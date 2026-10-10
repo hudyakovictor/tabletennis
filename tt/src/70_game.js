@@ -110,6 +110,7 @@ class Game {
     this.pointNote = null;               // one-line diagnosis of the last point
 
     this.state = GS.MENU;
+    this.paused = false;
     this.training = null;
     this.time = 0; this.frame = 0; this.stateT = 0;
     this.score = [0, 0];                 // [player, ai]
@@ -259,7 +260,7 @@ class Game {
 
     window.addEventListener('keydown', (e) => {
       if (e.key === 'r' || e.key === 'R' || e.key === 'к' || e.key === 'К') this.restart();
-      if (e.key === 'p' || e.key === 'P' || e.key === 'з' || e.key === 'З') this.paused = !this.paused;
+      if (e.key === 'p' || e.key === 'P' || e.key === 'з' || e.key === 'З') this.setPaused(!this.paused);
       if (e.key === 'F3') { this.settings.showDebug = !this.settings.showDebug; e.preventDefault(); }
       if (e.key === 'c' || e.key === 'C' || e.key === 'с' || e.key === 'С') {
         const order = ['BROADCAST', 'DYNAMIC', 'LOW', 'SIDE'];
@@ -319,7 +320,17 @@ class Game {
   }
   stopTraining() { if (this.training) this.training.quit(); }
 
-  setState(s) { this.state = s; this.stateT = 0; }
+  setState(s) { this.state = s; this.stateT = 0; if (this.paused) this.setPaused(false); }
+
+  /* Pause only makes sense during a live rally or serve prep; leaving the play
+     state (restart, match end) always clears it so the overlay can't stick. */
+  setPaused(v) {
+    const play = this.state === GS.RALLY || this.state === GS.SERVE_READY ||
+                 this.state === GS.SERVE_TOSS || this.state === GS.POINT;
+    this.paused = !!v && play;
+    if (typeof document !== 'undefined' && document.body)
+      document.body.classList.toggle('is-paused', this.paused);
+  }
 
   msg(text, dur = 1.4, col = '#fff', big = false) {
     this.messages.push({ text, t: 0, dur, col, big });
@@ -612,7 +623,20 @@ class Game {
     }
 
     /* --- out of bounds safety --- */
-    if (Math.abs(b.p.x) > 9 || Math.abs(b.p.z) > 11 || b.p.y > 9) b.live = false;
+    if (Math.abs(b.p.x) > 9 || Math.abs(b.p.z) > 11 || b.p.y > 9) {
+      b.live = false;
+      // The ball escaped the arena without ever reaching the floor check that
+      // normally resolves a point (a wide or sky-high shot). Award the point so
+      // the rally state can't hang forever with a dead ball.
+      if (this.state === GS.RALLY) {
+        const lh = b.lastHitBy;
+        if (lh !== 0) {
+          const onRecv = this.rallyBounces.filter((s) => s === -lh).length;
+          if (onRecv === 0) this.awardPoint(-lh, lh > 0 ? 'АУТ' : 'СОПЕРНИК В АУТЕ');
+          else this.awardPoint(lh, lh > 0 ? 'ОЧКО! СОПЕРНИК НЕ ДОСТАЛ' : 'ВЫ НЕ ДОСТАЛИ МЯЧ');
+        }
+      }
+    }
 
     /* --- paddles (CCD) --- */
     if (this.time - this.player.lastHitT > 0.09) this.tryPlayerHit(p0);
@@ -841,7 +865,6 @@ class Game {
       if (o.reach) {
         w.on = true; w.kind = 'rally';
         w.x = o.reach.x; w.y = o.reach.y; w.z = o.reach.z !== undefined ? o.reach.z : this.player.pos.z;
-        w.t = Math.max(0, o.reachT - (this.time - (this._strikePredT || this.time)));
         w.t = o.reachT;
         // ready ramps up over the last ~0.32 s: swipe inside it and the
         // gesture lands on the ball instead of in front of it

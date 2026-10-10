@@ -421,7 +421,7 @@ class OpponentAI {
     this.anim.swing = Math.max(0, this.anim.swing - dt * 5.2);
     if (this.tell.t > 0) this.tell.t -= dt;
 
-    const playing = game.state === GS.RALLY || game.state === 'SERVE_FLIGHT';
+    const playing = game.state === GS.RALLY;
     const incoming = playing && ball.live && ball.lastHitBy === 1
       && (ball.v.z < -0.2 || (ball.p.z < 0 && ball.v.z < 1));
 

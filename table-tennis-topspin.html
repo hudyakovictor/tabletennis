@@ -177,6 +177,32 @@ h3.sec::after{content:"";flex:1;height:1px;background:var(--line)}
 #dbg.on{display:block}
 #dbg b{color:var(--acc);font-weight:600}
 .hintk{font-weight:500;font-size:9.5px;letter-spacing:.02em;color:var(--dim2);text-transform:none;margin-left:7px}
+
+/* ============================ pause ============================== */
+#pauseInd{position:absolute;inset:0;z-index:6;display:none;flex-direction:column;
+  align-items:center;justify-content:center;gap:10px;
+  background:radial-gradient(ellipse at 50% 45%,rgba(6,10,18,.34),rgba(3,5,9,.74));
+  backdrop-filter:blur(2px);-webkit-backdrop-filter:blur(2px);cursor:pointer}
+#pauseInd b{font-size:clamp(30px,8vw,52px);font-weight:900;letter-spacing:.24em;color:#fff;
+  text-shadow:0 6px 40px rgba(0,0,0,.85)}
+#pauseInd s{text-decoration:none;font-size:11.5px;letter-spacing:.14em;color:var(--dim);text-transform:uppercase}
+body.is-paused #pauseInd{display:flex}
+
+/* ====================== ball telemetry panel ======================= */
+#spin{position:absolute;right:max(12px,env(safe-area-inset-right));bottom:max(80px,calc(env(safe-area-inset-bottom) + 60px));
+  width:min(156px,38vw);background:var(--glass2);border:1px solid var(--line);border-radius:13px;
+  padding:10px 12px;backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);
+  box-shadow:0 12px 36px rgba(0,0,0,.5);display:none;z-index:4}
+#spin.on{display:block}
+#spin h4{margin:0 0 8px;font-size:9.5px;letter-spacing:.14em;color:var(--dim2);text-transform:uppercase;font-weight:700}
+#spin .srow{display:flex;justify-content:space-between;align-items:baseline;font-size:10px;color:var(--dim)}
+#spin .srow b{font-family:var(--mono);font-size:13px;color:var(--txt);font-weight:700}
+#spin .glab{display:flex;justify-content:space-between;font-size:8px;letter-spacing:.1em;color:var(--dim2)}
+#spin .gauge{position:relative;height:6px;border-radius:4px;background:rgba(255,255,255,.08);margin-top:3px;overflow:hidden}
+#spin .gauge .mid{position:absolute;left:50%;top:0;bottom:0;width:1px;background:var(--line2)}
+#spin .gauge i{position:absolute;top:0;bottom:0;display:block;border-radius:3px}
+#spin .gval{font-family:var(--mono);font-size:9.5px;color:var(--dim);text-align:center;margin-top:2px}
+
 .kbd{display:inline-block;font-family:var(--mono);font-size:10px;padding:1px 5px;border-radius:4px;
   border:1px solid var(--line2);background:rgba(255,255,255,.06);color:var(--txt);margin:0 1px}
 #loading{position:absolute;inset:0;display:grid;place-items:center;background:var(--bg);z-index:9;transition:opacity .45s}
@@ -253,6 +279,8 @@ h3.sec::after{content:"";flex:1;height:1px;background:var(--line)}
         <button class="tbt" id="trExit">ВЫЙТИ</button>
       </div>
     </div>
+
+    <div id="pauseInd" class="pe"><b>ПАУЗА</b><s>нажмите, чтобы продолжить · P</s></div>
   </div>
 
   <!-- ============================ MENU ============================ -->
@@ -349,7 +377,7 @@ h3.sec::after{content:"";flex:1;height:1px;background:var(--line)}
       <div class="sl"><label>Громкость</label>
         <input type="range" id="rVol" data-set="vol" min="0" max="100" value="90"><span class="v" id="vVol">90%</span></div>
       <div style="font-size:10px;color:var(--dim2);margin-top:10px">
-        <span class="kbd">R</span> рестарт · <span class="kbd">C</span> пресет камеры · <span class="kbd">F3</span> телеметрия физики<br>
+        <span class="kbd">R</span> рестарт · <span class="kbd">P</span> пауза · <span class="kbd">C</span> пресет камеры · <span class="kbd">F3</span> телеметрия физики<br>
         <span class="kbd">←</span><span class="kbd">→</span><span class="kbd">↑</span><span class="kbd">↓</span> ракурс ·
         <span class="kbd">+</span><span class="kbd">−</span> дистанция · <span class="kbd">0</span> сброс
       </div>
@@ -659,7 +687,7 @@ const Q = {
 
 /* --------------------------- misc helpers -------------------------- */
 // cheap value noise for camera shake / crowd modulation
-function hash1(n) { return (Math.sin(n * 127.1) * 43758.5453) % 1; }
+function hash1(n) { const v = Math.sin(n * 127.1) * 43758.5453; return v - Math.floor(v); }
 function noise1(x) {
   const i = Math.floor(x), f = x - i;
   const u = f * f * (3 - 2 * f);
@@ -1555,32 +1583,32 @@ const PH = {
   NU: 1.5e-5,               // kinematic viscosity (for Reynolds)
 
   /* ---- aerodynamics ---- */
-  CD0: 0.42,                // base drag coefficient (subcritical sphere)
-  CD_SPIN: 0.14,            // drag increase with spin ratio
-  CL_SLOPE: 1.00,           // lift slope dCl/dS for small spin ratio S
-  CL_MAX: 0.36,             // saturation of lift coefficient
-  SPIN_DECAY_TAU: 14.0,     // aerodynamic spin decay time constant [s]
+  CD0: 0.44,                // base drag coefficient (subcritical sphere)
+  CD_SPIN: 0.18,            // drag increase with spin ratio
+  CL_SLOPE: 1.05,           // lift slope dCl/dS for small spin ratio S
+  CL_MAX: 0.38,             // saturation of lift coefficient
+  SPIN_DECAY_TAU: 9.0,      // aerodynamic spin decay time constant [s]
 
   /* ---- table ---- */
   T_LEN: 2.74, T_WID: 1.525, T_H: 0.76,
   T_HALF_LEN: 1.37, T_HALF_WID: 0.7625,
   T_THICK: 0.025,
-  E_TABLE: 0.915,           // normal COR ball/table (calibrated: 30.5cm drop -> 23cm)
-  E_TABLE_SPEED: 0.0085,    // COR loss per m/s of impact speed
-  MU_TABLE: 0.25,           // Coulomb friction ball/table
+  E_TABLE: 0.870,           // normal COR ball/table (calibrated: 30.5cm drop -> 23cm  => sqrt(23/30.5)=0.868)
+  E_TABLE_SPEED: 0.009,     // COR loss per m/s of impact speed
+  MU_TABLE: 0.20,           // Coulomb friction ball/table
   ET_TABLE: 0.00,           // tangential restitution of the table (none)
 
   /* ---- net ---- */
   NET_H: 0.1525,            // net height above the table
   NET_OVERHANG: 0.1525,     // net extends past each side line
-  NET_E: 0.16,              // how much comes back off a compliant net
-  NET_DAMP_T: 0.26,         // tangential energy kept
-  NET_SPIN_KEEP: 0.30,
+  NET_E: 0.10,              // how much comes back off a compliant net
+  NET_DAMP_T: 0.22,         // tangential energy kept
+  NET_SPIN_KEEP: 0.25,
   TAPE_R: 0.008,            // the white tape at the top of the net
 
   /* ---- racket / rubber ---- */
   E_RACKET: 0.800,          // normal COR, inverted rubber + sponge, sweet spot
-  E_RACKET_SPEED: 0.0100,   // COR falls steeply with impact speed
+  E_RACKET_SPEED: 0.0060,   // COR falls with impact speed
   MU_RACKET: 1.05,          // very grippy topsheet
   ET_RACKET: 0.52,          // tangential restitution ("catapult" of the sponge)
   SWEET_R: 0.055,           // radius of the sweet spot on the blade
@@ -1778,10 +1806,10 @@ function predict(p0, v0, w0, opts = {}) {
   out.planeCross = null; out.netCross = null; out.floor = null;
   out.reachT = -1; out.reach = null; out.path = opts.path || null;
   if (out.path) out.path.length = 0;
-  let t = 0, prevY = _pp.y, prevZ = _pp.z;
+  let t = 0, prevX = _pp.x, prevY = _pp.y, prevZ = _pp.z;
   let bounceSide = 0;
   while (t < maxT) {
-    prevY = _pp.y; prevZ = _pp.z;
+    prevX = _pp.x; prevY = _pp.y; prevZ = _pp.z;
     integrateBall(_pp, _pv, _pw, dt);
     t += dt;
     if (out.path && (out.path.length < 400)) out.path.push(_pp.x, _pp.y, _pp.z);
@@ -1791,7 +1819,7 @@ function predict(p0, v0, w0, opts = {}) {
     if ((prevZ > 0) !== (_pp.z > 0)) {
       const a = Math.abs(prevZ) / (Math.abs(prevZ) + Math.abs(_pp.z) + 1e-9);
       const yAt = lerp(prevY, _pp.y, a);
-      const xAt = lerp(_pp.x - (_pp.x - p0.x) * 0, _pp.x, 1);
+      const xAt = lerp(prevX, _pp.x, a);
       out.netCross = { y: yAt, x: xAt, t };
       if (yAt < PH.NET_TOP + PH.R * 0.5 && Math.abs(xAt) < PH.NET_HALF_WID) { out.hitNet = true; break; }
     }
@@ -3114,7 +3142,7 @@ class OpponentAI {
     this.anim.swing = Math.max(0, this.anim.swing - dt * 5.2);
     if (this.tell.t > 0) this.tell.t -= dt;
 
-    const playing = game.state === GS.RALLY || game.state === 'SERVE_FLIGHT';
+    const playing = game.state === GS.RALLY;
     const incoming = playing && ball.live && ball.lastHitBy === 1
       && (ball.v.z < -0.2 || (ball.p.z < 0 && ball.v.z < 1));
 
@@ -4511,6 +4539,7 @@ class Game {
     this.pointNote = null;               // one-line diagnosis of the last point
 
     this.state = GS.MENU;
+    this.paused = false;
     this.training = null;
     this.time = 0; this.frame = 0; this.stateT = 0;
     this.score = [0, 0];                 // [player, ai]
@@ -4660,7 +4689,7 @@ class Game {
 
     window.addEventListener('keydown', (e) => {
       if (e.key === 'r' || e.key === 'R' || e.key === 'к' || e.key === 'К') this.restart();
-      if (e.key === 'p' || e.key === 'P' || e.key === 'з' || e.key === 'З') this.paused = !this.paused;
+      if (e.key === 'p' || e.key === 'P' || e.key === 'з' || e.key === 'З') this.setPaused(!this.paused);
       if (e.key === 'F3') { this.settings.showDebug = !this.settings.showDebug; e.preventDefault(); }
       if (e.key === 'c' || e.key === 'C' || e.key === 'с' || e.key === 'С') {
         const order = ['BROADCAST', 'DYNAMIC', 'LOW', 'SIDE'];
@@ -4720,7 +4749,17 @@ class Game {
   }
   stopTraining() { if (this.training) this.training.quit(); }
 
-  setState(s) { this.state = s; this.stateT = 0; }
+  setState(s) { this.state = s; this.stateT = 0; if (this.paused) this.setPaused(false); }
+
+  /* Pause only makes sense during a live rally or serve prep; leaving the play
+     state (restart, match end) always clears it so the overlay can't stick. */
+  setPaused(v) {
+    const play = this.state === GS.RALLY || this.state === GS.SERVE_READY ||
+                 this.state === GS.SERVE_TOSS || this.state === GS.POINT;
+    this.paused = !!v && play;
+    if (typeof document !== 'undefined' && document.body)
+      document.body.classList.toggle('is-paused', this.paused);
+  }
 
   msg(text, dur = 1.4, col = '#fff', big = false) {
     this.messages.push({ text, t: 0, dur, col, big });
@@ -5013,7 +5052,20 @@ class Game {
     }
 
     /* --- out of bounds safety --- */
-    if (Math.abs(b.p.x) > 9 || Math.abs(b.p.z) > 11 || b.p.y > 9) b.live = false;
+    if (Math.abs(b.p.x) > 9 || Math.abs(b.p.z) > 11 || b.p.y > 9) {
+      b.live = false;
+      // The ball escaped the arena without ever reaching the floor check that
+      // normally resolves a point (a wide or sky-high shot). Award the point so
+      // the rally state can't hang forever with a dead ball.
+      if (this.state === GS.RALLY) {
+        const lh = b.lastHitBy;
+        if (lh !== 0) {
+          const onRecv = this.rallyBounces.filter((s) => s === -lh).length;
+          if (onRecv === 0) this.awardPoint(-lh, lh > 0 ? 'АУТ' : 'СОПЕРНИК В АУТЕ');
+          else this.awardPoint(lh, lh > 0 ? 'ОЧКО! СОПЕРНИК НЕ ДОСТАЛ' : 'ВЫ НЕ ДОСТАЛИ МЯЧ');
+        }
+      }
+    }
 
     /* --- paddles (CCD) --- */
     if (this.time - this.player.lastHitT > 0.09) this.tryPlayerHit(p0);
@@ -5242,7 +5294,6 @@ class Game {
       if (o.reach) {
         w.on = true; w.kind = 'rally';
         w.x = o.reach.x; w.y = o.reach.y; w.z = o.reach.z !== undefined ? o.reach.z : this.player.pos.z;
-        w.t = Math.max(0, o.reachT - (this.time - (this._strikePredT || this.time)));
         w.t = o.reachT;
         // ready ramps up over the last ~0.32 s: swipe inside it and the
         // gesture lands on the ball instead of in front of it
@@ -6261,17 +6312,22 @@ const ICON = {
       game = new Game(canvas, ui);
       ui.attach(game);
     } catch (err) {
-      document.getElementById('loading').innerHTML =
+      console.error(err);
+      const loading = document.getElementById('loading');
+      if (loading) loading.innerHTML =
         `<div style="max-width:420px;text-align:center;padding:24px">
            <div style="font-size:19px;font-weight:800;margin-bottom:10px">WebGL недоступен</div>
            <div style="font-size:12px;color:#8da3bd;line-height:1.6">
              Этой демке нужен WebGL. Включите аппаратное ускорение в браузере и перезагрузите страницу.<br><br>
              <code style="font-size:10px;color:#ff8a8a">${(err && err.message) || err}</code>
            </div></div>`;
-      console.error(err);
       return;
     }
     window.__game = game;
+
+    // tap/click the pause overlay to resume
+    const pauseInd = document.getElementById('pauseInd');
+    if (pauseInd) pauseInd.addEventListener('click', () => game.setPaused(false));
 
     // icons
     document.getElementById('btnSound').innerHTML = ICON.sound;
@@ -6303,6 +6359,6 @@ const ICON = {
 })();
 
 </script>
-<!-- TOPSPIN ARENA · self-contained build 2026-10-08 · no external assets, no network required -->
+<!-- TOPSPIN ARENA · self-contained build 2026-10-10 · no external assets, no network required -->
 </body>
 </html>
