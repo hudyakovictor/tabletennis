@@ -158,6 +158,11 @@ class AudioEngine {
       setTimeout(() => this.ok && this._tone(330, 0.18, 0.04, 'sine', 0, 1.4), 90);
       return;
     }
+    if (kind === 'toss') {                       // short rising whoosh
+      this._tone(280, 0.07, 0.04, 'sine', 0, 2.8);
+      this._noise(0.06, 0.03, 'bandpass', 1200, 0.8);
+      return;
+    }
     const f = kind === 'back' ? 420 : kind === 'hover' ? 1200 : 760;
     this._tone(f, 0.06, kind === 'hover' ? 0.025 : 0.06, 'sine', 0, 1.6);
   }

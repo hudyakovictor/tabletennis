@@ -74,9 +74,9 @@ canvas{display:block;width:100%;height:100%}
 @keyframes pop{from{transform:scale(.72) translateY(12px);opacity:0}to{transform:none;opacity:1}}
 
 /* ============================ rally badge =========================== */
-#rally{position:absolute;top:max(76px,calc(env(safe-area-inset-top) + 66px));left:50%;transform:translateX(-50%);
+#rally{position:absolute;top:max(72px,calc(env(safe-area-inset-top) + 60px));left:50%;transform:translateX(-50%);
   font-family:var(--mono);font-size:11px;letter-spacing:.12em;color:var(--dim);
-  background:rgba(0,0,0,.42);border:1px solid var(--line);border-radius:20px;padding:3px 12px;opacity:0;transition:.2s}
+  background:rgba(0,0,0,.42);border:1px solid var(--line);border-radius:20px;padding:3px 12px;opacity:0;transition:.2s;z-index:4}
 #rally.on{opacity:1}
 #rally b{color:var(--acc)}
 
@@ -184,6 +184,21 @@ h3.sec::after{content:"";flex:1;height:1px;background:var(--line)}
 }
 @media (max-height:460px){ #spin{display:none} #train{transform:scale(.88);transform-origin:0 0} }
 @media (max-width:420px){ #spin{display:none} }
+
+/* ========================= telemetry panel ========================== */
+#spin{position:absolute;right:max(12px,env(safe-area-inset-right));bottom:max(80px,calc(env(safe-area-inset-bottom) + 60px));
+  width:min(156px,38vw);background:var(--glass2);border:1px solid var(--line);border-radius:13px;
+  padding:10px 12px;backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);
+  box-shadow:0 12px 36px rgba(0,0,0,.5);display:none;transition:opacity .22s;z-index:4}
+#spin.on{display:block}
+#spin h4{font-size:9px;letter-spacing:.16em;color:var(--dim2);text-transform:uppercase;margin:0 0 6px}
+#spin .srow{display:flex;justify-content:space-between;align-items:center;font-size:10px;color:var(--dim)}
+#spin .srow b{font-family:var(--mono);font-size:11px;color:var(--acc)}
+#spin .glab{display:flex;justify-content:space-between;font-size:8px;letter-spacing:.1em;color:var(--dim2);text-transform:uppercase}
+#spin .gauge{position:relative;height:6px;border-radius:3px;background:rgba(255,255,255,.08);margin:3px 0 1px;overflow:visible}
+#spin .gauge .mid{position:absolute;left:50%;top:0;bottom:0;width:1px;background:rgba(255,255,255,.18)}
+#spin .gauge i{position:absolute;top:0;bottom:0;border-radius:3px;transition:width .08s,background .15s}
+#spin .gval{font-family:var(--mono);font-size:10px;color:var(--acc);text-align:center}
 @media (max-aspect-ratio:3/4){
   /* portrait: the dead band above the table is the only place a panel can
      live without covering your own bat */

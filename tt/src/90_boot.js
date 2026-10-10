@@ -33,6 +33,13 @@
     document.querySelectorAll('.opt[data-set="target"]').forEach((b) =>
       b.addEventListener('click', () => { document.getElementById('toWin').textContent = b.dataset.val; }));
 
+    // auto-pause on tab switch
+    document.addEventListener('visibilitychange', () => {
+      if (document.hidden && game.state !== GS.MENU && game.state !== GS.MATCH_END) {
+        game.paused = true;
+      }
+    });
+
     // main loop
     let last = performance.now();
     let acc = 0;

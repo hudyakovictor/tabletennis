@@ -26,27 +26,27 @@ const PH = {
   NU: 1.5e-5,               // kinematic viscosity (for Reynolds)
 
   /* ---- aerodynamics ---- */
-  CD0: 0.42,                // base drag coefficient (subcritical sphere)
-  CD_SPIN: 0.14,            // drag increase with spin ratio
-  CL_SLOPE: 1.00,           // lift slope dCl/dS for small spin ratio S
-  CL_MAX: 0.36,             // saturation of lift coefficient
-  SPIN_DECAY_TAU: 14.0,     // aerodynamic spin decay time constant [s]
+  CD0: 0.44,                // base drag coefficient (subcritical sphere)
+  CD_SPIN: 0.18,            // drag increase with spin ratio
+  CL_SLOPE: 1.05,           // lift slope dCl/dS for small spin ratio S
+  CL_MAX: 0.38,             // saturation of lift coefficient
+  SPIN_DECAY_TAU: 9.0,      // aerodynamic spin decay time constant [s]
 
   /* ---- table ---- */
   T_LEN: 2.74, T_WID: 1.525, T_H: 0.76,
   T_HALF_LEN: 1.37, T_HALF_WID: 0.7625,
   T_THICK: 0.025,
-  E_TABLE: 0.915,           // normal COR ball/table (calibrated: 30.5cm drop -> 23cm)
-  E_TABLE_SPEED: 0.0085,    // COR loss per m/s of impact speed
-  MU_TABLE: 0.25,           // Coulomb friction ball/table
+  E_TABLE: 0.870,           // normal COR ball/table (calibrated: 30.5cm drop -> ~23cm)
+  E_TABLE_SPEED: 0.009,     // COR loss per m/s of impact speed
+  MU_TABLE: 0.20,           // Coulomb friction ball/table
   ET_TABLE: 0.00,           // tangential restitution of the table (none)
 
   /* ---- net ---- */
   NET_H: 0.1525,            // net height above the table
   NET_OVERHANG: 0.1525,     // net extends past each side line
-  NET_E: 0.16,              // how much comes back off a compliant net
-  NET_DAMP_T: 0.26,         // tangential energy kept
-  NET_SPIN_KEEP: 0.30,
+  NET_E: 0.10,              // how much comes back off a compliant net
+  NET_DAMP_T: 0.22,         // tangential energy kept
+  NET_SPIN_KEEP: 0.25,
   TAPE_R: 0.008,            // the white tape at the top of the net
 
   /* ---- racket / rubber ---- */

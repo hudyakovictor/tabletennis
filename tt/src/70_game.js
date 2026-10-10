@@ -9,7 +9,7 @@ const GS = {
   RALLY: 'RALLY', POINT: 'POINT', REPLAY: 'REPLAY', MATCH_END: 'MATCH_END',
 };
 
-const PHYS_DT = 1 / 600;          // 600 Hz — a 40 mm ball at 30 m/s moves 5 cm/step
+const PHYS_DT = 1 / 900;          // 900 Hz — a 40 mm ball at 30 m/s moves 3.3 cm/step
 
 /* --------------------------- particles ----------------------------- */
 class Particles {
@@ -98,6 +98,7 @@ class Game {
     };
     this.aiPaddle = {
       pos: V3.new(0, PH.TABLE_Y + 0.25, -1.45), normal: V3.new(0, 0, 1),
+      prevPos: V3.new(0, PH.TABLE_Y + 0.25, -1.45),
       q: Q.new(), side: -1,
     };
 
@@ -121,6 +122,10 @@ class Game {
     this.serveBounces = 0;
     this.isServeBall = false;
     this.lastPoint = null;
+    this.matchWinner = 0;
+    this.paused = false;
+    this.netTouched = false;
+    this.hintOut = 0;
     this.timeScale = 1; this.targetTimeScale = 1;
     this.shake = 0; this.shakeDir = V3.new();
     // Manual orbit laid on top of whichever preset is active: yaw and pitch
@@ -323,7 +328,7 @@ class Game {
 
   msg(text, dur = 1.4, col = '#fff', big = false) {
     this.messages.push({ text, t: 0, dur, col, big });
-    if (this.messages.length > 4) this.messages.shift();
+    if (this.messages.length > 3) this.messages.shift();
   }
 
   /* --------------------------- serving ----------------------------- */
@@ -337,6 +342,7 @@ class Game {
     this.rallyBounces.length = 0;
     this.serveBounces = 0;
     this.isServeBall = true;
+    this.stanceY = undefined;       // reset depth stance between rallies
     this.setState(GS.SERVE_READY);
     this.recorder.begin(this.time, s);
     this.ai.setPressure(this.score[1], this.score[0], this.settings.targetScore);
@@ -549,14 +555,18 @@ class Game {
     const b = this.ball;
     if (!b.live) return;
     // a ball that has run out of energy settles instead of micro-bouncing
+    const bsp2 = b.v.x * b.v.x + b.v.y * b.v.y + b.v.z * b.v.z;
     if (b.p.y - PH.R <= PH.TABLE_Y + 0.004 && Math.abs(b.v.y) < 0.30 &&
       Math.abs(b.p.x) <= PH.T_HALF_WID && Math.abs(b.p.z) <= PH.T_HALF_LEN) {
       b.restT = (b.restT || 0) + dt;
-      if (b.restT > 0.9 || V3.len(b.v) < 0.45) {
+      if (b.restT > 0.9 || bsp2 < 0.2025) {
         if (this.state === GS.POINT || this.state === GS.MATCH_END) { b.live = false; return; }
       }
     } else b.restT = 0;
-    const p0 = V3.clone(b.p);
+    // reuse a pre-allocated vector for previous position
+    if (!this._p0) this._p0 = V3.new();
+    const p0 = this._p0;
+    p0.x = b.p.x; p0.y = b.p.y; p0.z = b.p.z;
 
     integrateBall(b.p, b.v, b.w, dt);
     Q.integrate(b.q, b.q, b.w, dt);
@@ -572,8 +582,8 @@ class Game {
         const sp = -b.v.y;
         const info = bounceTable(b.p, b.v, b.w);
         if (edgeX || edgeZ) {
-          // edge ball: unpredictable, shoots off low and fast
-          b.v.y *= 0.45; b.v.x += rndSym(1.2); b.v.z *= 1.12;
+          // edge ball: unpredictable, shoots off low and slightly slowed
+          b.v.y *= 0.38; b.v.x += rndSym(1.4); b.v.z *= 0.92;
           this.audio.hitEdge();
           this.msg('РЕБРО СТОЛА!', 1.0, '#ffd34d');
         }
@@ -582,12 +592,12 @@ class Game {
     }
 
     /* --- net --- */
-    if ((p0.z > 0) !== (b.p.z > 0) || Math.abs(b.p.z) < PH.R + 0.004) {
+    if ((p0.z > 0) !== (b.p.z > 0)) {
       const a = Math.abs(p0.z) / (Math.abs(p0.z) + Math.abs(b.p.z) + 1e-9);
       const yAt = lerp(p0.y, b.p.y, a);
       const xAt = lerp(p0.x, b.p.x, a);
       if (Math.abs(xAt) < PH.NET_HALF_WID) {
-        if (yAt - PH.R < PH.NET_TOP && yAt + PH.R > PH.NET_TOP - PH.TAPE_R * 2 && yAt + PH.R > PH.NET_TOP) {
+        if (yAt + PH.R > PH.NET_TOP && yAt - PH.R < PH.NET_TOP + PH.TAPE_R * 2) {
           clipTape(b.p, b.v, b.w);
           this.audio.hitNet();
           this.msg('СЕТКА — ЭДЖ!', 1.1, '#ffd34d');
@@ -608,7 +618,8 @@ class Game {
       b.p.y = PH.R;
       impactSphere(b.v, b.w, N_UP, ZERO3, PH.E_FLOOR, PH.MU_FLOOR, 0);
       this.onFloor();
-      if (V3.len(b.v) < 0.6) b.live = false;
+      const fsp2 = b.v.x * b.v.x + b.v.y * b.v.y + b.v.z * b.v.z;
+      if (fsp2 < 0.36) b.live = false;
     }
 
     /* --- out of bounds safety --- */
@@ -621,7 +632,7 @@ class Game {
   /** net touch on a service: no point, the serve is simply taken again. */
   letServe() {
     this.msg('ПЕРЕИГРОВКА (LET)', 1.4, '#9fd0ff');
-    this.audio.ui();
+    this.audio.ui('back');
     this.ball.live = false;
     this.lastPoint = null;
     this.setState(GS.POINT);
@@ -811,7 +822,7 @@ class Game {
     pad.normal.z = expSmooth(pad.normal.z, want.z, 18, dt);
     V3.norm(pad.normal, pad.normal);
     pad.swing = Math.max(0, pad.swing - dt * 4.5);
-    pad.hitRadius = lerp(0.080, 0.165, this.settings.posAssist) * (this.state === GS.SERVE_TOSS ? 1.5 : 1);
+    pad.hitRadius = lerp(0.095, 0.185, this.settings.posAssist) * (this.state === GS.SERVE_TOSS ? 1.5 : 1);
   }
 
   /**
@@ -1041,6 +1052,8 @@ class Game {
     this.updateStrikeWindow(dtReal);
     if (this.training) this.training.update(dtReal);
     else this.ai.think(this, dt);
+    // track AI paddle previous position for CCD
+    V3.copy(this.aiPaddle.prevPos, this.aiPaddle.pos);
     this.tryAiHit();
     this.particles.update(dt);
     for (const m of this.marks) m.t += dtReal;
@@ -1069,26 +1082,32 @@ class Game {
     const h = this.ball.hist, R = this.R, m = this.scene.mesh.trail;
     const n = h.length / 3;
     if (n < 3 || !this.settings.showTrail) { m.count = 0; return; }
-    const cam = this.R.camPos;
+    const cx = this.R.camPos.x, cy = this.R.camPos.y, cz = this.R.camPos.z;
     let nv = 0, ni = 0;
-    const maxW = clamp(0.004 + V3.len(this.ball.v) * 0.0008, 0.004, 0.016);
+    const bv = this.ball.v;
+    const bsp = Math.sqrt(bv.x * bv.x + bv.y * bv.y + bv.z * bv.z);
+    const maxW = clamp(0.004 + bsp * 0.0008, 0.004, 0.016);
     for (let i = 0; i < n; i++) {
-      const x = h[i * 3], y = h[i * 3 + 1], z = h[i * 3 + 2];
-      const nx = i < n - 1 ? h[(i + 1) * 3] : x, ny = i < n - 1 ? h[(i + 1) * 3 + 1] : y, nz = i < n - 1 ? h[(i + 1) * 3 + 2] : z;
-      let dx = nx - x, dy = ny - y, dz = nz - z;
-      if (i === n - 1 && n > 1) { dx = x - h[(i - 1) * 3]; dy = y - h[(i - 1) * 3 + 1]; dz = z - h[(i - 1) * 3 + 2]; }
-      let vx = cam.x - x, vy = cam.y - y, vz = cam.z - z;
+      const i3 = i * 3;
+      const x = h[i3], y = h[i3 + 1], z = h[i3 + 2];
+      let dx, dy, dz;
+      if (i < n - 1) { dx = h[i3 + 3] - x; dy = h[i3 + 4] - y; dz = h[i3 + 5] - z; }
+      else if (n > 1) { dx = x - h[i3 - 3]; dy = y - h[i3 - 2]; dz = z - h[i3 - 1]; }
+      else { dx = dy = dz = 0; }
+      const vx = cx - x, vy = cy - y, vz = cz - z;
       let sx = dy * vz - dz * vy, sy = dz * vx - dx * vz, sz = dx * vy - dy * vx;
-      const sl = Math.hypot(sx, sy, sz) || 1;
+      const sl = Math.sqrt(sx * sx + sy * sy + sz * sz) || 1;
       const t = i / (n - 1);
       const w = maxW * t * t;
       sx = sx / sl * w; sy = sy / sl * w; sz = sz / sl * w;
-      m.pos[nv * 3] = x - sx; m.pos[nv * 3 + 1] = y - sy; m.pos[nv * 3 + 2] = z - sz;
-      m.nrm[nv * 3] = 0; m.nrm[nv * 3 + 1] = 1; m.nrm[nv * 3 + 2] = 0;
-      m.uv[nv * 2] = t; m.uv[nv * 2 + 1] = 0; nv++;
-      m.pos[nv * 3] = x + sx; m.pos[nv * 3 + 1] = y + sy; m.pos[nv * 3 + 2] = z + sz;
-      m.nrm[nv * 3] = 0; m.nrm[nv * 3 + 1] = 1; m.nrm[nv * 3 + 2] = 0;
-      m.uv[nv * 2] = t; m.uv[nv * 2 + 1] = 1; nv++;
+      const nv3 = nv * 3, nv2 = nv * 2;
+      m.pos[nv3] = x - sx; m.pos[nv3 + 1] = y - sy; m.pos[nv3 + 2] = z - sz;
+      m.nrm[nv3] = 0; m.nrm[nv3 + 1] = 1; m.nrm[nv3 + 2] = 0;
+      m.uv[nv2] = t; m.uv[nv2 + 1] = 0; nv++;
+      const nv3b = nv * 3, nv2b = nv * 2;
+      m.pos[nv3b] = x + sx; m.pos[nv3b + 1] = y + sy; m.pos[nv3b + 2] = z + sz;
+      m.nrm[nv3b] = 0; m.nrm[nv3b + 1] = 1; m.nrm[nv3b + 2] = 0;
+      m.uv[nv2b] = t; m.uv[nv2b + 1] = 1; nv++;
       if (i > 0) {
         const a = (i - 1) * 2;
         m.idx[ni++] = a; m.idx[ni++] = a + 1; m.idx[ni++] = a + 2;
@@ -1216,16 +1235,16 @@ class Game {
     if (me.trail.count) {
       const w = this.ball.w;
       const top = -w.x, side2 = w.y;
-      let col;
-      const mag = V3.len(w);
-      if (mag < 60) col = [0.55, 0.62, 0.75];
-      else if (Math.abs(side2) > Math.abs(top) * 0.8) col = [0.22, 0.88, 0.55];
-      else if (top > 0) col = [1.0, 0.48, 0.18];
-      else col = [0.30, 0.62, 1.0];
-      const k = clamp(mag / 700, 0.12, 1) * 0.9;
+      let tcol;
+      const wmag = Math.sqrt(w.x * w.x + w.y * w.y + w.z * w.z);
+      if (wmag < 60) tcol = [0.55, 0.62, 0.75];
+      else if (Math.abs(side2) > Math.abs(top) * 0.8) tcol = [0.22, 0.88, 0.55];
+      else if (top > 0) tcol = [1.0, 0.48, 0.18];
+      else tcol = [0.30, 0.62, 1.0];
+      const k = clamp(wmag / 700, 0.12, 1) * 0.9;
       R.draw(me.trail, M4.identity(tmp.m), {
         color: [1, 1, 1], rough: 1, blend: 'add', doubleSided: true,
-        emissive: [col[0] * k, col[1] * k, col[2] * k], opacity: 1,
+        emissive: [tcol[0] * k, tcol[1] * k, tcol[2] * k], opacity: 1,
       });
     }
 
@@ -1268,7 +1287,9 @@ class Game {
 
     /* ball glow so it reads against the dark hall */
     if (this.ball.live) {
-      const g = clamp(0.03 + V3.len(this.ball.v) * 0.0022, 0.03, 0.09);
+      const bv = this.ball.v;
+      const bsp = Math.sqrt(bv.x * bv.x + bv.y * bv.y + bv.z * bv.z);
+      const g = clamp(0.03 + bsp * 0.0022, 0.03, 0.09);
       this.billboard(tmp.m, this.ball.p, g, 0);
       R.draw(me.quad, tmp.m, {
         color: [1, 1, 1], tex: this.scene.tex.glow, blend: 'add', doubleSided: true,
@@ -1277,10 +1298,30 @@ class Game {
     }
   }
 
-  /** The opponent is deliberately NOT a character model: a floating bat
-   *  reads the incoming stroke far better than a torso in the way of the
-   *  ball, and nothing about a low-poly human helps you play. */
-  drawOpponent() {}
+  /** Stylized opponent: a simple silhouette behind the bat so it reads as
+   *  a person, not a floating paddle. Kept minimal to avoid competing with
+   *  the ball for attention. */
+  drawOpponent(d, shadowPass) {
+    const R = this.R, S = this.scene, me = S.mesh, ma = S.mat;
+    const tmp = S._tmp;
+    const ai = this.ai;
+    const ap = this.aiPaddle.pos;
+    // simple torso silhouette — a dark capsule behind the bat
+    const bodyY = PH.TABLE_Y + 0.42 + ai.anim.lean * 0.04;
+    const bodyX = ap.x * 0.85;
+    const bodyZ = ap.z - 0.12;
+    const d2 = shadowPass
+      ? (mesh, mat4, mat) => R.drawShadow(mesh, mat4, null, 0)
+      : (mesh, mat4, mat) => R.draw(mesh, mat4, mat);
+    M4.compose(tmp.m, V3.set(tmp.pos, bodyX, bodyY, bodyZ),
+      Q.setAxisAngle(tmp.rot, 0, 1, 0, ai.anim.lean * 0.3),
+      V3.set(tmp.scl, 0.22, 0.32, 0.14));
+    d2(me.capsule, tmp.m, { color: [0.08, 0.09, 0.13], rough: 0.85 });
+    // head
+    M4.compose(tmp.m, V3.set(tmp.pos, bodyX, bodyY + 0.28, bodyZ - 0.02),
+      Q.identity(tmp.rot), V3.set(tmp.scl, 0.09, 0.09, 0.09));
+    d2(me.ball, tmp.m, { color: [0.12, 0.11, 0.14], rough: 0.75 });
+  }
 
 
   render() {

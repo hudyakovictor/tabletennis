@@ -158,6 +158,13 @@ class UI {
     $('#servA').classList.toggle('on', g.server === 1);
     $('#servB').classList.toggle('on', g.server === -1);
     $('#oppName').textContent = g.ai.L.name;
+    // deuce / match point indicator in the middle
+    const T = g.settings.targetScore;
+    const mid = $('.sb-mid');
+    const s0 = g.score[0], s1 = g.score[1];
+    const deuce = s0 >= T - 1 && s1 >= T - 1 && s0 === s1;
+    if (deuce) { mid.querySelector('b').textContent = 'РАВНО'; mid.querySelector('span').textContent = 'ДЕЦ'; }
+    else { mid.querySelector('b').textContent = 'ДО'; mid.querySelector('span').textContent = T; }
   }
 
   showShot(info) {

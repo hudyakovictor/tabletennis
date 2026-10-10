@@ -78,7 +78,7 @@ const AI_LEVELS = [
     aggro: 0.74, variety: 0.90,
     vmagMin: 6.6, vmagMax: 15.4, paceOpen: 0.50, paceRamp: 0.105, paceMax: 1.0,
     windup: 0.165, errBase: 0.040, errPress: 0.028, deepness: 0.84, placeSkill: 0.90,
-    counterRate: 0.54, smashRate: 0.86, dropRate: 0.10,
+    counterRate: 0.54, smashRate: 0.72, dropRate: 0.12,
   },
 ];
 
@@ -177,6 +177,10 @@ class OpponentAI {
     this.L = AI_LEVELS[this.levelIndex];
     this.maxSpeed = this.L.move;
     this.pace = this.L.paceOpen;
+  }
+
+  setHandicap(h) {
+    this.handicap = clamp(h, 0.5, 1.5);
   }
 
   /** full reset between matches */
