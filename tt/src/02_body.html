@@ -1,0 +1,201 @@
+<div id="app">
+  <canvas id="gl"></canvas>
+  <canvas id="fx"></canvas>
+
+  <div id="hud">
+    <!-- scoreboard -->
+    <div id="score" class="pe">
+      <div class="sb-side">
+        <span class="serve-dot" id="servA"></span>
+        <span class="sb-nm">ВЫ</span>
+        <span class="sb-pts" id="ptsA">0</span>
+      </div>
+      <div class="sb-mid"><b>ДО</b><span id="toWin">11</span></div>
+      <div class="sb-side right">
+        <span class="serve-dot" id="servB"></span>
+        <span class="sb-nm" id="oppName">ПРО</span>
+        <span class="sb-pts" id="ptsB">0</span>
+      </div>
+    </div>
+
+    <div id="note"><i></i><span></span></div>
+  <div id="rally"></div>
+    <div id="msgs"></div>
+    <div id="dbg"></div>
+
+    <div id="topright">
+      <div class="ic pe" id="btnSound" title="Звук"></div>
+      <div class="ic pe" id="btnSettings" title="Настройки"></div>
+      <div class="ic pe" id="btnMenu" title="Меню"></div>
+    </div>
+
+    <!-- last shot: one line, fades away on its own -->
+    <div id="shot"><b id="shotName">—</b><s id="shotMeta"></s></div>
+
+    <!-- interactive coach -->
+    <div id="train" class="pe">
+      <div class="th"><span id="trStep">1 / 6</span><b id="trTitle">ПОДАЧА</b></div>
+      <div class="tpips" id="trPips"></div>
+      <div class="ttip" id="trTip"></div>
+      <div class="twhy" id="trWhy"></div>
+      <div class="tmsg" id="trMsg"></div>
+      <div class="tbtns">
+        <button class="tbt" id="trSkip">ДАЛЬШЕ ▸</button>
+        <button class="tbt" id="trExit">ВЫЙТИ</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============================ MENU ============================ -->
+  <div class="screen on" id="menu">
+    <div class="card">
+      <div class="logo">TOPSPIN<span style="opacity:.45">·</span>ARENA</div>
+      <div class="sub">Настольный теннис · физика ITTF · управление свайпом</div>
+
+      <button class="btn" id="train0">ОБУЧЕНИЕ — 6 ШАГОВ</button>
+      <div class="note">Тренер подаёт мячи и проверяет каждый удар по реальной физике. Пройти стоит один раз — дальше всё понятно.</div>
+
+      <h3 class="sec">Соперник</h3>
+      <div class="row">
+        <button class="opt" data-diff="0"><b>НОВИЧОК</b><s>ELO 900</s></button>
+        <button class="opt" data-diff="1"><b>ЛЮБИТЕЛЬ</b><s>ELO 1400</s></button>
+        <button class="opt sel" data-diff="2"><b>ПРО</b><s>ELO 1900</s></button>
+        <button class="opt" data-diff="3"><b>МАСТЕР</b><s>ELO 2300</s></button>
+        <button class="opt" data-diff="4"><b>ЛЕГЕНДА</b><s>ELO 2700</s></button>
+      </div>
+
+      <h3 class="sec">Матч до</h3>
+      <div class="row">
+        <button class="opt" data-set="target" data-val="5"><b>5</b><s>блиц</s></button>
+        <button class="opt sel" data-set="target" data-val="11"><b>11</b><s>стандарт ITTF</s></button>
+        <button class="opt" data-set="target" data-val="21"><b>21</b><s>классика</s></button>
+      </div>
+
+      <h3 class="sec">Помощь в исполнении</h3>
+      <div class="sl">
+        <label>Техника удара</label>
+        <input type="range" id="rAssist" data-set="assist" min="0" max="100" value="72">
+        <span class="v" id="vAssist">72%</span>
+      </div>
+      <div class="sl">
+        <label>Доводка ракетки</label>
+        <input type="range" id="rPos" data-set="posAssist" min="0" max="100" value="80">
+        <span class="v" id="vPos">80%</span>
+      </div>
+
+      <button class="btn ghost" id="play">НАЧАТЬ МАТЧ</button>
+    </div>
+  </div>
+
+  <!-- ========================== SETTINGS ========================== -->
+  <div class="screen" id="settings">
+    <div class="card">
+      <div class="logo" style="font-size:26px">НАСТРОЙКИ</div>
+      <h3 class="sec">Камера</h3>
+      <div class="row">
+        <button class="opt sel" data-set="cam" data-val="BROADCAST"><b>ТВ</b><s>трансляция</s></button>
+        <button class="opt" data-set="cam" data-val="DYNAMIC"><b>ДИНАМИКА</b><s>следит за мячом</s></button>
+        <button class="opt" data-set="cam" data-val="LOW"><b>НИЗКАЯ</b><s>от стола</s></button>
+        <button class="opt" data-set="cam" data-val="SIDE"><b>СБОКУ</b><s>анализ</s></button>
+      </div>
+      <h3 class="sec">Графика</h3>
+      <div class="row">
+        <button class="opt" data-set="quality" data-val="low"><b>НИЗКАЯ</b><s>макс. FPS</s></button>
+        <button class="opt" data-set="quality" data-val="medium"><b>СРЕДНЯЯ</b><s>баланс</s></button>
+        <button class="opt sel" data-set="quality" data-val="high"><b>ВЫСОКАЯ</b><s>всё включено</s></button>
+      </div>
+      <h3 class="sec">Подсказки</h3>
+      <div class="cols">
+        <div class="row"><button class="opt sel" data-set="zone" data-val="on"><b>ЗОНА УДАРА</b><s>кольцо на мяче</s></button>
+          <button class="opt" data-set="zone" data-val="off"><b>ВЫКЛ</b><s></s></button></div>
+        <div class="row"><button class="opt sel" data-set="predict" data-val="on"><b>ПРИЦЕЛ ВКЛ</b><s>точка приземления</s></button>
+          <button class="opt" data-set="predict" data-val="off"><b>ВЫКЛ</b><s></s></button></div>
+        <div class="row"><button class="opt sel" data-set="trail" data-val="on"><b>ШЛЕЙФ ВКЛ</b><s>цвет = вращение</s></button>
+          <button class="opt" data-set="trail" data-val="off"><b>ВЫКЛ</b><s></s></button></div>
+        <div class="row"><button class="opt" data-set="tele" data-val="on"><b>ТЕЛЕМЕТРИЯ</b><s>для разбора</s></button>
+          <button class="opt sel" data-set="tele" data-val="off"><b>ВЫКЛ</b><s></s></button></div>
+        <div class="row"><button class="opt sel" data-set="haptics" data-val="on"><b>ВИБРО ВКЛ</b><s>отдача в руку</s></button>
+          <button class="opt" data-set="haptics" data-val="off"><b>ВЫКЛ</b><s></s></button></div>
+        <div class="row"><button class="opt sel" data-set="coach" data-val="on"><b>РАЗБОР ОЧКА</b><s>почему проиграно</s></button>
+          <button class="opt" data-set="coach" data-val="off"><b>ВЫКЛ</b><s></s></button></div>
+        <div class="row"><button class="opt sel" data-set="adaptive" data-val="on"><b>АДАПТАЦИЯ</b><s>соперник подстраивается</s></button>
+          <button class="opt" data-set="adaptive" data-val="off"><b>ВЫКЛ</b><s>чистый уровень</s></button></div>
+      </div>
+      <h3 class="sec">Ракурс <span class="hintk">правая кнопка / два пальца · колесо · стрелки</span></h3>
+      <div class="sl"><label>Поворот</label>
+        <input type="range" id="rYaw" data-set="camYaw" min="-83" max="83" value="0"><span class="v" id="vYaw">0°</span></div>
+      <div class="sl"><label>Высота</label>
+        <input type="range" id="rPitch" data-set="camPitch" min="-23" max="54" value="0"><span class="v" id="vPitch">0°</span></div>
+      <div class="sl"><label>Дистанция</label>
+        <input type="range" id="rDist" data-set="camDist" min="45" max="240" value="100"><span class="v" id="vDist">100%</span></div>
+      <button class="opt" id="camReset" style="width:100%;margin-top:2px"><b>СБРОСИТЬ РАКУРС</b><s>клавиша 0</s></button>
+      <h3 class="sec">Хват</h3>
+      <div class="row">
+        <button class="opt sel" data-set="hand" data-val="right"><b>ПРАВАЯ</b><s></s></button>
+        <button class="opt" data-set="hand" data-val="left"><b>ЛЕВАЯ</b><s></s></button>
+      </div>
+      <h3 class="sec">Управление и звук</h3>
+      <div class="sl"><label>Чувствительность</label>
+        <input type="range" id="rSens" data-set="sens" min="50" max="180" value="100"><span class="v" id="vSens">1.00×</span></div>
+      <div class="sl"><label>Громкость</label>
+        <input type="range" id="rVol" data-set="vol" min="0" max="100" value="90"><span class="v" id="vVol">90%</span></div>
+      <div style="font-size:10px;color:var(--dim2);margin-top:10px">
+        <span class="kbd">R</span> рестарт · <span class="kbd">C</span> пресет камеры · <span class="kbd">F3</span> телеметрия физики<br>
+        <span class="kbd">←</span><span class="kbd">→</span><span class="kbd">↑</span><span class="kbd">↓</span> ракурс ·
+        <span class="kbd">+</span><span class="kbd">−</span> дистанция · <span class="kbd">0</span> сброс
+      </div>
+      <button class="btn" id="setClose">ЗАКРЫТЬ</button>
+    </div>
+  </div>
+
+  <!-- ====================== TRAINING COMPLETE ===================== -->
+  <div class="screen" id="tdone">
+    <div class="card">
+      <div class="logo" style="font-size:30px;">ОБУЧЕНИЕ ПРОЙДЕНО</div>
+      <div class="sub">Шесть ударов в руках. Дальше — матч</div>
+      <div class="recap">
+        <div class="rc"><i style="background:#4ee39a"></i><b>Вверх</b><s>топспин: мяч ныряет в стол</s></div>
+        <div class="rc"><i style="background:#39c6ff"></i><b>Вниз</b><s>подрезка: низко и медленно</s></div>
+        <div class="rc"><i style="background:#ffd34d"></i><b>Дугой вбок</b><s>боковое: мяч уходит вбок</s></div>
+        <div class="rc"><i style="background:#9aa7b8"></i><b>Коротко</b><s>блок: гасит чужую скорость</s></div>
+        <div class="rc"><i style="background:#ff7a2f"></i><b>Быстро и плоско</b><s>смеш по высокому мячу</s></div>
+        <div class="rc"><i style="background:#ff5d6e"></i><b>Момент</b><s>бей, когда кольцо сомкнулось</s></div>
+      </div>
+      <button class="btn" id="tdPlay">НАЧАТЬ МАТЧ</button>
+      <button class="btn ghost" id="tdAgain">ПРОЙТИ ЕЩЁ РАЗ</button>
+    </div>
+  </div>
+
+  <!-- ========================= MATCH END ========================== -->
+  <div class="screen" id="over">
+    <div class="card">
+      <div class="logo" id="overTitle" style="font-size:34px">ПОБЕДА</div>
+      <div class="sub" id="overScore" style="font-size:22px;letter-spacing:.1em;color:var(--txt)">0 : 0</div>
+      <h3 class="sec">Статистика матча</h3>
+      <div class="stats">
+        <div class="st"><s>Ударов</s><b id="stShots">0</b></div>
+        <div class="st"><s>Лучшее ралли</s><b id="stRally">0</b></div>
+        <div class="st"><s>Макс. скорость</s><b id="stMaxSpeed">0</b></div>
+        <div class="st"><s>Макс. вращение</s><b id="stMaxSpin">0</b></div>
+        <div class="st"><s>Среднее вращение</s><b id="stAvgSpin">0</b></div>
+        <div class="st"><s>Любимый удар</s><b id="stFav">—</b></div>
+      </div>
+      <button class="btn" id="again">РЕВАНШ</button>
+      <button class="btn ghost" id="backMenu">В МЕНЮ</button>
+    </div>
+  </div>
+
+  <!-- optional telemetry, off by default -->
+  <div id="spin">
+    <h4>Телеметрия мяча</h4>
+    <div class="srow" style="margin:0"><span>Скорость</span><b><span id="ballKmh">0</span> км/ч</b></div>
+    <div class="glab" style="margin-top:9px"><span>НИЖНЕЕ</span><span>ВЕРХНЕЕ</span></div>
+    <div class="gauge"><span class="mid"></span><i id="gTop"></i></div>
+    <div class="gval" id="gTopV">0 об/с</div>
+    <div class="glab" style="margin-top:7px"><span>ЛЕВОЕ</span><span>ПРАВОЕ</span></div>
+    <div class="gauge"><span class="mid"></span><i id="gSide"></i></div>
+    <div class="gval" id="gSideV">0 об/с</div>
+  </div>
+
+  <div id="loading"><div class="spinner"></div></div>
+</div>
