@@ -246,7 +246,7 @@ const Q = {
 
 /* --------------------------- misc helpers -------------------------- */
 // cheap value noise for camera shake / crowd modulation
-function hash1(n) { return (Math.sin(n * 127.1) * 43758.5453) % 1; }
+function hash1(n) { const v = Math.sin(n * 127.1) * 43758.5453; return v - Math.floor(v); }
 function noise1(x) {
   const i = Math.floor(x), f = x - i;
   const u = f * f * (3 - 2 * f);

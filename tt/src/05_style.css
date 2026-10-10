@@ -165,6 +165,32 @@ h3.sec::after{content:"";flex:1;height:1px;background:var(--line)}
 #dbg.on{display:block}
 #dbg b{color:var(--acc);font-weight:600}
 .hintk{font-weight:500;font-size:9.5px;letter-spacing:.02em;color:var(--dim2);text-transform:none;margin-left:7px}
+
+/* ============================ pause ============================== */
+#pauseInd{position:absolute;inset:0;z-index:6;display:none;flex-direction:column;
+  align-items:center;justify-content:center;gap:10px;
+  background:radial-gradient(ellipse at 50% 45%,rgba(6,10,18,.34),rgba(3,5,9,.74));
+  backdrop-filter:blur(2px);-webkit-backdrop-filter:blur(2px);cursor:pointer}
+#pauseInd b{font-size:clamp(30px,8vw,52px);font-weight:900;letter-spacing:.24em;color:#fff;
+  text-shadow:0 6px 40px rgba(0,0,0,.85)}
+#pauseInd s{text-decoration:none;font-size:11.5px;letter-spacing:.14em;color:var(--dim);text-transform:uppercase}
+body.is-paused #pauseInd{display:flex}
+
+/* ====================== ball telemetry panel ======================= */
+#spin{position:absolute;right:max(12px,env(safe-area-inset-right));bottom:max(80px,calc(env(safe-area-inset-bottom) + 60px));
+  width:min(156px,38vw);background:var(--glass2);border:1px solid var(--line);border-radius:13px;
+  padding:10px 12px;backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);
+  box-shadow:0 12px 36px rgba(0,0,0,.5);display:none;z-index:4}
+#spin.on{display:block}
+#spin h4{margin:0 0 8px;font-size:9.5px;letter-spacing:.14em;color:var(--dim2);text-transform:uppercase;font-weight:700}
+#spin .srow{display:flex;justify-content:space-between;align-items:baseline;font-size:10px;color:var(--dim)}
+#spin .srow b{font-family:var(--mono);font-size:13px;color:var(--txt);font-weight:700}
+#spin .glab{display:flex;justify-content:space-between;font-size:8px;letter-spacing:.1em;color:var(--dim2)}
+#spin .gauge{position:relative;height:6px;border-radius:4px;background:rgba(255,255,255,.08);margin-top:3px;overflow:hidden}
+#spin .gauge .mid{position:absolute;left:50%;top:0;bottom:0;width:1px;background:var(--line2)}
+#spin .gauge i{position:absolute;top:0;bottom:0;display:block;border-radius:3px}
+#spin .gval{font-family:var(--mono);font-size:9.5px;color:var(--dim);text-align:center;margin-top:2px}
+
 .kbd{display:inline-block;font-family:var(--mono);font-size:10px;padding:1px 5px;border-radius:4px;
   border:1px solid var(--line2);background:rgba(255,255,255,.06);color:var(--txt);margin:0 1px}
 #loading{position:absolute;inset:0;display:grid;place-items:center;background:var(--bg);z-index:9;transition:opacity .45s}
