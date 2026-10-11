@@ -5,7 +5,8 @@ SRC = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'src')
 OUT = sys.argv[1] if len(sys.argv) > 1 else '/home/user/table-tennis-topspin.html'
 
 JS_ORDER = ['10_math.js','20_gl.js','30_physics.js','40_swipe.js','50_audio.js',
-            '55_ai.js', '58_coach.js','60_scene.js','65_train.js','70_game.js','80_ui.js','90_boot.js']
+            '55_ai.js','56_rig.js','58_coach.js','59_replay.js','60_scene.js',
+            '65_train.js','70_game.js','80_ui.js','86_meta.js','90_boot.js']
 
 css  = open(os.path.join(SRC,'05_style.css'),encoding='utf-8').read()
 body = open(os.path.join(SRC,'02_body.html'),encoding='utf-8').read()

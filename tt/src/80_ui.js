@@ -24,7 +24,15 @@ class UI {
     this.resize();
     window.addEventListener('resize', () => this.resize());
   }
-  attach(game) { this.game = game; this.syncSettings(); }
+  attach(game) {
+    this.game = game;
+    this.syncSettings();
+    this.refreshMenuBits();
+    this.game.analytics && this.game.analytics.send('session:start', {
+      platform: this.game.platform.label, touch: this.game.platform.touch,
+      level: this.game.profile.data.level, coins: this.game.profile.data.coins,
+    });
+  }
 
   resize() {
     const d = Math.min(window.devicePixelRatio || 1, 2);
@@ -57,10 +65,12 @@ class UI {
       $$('.screen').forEach((s) => s.classList.remove('on'));
       this.trainHide();
       this.game.training = null;
+      this.game.analytics && this.game.analytics.send('match:start', { diff: d, mode: 'casual', assist: this.game.settings.assist });
       this.game.startMatch(d);
     };
     const startTrain = () => {
       $$('.screen').forEach((s) => s.classList.remove('on'));
+      this.game.analytics && this.game.analytics.send('tutorial:start', {});
       this.game.startTraining();
     };
     $('#play').addEventListener('click', startMatch);
@@ -72,6 +82,24 @@ class UI {
       this.game.stopTraining();
       $('#menu').classList.add('on');
     });
+    /* --- workshop / shop / daily --- */
+    const wsOpen = (tab) => {
+      this.game.audio.ui('click');
+      this.game.analytics && this.game.analytics.send('ui:workshop', { tab: tab || 'racket' });
+      $$('.screen').forEach((x) => x.classList.remove('on'));
+      this.pick = null;                       // a fresh visit starts from what is fitted
+      this.showWorkshop(tab || 'racket');
+    };
+    $('#wsOpen').addEventListener('click', () => wsOpen('racket'));
+    $('#dailyOpen').addEventListener('click', () => wsOpen('daily'));
+    $('#wsClose').addEventListener('click', () => {
+      $('#workshop').classList.remove('on');
+      $('#menu').classList.add('on');
+      this.game.audio.ui('click');
+    });
+    $$('#workshop .tab').forEach((b) => b.addEventListener('click', () => this.showWorkshop(b.dataset.tab)));
+    $('#wsEquip').addEventListener('click', () => this.equipSelection());
+    $('#adCoins').addEventListener('click', () => this.watchAd());
     $('#btnSettings').addEventListener('click', () => $('#settings').classList.toggle('on'));
     $('#setClose').addEventListener('click', () => $('#settings').classList.remove('on'));
     $('#camReset').addEventListener('click', () => this.game.camReset());
@@ -81,8 +109,271 @@ class UI {
       g.audio.setMuted(!g.settings.sound);
       $('#btnSound').innerHTML = g.settings.sound ? ICON.sound : ICON.mute;
     });
+    /* slow-mo: press and hold, on a phone or on the keyboard */
+    const slow = $('#slow');
+    const hold = (v) => (e) => {
+      if (e && e.cancelable) e.preventDefault();
+      this.game && this.game.setSlowmoHold(v);
+      if (v) this.game && this.game.audio.init();
+    };
+    slow.addEventListener('pointerdown', hold(true));
+    slow.addEventListener('pointerup', hold(false));
+    slow.addEventListener('pointerleave', hold(false));
+    slow.addEventListener('pointercancel', hold(false));
+    window.addEventListener('keyup', (e) => {
+      if (e.key === 'Shift' || e.key === ' ') this.game && this.game.setSlowmoHold(false);
+    });
+    window.addEventListener('keydown', (e) => {
+      if ((e.key === 'Shift' || e.key === ' ') && !e.repeat && this.game && this.game.replayer.on) {
+        this.game.skipReplay(); e.preventDefault(); return;
+      }
+      if ((e.key === 'Shift' || e.key === ' ') && !e.repeat) this.game && this.game.setSlowmoHold(true);
+      if ((e.key === 'm' || e.key === 'M' || e.key === 'ь' || e.key === 'Ь')) this.showMoments();
+    });
+    $('#reelSkip').addEventListener('pointerdown', () => this.game && this.game.skipReplay());
+    $('#reelsClose').addEventListener('click', () => { $('#reels').classList.remove('on'); this.game && this.game.audio.ui('click'); });
     $('#again').addEventListener('click', () => { $('#over').classList.remove('on'); this.game.restart(); });
     $('#backMenu').addEventListener('click', () => { $('#over').classList.remove('on'); $('#menu').classList.add('on'); });
+  }
+
+  /* -------------------------- best moments ------------------------- */
+
+  /** A rally just got into the top list: say so, briefly, without pause. */
+  flashMoment(m, idx) {
+    const t = $('#mnToast');
+    if (!t) return;
+    const n = this.game.moments.kept.length;
+    t.textContent = idx === 0 && n > 1 ? '\u2605 ЛУЧШИЙ МОМЕНТ МАТЧА'
+      : '\u2605 В КОПИЛКУ МОМЕНТОВ \u00b7 ' + m.shots + ' УДАРОВ';
+    t.classList.add('on');
+    clearTimeout(this._mnT);
+    this._mnT = setTimeout(() => t.classList.remove('on'), 1700);
+    if (idx === 0) this.game.audio.crowd && this.game.audio.crowd(0.5);
+  }
+
+  /** Cinematic chrome: letterbox, title card, "skip". */
+  replayShow(on, moment, hero) {
+    const r = $('#reel');
+    if (!r) return;
+    r.classList.toggle('on', !!on);
+    r.classList.toggle('hero', !!hero);
+    document.body.classList.toggle('is-reel', !!on);
+    if (!on || !moment) return;
+    const names = { SMASH: 'СМЕШ', LOOP: 'ТОПСПИН', COUNTER: 'КОНТРАТАКА', DRIVE: 'НАКАТ',
+      FLICK: 'ФЛИК', LOB: 'СВЕЧА', CHOP: 'ПОДРЕЗКА', PUSH: 'ТОЛЧОК', BLOCK: 'БЛОК',
+      SIDE: 'БОКОВАЯ', HOOK: 'КРЮК', FADE: 'ФЕЙД', DROP: 'КОРОТКИЙ', SERVE_TOP: 'ПОДАЧА',
+      SERVE_FAST: 'ПОДАЧА', SERVE_SIDE: 'ПОДАЧА', SERVE_BACK: 'ПОДАЧА' };
+    $('#reelTag').textContent = hero ? 'ЛУЧШИЙ МОМЕНТ МАТЧА' : 'МОМЕНТ МАТЧА';
+    $('#reelTitle').textContent = (names[moment.finish] || moment.finish || 'РОЗЫГРЫШ')
+      + (moment.winner > 0 ? ' \u00b7 ОЧКО ВАШЕ' : '');
+    $('#reelMeta').textContent = moment.shots + ' УДАРОВ \u00b7 ' + Math.round(moment.speed) + ' КМ/Ч \u00b7 '
+      + Math.round(moment.spin) + ' ОБ/С \u00b7 РЕПЛЕЙ 0.35\u00d7';
+  }
+
+  /** The library: three best rallies of the match, newest score first. */
+  showMoments() {
+    const g = this.game; if (!g) return;
+    const kept = g.moments.kept.slice(0, 3);
+    if (!kept.length) return;
+    const list = $('#momentList');
+    list.innerHTML = kept.map((m, i) => {
+      const bars = Math.round(clamp(m.score / 0.85, 0, 1) * 5);
+      const st = Array.from({ length: 5 }, (_, k) => `<i class="${k < bars ? 'f' : ''}"></i>`).join('');
+      const names = { SMASH: 'смеш', LOOP: 'топспин', COUNTER: 'контратака', DRIVE: 'накат', FLICK: 'флик',
+        LOB: 'свеча', CHOP: 'подрезка', PUSH: 'толчок', BLOCK: 'блок', SIDE: 'боковая', HOOK: 'крюк', FADE: 'фейд', DROP: 'короткий' };
+      const why = [m.meta.matchPoint ? 'матчбол' : '', m.meta.deuce ? 'счёт 10-10' : '', m.meta.netClip ? 'по краю сетки' : '',
+        m.meta.deficit >= 2 ? 'отставал ' + m.meta.deficit + ':' + 0 : '', m.shots >= 12 ? 'долгий розыгрыш' : ''].filter(Boolean)[0] || 'чисто исполнено';
+      return `<button class="mrow" data-i="${i}"><span class="num">${i + 1}</span>
+        <span class="d"><b>${(names[m.finish] || m.finish)} · ${m.shots} ударов</b>
+        <s>${Math.round(m.speed)} км/ч · ${Math.round(m.spin)} об/с · ${why}</s></span>
+        <span class="st">${st}</span><span class="go">СМОТРЕТЬ \u203a</span></button>`;
+    }).join('');
+    Array.from(list.querySelectorAll('.mrow')).forEach((b) => b.addEventListener('click', () => {
+      $('#reels').classList.remove('on');
+      g.watchMoment(g.moments.kept[+b.dataset.i], true);
+    }));
+    $('#reels').classList.add('on');
+  }
+
+  /* --------------------- workshop · shop · daily ------------------- */
+
+  showWorkshop(tab) {
+    const g = this.game, p = g.profile;
+    if (!p) return;
+    $$('#workshop .tab').forEach((b) => b.classList.toggle('on', b.dataset.tab === tab));
+    $$('#workshop .pane').forEach((x) => x.classList.remove('on'));
+    $('#pane' + (tab === 'racket' ? 'Racket' : tab === 'shop' ? 'Shop' : 'Daily')).classList.add('on');
+    $('#wsBal').textContent = p.data.coins;
+    $('#wsCry').textContent = p.data.crystals;
+    if (!this.pick) this.pick = { blade: p.data.equip.blade, fh: p.data.equip.fh, bh: p.data.equip.bh };
+    this.drawItemList('listBlade', 'blade', this.pick.blade);
+    this.drawItemList('listFh', 'rubber', this.pick.fh);
+    this.drawItemList('listBh', 'rubber', this.pick.bh);
+    this.drawStatCard();
+    this.drawShop();
+    this.drawDaily();
+    $('#workshop').classList.add('on');
+  }
+
+  drawItemList(sel, kind, current) {
+    const p = this.game.profile;
+    const box = $('#' + sel);
+    box.innerHTML = ITEMS_ORDER.filter((it) => it.kind === kind).map((it) => {
+      const owned = p.owns(it.id);
+      const sw = it.kind === 'blade' ? it.wood : it.col;
+      const col = `rgb(${sw.map((c) => Math.round(c * 255)).join(',')})`;
+      const price = it.price ? `<span class="pr">${it.price}</span>` : '';
+      return `<button class="irow${it.id === current ? ' sel' : ''}${owned ? '' : ' locked'}" data-id="${it.id}">
+        <span class="sw" style="background:${col}"></span>
+        <span class="d"><b>${it.name}</b><s>${it.ru}${owned ? '' : ' · не куплено'}</s></span>${price}</button>`;
+    }).join('');
+    Array.from(box.querySelectorAll('.irow')).forEach((b) => b.addEventListener('click', () => {
+      const id = b.dataset.id, it = ITEMS[id];
+      const slot = it.kind === 'blade' ? 'blade' : (b.parentElement.id === 'listBh' ? 'bh' : 'fh');
+      if (!this.game.profile.owns(id)) {
+        const ok = this.game.shop.buyRacket(id);
+        if (!ok) { this.toast('НЕ ХВАТАЕТ МОНЕТ · ' + it.price); this.game.audio.ui('deny'); return; }
+        this.toast('КУПЛЕНО · ' + it.name);
+        this.game.audio.ui('buy');
+        $('#wsBal').textContent = this.game.profile.data.coins;
+        this.drawShop();
+      }
+      this.pick[slot] = id;
+      this.showWorkshop('racket');
+    }));
+  }
+
+  drawStatCard() {
+    const t = racketStats(this.pick.blade, this.pick.fh, this.pick.bh);
+    const eq = new Equipment(this.pick.blade, this.pick.fh, this.pick.bh);
+    const cur = this.game.equip;
+    const fitted = this.game.profile.data.equip;
+    const dirty = this.pick.blade !== fitted.blade || this.pick.fh !== fitted.fh || this.pick.bh !== fitted.bh;
+    $('#wsEquip').textContent = dirty ? 'ПОСТАВИТЬ В ИГРУ' : 'ЭТА РАКЕТКА УЖЕ В ИГРЕ';
+    $('#wsEquip').disabled = !dirty;
+    const rows = STAT_KEYS.map((k) => {
+      const v = t[k];
+      const d = v - cur.stats[k];
+      return `<div class="sbar"><s>${STAT_RU[k]}</s><span class="gr"><i style="width:${v}%"></i></span>
+        <b style="color:${d > 0 ? 'var(--good)' : d < 0 ? 'var(--bad)' : 'var(--dim2)'}">${v}${d ? (d > 0 ? ' ▲' : ' ▼') : ''}</b></div>`;
+    }).join('');
+    $('#statCard').innerHTML = rows;
+    const sp = (eq.fhParams.e / PH.E_RACKET);
+    const describe = t.speed > 70 ? 'быстрая, требует короткого замаха' : t.control > 72 ? 'прощает промах по центру'
+      : t.spin > 70 ? 'собирает вращение с кисти' : 'ровная, предсказуемая';
+    $('#statNote').innerHTML = `<b>${ITEMS[this.pick.blade].name} · ${ITEMS[this.pick.fh].name}</b><br>`
+      + `${describe}. Отскок ${(sp * 100).toFixed(0)}% от базы, пятно контакта ${(eq.sweetK * 100).toFixed(0)}%.`;
+  }
+
+  equipSelection() {
+    const p = this.game.profile;
+    const k = this.pick;
+    if (!p.equipRacket(k.blade, k.fh, k.bh)) { this.toast('ЧТО-ТО НЕ КУПЛЕНО'); return; }
+    this.game.applyEquipment();
+    this.toast('РАКЕТКА В ИГРЕ · ' + this.game.equip.name);
+    this.game.audio.ui('buy');
+    this.drawStatCard();
+    this.refreshMenuBits();
+  }
+
+  drawShop() {
+    const g = this.game, p = g.profile, shop = g.shop;
+    const rackets = shop.racketOffers().filter((o) => !o.owned);
+    $('#shopRackets').innerHTML = rackets.length ? rackets.map((o) => {
+      const it = o.item;
+      const s = itemStats(it);
+      const line = STAT_KEYS.map((k) => `${STAT_RU[k].slice(0, 4)} ${Math.round(s[k])}`).join(' · ');
+      return `<div class="sitem"><b>${it.name} · ${it.ru}</b><s>${line}</s>
+        <span class="buy"><span class="price">${o.price} монет</span>
+        <button data-buy="${it.id}">КУПИТЬ</button></span></div>`;
+    }).join('') : '<div class="snote">Все ракетки открыты. Играйте.</div>';
+    Array.from($('#shopRackets').querySelectorAll('button[data-buy]')).forEach((b) => b.addEventListener('click', () => {
+      if (g.shop.buyRacket(b.dataset.buy)) { this.game.audio.ui('buy'); this.toast('КУПЛЕНО'); }
+      else { this.game.audio.ui('deny'); this.toast('НЕ ХВАТАЕТ МОНЕТ'); }
+      $('#wsBal').textContent = p.data.coins; this.drawShop(); this.refreshMenuBits();
+    }));
+
+    const cos = shop.cosmeticOffers();
+    $('#shopCosmetics').innerHTML = cos.map((c) => {
+      const price = c.cur === 'coins' ? `${c.price} монет` : c.cur === 'crystals' ? `${c.price} кр.` : 'за карьеру';
+      return `<div class="sitem ${c.owned ? 'owned' : ''}"><b>${c.ru}</b>
+        <s>${c.owned ? 'открыто' : c.cur === 'career' ? 'награда за кубок мира' : 'косметика'}</s>
+        <span class="buy"><span class="price">${c.owned ? '—' : price}</span>
+        <button data-cos="${c.id}" ${c.owned ? 'disabled' : ''}>${c.owned ? 'ЕСТЬ' : 'КУПИТЬ'}</button></span></div>`;
+    }).join('');
+    Array.from($('#shopCosmetics').querySelectorAll('button[data-cos]')).forEach((b) => b.addEventListener('click', () => {
+      if (g.shop.buyCosmetic(b.dataset.cos)) { this.game.audio.ui('buy'); this.toast('КУПЛЕНО'); }
+      else { this.game.audio.ui('deny'); this.toast('НЕ ХВАТАЕТ КРИСТАЛЛОВ'); }
+      $('#wsCry').textContent = p.data.crystals; this.drawShop();
+    }));
+
+    /* Real-money shelves exist only where IAP is allowed at all. On Poki
+       the whole block is hidden and the page stays ads-only, as required. */
+    const iap = shop.iapOffers();
+    $('#shopIapWrap').style.display = iap.length ? 'block' : 'none';
+    $('#shopIap').innerHTML = iap.map((b) => `<div class="sitem ${b.owned ? 'owned' : ''}">
+      <b>${b.ru}</b><s>${b.note || (b.crystals ? b.crystals + ' кристаллов' : '')}</s>
+      <span class="buy"><span class="price">${b.price} €</span>
+      <button data-iap="${b.id}" ${b.owned && b.once ? 'disabled' : ''}>${b.owned && b.once ? 'КУПЛЕНО' : 'КУПИТЬ'}</button></span></div>`).join('');
+    Array.from($('#shopIap').querySelectorAll('button[data-iap]')).forEach((b) => b.addEventListener('click', () => {
+      /* The store call belongs to the mobile wrapper. Here we only take the
+         entitlement, and say so honestly instead of pretending. */
+      if (g.platform.canIAP && g.iap) { g.iap(b.dataset.iap); }
+      else if (g.shop.grant(b.dataset.iap, false)) {
+        this.toast('ПОКУПКА ЗАЧТЕНА · ' + b.dataset.iap.toUpperCase());
+        $('#wsBal').textContent = p.data.coins; $('#wsCry').textContent = p.data.crystals;
+        this.drawShop();
+      }
+    }));
+
+    const s = p.data.season;
+    const lv = p.seasonLevel();
+    $('#seasonBox').innerHTML = `<div class="sl"><span>СЕЗОН ${s.n + 1} · УРОВЕНЬ ${lv}/60</span>
+      <span>${s.premium ? 'ПРОПУСК АКТИВЕН' : 'БЕСПЛАТНАЯ ДОРОЖКА'}</span></div>
+      <div class="track"><i style="width:${(p.seasonProgress() * 100).toFixed(0)}%"></i></div>
+      <div class="snote">Опыт сезона дают матчи и задания. Пропуск добавляет косметику, арены и 400 кристаллов.</div>`;
+  }
+
+  drawDaily() {
+    const p = this.game.profile;
+    const d = p.data.daily;
+    $('#dailyHead').innerHTML = `Серия <b>${p.data.streak}</b> ${p.data.streak >= 7 ? '· +50% к награде'
+      : p.data.streak >= 3 ? '· +25% к награде' : '· три дня подряд дают +25%'}`;
+    $('#taskList').innerHTML = DAILY_TASKS.map((t) => {
+      const cur = Math.min(d.tasks[t.id] || 0, t.need);
+      const done = d.done.indexOf(t.id) >= 0, claimed = d.claimed.indexOf(t.id) >= 0;
+      return `<div class="trow"><span class="d"><b>${t.ru}</b><s>${cur}/${t.need} · ${t.coins} монет</s></span>
+        <button data-claim="${t.id}" ${done && !claimed ? '' : 'disabled'}>${claimed ? 'ПОЛУЧЕНО' : done ? 'ЗАБРАТЬ' : 'В ПРОЦЕССЕ'}</button></div>`;
+    }).join('');
+    Array.from($('#taskList').querySelectorAll('button[data-claim]')).forEach((b) => b.addEventListener('click', () => {
+      const got = p.claimTask(b.dataset.claim);
+      if (got) { this.toast('+' + got + ' МОНЕТ'); this.game.audio.ui('buy'); }
+      $('#wsBal').textContent = p.data.coins;
+      this.drawDaily(); this.drawShop(); this.refreshMenuBits();
+    }));
+  }
+
+  watchAd() {
+    const r = this.game.shop.rewardAd('dailyWheel');
+    if (r.ok) { this.toast('+' + r.coins + ' МОНЕТ · СПАСИБО'); this.game.audio.ui('buy'); }
+    else this.toast(r.why === 'no-ads' ? 'РЕКЛАМА ОТКЛЮЧЕНА' : 'ПОДОЖДИТЕ ' + (r.left || 45) + ' С');
+    $('#wsBal').textContent = this.game.profile.data.coins;
+    this.drawShop(); this.refreshMenuBits();
+  }
+
+  refreshMenuBits() {
+    const p = this.game.profile; if (!p) return;
+    $('#wsCoins').textContent = p.data.coins + ' монет';
+    $('#wsStreak').textContent = 'серия ' + p.data.streak + ' · ' + p.data.daily.done.length + '/6';
+  }
+
+  toast(text) {
+    const t = $('#mnToast');
+    if (!t) return;
+    t.textContent = text;
+    t.classList.add('on');
+    clearTimeout(this._tT);
+    this._tT = setTimeout(() => t.classList.remove('on'), 1500);
   }
 
   applySetting(k, v) {
@@ -106,11 +397,18 @@ class UI {
         if (g.director) { g.director.enabled = s.adaptive; if (!s.adaptive) { g.director.reset(); g.ai.setHandicap(1); } }
         break;
       case 'haptics': s.haptics = v === 'on'; if (s.haptics) g.buzz(12); break;
+      case 'slowmoPlayer':
+        s.slowmoPlayer = v === 'on';
+        if (!s.slowmoPlayer) g.setSlowmoHold(false);
+        $('#slow').classList.toggle('off', !s.slowmoPlayer);
+        break;
       case 'target': s.targetScore = +v; $('#toWin').textContent = v; break;
+      default: break;
       case 'camYaw': g.camAdj.yaw = (-v) * Math.PI / 180; g.camAdjT = 1.2; this.syncCam(); return;
       case 'camPitch': g.camAdj.pitch = v * Math.PI / 180; g.camAdjT = 1.2; this.syncCam(); return;
       case 'camDist': g.camAdj.zoom = v / 100; g.camAdjT = 1.2; this.syncCam(); return;
     }
+    g.saveSettings();
     g.audio.ui('click');
   }
 
@@ -138,6 +436,8 @@ class UI {
     sel('trail', s.showTrail ? 'on' : 'off'); sel('predict', s.showPredict ? 'on' : 'off');
     sel('zone', s.showZone ? 'on' : 'off'); sel('tele', s.showTele ? 'on' : 'off');
     sel('coach', s.coach ? 'on' : 'off'); sel('adaptive', s.adaptive ? 'on' : 'off');
+    sel('slowmoPlayer', s.slowmoPlayer !== false ? 'on' : 'off');
+    $('#slow').classList.toggle('off', s.slowmoPlayer === false);
     sel('haptics', s.haptics ? 'on' : 'off');
     sel('target', s.targetScore);
     $('#spin').classList.toggle('on', !!s.showTele);
@@ -216,6 +516,37 @@ class UI {
     $('#stRally').textContent = g.bestRally;
     const top = Object.entries(s.byStroke).sort((a, b) => b[1] - a[1])[0];
     $('#stFav').textContent = top ? (STROKES[top[0]] ? STROKES[top[0]].short : top[0]) + ' ×' + top[1] : '—';
+    // the match is over, so lead with the thing worth remembering: the
+    // best rally, played back before the numbers
+    /* what the match paid, in one line, next to the score */
+    if (g.lastReward) {
+      const r = g.lastReward;
+      const line = document.createElement('div');
+      line.className = 'snote';
+      line.innerHTML = `+<b>${r.coins}</b> монет · +<b>${r.xp}</b> опыта`
+        + (r.seasonLevels ? ` · сезон +${r.seasonLevels}` : '')
+        + (g.moments.kept.length ? ` · моментов в копилке: ${g.moments.kept.length}` : '');
+      row.appendChild(line);
+      g.lastReward = null;
+    }
+    const best = g.moments.best;
+    const row = $('#overMoments');
+    row.innerHTML = '';
+    const kept = g.moments.kept.slice(0, 3);
+    if (kept.length) {
+      const b = document.createElement('button');
+      b.className = 'btn';
+      b.textContent = '\u25b6 ЛУЧШИЕ МОМЕНТЫ \u00b7 ' + kept.length;
+      b.addEventListener('click', () => this.showMoments());
+      row.appendChild(b);
+    }
+    if (best && !this.suppressCinema) {
+      this.suppressCinema = true;
+      setTimeout(() => { this.suppressCinema = false; }, 400);   // one auto-play per match
+      g.watchMoment(best, true, () => { $('#over').classList.add('on'); });
+      return;
+    }
+    this.suppressCinema = false;
     $('#over').classList.add('on');
   }
 
@@ -472,6 +803,17 @@ class UI {
     rb.classList.toggle('on', showRally);
     if (showRally) rb.innerHTML = `РАЛЛИ <b>${g.rally}</b> · РЕКОРД <b>${Math.max(g.bestRally, g.rally)}</b>`;
 
+    /* slow-mo meter: the ring fills back up while you wait, and drops
+       while you hold — the one piece of state the player must feel */
+    const sl = g.slowmo, slEl = $('#slow');
+    if (slEl) {
+      const avail = g.slowmoAvailable();
+      slEl.classList.toggle('on', sl.active);
+      slEl.classList.toggle('ready', !sl.active && sl.energy > 0.995);
+      slEl.classList.toggle('off', g.settings.slowmoPlayer === false || !sl.allowed);
+      $('#slowFill').style.height = (sl.energy * 100).toFixed(0) + '%';
+      document.body.classList.toggle('is-slow', sl.active);
+    }
     if (this.shotTimer > 0) { this.shotTimer -= dt; if (this.shotTimer <= 0) $('#shot').classList.remove('on'); }
     if (this.noteTimer > 0) { this.noteTimer -= dt; if (this.noteTimer <= 0) this.hideNote(); }
 
