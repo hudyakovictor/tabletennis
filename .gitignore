@@ -1,0 +1,5 @@
+# dependencies installed for the puppeteer-based QA harnesses
+tt/tools/node_modules/
+
+# screenshots produced by tt/tools/qa_live.js — regenerate with that script
+tt/shots/
