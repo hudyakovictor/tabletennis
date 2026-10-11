@@ -219,6 +219,26 @@ function deriveStroke(m, ctx) {
   const side = ctx.side || 1;
   const fwd = -side;
 
+  /* ---- 0. hostile input never reaches the physics ----------------- *
+   * The metrics come straight from touch events: a dropped gesture, a
+   * cancelled one or a device that reports nonsense must not be able to
+   * push a NaN into the impact solver, where it would poison the ball
+   * state for the rest of the match. Sanitise once, here.               */
+  if (m) {
+    const sane = (v, lo, hi, fb) => (Number.isFinite(v) ? clamp(v, lo, hi) : fb);
+    m.releaseSpeed = sane(m.releaseSpeed, 0, 40, 0);
+    m.peakSpeed = sane(m.peakSpeed, 0, 40, 0);
+    m.right = sane(m.right, -1.4, 1.4, 0);
+    m.up = sane(m.up, -1.4, 1.4, 0);
+    m.dist = sane(m.dist, 0, 4, 0);
+    m.curl = sane(m.curl, -6, 6, 0);
+    m.smooth = sane(m.smooth, 0.15, 1, 0.6);
+    m.straightness = sane(m.straightness, 0, 1, 1);
+    m.samples = Number.isFinite(m.samples) ? m.samples : 0;
+    m.x = sane(m.x, -2, 3, 0.5);
+    m.y = sane(m.y, -2, 3, 0.5);
+  }
+
   /* ---- 1. effort ------------------------------------------------- */
   const raw = Math.max(m.releaseSpeed, m.peakSpeed * 0.78);
   const sp01 = clamp(raw / 4.2, 0, 1.45);
@@ -226,8 +246,13 @@ function deriveStroke(m, ctx) {
   /* ---- 2. context ------------------------------------------------ */
   const b = ctx.ball || { y: PH.TABLE_Y + 0.15, z: side * 1.2 };
   ctx.ball = b;
+  // Spin sign, stated once so it cannot drift again: for a ball travelling
+  // towards the player (+z) a POSITIVE w.x is TOPSPIN (the top of the ball
+  // moves forward, Magnus pushes it down — verified against aeroAccel in
+  // 30_physics.js). "Incoming topspin is positive" therefore means
+  // side * w.x, which is also the convention OpponentAI already uses.
   const incomingTop = ctx.incomingTop !== undefined ? ctx.incomingTop
-    : -side * ((ctx.ballSpin && ctx.ballSpin.x) || 0);
+    : side * ((ctx.ballSpin && ctx.ballSpin.x) || 0);
   ctx.incomingTop = incomingTop;
   const hAboveNet = b.y - PH.NET_TOP;
   const hAboveTable = b.y - PH.TABLE_Y;
@@ -268,7 +293,8 @@ function deriveStroke(m, ctx) {
   azFace = clamp(azFace + latTurn, -1.25, 1.25);
 
   let vmag = 2.0 + 15.5 * Math.pow(sp01, 0.82);
-  vmag = clamp(vmag * A.speed * (ctx.powerScale || 1), 0.8, 19.5);
+  vmag = clamp(vmag * A.speed * (Number.isFinite(ctx.powerScale) ? ctx.powerScale : 1), 0.8, 19.5);
+  if (!Number.isFinite(vmag)) vmag = 4.0;          // last line of defence
 
   /* ---- 5. build the 3-D racket frame ------------------------------ */
   const eR = elev * DEG;
@@ -312,7 +338,17 @@ function deriveStroke(m, ctx) {
     + 0.14 * clamp(m.samples / 12, 0, 1)
     - 0.10 * clamp(Math.abs(m.curl) - 1.4, 0, 1.6), 0.2, 1);
 
-  const rubber = A.soft ? { e: PH.E_RACKET * A.soft, mu: PH.MU_RACKET, et: PH.ET_RACKET * (0.5 + 0.5 * A.soft) } : null;
+  /* The rubber is the player's equipment (84_racket.js), modulated by the
+     archetype: a soft, absorbing stroke presses the sponge, which costs
+     restitution and gains dwell. Without equipment the base racket is
+     used, so the physics is unchanged for anything that does not fit one. */
+  const eq = ctx.equip || { e: PH.E_RACKET, mu: PH.MU_RACKET, et: PH.ET_RACKET, damp: 1 };
+  const rubber = {
+    e: eq.e * (A.soft || 1),        // soft archetypes press the sponge
+    mu: eq.mu,
+    et: eq.et * (A.soft ? 0.5 + 0.5 * A.soft : 1),
+    damp: eq.damp,
+  };
 
   return {
     stroke: st, arch: A, vR, normal, vmag, aim: { x: aimX, z: aimZ },
@@ -357,79 +393,182 @@ function strokeFrame(racket, dElev, dAz, scale, outSwing, outNormal) {
 }
 
 /**
- * Serve solver. Searches the stroke's elevation / azimuth / swing scale on a
- * coarse-to-fine grid, scoring a FULL two-bounce simulation of the serve.
- * ~120 short integrations, and it only runs once per point.
+ * Serve solver (ITTF 2.06.4: own bounce, over the net, receiver's bounce).
+ *
+ * Two things matter here and the previous version got both wrong:
+ *   · it burned ~350 full flights per serve (measured 304 ms) — a visible
+ *     freeze every time anyone served;
+ *   · it happily returned a serve that flew long and then handed it to the
+ *     player anyway, because nothing checked legality at the end. Measured
+ *     result: one serve in four was illegal, at every assist level.
+ *
+ * The search is now a coordinate descent (azimuth → elevation × scale →
+ * scale × softness → local polish) at a cheap integration step, and it walks
+ * the placement target back towards the net until it finds a serve that is
+ * genuinely legal. Legality is returned, not implied.
  */
 const _svRep = {};
 function solveServeStroke(ballP, racket, evalStroke, side, assist) {
-  const aim = racket.aim || { x: 0, z: -side * 0.95 };
-  // where the first bounce should land on the server's own half
-  const own = { x: aim.x * 0.35, z: side * (0.40 + Math.abs(aim.z) * 0.16) };
+  const aimBase = racket.aim || { x: 0, z: -side * 0.95 };
   const v = V3.new(), w = V3.new();
+  let legal = false, why = 'none';
 
-  const score = (dE, dA, sc, dmp, fine) => {
+  const score = (own, aim, dE, dA, sc, dmp, fine) => {
     evalStroke(dE, dA, sc, dmp, v, w);
-    if (v.z * side > -0.30) return 60;                        // not going forward
+    legal = false; why = 'none';
+    if (v.z * side > -0.30) { why = 'back'; return 60; }      // not going forward
     predict(V3.clone(ballP), V3.clone(v), V3.clone(w),
-      { dt: fine ? 1 / 320 : 1 / 170, maxT: 2.4, out: _svRep });
+      { dt: fine ? 1 / 300 : 1 / 160, maxT: 2.4, out: _svRep });
     const r = _svRep;
-    if (r.bounces === 0) return 40 + (r.hitNet ? 4 : 0);
-    if (Math.sign(r.landed.z) !== side) return 26 + Math.abs(r.landed.z - own.z);
+    if (r.bounces === 0) { why = r.hitNet ? 'net' : 'none'; return 40 + (r.hitNet ? 4 : 0); }
+    if (Math.sign(r.landed.z) !== side) { why = 'wrongside'; return 26 + Math.abs(r.landed.z - own.z); }
     const d1 = Math.hypot(r.landed.x - own.x, r.landed.z - own.z);
-    if (r.hitNet) return 12 + d1 * 0.3 + Math.max(0, PH.NET_TOP + PH.R - (r.netCross ? r.netCross.y : 0)) * 10;
-    if (!r.b2) {                                              // flew long
-      const over = r.floor ? Math.abs(r.floor.z) - PH.T_HALF_LEN : 1.2;
-      return 6 + Math.max(0, over) * 0.9 + d1 * 0.15;
+    if (r.hitNet) { why = 'net'; return 12 + d1 * 0.3 + Math.max(0, PH.NET_TOP + PH.R - (r.netCross ? r.netCross.y : 0)) * 10; }
+    if (!r.b2) {                                              // flew past the table
+      why = 'long';
+      const pc = r.floor || r.planeCross;
+      const miss = pc ? Math.hypot(pc.x - aim.x, pc.z - aim.z) : 1.2;
+      return 6 + miss * 0.6 + d1 * 0.15;                      // includes going wide
     }
-    if (Math.sign(r.b2.z) === side) return 9 + d1;            // double bounce, own half
+    if (Math.sign(r.b2.z) === side) { why = 'own'; return 9 + d1; }   // double bounce, own half
+    legal = true; why = 'ok';
     return Math.hypot(r.b2.x - aim.x, r.b2.z - aim.z) + d1 * 0.22;
   };
 
-  const SC = [0.25, 0.38, 0.52, 0.66, 0.82, 1.0, 1.2, 1.42, 1.66];
+  const SC = [0.30, 0.45, 0.65, 0.88, 1.15, 1.45];
   const DMP = [1, 0.58];
-  let bE = 0, bA = 0, bS = 1, bD = 1, bV = Infinity;
-  // stage 1 - how far must the swing direction be pulled back towards centre?
-  for (let i = -5; i <= 5; i++) {
-    const dA = i * 0.22;
-    for (let j = 1; j < SC.length; j += 2) {
-      const sv = score(0, dA, SC[j], 1, false);
-      if (sv < bV) { bV = sv; bA = dA; bS = SC[j]; }
+  let bE = 0, bA = 0, bS = 1, bD = 1, bV = Infinity, bAim = aimBase, bOwn = null, solvedLegal = false;
+
+  // A hard topspin serve simply cannot be aimed at the very back line and
+  // stay legal on a bad toss, so shorten the target until it works.
+  for (const depthF of [1.0, 0.70]) {
+    const aim = { x: aimBase.x, z: aimBase.z * depthF };
+    const own = { x: aim.x * 0.35, z: side * (0.40 + Math.abs(aim.z) * 0.16) };
+
+    // stage 1 — how far must the swing direction be pulled back to centre?
+    let aBest = 0, aBestV = Infinity;
+    for (let i = -3; i <= 3; i++) {
+      const dA = i * 0.26;
+      const sv = score(own, aim, 0, dA, 0.65, 1, false);
+      if (sv < aBestV) { aBestV = sv; aBest = dA; }
     }
-  }
-  // stage 2 - elevation / swing scale / softness at that azimuth
-  bV = Infinity;
-  for (let i = -6; i <= 6; i++) {
-    const dE = i * 0.10;
-    for (let j = 0; j < SC.length; j++) {
-      for (let k = 0; k < DMP.length; k++) {
-        const sv = score(dE, bA, SC[j], DMP[k], false);
-        if (sv < bV) { bV = sv; bE = dE; bS = SC[j]; bD = DMP[k]; }
+    // stage 2 — JOINT grid over elevation and swing scale. These two
+    // interact (a lower face needs a longer swing to still carry the ball
+    // over the net), so sweeping them one after the other walks into the
+    // wrong valley and misses perfectly legal serves that are 20 cm away.
+    // The elevation range has to cover -0.6: a heavy backspin serve lives
+    // down there with a big swing scale.
+    let eBest = 0, sBest = 0.65, vBest = Infinity;
+    for (let i = -4; i <= 4; i++) {
+      const dE = i * 0.15;
+      for (const sc of [0.45, 0.75, 1.10, 1.45]) {
+        const sv = score(own, aim, dE, aBest, sc, 1, false);
+        if (sv < vBest) { vBest = sv; eBest = dE; sBest = sc; }
       }
     }
-  }
-  bV = score(bE, bA, bS, bD, true);
-  for (let pass = 0; pass < 2; pass++) {
-    const stepE = 0.05 / (pass + 1), stepS = 0.08 / (pass + 1);
-    for (let i = -2; i <= 2; i++) for (let j = -2; j <= 2; j++) {
-      const dE = bE + i * stepE, sc = Math.max(0.16, bS + j * stepS);
-      const sv = score(dE, bA, sc, bD, true);
-      if (sv < bV) { bV = sv; bE = dE; bS = sc; }
+    // stage 3 — swing scale and softness around that winner
+    let dBest = 1;
+    for (const sMul of [0.8, 0.9, 1.0, 1.1, 1.25, 1.5]) for (const dmp of DMP) {
+      const sc = Math.max(0.16, sBest * sMul);
+      const sv = score(own, aim, eBest, aBest, sc, dmp, false);
+      if (sv < vBest) { vBest = sv; sBest = sc; dBest = dmp; }
     }
-    const stepA = 0.15 / (pass + 1);
-    for (let i = -3; i <= 3; i++) {
-      const dA = bA + i * stepA;
-      const sv = score(bE, dA, bS, bD, true);
-      if (sv < bV) { bV = sv; bA = dA; }
+    // stage 4 — local coordinate descent, confirmed at the production step
+    for (let it = 0; it < 3; it++) {
+      const sE = 0.05 / (it + 1), sA = 0.10 / (it + 1), sS = 0.10 / (it + 1);
+      let improved = false;
+      const fine = it === 2;
+      for (const [ddE, ddA, mulS] of [[sE, 0, 1], [-sE, 0, 1], [0, sA, 1], [0, -sA, 1], [0, 0, 1 + sS], [0, 0, 1 - sS]]) {
+        const sc2 = Math.max(0.16, sBest * mulS);
+        const sv = score(own, aim, eBest + ddE, aBest + ddA, sc2, dBest, fine);
+        if (sv < vBest) { vBest = sv; eBest += ddE; aBest += ddA; sBest = sc2; improved = true; }
+      }
+      if (!improved) break;
     }
+    const sv = score(own, aim, eBest, aBest, sBest, dBest, true);
+    if (sv <= vBest) { vBest = sv; solvedLegal = legal; }
+    // Targeted recovery. The descent stops at the first local optimum; if
+    // that optimum is still illegal, the simulation has just told us *why*,
+    // and the response to swing scale is monotone: too slow dies on our own
+    // half or in the net, too fast flies long. So bracket the scale and
+    // bisect — a handful of flights, versus another full grid. This is what
+    // used to cost a point every fourth serve.
+    if (!solvedLegal && (why === 'long' || why === 'net' || why === 'own')) {
+      let lo = 0.10, hi = 2.10, sTry = sBest;
+      for (let j = 0; j < 9 && !solvedLegal && hi - lo > 0.02; j++) {
+        if (why === 'long') hi = sTry; else lo = sTry;
+        sTry = 0.5 * (lo + hi);
+        const s2 = score(own, aim, eBest, aBest, sTry, dBest, true);
+        if (legal) { vBest = Math.min(vBest, s2); sBest = sTry; solvedLegal = true; break; }
+        if (s2 < vBest) { vBest = s2; sBest = sTry; }
+      }
+      // last resort: the other hand softness, at whatever scale we settled on
+      if (!solvedLegal) {
+        for (const dmp of [1, 0.58]) {
+          const s2 = score(own, aim, eBest, aBest, sBest, dmp, true);
+          if (legal) { vBest = Math.min(vBest, s2); dBest = dmp; solvedLegal = true; break; }
+          if (s2 < vBest) { vBest = s2; dBest = dmp; }
+        }
+      }
+    }
+    // A serve that lands just past the sideline is a lateral miss: no amount
+    // of swing scale will save it. Sweep the azimuth, then lift the face if
+    // the ball is still finding the net.
+    if (!solvedLegal) {
+      for (const ddA of [0, -0.12, 0.12, -0.26, 0.26, -0.42, 0.42]) {
+        const s2 = score(own, aim, eBest, aBest + ddA, sBest, dBest, true);
+        if (legal) { vBest = Math.min(vBest, s2); aBest += ddA; solvedLegal = true; break; }
+        if (s2 < vBest) { vBest = s2; aBest += ddA; }
+      }
+    }
+    if (!solvedLegal && why === 'net') {
+      const e0 = eBest;
+      for (const ddE of [0.10, 0.20, 0.32]) {
+        const s2 = score(own, aim, e0 + ddE, aBest, sBest, dBest, true);
+        if (legal) { vBest = Math.min(vBest, s2); eBest = e0 + ddE; solvedLegal = true; break; }
+        if (s2 < vBest) { vBest = s2; eBest = e0 + ddE; }
+      }
+    }
+    if (vBest < bV) { bV = vBest; bE = eBest; bA = aBest; bS = sBest; bD = dBest; bAim = aim; bOwn = own; }
+    if (solvedLegal) { bE = eBest; bA = aBest; bS = sBest; bD = dBest; bAim = aim; bOwn = own; solvedLegal = true; break; }
   }
-  // a weaker player keeps part of their own error — but never to the point
+
+  // Safety net. If the player's gesture simply does not admit a legal serve
+  // (a wild flick, a ball caught on the way up), play a plain, safe serve
+  // instead of handing them a fault they cannot see coming. Losing a point
+  // to the solver is the one thing a serve must never do.
+  if (!solvedLegal) {
+    const own = { x: 0, z: side * 0.55 };
+    const aim = { x: 0, z: -side * 0.75 };
+    let sB = 0.8, dB = 1, eB = 0.0, aB = 0.0, svBest = Infinity;
+    for (const sc of [0.5, 0.7, 0.95, 1.25]) for (const dmp of DMP) {
+      const sv = score(own, aim, 0, 0, sc, dmp, false);
+      if (legal) { sB = sc; dB = dmp; solvedLegal = true; break; }
+      if (sv < svBest) { svBest = sv; sB = sc; dB = dmp; }
+    }
+    if (!solvedLegal) for (const dE of [-0.3, -0.15, 0.15, 0.3, 0.45]) {
+      const sv = score(own, aim, dE, 0, sB, dB, false);
+      if (legal) { eB = dE; solvedLegal = true; break; }
+      if (sv < svBest) { svBest = sv; eB = dE; }
+    }
+    if (!solvedLegal) for (const dA of [-0.35, 0.35, -0.6, 0.6]) {
+      const sv = score(own, aim, eB, dA, sB, dB, false);
+      if (legal) { aB = dA; solvedLegal = true; break; }
+      if (sv < svBest) { svBest = sv; aB = dA; }
+    }
+    if (solvedLegal) { bE = eB; bA = aB; bS = sB; bD = dB; bAim = aim; bOwn = own; }
+  }
+
+  // A weaker player keeps part of their own error — but never to the point
   // of an illegal serve, which is simply not fun.
   const k = clamp(0.45 + 0.55 * assist, 0, 1);
   const fE = bE * k, fA = bA * k, fS = 1 + (bS - 1) * k, fD = 1 + (bD - 1) * k;
-  const okV = score(fE, fA, fS, fD, true);
-  if (okV < 0.55 || okV <= bV + 0.30) return { dE: fE, dA: fA, sc: fS, dmp: fD, ok: okV < 2.0, target: aim };
-  return { dE: bE, dA: bA, sc: bS, dmp: bD, ok: bV < 2.0, target: aim };
+  score(bOwn, bAim, fE, fA, fS, fD, true);
+  if (legal) return { dE: fE, dA: fA, sc: fS, dmp: fD, ok: true, target: bAim };
+  // The player's own error would have produced an illegal serve: give them
+  // the solved one instead. Only a truly absurd gesture can fail here.
+  score(bOwn, bAim, bE, bA, bS, bD, true);
+  return { dE: bE, dA: bA, sc: bS, dmp: bD, ok: legal, target: bAim };
 }
 
 function refineRacket(ballP, ballV, ballW, racket, assist, quality) {
@@ -489,7 +628,7 @@ function refineRacket(ballP, ballV, ballW, racket, assist, quality) {
   if (Math.sign(target.z) === side || Math.abs(target.z) < 0.10) target.z = -side * 0.22;
 
   /* ---- 3. converge the stroke rotation onto that target ----------- */
-  let dE = 0, dA = 0, sc = 1, dmp = 1, sol = null;
+  let dE = 0, dA = 0, sc = 1, dmp = 1, sol = null, converged = false;
   for (let outer = 0; outer < 3; outer++) {
     sol = solveLaunch(ballP, target, _rw, {
       speed: V3.len(_rv),
@@ -527,9 +666,15 @@ function refineRacket(ballP, ballV, ballW, racket, assist, quality) {
         if (dmp < 1 && sc > scHi * 0.92) dmp = Math.min(1, dmp * 1.18);
         sc = clamp(sc * Math.pow(sErr, 0.60), scLo, scHi);
       }
-      if (Math.abs(eErr) < 0.004 && Math.abs(aErr) < 0.006 && Math.abs(sErr - 1) < 0.015) break;
+      if (Math.abs(eErr) < 0.004 && Math.abs(aErr) < 0.006 && Math.abs(sErr - 1) < 0.015) {
+        // The frame now reproduces the wanted launch exactly: re-solving with
+        // a fresher spin vector cannot improve it, and each extra solve costs
+        // a dozen full flights inside the contact frame.
+        converged = true;
+        break;
+      }
     }
-    if (sol.err < 0.12) break;
+    if (converged || sol.err < 0.12) break;
   }
   if (!sol) return racket;
 
@@ -550,22 +695,49 @@ function refineRacket(ballP, ballV, ballW, racket, assist, quality) {
    *        How hard it tries is itself a function of the assist, so a
    *        low setting really does let the ball go into the net.       */
   const chk = {};
-  const validate = (e_, a_, s_, d_) => {
+  const validate = (e_, a_, s_, d_, fine) => {
     evalStroke(e_, a_, s_, d_, _rv, _rw);
     predict(V3.clone(ballP), V3.clone(_rv), V3.clone(_rw),
-      { dt: 1 / 280, maxT: 2.6, stopOnFirstBounce: true, out: chk });
+      { dt: fine ? 1 / 280 : 1 / 150, maxT: 2.6, stopOnFirstBounce: true, out: chk });
     if (chk.hitNet) return -1;
     if (!chk.landed) return 1;
     if (Math.sign(chk.landed.z) === side) return -1;
     return 0;
   };
   const guard = Math.round(clamp((assist - 0.22) / 0.78, 0, 1) * 16);
-  let verdict = validate(dE, dA, sc, dmp);
+  let verdict = validate(dE, dA, sc, dmp, false);
   for (let k = 0; k < guard && verdict !== 0; k++) {
     const step = 0.035 + k * 0.012;
-    if (verdict < 0) { dE += step; sc = clamp(sc * 1.05, 0.12, 2.20); dmp = Math.min(1, dmp * 1.05); }
-    else { dE -= step * 0.8; dmp = Math.max(0.26, dmp * 0.94); sc = clamp(sc * 0.97, 0.10, 2.20); }
-    verdict = validate(dE, dA, sc, dmp);
+    // Where did the shot actually end up? Correction used to be vertical
+    // only, which is why a hook that curved past the sideline simply could
+    // not be saved: the error was lateral, so it has to be answered with
+    // azimuth, not with elevation.
+    const latErr = chk.landed ? chk.landed.x - target.x : 0;
+    if (verdict < 0) {
+      dE += step;
+      if (Math.abs(latErr) > 0.16) dA = clamp(dA - Math.sign(latErr) * step * 0.85, -1.15, 1.15);
+      sc = clamp(sc * 1.05, 0.12, 2.20); dmp = Math.min(1, dmp * 1.05);
+    } else {
+      dE -= step * 0.8;
+      if (Math.abs(latErr) > 0.16) dA = clamp(dA - Math.sign(latErr) * step * 0.85, -1.15, 1.15);
+      dmp = Math.max(0.26, dmp * 0.94); sc = clamp(sc * 0.97, 0.10, 2.20);
+    }
+    verdict = validate(dE, dA, sc, dmp, k > guard - 4);
+  }
+  // The cheap checks can flatter a shot; confirm at the production step, and
+  // keep nudging if the fine integration disagrees with the coarse one.
+  // (validate returns 0 for a legal shot, so the test is `!== 0`, not `!`.)
+  verdict = validate(dE, dA, sc, dmp, true);
+  for (let j = 0; j < 6 && verdict !== 0; j++) {
+    if (verdict < 0) {                      // net, or died on our own half
+      dE += 0.03 + j * 0.02;
+      sc = clamp(sc * 1.04, 0.12, 2.20);
+    } else {                                // long
+      dE -= 0.02 + j * 0.015;
+      sc = clamp(sc * 0.98, 0.10, 2.20);
+      dmp = Math.max(0.30, dmp * 0.96);
+    }
+    verdict = validate(dE, dA, sc, dmp, true);
   }
 
   const swing = V3.new(), normal = V3.new();

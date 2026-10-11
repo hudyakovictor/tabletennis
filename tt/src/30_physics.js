@@ -36,9 +36,15 @@ const PH = {
   T_LEN: 2.74, T_WID: 1.525, T_H: 0.76,
   T_HALF_LEN: 1.37, T_HALF_WID: 0.7625,
   T_THICK: 0.025,
-  E_TABLE: 0.870,           // normal COR ball/table (calibrated: 30.5cm drop -> 23cm  => sqrt(23/30.5)=0.868)
-  E_TABLE_SPEED: 0.009,     // COR loss per m/s of impact speed
-  MU_TABLE: 0.20,           // Coulomb friction ball/table
+  // ITTF T3 drop test: a standard ball dropped from 30.5 cm must rebound
+  // 23..26 cm, i.e. e = sqrt(23/30.5)..sqrt(26/30.5) = 0.868..0.923.
+  // A dropped ball lands at ~2.4 m/s and the rebound is measured in the
+  // first bounce, so the *effective* e at that speed has to sit near 0.894.
+  // The previous pair (0.870 / 0.009) gave e = 0.848 -> 20.5 cm rebound,
+  // outside the legal window; this pair gives 24.0 cm.
+  E_TABLE: 0.930,           // normal COR ball/table at zero impact speed
+  E_TABLE_SPEED: 0.0085,    // COR loss per m/s of impact speed
+  MU_TABLE: 0.25,           // Coulomb friction ball/table (ITTF T3 studies)
   ET_TABLE: 0.00,           // tangential restitution of the table (none)
 
   /* ---- net ---- */
@@ -303,15 +309,21 @@ function predict(p0, v0, w0, opts = {}) {
  *  range/elevation curve is unimodal and the net is a hard obstacle.
  * ---------------------------------------------------------------- */
 const _ip = V3.new(), _iv = V3.new(), _iw = V3.new(), _predOut = {};
+/** Full elevation span, used to keep the polished answer inside the range. */
 const _ELEV = [-0.34, -0.26, -0.19, -0.13, -0.08, -0.04, 0, 0.035, 0.07, 0.105,
   0.145, 0.19, 0.24, 0.30, 0.36, 0.43, 0.51, 0.60, 0.70, 0.81, 0.93, 1.06];
+/** Sparse grid for the cheap first pass; the winner is polished afterwards. */
+const _ELEV_SCAN = [-0.34, -0.19, -0.08, 0, 0.035, 0.07, 0.105, 0.145, 0.24, 0.36, 0.51, 0.70, 0.93, 1.06];
+/** Integration steps: coarse for the scan, medium for the polish, production
+ *  step for the answer that is handed to the impact solver. */
+const DT_SCAN = 1 / 130, DT_POLISH = 1 / 200, DT_FINE = 1 / 260;
 
-function _tryLaunch(from, spin, speed, ux, uz, elev, netClear, out) {
+function _tryLaunch(from, spin, speed, ux, uz, elev, netClear, out, dt) {
   V3.copy(_ip, from);
   const ch = Math.cos(elev), sh = Math.sin(elev);
   V3.set(_iv, ux * speed * ch, speed * sh, uz * speed * ch);
   V3.copy(_iw, spin);
-  predict(_ip, _iv, _iw, { dt: 1 / 260, maxT: 2.4, stopOnFirstBounce: true, out });
+  predict(_ip, _iv, _iw, { dt: dt || 1 / 260, maxT: 2.4, stopOnFirstBounce: true, out });
   const clear = (out.netCross ? out.netCross.y : 99) - PH.NET_TOP - PH.R;
   return { clear, landed: out.landed, hitNet: out.hitNet, vx: _iv.x, vy: _iv.y, vz: _iv.z };
 }
@@ -342,41 +354,82 @@ function solveLaunch(from, target, spin, opts = {}) {
     return e + Math.max(0, netClear - t.clear) * 7;
   };
 
-  for (let pass = 0; pass < 3; pass++) {
-    best = null;
-    for (let i = 0; i < _ELEV.length; i++) {
-      const t = _tryLaunch(from, spin, speed, ux, uz, _ELEV[i], netClear, o);
-      const sc = scoreOf(t);
-      if (!best || sc < best.score) best = { score: sc, elev: _ELEV[i], ...t };
+  /* ---------------------------------------------------------------
+   * Shape of the search, and why:
+   *   · a sparse scan at a cheap integration step finds the right valley
+   *     (14 flights);
+   *   · a short golden-section polish pins the elevation down (6 flights);
+   *   · the answer is confirmed at the production step (1 flight);
+   *   · sidespin and the "too hot for the table" give-back are applied as
+   *     local corrections around that answer, not as another full scan.
+   * Everything shares one hard budget, because this function is called up
+   * to three times per stroke and used to reach 150+ flights per hit.
+   * --------------------------------------------------------------- */
+  let spent = 0;
+  const BUDGET = 30;
+
+  // 1. coarse scan
+  let bestS = Infinity, bestI = 0;
+  const sc = new Array(_ELEV_SCAN.length), tk = new Array(_ELEV_SCAN.length);
+  for (let i = 0; i < _ELEV_SCAN.length; i++) {
+    const t = _tryLaunch(from, spin, speed, ux, uz, _ELEV_SCAN[i], netClear, o, DT_SCAN);
+    spent++;
+    tk[i] = t; sc[i] = scoreOf(t);
+    if (sc[i] < bestS) { bestS = sc[i]; bestI = i; }
+  }
+  if (!isFinite(bestS)) return null;
+  best = { score: bestS, elev: _ELEV_SCAN[bestI], ...tk[bestI] };
+
+  // 2. golden-section polish (the scan only has to land in the right valley)
+  let lo = Math.max(_ELEV[0], best.elev - 0.075), hi = Math.min(_ELEV[_ELEV.length - 1], best.elev + 0.075);
+  for (let k = 0; k < 3 && spent < BUDGET - 2; k++) {
+    const third = (hi - lo) / 3;
+    const e1 = lo + third, e2 = hi - third;
+    const a = _tryLaunch(from, spin, speed, ux, uz, e1, netClear, o, DT_POLISH), sa = scoreOf(a);
+    const b2 = _tryLaunch(from, spin, speed, ux, uz, e2, netClear, o, DT_POLISH), sb = scoreOf(b2);
+    spent += 2;
+    if (sa < sb) { hi = e2; if (sa < best.score) best = { score: sa, elev: e1, ...a }; }
+    else { lo = e1; if (sb < best.score) best = { score: sb, elev: e2, ...b2 }; }
+  }
+
+  // 3. sidespin bends the flight: rotate the aim azimuth analytically and
+  //    re-check the same elevation, instead of rescanning the whole grid
+  if (best.landed) {
+    const errLat = (best.landed.x - target.x) * (-uz) + (best.landed.z - target.z) * (ux);
+    if (Math.abs(errLat) > 0.03) {
+      const corr = -Math.atan2(errLat, horiz) * 0.95;
+      const c = Math.cos(corr), sN = Math.sin(corr);
+      const nx = ux * c - uz * sN, nz = ux * sN + uz * c;
+      const ux0 = ux, uz0 = uz;
+      ux = nx; uz = nz;
+      const t = _tryLaunch(from, spin, speed, ux, uz, best.elev, netClear, o, DT_FINE);
+      spent++;
+      const s = scoreOf(t);
+      if (s < best.score) best = { score: s, elev: best.elev, ...t };
+      else { ux = ux0; uz = uz0; }             // rotation did not help, undo
     }
-    if (!best) return null;
-    // local refinement around the winner
-    let lo = best.elev - 0.075, hi = best.elev + 0.075;
-    for (let k = 0; k < 7; k++) {
-      const mid = (lo + hi) / 2;
-      const a = _tryLaunch(from, spin, speed, ux, uz, mid - 0.018, netClear, o), sa = scoreOf(a);
-      const b2 = _tryLaunch(from, spin, speed, ux, uz, mid + 0.018, netClear, o), sb = scoreOf(b2);
-      if (sa < sb) { hi = mid; if (sa < best.score) best = { score: sa, elev: mid - 0.018, ...a }; }
-      else { lo = mid; if (sb < best.score) best = { score: sb, elev: mid + 0.018, ...b2 }; }
-    }
-    // too hot to keep on the table? allow a limited power give-back
-    if (best.score > 0.18 && forgive > 0.001 && (!best.landed || best.score > 0.3)) {
-      const next = speed * (1 - 0.22 * forgive);
-      if (next > 2.0 && pass < 2) { speed = next; continue; }
-    }
-    // sidespin bends the flight: correct the aim azimuth and re-solve once
-    if (best.landed && pass < 2) {
-      const errLat = (best.landed.x - target.x) * (-uz) + (best.landed.z - target.z) * (ux);
-      if (Math.abs(errLat) > 0.015) {
-        const corr = -Math.atan2(errLat, horiz) * 0.95;
-        const c = Math.cos(corr), sN = Math.sin(corr);
-        const nx = ux * c - uz * sN, nz = ux * sN + uz * c;
-        ux = nx; uz = nz;
-        continue;
+  }
+
+  // 4. too hot to keep on the table? a limited power give-back, rescanned
+  //    only around the winner
+  if (best.score > 0.18 && forgive > 0.001 && (!best.landed || best.score > 0.3)) {
+    const next = speed * (1 - 0.22 * forgive);
+    if (next > 2.0) {
+      speed = next;
+      const e0 = best.elev;
+      for (const e of [e0 - 0.06, e0, e0 + 0.06]) {
+        if (spent >= BUDGET) break;
+        const t = _tryLaunch(from, spin, speed, ux, uz, e, netClear, o, DT_POLISH);
+        spent++;
+        const s = scoreOf(t);
+        if (s < best.score) best = { score: s, elev: e, ...t };
       }
     }
-    break;
   }
+
+  // 5. answer confirmed at the step the impact solver works at
+  const fin = _tryLaunch(from, spin, speed, ux, uz, best.elev, netClear, o, DT_FINE);
+  best = { score: scoreOf(fin), elev: best.elev, ...fin };
   if (!best) return null;
   return {
     vx: best.vx, vy: best.vy, vz: best.vz, elev: best.elev, speed,

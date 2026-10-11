@@ -496,7 +496,10 @@ class Renderer {
 
     this.white = this.texFromPixel([255, 255, 255, 255]);
     this.shadowSize = this.quality === 'low' ? 1024 : 2048;
-    this.shadowFBO = this.makeShadowFBO(this.shadowSize);
+    // Nothing is ever drawn into this target while the analytic contact
+    // shadows are in use, so a 2048² depth texture is not allocated at boot
+    // (16 MB and a GPU allocation on every start-up, for nothing).
+    this.shadowFBO = null;
     this.rtScene = null; this.rtA = null; this.rtB = null;
     this._w = 0; this._h = 0;
 

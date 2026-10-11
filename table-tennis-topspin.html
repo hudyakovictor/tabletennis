@@ -230,6 +230,133 @@ body.is-paused #pauseInd{display:flex}
   #shot{bottom:max(14px,calc(env(safe-area-inset-bottom) + 10px))}
 }
 
+/* ============================ slow-mo =============================== */
+#slow{position:absolute;right:max(12px,env(safe-area-inset-right));
+  bottom:max(74px,calc(env(safe-area-inset-bottom) + 66px));
+  width:64px;height:64px;border-radius:50%;display:flex;flex-direction:column;
+  align-items:center;justify-content:center;gap:1px;pointer-events:auto;cursor:pointer;
+  background:radial-gradient(circle at 50% 35%,rgba(30,48,74,.85),rgba(9,14,24,.85));
+  border:1px solid var(--line2);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);
+  color:var(--dim);overflow:hidden;transition:color .2s,border-color .2s,transform .12s}
+#slow:active{transform:scale(.94)}
+#slow b{font-size:8px;font-weight:900;letter-spacing:.06em;z-index:2}
+#slow s{font-family:var(--mono);font-size:8px;opacity:.6;text-decoration:none;z-index:2}
+#slow i{position:absolute;left:0;right:0;bottom:0;height:100%;
+  background:linear-gradient(180deg,rgba(57,198,255,.26),rgba(57,198,255,.05));transition:height .08s linear}
+#slow.on{color:#eaf6ff;border-color:rgba(57,198,255,.75);box-shadow:0 0 26px rgba(57,198,255,.35)}
+#slow.ready{color:var(--txt)}
+#slow.off{opacity:.32;pointer-events:none}
+body.is-slow #gl{filter:saturate(1.12) contrast(1.04)}
+
+/* ======================== replay cinema ============================= */
+#reel{position:absolute;inset:0;z-index:6;pointer-events:none;opacity:0;transition:opacity .28s;
+  font-family:var(--ui)}
+#reel.on{opacity:1}
+#reel .bar{position:absolute;left:0;right:0;height:0;background:#04060a;transition:height .3s cubic-bezier(.2,.9,.3,1)}
+#reel.on .bar{height:9.5vh}
+#reel .bar.top{top:0}
+#reel .bar.bot{bottom:0}
+#reel .tag{position:absolute;left:max(16px,env(safe-area-inset-left));top:calc(9.5vh + 12px);
+  font-family:var(--mono);font-size:10px;letter-spacing:.2em;color:var(--warn);
+  background:rgba(0,0,0,.5);border:1px solid rgba(255,211,77,.35);border-radius:20px;padding:3px 11px}
+#reel .ttl{position:absolute;left:max(16px,env(safe-area-inset-left));bottom:calc(9.5vh + 14px);
+  display:flex;flex-direction:column;gap:2px;text-shadow:0 4px 30px rgba(0,0,0,.9)}
+#reel .ttl b{font-size:31px;font-weight:900;letter-spacing:.02em}
+#reel .ttl s{font-family:var(--mono);font-size:12px;color:var(--acc);text-decoration:none;letter-spacing:.06em}
+#reel .skip{position:absolute;right:max(16px,env(safe-area-inset-right));bottom:calc(9.5vh + 16px);
+  font-size:10px;letter-spacing:.16em;color:var(--dim2)}
+#reel.hero .tag{color:#0a0f18;background:var(--warn);border-color:var(--warn)}
+
+/* ======================= moment library ============================= */
+.mlist{display:flex;flex-direction:column;gap:8px;margin:6px 0 14px;max-height:44vh;overflow:auto}
+.mrow{display:flex;align-items:center;gap:12px;background:rgba(255,255,255,.035);
+  border:1px solid var(--line);border-radius:13px;padding:9px 13px;text-align:left;cursor:pointer;
+  transition:.16s;color:var(--txt);font-family:var(--ui)}
+.mrow:hover{background:rgba(57,198,255,.10);border-color:rgba(57,198,255,.4)}
+.mrow .num{font-family:var(--mono);font-size:19px;font-weight:800;color:var(--acc);min-width:26px}
+.mrow .d{flex:1;display:flex;flex-direction:column;gap:2px}
+.mrow .d b{font-size:13px;font-weight:800;letter-spacing:.02em}
+.mrow .d s{font-family:var(--mono);font-size:10.5px;color:var(--dim);text-decoration:none}
+.mrow .st{display:flex;gap:5px}
+.mrow .st i{width:5px;height:14px;border-radius:2px;background:rgba(255,255,255,.14)}
+.mrow .st i.f{background:var(--warn)}
+.mrow .go{font-size:10px;letter-spacing:.12em;color:var(--dim2)}
+.omrow{display:flex;flex-direction:column;gap:7px;margin:2px 0 14px}
+#mnToast{position:absolute;left:50%;top:max(104px,calc(env(safe-area-inset-top) + 94px));
+  transform:translateX(-50%) scale(.9);opacity:0;transition:.22s;pointer-events:none;
+  font-family:var(--mono);font-size:10.5px;letter-spacing:.14em;color:#0a0f18;background:var(--warn);
+  border-radius:20px;padding:4px 13px;font-weight:700}
+#mnToast.on{opacity:1;transform:translateX(-50%) scale(1)}
+
+#reel .skip{pointer-events:auto;cursor:pointer}
+body.is-reel #hud,body.is-reel #slow{opacity:.0}
+#hud{transition:opacity .25s}
+
+/* ==================== workshop · shop · daily ====================== */
+#workshop .card.wide{width:min(880px,94vw);max-height:92vh;overflow:auto}
+.wtop{display:flex;align-items:center;justify-content:space-between;gap:14px;margin-bottom:10px}
+.wallet{display:flex;gap:9px}
+.wallet span{display:flex;align-items:center;gap:6px;font-family:var(--mono);font-size:12px;
+  background:rgba(255,255,255,.05);border:1px solid var(--line);border-radius:20px;padding:4px 11px}
+.wallet i{width:12px;height:12px;border-radius:50%;display:block}
+.wmon i{background:radial-gradient(circle at 34% 32%,#ffe8a0,#e0a12a);box-shadow:0 0 10px rgba(224,161,42,.5)}
+.wcr i{background:radial-gradient(circle at 34% 32%,#cfefff,#3ba7e0);box-shadow:0 0 10px rgba(59,167,224,.5)}
+.wallet b{color:var(--txt);font-weight:700}
+.tabs{display:flex;gap:6px;margin:4px 0 12px;border-bottom:1px solid var(--line);padding-bottom:8px}
+.tab{background:none;border:0;color:var(--dim);font-family:var(--ui);font-size:11.5px;font-weight:800;
+  letter-spacing:.1em;padding:6px 11px;border-radius:9px;cursor:pointer;transition:.16s}
+.tab:hover{color:var(--txt);background:rgba(255,255,255,.05)}
+.tab.on{color:#08111c;background:var(--acc)}
+.pane{display:none}.pane.on{display:block}
+.rack{display:grid;grid-template-columns:1.15fr 1fr 1fr;gap:12px;margin-bottom:12px}
+@media (max-width:700px){.rack{grid-template-columns:1fr}}
+.rcol h4,.shopH{font-size:10px;letter-spacing:.16em;color:var(--dim2);margin:0 0 7px;font-weight:800}
+.shopH{margin-top:16px}
+.ilist{display:flex;flex-direction:column;gap:5px;max-height:34vh;overflow:auto;padding-right:3px}
+.irow{display:flex;align-items:center;gap:8px;background:rgba(255,255,255,.035);border:1px solid var(--line);
+  border-radius:10px;padding:7px 9px;cursor:pointer;transition:.14s;text-align:left;color:var(--txt);font-family:var(--ui)}
+.irow:hover{border-color:var(--line2);background:rgba(255,255,255,.07)}
+.irow.sel{border-color:var(--acc);background:rgba(57,198,255,.14)}
+.irow.locked{opacity:.5}
+.irow .d{flex:1;display:flex;flex-direction:column}
+.irow .d b{font-size:11.5px;font-weight:800}
+.irow .d s{font-family:var(--mono);font-size:9.5px;color:var(--dim);text-decoration:none}
+.irow .pr{font-family:var(--mono);font-size:10px;color:var(--warn)}
+.irow .sw{width:10px;height:18px;border-radius:3px;flex:0 0 auto}
+.card2{background:var(--glass2);border:1px solid var(--line2);border-radius:14px;padding:13px}
+.statcard{display:flex;flex-direction:column;gap:7px;margin-bottom:10px}
+.sbar{display:grid;grid-template-columns:86px 1fr 34px;align-items:center;gap:9px}
+.sbar s{font-family:var(--mono);font-size:9.5px;color:var(--dim);text-decoration:none;letter-spacing:.06em}
+.sbar .gr{height:7px;border-radius:4px;background:rgba(255,255,255,.09);overflow:hidden}
+.sbar .gr i{display:block;height:100%;border-radius:4px;transition:width .25s;
+  background:linear-gradient(90deg,#39c6ff,#4ee39a)}
+.sbar b{font-family:var(--mono);font-size:11px;text-align:right}
+.snote{font-size:10.5px;color:var(--dim);line-height:1.5;margin:7px 0}
+.sgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:8px}
+.sitem{background:rgba(255,255,255,.035);border:1px solid var(--line);border-radius:12px;padding:9px 11px;
+  display:flex;flex-direction:column;gap:5px}
+.sitem b{font-size:11.5px;font-weight:800;letter-spacing:.02em}
+.sitem s{font-family:var(--mono);font-size:9.5px;color:var(--dim);text-decoration:none}
+.sitem .buy{display:flex;justify-content:space-between;align-items:center;margin-top:2px}
+.sitem button{background:var(--acc);color:#08111c;border:0;border-radius:8px;font-family:var(--ui);
+  font-size:10.5px;font-weight:900;letter-spacing:.06em;padding:5px 11px;cursor:pointer}
+.sitem button:disabled{background:rgba(255,255,255,.12);color:var(--dim2);cursor:default}
+.sitem .price{font-family:var(--mono);font-size:11px;color:var(--warn)}
+.sitem.owned{border-color:rgba(78,227,154,.35)}
+.season{background:rgba(255,255,255,.035);border:1px solid var(--line);border-radius:12px;padding:11px}
+.season .sl{display:flex;justify-content:space-between;font-family:var(--mono);font-size:10.5px;color:var(--dim);margin-bottom:6px}
+.season .track{height:9px;border-radius:5px;background:rgba(255,255,255,.09);overflow:hidden}
+.season .track i{display:block;height:100%;background:linear-gradient(90deg,#ffd34d,#ff7a2f)}
+.tlist{display:flex;flex-direction:column;gap:7px;margin-bottom:12px}
+.trow{display:flex;align-items:center;gap:10px;background:rgba(255,255,255,.035);border:1px solid var(--line);
+  border-radius:11px;padding:9px 12px}
+.trow .d{flex:1}
+.trow .d b{font-size:11.5px;font-weight:800;display:block}
+.trow .d s{font-family:var(--mono);font-size:9.5px;color:var(--dim);text-decoration:none}
+.trow button{background:var(--good);color:#08111c;border:0;border-radius:8px;font-family:var(--ui);font-size:10.5px;
+  font-weight:900;padding:5px 11px;cursor:pointer}
+.trow button:disabled{background:rgba(255,255,255,.10);color:var(--dim2)}
+
 </style>
 </head>
 <body>
@@ -280,6 +407,14 @@ body.is-paused #pauseInd{display:flex}
       </div>
     </div>
 
+    <!-- slow-mo: hold to slow the world down (never in tournaments/PvP) -->
+    <div id="slow" class="pe" title="Замедление">
+      <i id="slowFill"></i>
+      <b>SLOW-MO</b>
+      <s id="slowKey">SHIFT</s>
+    </div>
+
+    <div id="mnToast"></div>
     <div id="pauseInd" class="pe"><b>ПАУЗА</b><s>нажмите, чтобы продолжить · P</s></div>
   </div>
 
@@ -321,6 +456,10 @@ body.is-paused #pauseInd{display:flex}
       </div>
 
       <button class="btn ghost" id="play">НАЧАТЬ МАТЧ</button>
+      <div class="row" style="margin-top:9px">
+        <button class="opt" id="wsOpen"><b>МАСТЕРСКАЯ</b><s id="wsCoins">0 монет</s></button>
+        <button class="opt" id="dailyOpen"><b>ЗАДАНИЯ</b><s id="wsStreak">серия 1</s></button>
+      </div>
     </div>
   </div>
 
@@ -353,6 +492,8 @@ body.is-paused #pauseInd{display:flex}
           <button class="opt sel" data-set="tele" data-val="off"><b>ВЫКЛ</b><s></s></button></div>
         <div class="row"><button class="opt sel" data-set="haptics" data-val="on"><b>ВИБРО ВКЛ</b><s>отдача в руку</s></button>
           <button class="opt" data-set="haptics" data-val="off"><b>ВЫКЛ</b><s></s></button></div>
+        <div class="row"><button class="opt sel" data-set="slowmoPlayer" data-val="on"><b>SLOW-MO</b><s>замедление в матче</s></button>
+          <button class="opt" data-set="slowmoPlayer" data-val="off"><b>ВЫКЛ</b><s>для турниров и PvP</s></button></div>
         <div class="row"><button class="opt sel" data-set="coach" data-val="on"><b>РАЗБОР ОЧКА</b><s>почему проиграно</s></button>
           <button class="opt" data-set="coach" data-val="off"><b>ВЫКЛ</b><s></s></button></div>
         <div class="row"><button class="opt sel" data-set="adaptive" data-val="on"><b>АДАПТАЦИЯ</b><s>соперник подстраивается</s></button>
@@ -382,6 +523,62 @@ body.is-paused #pauseInd{display:flex}
         <span class="kbd">+</span><span class="kbd">−</span> дистанция · <span class="kbd">0</span> сброс
       </div>
       <button class="btn" id="setClose">ЗАКРЫТЬ</button>
+    </div>
+  </div>
+
+  <!-- ==================== WORKSHOP · SHOP · DAILY ================== -->
+  <div class="screen" id="workshop">
+    <div class="card wide">
+      <div class="wtop">
+        <div class="logo" style="font-size:26px">МАСТЕРСКАЯ</div>
+        <div class="wallet">
+          <span class="wmon"><i></i><b id="wsBal">0</b></span>
+          <span class="wcr"><i></i><b id="wsCry">0</b></span>
+        </div>
+      </div>
+      <div class="tabs">
+        <button class="tab on" data-tab="racket">РАКЕТКА</button>
+        <button class="tab" data-tab="shop">МАГАЗИН</button>
+        <button class="tab" data-tab="daily">ЗАДАНИЯ</button>
+      </div>
+
+      <div class="pane on" id="paneRacket">
+        <div class="rack">
+          <div class="rcol"><h4>ОСНОВАНИЕ</h4><div class="ilist" id="listBlade"></div></div>
+          <div class="rcol"><h4>СПРАВА</h4><div class="ilist" id="listFh"></div></div>
+          <div class="rcol"><h4>СЛЕВА</h4><div class="ilist" id="listBh"></div></div>
+        </div>
+        <div class="card2">
+          <div class="statcard" id="statCard"></div>
+          <div class="snote" id="statNote"></div>
+          <button class="btn" id="wsEquip">ПОСТАВИТЬ В ИГРУ</button>
+          <div class="snote">Характер определяет только профиль удара, а не силу: сумма четырёх параметров
+          у всех предметов одинаковая, и ни один не лучше другого во всём.</div>
+        </div>
+      </div>
+
+      <div class="pane" id="paneShop">
+        <h4 class="shopH">РАКЕТКИ ЗА МОНЕТЫ</h4>
+        <div class="sgrid" id="shopRackets"></div>
+        <h4 class="shopH">ВНЕШНИЙ ВИД</h4>
+        <div class="sgrid" id="shopCosmetics"></div>
+        <div id="shopIapWrap">
+          <h4 class="shopH">ПОДДЕРЖКА ИГРЫ</h4>
+          <div class="sgrid" id="shopIap"></div>
+          <div class="snote">Покупки не дают преимущества на столе. Реклама — только по вашему вызову.</div>
+        </div>
+        <h4 class="shopH">СЕЗОН</h4>
+        <div class="season" id="seasonBox"></div>
+      </div>
+
+      <div class="pane" id="paneDaily">
+        <div class="snote" id="dailyHead"></div>
+        <div class="tlist" id="taskList"></div>
+        <button class="btn ghost" id="adCoins">СМОТРЕТЬ РЕКЛАМУ · +120 МОНЕТ</button>
+        <div class="snote">Реклама всегда необязательна и никогда не прерывает матч.</div>
+      </div>
+
+      <button class="btn ghost" id="wsClose">ЗАКРЫТЬ</button>
     </div>
   </div>
 
@@ -417,6 +614,7 @@ body.is-paused #pauseInd{display:flex}
         <div class="st"><s>Среднее вращение</s><b id="stAvgSpin">0</b></div>
         <div class="st"><s>Любимый удар</s><b id="stFav">—</b></div>
       </div>
+      <div id="overMoments" class="omrow"></div>
       <button class="btn" id="again">РЕВАНШ</button>
       <button class="btn ghost" id="backMenu">В МЕНЮ</button>
     </div>
@@ -432,6 +630,25 @@ body.is-paused #pauseInd{display:flex}
     <div class="glab" style="margin-top:7px"><span>ЛЕВОЕ</span><span>ПРАВОЕ</span></div>
     <div class="gauge"><span class="mid"></span><i id="gSide"></i></div>
     <div class="gval" id="gSideV">0 об/с</div>
+  </div>
+
+  <!-- ======================= REPLAY CINEMA ======================== -->
+  <div id="reel">
+    <div class="bar top"></div>
+    <div class="bar bot"></div>
+    <div class="tag" id="reelTag">ЛУЧШИЙ МОМЕНТ МАТЧА</div>
+    <div class="ttl"><b id="reelTitle">—</b><s id="reelMeta"></s></div>
+    <div class="skip" id="reelSkip">ПРОПУСТИТЬ ▸</div>
+  </div>
+
+  <!-- ====================== MOMENT LIBRARY ======================= -->
+  <div class="screen" id="reels">
+    <div class="card">
+      <div class="logo" style="font-size:30px">ЛУЧШИЕ МОМЕНТЫ</div>
+      <div class="sub">Игра запоминает только то, что стоит пересматривать</div>
+      <div id="momentList" class="mlist"></div>
+      <button class="btn ghost" id="reelsClose">ЗАКРЫТЬ</button>
+    </div>
   </div>
 
   <div id="loading"><div class="spinner"></div></div>
@@ -1193,7 +1410,10 @@ class Renderer {
 
     this.white = this.texFromPixel([255, 255, 255, 255]);
     this.shadowSize = this.quality === 'low' ? 1024 : 2048;
-    this.shadowFBO = this.makeShadowFBO(this.shadowSize);
+    // Nothing is ever drawn into this target while the analytic contact
+    // shadows are in use, so a 2048² depth texture is not allocated at boot
+    // (16 MB and a GPU allocation on every start-up, for nothing).
+    this.shadowFBO = null;
     this.rtScene = null; this.rtA = null; this.rtB = null;
     this._w = 0; this._h = 0;
 
@@ -1593,9 +1813,15 @@ const PH = {
   T_LEN: 2.74, T_WID: 1.525, T_H: 0.76,
   T_HALF_LEN: 1.37, T_HALF_WID: 0.7625,
   T_THICK: 0.025,
-  E_TABLE: 0.870,           // normal COR ball/table (calibrated: 30.5cm drop -> 23cm  => sqrt(23/30.5)=0.868)
-  E_TABLE_SPEED: 0.009,     // COR loss per m/s of impact speed
-  MU_TABLE: 0.20,           // Coulomb friction ball/table
+  // ITTF T3 drop test: a standard ball dropped from 30.5 cm must rebound
+  // 23..26 cm, i.e. e = sqrt(23/30.5)..sqrt(26/30.5) = 0.868..0.923.
+  // A dropped ball lands at ~2.4 m/s and the rebound is measured in the
+  // first bounce, so the *effective* e at that speed has to sit near 0.894.
+  // The previous pair (0.870 / 0.009) gave e = 0.848 -> 20.5 cm rebound,
+  // outside the legal window; this pair gives 24.0 cm.
+  E_TABLE: 0.930,           // normal COR ball/table at zero impact speed
+  E_TABLE_SPEED: 0.0085,    // COR loss per m/s of impact speed
+  MU_TABLE: 0.25,           // Coulomb friction ball/table (ITTF T3 studies)
   ET_TABLE: 0.00,           // tangential restitution of the table (none)
 
   /* ---- net ---- */
@@ -1860,15 +2086,21 @@ function predict(p0, v0, w0, opts = {}) {
  *  range/elevation curve is unimodal and the net is a hard obstacle.
  * ---------------------------------------------------------------- */
 const _ip = V3.new(), _iv = V3.new(), _iw = V3.new(), _predOut = {};
+/** Full elevation span, used to keep the polished answer inside the range. */
 const _ELEV = [-0.34, -0.26, -0.19, -0.13, -0.08, -0.04, 0, 0.035, 0.07, 0.105,
   0.145, 0.19, 0.24, 0.30, 0.36, 0.43, 0.51, 0.60, 0.70, 0.81, 0.93, 1.06];
+/** Sparse grid for the cheap first pass; the winner is polished afterwards. */
+const _ELEV_SCAN = [-0.34, -0.19, -0.08, 0, 0.035, 0.07, 0.105, 0.145, 0.24, 0.36, 0.51, 0.70, 0.93, 1.06];
+/** Integration steps: coarse for the scan, medium for the polish, production
+ *  step for the answer that is handed to the impact solver. */
+const DT_SCAN = 1 / 130, DT_POLISH = 1 / 200, DT_FINE = 1 / 260;
 
-function _tryLaunch(from, spin, speed, ux, uz, elev, netClear, out) {
+function _tryLaunch(from, spin, speed, ux, uz, elev, netClear, out, dt) {
   V3.copy(_ip, from);
   const ch = Math.cos(elev), sh = Math.sin(elev);
   V3.set(_iv, ux * speed * ch, speed * sh, uz * speed * ch);
   V3.copy(_iw, spin);
-  predict(_ip, _iv, _iw, { dt: 1 / 260, maxT: 2.4, stopOnFirstBounce: true, out });
+  predict(_ip, _iv, _iw, { dt: dt || 1 / 260, maxT: 2.4, stopOnFirstBounce: true, out });
   const clear = (out.netCross ? out.netCross.y : 99) - PH.NET_TOP - PH.R;
   return { clear, landed: out.landed, hitNet: out.hitNet, vx: _iv.x, vy: _iv.y, vz: _iv.z };
 }
@@ -1899,41 +2131,82 @@ function solveLaunch(from, target, spin, opts = {}) {
     return e + Math.max(0, netClear - t.clear) * 7;
   };
 
-  for (let pass = 0; pass < 3; pass++) {
-    best = null;
-    for (let i = 0; i < _ELEV.length; i++) {
-      const t = _tryLaunch(from, spin, speed, ux, uz, _ELEV[i], netClear, o);
-      const sc = scoreOf(t);
-      if (!best || sc < best.score) best = { score: sc, elev: _ELEV[i], ...t };
+  /* ---------------------------------------------------------------
+   * Shape of the search, and why:
+   *   · a sparse scan at a cheap integration step finds the right valley
+   *     (14 flights);
+   *   · a short golden-section polish pins the elevation down (6 flights);
+   *   · the answer is confirmed at the production step (1 flight);
+   *   · sidespin and the "too hot for the table" give-back are applied as
+   *     local corrections around that answer, not as another full scan.
+   * Everything shares one hard budget, because this function is called up
+   * to three times per stroke and used to reach 150+ flights per hit.
+   * --------------------------------------------------------------- */
+  let spent = 0;
+  const BUDGET = 30;
+
+  // 1. coarse scan
+  let bestS = Infinity, bestI = 0;
+  const sc = new Array(_ELEV_SCAN.length), tk = new Array(_ELEV_SCAN.length);
+  for (let i = 0; i < _ELEV_SCAN.length; i++) {
+    const t = _tryLaunch(from, spin, speed, ux, uz, _ELEV_SCAN[i], netClear, o, DT_SCAN);
+    spent++;
+    tk[i] = t; sc[i] = scoreOf(t);
+    if (sc[i] < bestS) { bestS = sc[i]; bestI = i; }
+  }
+  if (!isFinite(bestS)) return null;
+  best = { score: bestS, elev: _ELEV_SCAN[bestI], ...tk[bestI] };
+
+  // 2. golden-section polish (the scan only has to land in the right valley)
+  let lo = Math.max(_ELEV[0], best.elev - 0.075), hi = Math.min(_ELEV[_ELEV.length - 1], best.elev + 0.075);
+  for (let k = 0; k < 3 && spent < BUDGET - 2; k++) {
+    const third = (hi - lo) / 3;
+    const e1 = lo + third, e2 = hi - third;
+    const a = _tryLaunch(from, spin, speed, ux, uz, e1, netClear, o, DT_POLISH), sa = scoreOf(a);
+    const b2 = _tryLaunch(from, spin, speed, ux, uz, e2, netClear, o, DT_POLISH), sb = scoreOf(b2);
+    spent += 2;
+    if (sa < sb) { hi = e2; if (sa < best.score) best = { score: sa, elev: e1, ...a }; }
+    else { lo = e1; if (sb < best.score) best = { score: sb, elev: e2, ...b2 }; }
+  }
+
+  // 3. sidespin bends the flight: rotate the aim azimuth analytically and
+  //    re-check the same elevation, instead of rescanning the whole grid
+  if (best.landed) {
+    const errLat = (best.landed.x - target.x) * (-uz) + (best.landed.z - target.z) * (ux);
+    if (Math.abs(errLat) > 0.03) {
+      const corr = -Math.atan2(errLat, horiz) * 0.95;
+      const c = Math.cos(corr), sN = Math.sin(corr);
+      const nx = ux * c - uz * sN, nz = ux * sN + uz * c;
+      const ux0 = ux, uz0 = uz;
+      ux = nx; uz = nz;
+      const t = _tryLaunch(from, spin, speed, ux, uz, best.elev, netClear, o, DT_FINE);
+      spent++;
+      const s = scoreOf(t);
+      if (s < best.score) best = { score: s, elev: best.elev, ...t };
+      else { ux = ux0; uz = uz0; }             // rotation did not help, undo
     }
-    if (!best) return null;
-    // local refinement around the winner
-    let lo = best.elev - 0.075, hi = best.elev + 0.075;
-    for (let k = 0; k < 7; k++) {
-      const mid = (lo + hi) / 2;
-      const a = _tryLaunch(from, spin, speed, ux, uz, mid - 0.018, netClear, o), sa = scoreOf(a);
-      const b2 = _tryLaunch(from, spin, speed, ux, uz, mid + 0.018, netClear, o), sb = scoreOf(b2);
-      if (sa < sb) { hi = mid; if (sa < best.score) best = { score: sa, elev: mid - 0.018, ...a }; }
-      else { lo = mid; if (sb < best.score) best = { score: sb, elev: mid + 0.018, ...b2 }; }
-    }
-    // too hot to keep on the table? allow a limited power give-back
-    if (best.score > 0.18 && forgive > 0.001 && (!best.landed || best.score > 0.3)) {
-      const next = speed * (1 - 0.22 * forgive);
-      if (next > 2.0 && pass < 2) { speed = next; continue; }
-    }
-    // sidespin bends the flight: correct the aim azimuth and re-solve once
-    if (best.landed && pass < 2) {
-      const errLat = (best.landed.x - target.x) * (-uz) + (best.landed.z - target.z) * (ux);
-      if (Math.abs(errLat) > 0.015) {
-        const corr = -Math.atan2(errLat, horiz) * 0.95;
-        const c = Math.cos(corr), sN = Math.sin(corr);
-        const nx = ux * c - uz * sN, nz = ux * sN + uz * c;
-        ux = nx; uz = nz;
-        continue;
+  }
+
+  // 4. too hot to keep on the table? a limited power give-back, rescanned
+  //    only around the winner
+  if (best.score > 0.18 && forgive > 0.001 && (!best.landed || best.score > 0.3)) {
+    const next = speed * (1 - 0.22 * forgive);
+    if (next > 2.0) {
+      speed = next;
+      const e0 = best.elev;
+      for (const e of [e0 - 0.06, e0, e0 + 0.06]) {
+        if (spent >= BUDGET) break;
+        const t = _tryLaunch(from, spin, speed, ux, uz, e, netClear, o, DT_POLISH);
+        spent++;
+        const s = scoreOf(t);
+        if (s < best.score) best = { score: s, elev: e, ...t };
       }
     }
-    break;
   }
+
+  // 5. answer confirmed at the step the impact solver works at
+  const fin = _tryLaunch(from, spin, speed, ux, uz, best.elev, netClear, o, DT_FINE);
+  best = { score: scoreOf(fin), elev: best.elev, ...fin };
   if (!best) return null;
   return {
     vx: best.vx, vy: best.vy, vz: best.vz, elev: best.elev, speed,
@@ -2163,6 +2436,26 @@ function deriveStroke(m, ctx) {
   const side = ctx.side || 1;
   const fwd = -side;
 
+  /* ---- 0. hostile input never reaches the physics ----------------- *
+   * The metrics come straight from touch events: a dropped gesture, a
+   * cancelled one or a device that reports nonsense must not be able to
+   * push a NaN into the impact solver, where it would poison the ball
+   * state for the rest of the match. Sanitise once, here.               */
+  if (m) {
+    const sane = (v, lo, hi, fb) => (Number.isFinite(v) ? clamp(v, lo, hi) : fb);
+    m.releaseSpeed = sane(m.releaseSpeed, 0, 40, 0);
+    m.peakSpeed = sane(m.peakSpeed, 0, 40, 0);
+    m.right = sane(m.right, -1.4, 1.4, 0);
+    m.up = sane(m.up, -1.4, 1.4, 0);
+    m.dist = sane(m.dist, 0, 4, 0);
+    m.curl = sane(m.curl, -6, 6, 0);
+    m.smooth = sane(m.smooth, 0.15, 1, 0.6);
+    m.straightness = sane(m.straightness, 0, 1, 1);
+    m.samples = Number.isFinite(m.samples) ? m.samples : 0;
+    m.x = sane(m.x, -2, 3, 0.5);
+    m.y = sane(m.y, -2, 3, 0.5);
+  }
+
   /* ---- 1. effort ------------------------------------------------- */
   const raw = Math.max(m.releaseSpeed, m.peakSpeed * 0.78);
   const sp01 = clamp(raw / 4.2, 0, 1.45);
@@ -2170,8 +2463,13 @@ function deriveStroke(m, ctx) {
   /* ---- 2. context ------------------------------------------------ */
   const b = ctx.ball || { y: PH.TABLE_Y + 0.15, z: side * 1.2 };
   ctx.ball = b;
+  // Spin sign, stated once so it cannot drift again: for a ball travelling
+  // towards the player (+z) a POSITIVE w.x is TOPSPIN (the top of the ball
+  // moves forward, Magnus pushes it down — verified against aeroAccel in
+  // 30_physics.js). "Incoming topspin is positive" therefore means
+  // side * w.x, which is also the convention OpponentAI already uses.
   const incomingTop = ctx.incomingTop !== undefined ? ctx.incomingTop
-    : -side * ((ctx.ballSpin && ctx.ballSpin.x) || 0);
+    : side * ((ctx.ballSpin && ctx.ballSpin.x) || 0);
   ctx.incomingTop = incomingTop;
   const hAboveNet = b.y - PH.NET_TOP;
   const hAboveTable = b.y - PH.TABLE_Y;
@@ -2212,7 +2510,8 @@ function deriveStroke(m, ctx) {
   azFace = clamp(azFace + latTurn, -1.25, 1.25);
 
   let vmag = 2.0 + 15.5 * Math.pow(sp01, 0.82);
-  vmag = clamp(vmag * A.speed * (ctx.powerScale || 1), 0.8, 19.5);
+  vmag = clamp(vmag * A.speed * (Number.isFinite(ctx.powerScale) ? ctx.powerScale : 1), 0.8, 19.5);
+  if (!Number.isFinite(vmag)) vmag = 4.0;          // last line of defence
 
   /* ---- 5. build the 3-D racket frame ------------------------------ */
   const eR = elev * DEG;
@@ -2256,7 +2555,17 @@ function deriveStroke(m, ctx) {
     + 0.14 * clamp(m.samples / 12, 0, 1)
     - 0.10 * clamp(Math.abs(m.curl) - 1.4, 0, 1.6), 0.2, 1);
 
-  const rubber = A.soft ? { e: PH.E_RACKET * A.soft, mu: PH.MU_RACKET, et: PH.ET_RACKET * (0.5 + 0.5 * A.soft) } : null;
+  /* The rubber is the player's equipment (84_racket.js), modulated by the
+     archetype: a soft, absorbing stroke presses the sponge, which costs
+     restitution and gains dwell. Without equipment the base racket is
+     used, so the physics is unchanged for anything that does not fit one. */
+  const eq = ctx.equip || { e: PH.E_RACKET, mu: PH.MU_RACKET, et: PH.ET_RACKET, damp: 1 };
+  const rubber = {
+    e: eq.e * (A.soft || 1),        // soft archetypes press the sponge
+    mu: eq.mu,
+    et: eq.et * (A.soft ? 0.5 + 0.5 * A.soft : 1),
+    damp: eq.damp,
+  };
 
   return {
     stroke: st, arch: A, vR, normal, vmag, aim: { x: aimX, z: aimZ },
@@ -2301,79 +2610,182 @@ function strokeFrame(racket, dElev, dAz, scale, outSwing, outNormal) {
 }
 
 /**
- * Serve solver. Searches the stroke's elevation / azimuth / swing scale on a
- * coarse-to-fine grid, scoring a FULL two-bounce simulation of the serve.
- * ~120 short integrations, and it only runs once per point.
+ * Serve solver (ITTF 2.06.4: own bounce, over the net, receiver's bounce).
+ *
+ * Two things matter here and the previous version got both wrong:
+ *   · it burned ~350 full flights per serve (measured 304 ms) — a visible
+ *     freeze every time anyone served;
+ *   · it happily returned a serve that flew long and then handed it to the
+ *     player anyway, because nothing checked legality at the end. Measured
+ *     result: one serve in four was illegal, at every assist level.
+ *
+ * The search is now a coordinate descent (azimuth → elevation × scale →
+ * scale × softness → local polish) at a cheap integration step, and it walks
+ * the placement target back towards the net until it finds a serve that is
+ * genuinely legal. Legality is returned, not implied.
  */
 const _svRep = {};
 function solveServeStroke(ballP, racket, evalStroke, side, assist) {
-  const aim = racket.aim || { x: 0, z: -side * 0.95 };
-  // where the first bounce should land on the server's own half
-  const own = { x: aim.x * 0.35, z: side * (0.40 + Math.abs(aim.z) * 0.16) };
+  const aimBase = racket.aim || { x: 0, z: -side * 0.95 };
   const v = V3.new(), w = V3.new();
+  let legal = false, why = 'none';
 
-  const score = (dE, dA, sc, dmp, fine) => {
+  const score = (own, aim, dE, dA, sc, dmp, fine) => {
     evalStroke(dE, dA, sc, dmp, v, w);
-    if (v.z * side > -0.30) return 60;                        // not going forward
+    legal = false; why = 'none';
+    if (v.z * side > -0.30) { why = 'back'; return 60; }      // not going forward
     predict(V3.clone(ballP), V3.clone(v), V3.clone(w),
-      { dt: fine ? 1 / 320 : 1 / 170, maxT: 2.4, out: _svRep });
+      { dt: fine ? 1 / 300 : 1 / 160, maxT: 2.4, out: _svRep });
     const r = _svRep;
-    if (r.bounces === 0) return 40 + (r.hitNet ? 4 : 0);
-    if (Math.sign(r.landed.z) !== side) return 26 + Math.abs(r.landed.z - own.z);
+    if (r.bounces === 0) { why = r.hitNet ? 'net' : 'none'; return 40 + (r.hitNet ? 4 : 0); }
+    if (Math.sign(r.landed.z) !== side) { why = 'wrongside'; return 26 + Math.abs(r.landed.z - own.z); }
     const d1 = Math.hypot(r.landed.x - own.x, r.landed.z - own.z);
-    if (r.hitNet) return 12 + d1 * 0.3 + Math.max(0, PH.NET_TOP + PH.R - (r.netCross ? r.netCross.y : 0)) * 10;
-    if (!r.b2) {                                              // flew long
-      const over = r.floor ? Math.abs(r.floor.z) - PH.T_HALF_LEN : 1.2;
-      return 6 + Math.max(0, over) * 0.9 + d1 * 0.15;
+    if (r.hitNet) { why = 'net'; return 12 + d1 * 0.3 + Math.max(0, PH.NET_TOP + PH.R - (r.netCross ? r.netCross.y : 0)) * 10; }
+    if (!r.b2) {                                              // flew past the table
+      why = 'long';
+      const pc = r.floor || r.planeCross;
+      const miss = pc ? Math.hypot(pc.x - aim.x, pc.z - aim.z) : 1.2;
+      return 6 + miss * 0.6 + d1 * 0.15;                      // includes going wide
     }
-    if (Math.sign(r.b2.z) === side) return 9 + d1;            // double bounce, own half
+    if (Math.sign(r.b2.z) === side) { why = 'own'; return 9 + d1; }   // double bounce, own half
+    legal = true; why = 'ok';
     return Math.hypot(r.b2.x - aim.x, r.b2.z - aim.z) + d1 * 0.22;
   };
 
-  const SC = [0.25, 0.38, 0.52, 0.66, 0.82, 1.0, 1.2, 1.42, 1.66];
+  const SC = [0.30, 0.45, 0.65, 0.88, 1.15, 1.45];
   const DMP = [1, 0.58];
-  let bE = 0, bA = 0, bS = 1, bD = 1, bV = Infinity;
-  // stage 1 - how far must the swing direction be pulled back towards centre?
-  for (let i = -5; i <= 5; i++) {
-    const dA = i * 0.22;
-    for (let j = 1; j < SC.length; j += 2) {
-      const sv = score(0, dA, SC[j], 1, false);
-      if (sv < bV) { bV = sv; bA = dA; bS = SC[j]; }
+  let bE = 0, bA = 0, bS = 1, bD = 1, bV = Infinity, bAim = aimBase, bOwn = null, solvedLegal = false;
+
+  // A hard topspin serve simply cannot be aimed at the very back line and
+  // stay legal on a bad toss, so shorten the target until it works.
+  for (const depthF of [1.0, 0.70]) {
+    const aim = { x: aimBase.x, z: aimBase.z * depthF };
+    const own = { x: aim.x * 0.35, z: side * (0.40 + Math.abs(aim.z) * 0.16) };
+
+    // stage 1 — how far must the swing direction be pulled back to centre?
+    let aBest = 0, aBestV = Infinity;
+    for (let i = -3; i <= 3; i++) {
+      const dA = i * 0.26;
+      const sv = score(own, aim, 0, dA, 0.65, 1, false);
+      if (sv < aBestV) { aBestV = sv; aBest = dA; }
     }
-  }
-  // stage 2 - elevation / swing scale / softness at that azimuth
-  bV = Infinity;
-  for (let i = -6; i <= 6; i++) {
-    const dE = i * 0.10;
-    for (let j = 0; j < SC.length; j++) {
-      for (let k = 0; k < DMP.length; k++) {
-        const sv = score(dE, bA, SC[j], DMP[k], false);
-        if (sv < bV) { bV = sv; bE = dE; bS = SC[j]; bD = DMP[k]; }
+    // stage 2 — JOINT grid over elevation and swing scale. These two
+    // interact (a lower face needs a longer swing to still carry the ball
+    // over the net), so sweeping them one after the other walks into the
+    // wrong valley and misses perfectly legal serves that are 20 cm away.
+    // The elevation range has to cover -0.6: a heavy backspin serve lives
+    // down there with a big swing scale.
+    let eBest = 0, sBest = 0.65, vBest = Infinity;
+    for (let i = -4; i <= 4; i++) {
+      const dE = i * 0.15;
+      for (const sc of [0.45, 0.75, 1.10, 1.45]) {
+        const sv = score(own, aim, dE, aBest, sc, 1, false);
+        if (sv < vBest) { vBest = sv; eBest = dE; sBest = sc; }
       }
     }
-  }
-  bV = score(bE, bA, bS, bD, true);
-  for (let pass = 0; pass < 2; pass++) {
-    const stepE = 0.05 / (pass + 1), stepS = 0.08 / (pass + 1);
-    for (let i = -2; i <= 2; i++) for (let j = -2; j <= 2; j++) {
-      const dE = bE + i * stepE, sc = Math.max(0.16, bS + j * stepS);
-      const sv = score(dE, bA, sc, bD, true);
-      if (sv < bV) { bV = sv; bE = dE; bS = sc; }
+    // stage 3 — swing scale and softness around that winner
+    let dBest = 1;
+    for (const sMul of [0.8, 0.9, 1.0, 1.1, 1.25, 1.5]) for (const dmp of DMP) {
+      const sc = Math.max(0.16, sBest * sMul);
+      const sv = score(own, aim, eBest, aBest, sc, dmp, false);
+      if (sv < vBest) { vBest = sv; sBest = sc; dBest = dmp; }
     }
-    const stepA = 0.15 / (pass + 1);
-    for (let i = -3; i <= 3; i++) {
-      const dA = bA + i * stepA;
-      const sv = score(bE, dA, bS, bD, true);
-      if (sv < bV) { bV = sv; bA = dA; }
+    // stage 4 — local coordinate descent, confirmed at the production step
+    for (let it = 0; it < 3; it++) {
+      const sE = 0.05 / (it + 1), sA = 0.10 / (it + 1), sS = 0.10 / (it + 1);
+      let improved = false;
+      const fine = it === 2;
+      for (const [ddE, ddA, mulS] of [[sE, 0, 1], [-sE, 0, 1], [0, sA, 1], [0, -sA, 1], [0, 0, 1 + sS], [0, 0, 1 - sS]]) {
+        const sc2 = Math.max(0.16, sBest * mulS);
+        const sv = score(own, aim, eBest + ddE, aBest + ddA, sc2, dBest, fine);
+        if (sv < vBest) { vBest = sv; eBest += ddE; aBest += ddA; sBest = sc2; improved = true; }
+      }
+      if (!improved) break;
     }
+    const sv = score(own, aim, eBest, aBest, sBest, dBest, true);
+    if (sv <= vBest) { vBest = sv; solvedLegal = legal; }
+    // Targeted recovery. The descent stops at the first local optimum; if
+    // that optimum is still illegal, the simulation has just told us *why*,
+    // and the response to swing scale is monotone: too slow dies on our own
+    // half or in the net, too fast flies long. So bracket the scale and
+    // bisect — a handful of flights, versus another full grid. This is what
+    // used to cost a point every fourth serve.
+    if (!solvedLegal && (why === 'long' || why === 'net' || why === 'own')) {
+      let lo = 0.10, hi = 2.10, sTry = sBest;
+      for (let j = 0; j < 9 && !solvedLegal && hi - lo > 0.02; j++) {
+        if (why === 'long') hi = sTry; else lo = sTry;
+        sTry = 0.5 * (lo + hi);
+        const s2 = score(own, aim, eBest, aBest, sTry, dBest, true);
+        if (legal) { vBest = Math.min(vBest, s2); sBest = sTry; solvedLegal = true; break; }
+        if (s2 < vBest) { vBest = s2; sBest = sTry; }
+      }
+      // last resort: the other hand softness, at whatever scale we settled on
+      if (!solvedLegal) {
+        for (const dmp of [1, 0.58]) {
+          const s2 = score(own, aim, eBest, aBest, sBest, dmp, true);
+          if (legal) { vBest = Math.min(vBest, s2); dBest = dmp; solvedLegal = true; break; }
+          if (s2 < vBest) { vBest = s2; dBest = dmp; }
+        }
+      }
+    }
+    // A serve that lands just past the sideline is a lateral miss: no amount
+    // of swing scale will save it. Sweep the azimuth, then lift the face if
+    // the ball is still finding the net.
+    if (!solvedLegal) {
+      for (const ddA of [0, -0.12, 0.12, -0.26, 0.26, -0.42, 0.42]) {
+        const s2 = score(own, aim, eBest, aBest + ddA, sBest, dBest, true);
+        if (legal) { vBest = Math.min(vBest, s2); aBest += ddA; solvedLegal = true; break; }
+        if (s2 < vBest) { vBest = s2; aBest += ddA; }
+      }
+    }
+    if (!solvedLegal && why === 'net') {
+      const e0 = eBest;
+      for (const ddE of [0.10, 0.20, 0.32]) {
+        const s2 = score(own, aim, e0 + ddE, aBest, sBest, dBest, true);
+        if (legal) { vBest = Math.min(vBest, s2); eBest = e0 + ddE; solvedLegal = true; break; }
+        if (s2 < vBest) { vBest = s2; eBest = e0 + ddE; }
+      }
+    }
+    if (vBest < bV) { bV = vBest; bE = eBest; bA = aBest; bS = sBest; bD = dBest; bAim = aim; bOwn = own; }
+    if (solvedLegal) { bE = eBest; bA = aBest; bS = sBest; bD = dBest; bAim = aim; bOwn = own; solvedLegal = true; break; }
   }
-  // a weaker player keeps part of their own error — but never to the point
+
+  // Safety net. If the player's gesture simply does not admit a legal serve
+  // (a wild flick, a ball caught on the way up), play a plain, safe serve
+  // instead of handing them a fault they cannot see coming. Losing a point
+  // to the solver is the one thing a serve must never do.
+  if (!solvedLegal) {
+    const own = { x: 0, z: side * 0.55 };
+    const aim = { x: 0, z: -side * 0.75 };
+    let sB = 0.8, dB = 1, eB = 0.0, aB = 0.0, svBest = Infinity;
+    for (const sc of [0.5, 0.7, 0.95, 1.25]) for (const dmp of DMP) {
+      const sv = score(own, aim, 0, 0, sc, dmp, false);
+      if (legal) { sB = sc; dB = dmp; solvedLegal = true; break; }
+      if (sv < svBest) { svBest = sv; sB = sc; dB = dmp; }
+    }
+    if (!solvedLegal) for (const dE of [-0.3, -0.15, 0.15, 0.3, 0.45]) {
+      const sv = score(own, aim, dE, 0, sB, dB, false);
+      if (legal) { eB = dE; solvedLegal = true; break; }
+      if (sv < svBest) { svBest = sv; eB = dE; }
+    }
+    if (!solvedLegal) for (const dA of [-0.35, 0.35, -0.6, 0.6]) {
+      const sv = score(own, aim, eB, dA, sB, dB, false);
+      if (legal) { aB = dA; solvedLegal = true; break; }
+      if (sv < svBest) { svBest = sv; aB = dA; }
+    }
+    if (solvedLegal) { bE = eB; bA = aB; bS = sB; bD = dB; bAim = aim; bOwn = own; }
+  }
+
+  // A weaker player keeps part of their own error — but never to the point
   // of an illegal serve, which is simply not fun.
   const k = clamp(0.45 + 0.55 * assist, 0, 1);
   const fE = bE * k, fA = bA * k, fS = 1 + (bS - 1) * k, fD = 1 + (bD - 1) * k;
-  const okV = score(fE, fA, fS, fD, true);
-  if (okV < 0.55 || okV <= bV + 0.30) return { dE: fE, dA: fA, sc: fS, dmp: fD, ok: okV < 2.0, target: aim };
-  return { dE: bE, dA: bA, sc: bS, dmp: bD, ok: bV < 2.0, target: aim };
+  score(bOwn, bAim, fE, fA, fS, fD, true);
+  if (legal) return { dE: fE, dA: fA, sc: fS, dmp: fD, ok: true, target: bAim };
+  // The player's own error would have produced an illegal serve: give them
+  // the solved one instead. Only a truly absurd gesture can fail here.
+  score(bOwn, bAim, bE, bA, bS, bD, true);
+  return { dE: bE, dA: bA, sc: bS, dmp: bD, ok: legal, target: bAim };
 }
 
 function refineRacket(ballP, ballV, ballW, racket, assist, quality) {
@@ -2433,7 +2845,7 @@ function refineRacket(ballP, ballV, ballW, racket, assist, quality) {
   if (Math.sign(target.z) === side || Math.abs(target.z) < 0.10) target.z = -side * 0.22;
 
   /* ---- 3. converge the stroke rotation onto that target ----------- */
-  let dE = 0, dA = 0, sc = 1, dmp = 1, sol = null;
+  let dE = 0, dA = 0, sc = 1, dmp = 1, sol = null, converged = false;
   for (let outer = 0; outer < 3; outer++) {
     sol = solveLaunch(ballP, target, _rw, {
       speed: V3.len(_rv),
@@ -2471,9 +2883,15 @@ function refineRacket(ballP, ballV, ballW, racket, assist, quality) {
         if (dmp < 1 && sc > scHi * 0.92) dmp = Math.min(1, dmp * 1.18);
         sc = clamp(sc * Math.pow(sErr, 0.60), scLo, scHi);
       }
-      if (Math.abs(eErr) < 0.004 && Math.abs(aErr) < 0.006 && Math.abs(sErr - 1) < 0.015) break;
+      if (Math.abs(eErr) < 0.004 && Math.abs(aErr) < 0.006 && Math.abs(sErr - 1) < 0.015) {
+        // The frame now reproduces the wanted launch exactly: re-solving with
+        // a fresher spin vector cannot improve it, and each extra solve costs
+        // a dozen full flights inside the contact frame.
+        converged = true;
+        break;
+      }
     }
-    if (sol.err < 0.12) break;
+    if (converged || sol.err < 0.12) break;
   }
   if (!sol) return racket;
 
@@ -2494,22 +2912,49 @@ function refineRacket(ballP, ballV, ballW, racket, assist, quality) {
    *        How hard it tries is itself a function of the assist, so a
    *        low setting really does let the ball go into the net.       */
   const chk = {};
-  const validate = (e_, a_, s_, d_) => {
+  const validate = (e_, a_, s_, d_, fine) => {
     evalStroke(e_, a_, s_, d_, _rv, _rw);
     predict(V3.clone(ballP), V3.clone(_rv), V3.clone(_rw),
-      { dt: 1 / 280, maxT: 2.6, stopOnFirstBounce: true, out: chk });
+      { dt: fine ? 1 / 280 : 1 / 150, maxT: 2.6, stopOnFirstBounce: true, out: chk });
     if (chk.hitNet) return -1;
     if (!chk.landed) return 1;
     if (Math.sign(chk.landed.z) === side) return -1;
     return 0;
   };
   const guard = Math.round(clamp((assist - 0.22) / 0.78, 0, 1) * 16);
-  let verdict = validate(dE, dA, sc, dmp);
+  let verdict = validate(dE, dA, sc, dmp, false);
   for (let k = 0; k < guard && verdict !== 0; k++) {
     const step = 0.035 + k * 0.012;
-    if (verdict < 0) { dE += step; sc = clamp(sc * 1.05, 0.12, 2.20); dmp = Math.min(1, dmp * 1.05); }
-    else { dE -= step * 0.8; dmp = Math.max(0.26, dmp * 0.94); sc = clamp(sc * 0.97, 0.10, 2.20); }
-    verdict = validate(dE, dA, sc, dmp);
+    // Where did the shot actually end up? Correction used to be vertical
+    // only, which is why a hook that curved past the sideline simply could
+    // not be saved: the error was lateral, so it has to be answered with
+    // azimuth, not with elevation.
+    const latErr = chk.landed ? chk.landed.x - target.x : 0;
+    if (verdict < 0) {
+      dE += step;
+      if (Math.abs(latErr) > 0.16) dA = clamp(dA - Math.sign(latErr) * step * 0.85, -1.15, 1.15);
+      sc = clamp(sc * 1.05, 0.12, 2.20); dmp = Math.min(1, dmp * 1.05);
+    } else {
+      dE -= step * 0.8;
+      if (Math.abs(latErr) > 0.16) dA = clamp(dA - Math.sign(latErr) * step * 0.85, -1.15, 1.15);
+      dmp = Math.max(0.26, dmp * 0.94); sc = clamp(sc * 0.97, 0.10, 2.20);
+    }
+    verdict = validate(dE, dA, sc, dmp, k > guard - 4);
+  }
+  // The cheap checks can flatter a shot; confirm at the production step, and
+  // keep nudging if the fine integration disagrees with the coarse one.
+  // (validate returns 0 for a legal shot, so the test is `!== 0`, not `!`.)
+  verdict = validate(dE, dA, sc, dmp, true);
+  for (let j = 0; j < 6 && verdict !== 0; j++) {
+    if (verdict < 0) {                      // net, or died on our own half
+      dE += 0.03 + j * 0.02;
+      sc = clamp(sc * 1.04, 0.12, 2.20);
+    } else {                                // long
+      dE -= 0.02 + j * 0.015;
+      sc = clamp(sc * 0.98, 0.10, 2.20);
+      dmp = Math.max(0.30, dmp * 0.96);
+    }
+    verdict = validate(dE, dA, sc, dmp, true);
   }
 
   const swing = V3.new(), normal = V3.new();
@@ -3392,6 +3837,206 @@ function rotateVecQuat(out, v, q) {
 }
 
 
+/* ====== 56_rig.js ====== */
+/* =====================================================================
+ *  PADDLE RIG — every paddle in the world gets a hand and an arm.
+ *
+ *  Why this exists. A paddle floating in the air is a sprite, not an
+ *  opponent: the eye has nothing to read, and the scene feels empty even
+ *  though the physics underneath is real. One rig, built from the same
+ *  primitives as the rest of the scene, fixes three things at once:
+ *
+ *  · the opponent finally looks like a person standing at the far end —
+ *    you can see the wrist snap on a loop and the forearm drop on a chop,
+ *    which is exactly the information a table-tennis player watches for;
+ *  · the online opponent's hand (same rig, fed from the network);
+ *  · the training ghost — the very same rig drawn translucent, tracing
+ *    the stroke you were supposed to play.
+ *
+ *  Nothing here is animated by hand: the arm is solved from the paddle's
+ *  own position and normal every frame, so it follows the physics for
+ *  free. Limb axes are +Z so a single Q.lookRotation aims them.
+ * ===================================================================== */
+
+/** Limb segment: a tapered cylinder whose axis is +Z instead of +Y. */
+function limbGeo(rTop, rBot, seg = 16) {
+  return transformGeo(makeCylinder(rTop, rBot, 1, seg, true), (p, n) => {
+    const y = p.y, z = p.z; p.y = -z; p.z = y;
+    const ny = n.y, nz = n.z; n.y = -nz; n.z = ny;
+  });
+}
+
+const RIG = {
+  HANDLE: 0.122,        // how far the fist sits down the handle
+  FOREARM: 0.285,       // wrist to elbow
+  SKIN: [0.855, 0.635, 0.495],
+  SKIN_SHADE: [0.72, 0.50, 0.38],
+  SLEEVE: [0.13, 0.20, 0.42],
+  SLEEVE_ALT: [0.72, 0.14, 0.19],
+};
+
+class PaddleRig {
+  constructor() { this.built = false; }
+
+  build(R) {
+    if (this.built) return;
+    this.mFore = R.mesh(limbGeo(0.0265, 0.0405, 16));       // forearm
+    this.mUpper = R.mesh(limbGeo(0.0405, 0.047, 14));       // elbow end of the sleeve
+    this.mSleeve = R.mesh(limbGeo(0.049, 0.056, 16));       // short sleeve cuff
+    this.mPalm = R.mesh(makeSphere(0.047, 18, 12));         // fist
+    this.mThumb = R.mesh(limbGeo(0.0145, 0.018, 10));       // thumb over the handle
+    this.mJoint = R.mesh(makeSphere(0.041, 14, 10));        // elbow
+    this.mPath = R.dynMesh(420);                            // ghost stroke ribbon
+    this.R = R;
+    this.built = true;
+    this._s = {
+      q: Q.new(), qr: Q.new(), m: M4.create(), m2: M4.create(),
+      v1: V3.new(), v2: V3.new(), v3: V3.new(), v4: V3.new(),
+      one: { x: 1, y: 1, z: 1 }, up: { x: 0, y: 1, z: 0 },
+    };
+  }
+
+  /** World direction of the paddle handle (local -Y) for a given quat. */
+  handleDir(out, quat) {
+    const s = this._s;
+    M4.compose(s.m, { x: 0, y: 0, z: 0 }, quat, s.one);
+    return V3.norm(out, M4.transformDir(out, s.m, { x: 0, y: -1, z: 0 }));
+  }
+
+  /** Paddle orientation: local +Z along the normal, rolled into the hand. */
+  paddleQuat(out, normal, hand, swing) {
+    Q.lookRotation(out, normal, this._s.up);
+    const roll = (hand === 'left' ? 0.42 : -0.42) + (swing || 0) * 0.3;
+    Q.mul(out, out, Q.setAxisAngle(this._s.qr, 0, 0, 1, roll));
+    return out;
+  }
+
+  /**
+   * Draw the arm + hand that holds a paddle. The paddle itself is drawn by
+   * the caller (it may be a ghost, a remote player, or the real thing).
+   *   o = { pos, normal, hand, swing, windup, ghost, alpha, t }
+   */
+  drawArm(R, S, o) {
+    this.build(R);
+    const s = this._s;
+    const wd = clamp(o.windup || 0, 0, 1);
+    const n = V3.norm(s.v1, o.normal);
+    const hdir = this.handleDir(s.v2, o.q || this.paddleQuat(s.q, n, o.hand, o.swing));
+    // fist grips the handle a hand's width below the blade
+    const fist = V3.addScaled(V3.new(), o.pos, hdir, RIG.HANDLE);
+    // the forearm runs back and down from the fist; on a windup the elbow
+    // drops away from the table, which is the whole telegraph of a loop
+    const fa = V3.norm(s.v3, V3.new(
+      -n.x * 0.60 + hdir.x * 0.45,
+      -0.46 - wd * 0.30,
+      -n.z * 0.60 + hdir.z * 0.45));
+    const elbow = V3.addScaled(V3.new(), fist, fa, RIG.FOREARM);
+    const mid = V3.lerp(s.v4, fist, elbow, 0.5);
+
+    const skin = o.ghost ? o.ghostCol : RIG.SKIN;
+    const blue = o.hand === 'left';
+    const sleeveCol = o.ghost ? o.ghostCol : (o.sleeve || (blue ? RIG.SLEEVE_ALT : RIG.SLEEVE));
+
+    const base = o.ghost ? this.ghostMat(o, skin, 0.55) : { color: skin, rough: 0.62 };
+    const cloth = o.ghost ? this.ghostMat(o, sleeveCol, 0.42) : { color: sleeveCol, rough: 0.85 };
+
+    // forearm
+    const qf = Q.lookRotation(s.q, fa, s.up);
+    M4.compose(s.m, mid, qf, { x: 1, y: 1, z: RIG.FOREARM });
+    R.draw(this.mFore, s.m, base);
+    // elbow
+    M4.compose(s.m, elbow, qf, s.one);
+    R.draw(this.mJoint, s.m, base);
+    // sleeve cuff over the elbow end
+    const cuff = V3.addScaled(V3.new(), elbow, fa, RIG.FOREARM * 0.44);
+    M4.compose(s.m, cuff, qf, { x: 1, y: 1, z: RIG.FOREARM * 0.55 });
+    R.draw(this.mUpper, s.m, cloth);
+    M4.compose(s.m, V3.addScaled(V3.new(), elbow, fa, RIG.FOREARM * 0.92), qf, { x: 1, y: 1, z: RIG.FOREARM * 0.5 });
+    R.draw(this.mSleeve, s.m, cloth);
+    // fist: squashed ball, thumb laid along the handle
+    M4.compose(s.m, fist, qf, { x: 0.92, y: 0.74, z: 0.58 });
+    R.draw(this.mPalm, s.m, base);
+    const th = V3.addScaled(V3.new(), fist, hdir, -0.012);
+    const qh = Q.lookRotation(s.q, hdir, n);
+    M4.compose(s.m, V3.addScaled(th, th, n, 0.030), qh, { x: 1, y: 1, z: 0.062 });
+    R.draw(this.mThumb, s.m, base);
+    return { fist, elbow };
+  }
+
+  ghostMat(o, col, rough) {
+    return {
+      color: o.ghostCol || col, rough: rough || 0.4, unlit: true,
+      blend: 'add', opacity: o.alpha !== undefined ? o.alpha : 0.42,
+      emissive: [0.06, 0.10, 0.14], doubleSided: false,
+    };
+  }
+
+  /** The whole thing: paddle + hand + arm. Used by the opponent and the ghost. */
+  draw(R, S, o) {
+    this.build(R);
+    const s = this._s;
+    const n = V3.norm(s.v1, o.normal);
+    const q = o.q || this.paddleQuat(s.q, n, o.hand, o.swing);
+    const me = S.mesh, ma = S.mat;
+    const mats = o.mats || {};                       // the equipped racket's palette
+    const wood = o.ghost ? this.ghostMat(o, o.ghostCol, 0.5) : (mats.wood || ma.bladeWood);
+    const red = o.ghost ? this.ghostMat(o, o.ghostCol, 0.5) : (mats.red || ma.rubberRed);
+    const black = o.ghost ? this.ghostMat(o, o.ghostCol, 0.5) : (mats.black || ma.rubberBlack);
+    const handle = o.ghost ? this.ghostMat(o, o.ghostCol, 0.5) : (mats.grip || ma.handle);
+
+    M4.compose(s.m, o.pos, q, s.one);
+    R.draw(me.blade, s.m, wood);
+    M4.compose(s.m2, V3.addScaled(s.v2, o.pos, n, 0.0085), q, s.one);
+    R.draw(me.rubber, s.m2, black);
+    M4.compose(s.m2, V3.addScaled(s.v2, o.pos, n, -0.0085), q, s.one);
+    R.draw(me.rubber, s.m2, red);
+    const ho = V3.new();
+    M4.transformDir(ho, s.m, { x: 0, y: -0.125, z: 0 });
+    M4.compose(s.m2, V3.addScaled(s.v3, o.pos, ho, 1), q, s.one);
+    R.draw(me.handle, s.m2, handle);
+
+    this.drawArm(R, S, Object.assign({}, o, { q }));
+    return q;
+  }
+
+  /* ------------------------------------------------------------------ *
+   *  Ghost stroke ribbon — the path of the hand through the stroke,     *
+   *  drawn as a camera-facing ribbon with a travelling highlight.       *
+   * ------------------------------------------------------------------ */
+  pathMesh(pts, camPos, width, headI) {
+    const R = this.mPath, RR = this.R;
+    const n = pts.length / 3;
+    if (n < 3) { R.count = 0; return R; }
+    let nv = 0, ni = 0;
+    for (let i = 0; i < n; i++) {
+      const x = pts[i * 3], y = pts[i * 3 + 1], z = pts[i * 3 + 2];
+      const j = i < n - 1 ? i + 1 : i - 1, sgn = i < n - 1 ? 1 : -1;
+      let dx = (pts[j * 3] - x) * sgn, dy = (pts[j * 3 + 1] - y) * sgn, dz = (pts[j * 3 + 2] - z) * sgn;
+      let vx = camPos.x - x, vy = camPos.y - y, vz = camPos.z - z;
+      let sx = dy * vz - dz * vy, sy = dz * vx - dx * vz, sz = dx * vy - dy * vx;
+      const sl = Math.hypot(sx, sy, sz) || 1;
+      const t = i / (n - 1);
+      const w = width * (0.35 + 0.65 * t);
+      sx = sx / sl * w; sy = sy / sl * w; sz = sz / sl * w;
+      const up = (headI !== undefined) ? clamp(1 - Math.abs(i - headI) / 5, 0.18, 1) : 1;
+      R.pos[nv * 3] = x - sx; R.pos[nv * 3 + 1] = y - sy; R.pos[nv * 3 + 2] = z - sz;
+      R.nrm[nv * 3] = 0; R.nrm[nv * 3 + 1] = 1; R.nrm[nv * 3 + 2] = 0;
+      R.uv[nv * 2] = t; R.uv[nv * 2 + 1] = 0; nv++;
+      R.pos[nv * 3] = x + sx; R.pos[nv * 3 + 1] = y + sy; R.pos[nv * 3 + 2] = z + sz;
+      R.nrm[nv * 3] = 0; R.nrm[nv * 3 + 1] = 1; R.nrm[nv * 3 + 2] = 0;
+      R.uv[nv * 2] = t; R.uv[nv * 2 + 1] = up; nv++;
+      if (i > 0) {
+        const a = (i - 1) * 2;
+        R.idx[ni++] = a; R.idx[ni++] = a + 1; R.idx[ni++] = a + 2;
+        R.idx[ni++] = a + 1; R.idx[ni++] = a + 3; R.idx[ni++] = a + 2;
+      }
+    }
+    RR.uploadDyn(R, nv, ni);
+    return R;
+  }
+}
+
+
 /* ====== 58_coach.js ====== */
 /* =====================================================================
  *  RALLY RECORDER · POINT ANALYST · MATCH DIRECTOR
@@ -3689,6 +4334,216 @@ class MatchDirector {
     const recent = this.history.slice(-6);
     if (recent.length < 3) return 0;
     return recent.reduce((s, v) => s + v, 0) / recent.length;
+  }
+}
+
+
+/* ====== 59_replay.js ====== */
+/* =====================================================================
+ *  BEST MOMENTS — record the match, keep only the beautiful parts.
+ *
+ *  A replay of "every point" is a feature nobody watches twice. What
+ *  people actually want is the two or three rallies they will tell a
+ *  friend about: the long one, the smash that came back, the point at
+ *  10-10. So the recorder is not a video tape, it is a filter:
+ *
+ *  · MomentRecorder keeps a short ring buffer of the last seconds of
+ *    play (ball, both paddles, both normals) and every contact;
+ *  · when a point ends, the rally is cut out of the ring, scored for
+ *    beauty, and kept only if it makes the top few — a whole match
+ *    costs a few hundred kilobytes;
+ *  · MomentPlayer plays one back at 0.35× with its own camera, so the
+ *    physics does the animating and the code only has to move the
+ *    camera and the letterbox.
+ * ===================================================================== */
+
+const REPLAY_HZ = 30;             // 30 Hz is smooth at 0.35× and halves memory
+const REPLAY_RING_S = 45;         // seconds of rolling history
+const REPLAY_FLOATS = 16;         // ball(3) + myPos(3) + myNrm(3) + aiPos(3) + aiNrm(3) + pad
+const REPLAY_KEEP = 5;            // how many moments survive a whole match
+
+/* --------------------------- scoring ------------------------------- */
+/* Beauty is not one thing. A 22-shot rally of chops is beautiful in a
+   different way from a 3-shot smash, so the score adds up several
+   independent reasons to rewatch, and no single one can dominate. */
+const BEAUTY = {
+  rally(n) { return clamp((n - 4) / 12, 0, 1) * 0.30; },        // 4 shots = 0, 16+ = 0.30
+  speed(kmh) { return clamp((kmh - 45) / 65, 0, 1) * 0.17; },   // 45 km/h = 0, 110+ = 0.17
+  spin(rps) { return clamp((rps - 45) / 85, 0, 1) * 0.14; },    // 45 rev/s = 0, 130+ = 0.14
+  finish(kind) { return (kind === 'smash' ? 0.14 : kind === 'loop' ? 0.11 : kind === 'fade' || kind === 'hook' ? 0.10 : kind === 'lob' ? 0.09 : 0.03); },
+  clutch(meta) { return (meta.deuce ? 0.10 : 0) + (meta.matchPoint ? 0.09 : 0) + (meta.close ? 0.05 : 0); },
+  comeback(meta) { return clamp(meta.deficit / 4, 0, 1) * 0.09; },
+  netClip(meta) { return meta.netClip ? 0.05 : 0; },
+};
+
+class MomentRecorder {
+  constructor() {
+    this.cap = REPLAY_HZ * REPLAY_RING_S;
+    this.f = new Float32Array(this.cap * REPLAY_FLOATS);
+    this.n = 0; this.head = 0;          // ring state (n = filled, head = write cursor)
+    this.beginT = 0; this.marks = [];   // indices into the ring for the current rally
+    this.events = [];                   // contacts of the current rally
+    this.kept = [];                     // surviving moments, best first
+    this.rallyStart = 0;                // ring index where the rally began
+    this.lastClip = null;
+  }
+
+  reset() { this.kept.length = 0; this.beginRally(0, null); this.n = 0; this.head = 0; }
+
+  /** called when a rally starts: we remember the score so the filter can
+   *  tell "3-0 up, easy point" from "0-4 down, that one" */
+  beginRally(t, score) {
+    this.events.length = 0;
+    this.rallyStart = this.head;
+    this.rallyT = t;
+    this.netClip = false;
+    this.deficit = score ? Math.max(0, score[1] - score[0]) : 0;
+  }
+
+  /** one frame of play: everything the renderer needs to show it again */
+  push(t, g) {
+    const i = this.head * REPLAY_FLOATS, f = this.f;
+    const b = g.ball.p, p = g.player.pos, ap = g.aiPaddle.pos;
+    f[i] = b.x; f[i + 1] = b.y; f[i + 2] = b.z;
+    f[i + 3] = p.x; f[i + 4] = p.y; f[i + 5] = p.z;
+    f[i + 6] = g.player.normal.x; f[i + 7] = g.player.normal.y; f[i + 8] = g.player.normal.z;
+    f[i + 9] = ap.x; f[i + 10] = ap.y; f[i + 11] = ap.z;
+    f[i + 12] = g.aiPaddle.normal.x; f[i + 13] = g.aiPaddle.normal.y; f[i + 14] = g.aiPaddle.normal.z;
+    f[i + 15] = g.ball.live ? 1 : 0;
+    this.head = (this.head + 1) % this.cap;
+    if (this.n < this.cap) this.n++;
+    this.t = t;
+  }
+
+  /** @param e {by, stroke, speed, spin, quality, slip} */
+  addContact(t, e) { this.events.push(Object.assign({ t }, e)); }
+  addBounce(isNet) { if (isNet) this.netClip = true; }
+
+  /**
+   * Cut the rally out of the ring and decide whether it survives.
+   * meta = { winner, reason, score, target, serve, tossT }
+   */
+  endRally(t, g, meta) {
+    const shots = this.events.length;
+    if (shots < 3) { this.beginRally(t, null); return null; }   // a 2-shot point is never beautiful
+
+    // ring → linear clip, oldest first
+    const len = Math.min(this.n, Math.round((t - this.rallyT) * REPLAY_HZ) + 3);
+    const clip = new Float32Array(len * REPLAY_FLOATS);
+    for (let k = 0; k < len; k++) {
+      const src = ((this.head - len + k) % this.cap + this.cap) % this.cap;
+      clip.set(this.f.subarray(src * REPLAY_FLOATS, src * REPLAY_FLOATS + REPLAY_FLOATS), k * REPLAY_FLOATS);
+    }
+
+    let peakSpeed = 0, peakSpin = 0, finish = 'drive', mine = 0;
+    for (const e of this.events) {
+      if (e.speed > peakSpeed) { peakSpeed = e.speed; finish = e.stroke || finish; }
+      if (e.spin > peakSpin) peakSpin = e.spin;
+      if (e.by > 0) mine++;
+    }
+    const myScore = meta.score[0], oppScore = meta.score[1];
+    const T = meta.target;
+    const wS = meta.winner > 0 ? myScore : oppScore, lS = meta.winner > 0 ? oppScore : myScore;
+    const m = {
+      deuce: myScore >= T - 1 && oppScore >= T - 1,
+      matchPoint: wS >= T && wS - lS >= 2,     // this point ended the match
+      close: Math.abs(myScore - oppScore) <= 1,
+      deficit: this.deficit || 0,
+      netClip: this.netClip,
+    };
+    const score = BEAUTY.rally(shots) + BEAUTY.speed(peakSpeed) + BEAUTY.spin(peakSpin)
+      + BEAUTY.finish(finish) + BEAUTY.clutch(m) + BEAUTY.comeback(m) + BEAUTY.netClip(m);
+
+    const moment = {
+      score, shots, frames: clip, hz: REPLAY_HZ,
+      speed: peakSpeed, spin: peakSpin, finish,
+      events: this.events.slice(),
+      winner: meta.winner, reason: meta.reason, mine,
+      meta: m, t,
+      crowd: meta.winner > 0 && m.matchPoint,
+    };
+    this.beginRally(t, null);
+
+    // keep the top few. A quiet match still ends with something to watch.
+    const kept = this.kept;
+    kept.push(moment);
+    kept.sort((a, b) => b.score - a.score);
+    if (kept.length > REPLAY_KEEP) kept.length = REPLAY_KEEP;
+    this.lastClip = moment;
+    return moment;
+  }
+
+  get best() { return this.kept.length ? this.kept[0] : null; }
+}
+
+/* ------------------------- playback -------------------------------- */
+/* The clip is data, not a video: the same renderer draws it, so a replay
+   is exactly as detailed as the match was — and can be filmed from a
+   camera that would have been impossible to play from. */
+class MomentPlayer {
+  constructor() {
+    this.on = false;
+    this.moment = null;
+    this.i = 0;            // float frame cursor
+    this.speed = 0.35;
+    this.hold = 0;
+    this.camPhase = 0;
+    this.onEnd = null;
+    this.titles = true;
+  }
+
+  play(moment, speed) {
+    if (!moment) return false;
+    this.moment = moment;
+    this.i = 0; this.hold = 0; this.camPhase = 0;
+    this.speed = speed || 0.35;
+    this.on = true;
+    return true;
+  }
+
+  stop() { this.on = false; this.moment = null; }
+
+  get lastFrame() { return this.moment ? this.moment.frames.length / REPLAY_FLOATS - 1 : 0; }
+
+  /** advance and write the pose back into the live game objects */
+  update(dtReal, g) {
+    const mo = this.moment;
+    if (!mo) { this.on = false; return; }
+    const F = mo.frames, last = this.lastFrame;
+    // ease in: the first half second is slow, then settle to normal speed
+    const sp = this.speed * (this.i < 6 ? 0.45 + 0.09 * this.i : 1);
+    this.i += dtReal * mo.hz * sp;
+    this.camPhase += dtReal;
+    if (this.i >= last) { this.i = last; this.hold += dtReal; if (this.hold > 1.1) return this.finish(); }
+    else this.hold = 0;
+
+    const i0 = Math.floor(this.i), i1 = Math.min(i0 + 1, last), u = this.i - i0;
+    const a = i0 * REPLAY_FLOATS, b = i1 * REPLAY_FLOATS;
+    const L = (k) => lerp(F[a + k], F[b + k], u);
+    V3.set(g.ball.p, L(0), L(1), L(2));
+    V3.set(g.player.pos, L(3), L(4), L(5));
+    V3.set(g.player.normal, L(6), L(7), L(8));
+    V3.set(g.aiPaddle.pos, L(9), L(10), L(11));
+    V3.set(g.aiPaddle.normal, L(12), L(13), L(14));
+    V3.copy(g.ai.pos, g.aiPaddle.pos);
+    g.ball.live = true;
+    // trail: rebuild the last few frames of history so the ball draws a streak
+    g.ball.hist.length = 0;
+    const back = Math.min(10, i0);
+    for (let k = back; k >= 0; k--) {
+      const o = (i0 - k) * REPLAY_FLOATS;
+      g.ball.hist.push(F[o], F[o + 1], F[o + 2]);
+    }
+    const vx = (F[b] - F[a]) * mo.hz, vy = (F[b + 1] - F[a + 1]) * mo.hz, vz = (F[b + 2] - F[a + 2]) * mo.hz;
+    V3.set(g.ball.v, vx, vy, vz);
+    V3.set(g.ball.w, 0, 0, 0);
+  }
+
+  finish() {
+    this.on = false;
+    const cb = this.onEnd; this.onEnd = null;
+    this.moment = null;
+    if (cb) cb();
   }
 }
 
@@ -4491,6 +5346,21 @@ class Game {
     this.ai = new OpponentAI(2);
     this.swipe = new SwipeTracker();
     this.particles = new Particles();
+    this.rig = new PaddleRig();
+    this.equip = new Equipment();
+    this.aiEquip = new Equipment('b_carb', 'r_base', 'r_base');
+    /* the commercial layer: profile, shop, analytics, and where we run */
+    this.platform = new Platform(typeof navigator !== 'undefined' ? navigator : null);
+    this.analytics = new Analytics(this.platform);
+    this.profile = new Profile(this.platform);
+    this.shop = new Shop(this.profile, this.platform, this.analytics);
+    this.applyEquipment();
+    this.loadSettings();
+    this.matchTasks = { topspin: 0, smash: 0, serves: 0, moments: 0 };
+    this.iap = null;                     // the mobile wrapper sets this
+    this.moments = new MomentRecorder();
+    this.replayer = new MomentPlayer();
+    this.replayer.onEnd = () => this.endReplay();
 
     this.settings = {
       assist: 0.72,
@@ -4510,6 +5380,7 @@ class Game {
       adaptive: true,                    // dynamic difficulty
       showDebug: false,
       slowmoOnBigShots: true,
+      slowmoPlayer: true,                // bullet time, for the player, in casual play only
       targetScore: 11,
       sensitivity: 1.0,
     };
@@ -4566,6 +5437,7 @@ class Game {
       byStroke: {}, totalSpin: 0, rallies: 0,
     };
     this.replayBuf = []; this.replayMax = 360; this.replay = null;
+    this.slowmo = { on: false, energy: 1, active: false, allowed: true, used: 0 };
     this.predictPath = [];
     this.predictOut = {};
     this.lastShotInfo = null;
@@ -4617,11 +5489,13 @@ class Game {
       ptrs.set(e.pointerId, { x: e.clientX, y: e.clientY });
       e.preventDefault();
 
+      if (this.replayer.on) return;
       if (e.button === 2 || e.button === 1) {        // right / middle: orbit
         dropStroke();
         orbit = { kind: 'drag', x: e.clientX, y: e.clientY };
         return;
       }
+      if (this.replayer.on) { this.skipReplay(); return; }   // tap = skip the reel
       if (ptrs.size >= 2) {                          // second finger: orbit
         dropStroke();
         const g = centroid();
@@ -4718,6 +5592,7 @@ class Game {
 
   /* --------------------------- match flow -------------------------- */
   startMatch(diff) {
+    this.matchTasks = { topspin: 0, smash: 0, serves: 0, moments: 0 };
     this.training = null;
     this.matchWinner = 0;
     this.ai.reset();
@@ -4779,6 +5654,7 @@ class Game {
     this.isServeBall = true;
     this.setState(GS.SERVE_READY);
     this.recorder.begin(this.time, s);
+    this.moments.beginRally(this.time, this.score);
     this.ai.setPressure(this.score[1], this.score[0], this.settings.targetScore);
     if (s < 0) this.aiServeTimer = rnd(0.7, 1.3);
   }
@@ -4830,6 +5706,11 @@ class Game {
 
     this.audio.point(who > 0);
     this.msg(reason, 1.5, who > 0 ? '#6ee7a8' : '#ff8a8a', true);
+    // the filter: keep this rally only if it is worth watching again
+    this.lastMoment = this.moments.endRally(this.time, this, {
+      winner: who, reason, score: this.score, target: this.settings.targetScore,
+    });
+    if (this.lastMoment && this.ui) this.ui.flashMoment(this.lastMoment, this.moments.kept.indexOf(this.lastMoment));
     this.setState(GS.POINT);
     this.shakeIt(0.5, V3.new(rndSym(1), 1, 0));
 
@@ -4939,6 +5820,14 @@ class Game {
         x: contactP.x, y: contactP.y, z: contactP.z, quality,
       }, this.lastShotInfo));
       if (this.training) this.training.onPlayerHit(this.lastShotInfo);
+      this.moments.addContact(this.time, {
+        by: 1, stroke: (racket.stroke && racket.stroke.id) || '?',
+        speed: speed * 3.6, spin: spin / TAU, quality,
+      });
+      const sid = racket.stroke && racket.stroke.id;
+      if (sid === 'LOOP' || sid === 'COUNTER') this.matchTasks.topspin++;
+      else if (sid === 'SMASH') this.matchTasks.smash++;
+      else if (sid === 'SERVE_TOP' || sid === 'SERVE_SIDE' || sid === 'SERVE_FAST' || sid === 'SERVE_BACK') this.matchTasks.serves++;
       this.buzz(Math.round(lerp(8, 26, clamp(speed / 90, 0, 1))));
       this.shakeIt(clamp(speed / 55, 0.03, 0.38), V3.new(rndSym(0.4), 0.5, 1));
       if (this.settings.slowmoOnBigShots && speed * 3.6 > 78) this.punchSlowmo(0.42, 0.26);
@@ -4957,12 +5846,173 @@ class Game {
         slip: !!(this.ai.lastShot && this.ai.lastShot.slip),
       });
       this.ui && this.ui.showAiShot(racket.stroke);
+      this.moments.addContact(this.time, {
+        by: -1, stroke: (racket.stroke && racket.stroke.id) || '?',
+        speed: speed * 3.6, spin: spin / TAU, quality,
+      });
     }
   }
 
   punchSlowmo(scale, dur) {
     this.targetTimeScale = scale;
     this.slowmoUntil = this.time + dur;
+  }
+
+  /* ------------------------- player slow-mo ------------------------ *
+   * Bullet time for the player, and only for the player. It is a
+   * reaction aid, not a way to win: the ball slows, but so does the
+   * opponent's racket and your own swing window, so the shot you
+   * produce is the shot you produce. It is switched off entirely in
+   * career tournaments and online matches, where the score counts. */
+  setSlowmoHold(v) {
+    const S = this.slowmo;
+    if (v && !this.slowmoAvailable()) return;
+    S.on = !!v;
+    if (S.on && !S.active) this.audio.slowIn && this.audio.slowIn();
+  }
+
+  slowmoAvailable() {
+    const S = this.slowmo;
+    return this.settings.slowmoPlayer !== false && S.allowed && !this.training &&
+      (this.state === GS.RALLY || this.state === GS.SERVE_TOSS || this.state === GS.SERVE_READY);
+  }
+
+  updateSlowmo(dtReal) {
+    const S = this.slowmo;
+    const want = S.on && this.slowmoAvailable() && S.energy > 0.015;
+    if (want) {
+      S.energy = Math.max(0, S.energy - dtReal * 0.40);     // ~2.5 s from full
+      S.used += dtReal;
+    } else {
+      S.energy = Math.min(1, S.energy + dtReal * 0.09);     // ~11 s to refill
+      S.on = S.on && S.energy > 0.015;                      // ran dry → release
+    }
+    S.active = want;
+    if (want) { this.targetTimeScale = 0.34; this.slowmoUntil = 0; }
+    else if (!this.slowmoUntil) this.targetTimeScale = 1;
+  }
+
+  /** Career tournaments and online matches call this with false. */
+  setSlowmoAllowed(v) { this.slowmo.allowed = !!v; if (!v) this.setSlowmoHold(false); }
+
+  /* --------------------------- settings ---------------------------- */
+
+  /** The player's preferences are part of the save: coming back to a game
+   *  that has forgotten your sensitivity is coming back to a stranger. */
+  saveSettings() {
+    if (!this.profile) return;
+    const s = this.settings;
+    this.profile.data.settings = {
+      assist: s.assist, posAssist: s.posAssist, difficulty: s.difficulty, quality: s.quality,
+      sound: s.sound, volume: s.volume, camera: s.camera, hand: s.hand,
+      showTrail: s.showTrail, showPredict: s.showPredict, showZone: s.showZone,
+      showTele: s.showTele, haptics: s.haptics, coach: s.coach, adaptive: s.adaptive,
+      slowmoPlayer: s.slowmoPlayer, targetScore: s.targetScore, sensitivity: s.sensitivity,
+    };
+    this.profile.touch();
+  }
+
+  loadSettings() {
+    if (!this.profile || !this.profile.data.settings) return false;
+    Object.assign(this.settings, this.profile.data.settings);
+    if (this.settings.volume !== undefined) this.audio.setVolume(this.settings.volume);
+    if (this.settings.sound === false) this.audio.setMuted(true);
+    if (this.settings.difficulty !== undefined) this.ai.setLevel(this.settings.difficulty);
+    if (this.settings.quality) this.R.quality = this.settings.quality;
+    return true;
+  }
+
+  /* --------------------------- equipment --------------------------- */
+
+  /** Paddle materials for the equipped racket. Cached: the workshop is a
+   *  menu, not a per-frame cost. The faces stay red and black (ITTF 2.04.8
+   *  — a bat must have two differently coloured faces), and what the shop
+   *  sells is the frame: the wood, the grip and the shade. */
+  paddleMats(S, eq) {
+    const e = eq || this.equip;
+    if (!e) return null;
+    const c = e.colours;
+    const key = e.bladeId + '|' + e.fhId + '|' + e.bhId;
+    this._eqCache = this._eqCache || {};
+    if (this._eqCache[key]) return this._eqCache[key];
+    const ma = S.mat;
+    const tint = (col, base, k) => [0, 1, 2].map((i) => base.color[i] * (1 - k + k * col[i] * 2.2));
+    this._eqMats = {
+      wood: Object.assign({}, ma.bladeWood, {
+        color: tint(c.wood, ma.bladeWood, 0.85),
+        emissive: [0.055 * c.wood[0], 0.042 * c.wood[1], 0.028 * c.wood[2]],
+      }),
+      grip: Object.assign({}, ma.handle, { color: tint(c.grip, ma.handle, 0.8) }),
+      red: Object.assign({}, ma.rubberRed, { color: tint(c.fore, ma.rubberRed, 0.22) }),
+      black: Object.assign({}, ma.rubberBlack, { color: tint(c.back, ma.rubberBlack, 0.22) }),
+    };
+    this._eqCache[key] = this._eqMats;
+    return this._eqMats;
+  }
+
+  /** Pull the fitted racket out of the profile and into the physics. */
+  applyEquipment() {
+    const e = this.profile ? this.profile.data.equip : { blade: 'b_base', fh: 'r_base', bh: 'r_base' };
+    this.equip.set(e.blade, e.fh, e.bh);
+    return this.equip;
+  }
+
+  /* ---------------------------- replay ----------------------------- */
+
+  /** Play a recorded moment. `after` runs when the clip ends or is skipped. */
+  watchMoment(moment, hero, after) {
+    if (!moment) return false;
+    this.setSlowmoHold(false);
+    this.ball.live = true;
+    if (!this.replayer.play(moment, hero ? 0.35 : 0.5)) return false;
+    this.replayAfter = after || null;
+    const back = this.state;
+    this.replayFrom = back === GS.MATCH_END ? GS.MATCH_END : GS.POINT;
+    this.setState(GS.REPLAY);
+    this.ui && this.ui.replayShow(true, moment, !!hero);
+    this.audio.applause(hero ? 1.4 : 0.6);
+    if (this.profile) this.profile.taskProgress('replay', 0, 1);
+    this.analytics && this.analytics.send('replay:watch', { shots: moment.shots, speed: Math.round(moment.speed), hero: !!hero });
+    return true;
+  }
+
+  skipReplay() {
+    if (!this.replayer.on) return;
+    this.replayer.finish();
+    this.endReplay();
+  }
+
+  endReplay() {
+    this.ui && this.ui.replayShow(false);
+    this.camFov = undefined;
+    if (this.state === GS.REPLAY) this.setState(this.replayFrom || GS.POINT);
+    const cb = this.replayAfter; this.replayAfter = null;
+    if (cb) cb();
+  }
+
+  /** Everything that has to be written down when the last point lands. */
+  settleMatch() {
+    const won = this.matchWinner > 0;
+    const p = this.profile;
+    if (!p) return;
+    const res = p.onMatchEnd(won, this.score, this.stats, this.moments.kept.length);
+    p.taskProgress('topspin', 0, this.matchTasks.topspin >= 10 ? 10 : 0);
+    p.taskProgress('smash', 0, this.matchTasks.smash >= 3 ? 3 : 0);
+    p.taskProgress('serves', 0, this.matchTasks.serves >= 5 ? 5 : 0);
+    if (this.bestRally >= 8) p.taskProgress('rally8', 0, 1);
+    this.analytics && this.analytics.send('match:end', {
+      won, score: this.score.join('-'), rally: this.bestRally, shots: this.stats.shots,
+      moments: this.moments.kept.length, level: p.data.level, session: Math.round(this.analytics.sessionSec),
+    });
+    this.lastReward = res;
+    this.ui && this.ui.refreshMenuBits && this.ui.refreshMenuBits();
+  }
+
+  /** After the final point: a short reel of the best rally, then the score. */
+  playBestMoments() {
+    const m = this.moments.best;
+    if (!m) return false;
+    return this.watchMoment(m, true, null);
   }
 
   /* ----------------- continuous collision: ball vs paddle ---------- */
@@ -5039,6 +6089,7 @@ class Game {
           this.particles.burst(xAt, yAt, 0, 7, 0.7, 0.3, 0.013, 0.8, 0.85, 1);
           if (this.isServeBall) { this.letServe(); return; }
           this.netTouched = true;
+          this.moments.addBounce(true);
         }
       }
     }
@@ -5122,7 +6173,7 @@ class Game {
     const isServeStroke = this.isServeBall && b.lastHitBy === 0 && this.server === 1;
     pad.lastHitT = this.time;
     const contact = V3.new(hit.x, hit.y, hit.z);
-    const sweet = clamp(1 - hit.rad / radius, 0, 1);
+    const sweet = clamp((1 - hit.rad / radius) * this.equip.sweetK, 0, 1);
 
     // ---- build the stroke from the live gesture --------------------
     const sw = this.swipe;
@@ -5138,11 +6189,19 @@ class Game {
         ball: { y: contact.y, z: contact.z },
         ballSpin: b.w, ballSpeed: V3.len(b.v),
         powerScale: 1,
+        equip: this.equip.forSide(1),      // the rubber object for this bat
       };
       racket = deriveStroke(m, ctx);
+      racket.vmag *= this.equip.vmagK;     // swing weight of the frame
       quality = clamp(racket.quality * (0.55 + 0.45 * sweet) * (0.70 + 0.30 * timing), 0.18, 1);
       racket.quality = quality;
       racket = refineRacket(contact, b.v, b.w, racket, this.settings.assist, quality);
+      // Losing a point because the *solver* could not keep a serve on the
+      // table is never acceptable: re-solve the serve with full execution
+      // help, which is a legal serve by construction (ITTF 2.06.4).
+      if (isServeStroke && racket.valid === false) {
+        racket = refineRacket(contact, b.v, b.w, racket, 1, quality);
+      }
       racket.sweet = sweet; racket.timing = timing;
     } else {
       // Passive contact: the ball meets a bat that is not swinging. Real
@@ -5395,7 +6454,12 @@ class Game {
     V3.set(this.camPosT, px, py, pz);
     V3.set(this.camLookT, lx, ly, lz);
     this.fovT = fov;
+    this.applyCamera(dt);
+  }
 
+  /** Smoothing, shake and the actual setCamera call — shared by the live
+   *  camera and the replay camera. */
+  applyCamera(dt) {
     const k = 6.5;
     this.camPos.x = expSmooth(this.camPos.x, this.camPosT.x, k, dt);
     this.camPos.y = expSmooth(this.camPos.y, this.camPosT.y, k, dt);
@@ -5417,15 +6481,41 @@ class Game {
     this.R.setLightFrustum(V3.new(0, PH.TABLE_Y, 0), 6.0, 2.35, 0.5, 14);
   }
 
+  /** A replay is shot, not spectated: the camera drifts in from wide and
+   *  swings over the ball for the contact, so the stroke reads like a
+   *  photograph instead of a video of a game. */
+  updateCameraReplay(dtReal) {
+    const rp = this.replayer, b = this.ball.p;
+    const prog = rp.moment ? clamp(rp.i / Math.max(1, rp.lastFrame), 0, 1) : 0;
+    const t = clamp((prog - 0.42) / 0.5, 0, 1);
+    const e = t * t * (3 - 2 * t);                     // smoothstep
+    const wx = clamp(b.x * 0.35, -1.4, 1.4), wz = clamp(b.z * 0.25 + 3.35, 2.4, 4.0);
+    const ox = clamp(b.x * 0.75, -1.5, 1.5), oz = clamp(b.z + 1.35, 0.55, 3.1);
+    V3.set(this.camPosT, lerp(wx, ox, e), lerp(2.02, 1.34, e) + Math.sin(this.time * 0.7) * 0.02, lerp(wz, oz, e));
+    V3.set(this.camLookT, b.x * 0.9, b.y * 0.9 + 0.06, b.z * 0.9);
+    this.fovT = lerp(41, 34, e);
+    this.applyCamera(dtReal);
+  }
+
   /* ------------------------------ update --------------------------- */
   update(dtReal) {
     this.frame++;
+    /* ---- a replay owns the whole update: physics is off, the clip is
+       the truth, and the camera is a filmmaker rather than a spectator ---- */
+    if (this.replayer.on) {
+      this.time += dtReal;
+      this.replayer.update(dtReal, this);
+      this.particles.update(dtReal);
+      this.updateCameraReplay(dtReal);
+      return;
+    }
     const ts = this.timeScale;
     const dt = Math.min(dtReal, 0.05) * ts;
     this.time += dtReal;
     this.stateT += dtReal;
 
     if (this.slowmoUntil && this.time > this.slowmoUntil) { this.targetTimeScale = 1; this.slowmoUntil = 0; }
+    this.updateSlowmo(dtReal);
     this.timeScale = expSmooth(this.timeScale, this.targetTimeScale, 9, dtReal);
 
     // state machine
@@ -5449,7 +6539,11 @@ class Game {
         break;
       case GS.SERVE_TOSS:
         if (this.server === -1 && this.time > this.aiSwingAt && this.ball.lastHitBy === 0) {
-          const racket = this.ai.serve(this);
+          let racket = this.ai.serve(this);
+          // the opponent does not get to donate points either
+          if (racket.valid === false) {
+            racket = refineRacket(this.ball.p, this.ball.v, this.ball.w, racket, 1, racket.quality);
+          }
           const contact = V3.clone(this.ball.p);
           const info = impactRacket(this.ball.v, this.ball.w, racket.normal, racket.vR, racket.quality, racket.rubber || {});
           V3.copy(this.aiPaddle.pos, this.ball.p);
@@ -5467,6 +6561,7 @@ class Game {
         if (this.matchWinner && this.stateT > 1.35) {
           this.setState(GS.MATCH_END);
           this.audio.gameOver(this.matchWinner > 0);
+          this.settleMatch();
           this.ui && this.ui.showMatchEnd(this.matchWinner > 0);
         } else if (this.stateT > 1.35) {
           this.rally = 0;
@@ -5491,6 +6586,7 @@ class Game {
 
     this.updatePlayerPaddle(dtReal);
     this.updateStrikeWindow(dtReal);
+    if (this.state === GS.RALLY || this.state === GS.SERVE_TOSS) this.moments.push(this.time, this);
     if (this.training) this.training.update(dtReal);
     else this.ai.think(this, dt);
     this.tryAiHit();
@@ -5500,6 +6596,10 @@ class Game {
     for (const m of this.messages) m.t += dtReal;
     while (this.messages.length && this.messages[0].t > this.messages[0].dur) this.messages.shift();
     this.hitFlash = Math.max(0, this.hitFlash - dtReal * 3.2);
+    if (this.profile) {
+      this.profile.data.stats.minutes += dtReal / 60;
+      this.profile.maybeSave(dtReal);
+    }
     this.updateCamera(dtReal);
 
     // post-processing reacts to the action
@@ -5574,16 +6674,17 @@ class Game {
 
     /* player paddle */
     const pad = this.player;
+    const PM = this.paddleMats(S) || ma;
     const pq = Q.lookRotation(Q.new(), pad.normal, { x: 0, y: 1, z: 0 });
     const roll = Q.setAxisAngle(Q.new(), 0, 0, 1, (this.settings.hand === 'right' ? -0.42 : 0.42) + pad.swing * 0.3);
     Q.mul(pq, pq, roll);
     M4.compose(tmp.m, pad.pos, pq, V3.set(tmp.scl, 1, 1, 1));
-    d(me.blade, tmp.m, ma.bladeWood);
+    d(me.blade, tmp.m, PM.wood);
     if (!shadowPass) {
       M4.compose(tmp.m2, V3.addScaled(V3.new(), pad.pos, pad.normal, 0.0085), pq, V3.set(tmp.scl, 1, 1, 1));
-      R.draw(me.rubber, tmp.m2, ma.rubberBlack);
+      R.draw(me.rubber, tmp.m2, PM.black);
       M4.compose(tmp.m2, V3.addScaled(V3.new(), pad.pos, pad.normal, -0.0085), pq, V3.set(tmp.scl, 1, 1, 1));
-      R.draw(me.rubber, tmp.m2, ma.rubberRed);
+      R.draw(me.rubber, tmp.m2, PM.red);
     }
     // handle
     {
@@ -5591,10 +6692,11 @@ class Game {
       const wo = V3.new();
       M4.transformDir(wo, tmp.m, off);
       M4.compose(tmp.m2, V3.add(V3.new(), pad.pos, wo), pq, V3.set(tmp.scl, 1, 1, 1));
-      d(me.handle, tmp.m2, ma.handle);
+      d(me.handle, tmp.m2, PM.grip);
     }
 
-    /* AI paddle + stylised opponent */
+    /* the opponent: paddle, hand, forearm and sleeve, all solved from
+       the paddle's own position and normal (see 56_rig.js) */
     const ap = this.aiPaddle;
     const an = V3.norm(V3.new(), V3.sub(V3.new(), this.ball.p, this.ai.pos));
     an.z = Math.abs(an.z) * 1 || 1;
@@ -5607,16 +6709,17 @@ class Game {
       1));
     V3.copy(ap.normal, aiNorm);
     V3.copy(ap.pos, this.ai.pos);
-    const aq = Q.lookRotation(Q.new(), aiNorm, { x: 0, y: 1, z: 0 });
-    M4.compose(tmp.m, ap.pos, aq, V3.set(tmp.scl, 1, 1, 1));
-    d(me.blade, tmp.m, ma.bladeWood);
-    if (!shadowPass) {
-      M4.compose(tmp.m2, V3.addScaled(V3.new(), ap.pos, aiNorm, 0.0085), aq, V3.set(tmp.scl, 1, 1, 1));
-      R.draw(me.rubber, tmp.m2, ma.rubberBlack);
-      M4.compose(tmp.m2, V3.addScaled(V3.new(), ap.pos, aiNorm, -0.0085), aq, V3.set(tmp.scl, 1, 1, 1));
-      R.draw(me.rubber, tmp.m2, ma.rubberRed);
+    if (shadowPass) {
+      const aqS = Q.lookRotation(Q.new(), aiNorm, { x: 0, y: 1, z: 0 });
+      M4.compose(tmp.m, ap.pos, aqS, V3.set(tmp.scl, 1, 1, 1));
+      R.drawShadow(me.blade, tmp.m, null, 0);
+    } else {
+      this.rig.draw(R, S, {
+        pos: ap.pos, normal: aiNorm, hand: this.settings.hand === 'right' ? 'left' : 'right',
+        swing: -this.ai.anim.swing, windup: wd,
+        mats: this.paddleMats(S, this.aiEquip),
+      });
     }
-    this.drawOpponent(d, shadowPass);
 
   }
 
@@ -5784,7 +6887,15 @@ class UI {
     this.resize();
     window.addEventListener('resize', () => this.resize());
   }
-  attach(game) { this.game = game; this.syncSettings(); }
+  attach(game) {
+    this.game = game;
+    this.syncSettings();
+    this.refreshMenuBits();
+    this.game.analytics && this.game.analytics.send('session:start', {
+      platform: this.game.platform.label, touch: this.game.platform.touch,
+      level: this.game.profile.data.level, coins: this.game.profile.data.coins,
+    });
+  }
 
   resize() {
     const d = Math.min(window.devicePixelRatio || 1, 2);
@@ -5817,10 +6928,12 @@ class UI {
       $$('.screen').forEach((s) => s.classList.remove('on'));
       this.trainHide();
       this.game.training = null;
+      this.game.analytics && this.game.analytics.send('match:start', { diff: d, mode: 'casual', assist: this.game.settings.assist });
       this.game.startMatch(d);
     };
     const startTrain = () => {
       $$('.screen').forEach((s) => s.classList.remove('on'));
+      this.game.analytics && this.game.analytics.send('tutorial:start', {});
       this.game.startTraining();
     };
     $('#play').addEventListener('click', startMatch);
@@ -5832,6 +6945,24 @@ class UI {
       this.game.stopTraining();
       $('#menu').classList.add('on');
     });
+    /* --- workshop / shop / daily --- */
+    const wsOpen = (tab) => {
+      this.game.audio.ui('click');
+      this.game.analytics && this.game.analytics.send('ui:workshop', { tab: tab || 'racket' });
+      $$('.screen').forEach((x) => x.classList.remove('on'));
+      this.pick = null;                       // a fresh visit starts from what is fitted
+      this.showWorkshop(tab || 'racket');
+    };
+    $('#wsOpen').addEventListener('click', () => wsOpen('racket'));
+    $('#dailyOpen').addEventListener('click', () => wsOpen('daily'));
+    $('#wsClose').addEventListener('click', () => {
+      $('#workshop').classList.remove('on');
+      $('#menu').classList.add('on');
+      this.game.audio.ui('click');
+    });
+    $$('#workshop .tab').forEach((b) => b.addEventListener('click', () => this.showWorkshop(b.dataset.tab)));
+    $('#wsEquip').addEventListener('click', () => this.equipSelection());
+    $('#adCoins').addEventListener('click', () => this.watchAd());
     $('#btnSettings').addEventListener('click', () => $('#settings').classList.toggle('on'));
     $('#setClose').addEventListener('click', () => $('#settings').classList.remove('on'));
     $('#camReset').addEventListener('click', () => this.game.camReset());
@@ -5841,8 +6972,271 @@ class UI {
       g.audio.setMuted(!g.settings.sound);
       $('#btnSound').innerHTML = g.settings.sound ? ICON.sound : ICON.mute;
     });
+    /* slow-mo: press and hold, on a phone or on the keyboard */
+    const slow = $('#slow');
+    const hold = (v) => (e) => {
+      if (e && e.cancelable) e.preventDefault();
+      this.game && this.game.setSlowmoHold(v);
+      if (v) this.game && this.game.audio.init();
+    };
+    slow.addEventListener('pointerdown', hold(true));
+    slow.addEventListener('pointerup', hold(false));
+    slow.addEventListener('pointerleave', hold(false));
+    slow.addEventListener('pointercancel', hold(false));
+    window.addEventListener('keyup', (e) => {
+      if (e.key === 'Shift' || e.key === ' ') this.game && this.game.setSlowmoHold(false);
+    });
+    window.addEventListener('keydown', (e) => {
+      if ((e.key === 'Shift' || e.key === ' ') && !e.repeat && this.game && this.game.replayer.on) {
+        this.game.skipReplay(); e.preventDefault(); return;
+      }
+      if ((e.key === 'Shift' || e.key === ' ') && !e.repeat) this.game && this.game.setSlowmoHold(true);
+      if ((e.key === 'm' || e.key === 'M' || e.key === 'ь' || e.key === 'Ь')) this.showMoments();
+    });
+    $('#reelSkip').addEventListener('pointerdown', () => this.game && this.game.skipReplay());
+    $('#reelsClose').addEventListener('click', () => { $('#reels').classList.remove('on'); this.game && this.game.audio.ui('click'); });
     $('#again').addEventListener('click', () => { $('#over').classList.remove('on'); this.game.restart(); });
     $('#backMenu').addEventListener('click', () => { $('#over').classList.remove('on'); $('#menu').classList.add('on'); });
+  }
+
+  /* -------------------------- best moments ------------------------- */
+
+  /** A rally just got into the top list: say so, briefly, without pause. */
+  flashMoment(m, idx) {
+    const t = $('#mnToast');
+    if (!t) return;
+    const n = this.game.moments.kept.length;
+    t.textContent = idx === 0 && n > 1 ? '\u2605 ЛУЧШИЙ МОМЕНТ МАТЧА'
+      : '\u2605 В КОПИЛКУ МОМЕНТОВ \u00b7 ' + m.shots + ' УДАРОВ';
+    t.classList.add('on');
+    clearTimeout(this._mnT);
+    this._mnT = setTimeout(() => t.classList.remove('on'), 1700);
+    if (idx === 0) this.game.audio.crowd && this.game.audio.crowd(0.5);
+  }
+
+  /** Cinematic chrome: letterbox, title card, "skip". */
+  replayShow(on, moment, hero) {
+    const r = $('#reel');
+    if (!r) return;
+    r.classList.toggle('on', !!on);
+    r.classList.toggle('hero', !!hero);
+    document.body.classList.toggle('is-reel', !!on);
+    if (!on || !moment) return;
+    const names = { SMASH: 'СМЕШ', LOOP: 'ТОПСПИН', COUNTER: 'КОНТРАТАКА', DRIVE: 'НАКАТ',
+      FLICK: 'ФЛИК', LOB: 'СВЕЧА', CHOP: 'ПОДРЕЗКА', PUSH: 'ТОЛЧОК', BLOCK: 'БЛОК',
+      SIDE: 'БОКОВАЯ', HOOK: 'КРЮК', FADE: 'ФЕЙД', DROP: 'КОРОТКИЙ', SERVE_TOP: 'ПОДАЧА',
+      SERVE_FAST: 'ПОДАЧА', SERVE_SIDE: 'ПОДАЧА', SERVE_BACK: 'ПОДАЧА' };
+    $('#reelTag').textContent = hero ? 'ЛУЧШИЙ МОМЕНТ МАТЧА' : 'МОМЕНТ МАТЧА';
+    $('#reelTitle').textContent = (names[moment.finish] || moment.finish || 'РОЗЫГРЫШ')
+      + (moment.winner > 0 ? ' \u00b7 ОЧКО ВАШЕ' : '');
+    $('#reelMeta').textContent = moment.shots + ' УДАРОВ \u00b7 ' + Math.round(moment.speed) + ' КМ/Ч \u00b7 '
+      + Math.round(moment.spin) + ' ОБ/С \u00b7 РЕПЛЕЙ 0.35\u00d7';
+  }
+
+  /** The library: three best rallies of the match, newest score first. */
+  showMoments() {
+    const g = this.game; if (!g) return;
+    const kept = g.moments.kept.slice(0, 3);
+    if (!kept.length) return;
+    const list = $('#momentList');
+    list.innerHTML = kept.map((m, i) => {
+      const bars = Math.round(clamp(m.score / 0.85, 0, 1) * 5);
+      const st = Array.from({ length: 5 }, (_, k) => `<i class="${k < bars ? 'f' : ''}"></i>`).join('');
+      const names = { SMASH: 'смеш', LOOP: 'топспин', COUNTER: 'контратака', DRIVE: 'накат', FLICK: 'флик',
+        LOB: 'свеча', CHOP: 'подрезка', PUSH: 'толчок', BLOCK: 'блок', SIDE: 'боковая', HOOK: 'крюк', FADE: 'фейд', DROP: 'короткий' };
+      const why = [m.meta.matchPoint ? 'матчбол' : '', m.meta.deuce ? 'счёт 10-10' : '', m.meta.netClip ? 'по краю сетки' : '',
+        m.meta.deficit >= 2 ? 'отставал ' + m.meta.deficit + ':' + 0 : '', m.shots >= 12 ? 'долгий розыгрыш' : ''].filter(Boolean)[0] || 'чисто исполнено';
+      return `<button class="mrow" data-i="${i}"><span class="num">${i + 1}</span>
+        <span class="d"><b>${(names[m.finish] || m.finish)} · ${m.shots} ударов</b>
+        <s>${Math.round(m.speed)} км/ч · ${Math.round(m.spin)} об/с · ${why}</s></span>
+        <span class="st">${st}</span><span class="go">СМОТРЕТЬ \u203a</span></button>`;
+    }).join('');
+    Array.from(list.querySelectorAll('.mrow')).forEach((b) => b.addEventListener('click', () => {
+      $('#reels').classList.remove('on');
+      g.watchMoment(g.moments.kept[+b.dataset.i], true);
+    }));
+    $('#reels').classList.add('on');
+  }
+
+  /* --------------------- workshop · shop · daily ------------------- */
+
+  showWorkshop(tab) {
+    const g = this.game, p = g.profile;
+    if (!p) return;
+    $$('#workshop .tab').forEach((b) => b.classList.toggle('on', b.dataset.tab === tab));
+    $$('#workshop .pane').forEach((x) => x.classList.remove('on'));
+    $('#pane' + (tab === 'racket' ? 'Racket' : tab === 'shop' ? 'Shop' : 'Daily')).classList.add('on');
+    $('#wsBal').textContent = p.data.coins;
+    $('#wsCry').textContent = p.data.crystals;
+    if (!this.pick) this.pick = { blade: p.data.equip.blade, fh: p.data.equip.fh, bh: p.data.equip.bh };
+    this.drawItemList('listBlade', 'blade', this.pick.blade);
+    this.drawItemList('listFh', 'rubber', this.pick.fh);
+    this.drawItemList('listBh', 'rubber', this.pick.bh);
+    this.drawStatCard();
+    this.drawShop();
+    this.drawDaily();
+    $('#workshop').classList.add('on');
+  }
+
+  drawItemList(sel, kind, current) {
+    const p = this.game.profile;
+    const box = $('#' + sel);
+    box.innerHTML = ITEMS_ORDER.filter((it) => it.kind === kind).map((it) => {
+      const owned = p.owns(it.id);
+      const sw = it.kind === 'blade' ? it.wood : it.col;
+      const col = `rgb(${sw.map((c) => Math.round(c * 255)).join(',')})`;
+      const price = it.price ? `<span class="pr">${it.price}</span>` : '';
+      return `<button class="irow${it.id === current ? ' sel' : ''}${owned ? '' : ' locked'}" data-id="${it.id}">
+        <span class="sw" style="background:${col}"></span>
+        <span class="d"><b>${it.name}</b><s>${it.ru}${owned ? '' : ' · не куплено'}</s></span>${price}</button>`;
+    }).join('');
+    Array.from(box.querySelectorAll('.irow')).forEach((b) => b.addEventListener('click', () => {
+      const id = b.dataset.id, it = ITEMS[id];
+      const slot = it.kind === 'blade' ? 'blade' : (b.parentElement.id === 'listBh' ? 'bh' : 'fh');
+      if (!this.game.profile.owns(id)) {
+        const ok = this.game.shop.buyRacket(id);
+        if (!ok) { this.toast('НЕ ХВАТАЕТ МОНЕТ · ' + it.price); this.game.audio.ui('deny'); return; }
+        this.toast('КУПЛЕНО · ' + it.name);
+        this.game.audio.ui('buy');
+        $('#wsBal').textContent = this.game.profile.data.coins;
+        this.drawShop();
+      }
+      this.pick[slot] = id;
+      this.showWorkshop('racket');
+    }));
+  }
+
+  drawStatCard() {
+    const t = racketStats(this.pick.blade, this.pick.fh, this.pick.bh);
+    const eq = new Equipment(this.pick.blade, this.pick.fh, this.pick.bh);
+    const cur = this.game.equip;
+    const fitted = this.game.profile.data.equip;
+    const dirty = this.pick.blade !== fitted.blade || this.pick.fh !== fitted.fh || this.pick.bh !== fitted.bh;
+    $('#wsEquip').textContent = dirty ? 'ПОСТАВИТЬ В ИГРУ' : 'ЭТА РАКЕТКА УЖЕ В ИГРЕ';
+    $('#wsEquip').disabled = !dirty;
+    const rows = STAT_KEYS.map((k) => {
+      const v = t[k];
+      const d = v - cur.stats[k];
+      return `<div class="sbar"><s>${STAT_RU[k]}</s><span class="gr"><i style="width:${v}%"></i></span>
+        <b style="color:${d > 0 ? 'var(--good)' : d < 0 ? 'var(--bad)' : 'var(--dim2)'}">${v}${d ? (d > 0 ? ' ▲' : ' ▼') : ''}</b></div>`;
+    }).join('');
+    $('#statCard').innerHTML = rows;
+    const sp = (eq.fhParams.e / PH.E_RACKET);
+    const describe = t.speed > 70 ? 'быстрая, требует короткого замаха' : t.control > 72 ? 'прощает промах по центру'
+      : t.spin > 70 ? 'собирает вращение с кисти' : 'ровная, предсказуемая';
+    $('#statNote').innerHTML = `<b>${ITEMS[this.pick.blade].name} · ${ITEMS[this.pick.fh].name}</b><br>`
+      + `${describe}. Отскок ${(sp * 100).toFixed(0)}% от базы, пятно контакта ${(eq.sweetK * 100).toFixed(0)}%.`;
+  }
+
+  equipSelection() {
+    const p = this.game.profile;
+    const k = this.pick;
+    if (!p.equipRacket(k.blade, k.fh, k.bh)) { this.toast('ЧТО-ТО НЕ КУПЛЕНО'); return; }
+    this.game.applyEquipment();
+    this.toast('РАКЕТКА В ИГРЕ · ' + this.game.equip.name);
+    this.game.audio.ui('buy');
+    this.drawStatCard();
+    this.refreshMenuBits();
+  }
+
+  drawShop() {
+    const g = this.game, p = g.profile, shop = g.shop;
+    const rackets = shop.racketOffers().filter((o) => !o.owned);
+    $('#shopRackets').innerHTML = rackets.length ? rackets.map((o) => {
+      const it = o.item;
+      const s = itemStats(it);
+      const line = STAT_KEYS.map((k) => `${STAT_RU[k].slice(0, 4)} ${Math.round(s[k])}`).join(' · ');
+      return `<div class="sitem"><b>${it.name} · ${it.ru}</b><s>${line}</s>
+        <span class="buy"><span class="price">${o.price} монет</span>
+        <button data-buy="${it.id}">КУПИТЬ</button></span></div>`;
+    }).join('') : '<div class="snote">Все ракетки открыты. Играйте.</div>';
+    Array.from($('#shopRackets').querySelectorAll('button[data-buy]')).forEach((b) => b.addEventListener('click', () => {
+      if (g.shop.buyRacket(b.dataset.buy)) { this.game.audio.ui('buy'); this.toast('КУПЛЕНО'); }
+      else { this.game.audio.ui('deny'); this.toast('НЕ ХВАТАЕТ МОНЕТ'); }
+      $('#wsBal').textContent = p.data.coins; this.drawShop(); this.refreshMenuBits();
+    }));
+
+    const cos = shop.cosmeticOffers();
+    $('#shopCosmetics').innerHTML = cos.map((c) => {
+      const price = c.cur === 'coins' ? `${c.price} монет` : c.cur === 'crystals' ? `${c.price} кр.` : 'за карьеру';
+      return `<div class="sitem ${c.owned ? 'owned' : ''}"><b>${c.ru}</b>
+        <s>${c.owned ? 'открыто' : c.cur === 'career' ? 'награда за кубок мира' : 'косметика'}</s>
+        <span class="buy"><span class="price">${c.owned ? '—' : price}</span>
+        <button data-cos="${c.id}" ${c.owned ? 'disabled' : ''}>${c.owned ? 'ЕСТЬ' : 'КУПИТЬ'}</button></span></div>`;
+    }).join('');
+    Array.from($('#shopCosmetics').querySelectorAll('button[data-cos]')).forEach((b) => b.addEventListener('click', () => {
+      if (g.shop.buyCosmetic(b.dataset.cos)) { this.game.audio.ui('buy'); this.toast('КУПЛЕНО'); }
+      else { this.game.audio.ui('deny'); this.toast('НЕ ХВАТАЕТ КРИСТАЛЛОВ'); }
+      $('#wsCry').textContent = p.data.crystals; this.drawShop();
+    }));
+
+    /* Real-money shelves exist only where IAP is allowed at all. On Poki
+       the whole block is hidden and the page stays ads-only, as required. */
+    const iap = shop.iapOffers();
+    $('#shopIapWrap').style.display = iap.length ? 'block' : 'none';
+    $('#shopIap').innerHTML = iap.map((b) => `<div class="sitem ${b.owned ? 'owned' : ''}">
+      <b>${b.ru}</b><s>${b.note || (b.crystals ? b.crystals + ' кристаллов' : '')}</s>
+      <span class="buy"><span class="price">${b.price} €</span>
+      <button data-iap="${b.id}" ${b.owned && b.once ? 'disabled' : ''}>${b.owned && b.once ? 'КУПЛЕНО' : 'КУПИТЬ'}</button></span></div>`).join('');
+    Array.from($('#shopIap').querySelectorAll('button[data-iap]')).forEach((b) => b.addEventListener('click', () => {
+      /* The store call belongs to the mobile wrapper. Here we only take the
+         entitlement, and say so honestly instead of pretending. */
+      if (g.platform.canIAP && g.iap) { g.iap(b.dataset.iap); }
+      else if (g.shop.grant(b.dataset.iap, false)) {
+        this.toast('ПОКУПКА ЗАЧТЕНА · ' + b.dataset.iap.toUpperCase());
+        $('#wsBal').textContent = p.data.coins; $('#wsCry').textContent = p.data.crystals;
+        this.drawShop();
+      }
+    }));
+
+    const s = p.data.season;
+    const lv = p.seasonLevel();
+    $('#seasonBox').innerHTML = `<div class="sl"><span>СЕЗОН ${s.n + 1} · УРОВЕНЬ ${lv}/60</span>
+      <span>${s.premium ? 'ПРОПУСК АКТИВЕН' : 'БЕСПЛАТНАЯ ДОРОЖКА'}</span></div>
+      <div class="track"><i style="width:${(p.seasonProgress() * 100).toFixed(0)}%"></i></div>
+      <div class="snote">Опыт сезона дают матчи и задания. Пропуск добавляет косметику, арены и 400 кристаллов.</div>`;
+  }
+
+  drawDaily() {
+    const p = this.game.profile;
+    const d = p.data.daily;
+    $('#dailyHead').innerHTML = `Серия <b>${p.data.streak}</b> ${p.data.streak >= 7 ? '· +50% к награде'
+      : p.data.streak >= 3 ? '· +25% к награде' : '· три дня подряд дают +25%'}`;
+    $('#taskList').innerHTML = DAILY_TASKS.map((t) => {
+      const cur = Math.min(d.tasks[t.id] || 0, t.need);
+      const done = d.done.indexOf(t.id) >= 0, claimed = d.claimed.indexOf(t.id) >= 0;
+      return `<div class="trow"><span class="d"><b>${t.ru}</b><s>${cur}/${t.need} · ${t.coins} монет</s></span>
+        <button data-claim="${t.id}" ${done && !claimed ? '' : 'disabled'}>${claimed ? 'ПОЛУЧЕНО' : done ? 'ЗАБРАТЬ' : 'В ПРОЦЕССЕ'}</button></div>`;
+    }).join('');
+    Array.from($('#taskList').querySelectorAll('button[data-claim]')).forEach((b) => b.addEventListener('click', () => {
+      const got = p.claimTask(b.dataset.claim);
+      if (got) { this.toast('+' + got + ' МОНЕТ'); this.game.audio.ui('buy'); }
+      $('#wsBal').textContent = p.data.coins;
+      this.drawDaily(); this.drawShop(); this.refreshMenuBits();
+    }));
+  }
+
+  watchAd() {
+    const r = this.game.shop.rewardAd('dailyWheel');
+    if (r.ok) { this.toast('+' + r.coins + ' МОНЕТ · СПАСИБО'); this.game.audio.ui('buy'); }
+    else this.toast(r.why === 'no-ads' ? 'РЕКЛАМА ОТКЛЮЧЕНА' : 'ПОДОЖДИТЕ ' + (r.left || 45) + ' С');
+    $('#wsBal').textContent = this.game.profile.data.coins;
+    this.drawShop(); this.refreshMenuBits();
+  }
+
+  refreshMenuBits() {
+    const p = this.game.profile; if (!p) return;
+    $('#wsCoins').textContent = p.data.coins + ' монет';
+    $('#wsStreak').textContent = 'серия ' + p.data.streak + ' · ' + p.data.daily.done.length + '/6';
+  }
+
+  toast(text) {
+    const t = $('#mnToast');
+    if (!t) return;
+    t.textContent = text;
+    t.classList.add('on');
+    clearTimeout(this._tT);
+    this._tT = setTimeout(() => t.classList.remove('on'), 1500);
   }
 
   applySetting(k, v) {
@@ -5866,11 +7260,18 @@ class UI {
         if (g.director) { g.director.enabled = s.adaptive; if (!s.adaptive) { g.director.reset(); g.ai.setHandicap(1); } }
         break;
       case 'haptics': s.haptics = v === 'on'; if (s.haptics) g.buzz(12); break;
+      case 'slowmoPlayer':
+        s.slowmoPlayer = v === 'on';
+        if (!s.slowmoPlayer) g.setSlowmoHold(false);
+        $('#slow').classList.toggle('off', !s.slowmoPlayer);
+        break;
       case 'target': s.targetScore = +v; $('#toWin').textContent = v; break;
+      default: break;
       case 'camYaw': g.camAdj.yaw = (-v) * Math.PI / 180; g.camAdjT = 1.2; this.syncCam(); return;
       case 'camPitch': g.camAdj.pitch = v * Math.PI / 180; g.camAdjT = 1.2; this.syncCam(); return;
       case 'camDist': g.camAdj.zoom = v / 100; g.camAdjT = 1.2; this.syncCam(); return;
     }
+    g.saveSettings();
     g.audio.ui('click');
   }
 
@@ -5898,6 +7299,8 @@ class UI {
     sel('trail', s.showTrail ? 'on' : 'off'); sel('predict', s.showPredict ? 'on' : 'off');
     sel('zone', s.showZone ? 'on' : 'off'); sel('tele', s.showTele ? 'on' : 'off');
     sel('coach', s.coach ? 'on' : 'off'); sel('adaptive', s.adaptive ? 'on' : 'off');
+    sel('slowmoPlayer', s.slowmoPlayer !== false ? 'on' : 'off');
+    $('#slow').classList.toggle('off', s.slowmoPlayer === false);
     sel('haptics', s.haptics ? 'on' : 'off');
     sel('target', s.targetScore);
     $('#spin').classList.toggle('on', !!s.showTele);
@@ -5976,6 +7379,37 @@ class UI {
     $('#stRally').textContent = g.bestRally;
     const top = Object.entries(s.byStroke).sort((a, b) => b[1] - a[1])[0];
     $('#stFav').textContent = top ? (STROKES[top[0]] ? STROKES[top[0]].short : top[0]) + ' ×' + top[1] : '—';
+    // the match is over, so lead with the thing worth remembering: the
+    // best rally, played back before the numbers
+    /* what the match paid, in one line, next to the score */
+    if (g.lastReward) {
+      const r = g.lastReward;
+      const line = document.createElement('div');
+      line.className = 'snote';
+      line.innerHTML = `+<b>${r.coins}</b> монет · +<b>${r.xp}</b> опыта`
+        + (r.seasonLevels ? ` · сезон +${r.seasonLevels}` : '')
+        + (g.moments.kept.length ? ` · моментов в копилке: ${g.moments.kept.length}` : '');
+      row.appendChild(line);
+      g.lastReward = null;
+    }
+    const best = g.moments.best;
+    const row = $('#overMoments');
+    row.innerHTML = '';
+    const kept = g.moments.kept.slice(0, 3);
+    if (kept.length) {
+      const b = document.createElement('button');
+      b.className = 'btn';
+      b.textContent = '\u25b6 ЛУЧШИЕ МОМЕНТЫ \u00b7 ' + kept.length;
+      b.addEventListener('click', () => this.showMoments());
+      row.appendChild(b);
+    }
+    if (best && !this.suppressCinema) {
+      this.suppressCinema = true;
+      setTimeout(() => { this.suppressCinema = false; }, 400);   // one auto-play per match
+      g.watchMoment(best, true, () => { $('#over').classList.add('on'); });
+      return;
+    }
+    this.suppressCinema = false;
     $('#over').classList.add('on');
   }
 
@@ -6232,6 +7666,17 @@ class UI {
     rb.classList.toggle('on', showRally);
     if (showRally) rb.innerHTML = `РАЛЛИ <b>${g.rally}</b> · РЕКОРД <b>${Math.max(g.bestRally, g.rally)}</b>`;
 
+    /* slow-mo meter: the ring fills back up while you wait, and drops
+       while you hold — the one piece of state the player must feel */
+    const sl = g.slowmo, slEl = $('#slow');
+    if (slEl) {
+      const avail = g.slowmoAvailable();
+      slEl.classList.toggle('on', sl.active);
+      slEl.classList.toggle('ready', !sl.active && sl.energy > 0.995);
+      slEl.classList.toggle('off', g.settings.slowmoPlayer === false || !sl.allowed);
+      $('#slowFill').style.height = (sl.energy * 100).toFixed(0) + '%';
+      document.body.classList.toggle('is-slow', sl.active);
+    }
     if (this.shotTimer > 0) { this.shotTimer -= dt; if (this.shotTimer <= 0) $('#shot').classList.remove('on'); }
     if (this.noteTimer > 0) { this.noteTimer -= dt; if (this.noteTimer <= 0) this.hideNote(); }
 
@@ -6298,6 +7743,439 @@ const ICON = {
 };
 
 
+/* ====== 86_meta.js ====== */
+/* =====================================================================
+ *  META — profile, money, shop, platform. The commercial layer.
+ *
+ *  Rules this file is written to, in order of importance:
+ *
+ *  1. NOTHING HERE MAY CHANGE WHO WINS. The shop sells different, never
+ *     better (see 84_racket.js: every item spends the same stat budget),
+ *     and it sells looks, convenience and reasons to come back.
+ *  2. NO DARK PATTERNS. No energy, no timers that punish, no loot boxes,
+ *     no ads mid-match, no "are you sure you want to stay poor". A
+ *     rewarded ad is always an offer, never a toll.
+ *  3. THE WEB BUILD HAS TO BE HONEST ABOUT ITSELF. Poki forbids
+ *     third-party IAP entirely, so on a portal the shop hides its
+ *     paid shelves and keeps ads-only. The same code runs everywhere.
+ *  4. IT MUST SURVIVE A RELOAD. One versioned blob in localStorage, with
+ *     a migration step, and no throwing if storage is blocked (private
+ *     mode, embedded iframes on portals).
+ * ===================================================================== */
+
+const SAVE_KEY = 'topspin.arena.save.v1';
+const SAVE_VERSION = 3;
+
+/* ------------------------------------------------------------------ *
+ *  Platform: where are we running, and what is allowed here?
+ * ------------------------------------------------------------------ */
+class Platform {
+  constructor(nav) {
+    const navi = nav || (typeof navigator !== 'undefined' ? navigator : {});
+    const ua = (navi.userAgent || '').toLowerCase();
+    const host = (typeof location !== 'undefined' ? location.hostname : '') || '';
+    this.poki = /poki\./i.test(host) || !!navi.poki;
+    this.crazy = /crazygames/i.test(host) || !!navi.CrazyGames;
+    this.y8 = /y8\./i.test(host);
+    this.gamedist = /gamedistribution/i.test(host);
+    this.portal = this.poki || this.crazy || this.y8 || this.gamedist;
+    this.itch = /itch\.io/i.test(host);
+    this.touch = 'ontouchstart' in (navi && navi.maxTouchPoints ? navi : {}) || (navi.maxTouchPoints || 0) > 0;
+  }
+
+  /* Poki: ads only, no IAP at all. CrazyGames: ads + IAP through them.
+     Own domain / itch: everything, and that is where the shop shows up.
+     These are getters, not fields, so flipping a flag (or being detected
+     later, when the portal SDK finally loads) can never leave the shop
+     showing a shelf the platform forbids. */
+  get canIAP() { return !this.poki && !this.y8 && !this.gamedist; }
+  get canRewarded() { return true; }
+  get storePct() { return this.poki ? 0.50 : this.crazy ? 0.60 : this.y8 ? 0.50 : this.gamedist ? 0.33 : 1.0; }
+  get label() {
+    if (this.poki) return 'POKI';
+    if (this.crazy) return 'CRAZYGAMES';
+    if (this.y8) return 'Y8';
+    if (this.gamedist) return 'GAMEDISTRIBUTION';
+    return 'ПРЯМОЙ ЗАПУСК';
+  }
+}
+
+/* ------------------------------------------------------------------ *
+ *  Analytics: one bus, adapters know how to talk to each portal.
+ *  Deliberately tiny — the numbers we act on are D1/D7, session length,
+ *  the drop-off step of the tutorial and the shop funnel.
+ * ------------------------------------------------------------------ */
+class Analytics {
+  constructor(platform) {
+    this.platform = platform;
+    this.queue = [];
+    this.sessionStart = Date.now();
+    this.events = 0;
+    this.onEvent = null;
+  }
+  send(name, props) {
+    const e = { name, t: Date.now(), i: this.events++, props: props || {} };
+    this.queue.push(e);
+    if (this.queue.length > 200) this.queue.shift();
+    if (this.onEvent) this.onEvent(e);
+    // portal SDKs are wired here when present; nothing else leaves the page
+    const n = (typeof navigator !== 'undefined') ? navigator : {};
+    if (n.poki && n.poki.gameLoadingFinished && this.events === 2) { try { n.poki.gameLoadingFinished(); } catch (x) { /* ignore */ } }
+    return e;
+  }
+  get sessionSec() { return (Date.now() - this.sessionStart) / 1000; }
+  funnelStep(name) { this.send('funnel:' + name, { d: Math.round(this.sessionSec) }); }
+}
+
+/* ------------------------------------------------------------------ *
+ *  Profile: everything that has to survive a reload.
+ * ------------------------------------------------------------------ */
+const DAILY_TASKS = [
+  { id: 'win1', ru: 'ВЫИГРАЙ МАТЧ', need: 1, coins: 120 },
+  { id: 'rally8', ru: 'РОЗЫГРЫШ ИЗ 8 УДАРОВ', need: 1, coins: 100 },
+  { id: 'topspin', ru: '10 ТОПСПИНОВ', need: 10, coins: 90 },
+  { id: 'smash', ru: '3 СМЕША', need: 3, coins: 110 },
+  { id: 'serves', ru: '5 ЛЕГАЛЬНЫХ ПОДАЧ ПОДРЯД', need: 5, coins: 100 },
+  { id: 'replay', ru: 'ПОСМОТРИ ЛУЧШИЙ МОМЕНТ', need: 1, coins: 80 },
+];
+
+class Profile {
+  constructor(platform) {
+    this.platform = platform;
+    this.data = this.blank();
+    this.loaded = false;
+    this.dirty = false;
+    this.load();
+  }
+
+  blank() {
+    return {
+      v: SAVE_VERSION,
+      created: Date.now(),
+      days: [],
+      streak: 0,
+      coins: 250,
+      crystals: 0,
+      xp: 0, level: 1,
+      owned: ['b_base', 'r_base'],
+      equip: { blade: 'b_base', fh: 'r_base', bh: 'r_base' },
+      cosmetics: { trail: 'std', arena: 'arena', grip: 'std' },
+      career: { div: 0, event: 0, points: 0, cups: 0, trophies: [], seen: 0 },
+      stats: { matches: 0, wins: 0, shots: 0, rallies: 0, maxRally: 0, minutes: 0, bestSpeed: 0, bestSpin: 0, moments: 0 },
+      daily: { day: '', tasks: {}, done: [], claimed: [], wheel: '' },
+      season: { n: 0, xp: 0, premium: false, claimed: [] },
+      ads: { watched: 0, last: 0 },
+      purchases: [],
+      settings: null,
+    };
+  }
+
+  load() {
+    let raw = null;
+    try { raw = (typeof localStorage !== 'undefined') ? localStorage.getItem(SAVE_KEY) : null; } catch (e) { raw = null; }
+    if (raw) {
+      try {
+        const d = JSON.parse(raw);
+        const base = this.blank();
+        this.data = Object.assign(base, d);
+        this.data.stats = Object.assign(base.stats, d.stats || {});
+        this.data.daily = Object.assign(base.daily, d.daily || {});
+        this.data.season = Object.assign(base.season, d.season || {});
+        this.data.career = Object.assign(base.career, d.career || {});
+        this.data.cosmetics = Object.assign(base.cosmetics, d.cosmetics || {});
+        if (!Array.isArray(this.data.owned) || !this.data.owned.length) this.data.owned = ['b_base', 'r_base'];
+        this.migrate(d.v || 1);
+      } catch (e) { this.data = this.blank(); }
+    }
+    this.migrate(this.data.v);
+    this.loaded = true;
+    this.today();
+    return this.data;
+  }
+
+  migrate(from) {
+    const d = this.data;
+    if (from < 2) { d.equip = d.equip || { blade: 'b_base', fh: 'r_base', bh: 'r_base' }; }
+    if (from < 3) {
+      for (const id of ['b_base', 'r_base']) if (d.owned.indexOf(id) < 0) d.owned.push(id);
+      d.cosmetics = d.cosmetics || { trail: 'std', arena: 'arena', grip: 'std' };
+    }
+    /* an old save may know only some of the three racket slots */
+    d.equip = d.equip || {};
+    d.equip.blade = d.equip.blade || 'b_base';
+    d.equip.fh = d.equip.fh || 'r_base';
+    d.equip.bh = d.equip.bh || d.equip.fh || 'r_base';
+    d.cosmetics = d.cosmetics || { trail: 'std', arena: 'arena', grip: 'std' };
+    d.v = SAVE_VERSION;
+  }
+
+  save(force) {
+    if (!this.dirty && !force) return true;
+    try {
+      if (typeof localStorage !== 'undefined') { localStorage.setItem(SAVE_KEY, JSON.stringify(this.data)); }
+      this.dirty = false;
+      return true;
+    } catch (e) { return false; }        // private mode: the game still plays
+  }
+
+  touch() { this.dirty = true; if (this._sv === undefined) this._sv = 0; }
+  maybeSave(dt) {                      // cheap: write at most every 4 s
+    if (!this.dirty) return;
+    this._sv = (this._sv || 0) + dt;
+    if (this._sv > 4) { this._sv = 0; this.save(); }
+  }
+
+  /* ------------------------------ time --------------------------- */
+  dayKey(t) {
+    const d = new Date(t || Date.now());
+    return d.getFullYear() + '-' + (d.getMonth() + 1) + '-' + d.getDate();
+  }
+  today() {
+    const k = this.dayKey();
+    const d = this.data.daily;
+    if (d.day !== k) {
+      const y = this.dayKey(Date.now() - 86400000);
+      this.data.streak = (d.day === y) ? (this.data.streak + 1) : 1;
+      d.day = k; d.tasks = {}; d.done = []; d.claimed = [];
+      this.touch();
+    }
+    this.data.days = this.data.days || [];
+    if (this.data.days.indexOf(k) < 0) { this.data.days.push(k); if (this.data.days.length > 60) this.data.days.shift(); }
+    return this.data.streak;
+  }
+
+  /* ------------------------------ money -------------------------- */
+  addCoins(n, why) {
+    this.data.coins = Math.max(0, Math.round(this.data.coins + n));
+    this.touch();
+    if (this.onCoins) this.onCoins(n, why);
+    return this.data.coins;
+  }
+  spend(coins, crystals) {
+    const d = this.data;
+    if (d.coins < (coins || 0) || d.crystals < (crystals || 0)) return false;
+    d.coins -= coins || 0; d.crystals -= crystals || 0;
+    this.touch();
+    return true;
+  }
+  addXP(n) {
+    const d = this.data;
+    d.xp += n;
+    const need = (lv) => 400 + lv * 260;
+    while (d.xp >= need(d.level)) { d.xp -= need(d.level); d.level++; if (this.onLevel) this.onLevel(d.level); }
+    this.touch();
+    return d.level;
+  }
+  xpToNext() { return 400 + this.data.level * 260; }
+
+  /* ---------------------------- inventory ------------------------ */
+  owns(id) { return this.data.owned.indexOf(id) >= 0; }
+  buy(id, price, currency) {
+    if (this.owns(id)) return false;
+    const ok = currency === 'crystals' ? this.spend(0, price) : this.spend(price, 0);
+    if (!ok) return false;
+    this.data.owned.push(id);
+    this.data.purchases.push({ id, price, currency, t: Date.now() });
+    this.touch(); this.save(true);
+    return true;
+  }
+  equipRacket(blade, fh, bh) {
+    for (const id of [blade, fh, bh]) if (id && !this.owns(id)) return false;
+    this.data.equip = { blade, fh, bh };
+    this.touch(); this.save(true);
+    return true;
+  }
+
+  /* ------------------------------- daily ------------------------- */
+  taskProgress(id, add, absolute) {
+    const d = this.data.daily;
+    const t = DAILY_TASKS.find((x) => x.id === id);
+    if (!t || d.claimed.indexOf(id) >= 0) return;
+    const cur = absolute !== undefined ? absolute : (d.tasks[id] || 0) + add;
+    d.tasks[id] = cur;
+    if (cur >= t.need && d.done.indexOf(id) < 0) { d.done.push(id); this.touch(); }
+    this.touch();
+  }
+  claimTask(id) {
+    const d = this.data.daily;
+    const t = DAILY_TASKS.find((x) => x.id === id);
+    if (!t || d.done.indexOf(id) < 0 || d.claimed.indexOf(id) >= 0) return 0;
+    d.claimed.push(id);
+    const bonus = this.data.streak >= 7 ? 1.5 : this.data.streak >= 3 ? 1.25 : 1;
+    const coins = Math.round(t.coins * bonus);
+    this.addCoins(coins, 'task:' + id);
+    this.save(true);
+    return coins;
+  }
+  get dailyDone() { return this.data.daily.done.length; }
+
+  /* ------------------------------ season ------------------------- */
+  seasonLevel() { return Math.min(60, 1 + Math.floor(this.data.season.xp / 250)); }
+  seasonProgress() { return clamp((this.data.season.xp % 250) / 250, 0, 1); }
+  addSeasonXP(n) {
+    const s = this.data.season;
+    const before = this.seasonLevel();
+    s.xp += n;
+    this.touch();
+    return this.seasonLevel() - before;      // how many levels just landed
+  }
+
+  /* ------------------------- match outcomes ---------------------- */
+  onMatchEnd(won, score, stats, moments) {
+    const d = this.data, s = d.stats;
+    const coins = won ? 30 : 8;
+    const xp = won ? 120 : 45;
+    s.matches++; if (won) s.wins++;
+    s.shots += stats.shots || 0;
+    s.rallies += stats.rallies || 0;
+    s.maxRally = Math.max(s.maxRally, stats.bestRally || 0);
+    s.bestSpeed = Math.max(s.bestSpeed, stats.maxSpeed || 0);
+    s.bestSpin = Math.max(s.bestSpin, stats.maxSpin || 0);
+    s.moments += moments || 0;
+    const lv = this.addXP(xp);
+    const se = this.addSeasonXP(xp);
+    this.addCoins(coins, 'match');
+    if (won) this.taskProgress('win1', 1);
+    this.touch(); this.save(true);
+    return { coins, xp, level: lv, seasonLevels: se };
+  }
+}
+
+/* ------------------------------------------------------------------ *
+ *  Shop: what is for sale, at what price, and on which platform.
+ *  Prices are in soft coins (earned by playing) or crystals (bought),
+ *  and cosmetics are the only thing crystals can buy.
+ * ------------------------------------------------------------------ */
+const COSMETICS = [
+  { id: 'trail_std', kind: 'trail', ru: 'СЛЕД · СТАНДАРТ', price: 0, cur: 'coins', val: 'std' },
+  { id: 'trail_gold', kind: 'trail', ru: 'СЛЕД · ЗОЛОТО', price: 240, cur: 'crystals', val: 'gold' },
+  { id: 'trail_ice', kind: 'trail', ru: 'СЛЕД · ЛЁД', price: 180, cur: 'crystals', val: 'ice' },
+  { id: 'arena_club', kind: 'arena', ru: 'АРЕНА · КЛУБ', price: 0, cur: 'coins', val: 'arena' },
+  { id: 'arena_world', kind: 'arena', ru: 'АРЕНА · АРЕНА МИРА', price: 1, cur: 'career', val: 'world' },
+  { id: 'grip_red', kind: 'grip', ru: 'НАКЛАДКА РУЧКИ · АЛЫЙ', price: 120, cur: 'crystals', val: 'red' },
+];
+
+const SHOP_BUNDLES = [
+  { id: 'starter', ru: 'СТАРТОВЫЙ НАБОР', crystals: 300, coins: 1500, price: '2.99', cur: 'eur', once: true,
+    note: 'основание LOOPER + 300 кристаллов' },
+  { id: 'crystals_120', ru: '120 КРИСТАЛЛОВ', crystals: 120, price: '1.19', cur: 'eur' },
+  { id: 'crystals_650', ru: '650 КРИСТАЛЛОВ', crystals: 650, price: '4.99', cur: 'eur', best: true },
+  { id: 'crystals_1500', ru: '1500 КРИСТАЛЛОВ', crystals: 1500, price: '9.99', cur: 'eur' },
+  { id: 'pass', ru: 'СЕЗОННЫЙ ПРОПУСК', pass: true, price: '4.99', cur: 'eur',
+    note: '60 уровней, скины, арены, 400 кристаллов' },
+  { id: 'noads', ru: 'БЕЗ РЕКЛАМЫ НАВСЕГДА', noads: true, price: '3.99', cur: 'eur' },
+];
+
+class Shop {
+  constructor(profile, platform, analytics) {
+    this.p = profile; this.platform = platform; this.an = analytics;
+    this.log = [];
+  }
+
+  /** Racket items, priced in coins so that playing unlocks everything. */
+  racketOffers() {
+    const out = [];
+    for (const id in ITEMS) {
+      const it = ITEMS[id];
+      if (it.kind !== 'blade' && it.kind !== 'rubber') continue;
+      out.push({
+        id, item: it, kind: it.kind, ru: it.ru, name: it.name,
+        price: it.price, cur: 'coins', owned: this.p.owns(id), tier: it.tier, star: !!it.star,
+      });
+    }
+    return out;
+  }
+
+  cosmeticOffers() {
+    return COSMETICS.map((c) => ({
+      ...c, owned: this.p.data.cosmetics[c.kind] === c.val || (c.cur === 'coins' && c.price === 0),
+    }));
+  }
+
+  /** Only shown when the platform allows real money (not on Poki/Y8). */
+  iapOffers() {
+    if (!this.platform.canIAP) return [];
+    return SHOP_BUNDLES.map((b) => ({ ...b, owned: this.p.data.purchases.some((x) => x.id === b.id) }));
+  }
+
+  buyRacket(id) {
+    const it = ITEMS[id];
+    if (!it || it.price === undefined) return false;
+    if (!this.p.buy(id, it.price, 'coins')) return false;
+    this.an && this.an.send('shop:buy', { id, cur: 'coins', price: it.price });
+    this.log.push({ id, t: Date.now() });
+    return true;
+  }
+
+  buyCosmetic(id) {
+    const c = COSMETICS.find((x) => x.id === id);
+    if (!c) return false;
+    if (c.cur === 'career') return false;                 // earned, never sold
+    if (c.cur === 'crystals') {
+      if (!this.p.spend(0, c.price)) return false;
+    }
+    this.p.data.cosmetics[c.kind] = c.val;
+    this.p.touch(); this.p.save(true);
+    this.an && this.an.send('shop:buy', { id, cur: c.cur, price: c.price });
+    return true;
+  }
+
+  /**
+   * Real-money purchase. The actual store call belongs to the wrapper
+   * (Capacitor / portal SDK); this is the entitlement side, which is the
+   * part that must be right: grant once, record it, never refund silently.
+   */
+  grant(bundleId, receipt) {
+    const b = SHOP_BUNDLES.find((x) => x.id === bundleId);
+    if (!b) return false;
+    const d = this.p.data;
+    if (b.once && d.purchases.some((x) => x.id === bundleId)) return false;
+    d.purchases.push({ id: bundleId, t: Date.now(), receipt: receipt ? 'ok' : 'none' });
+    if (b.crystals) d.crystals += b.crystals;
+    if (b.coins) d.coins += b.coins;
+    if (b.pass) d.season.premium = true;
+    if (b.noads) d.ads.noadsBought = true;
+    if (bundleId === 'starter') { if (!this.p.owns('b_loop')) d.owned.push('b_loop'); }
+    this.p.touch(); this.p.save(true);
+    this.an && this.an.send('iap:grant', { id: bundleId, eur: b.price });
+    return true;
+  }
+
+  /**
+   * Rewarded video. The offer must be concrete and the answer must be
+   * "no thanks" — a rewarded ad with no refusal is a toll booth.
+   */
+  rewardAd(kind) {
+    const p = this.p;
+    if (p.data.ads.noadsBought) return { ok: false, why: 'no-ads' };
+    const now = Date.now();
+    if (now - (p.data.ads.last || 0) < 45000) return { ok: false, why: 'cooldown', left: Math.ceil((45000 - (now - p.data.ads.last)) / 1000) };
+    const table = {
+      coins2x: { coins: 120, ru: '×2 монеты за матч' },
+      secondChance: { coins: 0, ru: 'второй шанс в турнире' },
+      dailyWheel: { coins: 120, ru: 'колесо дня' },
+    };
+    const offer = table[kind] || table.coins2x;
+    p.data.ads.last = now;
+    p.data.ads.watched++;
+    if (offer.coins) p.addCoins(offer.coins, 'ad:' + kind);
+    p.touch(); p.save(true);
+    this.an && this.an.send('ad:rewarded', { kind, coins: offer.coins });
+    return { ok: true, coins: offer.coins, offer };
+  }
+}
+
+/* ------------------------------------------------------------------ *
+ *  Economy tuning, in one place so it can be argued with.
+ * ------------------------------------------------------------------ */
+const ECONOMY = {
+  matchWin: 30, matchLoss: 8, tournamentWin: 250, dailyTask: '90–120',
+  level: 120, season: 250,
+  note: 'Сессия 12 минут ≈ 2 матча ≈ 70 монет + 1–2 задания. Скин ракетки 900 —'
+      + ' это примерно 8 игровых сессий, или один вечер с двумя рекламными удвоениями.',
+};
+
+
 /* ====== 90_boot.js ====== */
 /* =====================================================================
  *  BOOT
@@ -6359,6 +8237,6 @@ const ICON = {
 })();
 
 </script>
-<!-- TOPSPIN ARENA · self-contained build 2026-10-10 · no external assets, no network required -->
+<!-- TOPSPIN ARENA · self-contained build 2026-10-11 · no external assets, no network required -->
 </body>
 </html>

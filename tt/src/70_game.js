@@ -62,6 +62,21 @@ class Game {
     this.ai = new OpponentAI(2);
     this.swipe = new SwipeTracker();
     this.particles = new Particles();
+    this.rig = new PaddleRig();
+    this.equip = new Equipment();
+    this.aiEquip = new Equipment('b_carb', 'r_base', 'r_base');
+    /* the commercial layer: profile, shop, analytics, and where we run */
+    this.platform = new Platform(typeof navigator !== 'undefined' ? navigator : null);
+    this.analytics = new Analytics(this.platform);
+    this.profile = new Profile(this.platform);
+    this.shop = new Shop(this.profile, this.platform, this.analytics);
+    this.applyEquipment();
+    this.loadSettings();
+    this.matchTasks = { topspin: 0, smash: 0, serves: 0, moments: 0 };
+    this.iap = null;                     // the mobile wrapper sets this
+    this.moments = new MomentRecorder();
+    this.replayer = new MomentPlayer();
+    this.replayer.onEnd = () => this.endReplay();
 
     this.settings = {
       assist: 0.72,
@@ -81,6 +96,7 @@ class Game {
       adaptive: true,                    // dynamic difficulty
       showDebug: false,
       slowmoOnBigShots: true,
+      slowmoPlayer: true,                // bullet time, for the player, in casual play only
       targetScore: 11,
       sensitivity: 1.0,
     };
@@ -137,6 +153,7 @@ class Game {
       byStroke: {}, totalSpin: 0, rallies: 0,
     };
     this.replayBuf = []; this.replayMax = 360; this.replay = null;
+    this.slowmo = { on: false, energy: 1, active: false, allowed: true, used: 0 };
     this.predictPath = [];
     this.predictOut = {};
     this.lastShotInfo = null;
@@ -188,11 +205,13 @@ class Game {
       ptrs.set(e.pointerId, { x: e.clientX, y: e.clientY });
       e.preventDefault();
 
+      if (this.replayer.on) return;
       if (e.button === 2 || e.button === 1) {        // right / middle: orbit
         dropStroke();
         orbit = { kind: 'drag', x: e.clientX, y: e.clientY };
         return;
       }
+      if (this.replayer.on) { this.skipReplay(); return; }   // tap = skip the reel
       if (ptrs.size >= 2) {                          // second finger: orbit
         dropStroke();
         const g = centroid();
@@ -289,6 +308,7 @@ class Game {
 
   /* --------------------------- match flow -------------------------- */
   startMatch(diff) {
+    this.matchTasks = { topspin: 0, smash: 0, serves: 0, moments: 0 };
     this.training = null;
     this.matchWinner = 0;
     this.ai.reset();
@@ -350,6 +370,7 @@ class Game {
     this.isServeBall = true;
     this.setState(GS.SERVE_READY);
     this.recorder.begin(this.time, s);
+    this.moments.beginRally(this.time, this.score);
     this.ai.setPressure(this.score[1], this.score[0], this.settings.targetScore);
     if (s < 0) this.aiServeTimer = rnd(0.7, 1.3);
   }
@@ -401,6 +422,11 @@ class Game {
 
     this.audio.point(who > 0);
     this.msg(reason, 1.5, who > 0 ? '#6ee7a8' : '#ff8a8a', true);
+    // the filter: keep this rally only if it is worth watching again
+    this.lastMoment = this.moments.endRally(this.time, this, {
+      winner: who, reason, score: this.score, target: this.settings.targetScore,
+    });
+    if (this.lastMoment && this.ui) this.ui.flashMoment(this.lastMoment, this.moments.kept.indexOf(this.lastMoment));
     this.setState(GS.POINT);
     this.shakeIt(0.5, V3.new(rndSym(1), 1, 0));
 
@@ -510,6 +536,14 @@ class Game {
         x: contactP.x, y: contactP.y, z: contactP.z, quality,
       }, this.lastShotInfo));
       if (this.training) this.training.onPlayerHit(this.lastShotInfo);
+      this.moments.addContact(this.time, {
+        by: 1, stroke: (racket.stroke && racket.stroke.id) || '?',
+        speed: speed * 3.6, spin: spin / TAU, quality,
+      });
+      const sid = racket.stroke && racket.stroke.id;
+      if (sid === 'LOOP' || sid === 'COUNTER') this.matchTasks.topspin++;
+      else if (sid === 'SMASH') this.matchTasks.smash++;
+      else if (sid === 'SERVE_TOP' || sid === 'SERVE_SIDE' || sid === 'SERVE_FAST' || sid === 'SERVE_BACK') this.matchTasks.serves++;
       this.buzz(Math.round(lerp(8, 26, clamp(speed / 90, 0, 1))));
       this.shakeIt(clamp(speed / 55, 0.03, 0.38), V3.new(rndSym(0.4), 0.5, 1));
       if (this.settings.slowmoOnBigShots && speed * 3.6 > 78) this.punchSlowmo(0.42, 0.26);
@@ -528,12 +562,173 @@ class Game {
         slip: !!(this.ai.lastShot && this.ai.lastShot.slip),
       });
       this.ui && this.ui.showAiShot(racket.stroke);
+      this.moments.addContact(this.time, {
+        by: -1, stroke: (racket.stroke && racket.stroke.id) || '?',
+        speed: speed * 3.6, spin: spin / TAU, quality,
+      });
     }
   }
 
   punchSlowmo(scale, dur) {
     this.targetTimeScale = scale;
     this.slowmoUntil = this.time + dur;
+  }
+
+  /* ------------------------- player slow-mo ------------------------ *
+   * Bullet time for the player, and only for the player. It is a
+   * reaction aid, not a way to win: the ball slows, but so does the
+   * opponent's racket and your own swing window, so the shot you
+   * produce is the shot you produce. It is switched off entirely in
+   * career tournaments and online matches, where the score counts. */
+  setSlowmoHold(v) {
+    const S = this.slowmo;
+    if (v && !this.slowmoAvailable()) return;
+    S.on = !!v;
+    if (S.on && !S.active) this.audio.slowIn && this.audio.slowIn();
+  }
+
+  slowmoAvailable() {
+    const S = this.slowmo;
+    return this.settings.slowmoPlayer !== false && S.allowed && !this.training &&
+      (this.state === GS.RALLY || this.state === GS.SERVE_TOSS || this.state === GS.SERVE_READY);
+  }
+
+  updateSlowmo(dtReal) {
+    const S = this.slowmo;
+    const want = S.on && this.slowmoAvailable() && S.energy > 0.015;
+    if (want) {
+      S.energy = Math.max(0, S.energy - dtReal * 0.40);     // ~2.5 s from full
+      S.used += dtReal;
+    } else {
+      S.energy = Math.min(1, S.energy + dtReal * 0.09);     // ~11 s to refill
+      S.on = S.on && S.energy > 0.015;                      // ran dry → release
+    }
+    S.active = want;
+    if (want) { this.targetTimeScale = 0.34; this.slowmoUntil = 0; }
+    else if (!this.slowmoUntil) this.targetTimeScale = 1;
+  }
+
+  /** Career tournaments and online matches call this with false. */
+  setSlowmoAllowed(v) { this.slowmo.allowed = !!v; if (!v) this.setSlowmoHold(false); }
+
+  /* --------------------------- settings ---------------------------- */
+
+  /** The player's preferences are part of the save: coming back to a game
+   *  that has forgotten your sensitivity is coming back to a stranger. */
+  saveSettings() {
+    if (!this.profile) return;
+    const s = this.settings;
+    this.profile.data.settings = {
+      assist: s.assist, posAssist: s.posAssist, difficulty: s.difficulty, quality: s.quality,
+      sound: s.sound, volume: s.volume, camera: s.camera, hand: s.hand,
+      showTrail: s.showTrail, showPredict: s.showPredict, showZone: s.showZone,
+      showTele: s.showTele, haptics: s.haptics, coach: s.coach, adaptive: s.adaptive,
+      slowmoPlayer: s.slowmoPlayer, targetScore: s.targetScore, sensitivity: s.sensitivity,
+    };
+    this.profile.touch();
+  }
+
+  loadSettings() {
+    if (!this.profile || !this.profile.data.settings) return false;
+    Object.assign(this.settings, this.profile.data.settings);
+    if (this.settings.volume !== undefined) this.audio.setVolume(this.settings.volume);
+    if (this.settings.sound === false) this.audio.setMuted(true);
+    if (this.settings.difficulty !== undefined) this.ai.setLevel(this.settings.difficulty);
+    if (this.settings.quality) this.R.quality = this.settings.quality;
+    return true;
+  }
+
+  /* --------------------------- equipment --------------------------- */
+
+  /** Paddle materials for the equipped racket. Cached: the workshop is a
+   *  menu, not a per-frame cost. The faces stay red and black (ITTF 2.04.8
+   *  — a bat must have two differently coloured faces), and what the shop
+   *  sells is the frame: the wood, the grip and the shade. */
+  paddleMats(S, eq) {
+    const e = eq || this.equip;
+    if (!e) return null;
+    const c = e.colours;
+    const key = e.bladeId + '|' + e.fhId + '|' + e.bhId;
+    this._eqCache = this._eqCache || {};
+    if (this._eqCache[key]) return this._eqCache[key];
+    const ma = S.mat;
+    const tint = (col, base, k) => [0, 1, 2].map((i) => base.color[i] * (1 - k + k * col[i] * 2.2));
+    this._eqMats = {
+      wood: Object.assign({}, ma.bladeWood, {
+        color: tint(c.wood, ma.bladeWood, 0.85),
+        emissive: [0.055 * c.wood[0], 0.042 * c.wood[1], 0.028 * c.wood[2]],
+      }),
+      grip: Object.assign({}, ma.handle, { color: tint(c.grip, ma.handle, 0.8) }),
+      red: Object.assign({}, ma.rubberRed, { color: tint(c.fore, ma.rubberRed, 0.22) }),
+      black: Object.assign({}, ma.rubberBlack, { color: tint(c.back, ma.rubberBlack, 0.22) }),
+    };
+    this._eqCache[key] = this._eqMats;
+    return this._eqMats;
+  }
+
+  /** Pull the fitted racket out of the profile and into the physics. */
+  applyEquipment() {
+    const e = this.profile ? this.profile.data.equip : { blade: 'b_base', fh: 'r_base', bh: 'r_base' };
+    this.equip.set(e.blade, e.fh, e.bh);
+    return this.equip;
+  }
+
+  /* ---------------------------- replay ----------------------------- */
+
+  /** Play a recorded moment. `after` runs when the clip ends or is skipped. */
+  watchMoment(moment, hero, after) {
+    if (!moment) return false;
+    this.setSlowmoHold(false);
+    this.ball.live = true;
+    if (!this.replayer.play(moment, hero ? 0.35 : 0.5)) return false;
+    this.replayAfter = after || null;
+    const back = this.state;
+    this.replayFrom = back === GS.MATCH_END ? GS.MATCH_END : GS.POINT;
+    this.setState(GS.REPLAY);
+    this.ui && this.ui.replayShow(true, moment, !!hero);
+    this.audio.applause(hero ? 1.4 : 0.6);
+    if (this.profile) this.profile.taskProgress('replay', 0, 1);
+    this.analytics && this.analytics.send('replay:watch', { shots: moment.shots, speed: Math.round(moment.speed), hero: !!hero });
+    return true;
+  }
+
+  skipReplay() {
+    if (!this.replayer.on) return;
+    this.replayer.finish();
+    this.endReplay();
+  }
+
+  endReplay() {
+    this.ui && this.ui.replayShow(false);
+    this.camFov = undefined;
+    if (this.state === GS.REPLAY) this.setState(this.replayFrom || GS.POINT);
+    const cb = this.replayAfter; this.replayAfter = null;
+    if (cb) cb();
+  }
+
+  /** Everything that has to be written down when the last point lands. */
+  settleMatch() {
+    const won = this.matchWinner > 0;
+    const p = this.profile;
+    if (!p) return;
+    const res = p.onMatchEnd(won, this.score, this.stats, this.moments.kept.length);
+    p.taskProgress('topspin', 0, this.matchTasks.topspin >= 10 ? 10 : 0);
+    p.taskProgress('smash', 0, this.matchTasks.smash >= 3 ? 3 : 0);
+    p.taskProgress('serves', 0, this.matchTasks.serves >= 5 ? 5 : 0);
+    if (this.bestRally >= 8) p.taskProgress('rally8', 0, 1);
+    this.analytics && this.analytics.send('match:end', {
+      won, score: this.score.join('-'), rally: this.bestRally, shots: this.stats.shots,
+      moments: this.moments.kept.length, level: p.data.level, session: Math.round(this.analytics.sessionSec),
+    });
+    this.lastReward = res;
+    this.ui && this.ui.refreshMenuBits && this.ui.refreshMenuBits();
+  }
+
+  /** After the final point: a short reel of the best rally, then the score. */
+  playBestMoments() {
+    const m = this.moments.best;
+    if (!m) return false;
+    return this.watchMoment(m, true, null);
   }
 
   /* ----------------- continuous collision: ball vs paddle ---------- */
@@ -610,6 +805,7 @@ class Game {
           this.particles.burst(xAt, yAt, 0, 7, 0.7, 0.3, 0.013, 0.8, 0.85, 1);
           if (this.isServeBall) { this.letServe(); return; }
           this.netTouched = true;
+          this.moments.addBounce(true);
         }
       }
     }
@@ -693,7 +889,7 @@ class Game {
     const isServeStroke = this.isServeBall && b.lastHitBy === 0 && this.server === 1;
     pad.lastHitT = this.time;
     const contact = V3.new(hit.x, hit.y, hit.z);
-    const sweet = clamp(1 - hit.rad / radius, 0, 1);
+    const sweet = clamp((1 - hit.rad / radius) * this.equip.sweetK, 0, 1);
 
     // ---- build the stroke from the live gesture --------------------
     const sw = this.swipe;
@@ -709,11 +905,19 @@ class Game {
         ball: { y: contact.y, z: contact.z },
         ballSpin: b.w, ballSpeed: V3.len(b.v),
         powerScale: 1,
+        equip: this.equip.forSide(1),      // the rubber object for this bat
       };
       racket = deriveStroke(m, ctx);
+      racket.vmag *= this.equip.vmagK;     // swing weight of the frame
       quality = clamp(racket.quality * (0.55 + 0.45 * sweet) * (0.70 + 0.30 * timing), 0.18, 1);
       racket.quality = quality;
       racket = refineRacket(contact, b.v, b.w, racket, this.settings.assist, quality);
+      // Losing a point because the *solver* could not keep a serve on the
+      // table is never acceptable: re-solve the serve with full execution
+      // help, which is a legal serve by construction (ITTF 2.06.4).
+      if (isServeStroke && racket.valid === false) {
+        racket = refineRacket(contact, b.v, b.w, racket, 1, quality);
+      }
       racket.sweet = sweet; racket.timing = timing;
     } else {
       // Passive contact: the ball meets a bat that is not swinging. Real
@@ -966,7 +1170,12 @@ class Game {
     V3.set(this.camPosT, px, py, pz);
     V3.set(this.camLookT, lx, ly, lz);
     this.fovT = fov;
+    this.applyCamera(dt);
+  }
 
+  /** Smoothing, shake and the actual setCamera call — shared by the live
+   *  camera and the replay camera. */
+  applyCamera(dt) {
     const k = 6.5;
     this.camPos.x = expSmooth(this.camPos.x, this.camPosT.x, k, dt);
     this.camPos.y = expSmooth(this.camPos.y, this.camPosT.y, k, dt);
@@ -988,15 +1197,41 @@ class Game {
     this.R.setLightFrustum(V3.new(0, PH.TABLE_Y, 0), 6.0, 2.35, 0.5, 14);
   }
 
+  /** A replay is shot, not spectated: the camera drifts in from wide and
+   *  swings over the ball for the contact, so the stroke reads like a
+   *  photograph instead of a video of a game. */
+  updateCameraReplay(dtReal) {
+    const rp = this.replayer, b = this.ball.p;
+    const prog = rp.moment ? clamp(rp.i / Math.max(1, rp.lastFrame), 0, 1) : 0;
+    const t = clamp((prog - 0.42) / 0.5, 0, 1);
+    const e = t * t * (3 - 2 * t);                     // smoothstep
+    const wx = clamp(b.x * 0.35, -1.4, 1.4), wz = clamp(b.z * 0.25 + 3.35, 2.4, 4.0);
+    const ox = clamp(b.x * 0.75, -1.5, 1.5), oz = clamp(b.z + 1.35, 0.55, 3.1);
+    V3.set(this.camPosT, lerp(wx, ox, e), lerp(2.02, 1.34, e) + Math.sin(this.time * 0.7) * 0.02, lerp(wz, oz, e));
+    V3.set(this.camLookT, b.x * 0.9, b.y * 0.9 + 0.06, b.z * 0.9);
+    this.fovT = lerp(41, 34, e);
+    this.applyCamera(dtReal);
+  }
+
   /* ------------------------------ update --------------------------- */
   update(dtReal) {
     this.frame++;
+    /* ---- a replay owns the whole update: physics is off, the clip is
+       the truth, and the camera is a filmmaker rather than a spectator ---- */
+    if (this.replayer.on) {
+      this.time += dtReal;
+      this.replayer.update(dtReal, this);
+      this.particles.update(dtReal);
+      this.updateCameraReplay(dtReal);
+      return;
+    }
     const ts = this.timeScale;
     const dt = Math.min(dtReal, 0.05) * ts;
     this.time += dtReal;
     this.stateT += dtReal;
 
     if (this.slowmoUntil && this.time > this.slowmoUntil) { this.targetTimeScale = 1; this.slowmoUntil = 0; }
+    this.updateSlowmo(dtReal);
     this.timeScale = expSmooth(this.timeScale, this.targetTimeScale, 9, dtReal);
 
     // state machine
@@ -1020,7 +1255,11 @@ class Game {
         break;
       case GS.SERVE_TOSS:
         if (this.server === -1 && this.time > this.aiSwingAt && this.ball.lastHitBy === 0) {
-          const racket = this.ai.serve(this);
+          let racket = this.ai.serve(this);
+          // the opponent does not get to donate points either
+          if (racket.valid === false) {
+            racket = refineRacket(this.ball.p, this.ball.v, this.ball.w, racket, 1, racket.quality);
+          }
           const contact = V3.clone(this.ball.p);
           const info = impactRacket(this.ball.v, this.ball.w, racket.normal, racket.vR, racket.quality, racket.rubber || {});
           V3.copy(this.aiPaddle.pos, this.ball.p);
@@ -1038,6 +1277,7 @@ class Game {
         if (this.matchWinner && this.stateT > 1.35) {
           this.setState(GS.MATCH_END);
           this.audio.gameOver(this.matchWinner > 0);
+          this.settleMatch();
           this.ui && this.ui.showMatchEnd(this.matchWinner > 0);
         } else if (this.stateT > 1.35) {
           this.rally = 0;
@@ -1062,6 +1302,7 @@ class Game {
 
     this.updatePlayerPaddle(dtReal);
     this.updateStrikeWindow(dtReal);
+    if (this.state === GS.RALLY || this.state === GS.SERVE_TOSS) this.moments.push(this.time, this);
     if (this.training) this.training.update(dtReal);
     else this.ai.think(this, dt);
     this.tryAiHit();
@@ -1071,6 +1312,10 @@ class Game {
     for (const m of this.messages) m.t += dtReal;
     while (this.messages.length && this.messages[0].t > this.messages[0].dur) this.messages.shift();
     this.hitFlash = Math.max(0, this.hitFlash - dtReal * 3.2);
+    if (this.profile) {
+      this.profile.data.stats.minutes += dtReal / 60;
+      this.profile.maybeSave(dtReal);
+    }
     this.updateCamera(dtReal);
 
     // post-processing reacts to the action
@@ -1145,16 +1390,17 @@ class Game {
 
     /* player paddle */
     const pad = this.player;
+    const PM = this.paddleMats(S) || ma;
     const pq = Q.lookRotation(Q.new(), pad.normal, { x: 0, y: 1, z: 0 });
     const roll = Q.setAxisAngle(Q.new(), 0, 0, 1, (this.settings.hand === 'right' ? -0.42 : 0.42) + pad.swing * 0.3);
     Q.mul(pq, pq, roll);
     M4.compose(tmp.m, pad.pos, pq, V3.set(tmp.scl, 1, 1, 1));
-    d(me.blade, tmp.m, ma.bladeWood);
+    d(me.blade, tmp.m, PM.wood);
     if (!shadowPass) {
       M4.compose(tmp.m2, V3.addScaled(V3.new(), pad.pos, pad.normal, 0.0085), pq, V3.set(tmp.scl, 1, 1, 1));
-      R.draw(me.rubber, tmp.m2, ma.rubberBlack);
+      R.draw(me.rubber, tmp.m2, PM.black);
       M4.compose(tmp.m2, V3.addScaled(V3.new(), pad.pos, pad.normal, -0.0085), pq, V3.set(tmp.scl, 1, 1, 1));
-      R.draw(me.rubber, tmp.m2, ma.rubberRed);
+      R.draw(me.rubber, tmp.m2, PM.red);
     }
     // handle
     {
@@ -1162,10 +1408,11 @@ class Game {
       const wo = V3.new();
       M4.transformDir(wo, tmp.m, off);
       M4.compose(tmp.m2, V3.add(V3.new(), pad.pos, wo), pq, V3.set(tmp.scl, 1, 1, 1));
-      d(me.handle, tmp.m2, ma.handle);
+      d(me.handle, tmp.m2, PM.grip);
     }
 
-    /* AI paddle + stylised opponent */
+    /* the opponent: paddle, hand, forearm and sleeve, all solved from
+       the paddle's own position and normal (see 56_rig.js) */
     const ap = this.aiPaddle;
     const an = V3.norm(V3.new(), V3.sub(V3.new(), this.ball.p, this.ai.pos));
     an.z = Math.abs(an.z) * 1 || 1;
@@ -1178,16 +1425,17 @@ class Game {
       1));
     V3.copy(ap.normal, aiNorm);
     V3.copy(ap.pos, this.ai.pos);
-    const aq = Q.lookRotation(Q.new(), aiNorm, { x: 0, y: 1, z: 0 });
-    M4.compose(tmp.m, ap.pos, aq, V3.set(tmp.scl, 1, 1, 1));
-    d(me.blade, tmp.m, ma.bladeWood);
-    if (!shadowPass) {
-      M4.compose(tmp.m2, V3.addScaled(V3.new(), ap.pos, aiNorm, 0.0085), aq, V3.set(tmp.scl, 1, 1, 1));
-      R.draw(me.rubber, tmp.m2, ma.rubberBlack);
-      M4.compose(tmp.m2, V3.addScaled(V3.new(), ap.pos, aiNorm, -0.0085), aq, V3.set(tmp.scl, 1, 1, 1));
-      R.draw(me.rubber, tmp.m2, ma.rubberRed);
+    if (shadowPass) {
+      const aqS = Q.lookRotation(Q.new(), aiNorm, { x: 0, y: 1, z: 0 });
+      M4.compose(tmp.m, ap.pos, aqS, V3.set(tmp.scl, 1, 1, 1));
+      R.drawShadow(me.blade, tmp.m, null, 0);
+    } else {
+      this.rig.draw(R, S, {
+        pos: ap.pos, normal: aiNorm, hand: this.settings.hand === 'right' ? 'left' : 'right',
+        swing: -this.ai.anim.swing, windup: wd,
+        mats: this.paddleMats(S, this.aiEquip),
+      });
     }
-    this.drawOpponent(d, shadowPass);
 
   }
 
