@@ -516,6 +516,330 @@ class UI {
         `<b>assist</b> ${(g.settings.assist * 100) | 0}%  <b>pos</b> ${(g.settings.posAssist * 100) | 0}%`;
     }
   }
+
+  /* ================================================================
+   *  CAREER MODE UI
+   * ================================================================ */
+  bindCareer() {
+    const g = this.game;
+    $('#careerStart').addEventListener('click', () => {
+      g.audio.init(); g.audio.resume(); g.audio.ui('click');
+      if (g.career.load()) {
+        this.showCareerIntro(g.career);
+      } else {
+        g.career.start();
+        this.showCareerIntro(g.career);
+      }
+    });
+    $('#crReady').addEventListener('click', () => {
+      g.audio.ui('click');
+      const c = g.career;
+      c.readyForOpponentSelect();
+      this.showCareerOpponentSelect(c);
+    });
+    $('#crEndRestart').addEventListener('click', () => {
+      g.audio.ui('click');
+      $('#careerEnd').classList.remove('on');
+      g.career.start();
+      this.showCareerIntro(g.career);
+    });
+    $('#crEndMenu').addEventListener('click', () => {
+      g.audio.ui('click');
+      $('#careerEnd').classList.remove('on');
+      $('#menu').classList.add('on');
+    });
+  }
+
+  showCareerIntro(career) {
+    const t = career.currentTournamentInfo;
+    $$('.screen').forEach(s => s.classList.remove('on'));
+    $('#crTournName').textContent = `${t.icon} ${t.name}`;
+    $('#crTournPlace').textContent = t.place;
+    $('#crTournInfo').textContent = `Раундов: ${t.rounds} · ELO ${t.eloMin}–${t.eloMax} · Побед: ${career.totalWins}`;
+    $('#careerIntro').classList.add('on');
+  }
+
+  showCareerOpponentSelect(career) {
+    const g = this.game;
+    $$('.screen').forEach(s => s.classList.remove('on'));
+    const list = $('#crOppList');
+    list.innerHTML = '';
+    career.opponents.forEach((opp, i) => {
+      const btn = document.createElement('button');
+      btn.className = 'opt';
+      btn.innerHTML = `<b>${opp.name}</b><s>${opp.style} · ELO ${opp.elo}</s>`;
+      btn.addEventListener('click', () => {
+        g.audio.ui('click');
+        $$('.screen').forEach(s => s.classList.remove('on'));
+        career.selectOpponent(i);
+      });
+      list.appendChild(btn);
+    });
+    const status = document.createElement('div');
+    status.className = 'note';
+    status.textContent = `Раунд ${career.currentRound + 1} из ${career.currentTournamentInfo.rounds} · Перков: ${career.perks.length}`;
+    status.style.marginTop = '10px';
+    list.appendChild(status);
+    $('#careerIntro').classList.add('on');
+  }
+
+  showCareerPerks(career) {
+    const g = this.game;
+    $$('.screen').forEach(s => s.classList.remove('on'));
+    const list = $('#crPerkList');
+    list.innerHTML = '';
+    career.pendingPerks.forEach((perk, i) => {
+      const btn = document.createElement('button');
+      btn.className = 'opt';
+      const colors = { green: '#4ee39a', blue: '#39c6ff', gold: '#ffd34d' };
+      btn.style.borderColor = colors[perk.rarity] || '#39c6ff';
+      btn.innerHTML = `<b style="color:${colors[perk.rarity]}">${perk.name}</b><s>${perk.desc}</s>`;
+      btn.addEventListener('click', () => {
+        g.audio.ui('click');
+        career.selectPerk(i);
+        $$('.screen').forEach(s => s.classList.remove('on'));
+        this.showCareerOpponentSelect(career);
+      });
+      list.appendChild(btn);
+    });
+    $('#careerPerk').classList.add('on');
+  }
+
+  showCareerTournamentEnd(career) {
+    const t = career.currentTournamentInfo;
+    this.showNote({ text: `${t.icon} ${t.name} ПОБЕЖДЁН!`, col: '#ffd34d', code: 'win' });
+    setTimeout(() => {
+      career.advanceTournament();
+      if (career.state === 'RUN_END') {
+        this.showCareerRunEnd(career);
+      } else {
+        this.showCareerIntro(career);
+      }
+    }, 2500);
+  }
+
+  showCareerRunEnd(career) {
+    $$('.screen').forEach(s => s.classList.remove('on'));
+    const t = TOURNAMENTS[Math.max(0, career.currentTournament - 1)] || TOURNAMENTS[0];
+    const isVictory = career.currentTournament >= TOURNAMENTS.length;
+    $('#crEndTitle').textContent = isVictory ? '👑 ЧЕМПИОН МИРА!' : `🏁 ${t.name}`;
+    $('#crEndSub').textContent = isVictory
+      ? 'Вы прошли все 12 турниров. Легенда.'
+      : `Выбыли на турнире: ${t.name}`;
+    const stats = $('#crEndStats');
+    stats.innerHTML = `
+      <div class="recap">
+        <div class="rc"><i style="background:#4ee39a"></i><b>${career.totalWins}</b><s>побед</s></div>
+        <div class="rc"><i style="background:#ff5d6e"></i><b>${career.totalLosses}</b><s>поражений</s></div>
+        <div class="rc"><i style="background:#39c6ff"></i><b>${career.perks.length}</b><s>перков</s></div>
+        <div class="rc"><i style="background:#ffd34d"></i><b>${Math.round(career.runStats.maxSpeed)}</b><s>км/ч макс</s></div>
+      </div>
+    `;
+    career.active = false;
+    try { localStorage.removeItem('topspin_career'); } catch(e) {}
+    $('#careerEnd').classList.add('on');
+  }
+
+  /* ================================================================
+   *  ONLINE MODE UI
+   * ================================================================ */
+  bindOnline() {
+    const g = this.game;
+    const net = g.network;
+    $('#onlineStart').addEventListener('click', () => {
+      g.audio.init(); g.audio.resume(); g.audio.ui('click');
+      $$('.screen').forEach(s => s.classList.remove('on'));
+      $('#netStatus').textContent = 'Подключение...';
+      $('#netRoomCode').style.display = 'none';
+      $('#onlineLobby').classList.add('on');
+      net.connect();
+    });
+    net.on('connected', () => {
+      $('#netStatus').textContent = 'Подключено! Создайте комнату.';
+      $('#netRoomCode').style.display = 'none';
+    });
+    net.on('assigned', (msg) => {
+      $('#netRoomCode').textContent = msg.room;
+      $('#netRoomCode').style.display = 'block';
+      $('#netStatus').textContent = msg.side === 1
+        ? 'Вы хост. Ждём соперника...'
+        : 'Подключены к комнате.';
+    });
+    net.on('matchStart', () => {
+      $$('.screen').forEach(s => s.classList.remove('on'));
+      g.startMatch();
+    });
+    net.on('disconnected', () => {
+      $('#netStatus').textContent = 'Отключено.';
+    });
+    net.on('error', (msg) => {
+      $('#netStatus').textContent = `Ошибка: ${msg}`;
+    });
+    net.on('peerLeft', () => {
+      g.msg('СОПЕРНИК ВЫШЕЛ', 2.0, '#ff8a8a');
+    });
+    $('#netCreate').addEventListener('click', () => {
+      g.audio.ui('click');
+      net.joinRoom();
+    });
+    $('#netJoin').addEventListener('click', () => {
+      g.audio.ui('click');
+      const code = prompt('Введите код комнаты:');
+      if (code) net.joinRoom(code.toUpperCase().trim());
+    });
+    $('#netClose').addEventListener('click', () => {
+      g.audio.ui('click');
+      net.disconnect();
+      $('#onlineLobby').classList.remove('on');
+      $('#menu').classList.add('on');
+    });
+  }
+
+  /* ================================================================
+   *  SHOP UI
+   * ================================================================ */
+  bindShop() {
+    const g = this.game;
+    const eco = g.economy;
+
+    const renderShop = () => {
+      $('#shopBalance').textContent = `🪙 ${eco.coins} · 💎 ${eco.gems}`;
+      // blades
+      const bladeContainer = $('#shopBlades');
+      bladeContainer.innerHTML = '';
+      Object.entries(SHOP_ITEMS).filter(([,v]) => v.cat === 'blade').forEach(([id, item]) => {
+        const owned = eco.owned.includes(id);
+        const equipped = eco.equipped.blade === id;
+        const btn = document.createElement('button');
+        btn.className = 'opt' + (equipped ? ' sel' : '');
+        btn.innerHTML = `<b>${item.name}</b><s>${owned ? (equipped ? 'ЭКИПИРОВАНО' : item.desc) : `${item.price} 🪙`}</s>`;
+        btn.addEventListener('click', () => {
+          g.audio.ui('click');
+          if (owned) { eco.equip(id); eco.applyToGame(g); }
+          else if (eco.buy(id)) { eco.equip(id); eco.applyToGame(g); }
+          renderShop();
+        });
+        bladeContainer.appendChild(btn);
+      });
+      // rubbers
+      const rubberContainer = $('#shopRubbers');
+      rubberContainer.innerHTML = '';
+      Object.entries(SHOP_ITEMS).filter(([,v]) => v.cat === 'rubber').forEach(([id, item]) => {
+        const owned = eco.owned.includes(id);
+        const equipped = eco.equipped.rubber === id;
+        const btn = document.createElement('button');
+        btn.className = 'opt' + (equipped ? ' sel' : '');
+        btn.innerHTML = `<b>${item.name}</b><s>${owned ? (equipped ? 'ЭКИПИРОВАНО' : item.desc) : `${item.price} ${item.currency === 'gems' ? '💎' : '🪙'}`}</s>`;
+        btn.addEventListener('click', () => {
+          g.audio.ui('click');
+          if (owned) { eco.equip(id); eco.applyToGame(g); }
+          else if (eco.buy(id)) { eco.equip(id); eco.applyToGame(g); }
+          renderShop();
+        });
+        rubberContainer.appendChild(btn);
+      });
+      // arenas
+      const arenaContainer = $('#shopArenas');
+      arenaContainer.innerHTML = '';
+      Object.entries(SHOP_ITEMS).filter(([,v]) => v.cat === 'arena').forEach(([id, item]) => {
+        const owned = eco.owned.includes(id);
+        const equipped = eco.equipped.arena === id;
+        const btn = document.createElement('button');
+        btn.className = 'opt' + (equipped ? ' sel' : '');
+        btn.innerHTML = `<b>${item.name}</b><s>${owned ? (equipped ? 'АКТИВНА' : item.desc) : `${item.price} ${item.currency === 'gems' ? '💎' : '🪙'}`}</s>`;
+        btn.addEventListener('click', () => {
+          g.audio.ui('click');
+          if (owned) eco.equip(id);
+          else if (eco.buy(id)) eco.equip(id);
+          renderShop();
+        });
+        arenaContainer.appendChild(btn);
+      });
+      // trails
+      const trailContainer = $('#shopTrails');
+      trailContainer.innerHTML = '';
+      Object.entries(SHOP_ITEMS).filter(([,v]) => v.cat === 'trail').forEach(([id, item]) => {
+        const owned = eco.owned.includes(id);
+        const equipped = eco.equipped.trail === id;
+        const btn = document.createElement('button');
+        btn.className = 'opt' + (equipped ? ' sel' : '');
+        btn.innerHTML = `<b>${item.name}</b><s>${owned ? (equipped ? 'АКТИВЕН' : item.desc) : `${item.price} ${item.currency === 'gems' ? '💎' : '🪙'}`}</s>`;
+        btn.addEventListener('click', () => {
+          g.audio.ui('click');
+          if (owned) { eco.equip(id); eco.applyToGame(g); }
+          else if (eco.buy(id)) { eco.equip(id); eco.applyToGame(g); }
+          renderShop();
+        });
+        trailContainer.appendChild(btn);
+      });
+    };
+
+    $('#btnShop').addEventListener('click', () => {
+      g.audio.ui('click');
+      renderShop();
+      $$('.screen').forEach(s => s.classList.remove('on'));
+      $('#shopPanel').classList.add('on');
+    });
+    $('#shopClose').addEventListener('click', () => {
+      g.audio.ui('click');
+      $('#shopPanel').classList.remove('on');
+      if (g.state === GS.MENU) $('#menu').classList.add('on');
+    });
+  }
+
+  /* ================================================================
+   *  REPLAY UI
+   * ================================================================ */
+  bindReplay() {
+    const g = this.game;
+    const rp = g.replayPlayer;
+
+    const updateReplayUI = () => {
+      if (!rp.active) return;
+      const h = rp.highlight;
+      $('#replayInfo').textContent = h
+        ? `Ралли: ${h.rallyLen} ударов · ${Math.round(h.maxSpeed)} км/ч`
+        : '';
+      $('#replaySpeed').textContent = `${rp.speed.toFixed(2)}×`;
+      $('#replaySpeed').style.color = rp.paused ? '#ff5d6e' : '#39c6ff';
+    };
+
+    $('#btnReplay').addEventListener('click', () => {
+      g.audio.ui('click');
+      if (g.replay.hasHighlights) {
+        rp.start(0);
+        $$('.screen').forEach(s => s.classList.remove('on'));
+        $('#replayPanel').classList.add('on');
+        updateReplayUI();
+      } else {
+        g.msg('НЕТ МОМЕНТОВ', 1.0, '#8da3bd');
+      }
+    });
+    $('#rplPause').addEventListener('click', () => { rp.togglePause(); updateReplayUI(); });
+    $('#rplPrev').addEventListener('click', () => { rp.prevFrame(); updateReplayUI(); });
+    $('#rplNext').addEventListener('click', () => { rp.nextFrame(); updateReplayUI(); });
+    $('#rplSlower').addEventListener('click', () => { rp.setSpeed(rp.speed * 0.7); updateReplayUI(); });
+    $('#rplFaster').addEventListener('click', () => { rp.setSpeed(rp.speed * 1.4); updateReplayUI(); });
+    $('#replayClose').addEventListener('click', () => {
+      g.audio.ui('click');
+      rp.stop();
+      $('#replayPanel').classList.remove('on');
+      if (g.state === GS.MENU) $('#menu').classList.add('on');
+    });
+  }
+
+  /* ================================================================
+   *  SLOW-MO BUTTON
+   * ================================================================ */
+  bindSlowmo() {
+    const g = this.game;
+    $('#btnSlowmo').addEventListener('click', () => {
+      if (g.career.active || g.network.isInMatch) return;
+      g.slowmoActive = !g.slowmoActive;
+      g.msg(g.slowmoActive ? 'СЛОУМО ВКЛ' : 'СЛОУМО ВЫКЛ', 0.8, '#39c6ff');
+      g.audio.ui('click');
+    });
+  }
 }
 
 const CSSFONT = '"Inter",ui-sans-serif,system-ui,-apple-system,sans-serif';
