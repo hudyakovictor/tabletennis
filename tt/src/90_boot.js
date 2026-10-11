@@ -13,9 +13,6 @@
       ui.attach(game);
       ui.bindCareer();
       ui.bindOnline();
-      ui.bindShop();
-      ui.bindReplay();
-      ui.bindSlowmo();
     } catch (err) {
       console.error(err);
       const loading = document.getElementById('loading');

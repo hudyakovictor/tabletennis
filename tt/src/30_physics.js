@@ -36,22 +36,23 @@ const PH = {
   T_LEN: 2.74, T_WID: 1.525, T_H: 0.76,
   T_HALF_LEN: 1.37, T_HALF_WID: 0.7625,
   T_THICK: 0.025,
-  E_TABLE: 0.870,           // normal COR ball/table (calibrated: 30.5cm drop -> 23cm  => sqrt(23/30.5)=0.868)
-  E_TABLE_SPEED: 0.009,     // COR loss per m/s of impact speed
-  MU_TABLE: 0.24,           // Coulomb friction ball/table (velocity-dependent, see bounceTable)
-  MU_TABLE_SPEED: 0.008,    // friction drops with sliding speed
-  ET_TABLE: 0.03,           // tangential restitution of the table (slight springiness)
+  // ITTF T3 drop test: a standard ball dropped from 30.5 cm must rebound
+  // 23..26 cm, i.e. e = sqrt(23/30.5)..sqrt(26/30.5) = 0.868..0.923.
+  // A dropped ball lands at ~2.4 m/s and the rebound is measured in the
+  // first bounce, so the *effective* e at that speed has to sit near 0.894.
+  // The previous pair (0.870 / 0.009) gave e = 0.848 -> 20.5 cm rebound,
+  // outside the legal window; this pair gives 24.0 cm.
+  E_TABLE: 0.930,           // normal COR ball/table at zero impact speed
+  E_TABLE_SPEED: 0.0085,    // COR loss per m/s of impact speed
+  MU_TABLE: 0.25,           // Coulomb friction ball/table (ITTF T3 studies)
+  ET_TABLE: 0.00,           // tangential restitution of the table (none)
 
   /* ---- net ---- */
   NET_H: 0.1525,            // net height above the table
   NET_OVERHANG: 0.1525,     // net extends past each side line
   NET_E: 0.10,              // how much comes back off a compliant net
-  NET_E_BOTTOM: 0.06,       // net is tighter at the bottom (less give)
-  NET_E_TOP: 0.14,          // net is looser near the tape (more give)
   NET_DAMP_T: 0.22,         // tangential energy kept
   NET_SPIN_KEEP: 0.25,
-  NET_SAG: 0.012,           // sag at the sides of the net [m]
-  NET_SKEW_FACTOR: 0.35,    // how much the net deflects tangentially
   TAPE_R: 0.008,            // the white tape at the top of the net
 
   /* ---- racket / rubber ---- */
@@ -79,12 +80,7 @@ function aeroAccel(out, v, w) {
   if (speed < 1e-5) { out.x = 0; out.y = -PH.G; out.z = 0; return out; }
   const wlen = V3.len(w);
   const S = (PH.R * wlen) / Math.max(speed, 0.6);     // spin ratio
-  // Reynolds-dependent drag: Cd drops in the critical regime Re ~ 3e5
-  // smooth cubic: 1.10 at Re=0 → 1.02 at Re=30k → 0.97 at Re=80k → 0.95 at Re=200k
-  const Re = (2 * PH.R * speed) / PH.NU;               // Reynolds number
-  const ReK = clamp(Re / 80000, 0, 1);                 // 0..1 over working range
-  const ReCorr = 1.10 - 0.21 * ReK + 0.14 * ReK * ReK - 0.06 * ReK * ReK * ReK;
-  const cd = (PH.CD0 + PH.CD_SPIN * Math.min(S, 1.2)) * ReCorr;
+  const cd = PH.CD0 + PH.CD_SPIN * Math.min(S, 1.2);
   const kd = 0.5 * PH.RHO * PH.AREA * cd / PH.M;      // 1/m * 0.5 rho A Cd
   // drag  a = -kd |v| v
   out.x = -kd * speed * v.x;
@@ -94,10 +90,6 @@ function aeroAccel(out, v, w) {
     // Magnus: F = 0.5 rho A Cl |v|^2 * unit(w x v),  Cl = f(S)
     let cl = Math.min(PH.CL_SLOPE * S, PH.CL_MAX);
     if (S > 1.25) cl *= 1 - 0.26 * Math.min((S - 1.25) / 1.2, 1);   // saturation
-    // lift crisis at extreme spin: boundary layer fully separated
-    if (S > 2.5) cl *= Math.max(0.08, 1 - 0.55 * (S - 2.5));
-    // Reynolds correction on Magnus: low Re reduces lift effectiveness
-    if (Re < 2.5e4) cl *= 0.75 + 0.25 * Re / 2.5e4;
     V3.cross(_acc_tmp, w, v);
     const cl_len = V3.len(_acc_tmp);
     if (cl_len > 1e-6) {
@@ -193,10 +185,7 @@ const N_UP = V3.new(0, 1, 0), ZERO3 = V3.new(0, 0, 0);
 function bounceTable(p, v, w) {
   const speed = -v.y;
   const e = clamp(PH.E_TABLE - PH.E_TABLE_SPEED * speed, 0.68, 0.92);
-  // velocity-dependent friction: high sliding speed reduces grip
-  const vtEst = Math.sqrt(v.x * v.x + v.z * v.z);
-  const mu = Math.max(0.10, PH.MU_TABLE - PH.MU_TABLE_SPEED * vtEst);
-  const info = impactSphere(v, w, N_UP, ZERO3, e, mu, PH.ET_TABLE);
+  const info = impactSphere(v, w, N_UP, ZERO3, e, PH.MU_TABLE, PH.ET_TABLE);
   p.y = PH.TABLE_Y + PH.R + 1e-5;
   return info;
 }
@@ -207,90 +196,42 @@ function bounceTable(p, v, w) {
  *  `quality` in [0..1] scales the effective COR (off-centre hits).
  * ---------------------------------------------------------------- */
 const SPIN_CAP = 1080;   // rad/s  (~172 rev/s, above the measured world best)
-
-/* ---- Rubber profiles: each type defines its own physics ---- */
-const RUBBER_PROFILES = {
-  CLASSIC:  { e: 0.800, mu: 1.05, et: 0.52, sponge: 1.8, tacky: 0.0, name: 'Классика' },
-  TENSOR:   { e: 0.830, mu: 1.10, et: 0.62, sponge: 2.1, tacky: 0.0, name: 'Тензор' },
-  TACKY:    { e: 0.750, mu: 1.28, et: 0.38, sponge: 1.5, tacky: 0.85, name: 'Липкая' },
-  LONGPIP:  { e: 0.620, mu: 0.80, et: 0.20, sponge: 0.8, tacky: 0.0, name: 'Длинные шипы' },
-  ANTISPIN: { e: 0.700, mu: 0.42, et: 0.12, sponge: 1.0, tacky: 0.5, name: 'Антискручивание' },
-  HARD:     { e: 0.760, mu: 0.95, et: 0.44, sponge: 1.2, tacky: 0.0, name: 'Жёсткая' },
-};
-
 function impactRacket(v, w, n, vR, quality = 1, rubber = {}) {
-  // rubber profiles: read from profile if specified, else use passed values or defaults
-  const rp = rubber.profile ? RUBBER_PROFILES[rubber.profile] : null;
-  const baseE  = rp ? rp.e  : (rubber.e  ?? PH.E_RACKET);
-  const baseMu = rp ? rp.mu : (rubber.mu ?? PH.MU_RACKET);
-  const baseEt = rp ? rp.et : (rubber.et ?? PH.ET_RACKET);
-  const spongeThick = rp ? rp.sponge : (rubber.sponge ?? 1.8);  // mm
-  const tacky       = rp ? rp.tacky  : (rubber.tacky  ?? 0);    // 0..1
-  // sponge thickness scales the catapult (tangential restitution)
-  const spongeScale = 0.65 + 0.35 * clamp(spongeThick / 2.2, 0.3, 1.2);
-  // tacky rubber: higher friction but less catapult (ball "sticks")
-  const muBoost = 1 + 0.20 * tacky;
-  const etPenalty = 1 - 0.35 * tacky;
-  const e0 = baseE * (0.55 + 0.45 * quality);
-  const mu = baseMu * (0.6 + 0.4 * quality) * muBoost;
-  const et = baseEt * (0.5 + 0.5 * quality) * spongeScale * etPenalty;
+  const e0 = (rubber.e ?? PH.E_RACKET) * (0.55 + 0.45 * quality);
+  const mu = (rubber.mu ?? PH.MU_RACKET) * (0.6 + 0.4 * quality);
+  const et = (rubber.et ?? PH.ET_RACKET) * (0.5 + 0.5 * quality);
   V3.sub(_u, v, vR);
   const closing = -V3.dot(_u, n);
   const e = clamp((e0 - PH.E_RACKET_SPEED * Math.max(0, closing)) * (rubber.damp ?? 1), 0.18, 0.92);
   const info = impactSphere(v, w, n, vR, e, mu, et);
   const wl = V3.len(w);
   if (wl > SPIN_CAP) V3.mul(w, w, SPIN_CAP / wl);
-  // long pimples: invert incoming spin
-  if (rp && rp === RUBBER_PROFILES.LONGPIP) {
-    w.x *= -0.55; w.y *= -0.55; w.z *= -0.55;
-  }
   return info;
 }
 
 /* ---------------------------------------------------------------- *
  *  Ball <-> net.  Highly inelastic, compliant, kills most spin.
  * ---------------------------------------------------------------- */
-/** Net sag model: height varies with x-position (tight at center, sags at sides). */
-function netHeightAt(x) {
-  const normX = clamp(Math.abs(x) / PH.NET_HALF_WID, 0, 1);
-  return PH.NET_H - PH.NET_SAG * normX * normX;
-}
-
 function bounceNet(p, v, w, side) {
-  const hRatio = clamp((p.y - PH.TABLE_Y) / PH.NET_H, 0, 1);
-  // height-dependent compliance: bottom=stiff, top=looser
-  const eNet = lerp(PH.NET_E_BOTTOM, PH.NET_E_TOP, hRatio);
-  // tangential response: skewed net deflects ball sideways
-  const vtEst = Math.sqrt(v.x * v.x + v.y * v.y);
-  const tangentialDamp = PH.NET_DAMP_T * (1 + PH.NET_SKEW_FACTOR * hRatio);
   const vz = v.z;
-  v.z = -vz * eNet;
-  v.x *= Math.min(tangentialDamp, 0.65);
+  v.z = -vz * PH.NET_E;
+  v.x *= PH.NET_DAMP_T;
   v.y = v.y * PH.NET_DAMP_T - Math.abs(vz) * 0.06;
-  // the mesh scatters a little — more at higher speed
-  const scatter = Math.min(1, Math.abs(vz) / 6);
-  v.x += gauss(0.12 * scatter);
+  // the mesh scatters a little
+  v.x += gauss(0.12 * Math.min(1, Math.abs(vz) / 6));
   v.y += gauss(0.08);
-  // glancing hits slide along the net and lose more energy
-  if (vtEst > 2) { v.x *= 0.85; v.y *= 0.85; }
   w.x *= PH.NET_SPIN_KEEP; w.y *= PH.NET_SPIN_KEEP; w.z *= PH.NET_SPIN_KEEP;
   p.z = side * (PH.R + 0.004);
 }
 
-/** Ball clips the top tape: deflect + big energy loss, classic net-cord.
- *  Angle-dependent: direct hits absorb more; glancing hits deflect more. */
+/** Ball clips the top tape: deflect + big energy loss, classic net-cord. */
 function clipTape(p, v, w) {
   const sp = V3.len(v);
-  const vTangent = Math.sqrt(v.x * v.x + v.y * v.y);
-  const angle01 = clamp(Math.abs(v.z) / Math.max(sp, 0.1), 0, 1);  // 0=glancing, 1=direct
-  const absorb = lerp(0.60, 0.82, angle01);   // direct hits absorb more
-  const deflect = 1 - absorb;
-  v.y = Math.abs(v.y) * 0.18 * deflect + sp * 0.07 + 0.25;
-  v.z *= 0.42 * deflect;
-  v.x *= 0.58 * deflect;
-  // scatter proportional to speed
-  v.x += gauss(0.22 * Math.min(1, sp / 12));
-  v.z += gauss(0.10 * Math.min(1, sp / 12));
+  v.y = Math.abs(v.y) * 0.18 + sp * 0.07 + 0.25;
+  v.z *= 0.42;
+  v.x *= 0.58;
+  v.x += gauss(0.22);
+  v.z += gauss(0.10);
   w.x *= 0.45; w.y *= 0.45; w.z *= 0.45;
   p.y = PH.NET_TOP + PH.R + 0.002;
 }
@@ -323,14 +264,13 @@ function predict(p0, v0, w0, opts = {}) {
     if (out.path && (out.path.length < 400)) out.path.push(_pp.x, _pp.y, _pp.z);
     if (_pp.y > out.apex) out.apex = _pp.y;
 
-    // net plane — uses sag-adjusted height
+    // net plane
     if ((prevZ > 0) !== (_pp.z > 0)) {
       const a = Math.abs(prevZ) / (Math.abs(prevZ) + Math.abs(_pp.z) + 1e-9);
       const yAt = lerp(prevY, _pp.y, a);
       const xAt = lerp(prevX, _pp.x, a);
       out.netCross = { y: yAt, x: xAt, t };
-      const netTopAtX = PH.TABLE_Y + netHeightAt(xAt) + PH.R * 0.5;
-      if (yAt < netTopAtX && Math.abs(xAt) < PH.NET_HALF_WID) { out.hitNet = true; break; }
+      if (yAt < PH.NET_TOP + PH.R * 0.5 && Math.abs(xAt) < PH.NET_HALF_WID) { out.hitNet = true; break; }
     }
     // crossing of the table's horizontal plane anywhere (used to measure
     // how far a ball that misses actually overshoots)
@@ -369,15 +309,21 @@ function predict(p0, v0, w0, opts = {}) {
  *  range/elevation curve is unimodal and the net is a hard obstacle.
  * ---------------------------------------------------------------- */
 const _ip = V3.new(), _iv = V3.new(), _iw = V3.new(), _predOut = {};
+/** Full elevation span, used to keep the polished answer inside the range. */
 const _ELEV = [-0.34, -0.26, -0.19, -0.13, -0.08, -0.04, 0, 0.035, 0.07, 0.105,
   0.145, 0.19, 0.24, 0.30, 0.36, 0.43, 0.51, 0.60, 0.70, 0.81, 0.93, 1.06];
+/** Sparse grid for the cheap first pass; the winner is polished afterwards. */
+const _ELEV_SCAN = [-0.34, -0.19, -0.08, 0, 0.035, 0.07, 0.105, 0.145, 0.24, 0.36, 0.51, 0.70, 0.93, 1.06];
+/** Integration steps: coarse for the scan, medium for the polish, production
+ *  step for the answer that is handed to the impact solver. */
+const DT_SCAN = 1 / 130, DT_POLISH = 1 / 200, DT_FINE = 1 / 260;
 
-function _tryLaunch(from, spin, speed, ux, uz, elev, netClear, out) {
+function _tryLaunch(from, spin, speed, ux, uz, elev, netClear, out, dt) {
   V3.copy(_ip, from);
   const ch = Math.cos(elev), sh = Math.sin(elev);
   V3.set(_iv, ux * speed * ch, speed * sh, uz * speed * ch);
   V3.copy(_iw, spin);
-  predict(_ip, _iv, _iw, { dt: 1 / 260, maxT: 2.4, stopOnFirstBounce: true, out });
+  predict(_ip, _iv, _iw, { dt: dt || 1 / 260, maxT: 2.4, stopOnFirstBounce: true, out });
   const clear = (out.netCross ? out.netCross.y : 99) - PH.NET_TOP - PH.R;
   return { clear, landed: out.landed, hitNet: out.hitNet, vx: _iv.x, vy: _iv.y, vz: _iv.z };
 }
@@ -408,41 +354,82 @@ function solveLaunch(from, target, spin, opts = {}) {
     return e + Math.max(0, netClear - t.clear) * 7;
   };
 
-  for (let pass = 0; pass < 3; pass++) {
-    best = null;
-    for (let i = 0; i < _ELEV.length; i++) {
-      const t = _tryLaunch(from, spin, speed, ux, uz, _ELEV[i], netClear, o);
-      const sc = scoreOf(t);
-      if (!best || sc < best.score) best = { score: sc, elev: _ELEV[i], ...t };
+  /* ---------------------------------------------------------------
+   * Shape of the search, and why:
+   *   · a sparse scan at a cheap integration step finds the right valley
+   *     (14 flights);
+   *   · a short golden-section polish pins the elevation down (6 flights);
+   *   · the answer is confirmed at the production step (1 flight);
+   *   · sidespin and the "too hot for the table" give-back are applied as
+   *     local corrections around that answer, not as another full scan.
+   * Everything shares one hard budget, because this function is called up
+   * to three times per stroke and used to reach 150+ flights per hit.
+   * --------------------------------------------------------------- */
+  let spent = 0;
+  const BUDGET = 30;
+
+  // 1. coarse scan
+  let bestS = Infinity, bestI = 0;
+  const sc = new Array(_ELEV_SCAN.length), tk = new Array(_ELEV_SCAN.length);
+  for (let i = 0; i < _ELEV_SCAN.length; i++) {
+    const t = _tryLaunch(from, spin, speed, ux, uz, _ELEV_SCAN[i], netClear, o, DT_SCAN);
+    spent++;
+    tk[i] = t; sc[i] = scoreOf(t);
+    if (sc[i] < bestS) { bestS = sc[i]; bestI = i; }
+  }
+  if (!isFinite(bestS)) return null;
+  best = { score: bestS, elev: _ELEV_SCAN[bestI], ...tk[bestI] };
+
+  // 2. golden-section polish (the scan only has to land in the right valley)
+  let lo = Math.max(_ELEV[0], best.elev - 0.075), hi = Math.min(_ELEV[_ELEV.length - 1], best.elev + 0.075);
+  for (let k = 0; k < 3 && spent < BUDGET - 2; k++) {
+    const third = (hi - lo) / 3;
+    const e1 = lo + third, e2 = hi - third;
+    const a = _tryLaunch(from, spin, speed, ux, uz, e1, netClear, o, DT_POLISH), sa = scoreOf(a);
+    const b2 = _tryLaunch(from, spin, speed, ux, uz, e2, netClear, o, DT_POLISH), sb = scoreOf(b2);
+    spent += 2;
+    if (sa < sb) { hi = e2; if (sa < best.score) best = { score: sa, elev: e1, ...a }; }
+    else { lo = e1; if (sb < best.score) best = { score: sb, elev: e2, ...b2 }; }
+  }
+
+  // 3. sidespin bends the flight: rotate the aim azimuth analytically and
+  //    re-check the same elevation, instead of rescanning the whole grid
+  if (best.landed) {
+    const errLat = (best.landed.x - target.x) * (-uz) + (best.landed.z - target.z) * (ux);
+    if (Math.abs(errLat) > 0.03) {
+      const corr = -Math.atan2(errLat, horiz) * 0.95;
+      const c = Math.cos(corr), sN = Math.sin(corr);
+      const nx = ux * c - uz * sN, nz = ux * sN + uz * c;
+      const ux0 = ux, uz0 = uz;
+      ux = nx; uz = nz;
+      const t = _tryLaunch(from, spin, speed, ux, uz, best.elev, netClear, o, DT_FINE);
+      spent++;
+      const s = scoreOf(t);
+      if (s < best.score) best = { score: s, elev: best.elev, ...t };
+      else { ux = ux0; uz = uz0; }             // rotation did not help, undo
     }
-    if (!best) return null;
-    // local refinement around the winner
-    let lo = best.elev - 0.075, hi = best.elev + 0.075;
-    for (let k = 0; k < 7; k++) {
-      const mid = (lo + hi) / 2;
-      const a = _tryLaunch(from, spin, speed, ux, uz, mid - 0.018, netClear, o), sa = scoreOf(a);
-      const b2 = _tryLaunch(from, spin, speed, ux, uz, mid + 0.018, netClear, o), sb = scoreOf(b2);
-      if (sa < sb) { hi = mid; if (sa < best.score) best = { score: sa, elev: mid - 0.018, ...a }; }
-      else { lo = mid; if (sb < best.score) best = { score: sb, elev: mid + 0.018, ...b2 }; }
-    }
-    // too hot to keep on the table? allow a limited power give-back
-    if (best.score > 0.18 && forgive > 0.001 && (!best.landed || best.score > 0.3)) {
-      const next = speed * (1 - 0.22 * forgive);
-      if (next > 2.0 && pass < 2) { speed = next; continue; }
-    }
-    // sidespin bends the flight: correct the aim azimuth and re-solve once
-    if (best.landed && pass < 2) {
-      const errLat = (best.landed.x - target.x) * (-uz) + (best.landed.z - target.z) * (ux);
-      if (Math.abs(errLat) > 0.015) {
-        const corr = -Math.atan2(errLat, horiz) * 0.95;
-        const c = Math.cos(corr), sN = Math.sin(corr);
-        const nx = ux * c - uz * sN, nz = ux * sN + uz * c;
-        ux = nx; uz = nz;
-        continue;
+  }
+
+  // 4. too hot to keep on the table? a limited power give-back, rescanned
+  //    only around the winner
+  if (best.score > 0.18 && forgive > 0.001 && (!best.landed || best.score > 0.3)) {
+    const next = speed * (1 - 0.22 * forgive);
+    if (next > 2.0) {
+      speed = next;
+      const e0 = best.elev;
+      for (const e of [e0 - 0.06, e0, e0 + 0.06]) {
+        if (spent >= BUDGET) break;
+        const t = _tryLaunch(from, spin, speed, ux, uz, e, netClear, o, DT_POLISH);
+        spent++;
+        const s = scoreOf(t);
+        if (s < best.score) best = { score: s, elev: e, ...t };
       }
     }
-    break;
   }
+
+  // 5. answer confirmed at the step the impact solver works at
+  const fin = _tryLaunch(from, spin, speed, ux, uz, best.elev, netClear, o, DT_FINE);
+  best = { score: scoreOf(fin), elev: best.elev, ...fin };
   if (!best) return null;
   return {
     vx: best.vx, vy: best.vy, vz: best.vz, elev: best.elev, speed,
