@@ -1,10 +1,10 @@
-<div id="app">
-  <canvas id="gl"></canvas>
+<div id="app" role="application" aria-label="TOPSPIN ARENA — настольный теннис, управление свайпом">
+  <canvas id="gl" aria-label="Игровое поле. Свайп задаёт удар; двумя пальцами — ракурс камеры."></canvas>
   <canvas id="fx"></canvas>
 
   <div id="hud">
     <!-- scoreboard -->
-    <div id="score" class="pe">
+    <div id="score" class="pe" role="status" aria-label="Счёт матча">
       <div class="sb-side">
         <span class="serve-dot" id="servA"></span>
         <span class="sb-nm">ВЫ</span>
@@ -18,18 +18,15 @@
       </div>
     </div>
 
-    <div id="note"><i></i><span></span></div>
-  <div id="rally"></div>
-    <div id="msgs"></div>
+    <div id="note" role="status" aria-live="polite"><i></i><span></span></div>
+  <div id="rally" role="status" aria-live="off"></div>
+    <div id="msgs" role="log" aria-live="polite" aria-atomic="false"></div>
     <div id="dbg"></div>
 
     <div id="topright">
-      <div class="ic pe" id="btnSlowmo" title="Слоумо (S)">🐌</div>
-      <div class="ic pe" id="btnReplay" title="Повтор (V)">🎬</div>
-      <div class="ic pe" id="btnShop" title="Магазин">🛒</div>
-      <div class="ic pe" id="btnSound" title="Звук"></div>
-      <div class="ic pe" id="btnSettings" title="Настройки"></div>
-      <div class="ic pe" id="btnMenu" title="Меню"></div>
+      <button class="ic pe" id="btnSound" title="Звук" aria-label="Звук вкл/выкл"></button>
+      <button class="ic pe" id="btnSettings" title="Настройки" aria-label="Настройки"></button>
+      <button class="ic pe" id="btnMenu" title="Меню" aria-label="В главное меню"></button>
     </div>
 
     <!-- last shot: one line, fades away on its own -->
@@ -48,11 +45,19 @@
       </div>
     </div>
 
+    <!-- slow-mo: hold to slow the world down (never in tournaments/PvP) -->
+    <button id="slow" class="pe" title="Замедление" aria-label="Замедление времени, удерживайте">
+      <i id="slowFill"></i>
+      <b>SLOW-MO</b>
+      <s id="slowKey">SHIFT</s>
+    </button>
+
+    <div id="mnToast"></div>
     <div id="pauseInd" class="pe"><b>ПАУЗА</b><s>нажмите, чтобы продолжить · P</s></div>
   </div>
 
   <!-- ============================ MENU ============================ -->
-  <div class="screen on" id="menu">
+  <div class="screen on" id="menu" role="dialog" aria-label="Главное меню">
     <div class="card">
       <div class="logo">TOPSPIN<span style="opacity:.45">·</span>ARENA</div>
       <div class="sub">Настольный теннис · физика ITTF · управление свайпом</div>
@@ -89,57 +94,15 @@
       </div>
 
       <button class="btn ghost" id="play">НАЧАТЬ МАТЧ</button>
-
-      <h3 class="sec">Режимы</h3>
-      <div class="row">
-        <button class="btn" id="careerStart" style="flex:1;background:linear-gradient(100deg,#ff7a2f,#ffd34d)">🏆 КАРЬЕРА</button>
-        <button class="btn" id="onlineStart" style="flex:1;background:linear-gradient(100deg,#39c6ff,#7ff0c0)">🌐 ОНЛАЙН</button>
+      <div class="row" style="margin-top:9px">
+        <button class="opt" id="wsOpen"><b>МАСТЕРСКАЯ</b><s id="wsCoins">0 монет</s></button>
+        <button class="opt" id="dailyOpen"><b>ЗАДАНИЯ</b><s id="wsStreak">серия 1</s></button>
       </div>
     </div>
   </div>
 
-  <!-- ========================== CAREER ========================== -->
-  <div class="screen" id="careerIntro">
-    <div class="card">
-      <div class="logo" style="font-size:22px" id="crTournName">🏆 КАРЬЕРА</div>
-      <div class="sub" id="crTournPlace"></div>
-      <div class="note" id="crTournInfo"></div>
-      <div class="row" id="crOppList" style="margin-top:12px"></div>
-      <button class="btn" id="crReady">ВПЕРЁД</button>
-    </div>
-  </div>
-  <div class="screen" id="careerPerk">
-    <div class="card">
-      <div class="logo" style="font-size:20px">⚡ ВЫБЕРИ ПЕРК</div>
-      <div class="sub">Улучшение для следующих матчей</div>
-      <div class="row" id="crPerkList" style="margin-top:12px"></div>
-    </div>
-  </div>
-  <div class="screen" id="careerEnd">
-    <div class="card">
-      <div class="logo" style="font-size:20px" id="crEndTitle">🏁 КАРЬЕРА</div>
-      <div class="sub" id="crEndSub"></div>
-      <div id="crEndStats" style="margin-top:10px"></div>
-      <button class="btn" id="crEndRestart">НАЧАТЬ ЗАНОВО</button>
-      <button class="btn ghost" id="crEndMenu">В МЕНЮ</button>
-    </div>
-  </div>
-
-  <!-- ========================== ONLINE ========================== -->
-  <div class="screen" id="onlineLobby">
-    <div class="card">
-      <div class="logo" style="font-size:20px">🌐 ОНЛАЙН МАТЧ</div>
-      <div class="sub" id="netStatus">Подключение...</div>
-      <div id="netRoomCode" style="font-family:var(--mono);font-size:28px;letter-spacing:.2em;color:var(--acc);text-align:center;margin:12px 0;display:none"></div>
-      <button class="btn" id="netCreate">СОЗДАТЬ КОМНАТУ</button>
-      <button class="btn ghost" id="netJoin" style="margin-top:8px">ПРИСОЕДИНИТЬСЯ ПО КОДУ</button>
-      <div class="note" id="netNote">Создайте комнату и поделитесь кодом с другом. Или введите код, чтобы присоединиться.</div>
-      <button class="btn ghost" id="netClose" style="margin-top:12px">ЗАКРЫТЬ</button>
-    </div>
-  </div>
-
   <!-- ========================== SETTINGS ========================== -->
-  <div class="screen" id="settings">
+  <div class="screen" id="settings" role="dialog" aria-label="Настройки">
     <div class="card">
       <div class="logo" style="font-size:26px">НАСТРОЙКИ</div>
       <h3 class="sec">Камера</h3>
@@ -167,6 +130,8 @@
           <button class="opt sel" data-set="tele" data-val="off"><b>ВЫКЛ</b><s></s></button></div>
         <div class="row"><button class="opt sel" data-set="haptics" data-val="on"><b>ВИБРО ВКЛ</b><s>отдача в руку</s></button>
           <button class="opt" data-set="haptics" data-val="off"><b>ВЫКЛ</b><s></s></button></div>
+        <div class="row"><button class="opt sel" data-set="slowmoPlayer" data-val="on"><b>SLOW-MO</b><s>замедление в матче</s></button>
+          <button class="opt" data-set="slowmoPlayer" data-val="off"><b>ВЫКЛ</b><s>для турниров и PvP</s></button></div>
         <div class="row"><button class="opt sel" data-set="coach" data-val="on"><b>РАЗБОР ОЧКА</b><s>почему проиграно</s></button>
           <button class="opt" data-set="coach" data-val="off"><b>ВЫКЛ</b><s></s></button></div>
         <div class="row"><button class="opt sel" data-set="adaptive" data-val="on"><b>АДАПТАЦИЯ</b><s>соперник подстраивается</s></button>
@@ -199,6 +164,63 @@
     </div>
   </div>
 
+  <!-- ==================== WORKSHOP · SHOP · DAILY ================== -->
+  <div class="screen" id="workshop" role="dialog" aria-label="Мастерская, магазин и задания">
+    <div class="card wide">
+      <div class="wtop">
+        <div class="logo" style="font-size:26px">МАСТЕРСКАЯ</div>
+        <div class="wallet">
+          <span class="wmon"><i></i><b id="wsBal">0</b></span>
+          <span class="wcr"><i></i><b id="wsCry">0</b></span>
+        </div>
+      </div>
+      <div class="tabs">
+        <button class="tab on" data-tab="racket">РАКЕТКА</button>
+        <button class="tab" data-tab="shop">МАГАЗИН</button>
+        <button class="tab" data-tab="daily">ЗАДАНИЯ</button>
+      </div>
+
+      <div class="pane on" id="paneRacket">
+        <div class="rack">
+          <div class="rcol"><h4>ОСНОВАНИЕ</h4><div class="ilist" id="listBlade"></div></div>
+          <div class="rcol"><h4>СПРАВА</h4><div class="ilist" id="listFh"></div></div>
+          <div class="rcol"><h4>СЛЕВА</h4><div class="ilist" id="listBh"></div></div>
+        </div>
+        <div class="card2">
+          <div class="statcard" id="statCard"></div>
+          <div class="snote" id="statNote"></div>
+          <button class="btn" id="wsEquip">ПОСТАВИТЬ В ИГРУ</button>
+          <button class="btn ghost" id="wsBuyCry" style="display:none">КУПИТЬ ЗА КРИСТАЛЛЫ</button>
+          <div class="snote">Характер определяет только профиль удара, а не силу: сумма четырёх параметров
+          у всех предметов одинаковая, и ни один не лучше другого во всём.</div>
+        </div>
+      </div>
+
+      <div class="pane" id="paneShop">
+        <h4 class="shopH">РАКЕТКИ ЗА МОНЕТЫ</h4>
+        <div class="sgrid" id="shopRackets"></div>
+        <h4 class="shopH">ВНЕШНИЙ ВИД</h4>
+        <div class="sgrid" id="shopCosmetics"></div>
+        <div id="shopIapWrap">
+          <h4 class="shopH">ПОДДЕРЖКА ИГРЫ</h4>
+          <div class="sgrid" id="shopIap"></div>
+          <div class="snote">Покупки не дают преимущества на столе. Реклама — только по вашему вызову.</div>
+        </div>
+        <h4 class="shopH">СЕЗОН</h4>
+        <div class="season" id="seasonBox"></div>
+      </div>
+
+      <div class="pane" id="paneDaily">
+        <div class="snote" id="dailyHead"></div>
+        <div class="tlist" id="taskList"></div>
+        <button class="btn ghost" id="adCoins">СМОТРЕТЬ РЕКЛАМУ · +120 МОНЕТ</button>
+        <div class="snote">Реклама всегда необязательна и никогда не прерывает матч.</div>
+      </div>
+
+      <button class="btn ghost" id="wsClose">ЗАКРЫТЬ</button>
+    </div>
+  </div>
+
   <!-- ====================== TRAINING COMPLETE ===================== -->
   <div class="screen" id="tdone">
     <div class="card">
@@ -218,7 +240,7 @@
   </div>
 
   <!-- ========================= MATCH END ========================== -->
-  <div class="screen" id="over">
+  <div class="screen" id="over" role="dialog" aria-label="Итоги матча">
     <div class="card">
       <div class="logo" id="overTitle" style="font-size:34px">ПОБЕДА</div>
       <div class="sub" id="overScore" style="font-size:22px;letter-spacing:.1em;color:var(--txt)">0 : 0</div>
@@ -231,6 +253,7 @@
         <div class="st"><s>Среднее вращение</s><b id="stAvgSpin">0</b></div>
         <div class="st"><s>Любимый удар</s><b id="stFav">—</b></div>
       </div>
+      <div id="overMoments" class="omrow"></div>
       <button class="btn" id="again">РЕВАНШ</button>
       <button class="btn ghost" id="backMenu">В МЕНЮ</button>
     </div>
@@ -248,39 +271,24 @@
     <div class="gval" id="gSideV">0 об/с</div>
   </div>
 
-  <!-- ========================== SHOP ========================== -->
-  <div class="screen" id="shopPanel">
-    <div class="card" style="max-height:85vh">
-      <div class="logo" style="font-size:20px">🛒 МАГАЗИН</div>
-      <div class="sub" id="shopBalance">🪙 0 · 💎 0</div>
-      <h3 class="sec">Основа</h3>
-      <div class="row" id="shopBlades"></div>
-      <h3 class="sec">Накладка</h3>
-      <div class="row" id="shopRubbers"></div>
-      <h3 class="sec">Арена</h3>
-      <div class="row" id="shopArenas"></div>
-      <h3 class="sec">След мяча</h3>
-      <div class="row" id="shopTrails"></div>
-      <button class="btn ghost" id="shopClose" style="margin-top:12px">ЗАКРЫТЬ</button>
-    </div>
+  <!-- ======================= REPLAY CINEMA ======================== -->
+  <div id="reel" aria-hidden="true">
+    <div class="bar top"></div>
+    <div class="bar bot"></div>
+    <div class="tag" id="reelTag">ЛУЧШИЙ МОМЕНТ МАТЧА</div>
+    <div class="ttl"><b id="reelTitle">—</b><s id="reelMeta"></s></div>
+    <div class="skip" id="reelSkip">ПРОПУСТИТЬ ▸</div>
   </div>
 
-  <!-- ========================== REPLAY VIEWER ========================== -->
-  <div class="screen" id="replayPanel">
+  <!-- ====================== MOMENT LIBRARY ======================= -->
+  <div class="screen" id="reels" role="dialog" aria-label="Лучшие моменты матча">
     <div class="card">
-      <div class="logo" style="font-size:18px">🎬 ЛУЧШИЙ МОМЕНТ</div>
-      <div class="sub" id="replayInfo"></div>
-      <div class="row" style="margin-top:10px">
-        <button class="opt" id="rplPrev">⏮</button>
-        <button class="opt" id="rplPause">⏸</button>
-        <button class="opt" id="rplNext">⏭</button>
-        <button class="opt" id="rplSlower">🐢</button>
-        <button class="opt" id="rplFaster">🐇</button>
-      </div>
-      <div class="note" id="replaySpeed" style="margin-top:8px;text-align:center;font-size:14px;color:var(--acc)">0.35×</div>
-      <button class="btn ghost" id="replayClose" style="margin-top:12px">ЗАКРЫТЬ</button>
+      <div class="logo" style="font-size:30px">ЛУЧШИЕ МОМЕНТЫ</div>
+      <div class="sub">Игра запоминает только то, что стоит пересматривать</div>
+      <div id="momentList" class="mlist"></div>
+      <button class="btn ghost" id="reelsClose">ЗАКРЫТЬ</button>
     </div>
   </div>
 
-  <div id="loading"><div class="spinner"></div></div>
+  <div id="loading" role="status" aria-label="Загрузка"><div class="spinner"></div></div>
 </div>
