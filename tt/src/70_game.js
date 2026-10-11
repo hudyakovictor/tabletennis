@@ -171,9 +171,20 @@ class Game {
   /* ----------------------------- input ---------------------------- */
   bindInput() {
     const c = this.canvas;
+    /* Screen → surface coordinates. A pointer event with a non-finite or
+       absurd coordinate (broken touch driver, synthetic event, detached
+       canvas with a zero-size rect) used to poison the paddle transform
+       permanently: one NaN reached the smoothing filter and the racket
+       never came back. Sanitise at the boundary, in one place. */
     const norm = (e) => {
       const r = c.getBoundingClientRect();
-      return { x: (e.clientX - r.left) / r.width, y: (e.clientY - r.top) / r.height };
+      const w = r.width > 0 ? r.width : (c.clientWidth || 1);
+      const h = r.height > 0 ? r.height : (c.clientHeight || 1);
+      let x = (e.clientX - r.left) / w;
+      let y = (e.clientY - r.top) / h;
+      if (!Number.isFinite(x)) x = 0.5; else x = clamp(x, -0.25, 1.25);
+      if (!Number.isFinite(y)) y = 0.5; else y = clamp(y, -0.25, 1.25);
+      return { x, y };
     };
 
     /* Two input languages share one surface:
@@ -889,7 +900,10 @@ class Game {
     const isServeStroke = this.isServeBall && b.lastHitBy === 0 && this.server === 1;
     pad.lastHitT = this.time;
     const contact = V3.new(hit.x, hit.y, hit.z);
-    const sweet = clamp((1 - hit.rad / radius) * this.equip.sweetK, 0, 1);
+    /* the tolerance of THIS face: the frame's sweet spot scaled by how
+       forgiving the rubber on it is (a soft topsheet costs less) */
+    const sideParams = this.equip.forSide(1);
+    const sweet = clamp((1 - hit.rad / radius) * (sideParams.sweet || this.equip.sweetK), 0, 1);
 
     // ---- build the stroke from the live gesture --------------------
     const sw = this.swipe;
@@ -905,7 +919,7 @@ class Game {
         ball: { y: contact.y, z: contact.z },
         ballSpin: b.w, ballSpeed: V3.len(b.v),
         powerScale: 1,
-        equip: this.equip.forSide(1),      // the rubber object for this bat
+        equip: sideParams,                 // the rubber object for this bat
       };
       racket = deriveStroke(m, ctx);
       racket.vmag *= this.equip.vmagK;     // swing weight of the frame
@@ -975,7 +989,12 @@ class Game {
     pad.prevPos = pad.prevPos || V3.clone(pad.pos);
     V3.copy(pad.prevPos, pad.pos);
 
-    const pt = this.pointer || { x: 0.5, y: 0.62 };
+    let pt = this.pointer || { x: 0.5, y: 0.62 };
+    if (!Number.isFinite(pt.x) || !Number.isFinite(pt.y)) {
+      pt = { x: 0.5, y: 0.62 };
+      this.pointer = pt;                 // self-heal: never stay broken
+    }
+    if (!Number.isFinite(this.stanceY)) this.stanceY = undefined;
     const sens = this.settings.sensitivity;
     // the depth of the stance is set when the hand lands, not by the swipe:
     // flicking the wrist upward must not lunge you over the table

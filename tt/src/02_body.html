@@ -1,10 +1,10 @@
-<div id="app">
-  <canvas id="gl"></canvas>
+<div id="app" role="application" aria-label="TOPSPIN ARENA — настольный теннис, управление свайпом">
+  <canvas id="gl" aria-label="Игровое поле. Свайп задаёт удар; двумя пальцами — ракурс камеры."></canvas>
   <canvas id="fx"></canvas>
 
   <div id="hud">
     <!-- scoreboard -->
-    <div id="score" class="pe">
+    <div id="score" class="pe" role="status" aria-label="Счёт матча">
       <div class="sb-side">
         <span class="serve-dot" id="servA"></span>
         <span class="sb-nm">ВЫ</span>
@@ -18,15 +18,15 @@
       </div>
     </div>
 
-    <div id="note"><i></i><span></span></div>
-  <div id="rally"></div>
-    <div id="msgs"></div>
+    <div id="note" role="status" aria-live="polite"><i></i><span></span></div>
+  <div id="rally" role="status" aria-live="off"></div>
+    <div id="msgs" role="log" aria-live="polite" aria-atomic="false"></div>
     <div id="dbg"></div>
 
     <div id="topright">
-      <div class="ic pe" id="btnSound" title="Звук"></div>
-      <div class="ic pe" id="btnSettings" title="Настройки"></div>
-      <div class="ic pe" id="btnMenu" title="Меню"></div>
+      <button class="ic pe" id="btnSound" title="Звук" aria-label="Звук вкл/выкл"></button>
+      <button class="ic pe" id="btnSettings" title="Настройки" aria-label="Настройки"></button>
+      <button class="ic pe" id="btnMenu" title="Меню" aria-label="В главное меню"></button>
     </div>
 
     <!-- last shot: one line, fades away on its own -->
@@ -46,18 +46,18 @@
     </div>
 
     <!-- slow-mo: hold to slow the world down (never in tournaments/PvP) -->
-    <div id="slow" class="pe" title="Замедление">
+    <button id="slow" class="pe" title="Замедление" aria-label="Замедление времени, удерживайте">
       <i id="slowFill"></i>
       <b>SLOW-MO</b>
       <s id="slowKey">SHIFT</s>
-    </div>
+    </button>
 
     <div id="mnToast"></div>
     <div id="pauseInd" class="pe"><b>ПАУЗА</b><s>нажмите, чтобы продолжить · P</s></div>
   </div>
 
   <!-- ============================ MENU ============================ -->
-  <div class="screen on" id="menu">
+  <div class="screen on" id="menu" role="dialog" aria-label="Главное меню">
     <div class="card">
       <div class="logo">TOPSPIN<span style="opacity:.45">·</span>ARENA</div>
       <div class="sub">Настольный теннис · физика ITTF · управление свайпом</div>
@@ -102,7 +102,7 @@
   </div>
 
   <!-- ========================== SETTINGS ========================== -->
-  <div class="screen" id="settings">
+  <div class="screen" id="settings" role="dialog" aria-label="Настройки">
     <div class="card">
       <div class="logo" style="font-size:26px">НАСТРОЙКИ</div>
       <h3 class="sec">Камера</h3>
@@ -165,7 +165,7 @@
   </div>
 
   <!-- ==================== WORKSHOP · SHOP · DAILY ================== -->
-  <div class="screen" id="workshop">
+  <div class="screen" id="workshop" role="dialog" aria-label="Мастерская, магазин и задания">
     <div class="card wide">
       <div class="wtop">
         <div class="logo" style="font-size:26px">МАСТЕРСКАЯ</div>
@@ -190,6 +190,7 @@
           <div class="statcard" id="statCard"></div>
           <div class="snote" id="statNote"></div>
           <button class="btn" id="wsEquip">ПОСТАВИТЬ В ИГРУ</button>
+          <button class="btn ghost" id="wsBuyCry" style="display:none">КУПИТЬ ЗА КРИСТАЛЛЫ</button>
           <div class="snote">Характер определяет только профиль удара, а не силу: сумма четырёх параметров
           у всех предметов одинаковая, и ни один не лучше другого во всём.</div>
         </div>
@@ -239,7 +240,7 @@
   </div>
 
   <!-- ========================= MATCH END ========================== -->
-  <div class="screen" id="over">
+  <div class="screen" id="over" role="dialog" aria-label="Итоги матча">
     <div class="card">
       <div class="logo" id="overTitle" style="font-size:34px">ПОБЕДА</div>
       <div class="sub" id="overScore" style="font-size:22px;letter-spacing:.1em;color:var(--txt)">0 : 0</div>
@@ -271,7 +272,7 @@
   </div>
 
   <!-- ======================= REPLAY CINEMA ======================== -->
-  <div id="reel">
+  <div id="reel" aria-hidden="true">
     <div class="bar top"></div>
     <div class="bar bot"></div>
     <div class="tag" id="reelTag">ЛУЧШИЙ МОМЕНТ МАТЧА</div>
@@ -280,7 +281,7 @@
   </div>
 
   <!-- ====================== MOMENT LIBRARY ======================= -->
-  <div class="screen" id="reels">
+  <div class="screen" id="reels" role="dialog" aria-label="Лучшие моменты матча">
     <div class="card">
       <div class="logo" style="font-size:30px">ЛУЧШИЕ МОМЕНТЫ</div>
       <div class="sub">Игра запоминает только то, что стоит пересматривать</div>
@@ -289,5 +290,5 @@
     </div>
   </div>
 
-  <div id="loading"><div class="spinner"></div></div>
+  <div id="loading" role="status" aria-label="Загрузка"><div class="spinner"></div></div>
 </div>

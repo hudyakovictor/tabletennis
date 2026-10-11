@@ -152,12 +152,13 @@ class MomentPlayer {
     this.titles = true;
   }
 
-  play(moment, speed) {
+  play(moment, speed, onEnd) {
     if (!moment) return false;
     this.moment = moment;
     this.i = 0; this.hold = 0; this.camPhase = 0;
     this.speed = speed || 0.35;
     this.on = true;
+    if (typeof onEnd === 'function') this.onEnd = onEnd;
     return true;
   }
 
@@ -168,7 +169,7 @@ class MomentPlayer {
   /** advance and write the pose back into the live game objects */
   update(dtReal, g) {
     const mo = this.moment;
-    if (!mo) { this.on = false; return; }
+    if (!mo || !g || !g.ball) { this.on = false; return; }   // no world, no replay
     const F = mo.frames, last = this.lastFrame;
     // ease in: the first half second is slow, then settle to normal speed
     const sp = this.speed * (this.i < 6 ? 0.45 + 0.09 * this.i : 1);
