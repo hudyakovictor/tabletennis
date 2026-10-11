@@ -98,6 +98,52 @@
         <button class="opt" id="wsOpen"><b>МАСТЕРСКАЯ</b><s id="wsCoins">0 монет</s></button>
         <button class="opt" id="dailyOpen"><b>ЗАДАНИЯ</b><s id="wsStreak">серия 1</s></button>
       </div>
+
+      <h3 class="sec">Режимы</h3>
+      <div class="row">
+        <button class="btn" id="careerStart" style="flex:1;background:linear-gradient(100deg,#ff7a2f,#ffd34d)">🏆 КАРЬЕРА</button>
+        <button class="btn" id="onlineStart" style="flex:1;background:linear-gradient(100deg,#39c6ff,#7ff0c0)">🌐 ОНЛАЙН</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ========================== CAREER ============================ -->
+  <div class="screen" id="careerIntro" role="dialog" aria-label="Карьера, вводная">
+    <div class="card">
+      <div class="logo" style="font-size:22px" id="crTournName">🏆 КАРЬЕРА</div>
+      <div class="sub" id="crTournPlace"></div>
+      <div class="note" id="crTournInfo"></div>
+      <div class="row" id="crOppList" style="margin-top:12px"></div>
+      <button class="btn" id="crReady">ВПЕРЁД</button>
+    </div>
+  </div>
+  <div class="screen" id="careerPerk" role="dialog" aria-label="Выбор перка">
+    <div class="card">
+      <div class="logo" style="font-size:20px">⚡ ВЫБЕРИ ПЕРК</div>
+      <div class="sub">Улучшение для следующих матчей</div>
+      <div class="row" id="crPerkList" style="margin-top:12px"></div>
+    </div>
+  </div>
+  <div class="screen" id="careerEnd" role="dialog" aria-label="Итоги карьеры">
+    <div class="card">
+      <div class="logo" style="font-size:20px" id="crEndTitle">🏁 КАРЬЕРА</div>
+      <div class="sub" id="crEndSub"></div>
+      <div id="crEndStats" style="margin-top:10px"></div>
+      <button class="btn" id="crEndRestart">НАЧАТЬ ЗАНОВО</button>
+      <button class="btn ghost" id="crEndMenu">В МЕНЮ</button>
+    </div>
+  </div>
+
+  <!-- ========================== ONLINE ============================ -->
+  <div class="screen" id="onlineLobby" role="dialog" aria-label="Онлайн лобби">
+    <div class="card">
+      <div class="logo" style="font-size:20px">🌐 ОНЛАЙН МАТЧ</div>
+      <div class="sub" id="netStatus">Подключение...</div>
+      <div id="netRoomCode" style="font-family:var(--mono);font-size:28px;letter-spacing:.2em;color:var(--acc);text-align:center;margin:12px 0;display:none"></div>
+      <button class="btn" id="netCreate">СОЗДАТЬ КОМНАТУ</button>
+      <button class="btn ghost" id="netJoin" style="margin-top:8px">ПРИСОЕДИНИТЬСЯ ПО КОДУ</button>
+      <div class="note" id="netNote">Релей-сервер задаётся параметром ?net=ws://… в адресе страницы (по умолчанию — боевой relay). Создайте комнату и передайте код другу.</div>
+      <button class="btn ghost" id="netClose" style="margin-top:12px">ЗАКРЫТЬ</button>
     </div>
   </div>
 

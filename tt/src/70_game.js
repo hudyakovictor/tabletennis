@@ -164,6 +164,19 @@ class Game {
     this._fpsT = 0; this._fpsN = 0; this.fps = 60;
 
     this.bindInput();
+
+    // Career mode (roguelike tournament progression, ported from PR #1)
+    this.career = new Career(this);
+    this._careerSpinBoost = 1; this._careerSpeedBoost = 1;
+    this._careerTopspinBoost = 1; this._careerBackspinPenalty = 1;
+    this._careerSmashBoost = 1; this._careerCounterBoost = 1;
+    this._careerChopBoost = 1; this._careerSidespinBoost = 1;
+    this._careerDecisiveBoost = 0; this._careerNetSafe = false;
+    this._careerAISlowdown = 1;
+
+    // Online multiplayer over the relay (experimental)
+    this.network = new NetworkManager(this);
+
     this.resize();
     window.addEventListener('resize', () => this.resize());
   }
@@ -328,6 +341,12 @@ class Game {
     this.director.enabled = this.settings.adaptive;
     this.pointNote = null;
     if (diff !== undefined) { this.settings.difficulty = diff; this.ai.setLevel(diff); }
+    // career: the chop perk slows the opponent, always from the base speed
+    if (this.career.active && this._careerAISlowdown < 1) {
+      this.ai.maxSpeed = this.ai.L.move * this._careerAISlowdown;
+    }
+    // career and online are scored modes: no bullet time there
+    this.setSlowmoAllowed(!(this.career.active || this.network.isInMatch));
     this.score = [0, 0]; this.games = [0, 0];
     this.rally = 0; this.bestRally = 0;
     this.stats = { shots: 0, winners: 0, errors: 0, maxSpeed: 0, maxSpin: 0, byStroke: {}, totalSpin: 0, rallies: 0 };
@@ -446,6 +465,17 @@ class Game {
     if ((this.score[0] >= T || this.score[1] >= T) && Math.abs(this.score[0] - this.score[1]) >= 2) {
       this.matchWinner = this.score[0] > this.score[1] ? 1 : -1;
     }
+    // network: relay the point to the peer
+    if (this.network.isInMatch) {
+      this.network._send({ type: 'point', who, reason, score: this.score.slice() });
+    }
+    // career: the decisive perk arms itself on match point and pays out
+    // on the player's next shot (see applyHit)
+    if (this.career.active && this._careerDecisiveBoost > 0) {
+      const isMatchPoint = (this.score[0] >= T - 1 && this.score[0] > this.score[1]) ||
+                           (this.score[1] >= T - 1 && this.score[1] > this.score[0]);
+      if (isMatchPoint) this._careerDecisiveActive = true;
+    }
     this.ui && this.ui.syncScore();
   }
 
@@ -518,6 +548,22 @@ class Game {
     this.shotId++;                       // the opponent reacts once per shot
     this.rallyBounces.length = 0;
     this.netTouched = false;
+    // career perks act on the player's own shots: the chosen boosts scale
+    // speed/spin right after the impact resolves, before anything reads them
+    if (side > 0 && this.career.active) {
+      const sid = (racket.stroke && racket.stroke.id) || 'DRIVE';
+      let vm = this._careerSpeedBoost;
+      let wm = this._careerSpinBoost;
+      if (sid === 'LOOP' || sid === 'DRIVE' || sid === 'SMASH' || sid === 'COUNTER') wm *= this._careerTopspinBoost;
+      if (sid === 'PUSH' || sid === 'CHOP') wm *= this._careerBackspinPenalty;
+      if (sid === 'SMASH') vm *= this._careerSmashBoost;
+      if (sid === 'COUNTER') vm *= this._careerCounterBoost;
+      if (sid === 'CHOP') wm *= this._careerChopBoost;
+      if (sid === 'HOOK' || sid === 'SIDE' || sid === 'SERVE_SIDE') b.w.y *= this._careerSidespinBoost;
+      if (this._careerDecisiveActive) { vm *= 1 + this._careerDecisiveBoost; this._careerDecisiveActive = false; }
+      if (vm !== 1) { b.v.x *= vm; b.v.y *= vm; b.v.z *= vm; }
+      if (wm !== 1) { b.w.x *= wm; b.w.y *= wm; b.w.z *= wm; }
+    }
     if (!this.isServeBall) this.rally++;
 
     const speed = V3.len(b.v), spin = V3.len(b.w);
@@ -1299,6 +1345,17 @@ class Game {
           this.audio.gameOver(this.matchWinner > 0);
           this.settleMatch();
           this.ui && this.ui.showMatchEnd(this.matchWinner > 0);
+          // career progression over the results screen
+          if (this.career.active) {
+            this.career.onMatchEnd(this.matchWinner);
+            if (this.career.state === 'RUN_END') this.ui && this.ui.showCareerRunEnd(this.career);
+            else if (this.career.state === 'TOURNAMENT_END') this.ui && this.ui.showCareerTournamentEnd(this.career);
+            else if (this.career.state === 'PERK_SELECT') this.ui && this.ui.showCareerPerks(this.career);
+            // a win with no perk on offer still needs a way forward: PR #1
+            // left this branch with no screen and the run silently stalled
+            else if (this.career.state === 'OPPONENT_SELECT') this.ui && this.ui.showCareerOpponentSelect(this.career);
+            this.career.save();
+          }
         } else if (this.stateT > 1.35) {
           this.rally = 0;
           this.prepServe();
@@ -1324,6 +1381,12 @@ class Game {
     this.updateStrikeWindow(dtReal);
     if (this.state === GS.RALLY || this.state === GS.SERVE_TOSS) this.moments.push(this.time, this);
     if (this.training) this.training.update(dtReal);
+    else if (this.network.isInMatch) {
+      // online: the far paddle belongs to the peer, not to the AI
+      const op = this.network.opponentRacket;
+      V3.copy(this.aiPaddle.pos, op.pos);
+      V3.copy(this.aiPaddle.normal, op.normal);
+    }
     else this.ai.think(this, dt);
     this.tryAiHit();
     this.particles.update(dt);
@@ -1346,6 +1409,19 @@ class Game {
     P.sat = expSmooth(P.sat, 1.05 + (1 - this.timeScale) * 0.25, 4, dtReal);
     P.ca = expSmooth(P.ca, 0.55 + sp * 0.75, 4, dtReal);
     this.audio.setCrowd(clamp(this.rally / 18, 0, 1) * 0.6 + (this.state === GS.POINT ? 0.4 : 0));
+
+    // network: sync state (host) or input (guest)
+    if (this.network.isInMatch) {
+      if (this.network.isHost) this.network.sendGameState();
+      else this.network.sendInput();
+    }
+    // career: net-safe perk lifts the ball over the tape
+    if (this._careerNetSafe && this.ball.live && this.ball.lastHitBy === 1) {
+      const nearNet = Math.abs(this.ball.p.z) < 0.15;
+      if (nearNet && this.ball.p.y < PH.NET_TOP + PH.R * 2 && this.ball.v.z < 0) {
+        this.ball.v.y += 0.8;
+      }
+    }
 
     // fps
     this._fpsN++; this._fpsT += dtReal;
