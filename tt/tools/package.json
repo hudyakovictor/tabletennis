@@ -1,13 +1,15 @@
 {
-  "name": "topspin-relay-server",
+  "name": "tools",
   "version": "1.0.0",
-  "description": "TOPSPIN ARENA relay server for online multiplayer",
-  "main": "../server.js",
+  "main": "index.js",
   "scripts": {
-    "start": "node ../server.js",
-    "start:dev": "node ../server.js 3001"
+    "test": "echo \"Error: no test specified\" && exit 1"
   },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "description": "",
   "dependencies": {
-    "ws": "^8.16.0"
+    "puppeteer": "^23.11.1"
   }
 }
