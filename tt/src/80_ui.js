@@ -99,6 +99,7 @@ class UI {
     });
     $$('#workshop .tab').forEach((b) => b.addEventListener('click', () => this.showWorkshop(b.dataset.tab)));
     $('#wsEquip').addEventListener('click', () => this.equipSelection());
+    $('#wsBuyCry').addEventListener('click', () => this.buySelectionCrystals());
     $('#adCoins').addEventListener('click', () => this.watchAd());
     $('#btnSettings').addEventListener('click', () => $('#settings').classList.toggle('on'));
     $('#setClose').addEventListener('click', () => $('#settings').classList.remove('on'));
@@ -223,13 +224,18 @@ class UI {
       const sw = it.kind === 'blade' ? it.wood : it.col;
       const col = `rgb(${sw.map((c) => Math.round(c * 255)).join(',')})`;
       const price = it.price ? `<span class="pr">${it.price}</span>` : '';
+      const cry = !owned && it.crystals ? ` <em class="cry">${it.crystals} \u25c8</em>` : '';
       return `<button class="irow${it.id === current ? ' sel' : ''}${owned ? '' : ' locked'}" data-id="${it.id}">
         <span class="sw" style="background:${col}"></span>
-        <span class="d"><b>${it.name}</b><s>${it.ru}${owned ? '' : ' · не куплено'}</s></span>${price}</button>`;
+        <span class="d"><b>${it.name}</b><s>${it.ru}${owned ? '' : ' · не куплено'}</s></span>${cry}${price}</button>`;
     }).join('');
     Array.from(box.querySelectorAll('.irow')).forEach((b) => b.addEventListener('click', () => {
       const id = b.dataset.id, it = ITEMS[id];
-      const slot = it.kind === 'blade' ? 'blade' : (b.parentElement.id === 'listBh' ? 'bh' : 'fh');
+      if (!it) return;                 // a stale row from a previous render
+      /* the list is re-rendered on every action, so a click that arrives
+         after a re-render has a detached button: ask the DOM carefully */
+      const owner = b.parentElement || b.closest('.ilist');
+      const slot = it.kind === 'blade' ? 'blade' : (owner && owner.id === 'listBh' ? 'bh' : 'fh');
       if (!this.game.profile.owns(id)) {
         const ok = this.game.shop.buyRacket(id);
         if (!ok) { this.toast('НЕ ХВАТАЕТ МОНЕТ · ' + it.price); this.game.audio.ui('deny'); return; }
@@ -251,6 +257,18 @@ class UI {
     const dirty = this.pick.blade !== fitted.blade || this.pick.fh !== fitted.fh || this.pick.bh !== fitted.bh;
     $('#wsEquip').textContent = dirty ? 'ПОСТАВИТЬ В ИГРУ' : 'ЭТА РАКЕТКА УЖЕ В ИГРЕ';
     $('#wsEquip').disabled = !dirty;
+    const bladeItem = ITEMS[this.pick.blade];
+    const buyCry = $('#wsBuyCry');
+    if (buyCry) {
+      const show = !this.game.profile.owns(this.pick.blade) && !!bladeItem.crystals;
+      buyCry.style.display = show ? '' : 'none';
+      /* keep a real name on the button even while it is hidden: an empty
+         button is what screen readers announce as "button" */
+      buyCry.textContent = show ? '\u041a\u0423\u041f\u0418\u0422\u042c \u0417\u0410 ' + bladeItem.crystals + ' \u25c8'
+        : '\u041a\u0423\u041f\u0418\u0422\u042c \u0417\u0410 \u041a\u0420\u0418\u0421\u0422\u0410\u041b\u041b\u042b';
+      buyCry.setAttribute('aria-label', show ? '\u041a\u0443\u043f\u0438\u0442\u044c \u0437\u0430 ' + bladeItem.crystals + ' \u043a\u0440\u0438\u0441\u0442\u0430\u043b\u043b\u043e\u0432'
+        : '\u041a\u0443\u043f\u0438\u0442\u044c \u0440\u0430\u043a\u0435\u0442\u043a\u0443 \u0437\u0430 \u043a\u0440\u0438\u0441\u0442\u0430\u043b\u043b\u044b');
+    }
     const rows = STAT_KEYS.map((k) => {
       const v = t[k];
       const d = v - cur.stats[k];
@@ -263,6 +281,21 @@ class UI {
       : t.spin > 70 ? 'собирает вращение с кисти' : 'ровная, предсказуемая';
     $('#statNote').innerHTML = `<b>${ITEMS[this.pick.blade].name} · ${ITEMS[this.pick.fh].name}</b><br>`
       + `${describe}. Отскок ${(sp * 100).toFixed(0)}% от базы, пятно контакта ${(eq.sweetK * 100).toFixed(0)}%.`;
+  }
+
+  /** Buy the racket that is being tried on, with crystals. */
+  buySelectionCrystals() {
+    const p = this.game.profile, it = ITEMS[this.pick.blade];
+    if (p.owns(it.id)) { this.toast('УЖЕ КУПЛЕНО'); return; }
+    if (!it.crystals) { this.toast('ЭТУ РАКЕТКУ БЕРУТ МОНЕТАМИ'); return; }
+    if (!this.game.shop.buyRacket(it.id, 'crystals')) {
+      this.toast('НУЖНО ' + it.crystals + ' КРИСТАЛЛОВ'); this.game.audio.ui('deny'); return;
+    }
+    this.toast('КУПЛЕНО ЗА ' + it.crystals + ' \u25c8 · ' + it.name);
+    this.game.audio.ui('buy');
+    $('#wsBal').textContent = p.data.coins;
+    $('#wsCry').textContent = p.data.crystals;
+    this.showWorkshop('racket');
   }
 
   equipSelection() {
@@ -356,7 +389,12 @@ class UI {
   watchAd() {
     const r = this.game.shop.rewardAd('dailyWheel');
     if (r.ok) { this.toast('+' + r.coins + ' МОНЕТ · СПАСИБО'); this.game.audio.ui('buy'); }
-    else this.toast(r.why === 'no-ads' ? 'РЕКЛАМА ОТКЛЮЧЕНА' : 'ПОДОЖДИТЕ ' + (r.left || 45) + ' С');
+    else if (r.why === 'no-ads') this.toast('РЕКЛАМА ОТКЛЮЧЕНА');
+    else if (r.why === 'daily') this.toast('ЛИМИТ НА СЕГОДНЯ · ЗАВТРА ЕЩЁ ' + r.cap);
+    else this.toast('ПОДОЖДИТЕ ' + (r.left || 45) + ' С');
+    const cap = this.game.shop.adsLeft;
+    const btn = $('#adCoins');
+    if (btn) btn.textContent = cap > 0 ? 'СМОТРЕТЬ РЕКЛАМУ · +120 МОНЕТ · ОСТАЛОСЬ ' + cap : 'РЕКЛАМА · ЛИМИТ НА СЕГОДНЯ ИСЧЕРПАН';
     $('#wsBal').textContent = this.game.profile.data.coins;
     this.drawShop(); this.refreshMenuBits();
   }
@@ -431,7 +469,7 @@ class UI {
 
   syncSettings() {
     const s = this.game.settings;
-    const sel = (k, v) => $$(`.opt[data-set="${k}"]`).forEach((x) => x.classList.toggle('sel', x.dataset.val == v));
+    const sel = (k, v) => $$(`.opt[data-set="${k}"]`).forEach((x) => x.classList.toggle('sel', x.dataset.val === String(v)));
     sel('cam', s.camera); sel('quality', s.quality); sel('hand', s.hand);
     sel('trail', s.showTrail ? 'on' : 'off'); sel('predict', s.showPredict ? 'on' : 'off');
     sel('zone', s.showZone ? 'on' : 'off'); sel('tele', s.showTele ? 'on' : 'off');
@@ -453,8 +491,8 @@ class UI {
   syncScore() {
     const g = this.game;
     const a = $('#ptsA'), b = $('#ptsB');
-    if (a.textContent != g.score[0]) { a.textContent = g.score[0]; a.classList.add('bump'); setTimeout(() => a.classList.remove('bump'), 220); }
-    if (b.textContent != g.score[1]) { b.textContent = g.score[1]; b.classList.add('bump'); setTimeout(() => b.classList.remove('bump'), 220); }
+    if (a.textContent !== String(g.score[0])) { a.textContent = g.score[0]; a.classList.add('bump'); setTimeout(() => a.classList.remove('bump'), 220); }
+    if (b.textContent !== String(g.score[1])) { b.textContent = g.score[1]; b.classList.add('bump'); setTimeout(() => b.classList.remove('bump'), 220); }
     $('#servA').classList.toggle('on', g.server === 1);
     $('#servB').classList.toggle('on', g.server === -1);
     $('#oppName').textContent = g.ai.L.name;
@@ -518,6 +556,8 @@ class UI {
     $('#stFav').textContent = top ? (STROKES[top[0]] ? STROKES[top[0]].short : top[0]) + ' ×' + top[1] : '—';
     // the match is over, so lead with the thing worth remembering: the
     // best rally, played back before the numbers
+    const row = $('#overMoments');
+    row.innerHTML = '';
     /* what the match paid, in one line, next to the score */
     if (g.lastReward) {
       const r = g.lastReward;
@@ -530,8 +570,6 @@ class UI {
       g.lastReward = null;
     }
     const best = g.moments.best;
-    const row = $('#overMoments');
-    row.innerHTML = '';
     const kept = g.moments.kept.slice(0, 3);
     if (kept.length) {
       const b = document.createElement('button');

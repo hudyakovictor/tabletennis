@@ -21,6 +21,40 @@
 const SAVE_KEY = 'topspin.arena.save.v1';
 const SAVE_VERSION = 3;
 
+/* Soft currency ceiling. Not a gameplay limit — a sanity limit: a save
+   that arrives with 1e309 coins (or NaN, or the string "много") is a
+   broken save, not a rich player. Clamping here keeps every downstream
+   multiplication finite. */
+const MAX_COINS = 9999999;
+const MAX_CRYSTALS = 999999;
+const MAX_XP = 1e9;
+const MAX_ADS_PER_DAY = 5;
+
+/** Merge an untrusted object into a fresh one, skipping the keys that can
+ *  rewrite an object's prototype. `JSON.parse('{"__proto__":{"a":1}}')`
+ *  produces a real own property, and a plain Object.assign would then set
+ *  the prototype of the target — the prototype-pollution trick. */
+function safeAssign(base, raw) {
+  if (!raw || typeof raw !== 'object') return base;
+  for (const k of Object.keys(raw)) {
+    if (k === '__proto__' || k === 'constructor' || k === 'prototype') continue;
+    base[k] = raw[k];
+  }
+  return base;
+}
+/** A finite number in range, or the default. Strings, null, NaN and
+ *  ±Infinity all land on the default instead of poisoning the wallet. */
+function num(v, d, lo, hi) {
+  let n = typeof v === 'number' ? v : NaN;
+  if (!Number.isFinite(n)) n = d;
+  if (lo !== undefined && n < lo) n = lo;
+  if (hi !== undefined && n > hi) n = hi;
+  return n;
+}
+const int = (v, d, lo, hi) => Math.round(num(v, d, lo, hi));
+const bool = (v, d) => (typeof v === 'boolean' ? v : d);
+const strList = (v, ok, cap) => (Array.isArray(v) ? v.filter((x) => typeof x === 'string' && ok(x)).slice(0, cap) : []);
+
 /* ------------------------------------------------------------------ *
  *  Platform: where are we running, and what is allowed here?
  * ------------------------------------------------------------------ */
@@ -119,7 +153,7 @@ class Profile {
       stats: { matches: 0, wins: 0, shots: 0, rallies: 0, maxRally: 0, minutes: 0, bestSpeed: 0, bestSpin: 0, moments: 0 },
       daily: { day: '', tasks: {}, done: [], claimed: [], wheel: '' },
       season: { n: 0, xp: 0, premium: false, claimed: [] },
-      ads: { watched: 0, last: 0 },
+      ads: { watched: 0, last: 0, day: '', today: 0 },
       purchases: [],
       settings: null,
     };
@@ -132,17 +166,21 @@ class Profile {
       try {
         const d = JSON.parse(raw);
         const base = this.blank();
-        this.data = Object.assign(base, d);
-        this.data.stats = Object.assign(base.stats, d.stats || {});
-        this.data.daily = Object.assign(base.daily, d.daily || {});
-        this.data.season = Object.assign(base.season, d.season || {});
-        this.data.career = Object.assign(base.career, d.career || {});
-        this.data.cosmetics = Object.assign(base.cosmetics, d.cosmetics || {});
+        safeAssign(base, d);
+        base.stats = safeAssign(base.stats, d.stats);
+        base.daily = safeAssign(base.daily, d.daily);
+        base.season = safeAssign(base.season, d.season);
+        base.career = safeAssign(base.career, d.career);
+        base.cosmetics = safeAssign(base.cosmetics, d.cosmetics);
+        base.equip = safeAssign(base.equip, d.equip);
+        base.ads = safeAssign(base.ads, d.ads);
+        this.data = base;
         if (!Array.isArray(this.data.owned) || !this.data.owned.length) this.data.owned = ['b_base', 'r_base'];
-        this.migrate(d.v || 1);
+        this.migrate(num(d.v, 1, 1, SAVE_VERSION));
       } catch (e) { this.data = this.blank(); }
     }
-    this.migrate(this.data.v);
+    this.migrate(num(this.data.v, 1, 1, SAVE_VERSION));
+    this.sanitize();
     this.loaded = true;
     this.today();
     return this.data;
@@ -162,6 +200,86 @@ class Profile {
     d.equip.bh = d.equip.bh || d.equip.fh || 'r_base';
     d.cosmetics = d.cosmetics || { trail: 'std', arena: 'arena', grip: 'std' };
     d.v = SAVE_VERSION;
+  }
+
+  /**
+   * The last line of defence between a save file and the game. Every
+   * field is normalised here: numbers finite and in range, ids existing,
+   * unknown items dropped, currency survivable. Called on every load, so
+   * a save edited by hand, half-written by a crash, or carried over from
+   * an older version can never make the game behave strangely.
+   */
+  sanitize() {
+    const d = this.data, b = this.blank();
+    d.v = SAVE_VERSION;
+    d.created = int(d.created, Date.now(), 0, 4e12);
+    d.coins = int(d.coins, b.coins, 0, MAX_COINS);
+    d.crystals = int(d.crystals, 0, 0, MAX_CRYSTALS);
+    d.xp = int(d.xp, 0, 0, MAX_XP);
+    d.level = int(d.level, 1, 1, 200);
+    d.streak = int(d.streak, 0, 0, 100000);
+    d.days = strList(d.days, (x) => /^\d{1,4}-\d{1,2}-\d{1,2}$/.test(x), 60);
+    /* inventory: only real catalogue ids, always including the starter kit */
+    d.owned = strList(d.owned, (id) => !!ITEMS[id], 400);
+    for (const id of ['b_base', 'r_base']) if (d.owned.indexOf(id) < 0) d.owned.push(id);
+    /* equipment: right kind for the right slot, and owned */
+    const pick = (id, kind, fallback) => {
+      const it = ITEMS[id];
+      return (it && it.kind === kind && d.owned.indexOf(id) >= 0) ? id : fallback;
+    };
+    if (!d.equip || typeof d.equip !== 'object') d.equip = {};
+    d.equip.blade = pick(d.equip.blade, 'blade', 'b_base');
+    d.equip.fh = pick(d.equip.fh, 'rubber', 'r_base');
+    d.equip.bh = pick(d.equip.bh, 'rubber', d.equip.fh);
+    /* cosmetics: value must exist for that category */
+    if (!d.cosmetics || typeof d.cosmetics !== 'object') d.cosmetics = {};
+    for (const kind of ['trail', 'arena', 'grip']) {
+      const vals = COSMETICS.filter((c) => c.kind === kind).map((c) => c.val);
+      if (vals.indexOf(d.cosmetics[kind]) < 0) d.cosmetics[kind] = b.cosmetics[kind];
+    }
+    /* stats */
+    if (!d.stats || typeof d.stats !== 'object') d.stats = {};
+    for (const key of Object.keys(b.stats)) d.stats[key] = num(d.stats[key], 0, 0, 1e12);
+    /* daily */
+    if (!d.daily || typeof d.daily !== 'object') d.daily = {};
+    if (typeof d.daily.day !== 'string') d.daily.day = '';
+    const taskIds = DAILY_TASKS.map((t) => t.id);
+    if (!d.daily.tasks || typeof d.daily.tasks !== 'object') d.daily.tasks = {};
+    for (const id of Object.keys(d.daily.tasks)) {
+      if (taskIds.indexOf(id) < 0) delete d.daily.tasks[id];
+      else d.daily.tasks[id] = num(d.daily.tasks[id], 0, 0, 1e9);
+    }
+    d.daily.done = strList(d.daily.done, (id) => taskIds.indexOf(id) >= 0, 20);
+    d.daily.claimed = strList(d.daily.claimed, (id) => taskIds.indexOf(id) >= 0, 20);
+    if (typeof d.daily.wheel !== 'string') d.daily.wheel = '';
+    /* season */
+    if (!d.season || typeof d.season !== 'object') d.season = {};
+    d.season.n = int(d.season.n, 0, 0, 999);
+    d.season.xp = int(d.season.xp, 0, 0, MAX_XP);
+    d.season.premium = bool(d.season.premium, false);
+    d.season.claimed = Array.isArray(d.season.claimed)
+      ? d.season.claimed.filter((x) => Number.isInteger(x) && x >= 0 && x <= 60).slice(0, 200) : [];
+    /* ads */
+    if (!d.ads || typeof d.ads !== 'object') d.ads = {};
+    d.ads.watched = int(d.ads.watched, 0, 0, 1e6);
+    d.ads.last = int(d.ads.last, 0, 0, 4e12);
+    d.ads.noadsBought = bool(d.ads.noadsBought, false);
+    d.ads.day = typeof d.ads.day === 'string' ? d.ads.day : '';
+    d.ads.today = int(d.ads.today, 0, 0, MAX_ADS_PER_DAY);
+    /* purchases: history of what was actually paid for */
+    d.purchases = Array.isArray(d.purchases)
+      ? d.purchases.filter((x) => x && typeof x === 'object' && typeof x.id === 'string').slice(-200) : [];
+    /* career (used by the tournament ladder) */
+    if (!d.career || typeof d.career !== 'object') d.career = {};
+    d.career.div = int(d.career.div, 0, 0, 99);
+    d.career.event = int(d.career.event, 0, 0, 999);
+    d.career.points = int(d.career.points, 0, 0, 1e9);
+    d.career.cups = int(d.career.cups, 0, 0, 9999);
+    d.career.seen = int(d.career.seen, 0, 0, 1e9);
+    d.career.trophies = strList(d.career.trophies, () => true, 100);
+    /* settings: the game applies ranges on top, but it must be an object */
+    if (d.settings !== null && (typeof d.settings !== 'object' || Array.isArray(d.settings))) d.settings = null;
+    return d;
   }
 
   save(force) {
@@ -201,21 +319,26 @@ class Profile {
 
   /* ------------------------------ money -------------------------- */
   addCoins(n, why) {
-    this.data.coins = Math.max(0, Math.round(this.data.coins + n));
+    if (!Number.isFinite(n)) n = 0;                     // NaN from a broken reward table
+    if (!Number.isFinite(this.data.coins)) this.data.coins = 0;
+    this.data.coins = clamp(Math.round(this.data.coins + n), 0, MAX_COINS);
     this.touch();
     if (this.onCoins) this.onCoins(n, why);
     return this.data.coins;
   }
   spend(coins, crystals) {
     const d = this.data;
-    if (d.coins < (coins || 0) || d.crystals < (crystals || 0)) return false;
-    d.coins -= coins || 0; d.crystals -= crystals || 0;
+    const c = num(coins, 0, 0, MAX_COINS), k = num(crystals, 0, 0, MAX_CRYSTALS);
+    if (!Number.isFinite(d.coins) || !Number.isFinite(d.crystals)) this.sanitize();
+    if (d.coins < c || d.crystals < k) return false;
+    d.coins -= c; d.crystals -= k;
     this.touch();
     return true;
   }
   addXP(n) {
     const d = this.data;
-    d.xp += n;
+    if (!Number.isFinite(n) || n < 0) n = 0;
+    d.xp = clamp(d.xp + n, 0, MAX_XP);
     const need = (lv) => 400 + lv * 260;
     while (d.xp >= need(d.level)) { d.xp -= need(d.level); d.level++; if (this.onLevel) this.onLevel(d.level); }
     this.touch();
@@ -226,7 +349,8 @@ class Profile {
   /* ---------------------------- inventory ------------------------ */
   owns(id) { return this.data.owned.indexOf(id) >= 0; }
   buy(id, price, currency) {
-    if (this.owns(id)) return false;
+    if (this.owns(id) || !ITEMS[id]) return false;
+    if (!Number.isFinite(price) || price < 0) return false;
     const ok = currency === 'crystals' ? this.spend(0, price) : this.spend(price, 0);
     if (!ok) return false;
     this.data.owned.push(id);
@@ -235,7 +359,11 @@ class Profile {
     return true;
   }
   equipRacket(blade, fh, bh) {
-    for (const id of [blade, fh, bh]) if (id && !this.owns(id)) return false;
+    /* A rubber is not a blade and a blade is not a rubber: the equipment
+       maths reads different fields for the two, so a slot filled with the
+       wrong kind of item would quietly produce a nonsense racket. */
+    const okKind = (id, kind) => { const it = ITEMS[id]; return !!it && it.kind === kind && this.owns(id); };
+    if (!okKind(blade, 'blade') || !okKind(fh, 'rubber') || !okKind(bh, 'rubber')) return false;
     this.data.equip = { blade, fh, bh };
     this.touch(); this.save(true);
     return true;
@@ -269,6 +397,7 @@ class Profile {
   seasonProgress() { return clamp((this.data.season.xp % 250) / 250, 0, 1); }
   addSeasonXP(n) {
     const s = this.data.season;
+    if (!Number.isFinite(n) || n < 0) n = 0;
     const before = this.seasonLevel();
     s.xp += n;
     this.touch();
@@ -335,7 +464,8 @@ class Shop {
       if (it.kind !== 'blade' && it.kind !== 'rubber') continue;
       out.push({
         id, item: it, kind: it.kind, ru: it.ru, name: it.name,
-        price: it.price, cur: 'coins', owned: this.p.owns(id), tier: it.tier, star: !!it.star,
+        price: it.price, crystals: it.crystals, cur: 'coins', owned: this.p.owns(id),
+        tier: it.tier, star: !!it.star,
       });
     }
     return out;
@@ -353,12 +483,21 @@ class Shop {
     return SHOP_BUNDLES.map((b) => ({ ...b, owned: this.p.data.purchases.some((x) => x.id === b.id) }));
   }
 
-  buyRacket(id) {
+  /**
+   * Two ways to own a racket: play for it (coins) or pay for it
+   * (crystals, which come from the store). Both are recorded, and the
+   * cheap items stay coin-only so the whole game can be finished for
+   * free — paying buys time, never power.
+   */
+  buyRacket(id, cur) {
     const it = ITEMS[id];
-    if (!it || it.price === undefined) return false;
-    if (!this.p.buy(id, it.price, 'coins')) return false;
-    this.an && this.an.send('shop:buy', { id, cur: 'coins', price: it.price });
-    this.log.push({ id, t: Date.now() });
+    if (!it) return false;
+    const currency = cur === 'crystals' ? 'crystals' : 'coins';
+    const price = currency === 'crystals' ? it.crystals : it.price;
+    if (!Number.isFinite(price) || price <= 0) return false;
+    if (!this.p.buy(id, price, currency)) return false;
+    this.an && this.an.send('shop:buy', { id, cur: currency, price });
+    this.log.push({ id, cur: currency, t: Date.now() });
     return true;
   }
 
@@ -366,8 +505,11 @@ class Shop {
     const c = COSMETICS.find((x) => x.id === id);
     if (!c) return false;
     if (c.cur === 'career') return false;                 // earned, never sold
+    if (this.p.data.cosmetics[c.kind] === c.val) return false;    // already worn: never charge twice
     if (c.cur === 'crystals') {
       if (!this.p.spend(0, c.price)) return false;
+    } else if (c.cur === 'coins' && c.price > 0) {
+      if (!this.p.spend(c.price, 0)) return false;
     }
     this.p.data.cosmetics[c.kind] = c.val;
     this.p.touch(); this.p.save(true);
@@ -384,8 +526,13 @@ class Shop {
     const b = SHOP_BUNDLES.find((x) => x.id === bundleId);
     if (!b) return false;
     const d = this.p.data;
+    /* The store will happily call us twice (retry, double tap, a restored
+       purchase after reinstall). The receipt is what makes it idempotent:
+       one receipt, one grant — otherwise a single payment pays out twice. */
+    const tag = typeof receipt === 'string' && receipt ? receipt : null;
+    if (tag && d.purchases.some((x) => x.receipt === tag)) return false;
     if (b.once && d.purchases.some((x) => x.id === bundleId)) return false;
-    d.purchases.push({ id: bundleId, t: Date.now(), receipt: receipt ? 'ok' : 'none' });
+    d.purchases.push({ id: bundleId, t: Date.now(), receipt: tag || 'local:' + Date.now() });
     if (b.crystals) d.crystals += b.crystals;
     if (b.coins) d.coins += b.coins;
     if (b.pass) d.season.premium = true;
@@ -400,23 +547,38 @@ class Shop {
    * Rewarded video. The offer must be concrete and the answer must be
    * "no thanks" — a rewarded ad with no refusal is a toll booth.
    */
+  /** How many rewarded ads are left today (the UI must be able to say). */
+  get adsLeft() {
+    const a = this.p.data.ads;
+    if (a.noadsBought) return 0;
+    if (a.day !== this.p.dayKey(Date.now())) return MAX_ADS_PER_DAY;
+    return Math.max(0, MAX_ADS_PER_DAY - (a.today || 0));
+  }
+
   rewardAd(kind) {
-    const p = this.p;
-    if (p.data.ads.noadsBought) return { ok: false, why: 'no-ads' };
+    const p = this.p, a = p.data.ads;
+    if (a.noadsBought) return { ok: false, why: 'no-ads' };
     const now = Date.now();
-    if (now - (p.data.ads.last || 0) < 45000) return { ok: false, why: 'cooldown', left: Math.ceil((45000 - (now - p.data.ads.last)) / 1000) };
+    /* The daily budget is the real brake. Without it a player farms 120
+       coins every 45 seconds — more than playing pays — and every price
+       in the shop stops meaning anything. */
+    const day = p.dayKey(now);
+    if (a.day !== day) { a.day = day; a.today = 0; }
+    if (a.today >= MAX_ADS_PER_DAY) return { ok: false, why: 'daily', left: 0, cap: MAX_ADS_PER_DAY };
+    if (now - (a.last || 0) < 45000) return { ok: false, why: 'cooldown', left: Math.ceil((45000 - (now - a.last)) / 1000) };
     const table = {
       coins2x: { coins: 120, ru: '×2 монеты за матч' },
       secondChance: { coins: 0, ru: 'второй шанс в турнире' },
       dailyWheel: { coins: 120, ru: 'колесо дня' },
     };
     const offer = table[kind] || table.coins2x;
-    p.data.ads.last = now;
-    p.data.ads.watched++;
+    a.last = now;
+    a.watched++;
+    a.today++;
     if (offer.coins) p.addCoins(offer.coins, 'ad:' + kind);
     p.touch(); p.save(true);
-    this.an && this.an.send('ad:rewarded', { kind, coins: offer.coins });
-    return { ok: true, coins: offer.coins, offer };
+    this.an && this.an.send('ad:rewarded', { kind, coins: offer.coins, left: MAX_ADS_PER_DAY - a.today });
+    return { ok: true, coins: offer.coins, offer, left: MAX_ADS_PER_DAY - a.today };
   }
 }
 

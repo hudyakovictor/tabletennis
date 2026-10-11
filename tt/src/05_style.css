@@ -157,7 +157,8 @@ h3.sec::after{content:"";flex:1;height:1px;background:var(--line)}
 #topright{position:absolute;top:max(12px,env(safe-area-inset-top));right:max(12px,env(safe-area-inset-right));
   display:flex;gap:7px}
 .ic{width:34px;height:34px;border-radius:10px;border:1px solid var(--line);background:var(--glass);
-  display:grid;place-items:center;cursor:pointer;backdrop-filter:blur(10px);transition:.16s;color:var(--dim)}
+  display:grid;place-items:center;cursor:pointer;backdrop-filter:blur(10px);transition:.16s;color:var(--dim);
+  padding:0;appearance:none;-webkit-appearance:none;font:inherit}
 .ic:hover{color:var(--txt);border-color:var(--line2);background:var(--glass2)}
 #dbg{position:absolute;top:max(12px,env(safe-area-inset-top));left:max(12px,env(safe-area-inset-left));
   font-family:var(--mono);font-size:10px;line-height:1.5;color:var(--dim);background:rgba(0,0,0,.6);
@@ -225,7 +226,8 @@ body.is-paused #pauseInd{display:flex}
   align-items:center;justify-content:center;gap:1px;pointer-events:auto;cursor:pointer;
   background:radial-gradient(circle at 50% 35%,rgba(30,48,74,.85),rgba(9,14,24,.85));
   border:1px solid var(--line2);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);
-  color:var(--dim);overflow:hidden;transition:color .2s,border-color .2s,transform .12s}
+  color:var(--dim);overflow:hidden;transition:color .2s,border-color .2s,transform .12s;
+  padding:0;appearance:none;-webkit-appearance:none;font:inherit}
 #slow:active{transform:scale(.94)}
 #slow b{font-size:8px;font-weight:900;letter-spacing:.06em;z-index:2}
 #slow s{font-family:var(--mono);font-size:8px;opacity:.6;text-decoration:none;z-index:2}
@@ -310,6 +312,10 @@ body.is-reel #hud,body.is-reel #slow{opacity:.0}
 .irow .d b{font-size:11.5px;font-weight:800}
 .irow .d s{font-family:var(--mono);font-size:9.5px;color:var(--dim);text-decoration:none}
 .irow .pr{font-family:var(--mono);font-size:10px;color:var(--warn)}
+/* the crystal price on a racket: the "buy it now" shelf, next to the
+   price in coins that everyone can earn */
+.irow .cry{font-family:var(--mono);font-size:9.5px;font-style:normal;color:#b3a4ff;
+  border:1px solid rgba(179,164,255,.32);border-radius:7px;padding:2px 5px;background:rgba(179,164,255,.10)}
 .irow .sw{width:10px;height:18px;border-radius:3px;flex:0 0 auto}
 .card2{background:var(--glass2);border:1px solid var(--line2);border-radius:14px;padding:13px}
 .statcard{display:flex;flex-direction:column;gap:7px;margin-bottom:10px}
@@ -344,3 +350,14 @@ body.is-reel #hud,body.is-reel #slow{opacity:.0}
 .trow button{background:var(--good);color:#08111c;border:0;border-radius:8px;font-family:var(--ui);font-size:10.5px;
   font-weight:900;padding:5px 11px;cursor:pointer}
 .trow button:disabled{background:rgba(255,255,255,.10);color:var(--dim2)}
+
+
+/* ============ reduced motion ============
+   Everything that moves on its own (menu sheen, bumps, the reel) is
+   optional decoration. Players who ask the OS for calm get calm; the
+   swipe, the ball and the score are all still perfectly readable. */
+@media (prefers-reduced-motion: reduce){
+  *,*::before,*::after{animation-duration:.001ms!important;animation-iteration-count:1!important;
+    transition-duration:.001ms!important;scroll-behavior:auto!important}
+  #menuSheen,#app::after{animation:none!important}
+}

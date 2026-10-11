@@ -6,7 +6,16 @@ OUT = sys.argv[1] if len(sys.argv) > 1 else '/home/user/table-tennis-topspin.htm
 
 JS_ORDER = ['10_math.js','20_gl.js','30_physics.js','40_swipe.js','50_audio.js',
             '55_ai.js','56_rig.js','58_coach.js','59_replay.js','60_scene.js',
-            '65_train.js','70_game.js','80_ui.js','86_meta.js','90_boot.js']
+            '65_train.js','84_racket.js','86_meta.js','70_game.js','80_ui.js','90_boot.js']
+
+# Every module in src/ MUST be in JS_ORDER: a file that is present on disk
+# but missing here builds a bundle that throws on boot and shows "WebGL
+# недоступен" instead of the game. It happened. It will not happen again.
+_missing = sorted(set(f for f in os.listdir(SRC) if f.endswith('.js')) - set(JS_ORDER))
+_extra = sorted(set(JS_ORDER) - set(os.listdir(SRC)))
+if _missing or _extra:
+    raise SystemExit('build.py: JS_ORDER out of sync — missing: %s, unknown: %s'
+                     % (_missing, _extra))
 
 css  = open(os.path.join(SRC,'05_style.css'),encoding='utf-8').read()
 body = open(os.path.join(SRC,'02_body.html'),encoding='utf-8').read()

@@ -169,7 +169,8 @@ h3.sec::after{content:"";flex:1;height:1px;background:var(--line)}
 #topright{position:absolute;top:max(12px,env(safe-area-inset-top));right:max(12px,env(safe-area-inset-right));
   display:flex;gap:7px}
 .ic{width:34px;height:34px;border-radius:10px;border:1px solid var(--line);background:var(--glass);
-  display:grid;place-items:center;cursor:pointer;backdrop-filter:blur(10px);transition:.16s;color:var(--dim)}
+  display:grid;place-items:center;cursor:pointer;backdrop-filter:blur(10px);transition:.16s;color:var(--dim);
+  padding:0;appearance:none;-webkit-appearance:none;font:inherit}
 .ic:hover{color:var(--txt);border-color:var(--line2);background:var(--glass2)}
 #dbg{position:absolute;top:max(12px,env(safe-area-inset-top));left:max(12px,env(safe-area-inset-left));
   font-family:var(--mono);font-size:10px;line-height:1.5;color:var(--dim);background:rgba(0,0,0,.6);
@@ -237,7 +238,8 @@ body.is-paused #pauseInd{display:flex}
   align-items:center;justify-content:center;gap:1px;pointer-events:auto;cursor:pointer;
   background:radial-gradient(circle at 50% 35%,rgba(30,48,74,.85),rgba(9,14,24,.85));
   border:1px solid var(--line2);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);
-  color:var(--dim);overflow:hidden;transition:color .2s,border-color .2s,transform .12s}
+  color:var(--dim);overflow:hidden;transition:color .2s,border-color .2s,transform .12s;
+  padding:0;appearance:none;-webkit-appearance:none;font:inherit}
 #slow:active{transform:scale(.94)}
 #slow b{font-size:8px;font-weight:900;letter-spacing:.06em;z-index:2}
 #slow s{font-family:var(--mono);font-size:8px;opacity:.6;text-decoration:none;z-index:2}
@@ -322,6 +324,10 @@ body.is-reel #hud,body.is-reel #slow{opacity:.0}
 .irow .d b{font-size:11.5px;font-weight:800}
 .irow .d s{font-family:var(--mono);font-size:9.5px;color:var(--dim);text-decoration:none}
 .irow .pr{font-family:var(--mono);font-size:10px;color:var(--warn)}
+/* the crystal price on a racket: the "buy it now" shelf, next to the
+   price in coins that everyone can earn */
+.irow .cry{font-family:var(--mono);font-size:9.5px;font-style:normal;color:#b3a4ff;
+  border:1px solid rgba(179,164,255,.32);border-radius:7px;padding:2px 5px;background:rgba(179,164,255,.10)}
 .irow .sw{width:10px;height:18px;border-radius:3px;flex:0 0 auto}
 .card2{background:var(--glass2);border:1px solid var(--line2);border-radius:14px;padding:13px}
 .statcard{display:flex;flex-direction:column;gap:7px;margin-bottom:10px}
@@ -357,16 +363,27 @@ body.is-reel #hud,body.is-reel #slow{opacity:.0}
   font-weight:900;padding:5px 11px;cursor:pointer}
 .trow button:disabled{background:rgba(255,255,255,.10);color:var(--dim2)}
 
+
+/* ============ reduced motion ============
+   Everything that moves on its own (menu sheen, bumps, the reel) is
+   optional decoration. Players who ask the OS for calm get calm; the
+   swipe, the ball and the score are all still perfectly readable. */
+@media (prefers-reduced-motion: reduce){
+  *,*::before,*::after{animation-duration:.001ms!important;animation-iteration-count:1!important;
+    transition-duration:.001ms!important;scroll-behavior:auto!important}
+  #menuSheen,#app::after{animation:none!important}
+}
+
 </style>
 </head>
 <body>
-<div id="app">
-  <canvas id="gl"></canvas>
+<div id="app" role="application" aria-label="TOPSPIN ARENA — настольный теннис, управление свайпом">
+  <canvas id="gl" aria-label="Игровое поле. Свайп задаёт удар; двумя пальцами — ракурс камеры."></canvas>
   <canvas id="fx"></canvas>
 
   <div id="hud">
     <!-- scoreboard -->
-    <div id="score" class="pe">
+    <div id="score" class="pe" role="status" aria-label="Счёт матча">
       <div class="sb-side">
         <span class="serve-dot" id="servA"></span>
         <span class="sb-nm">ВЫ</span>
@@ -380,15 +397,15 @@ body.is-reel #hud,body.is-reel #slow{opacity:.0}
       </div>
     </div>
 
-    <div id="note"><i></i><span></span></div>
-  <div id="rally"></div>
-    <div id="msgs"></div>
+    <div id="note" role="status" aria-live="polite"><i></i><span></span></div>
+  <div id="rally" role="status" aria-live="off"></div>
+    <div id="msgs" role="log" aria-live="polite" aria-atomic="false"></div>
     <div id="dbg"></div>
 
     <div id="topright">
-      <div class="ic pe" id="btnSound" title="Звук"></div>
-      <div class="ic pe" id="btnSettings" title="Настройки"></div>
-      <div class="ic pe" id="btnMenu" title="Меню"></div>
+      <button class="ic pe" id="btnSound" title="Звук" aria-label="Звук вкл/выкл"></button>
+      <button class="ic pe" id="btnSettings" title="Настройки" aria-label="Настройки"></button>
+      <button class="ic pe" id="btnMenu" title="Меню" aria-label="В главное меню"></button>
     </div>
 
     <!-- last shot: one line, fades away on its own -->
@@ -408,18 +425,18 @@ body.is-reel #hud,body.is-reel #slow{opacity:.0}
     </div>
 
     <!-- slow-mo: hold to slow the world down (never in tournaments/PvP) -->
-    <div id="slow" class="pe" title="Замедление">
+    <button id="slow" class="pe" title="Замедление" aria-label="Замедление времени, удерживайте">
       <i id="slowFill"></i>
       <b>SLOW-MO</b>
       <s id="slowKey">SHIFT</s>
-    </div>
+    </button>
 
     <div id="mnToast"></div>
     <div id="pauseInd" class="pe"><b>ПАУЗА</b><s>нажмите, чтобы продолжить · P</s></div>
   </div>
 
   <!-- ============================ MENU ============================ -->
-  <div class="screen on" id="menu">
+  <div class="screen on" id="menu" role="dialog" aria-label="Главное меню">
     <div class="card">
       <div class="logo">TOPSPIN<span style="opacity:.45">·</span>ARENA</div>
       <div class="sub">Настольный теннис · физика ITTF · управление свайпом</div>
@@ -464,7 +481,7 @@ body.is-reel #hud,body.is-reel #slow{opacity:.0}
   </div>
 
   <!-- ========================== SETTINGS ========================== -->
-  <div class="screen" id="settings">
+  <div class="screen" id="settings" role="dialog" aria-label="Настройки">
     <div class="card">
       <div class="logo" style="font-size:26px">НАСТРОЙКИ</div>
       <h3 class="sec">Камера</h3>
@@ -527,7 +544,7 @@ body.is-reel #hud,body.is-reel #slow{opacity:.0}
   </div>
 
   <!-- ==================== WORKSHOP · SHOP · DAILY ================== -->
-  <div class="screen" id="workshop">
+  <div class="screen" id="workshop" role="dialog" aria-label="Мастерская, магазин и задания">
     <div class="card wide">
       <div class="wtop">
         <div class="logo" style="font-size:26px">МАСТЕРСКАЯ</div>
@@ -552,6 +569,7 @@ body.is-reel #hud,body.is-reel #slow{opacity:.0}
           <div class="statcard" id="statCard"></div>
           <div class="snote" id="statNote"></div>
           <button class="btn" id="wsEquip">ПОСТАВИТЬ В ИГРУ</button>
+          <button class="btn ghost" id="wsBuyCry" style="display:none">КУПИТЬ ЗА КРИСТАЛЛЫ</button>
           <div class="snote">Характер определяет только профиль удара, а не силу: сумма четырёх параметров
           у всех предметов одинаковая, и ни один не лучше другого во всём.</div>
         </div>
@@ -601,7 +619,7 @@ body.is-reel #hud,body.is-reel #slow{opacity:.0}
   </div>
 
   <!-- ========================= MATCH END ========================== -->
-  <div class="screen" id="over">
+  <div class="screen" id="over" role="dialog" aria-label="Итоги матча">
     <div class="card">
       <div class="logo" id="overTitle" style="font-size:34px">ПОБЕДА</div>
       <div class="sub" id="overScore" style="font-size:22px;letter-spacing:.1em;color:var(--txt)">0 : 0</div>
@@ -633,7 +651,7 @@ body.is-reel #hud,body.is-reel #slow{opacity:.0}
   </div>
 
   <!-- ======================= REPLAY CINEMA ======================== -->
-  <div id="reel">
+  <div id="reel" aria-hidden="true">
     <div class="bar top"></div>
     <div class="bar bot"></div>
     <div class="tag" id="reelTag">ЛУЧШИЙ МОМЕНТ МАТЧА</div>
@@ -642,7 +660,7 @@ body.is-reel #hud,body.is-reel #slow{opacity:.0}
   </div>
 
   <!-- ====================== MOMENT LIBRARY ======================= -->
-  <div class="screen" id="reels">
+  <div class="screen" id="reels" role="dialog" aria-label="Лучшие моменты матча">
     <div class="card">
       <div class="logo" style="font-size:30px">ЛУЧШИЕ МОМЕНТЫ</div>
       <div class="sub">Игра запоминает только то, что стоит пересматривать</div>
@@ -651,7 +669,7 @@ body.is-reel #hud,body.is-reel #slow{opacity:.0}
     </div>
   </div>
 
-  <div id="loading"><div class="spinner"></div></div>
+  <div id="loading" role="status" aria-label="Загрузка"><div class="spinner"></div></div>
 </div>
 
 <script>
@@ -4492,12 +4510,13 @@ class MomentPlayer {
     this.titles = true;
   }
 
-  play(moment, speed) {
+  play(moment, speed, onEnd) {
     if (!moment) return false;
     this.moment = moment;
     this.i = 0; this.hold = 0; this.camPhase = 0;
     this.speed = speed || 0.35;
     this.on = true;
+    if (typeof onEnd === 'function') this.onEnd = onEnd;
     return true;
   }
 
@@ -4508,7 +4527,7 @@ class MomentPlayer {
   /** advance and write the pose back into the live game objects */
   update(dtReal, g) {
     const mo = this.moment;
-    if (!mo) { this.on = false; return; }
+    if (!mo || !g || !g.ball) { this.on = false; return; }   // no world, no replay
     const F = mo.frames, last = this.lastFrame;
     // ease in: the first half second is slow, then settle to normal speed
     const sp = this.speed * (this.i < 6 ? 0.45 + 0.09 * this.i : 1);
@@ -5282,6 +5301,830 @@ class Trainer {
 }
 
 
+/* ====== 84_racket.js ====== */
+/* =====================================================================
+ *  EQUIPMENT — blades, rubbers, and the numbers they actually change.
+ *
+ *  A racket in this game is not a stat card with a "+12% damage" sticker.
+ *  Every item is a small set of real physical parameters — coefficient of
+ *  restitution, coefficient of friction, tangential restitution, dwell
+ *  damping, sweet-spot radius, swing weight — fed straight into the same
+ *  `impactRacket` the rest of the physics uses. Which means:
+ *
+ *  · the four numbers on the card are DERIVED from the physics, not the
+ *    other way round, so the card cannot lie about the feel;
+ *  · two rackets can be equally good and still ask you to play
+ *    differently — one throws the ball flatter and harder, another holds
+ *    it a millisecond longer and turns the same swing into more spin;
+ *  · nothing is strictly better than the starting racket. The budget of
+ *    the four stats is fixed (STAT_BUDGET), and every physical parameter
+ *    is a monotone function of exactly one stat — so a build can only
+ *    trade, never dominate. Paid equipment is different, never stronger.
+ * ===================================================================== */
+
+const STAT_MIN = 40, STAT_MAX = 92;
+const STAT_KEYS = ['speed', 'spin', 'control', 'feel'];
+const STAT_RU = { speed: 'СКОРОСТЬ', spin: 'ВРАЩЕНИЕ', control: 'КОНТРОЛЬ', feel: 'ЧУВСТВО' };
+
+/**
+ * A stat is not a "+12 % damage" sticker: each one moves exactly one
+ * physical parameter of the impact, inside a deliberately narrow band.
+ *
+ *   spread(64, a, b) ≈ (a+b)/2  — the starter gear sits in the middle,
+ *
+ * and the band itself is the design decision. Two of them matter:
+ *
+ *   · SPEED  stays within ±5 % per part. A full attack build is ~18 %
+ *     faster off the face than a defensive one — enough to feel on every
+ *     ball, not enough to buy a win. Anything wider and the shop starts
+ *     selling points instead of character (an earlier build of this file
+ *     had +35 %, which is exactly that mistake).
+ *   · SPIN is the wide one (±30 % tangential restitution) because spin is
+ *     what a racket is *for*: the topspin player feels it immediately,
+ *     while the flat hitter never notices.
+ */
+function spread(v, lo, hi) {
+  return lo + (hi - lo) * (clamp(v, STAT_MIN, STAT_MAX) - STAT_MIN) / (STAT_MAX - STAT_MIN);
+}
+/** The single-stat multiplier used by the shop cards (mid stat ≈ 1.0). */
+function statK(v) { return spread(v, 0.88, 1.12); }
+
+/* ------------------------------------------------------------------ *
+ *  The catalogue.  s = the profile the player sees (sums to 258 for
+ *  everything); the physics below is computed from it, so the shop can
+ *  never quietly sell power.                                          * ------------------------------------------------------------------ */
+const BLADES = [
+  { id: 'b_base', name: 'BASIC 5', ru: 'ПЯТИСЛОЙКА', tier: 0, price: 0,
+    s: { speed: 64, spin: 64, control: 65, feel: 65 }, wood: [0.62, 0.42, 0.24], grip: [0.20, 0.14, 0.11] },
+  { id: 'b_off', name: 'OFFENSIVE 7', ru: 'СЕМИСЛОЙКА', tier: 1, price: 900,
+    s: { speed: 76, spin: 58, control: 58, feel: 66 }, wood: [0.70, 0.50, 0.30], grip: [0.16, 0.11, 0.09] },
+  { id: 'b_loop', name: 'LOOPER', ru: 'ПЕТЛЯ', tier: 1, price: 1400,
+    s: { speed: 62, spin: 74, control: 62, feel: 60 }, wood: [0.58, 0.38, 0.22], grip: [0.24, 0.16, 0.12] },
+  { id: 'b_ctl', name: 'CONTROL', ru: 'КОНТРОЛЬ', tier: 1, price: 1100,
+    s: { speed: 56, spin: 62, control: 78, feel: 62 }, wood: [0.66, 0.56, 0.42], grip: [0.22, 0.18, 0.15] },
+  { id: 'b_def', name: 'DEFENCE', ru: 'ЗАЩИТА', tier: 2, price: 1800, crystals: 240,
+    s: { speed: 50, spin: 58, control: 84, feel: 66 }, wood: [0.72, 0.62, 0.48], grip: [0.26, 0.20, 0.16] },
+  { id: 'b_carb', name: 'CARBON', ru: 'КАРБОН', tier: 2, price: 2600, crystals: 340,
+    s: { speed: 80, spin: 60, control: 56, feel: 62 }, wood: [0.24, 0.27, 0.32], grip: [0.12, 0.13, 0.16] },
+  { id: 'b_hero', name: 'ARENA PRO', ru: 'АРЕНА ПРО', tier: 3, price: 4200, crystals: 520, star: true,
+    s: { speed: 68, spin: 70, control: 58, feel: 62 }, wood: [0.86, 0.72, 0.34], grip: [0.10, 0.12, 0.20] },
+];
+
+/* Two currencies, one ladder. Tier 0–1 items are bought with coins only:
+   the whole game, including a competitive racket, is earnable for free.
+   Tier 2–3 also carry a crystal price (crystals come from the store), so
+   a player who wants the flagship today can pay for the time instead of
+   grinding — never for power, since the stat budget is identical. */
+const RUBBERS = [
+  { id: 'r_base', name: 'ALL-ROUND', ru: 'УНИВЕРСАЛ', tier: 0, price: 0,
+    s: { speed: 64, spin: 64, control: 64, feel: 66 }, col: [0.78, 0.12, 0.14], back: [0.15, 0.15, 0.17] },
+  { id: 'r_tops', name: 'TOPSPIN', ru: 'ТОПСПИН', tier: 1, price: 700,
+    s: { speed: 60, spin: 78, control: 60, feel: 60 }, col: [0.18, 0.16, 0.20], back: [0.10, 0.10, 0.12] },
+  { id: 'r_fast', name: 'SPEED', ru: 'СКОРОСТЬ', tier: 1, price: 700,
+    s: { speed: 78, spin: 56, control: 60, feel: 64 }, col: [0.80, 0.16, 0.18], back: [0.16, 0.14, 0.15] },
+  { id: 'r_soft', name: 'SOFT', ru: 'МЯГКАЯ', tier: 1, price: 900,
+    s: { speed: 58, spin: 68, control: 76, feel: 56 }, col: [0.20, 0.42, 0.34], back: [0.12, 0.14, 0.14] },
+  { id: 'r_ctl', name: 'CONTROL', ru: 'КОНТРОЛЬ', tier: 1, price: 600,
+    s: { speed: 54, spin: 60, control: 82, feel: 62 }, col: [0.24, 0.26, 0.52], back: [0.12, 0.12, 0.14] },
+  { id: 'r_hyb', name: 'HYBRID', ru: 'ГИБРИД', tier: 2, price: 2200, crystals: 300,
+    s: { speed: 74, spin: 74, control: 50, feel: 60 }, col: [0.86, 0.58, 0.12], back: [0.14, 0.12, 0.10] },
+  { id: 'r_hero', name: 'ARENA GRIP', ru: 'АРЕНА ГРИП', tier: 3, price: 3400, crystals: 420, star: true,
+    s: { speed: 66, spin: 76, control: 56, feel: 60 }, col: [0.14, 0.14, 0.16], back: [0.10, 0.11, 0.12] },
+];
+
+/* Physics from the profile. One stat → one parameter, always monotone,
+   so no two items can be ordered "better" in every respect.
+
+   Two notes on why the mapping looks the way it does:
+   · `damp` multiplies the restitution inside impactRacket, so a control
+     racket gets damp BELOW 1 — it is literally slower off the face. That
+     is what control means in this physics, and it is a real trade.
+   · spin is carried mostly by tangential restitution (et), because that
+     is the term that lives in the gripping regime, where nearly every
+     rally stroke happens; mu only bites on a thin, fast graze. Putting
+     spin on mu alone would have produced rackets that measure different
+     and feel identical. */
+function bladePhysics(b) {
+  const st = b.s;
+  return {
+    eK: spread(st.speed, 0.950, 1.050),       // the blade is the springs
+    muK: spread(st.spin, 0.950, 1.060),       // surface grip on a thin contact
+    etK: spread(st.spin, 0.960, 1.100),       // a flexible blade holds the ball longer
+    dampK: spread(st.control, 1.050, 0.940),  // control = swallows a little pace
+    sweetK: spread(st.control, 0.900, 1.120), // and forgives an off-centre hit
+    vmagK: spread(st.feel, 0.970, 1.030),     // weight in the hand: swing speed
+  };
+}
+function rubberPhysics(r) {
+  const st = r.s;
+  return {
+    eK: spread(st.speed, 0.960, 1.040),
+    muK: spread(st.spin, 0.860, 1.140),
+    dampK: spread(st.control, 1.060, 0.930),
+    etK: spread(st.spin, 0.820, 1.450),       // the catapult: this is the spin
+    feelK: spread(st.feel, 0.940, 1.060),     // a softer topsheet forgives more
+  };
+}
+
+const ITEMS = {};
+for (const b of BLADES) ITEMS[b.id] = { kind: 'blade', ...b, phys: bladePhysics(b) };
+for (const r of RUBBERS) ITEMS[r.id] = { kind: 'rubber', ...r, phys: rubberPhysics(r) };
+const ITEM_LIST = BLADES.concat(RUBBERS).map((i) => ITEMS[i.id]);
+/* catalogue order for the workshop: cheapest first, stars last */
+const ITEMS_ORDER = ITEM_LIST.slice().sort((a, b) => (a.price - b.price) || (a.kind < b.kind ? -1 : 1));
+
+/** Card numbers, rounded and normalised for the profile screen. */
+function itemStats(it) {
+  /* The card shows what the item actually does: invert the same mapping
+     the physics uses, so the two can never disagree. */
+  const out = {};
+  for (const k of STAT_KEYS) out[k] = Math.round(clamp(it.s[k], 0, 100));
+  return out;
+}
+
+/**
+ * The whole racket's card: what a player will feel, in one place.
+ * speed and spin come from the fitted parts; control and feel are the
+ * average of the three parts, because that is how they are felt.
+ */
+/** The whole racket's card: the mean of its three parts. */
+function racketStats(bladeId, fhId, bhId) {
+  const out = { speed: 0, spin: 0, control: 0, feel: 0 };
+  let n = 0;
+  for (const id of [bladeId, fhId, bhId]) {
+    const it = ITEMS[id]; if (!it) continue;
+    for (const k of STAT_KEYS) out[k] += it.s[k];
+    n++;
+  }
+  for (const k of STAT_KEYS) out[k] = n ? Math.round(out[k] / n) : 0;
+  return out;
+}
+
+/* ------------------------------------------------------------------ *
+ *  Equipment — the fitted racket, and the rubber object the impact
+ *  solver consumes. Everything else in the game reads it from here.
+ * ------------------------------------------------------------------ */
+class Equipment {
+  constructor(blade = 'b_base', fh = 'r_base', bh = 'r_base') {
+    this.set(blade, fh, bh);
+  }
+
+  set(blade, fh, bh) {
+    this.bladeId = ITEMS[blade] ? blade : 'b_base';
+    this.fhId = ITEMS[fh] ? fh : 'r_base';
+    this.bhId = ITEMS[bh] ? bh : 'r_base';
+    this.refresh();
+    return this;
+  }
+
+  refresh() {
+    const b = ITEMS[this.bladeId], fh = ITEMS[this.fhId], bh = ITEMS[this.bhId];
+    this.blade = b; this.fh = fh; this.bh = bh;
+    this.stats = racketStats(this.bladeId, this.fhId, this.bhId);
+    const bp = b.phys;
+    /* The blade multiplies both faces; the two faces may differ, so a
+       defensive backhand with an attacking forehand is a real build. */
+    const mix = (r) => ({
+      e: PH.E_RACKET * bp.eK * r.phys.eK,
+      mu: PH.MU_RACKET * bp.muK * r.phys.muK,
+      et: PH.ET_RACKET * (bp.etK || 1) * r.phys.etK,
+      damp: bp.dampK * r.phys.dampK,
+      sweet: bp.sweetK * r.phys.feelK,        // how much an off-centre hit costs
+    });
+    this.fhParams = mix(fh);
+    this.bhParams = mix(bh);
+    this.sweetK = bp.sweetK;
+    this.vmagK = bp.vmagK;
+    this.colours = {
+      wood: b.wood, grip: b.grip,
+      fore: fh.col, foreBack: fh.back,
+      back: bh.col, backBack: bh.back,
+    };
+  }
+
+  /** @param side +1 forehand (red face), −1 backhand */
+  forSide(side) { return side >= 0 ? this.fhParams : this.bhParams; }
+  get name() { return this.blade.name + ' · ' + this.fh.name; }
+
+  /** Shop sanity: every profile must spend the same budget. */
+  static audit() {
+    let worst = 0, ids = [];
+    for (const id in ITEMS) {
+      const s = ITEMS[id].s, sum = s.speed + s.spin + s.control + s.feel;
+      worst = Math.max(worst, Math.abs(sum - 258));
+      if (Math.abs(sum - 258) > 0.5) ids.push(id + ':' + sum);
+    }
+    return { worst, ids };
+  }
+
+  /** No item may dominate another: 0 pairs that do, or it is a bug. */
+  static dominatingPairs() {
+    const bad = [];
+    for (const a of ITEM_LIST) for (const c of ITEM_LIST) {
+      if (a === c || a.kind !== c.kind) continue;
+      const ge = STAT_KEYS.every((k) => a.s[k] >= c.s[k]) && STAT_KEYS.some((k) => a.s[k] > c.s[k]);
+      if (ge) bad.push(a.id + '>' + c.id);
+    }
+    return bad;
+  }
+}
+
+
+/* ====== 86_meta.js ====== */
+/* =====================================================================
+ *  META — profile, money, shop, platform. The commercial layer.
+ *
+ *  Rules this file is written to, in order of importance:
+ *
+ *  1. NOTHING HERE MAY CHANGE WHO WINS. The shop sells different, never
+ *     better (see 84_racket.js: every item spends the same stat budget),
+ *     and it sells looks, convenience and reasons to come back.
+ *  2. NO DARK PATTERNS. No energy, no timers that punish, no loot boxes,
+ *     no ads mid-match, no "are you sure you want to stay poor". A
+ *     rewarded ad is always an offer, never a toll.
+ *  3. THE WEB BUILD HAS TO BE HONEST ABOUT ITSELF. Poki forbids
+ *     third-party IAP entirely, so on a portal the shop hides its
+ *     paid shelves and keeps ads-only. The same code runs everywhere.
+ *  4. IT MUST SURVIVE A RELOAD. One versioned blob in localStorage, with
+ *     a migration step, and no throwing if storage is blocked (private
+ *     mode, embedded iframes on portals).
+ * ===================================================================== */
+
+const SAVE_KEY = 'topspin.arena.save.v1';
+const SAVE_VERSION = 3;
+
+/* Soft currency ceiling. Not a gameplay limit — a sanity limit: a save
+   that arrives with 1e309 coins (or NaN, or the string "много") is a
+   broken save, not a rich player. Clamping here keeps every downstream
+   multiplication finite. */
+const MAX_COINS = 9999999;
+const MAX_CRYSTALS = 999999;
+const MAX_XP = 1e9;
+const MAX_ADS_PER_DAY = 5;
+
+/** Merge an untrusted object into a fresh one, skipping the keys that can
+ *  rewrite an object's prototype. `JSON.parse('{"__proto__":{"a":1}}')`
+ *  produces a real own property, and a plain Object.assign would then set
+ *  the prototype of the target — the prototype-pollution trick. */
+function safeAssign(base, raw) {
+  if (!raw || typeof raw !== 'object') return base;
+  for (const k of Object.keys(raw)) {
+    if (k === '__proto__' || k === 'constructor' || k === 'prototype') continue;
+    base[k] = raw[k];
+  }
+  return base;
+}
+/** A finite number in range, or the default. Strings, null, NaN and
+ *  ±Infinity all land on the default instead of poisoning the wallet. */
+function num(v, d, lo, hi) {
+  let n = typeof v === 'number' ? v : NaN;
+  if (!Number.isFinite(n)) n = d;
+  if (lo !== undefined && n < lo) n = lo;
+  if (hi !== undefined && n > hi) n = hi;
+  return n;
+}
+const int = (v, d, lo, hi) => Math.round(num(v, d, lo, hi));
+const bool = (v, d) => (typeof v === 'boolean' ? v : d);
+const strList = (v, ok, cap) => (Array.isArray(v) ? v.filter((x) => typeof x === 'string' && ok(x)).slice(0, cap) : []);
+
+/* ------------------------------------------------------------------ *
+ *  Platform: where are we running, and what is allowed here?
+ * ------------------------------------------------------------------ */
+class Platform {
+  constructor(nav) {
+    const navi = nav || (typeof navigator !== 'undefined' ? navigator : {});
+    const ua = (navi.userAgent || '').toLowerCase();
+    const host = (typeof location !== 'undefined' ? location.hostname : '') || '';
+    this.poki = /poki\./i.test(host) || !!navi.poki;
+    this.crazy = /crazygames/i.test(host) || !!navi.CrazyGames;
+    this.y8 = /y8\./i.test(host);
+    this.gamedist = /gamedistribution/i.test(host);
+    this.portal = this.poki || this.crazy || this.y8 || this.gamedist;
+    this.itch = /itch\.io/i.test(host);
+    this.touch = 'ontouchstart' in (navi && navi.maxTouchPoints ? navi : {}) || (navi.maxTouchPoints || 0) > 0;
+  }
+
+  /* Poki: ads only, no IAP at all. CrazyGames: ads + IAP through them.
+     Own domain / itch: everything, and that is where the shop shows up.
+     These are getters, not fields, so flipping a flag (or being detected
+     later, when the portal SDK finally loads) can never leave the shop
+     showing a shelf the platform forbids. */
+  get canIAP() { return !this.poki && !this.y8 && !this.gamedist; }
+  get canRewarded() { return true; }
+  get storePct() { return this.poki ? 0.50 : this.crazy ? 0.60 : this.y8 ? 0.50 : this.gamedist ? 0.33 : 1.0; }
+  get label() {
+    if (this.poki) return 'POKI';
+    if (this.crazy) return 'CRAZYGAMES';
+    if (this.y8) return 'Y8';
+    if (this.gamedist) return 'GAMEDISTRIBUTION';
+    return 'ПРЯМОЙ ЗАПУСК';
+  }
+}
+
+/* ------------------------------------------------------------------ *
+ *  Analytics: one bus, adapters know how to talk to each portal.
+ *  Deliberately tiny — the numbers we act on are D1/D7, session length,
+ *  the drop-off step of the tutorial and the shop funnel.
+ * ------------------------------------------------------------------ */
+class Analytics {
+  constructor(platform) {
+    this.platform = platform;
+    this.queue = [];
+    this.sessionStart = Date.now();
+    this.events = 0;
+    this.onEvent = null;
+  }
+  send(name, props) {
+    const e = { name, t: Date.now(), i: this.events++, props: props || {} };
+    this.queue.push(e);
+    if (this.queue.length > 200) this.queue.shift();
+    if (this.onEvent) this.onEvent(e);
+    // portal SDKs are wired here when present; nothing else leaves the page
+    const n = (typeof navigator !== 'undefined') ? navigator : {};
+    if (n.poki && n.poki.gameLoadingFinished && this.events === 2) { try { n.poki.gameLoadingFinished(); } catch (x) { /* ignore */ } }
+    return e;
+  }
+  get sessionSec() { return (Date.now() - this.sessionStart) / 1000; }
+  funnelStep(name) { this.send('funnel:' + name, { d: Math.round(this.sessionSec) }); }
+}
+
+/* ------------------------------------------------------------------ *
+ *  Profile: everything that has to survive a reload.
+ * ------------------------------------------------------------------ */
+const DAILY_TASKS = [
+  { id: 'win1', ru: 'ВЫИГРАЙ МАТЧ', need: 1, coins: 120 },
+  { id: 'rally8', ru: 'РОЗЫГРЫШ ИЗ 8 УДАРОВ', need: 1, coins: 100 },
+  { id: 'topspin', ru: '10 ТОПСПИНОВ', need: 10, coins: 90 },
+  { id: 'smash', ru: '3 СМЕША', need: 3, coins: 110 },
+  { id: 'serves', ru: '5 ЛЕГАЛЬНЫХ ПОДАЧ ПОДРЯД', need: 5, coins: 100 },
+  { id: 'replay', ru: 'ПОСМОТРИ ЛУЧШИЙ МОМЕНТ', need: 1, coins: 80 },
+];
+
+class Profile {
+  constructor(platform) {
+    this.platform = platform;
+    this.data = this.blank();
+    this.loaded = false;
+    this.dirty = false;
+    this.load();
+  }
+
+  blank() {
+    return {
+      v: SAVE_VERSION,
+      created: Date.now(),
+      days: [],
+      streak: 0,
+      coins: 250,
+      crystals: 0,
+      xp: 0, level: 1,
+      owned: ['b_base', 'r_base'],
+      equip: { blade: 'b_base', fh: 'r_base', bh: 'r_base' },
+      cosmetics: { trail: 'std', arena: 'arena', grip: 'std' },
+      career: { div: 0, event: 0, points: 0, cups: 0, trophies: [], seen: 0 },
+      stats: { matches: 0, wins: 0, shots: 0, rallies: 0, maxRally: 0, minutes: 0, bestSpeed: 0, bestSpin: 0, moments: 0 },
+      daily: { day: '', tasks: {}, done: [], claimed: [], wheel: '' },
+      season: { n: 0, xp: 0, premium: false, claimed: [] },
+      ads: { watched: 0, last: 0, day: '', today: 0 },
+      purchases: [],
+      settings: null,
+    };
+  }
+
+  load() {
+    let raw = null;
+    try { raw = (typeof localStorage !== 'undefined') ? localStorage.getItem(SAVE_KEY) : null; } catch (e) { raw = null; }
+    if (raw) {
+      try {
+        const d = JSON.parse(raw);
+        const base = this.blank();
+        safeAssign(base, d);
+        base.stats = safeAssign(base.stats, d.stats);
+        base.daily = safeAssign(base.daily, d.daily);
+        base.season = safeAssign(base.season, d.season);
+        base.career = safeAssign(base.career, d.career);
+        base.cosmetics = safeAssign(base.cosmetics, d.cosmetics);
+        base.equip = safeAssign(base.equip, d.equip);
+        base.ads = safeAssign(base.ads, d.ads);
+        this.data = base;
+        if (!Array.isArray(this.data.owned) || !this.data.owned.length) this.data.owned = ['b_base', 'r_base'];
+        this.migrate(num(d.v, 1, 1, SAVE_VERSION));
+      } catch (e) { this.data = this.blank(); }
+    }
+    this.migrate(num(this.data.v, 1, 1, SAVE_VERSION));
+    this.sanitize();
+    this.loaded = true;
+    this.today();
+    return this.data;
+  }
+
+  migrate(from) {
+    const d = this.data;
+    if (from < 2) { d.equip = d.equip || { blade: 'b_base', fh: 'r_base', bh: 'r_base' }; }
+    if (from < 3) {
+      for (const id of ['b_base', 'r_base']) if (d.owned.indexOf(id) < 0) d.owned.push(id);
+      d.cosmetics = d.cosmetics || { trail: 'std', arena: 'arena', grip: 'std' };
+    }
+    /* an old save may know only some of the three racket slots */
+    d.equip = d.equip || {};
+    d.equip.blade = d.equip.blade || 'b_base';
+    d.equip.fh = d.equip.fh || 'r_base';
+    d.equip.bh = d.equip.bh || d.equip.fh || 'r_base';
+    d.cosmetics = d.cosmetics || { trail: 'std', arena: 'arena', grip: 'std' };
+    d.v = SAVE_VERSION;
+  }
+
+  /**
+   * The last line of defence between a save file and the game. Every
+   * field is normalised here: numbers finite and in range, ids existing,
+   * unknown items dropped, currency survivable. Called on every load, so
+   * a save edited by hand, half-written by a crash, or carried over from
+   * an older version can never make the game behave strangely.
+   */
+  sanitize() {
+    const d = this.data, b = this.blank();
+    d.v = SAVE_VERSION;
+    d.created = int(d.created, Date.now(), 0, 4e12);
+    d.coins = int(d.coins, b.coins, 0, MAX_COINS);
+    d.crystals = int(d.crystals, 0, 0, MAX_CRYSTALS);
+    d.xp = int(d.xp, 0, 0, MAX_XP);
+    d.level = int(d.level, 1, 1, 200);
+    d.streak = int(d.streak, 0, 0, 100000);
+    d.days = strList(d.days, (x) => /^\d{1,4}-\d{1,2}-\d{1,2}$/.test(x), 60);
+    /* inventory: only real catalogue ids, always including the starter kit */
+    d.owned = strList(d.owned, (id) => !!ITEMS[id], 400);
+    for (const id of ['b_base', 'r_base']) if (d.owned.indexOf(id) < 0) d.owned.push(id);
+    /* equipment: right kind for the right slot, and owned */
+    const pick = (id, kind, fallback) => {
+      const it = ITEMS[id];
+      return (it && it.kind === kind && d.owned.indexOf(id) >= 0) ? id : fallback;
+    };
+    if (!d.equip || typeof d.equip !== 'object') d.equip = {};
+    d.equip.blade = pick(d.equip.blade, 'blade', 'b_base');
+    d.equip.fh = pick(d.equip.fh, 'rubber', 'r_base');
+    d.equip.bh = pick(d.equip.bh, 'rubber', d.equip.fh);
+    /* cosmetics: value must exist for that category */
+    if (!d.cosmetics || typeof d.cosmetics !== 'object') d.cosmetics = {};
+    for (const kind of ['trail', 'arena', 'grip']) {
+      const vals = COSMETICS.filter((c) => c.kind === kind).map((c) => c.val);
+      if (vals.indexOf(d.cosmetics[kind]) < 0) d.cosmetics[kind] = b.cosmetics[kind];
+    }
+    /* stats */
+    if (!d.stats || typeof d.stats !== 'object') d.stats = {};
+    for (const key of Object.keys(b.stats)) d.stats[key] = num(d.stats[key], 0, 0, 1e12);
+    /* daily */
+    if (!d.daily || typeof d.daily !== 'object') d.daily = {};
+    if (typeof d.daily.day !== 'string') d.daily.day = '';
+    const taskIds = DAILY_TASKS.map((t) => t.id);
+    if (!d.daily.tasks || typeof d.daily.tasks !== 'object') d.daily.tasks = {};
+    for (const id of Object.keys(d.daily.tasks)) {
+      if (taskIds.indexOf(id) < 0) delete d.daily.tasks[id];
+      else d.daily.tasks[id] = num(d.daily.tasks[id], 0, 0, 1e9);
+    }
+    d.daily.done = strList(d.daily.done, (id) => taskIds.indexOf(id) >= 0, 20);
+    d.daily.claimed = strList(d.daily.claimed, (id) => taskIds.indexOf(id) >= 0, 20);
+    if (typeof d.daily.wheel !== 'string') d.daily.wheel = '';
+    /* season */
+    if (!d.season || typeof d.season !== 'object') d.season = {};
+    d.season.n = int(d.season.n, 0, 0, 999);
+    d.season.xp = int(d.season.xp, 0, 0, MAX_XP);
+    d.season.premium = bool(d.season.premium, false);
+    d.season.claimed = Array.isArray(d.season.claimed)
+      ? d.season.claimed.filter((x) => Number.isInteger(x) && x >= 0 && x <= 60).slice(0, 200) : [];
+    /* ads */
+    if (!d.ads || typeof d.ads !== 'object') d.ads = {};
+    d.ads.watched = int(d.ads.watched, 0, 0, 1e6);
+    d.ads.last = int(d.ads.last, 0, 0, 4e12);
+    d.ads.noadsBought = bool(d.ads.noadsBought, false);
+    d.ads.day = typeof d.ads.day === 'string' ? d.ads.day : '';
+    d.ads.today = int(d.ads.today, 0, 0, MAX_ADS_PER_DAY);
+    /* purchases: history of what was actually paid for */
+    d.purchases = Array.isArray(d.purchases)
+      ? d.purchases.filter((x) => x && typeof x === 'object' && typeof x.id === 'string').slice(-200) : [];
+    /* career (used by the tournament ladder) */
+    if (!d.career || typeof d.career !== 'object') d.career = {};
+    d.career.div = int(d.career.div, 0, 0, 99);
+    d.career.event = int(d.career.event, 0, 0, 999);
+    d.career.points = int(d.career.points, 0, 0, 1e9);
+    d.career.cups = int(d.career.cups, 0, 0, 9999);
+    d.career.seen = int(d.career.seen, 0, 0, 1e9);
+    d.career.trophies = strList(d.career.trophies, () => true, 100);
+    /* settings: the game applies ranges on top, but it must be an object */
+    if (d.settings !== null && (typeof d.settings !== 'object' || Array.isArray(d.settings))) d.settings = null;
+    return d;
+  }
+
+  save(force) {
+    if (!this.dirty && !force) return true;
+    try {
+      if (typeof localStorage !== 'undefined') { localStorage.setItem(SAVE_KEY, JSON.stringify(this.data)); }
+      this.dirty = false;
+      return true;
+    } catch (e) { return false; }        // private mode: the game still plays
+  }
+
+  touch() { this.dirty = true; if (this._sv === undefined) this._sv = 0; }
+  maybeSave(dt) {                      // cheap: write at most every 4 s
+    if (!this.dirty) return;
+    this._sv = (this._sv || 0) + dt;
+    if (this._sv > 4) { this._sv = 0; this.save(); }
+  }
+
+  /* ------------------------------ time --------------------------- */
+  dayKey(t) {
+    const d = new Date(t || Date.now());
+    return d.getFullYear() + '-' + (d.getMonth() + 1) + '-' + d.getDate();
+  }
+  today() {
+    const k = this.dayKey();
+    const d = this.data.daily;
+    if (d.day !== k) {
+      const y = this.dayKey(Date.now() - 86400000);
+      this.data.streak = (d.day === y) ? (this.data.streak + 1) : 1;
+      d.day = k; d.tasks = {}; d.done = []; d.claimed = [];
+      this.touch();
+    }
+    this.data.days = this.data.days || [];
+    if (this.data.days.indexOf(k) < 0) { this.data.days.push(k); if (this.data.days.length > 60) this.data.days.shift(); }
+    return this.data.streak;
+  }
+
+  /* ------------------------------ money -------------------------- */
+  addCoins(n, why) {
+    if (!Number.isFinite(n)) n = 0;                     // NaN from a broken reward table
+    if (!Number.isFinite(this.data.coins)) this.data.coins = 0;
+    this.data.coins = clamp(Math.round(this.data.coins + n), 0, MAX_COINS);
+    this.touch();
+    if (this.onCoins) this.onCoins(n, why);
+    return this.data.coins;
+  }
+  spend(coins, crystals) {
+    const d = this.data;
+    const c = num(coins, 0, 0, MAX_COINS), k = num(crystals, 0, 0, MAX_CRYSTALS);
+    if (!Number.isFinite(d.coins) || !Number.isFinite(d.crystals)) this.sanitize();
+    if (d.coins < c || d.crystals < k) return false;
+    d.coins -= c; d.crystals -= k;
+    this.touch();
+    return true;
+  }
+  addXP(n) {
+    const d = this.data;
+    if (!Number.isFinite(n) || n < 0) n = 0;
+    d.xp = clamp(d.xp + n, 0, MAX_XP);
+    const need = (lv) => 400 + lv * 260;
+    while (d.xp >= need(d.level)) { d.xp -= need(d.level); d.level++; if (this.onLevel) this.onLevel(d.level); }
+    this.touch();
+    return d.level;
+  }
+  xpToNext() { return 400 + this.data.level * 260; }
+
+  /* ---------------------------- inventory ------------------------ */
+  owns(id) { return this.data.owned.indexOf(id) >= 0; }
+  buy(id, price, currency) {
+    if (this.owns(id) || !ITEMS[id]) return false;
+    if (!Number.isFinite(price) || price < 0) return false;
+    const ok = currency === 'crystals' ? this.spend(0, price) : this.spend(price, 0);
+    if (!ok) return false;
+    this.data.owned.push(id);
+    this.data.purchases.push({ id, price, currency, t: Date.now() });
+    this.touch(); this.save(true);
+    return true;
+  }
+  equipRacket(blade, fh, bh) {
+    /* A rubber is not a blade and a blade is not a rubber: the equipment
+       maths reads different fields for the two, so a slot filled with the
+       wrong kind of item would quietly produce a nonsense racket. */
+    const okKind = (id, kind) => { const it = ITEMS[id]; return !!it && it.kind === kind && this.owns(id); };
+    if (!okKind(blade, 'blade') || !okKind(fh, 'rubber') || !okKind(bh, 'rubber')) return false;
+    this.data.equip = { blade, fh, bh };
+    this.touch(); this.save(true);
+    return true;
+  }
+
+  /* ------------------------------- daily ------------------------- */
+  taskProgress(id, add, absolute) {
+    const d = this.data.daily;
+    const t = DAILY_TASKS.find((x) => x.id === id);
+    if (!t || d.claimed.indexOf(id) >= 0) return;
+    const cur = absolute !== undefined ? absolute : (d.tasks[id] || 0) + add;
+    d.tasks[id] = cur;
+    if (cur >= t.need && d.done.indexOf(id) < 0) { d.done.push(id); this.touch(); }
+    this.touch();
+  }
+  claimTask(id) {
+    const d = this.data.daily;
+    const t = DAILY_TASKS.find((x) => x.id === id);
+    if (!t || d.done.indexOf(id) < 0 || d.claimed.indexOf(id) >= 0) return 0;
+    d.claimed.push(id);
+    const bonus = this.data.streak >= 7 ? 1.5 : this.data.streak >= 3 ? 1.25 : 1;
+    const coins = Math.round(t.coins * bonus);
+    this.addCoins(coins, 'task:' + id);
+    this.save(true);
+    return coins;
+  }
+  get dailyDone() { return this.data.daily.done.length; }
+
+  /* ------------------------------ season ------------------------- */
+  seasonLevel() { return Math.min(60, 1 + Math.floor(this.data.season.xp / 250)); }
+  seasonProgress() { return clamp((this.data.season.xp % 250) / 250, 0, 1); }
+  addSeasonXP(n) {
+    const s = this.data.season;
+    if (!Number.isFinite(n) || n < 0) n = 0;
+    const before = this.seasonLevel();
+    s.xp += n;
+    this.touch();
+    return this.seasonLevel() - before;      // how many levels just landed
+  }
+
+  /* ------------------------- match outcomes ---------------------- */
+  onMatchEnd(won, score, stats, moments) {
+    const d = this.data, s = d.stats;
+    const coins = won ? 30 : 8;
+    const xp = won ? 120 : 45;
+    s.matches++; if (won) s.wins++;
+    s.shots += stats.shots || 0;
+    s.rallies += stats.rallies || 0;
+    s.maxRally = Math.max(s.maxRally, stats.bestRally || 0);
+    s.bestSpeed = Math.max(s.bestSpeed, stats.maxSpeed || 0);
+    s.bestSpin = Math.max(s.bestSpin, stats.maxSpin || 0);
+    s.moments += moments || 0;
+    const lv = this.addXP(xp);
+    const se = this.addSeasonXP(xp);
+    this.addCoins(coins, 'match');
+    if (won) this.taskProgress('win1', 1);
+    this.touch(); this.save(true);
+    return { coins, xp, level: lv, seasonLevels: se };
+  }
+}
+
+/* ------------------------------------------------------------------ *
+ *  Shop: what is for sale, at what price, and on which platform.
+ *  Prices are in soft coins (earned by playing) or crystals (bought),
+ *  and cosmetics are the only thing crystals can buy.
+ * ------------------------------------------------------------------ */
+const COSMETICS = [
+  { id: 'trail_std', kind: 'trail', ru: 'СЛЕД · СТАНДАРТ', price: 0, cur: 'coins', val: 'std' },
+  { id: 'trail_gold', kind: 'trail', ru: 'СЛЕД · ЗОЛОТО', price: 240, cur: 'crystals', val: 'gold' },
+  { id: 'trail_ice', kind: 'trail', ru: 'СЛЕД · ЛЁД', price: 180, cur: 'crystals', val: 'ice' },
+  { id: 'arena_club', kind: 'arena', ru: 'АРЕНА · КЛУБ', price: 0, cur: 'coins', val: 'arena' },
+  { id: 'arena_world', kind: 'arena', ru: 'АРЕНА · АРЕНА МИРА', price: 1, cur: 'career', val: 'world' },
+  { id: 'grip_red', kind: 'grip', ru: 'НАКЛАДКА РУЧКИ · АЛЫЙ', price: 120, cur: 'crystals', val: 'red' },
+];
+
+const SHOP_BUNDLES = [
+  { id: 'starter', ru: 'СТАРТОВЫЙ НАБОР', crystals: 300, coins: 1500, price: '2.99', cur: 'eur', once: true,
+    note: 'основание LOOPER + 300 кристаллов' },
+  { id: 'crystals_120', ru: '120 КРИСТАЛЛОВ', crystals: 120, price: '1.19', cur: 'eur' },
+  { id: 'crystals_650', ru: '650 КРИСТАЛЛОВ', crystals: 650, price: '4.99', cur: 'eur', best: true },
+  { id: 'crystals_1500', ru: '1500 КРИСТАЛЛОВ', crystals: 1500, price: '9.99', cur: 'eur' },
+  { id: 'pass', ru: 'СЕЗОННЫЙ ПРОПУСК', pass: true, price: '4.99', cur: 'eur',
+    note: '60 уровней, скины, арены, 400 кристаллов' },
+  { id: 'noads', ru: 'БЕЗ РЕКЛАМЫ НАВСЕГДА', noads: true, price: '3.99', cur: 'eur' },
+];
+
+class Shop {
+  constructor(profile, platform, analytics) {
+    this.p = profile; this.platform = platform; this.an = analytics;
+    this.log = [];
+  }
+
+  /** Racket items, priced in coins so that playing unlocks everything. */
+  racketOffers() {
+    const out = [];
+    for (const id in ITEMS) {
+      const it = ITEMS[id];
+      if (it.kind !== 'blade' && it.kind !== 'rubber') continue;
+      out.push({
+        id, item: it, kind: it.kind, ru: it.ru, name: it.name,
+        price: it.price, crystals: it.crystals, cur: 'coins', owned: this.p.owns(id),
+        tier: it.tier, star: !!it.star,
+      });
+    }
+    return out;
+  }
+
+  cosmeticOffers() {
+    return COSMETICS.map((c) => ({
+      ...c, owned: this.p.data.cosmetics[c.kind] === c.val || (c.cur === 'coins' && c.price === 0),
+    }));
+  }
+
+  /** Only shown when the platform allows real money (not on Poki/Y8). */
+  iapOffers() {
+    if (!this.platform.canIAP) return [];
+    return SHOP_BUNDLES.map((b) => ({ ...b, owned: this.p.data.purchases.some((x) => x.id === b.id) }));
+  }
+
+  /**
+   * Two ways to own a racket: play for it (coins) or pay for it
+   * (crystals, which come from the store). Both are recorded, and the
+   * cheap items stay coin-only so the whole game can be finished for
+   * free — paying buys time, never power.
+   */
+  buyRacket(id, cur) {
+    const it = ITEMS[id];
+    if (!it) return false;
+    const currency = cur === 'crystals' ? 'crystals' : 'coins';
+    const price = currency === 'crystals' ? it.crystals : it.price;
+    if (!Number.isFinite(price) || price <= 0) return false;
+    if (!this.p.buy(id, price, currency)) return false;
+    this.an && this.an.send('shop:buy', { id, cur: currency, price });
+    this.log.push({ id, cur: currency, t: Date.now() });
+    return true;
+  }
+
+  buyCosmetic(id) {
+    const c = COSMETICS.find((x) => x.id === id);
+    if (!c) return false;
+    if (c.cur === 'career') return false;                 // earned, never sold
+    if (this.p.data.cosmetics[c.kind] === c.val) return false;    // already worn: never charge twice
+    if (c.cur === 'crystals') {
+      if (!this.p.spend(0, c.price)) return false;
+    } else if (c.cur === 'coins' && c.price > 0) {
+      if (!this.p.spend(c.price, 0)) return false;
+    }
+    this.p.data.cosmetics[c.kind] = c.val;
+    this.p.touch(); this.p.save(true);
+    this.an && this.an.send('shop:buy', { id, cur: c.cur, price: c.price });
+    return true;
+  }
+
+  /**
+   * Real-money purchase. The actual store call belongs to the wrapper
+   * (Capacitor / portal SDK); this is the entitlement side, which is the
+   * part that must be right: grant once, record it, never refund silently.
+   */
+  grant(bundleId, receipt) {
+    const b = SHOP_BUNDLES.find((x) => x.id === bundleId);
+    if (!b) return false;
+    const d = this.p.data;
+    /* The store will happily call us twice (retry, double tap, a restored
+       purchase after reinstall). The receipt is what makes it idempotent:
+       one receipt, one grant — otherwise a single payment pays out twice. */
+    const tag = typeof receipt === 'string' && receipt ? receipt : null;
+    if (tag && d.purchases.some((x) => x.receipt === tag)) return false;
+    if (b.once && d.purchases.some((x) => x.id === bundleId)) return false;
+    d.purchases.push({ id: bundleId, t: Date.now(), receipt: tag || 'local:' + Date.now() });
+    if (b.crystals) d.crystals += b.crystals;
+    if (b.coins) d.coins += b.coins;
+    if (b.pass) d.season.premium = true;
+    if (b.noads) d.ads.noadsBought = true;
+    if (bundleId === 'starter') { if (!this.p.owns('b_loop')) d.owned.push('b_loop'); }
+    this.p.touch(); this.p.save(true);
+    this.an && this.an.send('iap:grant', { id: bundleId, eur: b.price });
+    return true;
+  }
+
+  /**
+   * Rewarded video. The offer must be concrete and the answer must be
+   * "no thanks" — a rewarded ad with no refusal is a toll booth.
+   */
+  /** How many rewarded ads are left today (the UI must be able to say). */
+  get adsLeft() {
+    const a = this.p.data.ads;
+    if (a.noadsBought) return 0;
+    if (a.day !== this.p.dayKey(Date.now())) return MAX_ADS_PER_DAY;
+    return Math.max(0, MAX_ADS_PER_DAY - (a.today || 0));
+  }
+
+  rewardAd(kind) {
+    const p = this.p, a = p.data.ads;
+    if (a.noadsBought) return { ok: false, why: 'no-ads' };
+    const now = Date.now();
+    /* The daily budget is the real brake. Without it a player farms 120
+       coins every 45 seconds — more than playing pays — and every price
+       in the shop stops meaning anything. */
+    const day = p.dayKey(now);
+    if (a.day !== day) { a.day = day; a.today = 0; }
+    if (a.today >= MAX_ADS_PER_DAY) return { ok: false, why: 'daily', left: 0, cap: MAX_ADS_PER_DAY };
+    if (now - (a.last || 0) < 45000) return { ok: false, why: 'cooldown', left: Math.ceil((45000 - (now - a.last)) / 1000) };
+    const table = {
+      coins2x: { coins: 120, ru: '×2 монеты за матч' },
+      secondChance: { coins: 0, ru: 'второй шанс в турнире' },
+      dailyWheel: { coins: 120, ru: 'колесо дня' },
+    };
+    const offer = table[kind] || table.coins2x;
+    a.last = now;
+    a.watched++;
+    a.today++;
+    if (offer.coins) p.addCoins(offer.coins, 'ad:' + kind);
+    p.touch(); p.save(true);
+    this.an && this.an.send('ad:rewarded', { kind, coins: offer.coins, left: MAX_ADS_PER_DAY - a.today });
+    return { ok: true, coins: offer.coins, offer, left: MAX_ADS_PER_DAY - a.today };
+  }
+}
+
+/* ------------------------------------------------------------------ *
+ *  Economy tuning, in one place so it can be argued with.
+ * ------------------------------------------------------------------ */
+const ECONOMY = {
+  matchWin: 30, matchLoss: 8, tournamentWin: 250, dailyTask: '90–120',
+  level: 120, season: 250,
+  note: 'Сессия 12 минут ≈ 2 матча ≈ 70 монет + 1–2 задания. Скин ракетки 900 —'
+      + ' это примерно 8 игровых сессий, или один вечер с двумя рекламными удвоениями.',
+};
+
+
 /* ====== 70_game.js ====== */
 /* =====================================================================
  *  GAME — state machine, ITTF rules, continuous collision detection,
@@ -5455,9 +6298,20 @@ class Game {
   /* ----------------------------- input ---------------------------- */
   bindInput() {
     const c = this.canvas;
+    /* Screen → surface coordinates. A pointer event with a non-finite or
+       absurd coordinate (broken touch driver, synthetic event, detached
+       canvas with a zero-size rect) used to poison the paddle transform
+       permanently: one NaN reached the smoothing filter and the racket
+       never came back. Sanitise at the boundary, in one place. */
     const norm = (e) => {
       const r = c.getBoundingClientRect();
-      return { x: (e.clientX - r.left) / r.width, y: (e.clientY - r.top) / r.height };
+      const w = r.width > 0 ? r.width : (c.clientWidth || 1);
+      const h = r.height > 0 ? r.height : (c.clientHeight || 1);
+      let x = (e.clientX - r.left) / w;
+      let y = (e.clientY - r.top) / h;
+      if (!Number.isFinite(x)) x = 0.5; else x = clamp(x, -0.25, 1.25);
+      if (!Number.isFinite(y)) y = 0.5; else y = clamp(y, -0.25, 1.25);
+      return { x, y };
     };
 
     /* Two input languages share one surface:
@@ -6173,7 +7027,10 @@ class Game {
     const isServeStroke = this.isServeBall && b.lastHitBy === 0 && this.server === 1;
     pad.lastHitT = this.time;
     const contact = V3.new(hit.x, hit.y, hit.z);
-    const sweet = clamp((1 - hit.rad / radius) * this.equip.sweetK, 0, 1);
+    /* the tolerance of THIS face: the frame's sweet spot scaled by how
+       forgiving the rubber on it is (a soft topsheet costs less) */
+    const sideParams = this.equip.forSide(1);
+    const sweet = clamp((1 - hit.rad / radius) * (sideParams.sweet || this.equip.sweetK), 0, 1);
 
     // ---- build the stroke from the live gesture --------------------
     const sw = this.swipe;
@@ -6189,7 +7046,7 @@ class Game {
         ball: { y: contact.y, z: contact.z },
         ballSpin: b.w, ballSpeed: V3.len(b.v),
         powerScale: 1,
-        equip: this.equip.forSide(1),      // the rubber object for this bat
+        equip: sideParams,                 // the rubber object for this bat
       };
       racket = deriveStroke(m, ctx);
       racket.vmag *= this.equip.vmagK;     // swing weight of the frame
@@ -6259,7 +7116,12 @@ class Game {
     pad.prevPos = pad.prevPos || V3.clone(pad.pos);
     V3.copy(pad.prevPos, pad.pos);
 
-    const pt = this.pointer || { x: 0.5, y: 0.62 };
+    let pt = this.pointer || { x: 0.5, y: 0.62 };
+    if (!Number.isFinite(pt.x) || !Number.isFinite(pt.y)) {
+      pt = { x: 0.5, y: 0.62 };
+      this.pointer = pt;                 // self-heal: never stay broken
+    }
+    if (!Number.isFinite(this.stanceY)) this.stanceY = undefined;
     const sens = this.settings.sensitivity;
     // the depth of the stance is set when the hand lands, not by the swipe:
     // flicking the wrist upward must not lunge you over the table
@@ -6962,6 +7824,7 @@ class UI {
     });
     $$('#workshop .tab').forEach((b) => b.addEventListener('click', () => this.showWorkshop(b.dataset.tab)));
     $('#wsEquip').addEventListener('click', () => this.equipSelection());
+    $('#wsBuyCry').addEventListener('click', () => this.buySelectionCrystals());
     $('#adCoins').addEventListener('click', () => this.watchAd());
     $('#btnSettings').addEventListener('click', () => $('#settings').classList.toggle('on'));
     $('#setClose').addEventListener('click', () => $('#settings').classList.remove('on'));
@@ -7086,13 +7949,18 @@ class UI {
       const sw = it.kind === 'blade' ? it.wood : it.col;
       const col = `rgb(${sw.map((c) => Math.round(c * 255)).join(',')})`;
       const price = it.price ? `<span class="pr">${it.price}</span>` : '';
+      const cry = !owned && it.crystals ? ` <em class="cry">${it.crystals} \u25c8</em>` : '';
       return `<button class="irow${it.id === current ? ' sel' : ''}${owned ? '' : ' locked'}" data-id="${it.id}">
         <span class="sw" style="background:${col}"></span>
-        <span class="d"><b>${it.name}</b><s>${it.ru}${owned ? '' : ' · не куплено'}</s></span>${price}</button>`;
+        <span class="d"><b>${it.name}</b><s>${it.ru}${owned ? '' : ' · не куплено'}</s></span>${cry}${price}</button>`;
     }).join('');
     Array.from(box.querySelectorAll('.irow')).forEach((b) => b.addEventListener('click', () => {
       const id = b.dataset.id, it = ITEMS[id];
-      const slot = it.kind === 'blade' ? 'blade' : (b.parentElement.id === 'listBh' ? 'bh' : 'fh');
+      if (!it) return;                 // a stale row from a previous render
+      /* the list is re-rendered on every action, so a click that arrives
+         after a re-render has a detached button: ask the DOM carefully */
+      const owner = b.parentElement || b.closest('.ilist');
+      const slot = it.kind === 'blade' ? 'blade' : (owner && owner.id === 'listBh' ? 'bh' : 'fh');
       if (!this.game.profile.owns(id)) {
         const ok = this.game.shop.buyRacket(id);
         if (!ok) { this.toast('НЕ ХВАТАЕТ МОНЕТ · ' + it.price); this.game.audio.ui('deny'); return; }
@@ -7114,6 +7982,18 @@ class UI {
     const dirty = this.pick.blade !== fitted.blade || this.pick.fh !== fitted.fh || this.pick.bh !== fitted.bh;
     $('#wsEquip').textContent = dirty ? 'ПОСТАВИТЬ В ИГРУ' : 'ЭТА РАКЕТКА УЖЕ В ИГРЕ';
     $('#wsEquip').disabled = !dirty;
+    const bladeItem = ITEMS[this.pick.blade];
+    const buyCry = $('#wsBuyCry');
+    if (buyCry) {
+      const show = !this.game.profile.owns(this.pick.blade) && !!bladeItem.crystals;
+      buyCry.style.display = show ? '' : 'none';
+      /* keep a real name on the button even while it is hidden: an empty
+         button is what screen readers announce as "button" */
+      buyCry.textContent = show ? '\u041a\u0423\u041f\u0418\u0422\u042c \u0417\u0410 ' + bladeItem.crystals + ' \u25c8'
+        : '\u041a\u0423\u041f\u0418\u0422\u042c \u0417\u0410 \u041a\u0420\u0418\u0421\u0422\u0410\u041b\u041b\u042b';
+      buyCry.setAttribute('aria-label', show ? '\u041a\u0443\u043f\u0438\u0442\u044c \u0437\u0430 ' + bladeItem.crystals + ' \u043a\u0440\u0438\u0441\u0442\u0430\u043b\u043b\u043e\u0432'
+        : '\u041a\u0443\u043f\u0438\u0442\u044c \u0440\u0430\u043a\u0435\u0442\u043a\u0443 \u0437\u0430 \u043a\u0440\u0438\u0441\u0442\u0430\u043b\u043b\u044b');
+    }
     const rows = STAT_KEYS.map((k) => {
       const v = t[k];
       const d = v - cur.stats[k];
@@ -7126,6 +8006,21 @@ class UI {
       : t.spin > 70 ? 'собирает вращение с кисти' : 'ровная, предсказуемая';
     $('#statNote').innerHTML = `<b>${ITEMS[this.pick.blade].name} · ${ITEMS[this.pick.fh].name}</b><br>`
       + `${describe}. Отскок ${(sp * 100).toFixed(0)}% от базы, пятно контакта ${(eq.sweetK * 100).toFixed(0)}%.`;
+  }
+
+  /** Buy the racket that is being tried on, with crystals. */
+  buySelectionCrystals() {
+    const p = this.game.profile, it = ITEMS[this.pick.blade];
+    if (p.owns(it.id)) { this.toast('УЖЕ КУПЛЕНО'); return; }
+    if (!it.crystals) { this.toast('ЭТУ РАКЕТКУ БЕРУТ МОНЕТАМИ'); return; }
+    if (!this.game.shop.buyRacket(it.id, 'crystals')) {
+      this.toast('НУЖНО ' + it.crystals + ' КРИСТАЛЛОВ'); this.game.audio.ui('deny'); return;
+    }
+    this.toast('КУПЛЕНО ЗА ' + it.crystals + ' \u25c8 · ' + it.name);
+    this.game.audio.ui('buy');
+    $('#wsBal').textContent = p.data.coins;
+    $('#wsCry').textContent = p.data.crystals;
+    this.showWorkshop('racket');
   }
 
   equipSelection() {
@@ -7219,7 +8114,12 @@ class UI {
   watchAd() {
     const r = this.game.shop.rewardAd('dailyWheel');
     if (r.ok) { this.toast('+' + r.coins + ' МОНЕТ · СПАСИБО'); this.game.audio.ui('buy'); }
-    else this.toast(r.why === 'no-ads' ? 'РЕКЛАМА ОТКЛЮЧЕНА' : 'ПОДОЖДИТЕ ' + (r.left || 45) + ' С');
+    else if (r.why === 'no-ads') this.toast('РЕКЛАМА ОТКЛЮЧЕНА');
+    else if (r.why === 'daily') this.toast('ЛИМИТ НА СЕГОДНЯ · ЗАВТРА ЕЩЁ ' + r.cap);
+    else this.toast('ПОДОЖДИТЕ ' + (r.left || 45) + ' С');
+    const cap = this.game.shop.adsLeft;
+    const btn = $('#adCoins');
+    if (btn) btn.textContent = cap > 0 ? 'СМОТРЕТЬ РЕКЛАМУ · +120 МОНЕТ · ОСТАЛОСЬ ' + cap : 'РЕКЛАМА · ЛИМИТ НА СЕГОДНЯ ИСЧЕРПАН';
     $('#wsBal').textContent = this.game.profile.data.coins;
     this.drawShop(); this.refreshMenuBits();
   }
@@ -7294,7 +8194,7 @@ class UI {
 
   syncSettings() {
     const s = this.game.settings;
-    const sel = (k, v) => $$(`.opt[data-set="${k}"]`).forEach((x) => x.classList.toggle('sel', x.dataset.val == v));
+    const sel = (k, v) => $$(`.opt[data-set="${k}"]`).forEach((x) => x.classList.toggle('sel', x.dataset.val === String(v)));
     sel('cam', s.camera); sel('quality', s.quality); sel('hand', s.hand);
     sel('trail', s.showTrail ? 'on' : 'off'); sel('predict', s.showPredict ? 'on' : 'off');
     sel('zone', s.showZone ? 'on' : 'off'); sel('tele', s.showTele ? 'on' : 'off');
@@ -7316,8 +8216,8 @@ class UI {
   syncScore() {
     const g = this.game;
     const a = $('#ptsA'), b = $('#ptsB');
-    if (a.textContent != g.score[0]) { a.textContent = g.score[0]; a.classList.add('bump'); setTimeout(() => a.classList.remove('bump'), 220); }
-    if (b.textContent != g.score[1]) { b.textContent = g.score[1]; b.classList.add('bump'); setTimeout(() => b.classList.remove('bump'), 220); }
+    if (a.textContent !== String(g.score[0])) { a.textContent = g.score[0]; a.classList.add('bump'); setTimeout(() => a.classList.remove('bump'), 220); }
+    if (b.textContent !== String(g.score[1])) { b.textContent = g.score[1]; b.classList.add('bump'); setTimeout(() => b.classList.remove('bump'), 220); }
     $('#servA').classList.toggle('on', g.server === 1);
     $('#servB').classList.toggle('on', g.server === -1);
     $('#oppName').textContent = g.ai.L.name;
@@ -7381,6 +8281,8 @@ class UI {
     $('#stFav').textContent = top ? (STROKES[top[0]] ? STROKES[top[0]].short : top[0]) + ' ×' + top[1] : '—';
     // the match is over, so lead with the thing worth remembering: the
     // best rally, played back before the numbers
+    const row = $('#overMoments');
+    row.innerHTML = '';
     /* what the match paid, in one line, next to the score */
     if (g.lastReward) {
       const r = g.lastReward;
@@ -7393,8 +8295,6 @@ class UI {
       g.lastReward = null;
     }
     const best = g.moments.best;
-    const row = $('#overMoments');
-    row.innerHTML = '';
     const kept = g.moments.kept.slice(0, 3);
     if (kept.length) {
       const b = document.createElement('button');
@@ -7740,439 +8640,6 @@ const ICON = {
   mute: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><line x1="23" y1="9" x2="17" y2="15"/><line x1="17" y1="9" x2="23" y2="15"/></svg>',
   gear: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>',
   menu: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>',
-};
-
-
-/* ====== 86_meta.js ====== */
-/* =====================================================================
- *  META — profile, money, shop, platform. The commercial layer.
- *
- *  Rules this file is written to, in order of importance:
- *
- *  1. NOTHING HERE MAY CHANGE WHO WINS. The shop sells different, never
- *     better (see 84_racket.js: every item spends the same stat budget),
- *     and it sells looks, convenience and reasons to come back.
- *  2. NO DARK PATTERNS. No energy, no timers that punish, no loot boxes,
- *     no ads mid-match, no "are you sure you want to stay poor". A
- *     rewarded ad is always an offer, never a toll.
- *  3. THE WEB BUILD HAS TO BE HONEST ABOUT ITSELF. Poki forbids
- *     third-party IAP entirely, so on a portal the shop hides its
- *     paid shelves and keeps ads-only. The same code runs everywhere.
- *  4. IT MUST SURVIVE A RELOAD. One versioned blob in localStorage, with
- *     a migration step, and no throwing if storage is blocked (private
- *     mode, embedded iframes on portals).
- * ===================================================================== */
-
-const SAVE_KEY = 'topspin.arena.save.v1';
-const SAVE_VERSION = 3;
-
-/* ------------------------------------------------------------------ *
- *  Platform: where are we running, and what is allowed here?
- * ------------------------------------------------------------------ */
-class Platform {
-  constructor(nav) {
-    const navi = nav || (typeof navigator !== 'undefined' ? navigator : {});
-    const ua = (navi.userAgent || '').toLowerCase();
-    const host = (typeof location !== 'undefined' ? location.hostname : '') || '';
-    this.poki = /poki\./i.test(host) || !!navi.poki;
-    this.crazy = /crazygames/i.test(host) || !!navi.CrazyGames;
-    this.y8 = /y8\./i.test(host);
-    this.gamedist = /gamedistribution/i.test(host);
-    this.portal = this.poki || this.crazy || this.y8 || this.gamedist;
-    this.itch = /itch\.io/i.test(host);
-    this.touch = 'ontouchstart' in (navi && navi.maxTouchPoints ? navi : {}) || (navi.maxTouchPoints || 0) > 0;
-  }
-
-  /* Poki: ads only, no IAP at all. CrazyGames: ads + IAP through them.
-     Own domain / itch: everything, and that is where the shop shows up.
-     These are getters, not fields, so flipping a flag (or being detected
-     later, when the portal SDK finally loads) can never leave the shop
-     showing a shelf the platform forbids. */
-  get canIAP() { return !this.poki && !this.y8 && !this.gamedist; }
-  get canRewarded() { return true; }
-  get storePct() { return this.poki ? 0.50 : this.crazy ? 0.60 : this.y8 ? 0.50 : this.gamedist ? 0.33 : 1.0; }
-  get label() {
-    if (this.poki) return 'POKI';
-    if (this.crazy) return 'CRAZYGAMES';
-    if (this.y8) return 'Y8';
-    if (this.gamedist) return 'GAMEDISTRIBUTION';
-    return 'ПРЯМОЙ ЗАПУСК';
-  }
-}
-
-/* ------------------------------------------------------------------ *
- *  Analytics: one bus, adapters know how to talk to each portal.
- *  Deliberately tiny — the numbers we act on are D1/D7, session length,
- *  the drop-off step of the tutorial and the shop funnel.
- * ------------------------------------------------------------------ */
-class Analytics {
-  constructor(platform) {
-    this.platform = platform;
-    this.queue = [];
-    this.sessionStart = Date.now();
-    this.events = 0;
-    this.onEvent = null;
-  }
-  send(name, props) {
-    const e = { name, t: Date.now(), i: this.events++, props: props || {} };
-    this.queue.push(e);
-    if (this.queue.length > 200) this.queue.shift();
-    if (this.onEvent) this.onEvent(e);
-    // portal SDKs are wired here when present; nothing else leaves the page
-    const n = (typeof navigator !== 'undefined') ? navigator : {};
-    if (n.poki && n.poki.gameLoadingFinished && this.events === 2) { try { n.poki.gameLoadingFinished(); } catch (x) { /* ignore */ } }
-    return e;
-  }
-  get sessionSec() { return (Date.now() - this.sessionStart) / 1000; }
-  funnelStep(name) { this.send('funnel:' + name, { d: Math.round(this.sessionSec) }); }
-}
-
-/* ------------------------------------------------------------------ *
- *  Profile: everything that has to survive a reload.
- * ------------------------------------------------------------------ */
-const DAILY_TASKS = [
-  { id: 'win1', ru: 'ВЫИГРАЙ МАТЧ', need: 1, coins: 120 },
-  { id: 'rally8', ru: 'РОЗЫГРЫШ ИЗ 8 УДАРОВ', need: 1, coins: 100 },
-  { id: 'topspin', ru: '10 ТОПСПИНОВ', need: 10, coins: 90 },
-  { id: 'smash', ru: '3 СМЕША', need: 3, coins: 110 },
-  { id: 'serves', ru: '5 ЛЕГАЛЬНЫХ ПОДАЧ ПОДРЯД', need: 5, coins: 100 },
-  { id: 'replay', ru: 'ПОСМОТРИ ЛУЧШИЙ МОМЕНТ', need: 1, coins: 80 },
-];
-
-class Profile {
-  constructor(platform) {
-    this.platform = platform;
-    this.data = this.blank();
-    this.loaded = false;
-    this.dirty = false;
-    this.load();
-  }
-
-  blank() {
-    return {
-      v: SAVE_VERSION,
-      created: Date.now(),
-      days: [],
-      streak: 0,
-      coins: 250,
-      crystals: 0,
-      xp: 0, level: 1,
-      owned: ['b_base', 'r_base'],
-      equip: { blade: 'b_base', fh: 'r_base', bh: 'r_base' },
-      cosmetics: { trail: 'std', arena: 'arena', grip: 'std' },
-      career: { div: 0, event: 0, points: 0, cups: 0, trophies: [], seen: 0 },
-      stats: { matches: 0, wins: 0, shots: 0, rallies: 0, maxRally: 0, minutes: 0, bestSpeed: 0, bestSpin: 0, moments: 0 },
-      daily: { day: '', tasks: {}, done: [], claimed: [], wheel: '' },
-      season: { n: 0, xp: 0, premium: false, claimed: [] },
-      ads: { watched: 0, last: 0 },
-      purchases: [],
-      settings: null,
-    };
-  }
-
-  load() {
-    let raw = null;
-    try { raw = (typeof localStorage !== 'undefined') ? localStorage.getItem(SAVE_KEY) : null; } catch (e) { raw = null; }
-    if (raw) {
-      try {
-        const d = JSON.parse(raw);
-        const base = this.blank();
-        this.data = Object.assign(base, d);
-        this.data.stats = Object.assign(base.stats, d.stats || {});
-        this.data.daily = Object.assign(base.daily, d.daily || {});
-        this.data.season = Object.assign(base.season, d.season || {});
-        this.data.career = Object.assign(base.career, d.career || {});
-        this.data.cosmetics = Object.assign(base.cosmetics, d.cosmetics || {});
-        if (!Array.isArray(this.data.owned) || !this.data.owned.length) this.data.owned = ['b_base', 'r_base'];
-        this.migrate(d.v || 1);
-      } catch (e) { this.data = this.blank(); }
-    }
-    this.migrate(this.data.v);
-    this.loaded = true;
-    this.today();
-    return this.data;
-  }
-
-  migrate(from) {
-    const d = this.data;
-    if (from < 2) { d.equip = d.equip || { blade: 'b_base', fh: 'r_base', bh: 'r_base' }; }
-    if (from < 3) {
-      for (const id of ['b_base', 'r_base']) if (d.owned.indexOf(id) < 0) d.owned.push(id);
-      d.cosmetics = d.cosmetics || { trail: 'std', arena: 'arena', grip: 'std' };
-    }
-    /* an old save may know only some of the three racket slots */
-    d.equip = d.equip || {};
-    d.equip.blade = d.equip.blade || 'b_base';
-    d.equip.fh = d.equip.fh || 'r_base';
-    d.equip.bh = d.equip.bh || d.equip.fh || 'r_base';
-    d.cosmetics = d.cosmetics || { trail: 'std', arena: 'arena', grip: 'std' };
-    d.v = SAVE_VERSION;
-  }
-
-  save(force) {
-    if (!this.dirty && !force) return true;
-    try {
-      if (typeof localStorage !== 'undefined') { localStorage.setItem(SAVE_KEY, JSON.stringify(this.data)); }
-      this.dirty = false;
-      return true;
-    } catch (e) { return false; }        // private mode: the game still plays
-  }
-
-  touch() { this.dirty = true; if (this._sv === undefined) this._sv = 0; }
-  maybeSave(dt) {                      // cheap: write at most every 4 s
-    if (!this.dirty) return;
-    this._sv = (this._sv || 0) + dt;
-    if (this._sv > 4) { this._sv = 0; this.save(); }
-  }
-
-  /* ------------------------------ time --------------------------- */
-  dayKey(t) {
-    const d = new Date(t || Date.now());
-    return d.getFullYear() + '-' + (d.getMonth() + 1) + '-' + d.getDate();
-  }
-  today() {
-    const k = this.dayKey();
-    const d = this.data.daily;
-    if (d.day !== k) {
-      const y = this.dayKey(Date.now() - 86400000);
-      this.data.streak = (d.day === y) ? (this.data.streak + 1) : 1;
-      d.day = k; d.tasks = {}; d.done = []; d.claimed = [];
-      this.touch();
-    }
-    this.data.days = this.data.days || [];
-    if (this.data.days.indexOf(k) < 0) { this.data.days.push(k); if (this.data.days.length > 60) this.data.days.shift(); }
-    return this.data.streak;
-  }
-
-  /* ------------------------------ money -------------------------- */
-  addCoins(n, why) {
-    this.data.coins = Math.max(0, Math.round(this.data.coins + n));
-    this.touch();
-    if (this.onCoins) this.onCoins(n, why);
-    return this.data.coins;
-  }
-  spend(coins, crystals) {
-    const d = this.data;
-    if (d.coins < (coins || 0) || d.crystals < (crystals || 0)) return false;
-    d.coins -= coins || 0; d.crystals -= crystals || 0;
-    this.touch();
-    return true;
-  }
-  addXP(n) {
-    const d = this.data;
-    d.xp += n;
-    const need = (lv) => 400 + lv * 260;
-    while (d.xp >= need(d.level)) { d.xp -= need(d.level); d.level++; if (this.onLevel) this.onLevel(d.level); }
-    this.touch();
-    return d.level;
-  }
-  xpToNext() { return 400 + this.data.level * 260; }
-
-  /* ---------------------------- inventory ------------------------ */
-  owns(id) { return this.data.owned.indexOf(id) >= 0; }
-  buy(id, price, currency) {
-    if (this.owns(id)) return false;
-    const ok = currency === 'crystals' ? this.spend(0, price) : this.spend(price, 0);
-    if (!ok) return false;
-    this.data.owned.push(id);
-    this.data.purchases.push({ id, price, currency, t: Date.now() });
-    this.touch(); this.save(true);
-    return true;
-  }
-  equipRacket(blade, fh, bh) {
-    for (const id of [blade, fh, bh]) if (id && !this.owns(id)) return false;
-    this.data.equip = { blade, fh, bh };
-    this.touch(); this.save(true);
-    return true;
-  }
-
-  /* ------------------------------- daily ------------------------- */
-  taskProgress(id, add, absolute) {
-    const d = this.data.daily;
-    const t = DAILY_TASKS.find((x) => x.id === id);
-    if (!t || d.claimed.indexOf(id) >= 0) return;
-    const cur = absolute !== undefined ? absolute : (d.tasks[id] || 0) + add;
-    d.tasks[id] = cur;
-    if (cur >= t.need && d.done.indexOf(id) < 0) { d.done.push(id); this.touch(); }
-    this.touch();
-  }
-  claimTask(id) {
-    const d = this.data.daily;
-    const t = DAILY_TASKS.find((x) => x.id === id);
-    if (!t || d.done.indexOf(id) < 0 || d.claimed.indexOf(id) >= 0) return 0;
-    d.claimed.push(id);
-    const bonus = this.data.streak >= 7 ? 1.5 : this.data.streak >= 3 ? 1.25 : 1;
-    const coins = Math.round(t.coins * bonus);
-    this.addCoins(coins, 'task:' + id);
-    this.save(true);
-    return coins;
-  }
-  get dailyDone() { return this.data.daily.done.length; }
-
-  /* ------------------------------ season ------------------------- */
-  seasonLevel() { return Math.min(60, 1 + Math.floor(this.data.season.xp / 250)); }
-  seasonProgress() { return clamp((this.data.season.xp % 250) / 250, 0, 1); }
-  addSeasonXP(n) {
-    const s = this.data.season;
-    const before = this.seasonLevel();
-    s.xp += n;
-    this.touch();
-    return this.seasonLevel() - before;      // how many levels just landed
-  }
-
-  /* ------------------------- match outcomes ---------------------- */
-  onMatchEnd(won, score, stats, moments) {
-    const d = this.data, s = d.stats;
-    const coins = won ? 30 : 8;
-    const xp = won ? 120 : 45;
-    s.matches++; if (won) s.wins++;
-    s.shots += stats.shots || 0;
-    s.rallies += stats.rallies || 0;
-    s.maxRally = Math.max(s.maxRally, stats.bestRally || 0);
-    s.bestSpeed = Math.max(s.bestSpeed, stats.maxSpeed || 0);
-    s.bestSpin = Math.max(s.bestSpin, stats.maxSpin || 0);
-    s.moments += moments || 0;
-    const lv = this.addXP(xp);
-    const se = this.addSeasonXP(xp);
-    this.addCoins(coins, 'match');
-    if (won) this.taskProgress('win1', 1);
-    this.touch(); this.save(true);
-    return { coins, xp, level: lv, seasonLevels: se };
-  }
-}
-
-/* ------------------------------------------------------------------ *
- *  Shop: what is for sale, at what price, and on which platform.
- *  Prices are in soft coins (earned by playing) or crystals (bought),
- *  and cosmetics are the only thing crystals can buy.
- * ------------------------------------------------------------------ */
-const COSMETICS = [
-  { id: 'trail_std', kind: 'trail', ru: 'СЛЕД · СТАНДАРТ', price: 0, cur: 'coins', val: 'std' },
-  { id: 'trail_gold', kind: 'trail', ru: 'СЛЕД · ЗОЛОТО', price: 240, cur: 'crystals', val: 'gold' },
-  { id: 'trail_ice', kind: 'trail', ru: 'СЛЕД · ЛЁД', price: 180, cur: 'crystals', val: 'ice' },
-  { id: 'arena_club', kind: 'arena', ru: 'АРЕНА · КЛУБ', price: 0, cur: 'coins', val: 'arena' },
-  { id: 'arena_world', kind: 'arena', ru: 'АРЕНА · АРЕНА МИРА', price: 1, cur: 'career', val: 'world' },
-  { id: 'grip_red', kind: 'grip', ru: 'НАКЛАДКА РУЧКИ · АЛЫЙ', price: 120, cur: 'crystals', val: 'red' },
-];
-
-const SHOP_BUNDLES = [
-  { id: 'starter', ru: 'СТАРТОВЫЙ НАБОР', crystals: 300, coins: 1500, price: '2.99', cur: 'eur', once: true,
-    note: 'основание LOOPER + 300 кристаллов' },
-  { id: 'crystals_120', ru: '120 КРИСТАЛЛОВ', crystals: 120, price: '1.19', cur: 'eur' },
-  { id: 'crystals_650', ru: '650 КРИСТАЛЛОВ', crystals: 650, price: '4.99', cur: 'eur', best: true },
-  { id: 'crystals_1500', ru: '1500 КРИСТАЛЛОВ', crystals: 1500, price: '9.99', cur: 'eur' },
-  { id: 'pass', ru: 'СЕЗОННЫЙ ПРОПУСК', pass: true, price: '4.99', cur: 'eur',
-    note: '60 уровней, скины, арены, 400 кристаллов' },
-  { id: 'noads', ru: 'БЕЗ РЕКЛАМЫ НАВСЕГДА', noads: true, price: '3.99', cur: 'eur' },
-];
-
-class Shop {
-  constructor(profile, platform, analytics) {
-    this.p = profile; this.platform = platform; this.an = analytics;
-    this.log = [];
-  }
-
-  /** Racket items, priced in coins so that playing unlocks everything. */
-  racketOffers() {
-    const out = [];
-    for (const id in ITEMS) {
-      const it = ITEMS[id];
-      if (it.kind !== 'blade' && it.kind !== 'rubber') continue;
-      out.push({
-        id, item: it, kind: it.kind, ru: it.ru, name: it.name,
-        price: it.price, cur: 'coins', owned: this.p.owns(id), tier: it.tier, star: !!it.star,
-      });
-    }
-    return out;
-  }
-
-  cosmeticOffers() {
-    return COSMETICS.map((c) => ({
-      ...c, owned: this.p.data.cosmetics[c.kind] === c.val || (c.cur === 'coins' && c.price === 0),
-    }));
-  }
-
-  /** Only shown when the platform allows real money (not on Poki/Y8). */
-  iapOffers() {
-    if (!this.platform.canIAP) return [];
-    return SHOP_BUNDLES.map((b) => ({ ...b, owned: this.p.data.purchases.some((x) => x.id === b.id) }));
-  }
-
-  buyRacket(id) {
-    const it = ITEMS[id];
-    if (!it || it.price === undefined) return false;
-    if (!this.p.buy(id, it.price, 'coins')) return false;
-    this.an && this.an.send('shop:buy', { id, cur: 'coins', price: it.price });
-    this.log.push({ id, t: Date.now() });
-    return true;
-  }
-
-  buyCosmetic(id) {
-    const c = COSMETICS.find((x) => x.id === id);
-    if (!c) return false;
-    if (c.cur === 'career') return false;                 // earned, never sold
-    if (c.cur === 'crystals') {
-      if (!this.p.spend(0, c.price)) return false;
-    }
-    this.p.data.cosmetics[c.kind] = c.val;
-    this.p.touch(); this.p.save(true);
-    this.an && this.an.send('shop:buy', { id, cur: c.cur, price: c.price });
-    return true;
-  }
-
-  /**
-   * Real-money purchase. The actual store call belongs to the wrapper
-   * (Capacitor / portal SDK); this is the entitlement side, which is the
-   * part that must be right: grant once, record it, never refund silently.
-   */
-  grant(bundleId, receipt) {
-    const b = SHOP_BUNDLES.find((x) => x.id === bundleId);
-    if (!b) return false;
-    const d = this.p.data;
-    if (b.once && d.purchases.some((x) => x.id === bundleId)) return false;
-    d.purchases.push({ id: bundleId, t: Date.now(), receipt: receipt ? 'ok' : 'none' });
-    if (b.crystals) d.crystals += b.crystals;
-    if (b.coins) d.coins += b.coins;
-    if (b.pass) d.season.premium = true;
-    if (b.noads) d.ads.noadsBought = true;
-    if (bundleId === 'starter') { if (!this.p.owns('b_loop')) d.owned.push('b_loop'); }
-    this.p.touch(); this.p.save(true);
-    this.an && this.an.send('iap:grant', { id: bundleId, eur: b.price });
-    return true;
-  }
-
-  /**
-   * Rewarded video. The offer must be concrete and the answer must be
-   * "no thanks" — a rewarded ad with no refusal is a toll booth.
-   */
-  rewardAd(kind) {
-    const p = this.p;
-    if (p.data.ads.noadsBought) return { ok: false, why: 'no-ads' };
-    const now = Date.now();
-    if (now - (p.data.ads.last || 0) < 45000) return { ok: false, why: 'cooldown', left: Math.ceil((45000 - (now - p.data.ads.last)) / 1000) };
-    const table = {
-      coins2x: { coins: 120, ru: '×2 монеты за матч' },
-      secondChance: { coins: 0, ru: 'второй шанс в турнире' },
-      dailyWheel: { coins: 120, ru: 'колесо дня' },
-    };
-    const offer = table[kind] || table.coins2x;
-    p.data.ads.last = now;
-    p.data.ads.watched++;
-    if (offer.coins) p.addCoins(offer.coins, 'ad:' + kind);
-    p.touch(); p.save(true);
-    this.an && this.an.send('ad:rewarded', { kind, coins: offer.coins });
-    return { ok: true, coins: offer.coins, offer };
-  }
-}
-
-/* ------------------------------------------------------------------ *
- *  Economy tuning, in one place so it can be argued with.
- * ------------------------------------------------------------------ */
-const ECONOMY = {
-  matchWin: 30, matchLoss: 8, tournamentWin: 250, dailyTask: '90–120',
-  level: 120, season: 250,
-  note: 'Сессия 12 минут ≈ 2 матча ≈ 70 монет + 1–2 задания. Скин ракетки 900 —'
-      + ' это примерно 8 игровых сессий, или один вечер с двумя рекламными удвоениями.',
 };
 
 
