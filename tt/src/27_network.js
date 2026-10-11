@@ -54,8 +54,17 @@ class NetworkManager {
   connect(url) {
     if (this.ws) this.disconnect();
     this.state = 'CONNECTING';
+    // the relay is not part of the bundle: it is chosen per page load
+    // (?net=wss://your.host) or falls back to the default deployment
+    let target = url;
+    if (!target) {
+      try {
+        const q = new URLSearchParams(location.search).get('net');
+        if (q) target = q;
+      } catch (e) { /* no query string available */ }
+    }
     try {
-      this.ws = new WebSocket(url || NET_SERVER_URL);
+      this.ws = new WebSocket(target || NET_SERVER_URL);
     } catch(e) {
       this.state = 'DISCONNECTED';
       this._emit('error', 'Не удалось подключиться');
