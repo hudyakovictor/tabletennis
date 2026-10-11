@@ -38,15 +38,20 @@ const PH = {
   T_THICK: 0.025,
   E_TABLE: 0.870,           // normal COR ball/table (calibrated: 30.5cm drop -> 23cm  => sqrt(23/30.5)=0.868)
   E_TABLE_SPEED: 0.009,     // COR loss per m/s of impact speed
-  MU_TABLE: 0.20,           // Coulomb friction ball/table
-  ET_TABLE: 0.00,           // tangential restitution of the table (none)
+  MU_TABLE: 0.24,           // Coulomb friction ball/table (velocity-dependent, see bounceTable)
+  MU_TABLE_SPEED: 0.008,    // friction drops with sliding speed
+  ET_TABLE: 0.03,           // tangential restitution of the table (slight springiness)
 
   /* ---- net ---- */
   NET_H: 0.1525,            // net height above the table
   NET_OVERHANG: 0.1525,     // net extends past each side line
   NET_E: 0.10,              // how much comes back off a compliant net
+  NET_E_BOTTOM: 0.06,       // net is tighter at the bottom (less give)
+  NET_E_TOP: 0.14,          // net is looser near the tape (more give)
   NET_DAMP_T: 0.22,         // tangential energy kept
   NET_SPIN_KEEP: 0.25,
+  NET_SAG: 0.012,           // sag at the sides of the net [m]
+  NET_SKEW_FACTOR: 0.35,    // how much the net deflects tangentially
   TAPE_R: 0.008,            // the white tape at the top of the net
 
   /* ---- racket / rubber ---- */
@@ -74,7 +79,12 @@ function aeroAccel(out, v, w) {
   if (speed < 1e-5) { out.x = 0; out.y = -PH.G; out.z = 0; return out; }
   const wlen = V3.len(w);
   const S = (PH.R * wlen) / Math.max(speed, 0.6);     // spin ratio
-  const cd = PH.CD0 + PH.CD_SPIN * Math.min(S, 1.2);
+  // Reynolds-dependent drag: Cd drops in the critical regime Re ~ 3e5
+  // smooth cubic: 1.10 at Re=0 → 1.02 at Re=30k → 0.97 at Re=80k → 0.95 at Re=200k
+  const Re = (2 * PH.R * speed) / PH.NU;               // Reynolds number
+  const ReK = clamp(Re / 80000, 0, 1);                 // 0..1 over working range
+  const ReCorr = 1.10 - 0.21 * ReK + 0.14 * ReK * ReK - 0.06 * ReK * ReK * ReK;
+  const cd = (PH.CD0 + PH.CD_SPIN * Math.min(S, 1.2)) * ReCorr;
   const kd = 0.5 * PH.RHO * PH.AREA * cd / PH.M;      // 1/m * 0.5 rho A Cd
   // drag  a = -kd |v| v
   out.x = -kd * speed * v.x;
@@ -84,6 +94,10 @@ function aeroAccel(out, v, w) {
     // Magnus: F = 0.5 rho A Cl |v|^2 * unit(w x v),  Cl = f(S)
     let cl = Math.min(PH.CL_SLOPE * S, PH.CL_MAX);
     if (S > 1.25) cl *= 1 - 0.26 * Math.min((S - 1.25) / 1.2, 1);   // saturation
+    // lift crisis at extreme spin: boundary layer fully separated
+    if (S > 2.5) cl *= Math.max(0.08, 1 - 0.55 * (S - 2.5));
+    // Reynolds correction on Magnus: low Re reduces lift effectiveness
+    if (Re < 2.5e4) cl *= 0.75 + 0.25 * Re / 2.5e4;
     V3.cross(_acc_tmp, w, v);
     const cl_len = V3.len(_acc_tmp);
     if (cl_len > 1e-6) {
@@ -179,7 +193,10 @@ const N_UP = V3.new(0, 1, 0), ZERO3 = V3.new(0, 0, 0);
 function bounceTable(p, v, w) {
   const speed = -v.y;
   const e = clamp(PH.E_TABLE - PH.E_TABLE_SPEED * speed, 0.68, 0.92);
-  const info = impactSphere(v, w, N_UP, ZERO3, e, PH.MU_TABLE, PH.ET_TABLE);
+  // velocity-dependent friction: high sliding speed reduces grip
+  const vtEst = Math.sqrt(v.x * v.x + v.z * v.z);
+  const mu = Math.max(0.10, PH.MU_TABLE - PH.MU_TABLE_SPEED * vtEst);
+  const info = impactSphere(v, w, N_UP, ZERO3, e, mu, PH.ET_TABLE);
   p.y = PH.TABLE_Y + PH.R + 1e-5;
   return info;
 }
@@ -190,42 +207,90 @@ function bounceTable(p, v, w) {
  *  `quality` in [0..1] scales the effective COR (off-centre hits).
  * ---------------------------------------------------------------- */
 const SPIN_CAP = 1080;   // rad/s  (~172 rev/s, above the measured world best)
+
+/* ---- Rubber profiles: each type defines its own physics ---- */
+const RUBBER_PROFILES = {
+  CLASSIC:  { e: 0.800, mu: 1.05, et: 0.52, sponge: 1.8, tacky: 0.0, name: 'Классика' },
+  TENSOR:   { e: 0.830, mu: 1.10, et: 0.62, sponge: 2.1, tacky: 0.0, name: 'Тензор' },
+  TACKY:    { e: 0.750, mu: 1.28, et: 0.38, sponge: 1.5, tacky: 0.85, name: 'Липкая' },
+  LONGPIP:  { e: 0.620, mu: 0.80, et: 0.20, sponge: 0.8, tacky: 0.0, name: 'Длинные шипы' },
+  ANTISPIN: { e: 0.700, mu: 0.42, et: 0.12, sponge: 1.0, tacky: 0.5, name: 'Антискручивание' },
+  HARD:     { e: 0.760, mu: 0.95, et: 0.44, sponge: 1.2, tacky: 0.0, name: 'Жёсткая' },
+};
+
 function impactRacket(v, w, n, vR, quality = 1, rubber = {}) {
-  const e0 = (rubber.e ?? PH.E_RACKET) * (0.55 + 0.45 * quality);
-  const mu = (rubber.mu ?? PH.MU_RACKET) * (0.6 + 0.4 * quality);
-  const et = (rubber.et ?? PH.ET_RACKET) * (0.5 + 0.5 * quality);
+  // rubber profiles: read from profile if specified, else use passed values or defaults
+  const rp = rubber.profile ? RUBBER_PROFILES[rubber.profile] : null;
+  const baseE  = rp ? rp.e  : (rubber.e  ?? PH.E_RACKET);
+  const baseMu = rp ? rp.mu : (rubber.mu ?? PH.MU_RACKET);
+  const baseEt = rp ? rp.et : (rubber.et ?? PH.ET_RACKET);
+  const spongeThick = rp ? rp.sponge : (rubber.sponge ?? 1.8);  // mm
+  const tacky       = rp ? rp.tacky  : (rubber.tacky  ?? 0);    // 0..1
+  // sponge thickness scales the catapult (tangential restitution)
+  const spongeScale = 0.65 + 0.35 * clamp(spongeThick / 2.2, 0.3, 1.2);
+  // tacky rubber: higher friction but less catapult (ball "sticks")
+  const muBoost = 1 + 0.20 * tacky;
+  const etPenalty = 1 - 0.35 * tacky;
+  const e0 = baseE * (0.55 + 0.45 * quality);
+  const mu = baseMu * (0.6 + 0.4 * quality) * muBoost;
+  const et = baseEt * (0.5 + 0.5 * quality) * spongeScale * etPenalty;
   V3.sub(_u, v, vR);
   const closing = -V3.dot(_u, n);
   const e = clamp((e0 - PH.E_RACKET_SPEED * Math.max(0, closing)) * (rubber.damp ?? 1), 0.18, 0.92);
   const info = impactSphere(v, w, n, vR, e, mu, et);
   const wl = V3.len(w);
   if (wl > SPIN_CAP) V3.mul(w, w, SPIN_CAP / wl);
+  // long pimples: invert incoming spin
+  if (rp && rp === RUBBER_PROFILES.LONGPIP) {
+    w.x *= -0.55; w.y *= -0.55; w.z *= -0.55;
+  }
   return info;
 }
 
 /* ---------------------------------------------------------------- *
  *  Ball <-> net.  Highly inelastic, compliant, kills most spin.
  * ---------------------------------------------------------------- */
+/** Net sag model: height varies with x-position (tight at center, sags at sides). */
+function netHeightAt(x) {
+  const normX = clamp(Math.abs(x) / PH.NET_HALF_WID, 0, 1);
+  return PH.NET_H - PH.NET_SAG * normX * normX;
+}
+
 function bounceNet(p, v, w, side) {
+  const hRatio = clamp((p.y - PH.TABLE_Y) / PH.NET_H, 0, 1);
+  // height-dependent compliance: bottom=stiff, top=looser
+  const eNet = lerp(PH.NET_E_BOTTOM, PH.NET_E_TOP, hRatio);
+  // tangential response: skewed net deflects ball sideways
+  const vtEst = Math.sqrt(v.x * v.x + v.y * v.y);
+  const tangentialDamp = PH.NET_DAMP_T * (1 + PH.NET_SKEW_FACTOR * hRatio);
   const vz = v.z;
-  v.z = -vz * PH.NET_E;
-  v.x *= PH.NET_DAMP_T;
+  v.z = -vz * eNet;
+  v.x *= Math.min(tangentialDamp, 0.65);
   v.y = v.y * PH.NET_DAMP_T - Math.abs(vz) * 0.06;
-  // the mesh scatters a little
-  v.x += gauss(0.12 * Math.min(1, Math.abs(vz) / 6));
+  // the mesh scatters a little — more at higher speed
+  const scatter = Math.min(1, Math.abs(vz) / 6);
+  v.x += gauss(0.12 * scatter);
   v.y += gauss(0.08);
+  // glancing hits slide along the net and lose more energy
+  if (vtEst > 2) { v.x *= 0.85; v.y *= 0.85; }
   w.x *= PH.NET_SPIN_KEEP; w.y *= PH.NET_SPIN_KEEP; w.z *= PH.NET_SPIN_KEEP;
   p.z = side * (PH.R + 0.004);
 }
 
-/** Ball clips the top tape: deflect + big energy loss, classic net-cord. */
+/** Ball clips the top tape: deflect + big energy loss, classic net-cord.
+ *  Angle-dependent: direct hits absorb more; glancing hits deflect more. */
 function clipTape(p, v, w) {
   const sp = V3.len(v);
-  v.y = Math.abs(v.y) * 0.18 + sp * 0.07 + 0.25;
-  v.z *= 0.42;
-  v.x *= 0.58;
-  v.x += gauss(0.22);
-  v.z += gauss(0.10);
+  const vTangent = Math.sqrt(v.x * v.x + v.y * v.y);
+  const angle01 = clamp(Math.abs(v.z) / Math.max(sp, 0.1), 0, 1);  // 0=glancing, 1=direct
+  const absorb = lerp(0.60, 0.82, angle01);   // direct hits absorb more
+  const deflect = 1 - absorb;
+  v.y = Math.abs(v.y) * 0.18 * deflect + sp * 0.07 + 0.25;
+  v.z *= 0.42 * deflect;
+  v.x *= 0.58 * deflect;
+  // scatter proportional to speed
+  v.x += gauss(0.22 * Math.min(1, sp / 12));
+  v.z += gauss(0.10 * Math.min(1, sp / 12));
   w.x *= 0.45; w.y *= 0.45; w.z *= 0.45;
   p.y = PH.NET_TOP + PH.R + 0.002;
 }
@@ -258,13 +323,14 @@ function predict(p0, v0, w0, opts = {}) {
     if (out.path && (out.path.length < 400)) out.path.push(_pp.x, _pp.y, _pp.z);
     if (_pp.y > out.apex) out.apex = _pp.y;
 
-    // net plane
+    // net plane — uses sag-adjusted height
     if ((prevZ > 0) !== (_pp.z > 0)) {
       const a = Math.abs(prevZ) / (Math.abs(prevZ) + Math.abs(_pp.z) + 1e-9);
       const yAt = lerp(prevY, _pp.y, a);
       const xAt = lerp(prevX, _pp.x, a);
       out.netCross = { y: yAt, x: xAt, t };
-      if (yAt < PH.NET_TOP + PH.R * 0.5 && Math.abs(xAt) < PH.NET_HALF_WID) { out.hitNet = true; break; }
+      const netTopAtX = PH.TABLE_Y + netHeightAt(xAt) + PH.R * 0.5;
+      if (yAt < netTopAtX && Math.abs(xAt) < PH.NET_HALF_WID) { out.hitNet = true; break; }
     }
     // crossing of the table's horizontal plane anywhere (used to measure
     // how far a ball that misses actually overshoots)

@@ -24,6 +24,9 @@
     <div id="dbg"></div>
 
     <div id="topright">
+      <div class="ic pe" id="btnSlowmo" title="Слоумо (S)">🐌</div>
+      <div class="ic pe" id="btnReplay" title="Повтор (V)">🎬</div>
+      <div class="ic pe" id="btnShop" title="Магазин">🛒</div>
       <div class="ic pe" id="btnSound" title="Звук"></div>
       <div class="ic pe" id="btnSettings" title="Настройки"></div>
       <div class="ic pe" id="btnMenu" title="Меню"></div>
@@ -86,6 +89,52 @@
       </div>
 
       <button class="btn ghost" id="play">НАЧАТЬ МАТЧ</button>
+
+      <h3 class="sec">Режимы</h3>
+      <div class="row">
+        <button class="btn" id="careerStart" style="flex:1;background:linear-gradient(100deg,#ff7a2f,#ffd34d)">🏆 КАРЬЕРА</button>
+        <button class="btn" id="onlineStart" style="flex:1;background:linear-gradient(100deg,#39c6ff,#7ff0c0)">🌐 ОНЛАЙН</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ========================== CAREER ========================== -->
+  <div class="screen" id="careerIntro">
+    <div class="card">
+      <div class="logo" style="font-size:22px" id="crTournName">🏆 КАРЬЕРА</div>
+      <div class="sub" id="crTournPlace"></div>
+      <div class="note" id="crTournInfo"></div>
+      <div class="row" id="crOppList" style="margin-top:12px"></div>
+      <button class="btn" id="crReady">ВПЕРЁД</button>
+    </div>
+  </div>
+  <div class="screen" id="careerPerk">
+    <div class="card">
+      <div class="logo" style="font-size:20px">⚡ ВЫБЕРИ ПЕРК</div>
+      <div class="sub">Улучшение для следующих матчей</div>
+      <div class="row" id="crPerkList" style="margin-top:12px"></div>
+    </div>
+  </div>
+  <div class="screen" id="careerEnd">
+    <div class="card">
+      <div class="logo" style="font-size:20px" id="crEndTitle">🏁 КАРЬЕРА</div>
+      <div class="sub" id="crEndSub"></div>
+      <div id="crEndStats" style="margin-top:10px"></div>
+      <button class="btn" id="crEndRestart">НАЧАТЬ ЗАНОВО</button>
+      <button class="btn ghost" id="crEndMenu">В МЕНЮ</button>
+    </div>
+  </div>
+
+  <!-- ========================== ONLINE ========================== -->
+  <div class="screen" id="onlineLobby">
+    <div class="card">
+      <div class="logo" style="font-size:20px">🌐 ОНЛАЙН МАТЧ</div>
+      <div class="sub" id="netStatus">Подключение...</div>
+      <div id="netRoomCode" style="font-family:var(--mono);font-size:28px;letter-spacing:.2em;color:var(--acc);text-align:center;margin:12px 0;display:none"></div>
+      <button class="btn" id="netCreate">СОЗДАТЬ КОМНАТУ</button>
+      <button class="btn ghost" id="netJoin" style="margin-top:8px">ПРИСОЕДИНИТЬСЯ ПО КОДУ</button>
+      <div class="note" id="netNote">Создайте комнату и поделитесь кодом с другом. Или введите код, чтобы присоединиться.</div>
+      <button class="btn ghost" id="netClose" style="margin-top:12px">ЗАКРЫТЬ</button>
     </div>
   </div>
 
@@ -197,6 +246,40 @@
     <div class="glab" style="margin-top:7px"><span>ЛЕВОЕ</span><span>ПРАВОЕ</span></div>
     <div class="gauge"><span class="mid"></span><i id="gSide"></i></div>
     <div class="gval" id="gSideV">0 об/с</div>
+  </div>
+
+  <!-- ========================== SHOP ========================== -->
+  <div class="screen" id="shopPanel">
+    <div class="card" style="max-height:85vh">
+      <div class="logo" style="font-size:20px">🛒 МАГАЗИН</div>
+      <div class="sub" id="shopBalance">🪙 0 · 💎 0</div>
+      <h3 class="sec">Основа</h3>
+      <div class="row" id="shopBlades"></div>
+      <h3 class="sec">Накладка</h3>
+      <div class="row" id="shopRubbers"></div>
+      <h3 class="sec">Арена</h3>
+      <div class="row" id="shopArenas"></div>
+      <h3 class="sec">След мяча</h3>
+      <div class="row" id="shopTrails"></div>
+      <button class="btn ghost" id="shopClose" style="margin-top:12px">ЗАКРЫТЬ</button>
+    </div>
+  </div>
+
+  <!-- ========================== REPLAY VIEWER ========================== -->
+  <div class="screen" id="replayPanel">
+    <div class="card">
+      <div class="logo" style="font-size:18px">🎬 ЛУЧШИЙ МОМЕНТ</div>
+      <div class="sub" id="replayInfo"></div>
+      <div class="row" style="margin-top:10px">
+        <button class="opt" id="rplPrev">⏮</button>
+        <button class="opt" id="rplPause">⏸</button>
+        <button class="opt" id="rplNext">⏭</button>
+        <button class="opt" id="rplSlower">🐢</button>
+        <button class="opt" id="rplFaster">🐇</button>
+      </div>
+      <div class="note" id="replaySpeed" style="margin-top:8px;text-align:center;font-size:14px;color:var(--acc)">0.35×</div>
+      <button class="btn ghost" id="replayClose" style="margin-top:12px">ЗАКРЫТЬ</button>
+    </div>
   </div>
 
   <div id="loading"><div class="spinner"></div></div>
