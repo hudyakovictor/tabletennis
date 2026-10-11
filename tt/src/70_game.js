@@ -147,6 +147,35 @@ class Game {
     this._fpsT = 0; this._fpsN = 0; this.fps = 60;
 
     this.bindInput();
+
+    // Career mode (roguelike tournament progression)
+    this.career = new Career(this);
+    // Online multiplayer
+    this.network = new NetworkManager(this);
+    this._careerSpinBoost = 1; this._careerSpeedBoost = 1;
+    this._careerTopspinBoost = 1; this._careerBackspinPenalty = 1;
+    this._careerSmashBoost = 1; this._careerCounterBoost = 1;
+    this._careerChopBoost = 1; this._careerSidespinBoost = 1;
+    this._careerDecisiveBoost = 0; this._careerFatigueReduce = 1;
+    this._careerRingSlow = 1; this._careerNetSafe = false;
+    this._careerAISlowdown = 1; this._careerSlowmoThreshold = 999;
+    this._careerSlowmoScale = 0.42;
+
+    // Shop + economy
+    this.economy = new Economy();
+    this.economy.applyToGame(this);
+    this._bladeSpeed = 1; this._bladeControl = 1; this._bladeSweetR = 0.055;
+    this._equippedRubberProfile = 'CLASSIC';
+    this._trailColor = '#ffffff';
+    this._equippedEffect = 'fx_default';
+
+    // Replay system
+    this.replay = new ReplayRecorder();
+    this.replayPlayer = new ReplayPlayer(this);
+
+    // Slow-mo mode (single player only, not in career or online)
+    this.slowmoActive = false;
+    this.slowmoManualScale = 0.25;  // 25% speed when manually activated
     this.resize();
     window.addEventListener('resize', () => this.resize());
   }
@@ -276,6 +305,20 @@ class Game {
       if (e.key === '+' || e.key === '=') { this.zoomBy(1 / (1 + 0.07 * step)); e.preventDefault(); }
       if (e.key === '-' || e.key === '_') { this.zoomBy(1 + 0.07 * step); e.preventDefault(); }
       if (e.key === '0' || e.key === ')') { this.camReset(); e.preventDefault(); }
+      // slow-mo toggle (single player only)
+      if (e.key === 's' || e.key === 'S' || e.key === 'ы' || e.key === 'Ы') {
+        if (!this.career.active && !this.network.isInMatch) {
+          this.slowmoActive = !this.slowmoActive;
+          this.msg(this.slowmoActive ? 'СЛОУМО ВКЛ' : 'СЛОУМО ВЫКЛ', 0.8, '#39c6ff');
+        }
+      }
+      // replay viewer toggle
+      if (e.key === 'v' || e.key === 'V' || e.key === 'м' || e.key === 'М') {
+        if (this.replay.hasHighlights) {
+          if (this.replayPlayer.active) { this.replayPlayer.stop(); }
+          else { this.replayPlayer.start(0); this.slowmoActive = false; }
+        }
+      }
     });
   }
 
@@ -303,6 +346,10 @@ class Game {
     this.server = Math.random() < 0.5 ? 1 : -1;
     this.servesLeft = 2;
     this.audio.init(); this.audio.resume();
+    // apply career slowdown to AI (always from base speed, not cumulative)
+    if (this._careerAISlowdown < 1) {
+      this.ai.maxSpeed = this.ai.L.move * this._careerAISlowdown;
+    }
     this.prepServe();
     this.msg(this.server === 1 ? 'ВАША ПОДАЧА' : 'ПОДАЁТ СОПЕРНИК', 1.6, '#7fd4ff');
   }
@@ -350,6 +397,7 @@ class Game {
     this.isServeBall = true;
     this.setState(GS.SERVE_READY);
     this.recorder.begin(this.time, s);
+    this.replay.onRallyStart();
     this.ai.setPressure(this.score[1], this.score[0], this.settings.targetScore);
     if (s < 0) this.aiServeTimer = rnd(0.7, 1.3);
   }
@@ -384,6 +432,17 @@ class Game {
     if (this.rally > this.bestRally) this.bestRally = this.rally;
     if (who > 0) this.stats.winners++; else this.stats.errors++;
 
+    // replay: score and save highlight
+    this.replay.onPointEnd(who, reason, this.rally, this.stats.maxSpeed);
+
+    // economy: earn coins
+    if (!this.career.active && !this.network.isInMatch) {
+      const reward = this.economy.earn(who > 0, this.rally, this.stats.maxSpeed, this.settings.difficulty);
+      if (reward.coins > 0) {
+        this.msg(`+${reward.coins} 🪙${reward.gems > 0 ? ` +${reward.gems} 💎` : ''}`, 1.2, '#ffd34d');
+      }
+    }
+
     // why did that happen? one sentence, only when it helps
     this.lastSwipeLate = (this.time - this.lastSwipeT) > 0.75;
     this.pointNote = this.analyst.analyse(this.recorder, who, reason, this);
@@ -407,6 +466,16 @@ class Game {
     const T = this.settings.targetScore;
     if ((this.score[0] >= T || this.score[1] >= T) && Math.abs(this.score[0] - this.score[1]) >= 2) {
       this.matchWinner = this.score[0] > this.score[1] ? 1 : -1;
+    }
+    // network: relay point to peer
+    if (this.network && this.network.isInMatch) {
+      this.network._send({ type: 'point', who, reason, score: this.score.slice() });
+    }
+    // career: decisive boost on match point
+    if (this.career && this.career.active && this._careerDecisiveBoost > 0) {
+      const isMatchPoint = (this.score[0] >= T - 1 && this.score[0] > this.score[1]) ||
+                           (this.score[1] >= T - 1 && this.score[1] > this.score[0]);
+      if (isMatchPoint) this._careerDecisiveActive = true;
     }
     this.ui && this.ui.syncScore();
   }
@@ -509,6 +578,7 @@ class Game {
       this.recorder.addShot(1, Object.assign({
         x: contactP.x, y: contactP.y, z: contactP.z, quality,
       }, this.lastShotInfo));
+      this.replay.onShot(this.lastShotInfo);
       if (this.training) this.training.onPlayerHit(this.lastShotInfo);
       this.buzz(Math.round(lerp(8, 26, clamp(speed / 90, 0, 1))));
       this.shakeIt(clamp(speed / 55, 0.03, 0.38), V3.new(rndSym(0.4), 0.5, 1));
@@ -1039,6 +1109,18 @@ class Game {
           this.setState(GS.MATCH_END);
           this.audio.gameOver(this.matchWinner > 0);
           this.ui && this.ui.showMatchEnd(this.matchWinner > 0);
+          // career progression
+          if (this.career && this.career.active) {
+            this.career.onMatchEnd(this.matchWinner);
+            if (this.career.state === 'RUN_END') {
+              this.ui && this.ui.showCareerRunEnd(this.career);
+            } else if (this.career.state === 'TOURNAMENT_END') {
+              this.ui && this.ui.showCareerTournamentEnd(this.career);
+            } else if (this.career.state === 'PERK_SELECT') {
+              this.ui && this.ui.showCareerPerks(this.career);
+            }
+            this.career.save();
+          }
         } else if (this.stateT > 1.35) {
           this.rally = 0;
           this.prepServe();
@@ -1059,6 +1141,31 @@ class Game {
       h.push(this.ball.p.x, this.ball.p.y, this.ball.p.z);
       if (h.length > 96 * 3) h.splice(0, 3);
     } else this._acc = 0;
+
+    // replay: record frame (aiPaddle.pos = rendered opponent racket position)
+    if (!this.replayPlayer.active && this.state !== GS.MENU && this.state !== GS.MATCH_END) {
+      this.replay.record(this.ball, this.player.pos, this.aiPaddle.pos, this.time);
+    }
+    // replay player
+    if (this.replayPlayer.active) {
+      this.replayPlayer.update(dtReal);
+    }
+    // slow-mo: manual mode overrides everything; punchSlowmo is automatic
+    const manualSlowmo = this.slowmoActive && !this.career.active && !this.network.isInMatch;
+    if (this.slowmoUntil && this.time > this.slowmoUntil) {
+      this.targetTimeScale = 1; this.slowmoUntil = 0;  // auto-clear punch
+    }
+    if (manualSlowmo) {
+      this.timeScale = lerp(this.timeScale, this.slowmoManualScale, 1 - Math.exp(-8 * dtReal));
+    } else {
+      this.timeScale = lerp(this.timeScale, this.targetTimeScale, 1 - Math.exp(-10 * dtReal));
+    }
+    // training ghost
+    if (this.training) {
+      this.training.updateGhost(dtReal);
+      // recompute ghost every 0.3s while ball is live
+      if (this.ball.live && this.frame % 18 === 0) this.training.computeGhost();
+    }
 
     this.updatePlayerPaddle(dtReal);
     this.updateStrikeWindow(dtReal);
@@ -1081,6 +1188,19 @@ class Game {
     P.sat = expSmooth(P.sat, 1.05 + (1 - this.timeScale) * 0.25, 4, dtReal);
     P.ca = expSmooth(P.ca, 0.55 + sp * 0.75, 4, dtReal);
     this.audio.setCrowd(clamp(this.rally / 18, 0, 1) * 0.6 + (this.state === GS.POINT ? 0.4 : 0));
+
+    // network: sync state (host) or input (guest)
+    if (this.network && this.network.isInMatch) {
+      if (this.network.isHost) this.network.sendGameState();
+      else this.network.sendInput();
+    }
+    // career: net-safe perk (always clear the net)
+    if (this._careerNetSafe && this.ball.live && this.ball.lastHitBy === 1) {
+      const nearNet = Math.abs(this.ball.p.z) < 0.15;
+      if (nearNet && this.ball.p.y < PH.NET_TOP + PH.R * 2 && this.ball.v.z < 0) {
+        this.ball.v.y += 0.8;  // gentle lift to clear net
+      }
+    }
 
     // fps
     this._fpsN++; this._fpsT += dtReal;
