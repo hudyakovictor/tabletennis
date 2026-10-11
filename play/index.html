@@ -259,6 +259,9 @@ body.is-paused #pauseInd{display:flex}
     <div id="dbg"></div>
 
     <div id="topright">
+      <div class="ic pe" id="btnSlowmo" title="Слоумо (S)">🐌</div>
+      <div class="ic pe" id="btnReplay" title="Повтор (V)">🎬</div>
+      <div class="ic pe" id="btnShop" title="Магазин">🛒</div>
       <div class="ic pe" id="btnSound" title="Звук"></div>
       <div class="ic pe" id="btnSettings" title="Настройки"></div>
       <div class="ic pe" id="btnMenu" title="Меню"></div>
@@ -321,6 +324,52 @@ body.is-paused #pauseInd{display:flex}
       </div>
 
       <button class="btn ghost" id="play">НАЧАТЬ МАТЧ</button>
+
+      <h3 class="sec">Режимы</h3>
+      <div class="row">
+        <button class="btn" id="careerStart" style="flex:1;background:linear-gradient(100deg,#ff7a2f,#ffd34d)">🏆 КАРЬЕРА</button>
+        <button class="btn" id="onlineStart" style="flex:1;background:linear-gradient(100deg,#39c6ff,#7ff0c0)">🌐 ОНЛАЙН</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ========================== CAREER ========================== -->
+  <div class="screen" id="careerIntro">
+    <div class="card">
+      <div class="logo" style="font-size:22px" id="crTournName">🏆 КАРЬЕРА</div>
+      <div class="sub" id="crTournPlace"></div>
+      <div class="note" id="crTournInfo"></div>
+      <div class="row" id="crOppList" style="margin-top:12px"></div>
+      <button class="btn" id="crReady">ВПЕРЁД</button>
+    </div>
+  </div>
+  <div class="screen" id="careerPerk">
+    <div class="card">
+      <div class="logo" style="font-size:20px">⚡ ВЫБЕРИ ПЕРК</div>
+      <div class="sub">Улучшение для следующих матчей</div>
+      <div class="row" id="crPerkList" style="margin-top:12px"></div>
+    </div>
+  </div>
+  <div class="screen" id="careerEnd">
+    <div class="card">
+      <div class="logo" style="font-size:20px" id="crEndTitle">🏁 КАРЬЕРА</div>
+      <div class="sub" id="crEndSub"></div>
+      <div id="crEndStats" style="margin-top:10px"></div>
+      <button class="btn" id="crEndRestart">НАЧАТЬ ЗАНОВО</button>
+      <button class="btn ghost" id="crEndMenu">В МЕНЮ</button>
+    </div>
+  </div>
+
+  <!-- ========================== ONLINE ========================== -->
+  <div class="screen" id="onlineLobby">
+    <div class="card">
+      <div class="logo" style="font-size:20px">🌐 ОНЛАЙН МАТЧ</div>
+      <div class="sub" id="netStatus">Подключение...</div>
+      <div id="netRoomCode" style="font-family:var(--mono);font-size:28px;letter-spacing:.2em;color:var(--acc);text-align:center;margin:12px 0;display:none"></div>
+      <button class="btn" id="netCreate">СОЗДАТЬ КОМНАТУ</button>
+      <button class="btn ghost" id="netJoin" style="margin-top:8px">ПРИСОЕДИНИТЬСЯ ПО КОДУ</button>
+      <div class="note" id="netNote">Создайте комнату и поделитесь кодом с другом. Или введите код, чтобы присоединиться.</div>
+      <button class="btn ghost" id="netClose" style="margin-top:12px">ЗАКРЫТЬ</button>
     </div>
   </div>
 
@@ -432,6 +481,40 @@ body.is-paused #pauseInd{display:flex}
     <div class="glab" style="margin-top:7px"><span>ЛЕВОЕ</span><span>ПРАВОЕ</span></div>
     <div class="gauge"><span class="mid"></span><i id="gSide"></i></div>
     <div class="gval" id="gSideV">0 об/с</div>
+  </div>
+
+  <!-- ========================== SHOP ========================== -->
+  <div class="screen" id="shopPanel">
+    <div class="card" style="max-height:85vh">
+      <div class="logo" style="font-size:20px">🛒 МАГАЗИН</div>
+      <div class="sub" id="shopBalance">🪙 0 · 💎 0</div>
+      <h3 class="sec">Основа</h3>
+      <div class="row" id="shopBlades"></div>
+      <h3 class="sec">Накладка</h3>
+      <div class="row" id="shopRubbers"></div>
+      <h3 class="sec">Арена</h3>
+      <div class="row" id="shopArenas"></div>
+      <h3 class="sec">След мяча</h3>
+      <div class="row" id="shopTrails"></div>
+      <button class="btn ghost" id="shopClose" style="margin-top:12px">ЗАКРЫТЬ</button>
+    </div>
+  </div>
+
+  <!-- ========================== REPLAY VIEWER ========================== -->
+  <div class="screen" id="replayPanel">
+    <div class="card">
+      <div class="logo" style="font-size:18px">🎬 ЛУЧШИЙ МОМЕНТ</div>
+      <div class="sub" id="replayInfo"></div>
+      <div class="row" style="margin-top:10px">
+        <button class="opt" id="rplPrev">⏮</button>
+        <button class="opt" id="rplPause">⏸</button>
+        <button class="opt" id="rplNext">⏭</button>
+        <button class="opt" id="rplSlower">🐢</button>
+        <button class="opt" id="rplFaster">🐇</button>
+      </div>
+      <div class="note" id="replaySpeed" style="margin-top:8px;text-align:center;font-size:14px;color:var(--acc)">0.35×</div>
+      <button class="btn ghost" id="replayClose" style="margin-top:12px">ЗАКРЫТЬ</button>
+    </div>
   </div>
 
   <div id="loading"><div class="spinner"></div></div>
@@ -1555,6 +1638,874 @@ class Renderer {
 }
 
 
+/* ====== 23_shop.js ====== */
+/* =====================================================================
+ *  SHOP — Economy, cosmetics, racket customization and monetization.
+ *
+ *  Currency:
+ *    coins   — earned by playing matches (win: 50-150, loss: 20-40)
+ *    gems    — premium currency (purchased or rare rewards)
+ *
+ *  Categories:
+ *    RUBBER  — physics-affecting (tensor, tacky, long-pips, etc.)
+ *    BLADE   — physics-affecting (speed/control/sweet-spot trade-off)
+ *    ARENA   — cosmetic (visual theme of the hall)
+ *    TRAIL   — cosmetic (ball trail color/pattern)
+ *    EFFECT  — cosmetic (hit flash, particles)
+ *    PREMIUM — pro subscription / battle pass
+ * ===================================================================== */
+
+const SHOP_ITEMS = {
+  /* ---- BLADES ---- */
+  blade_classic:   { cat: 'blade', name: 'Классика',       desc: 'Сбалансированная основа',           price: 0,    currency: 'coins', blade: { speed: 1.0, control: 1.0, sweetR: 0.055 } },
+  blade_off:       { cat: 'blade', name: 'ОФФЕНЗИВ',       desc: '+15% скорость, sweet spot −15%',     price: 500,  currency: 'coins', blade: { speed: 1.15, control: 0.90, sweetR: 0.047 } },
+  blade_def:       { cat: 'blade', name: 'ЗАЩИТНАЯ',       desc: '+20% контроль, sweet spot +18%',     price: 500,  currency: 'coins', blade: { speed: 0.88, control: 1.20, sweetR: 0.065 } },
+  blade_carbon:    { cat: 'blade', name: 'КАРБОН',         desc: '+25% скорость, −10% контроль',       price: 1200, currency: 'coins', blade: { speed: 1.25, control: 0.90, sweetR: 0.050 } },
+  blade_wood:      { cat: 'blade', name: 'ДЕРЕВЯННАЯ',     desc: '+5% контроль, классическое ощущение', price: 200, currency: 'coins', blade: { speed: 0.95, control: 1.05, sweetR: 0.058 } },
+  blade_pro:       { cat: 'blade', name: 'ПРО МОДЕЛЬ',     desc: 'Подпись чемпиона',                   price: 50,   currency: 'gems',  blade: { speed: 1.10, control: 1.10, sweetR: 0.052 } },
+
+  /* ---- RUBBERS ---- */
+  rubber_classic:  { cat: 'rubber', name: 'Классика',      desc: 'Проверенная накладка',                price: 0,    currency: 'coins', profile: 'CLASSIC' },
+  rubber_tensor:   { cat: 'rubber', name: 'ТЕНЗОР',        desc: '+19% catapult, вращение ↑',           price: 800,  currency: 'coins', profile: 'TENSOR' },
+  rubber_tacky:    { cat: 'rubber', name: 'ЛИПКАЯ',        desc: '+22% захват, вращение ↑↑, скорость ↓', price: 800, currency: 'coins', profile: 'TACKY' },
+  rubber_longpip:  { cat: 'rubber', name: 'ДЛИННЫЕ ШИПЫ',  desc: 'Инвертирует вращение, защита',        price: 1000, currency: 'coins', profile: 'LONGPIP' },
+  rubber_anti:     { cat: 'rubber', name: 'АНТИСКРУТ',     desc: 'Убивает вращение соперника',          price: 1000, currency: 'coins', profile: 'ANTISPIN' },
+  rubber_hard:     { cat: 'rubber', name: 'ЖЁСТКАЯ',       desc: 'Плоские удары, контроль',             price: 600,  currency: 'coins', profile: 'HARD' },
+  rubber_gold:     { cat: 'rubber', name: 'ЗОЛОТАЯ',       desc: 'Эксклюзивная накладка чемпиона',      price: 100,  currency: 'gems',  profile: 'TENSOR' },
+
+  /* ---- ARENAS (cosmetic) ---- */
+  arena_dark:      { cat: 'arena', name: 'Тёмный зал',     desc: 'Стандартная арена',                   price: 0,    currency: 'coins', palette: 'default' },
+  arena_neon:      { cat: 'arena', name: 'Неон-клуб',      desc: 'UV-подсветка, флуоресцентный мяч',   price: 1500, currency: 'coins', palette: 'neon' },
+  arena_rooftop:   { cat: 'arena', name: 'Крыша',          desc: 'Открытое небо, городской пейзаж',     price: 2000, currency: 'coins', palette: 'rooftop' },
+  arena_club:      { cat: 'arena', name: 'Спортклуб',      desc: 'Яркий свет, зрители',                 price: 1500, currency: 'coins', palette: 'club' },
+  arena_vintage:   { cat: 'arena', name: 'Винтаж',         desc: 'Деревянный зал, ретро-стиль',         price: 1000, currency: 'coins', palette: 'vintage' },
+  arena_gold:      { cat: 'arena', name: 'Золотая арена',  desc: 'Эксклюзивная чемпионская арена',       price: 200,  currency: 'gems',  palette: 'gold' },
+
+  /* ---- TRAILS (cosmetic) ---- */
+  trail_white:     { cat: 'trail', name: 'Белый',          desc: 'Стандартный след',                    price: 0,    currency: 'coins', color: '#ffffff' },
+  trail_fire:      { cat: 'trail', name: 'Огненный',       desc: 'Красно-оранжевый след',               price: 300,  currency: 'coins', color: '#ff6a2f' },
+  trail_ice:       { cat: 'trail', name: 'Ледяной',        desc: 'Голубой след с кристаллами',          price: 300,  currency: 'coins', color: '#44ccff' },
+  trail_gold:      { cat: 'trail', name: 'Золотой',        desc: 'Мерцающий золотой след',              price: 800,  currency: 'coins', color: '#ffd700' },
+  trail_rainbow:   { cat: 'trail', name: 'Радуга',         desc: 'Переливающийся след',                 price: 50,   currency: 'gems',  color: 'rainbow' },
+
+  /* ---- EFFECTS (cosmetic) ---- */
+  fx_default:      { cat: 'effect', name: 'Стандарт',      desc: 'Обычные частицы',                     price: 0,    currency: 'coins' },
+  fx_sparks:       { cat: 'effect', name: 'Искры',         desc: 'Электрические разряды при ударе',     price: 600,  currency: 'coins' },
+  fx_cherry:       { cat: 'effect', name: 'Сакура',        desc: 'Лепестки вишни при ударе',            price: 600,  currency: 'coins' },
+  fx_fire:         { cat: 'effect', name: 'Пламя',         desc: 'Огненные частицы',                    price: 50,   currency: 'gems' },
+
+  /* ---- PREMIUM ---- */
+  pro_month:       { cat: 'premium', name: 'PRO подписка', desc: 'Все арены + 500 gems/мес + без рекламы', price: 299, currency: 'real', duration: 'month' },
+  battle_pass:     { cat: 'premium', name: 'Battle Pass',  desc: '100 уровней наград + эксклюзивные предметы', price: 499, currency: 'real', duration: 'season' },
+  starter_pack:    { cat: 'premium', name: 'Стартовый набор', desc: '2000 coins + 50 gems + карбон + тензор', price: 149, currency: 'real', once: true },
+};
+
+/* ------------------------------------------------------------------ */
+/*  ECONOMY                                                            */
+/* ------------------------------------------------------------------ */
+class Economy {
+  constructor() {
+    this.coins = 0;
+    this.gems = 0;
+    this.owned = ['blade_classic', 'rubber_classic', 'arena_dark', 'trail_white', 'fx_default'];  // starter items
+    this.equipped = { blade: 'blade_classic', rubber: 'rubber_classic', arena: 'arena_dark', trail: 'trail_white', effect: 'fx_default' };
+    this.stats = { matchesPlayed: 0, totalCoinsEarned: 0, totalGemsEarned: 0, purchases: 0 };
+    this.load();
+  }
+
+  earn(won, rallyLen, maxSpeed, difficulty) {
+    // base reward
+    let coins = won ? 50 : 20;
+    // bonus for performance
+    coins += Math.min(rallyLen * 2, 40);          // long rallies = more
+    coins += Math.min(Math.round(maxSpeed / 10), 30);  // fast shots = more
+    coins += difficulty * 15;                      // harder opponent = more
+    if (won) coins += difficulty * 25;             // win bonus scales with difficulty
+    coins = Math.round(coins);
+    this.coins += coins;
+    this.stats.matchesPlayed++;
+    this.stats.totalCoinsEarned += coins;
+    // rare gem drop (5% chance on win) — single roll for both award and display
+    let gemsEarned = 0;
+    if (won && Math.random() < 0.05) { gemsEarned = 2; this.gems += 2; this.stats.totalGemsEarned += 2; }
+    this.save();
+    return { coins, gems: gemsEarned };
+  }
+
+  canAfford(itemId) {
+    const item = SHOP_ITEMS[itemId]; if (!item) return false;
+    if (item.currency === 'real') return false; // handled externally
+    return this[item.currency] >= item.price;
+  }
+
+  buy(itemId) {
+    const item = SHOP_ITEMS[itemId]; if (!item) return false;
+    if (item.currency === 'real') return false;
+    if (this.owned.includes(itemId)) return false;
+    if (!this.canAfford(itemId)) return false;
+    this[item.currency] -= item.price;
+    this.owned.push(itemId);
+    this.stats.purchases++;
+    this.save();
+    return true;
+  }
+
+  equip(itemId) {
+    const item = SHOP_ITEMS[itemId]; if (!item) return false;
+    if (!this.owned.includes(itemId)) return false;
+    this.equipped[item.cat] = itemId;
+    this.save();
+    return true;
+  }
+
+  getEquipped(cat) { return SHOP_ITEMS[this.equipped[cat]] || null; }
+  getEquippedId(cat) { return this.equipped[cat]; }
+
+  /** Apply equipped items to game settings */
+  applyToGame(game) {
+    const blade = this.getEquipped('blade');
+    const rubber = this.getEquipped('rubber');
+    if (blade && blade.blade) {
+      game._bladeSpeed = blade.blade.speed;
+      game._bladeControl = blade.blade.control;
+      game._bladeSweetR = blade.blade.sweetR;
+    }
+    if (rubber && rubber.profile) {
+      game._equippedRubberProfile = rubber.profile;
+    }
+    const trail = this.getEquipped('trail');
+    if (trail && trail.color) game._trailColor = trail.color;
+    game._equippedEffect = this.equipped.effect || 'fx_default';
+  }
+
+  save() {
+    try {
+      localStorage.setItem('topspin_economy', JSON.stringify({
+        coins: this.coins, gems: this.gems, owned: this.owned,
+        equipped: this.equipped, stats: this.stats,
+      }));
+    } catch(e) {}
+  }
+
+  load() {
+    try {
+      const raw = localStorage.getItem('topspin_economy');
+      if (!raw) return;
+      const d = JSON.parse(raw);
+      this.coins = d.coins || 0;
+      this.gems = d.gems || 0;
+      this.owned = d.owned || this.owned;
+      this.equipped = Object.assign(this.equipped, d.equipped || {});
+      this.stats = Object.assign(this.stats, d.stats || {});
+    } catch(e) {}
+  }
+}
+
+/* ====== 25_career.js ====== */
+/* =====================================================================
+ *  CAREER — Roguelike tournament mode: basement to world championship.
+ *
+ *  12 tournaments, each harder than the last. Between matches you pick
+ *  one of three perks that alter physics, assist or AI behaviour.
+ *  A loss ends the run; a win advances to the next tournament.
+ *  Every run is different because the perk pool is shuffled.
+ * ===================================================================== */
+
+/* ------------------------------------------------------------------ */
+/*  PERK DEFINITIONS                                                   */
+/* ------------------------------------------------------------------ */
+const PERKS = [
+  // --- GREEN (common, always available) ---
+  { id: 'steady_hand',   name: 'Стальная рука',       desc: 'Помощь прицела +8%',         rarity: 'green',
+    apply(g) { g.settings.assist = clamp(g.settings.assist + 0.08, 0, 1); } },
+  { id: 'quick_feet',    name: 'Быстрые ноги',         desc: 'Помощь позиции +10%',        rarity: 'green',
+    apply(g) { g.settings.posAssist = clamp(g.settings.posAssist + 0.10, 0, 1); } },
+  { id: 'heavy_spin',    name: 'Тяжёлое вращение',     desc: 'Вращение +12% на всех ударах', rarity: 'green',
+    apply(g) { g._careerSpinBoost = (g._careerSpinBoost || 1) * 1.12; } },
+  { id: 'fast_arms',     name: 'Быстрые руки',         desc: 'Макс. скорость замаха +15%',  rarity: 'green',
+    apply(g) { g._careerSpeedBoost = (g._careerSpeedBoost || 1) * 1.15; } },
+  { id: 'iron_will',     name: 'Железная воля',        desc: 'Помощь +12% на решающих очках', rarity: 'green',
+    apply(g) { g._careerDecisiveBoost = 0.12; } },
+  { id: 'deep_breath',   name: 'Глубокий вдох',        desc: 'Усталость -30%',              rarity: 'green',
+    apply(g) { g._careerFatigueReduce = 0.70; } },
+  { id: 'sharp_eye',     name: 'Зоркий глаз',          desc: 'Кольцо удара сжимается на 15% медленнее', rarity: 'green',
+    apply(g) { g._careerRingSlow = 0.85; } },
+  { id: 'net_touch',     name: 'Чутьё сетки',          desc: 'У сетки мяч всегда перелетает', rarity: 'green',
+    apply(g) { g._careerNetSafe = true; } },
+  // --- BLUE (uncommon, unlock after tournament 3) ---
+  { id: 'topspin_master',name: 'Мастер топспина',      desc: 'Топспин +25%, бэкспин -10%',  rarity: 'blue',
+    apply(g) { g._careerTopspinBoost = 1.25; g._careerBackspinPenalty = 0.90; } },
+  { id: 'smash_fury',    name: 'Ярость смеша',         desc: 'Смеш +30% скорости',          rarity: 'blue',
+    apply(g) { g._careerSmashBoost = 1.30; } },
+  { id: 'counter_punch', name: 'Контр-удар',           desc: 'Контр-топспин +40% вращения', rarity: 'blue',
+    apply(g) { g._careerCounterBoost = 1.40; } },
+  { id: 'chop_back',     name: 'Глубокая защита',      desc: 'Чоп +35% вращения, -20% скорость соперника', rarity: 'blue',
+    apply(g) { g._careerChopBoost = 1.35; g._careerAISlowdown = 0.80; } },
+  { id: 'deception',     name: 'Обманный удар',        desc: 'Боковое вращение +50%',       rarity: 'blue',
+    apply(g) { g._careerSidespinBoost = 1.50; } },
+  // --- GOLD (rare, unlock after tournament 7) ---
+  { id: 'berserker',     name: 'Берсерк',              desc: 'Assist = 0, все удары +25% мощности', rarity: 'gold',
+    apply(g) { g.settings.assist = 0; g._careerSpeedBoost = (g._careerSpeedBoost || 1) * 1.25; } },
+  { id: 'glass_cannon',  name: 'Стеклянная пушка',     desc: 'Скорость +35%, точность -15%', rarity: 'gold',
+    apply(g) { g._careerSpeedBoost = (g._careerSpeedBoost || 1) * 1.35; g.settings.assist = clamp(g.settings.assist - 0.15, 0, 1); } },
+  { id: 'time_master',   name: 'Повелитель времени',   desc: 'Замедление 0.3x при smash > 80 км/ч', rarity: 'gold',
+    apply(g) { g._careerSlowmoThreshold = 80; g._careerSlowmoScale = 0.3; } },
+];
+
+function getAvailablePerks(career) {
+  const t = career.currentTournament;
+  return PERKS.filter(p => {
+    if (p.rarity === 'blue' && t < 3) return false;
+    if (p.rarity === 'gold' && t < 7) return false;
+    if (career.perks.some(pk => pk.id === p.id)) return false;  // no duplicates
+    return true;
+});
+}
+
+function pickThreePerks(career) {
+  const pool = getAvailablePerks(career);
+  const shuffled = pool.slice().sort(() => Math.random() - 0.5);
+  return shuffled.slice(0, Math.min(3, shuffled.length));
+}
+
+/* ------------------------------------------------------------------ */
+/*  TOURNAMENT DEFINITIONS                                             */
+/* ------------------------------------------------------------------ */
+const TOURNAMENTS = [
+  { id: 0,  name: 'Подвальный пинг-понг',      place: 'Гараж',             eloMin: 600,  eloMax: 900,  rounds: 3, perkAfter: false, icon: '🏚️' },
+  { id: 1,  name: 'Районный чемпионат',          place: 'Дом культуры',      eloMin: 900,  eloMax: 1100, rounds: 3, perkAfter: true,  icon: '🏫' },
+  { id: 2,  name: 'Городская лига',              place: 'Спорткомплекс',     eloMin: 1100, eloMax: 1350, rounds: 3, perkAfter: true,  icon: '🏟️' },
+  { id: 3,  name: 'Областной турнир',            place: 'Дворец спорта',     eloMin: 1300, eloMax: 1550, rounds: 4, perkAfter: true,  icon: '🏛️' },
+  { id: 4,  name: 'Первенство региона',          place: 'Арена',             eloMin: 1500, eloMax: 1750, rounds: 4, perkAfter: true,  icon: '🏟️' },
+  { id: 5,  name: 'Кубок Федерации',             place: 'Центральный зал',   eloMin: 1700, eloMax: 1950, rounds: 4, perkAfter: true,  icon: '🏆' },
+  { id: 6,  name: 'Международный Гран-При',      place: 'Олимпийский зал',   eloMin: 1900, eloMax: 2150, rounds: 5, perkAfter: true,  icon: '🌍' },
+  { id: 7,  name: 'Чемпионат Европы',            place: 'Европа Арена',      eloMin: 2100, eloMax: 2350, rounds: 5, perkAfter: true,  icon: '🇪🇺' },
+  { id: 8,  name: 'Кубок Мира',                  place: 'Токио',             eloMin: 2300, eloMax: 2550, rounds: 5, perkAfter: true,  icon: '🌏' },
+  { id: 9,  name: 'Суперсерия',                  place: 'Шанхай',            eloMin: 2500, eloMax: 2700, rounds: 5, perkAfter: true,  icon: '⭐' },
+  { id: 10, name: 'Мировой Финал',               place: 'Дюссельдорф',       eloMin: 2700, eloMax: 2900, rounds: 6, perkAfter: true,  icon: '👑' },
+  { id: 11, name: 'Зал Славы',                   place: 'Легендарный зал',   eloMin: 2900, eloMax: 3100, rounds: 1, perkAfter: false, icon: '🔮' },
+];
+
+/* ------------------------------------------------------------------ */
+/*  OPPONENT NAME GENERATOR                                            */
+/* ------------------------------------------------------------------ */
+const OPP_FIRST = ['Алексей', 'Дмитрий', 'Сергей', 'Андрей', 'Михаил', 'Николай', 'Виктор', 'Игорь',
+  'Олег', 'Павел', 'Евгений', 'Роман', 'Максим', 'Артём', 'Кирилл', 'Тимур',
+  'Ван', 'Ли', 'Чжан', 'Линь', 'Чен', 'Ян', 'Хироши', 'Кэндзи', 'Юки',
+  'Тим', 'Ян-Ове', 'Кристиан', 'Маттиас', 'Феликс', 'Йонас', 'Каль'];
+const OPP_STYLE = ['Атакующий', 'Защитник', 'Универсал', 'Тактик', 'Агрессор', 'Стенка', 'Виртуоз', 'Пушер'];
+
+function generateOpponent(eloMin, eloMax) {
+  const elo = Math.round(eloMin + Math.random() * (eloMax - eloMin));
+  const name = OPP_FIRST[Math.floor(Math.random() * OPP_FIRST.length)];
+  const style = OPP_STYLE[Math.floor(Math.random() * OPP_STYLE.length)];
+  // map ELO to AI level (0-4) approximately
+  let level = 0;
+  if (elo >= 2500) level = 4; else if (elo >= 2000) level = 3;
+  else if (elo >= 1400) level = 2; else if (elo >= 1000) level = 1;
+  return { name, elo, style, level, id: Math.random().toString(36).slice(2, 8) };
+}
+
+/* ------------------------------------------------------------------ */
+/*  CAREER CLASS                                                       */
+/* ------------------------------------------------------------------ */
+class Career {
+  constructor(game) {
+    this.game = game;
+    this.active = false;
+    this.currentTournament = 0;
+    this.currentRound = 0;
+    this.totalWins = 0;
+    this.totalLosses = 0;
+    this.perks = [];
+    this.matchHistory = [];
+    this.opponents = [];        // current tournament bracket
+    this.pendingPerks = null;   // three perks to choose from
+    this.state = 'IDLE';        // IDLE TOURNAMENT_INTRO OPPONENT_SELECT PERK_SELECT MATCH MATCH_END TOURNAMENT_END RUN_END
+    this.runStats = { totalPoints: 0, totalRallies: 0, longestRally: 0, maxSpeed: 0 };
+  }
+
+  start() {
+    this.active = true;
+    this.currentTournament = 0;
+    this.currentRound = 0;
+    this.totalWins = 0;
+    this.totalLosses = 0;
+    this.perks = [];
+    this.matchHistory = [];
+    this.pendingPerks = null;
+    this.runStats = { totalPoints: 0, totalRallies: 0, longestRally: 0, maxSpeed: 0 };
+    this._resetCareerBoosts();
+    this.enterTournament();
+  }
+
+  _resetCareerBoosts() {
+    const g = this.game;
+    g._careerSpinBoost = 1; g._careerSpeedBoost = 1; g._careerTopspinBoost = 1;
+    g._careerBackspinPenalty = 1; g._careerSmashBoost = 1; g._careerCounterBoost = 1;
+    g._careerChopBoost = 1; g._careerSidespinBoost = 1; g._careerDecisiveBoost = 0;
+    g._careerFatigueReduce = 1; g._careerRingSlow = 1; g._careerNetSafe = false;
+    g._careerAISlowdown = 1; g._careerSlowmoThreshold = 999; g._careerSlowmoScale = 0.42;
+  }
+
+  enterTournament() {
+    const t = TOURNAMENTS[this.currentTournament];
+    if (!t) { this.state = 'RUN_END'; return; }
+    this.currentRound = 0;
+    // generate bracket
+    this.opponents = [];
+    for (let i = 0; i < t.rounds; i++) {
+      this.opponents.push(generateOpponent(t.eloMin, t.eloMax));
+    }
+    this.state = 'TOURNAMENT_INTRO';
+  }
+
+  /** Called by UI when the player dismisses the intro screen */
+  readyForOpponentSelect() {
+    this.state = 'OPPONENT_SELECT';
+  }
+
+  /** Called when the player selects an opponent to play */
+  selectOpponent(idx) {
+    if (idx < 0 || idx >= this.opponents.length) return;
+    this.selectedOpponent = this.opponents[idx];
+    const g = this.game;
+    // apply opponent
+    g.settings.difficulty = this.selectedOpponent.level;
+    g.ai.setLevel(this.selectedOpponent.level);
+    g.ai.reset();
+    // reset career decisive boost flag
+    if (g._careerDecisiveBoost) g._careerDecisiveActive = false;
+    this.state = 'MATCH';
+    g.startMatch(this.selectedOpponent.level);
+  }
+
+  /** Called by Game when a match ends */
+  onMatchEnd(winner) {
+    const won = winner === 1;
+    if (won) {
+      this.totalWins++;
+      this.currentRound++;
+      // remove beaten opponent
+      const idx = this.opponents.indexOf(this.selectedOpponent);
+      if (idx >= 0) this.opponents.splice(idx, 1);
+    } else {
+      this.totalLosses++;
+    }
+    this.matchHistory.push({
+      tournament: this.currentTournament, round: this.currentRound,
+      opponent: { ...this.selectedOpponent }, won,
+      score: [...this.game.score],
+    });
+    this.runStats.totalPoints += this.game.score[0];
+    this.runStats.maxSpeed = Math.max(this.runStats.maxSpeed, this.game.stats.maxSpeed);
+
+    if (!won) {
+      this.state = 'RUN_END';
+      return;
+    }
+    // check tournament complete
+    if (this.currentRound >= TOURNAMENTS[this.currentTournament].rounds) {
+      this.state = 'TOURNAMENT_END';
+      return;
+    }
+    // offer perks if applicable
+    const t = TOURNAMENTS[this.currentTournament];
+    if (t.perkAfter && this.currentRound === Math.ceil(t.rounds / 2)) {
+      this.pendingPerks = pickThreePerks(this);
+      if (this.pendingPerks.length > 0) {
+        this.state = 'PERK_SELECT';
+        return;
+      }
+    }
+    this.state = 'OPPONENT_SELECT';
+  }
+
+  /** Called when the player picks a perk */
+  selectPerk(idx) {
+    if (!this.pendingPerks || idx < 0 || idx >= this.pendingPerks.length) return;
+    const perk = this.pendingPerks[idx];
+    this.perks.push(perk);
+    perk.apply(this.game);
+    this.pendingPerks = null;
+    this.state = 'OPPONENT_SELECT';
+  }
+
+  /** Advance to next tournament */
+  advanceTournament() {
+    this.currentTournament++;
+    if (this.currentTournament >= TOURNAMENTS.length) {
+      this.state = 'RUN_END';
+      return;
+    }
+    this.enterTournament();
+  }
+
+  /** Tournament name for display */
+  get currentTournamentInfo() {
+    return TOURNAMENTS[this.currentTournament] || TOURNAMENTS[TOURNAMENTS.length - 1];
+  }
+
+  get isRunActive() {
+    return this.active && this.state !== 'RUN_END' && this.state !== 'IDLE';
+  }
+
+  /** Serialize for localStorage */
+  save() {
+    const data = {
+      currentTournament: this.currentTournament,
+      currentRound: this.currentRound,
+      totalWins: this.totalWins,
+      totalLosses: this.totalLosses,
+      perks: this.perks.map(p => p.id),
+      matchHistory: this.matchHistory.slice(-20),
+      runStats: this.runStats,
+    };
+    try { localStorage.setItem('topspin_career', JSON.stringify(data)); } catch(e) {}
+  }
+
+  load() {
+    try {
+      const raw = localStorage.getItem('topspin_career');
+      if (!raw) return false;
+      const data = JSON.parse(raw);
+      this.currentTournament = data.currentTournament || 0;
+      this.currentRound = data.currentRound || 0;
+      this.totalWins = data.totalWins || 0;
+      this.totalLosses = data.totalLosses || 0;
+      this.matchHistory = data.matchHistory || [];
+      this.runStats = data.runStats || this.runStats;
+      this.perks = (data.perks || []).map(id => PERKS.find(p => p.id === id)).filter(Boolean);
+      this.active = true;
+      this._resetCareerBoosts();
+      this.perks.forEach(p => p.apply(this.game));
+      this.enterTournament();
+      return true;
+    } catch(e) { return false; }
+  }
+}
+
+/* ====== 27_network.js ====== */
+/* =====================================================================
+ *  NETWORK — Online multiplayer with opponent racket visibility.
+ *
+ *  Architecture: WebSocket relay server. One player hosts (simulates
+ *  physics), the other is a guest (receives ball+racket state).
+ *  Both see each other's racket in real-time.
+ *
+ *  Protocol:
+ *    Client → Server:  { type: 'join', room? }
+ *    Server → Client:  { type: 'assigned', side, room, peerId }
+ *    Host → Server:    { type: 'state', ball:{p,v,w}, racket:{pos,normal,anim}, score, rally }
+ *    Server → Guest:   { type: 'state', ... }  (relayed from host)
+ *    Guest → Server:   { type: 'input', racket:{pos,normal,anim} }
+ *    Server → Host:    { type: 'input', ... }  (relayed from guest)
+ *    Either → Server:  { type: 'point', who, reason }
+ *    Server → Both:    { type: 'point', who, reason }
+ * ===================================================================== */
+
+const NET_SERVER_URL = 'wss://topspin-relay.fly.dev';  // configurable
+const NET_TICK_RATE = 20;        // Hz — state updates per second
+const NET_INPUT_RATE = 30;       // Hz — input updates per second
+const NET_INTERP_MS = 80;        // interpolation buffer in ms
+
+class NetworkManager {
+  constructor(game) {
+    this.game = game;
+    this.ws = null;
+    this.connected = false;
+    this.room = null;
+    this.side = 0;              // +1 = host (near), -1 = guest (far)
+    this.peerId = null;
+    this.isHost = false;
+    this.state = 'OFFLINE';     // OFFLINE CONNECTING LOBBY WAITING IN_MATCH DISCONNECTED
+    this.latency = 0;
+    this._pingT = 0;
+    this._lastStateT = 0;
+    this._lastInputT = 0;
+    this._interpBuf = [];       // ring buffer for interpolation
+    this._interpIdx = 0;
+    this._opponentRacket = {
+      pos: V3.new(0, PH.TABLE_Y + 0.25, -1.45),
+      normal: V3.new(0, 0, 1),
+      anim: { swing: 0, windup: 0, lean: 0 },
+    };
+    this._opponentScore = 0;
+    this._lastServerBall = null;
+    this._callbacks = {};
+  }
+
+  on(event, cb) { this._callbacks[event] = cb; }
+  _emit(event, data) { if (this._callbacks[event]) this._callbacks[event](data); }
+
+  connect(url) {
+    if (this.ws) this.disconnect();
+    this.state = 'CONNECTING';
+    try {
+      this.ws = new WebSocket(url || NET_SERVER_URL);
+    } catch(e) {
+      this.state = 'DISCONNECTED';
+      this._emit('error', 'Не удалось подключиться');
+      return;
+    }
+    this.ws.onopen = () => {
+      this.connected = true;
+      this.state = 'LOBBY';
+      this._emit('connected', {});
+      this._startPing();
+    };
+    this.ws.onmessage = (ev) => {
+      try { this._handle(JSON.parse(ev.data)); } catch(e) {}
+    };
+    this.ws.onclose = () => {
+      this.connected = false;
+      if (this.state === 'IN_MATCH') this.state = 'DISCONNECTED';
+      else this.state = 'OFFLINE';
+      this._emit('disconnected', {});
+    };
+    this.ws.onerror = () => {
+      this.state = 'DISCONNECTED';
+      this._emit('error', 'Ошибка соединения');
+    };
+  }
+
+  disconnect() {
+    this._stopPing();
+    if (this.ws) { this.ws.close(); this.ws = null; }
+    this.connected = false;
+    this.state = 'OFFLINE';
+    this.room = null;
+    this.side = 0;
+  }
+
+  joinRoom(roomId) {
+    if (!this.connected) return;
+    this.state = 'WAITING';
+    this._send({ type: 'join', room: roomId || undefined });
+  }
+
+  leaveRoom() {
+    this._send({ type: 'leave' });
+    this.room = null;
+    this.state = 'LOBBY';
+  }
+
+  /* ---- message handler ---- */
+  _handle(msg) {
+    switch (msg.type) {
+      case 'assigned':
+        this.room = msg.room;
+        this.side = msg.side;
+        this.peerId = msg.peerId;
+        this.isHost = msg.side === 1;
+        this._emit('assigned', msg);
+        break;
+      case 'ready':
+        this.state = 'IN_MATCH';
+        this._emit('matchStart', { side: this.side });
+        break;
+      case 'state':
+        // received from host (we are guest)
+        if (!this.isHost) this._applyRemoteState(msg);
+        break;
+      case 'input':
+        // received from guest (we are host)
+        if (this.isHost) this._applyRemoteInput(msg);
+        break;
+      case 'point':
+        this._emit('point', msg);
+        break;
+      case 'peer_left':
+        this._emit('peerLeft', {});
+        this.state = 'LOBBY';
+        break;
+      case 'pong':
+        this.latency = Date.now() - this._pingT;
+        break;
+      case 'error':
+        this._emit('error', msg.message || 'Server error');
+        break;
+    }
+  }
+
+  _send(obj) {
+    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+      this.ws.send(JSON.stringify(obj));
+    }
+  }
+
+  _startPing() {
+    this._stopPing();
+    this._pingInterval = setInterval(() => {
+      if (this.connected) {
+        this._pingT = Date.now();
+        this._send({ type: 'ping' });
+      } else {
+        this._stopPing();
+      }
+    }, 2000);
+  }
+  _stopPing() {
+    if (this._pingInterval) { clearInterval(this._pingInterval); this._pingInterval = null; }
+  }
+
+  /* ---- host: send game state to server ---- */
+  sendGameState() {
+    if (!this.isHost || this.state !== 'IN_MATCH') return;
+    const now = Date.now();
+    if (now - this._lastStateT < 1000 / NET_TICK_RATE) return;
+    this._lastStateT = now;
+    const g = this.game;
+    const b = g.ball;
+    const pad = g.player;
+    this._send({
+      type: 'state',
+      t: g.time,
+      ball: b.live ? { p: [b.p.x, b.p.y, b.p.z], v: [b.v.x, b.v.y, b.v.z], w: [b.w.x, b.w.y, b.w.z] } : null,
+      racket: { pos: [pad.pos.x, pad.pos.y, pad.pos.z], n: [pad.normal.x, pad.normal.y, pad.normal.z], sw: pad.swing },
+      score: g.score.slice(),
+      rally: g.rally,
+      shotId: g.shotId,
+    });
+  }
+
+  /* ---- guest: send input (racket position + normal) to server ---- */
+  sendInput() {
+    if (this.isHost || this.state !== 'IN_MATCH') return;
+    const now = Date.now();
+    if (now - this._lastInputT < 1000 / NET_INPUT_RATE) return;
+    this._lastInputT = now;
+    const pad = this.game.player;
+    this._send({
+      type: 'input',
+      pos: [pad.pos.x, pad.pos.y, pad.pos.z],
+      n: [pad.normal.x, pad.normal.y, pad.normal.z],
+      sw: pad.swing,
+    });
+  }
+
+  /* ---- guest: apply host state (interpolated) ---- */
+  _applyRemoteState(msg) {
+    this._interpBuf.push({ ...msg, receivedAt: Date.now() });
+    if (this._interpBuf.length > 30) this._interpBuf.shift();
+    // apply ball immediately (prediction handles smoothing)
+    if (msg.ball) {
+      const b = this.game.ball;
+      const bp = msg.ball.p, bv = msg.ball.v, bw = msg.ball.w;
+      // smooth lerp toward server state (corrects drift)
+      const k = 0.35;
+      if (b.live) {
+        b.p.x = lerp(b.p.x, bp[0], k); b.p.y = lerp(b.p.y, bp[1], k); b.p.z = lerp(b.p.z, bp[2], k);
+        b.v.x = lerp(b.v.x, bv[0], k); b.v.y = lerp(b.v.y, bv[1], k); b.v.z = lerp(b.v.z, bv[2], k);
+      } else {
+        V3.set(b.p, bp[0], bp[1], bp[2]); V3.set(b.v, bv[0], bv[1], bv[2]);
+        V3.set(b.w, bw[0], bw[1], bw[2]);
+        b.live = true;
+      }
+    }
+    // apply opponent racket (for rendering)
+    if (msg.racket) {
+      const op = this._opponentRacket;
+      const rp = msg.racket.pos, rn = msg.racket.n;
+      V3.set(op.pos, rp[0], rp[1], rp[2]);
+      V3.set(op.normal, rn[0], rn[1], rn[2]);
+      op.anim.swing = msg.racket.sw || 0;
+    }
+    // sync score
+    if (msg.score) this.game.score = msg.score;
+  }
+
+  /* ---- host: apply guest input ---- */
+  _applyRemoteInput(msg) {
+    const op = this._opponentRacket;
+    if (msg.pos) V3.set(op.pos, msg.pos[0], msg.pos[1], msg.pos[2]);
+    if (msg.n) V3.set(op.normal, msg.n[0], msg.n[1], msg.n[2]);
+    if (msg.sw !== undefined) op.anim.swing = msg.sw;
+  }
+
+  get opponentRacket() { return this._opponentRacket; }
+  get isConnected() { return this.connected; }
+  get isInMatch() { return this.state === 'IN_MATCH'; }
+}
+
+/* ====== 29_replay.js ====== */
+/* =====================================================================
+ *  REPLAY — highlight capture and playback system.
+ *
+ *  Captures ball+racket state every frame into a ring buffer.
+ *  After each point, scores the rally by peak speed, spin, rally length,
+ *  shot type and winner/loser. Keeps only the TOP 5 highlights per match.
+ *  Playback: slow-mo, free camera, follow-ball mode.
+ * ===================================================================== */
+
+const REPLAY_FPS = 60;
+const REPLAY_MAX_SEC = 8;
+const REPLAY_BUF_SIZE = REPLAY_FPS * REPLAY_MAX_SEC;  // ~480 frames
+const REPLAY_KEEP_TOP = 5;  // best highlights per match
+
+class ReplayRecorder {
+  constructor() {
+    this.buf = new Float32Array(REPLAY_BUF_SIZE * 16); // p(3)+v(3)+w(3)+rp(3)+rn(3)+sw(1) = 16 floats/frame
+    this.writeIdx = 0;
+    this.frameCount = 0;
+    this.highlights = [];
+    this._currentRallyStart = 0;
+    this._currentRallyScore = 0;
+  }
+
+  reset() {
+    this.writeIdx = 0;
+    this.frameCount = 0;
+    this.highlights = [];
+    this._currentRallyStart = 0;
+    this._currentRallyScore = 0;
+  }
+
+  /** Record one frame of state */
+  record(ball, playerRacket, aiRacket, time) {
+    const i = (this.writeIdx % REPLAY_BUF_SIZE) * 16;
+    const b = ball;
+    this.buf[i]    = b.p.x; this.buf[i+1]  = b.p.y; this.buf[i+2]  = b.p.z;
+    this.buf[i+3]  = b.v.x; this.buf[i+4]  = b.v.y; this.buf[i+5]  = b.v.z;
+    this.buf[i+6]  = b.w.x; this.buf[i+7]  = b.w.y; this.buf[i+8]  = b.w.z;
+    this.buf[i+9]  = playerRacket.x; this.buf[i+10] = playerRacket.y; this.buf[i+11] = playerRacket.z;
+    // time encoded in last slot
+    this.buf[i+15] = time;
+    this.writeIdx++;
+    this.frameCount++;
+  }
+
+  /** Call at the start of each rally */
+  onRallyStart() {
+    this._currentRallyStart = this.writeIdx;
+    this._currentRallyScore = 0;
+  }
+
+  /** Call when a shot is made — accumulate rally "interest" score */
+  onShot(info) {
+    if (!info) return;
+    let pts = 0;
+    pts += (info.speed || 0) * 1.5;     // fast shots are exciting
+    pts += Math.abs(info.spin || 0) * 0.3; // spin is cool
+    pts += Math.abs(info.sidespin || 0) * 0.4; // sidespin is rare and cool
+    if (info.stroke && info.stroke.id === 'SMASH') pts += 30;
+    if (info.stroke && info.stroke.id === 'HOOK') pts += 20;
+    if (info.stroke && info.stroke.id === 'FADE') pts += 20;
+    this._currentRallyScore += pts;
+  }
+
+  /** Call at the end of a point */
+  onPointEnd(who, reason, rallyLen, maxSpeed) {
+    const frameSpan = this.writeIdx - this._currentRallyStart;
+    if (frameSpan < 10) return; // too short to be interesting
+
+    let score = this._currentRallyScore;
+    score += Math.min(rallyLen, 20) * 3;  // long rallies are exciting
+    if (who > 0) score += 15;             // player winning is more exciting
+    if (rallyLen >= 10) score += 25;      // marathon rallies
+    if (maxSpeed > 80) score += 20;       // fast exchanges
+
+    // only keep if it's in the top N
+    const highlight = {
+      score,
+      startFrame: Math.max(0, this._currentRallyStart - 30), // 0.5s before rally
+      endFrame: this.writeIdx,
+      rallyLen,
+      maxSpeed,
+      who,
+      reason,
+    };
+    this.highlights.push(highlight);
+    this.highlights.sort((a, b) => b.score - a.score);
+    if (this.highlights.length > REPLAY_KEEP_TOP) {
+      this.highlights.length = REPLAY_KEEP_TOP;
+    }
+  }
+
+  /** Get the frame data for a highlight */
+  getHighlightFrames(idx) {
+    const h = this.highlights[idx];
+    if (!h) return null;
+    const frames = [];
+    // clamp to buffer window — older frames have been overwritten
+    const end = h.endFrame;
+    const start = Math.max(h.startFrame, end - REPLAY_BUF_SIZE);
+    for (let f = start; f < end; f++) {
+      const fi = (f % REPLAY_BUF_SIZE) * 16;
+      frames.push({
+        bp: { x: this.buf[fi], y: this.buf[fi+1], z: this.buf[fi+2] },
+        bv: { x: this.buf[fi+3], y: this.buf[fi+4], z: this.buf[fi+5] },
+        bw: { x: this.buf[fi+6], y: this.buf[fi+7], z: this.buf[fi+8] },
+        rp: { x: this.buf[fi+9], y: this.buf[fi+10], z: this.buf[fi+11] },
+        t: this.buf[fi+15],
+      });
+    }
+    return { highlight: h, frames };
+  }
+
+  get hasHighlights() { return this.highlights.length > 0; }
+  get highlightCount() { return this.highlights.length; }
+}
+
+/* ------------------------------------------------------------------ */
+/*  REPLAY PLAYER — renders a highlight with slow-mo and camera        */
+/* ------------------------------------------------------------------ */
+class ReplayPlayer {
+  constructor(game) {
+    this.game = game;
+    this.active = false;
+    this.frames = null;
+    this.highlight = null;
+    this.playIdx = 0;
+    this.speed = 0.35;        // playback speed multiplier (slow-mo by default)
+    this.paused = false;
+    this.mode = 'follow';     // 'follow' = track ball, 'free' = orbit camera
+    this.time = 0;
+  }
+
+  start(highlightIdx) {
+    const data = this.game.replay.getHighlightFrames(highlightIdx);
+    if (!data || data.frames.length < 5) return false;
+    this.frames = data.frames;
+    this.highlight = data.highlight;
+    this.playIdx = 0;
+    this.speed = 0.35;
+    this.paused = false;
+    this.time = 0;
+    this.active = true;
+    return true;
+  }
+
+  stop() {
+    this.active = false;
+    this.frames = null;
+  }
+
+  update(dt) {
+    if (!this.active || this.paused || !this.frames) return;
+    this.time += dt * this.speed;
+    const targetFrame = Math.floor(this.time * REPLAY_FPS);
+    if (targetFrame >= this.frames.length - 1) {
+      // loop
+      this.time = 0;
+      this.playIdx = 0;
+    }
+    this.playIdx = Math.min(targetFrame, this.frames.length - 1);
+  }
+
+  /** Get interpolated state at current playback time */
+  getState() {
+    if (!this.frames || this.frames.length === 0) return null;
+    const idx = Math.min(this.playIdx, this.frames.length - 1);
+    return this.frames[idx];
+  }
+
+  setSpeed(s) { this.speed = clamp(s, 0.1, 2.0); }
+  togglePause() { this.paused = !this.paused; }
+  nextFrame() { this.playIdx = Math.min(this.playIdx + 1, this.frames.length - 1); }
+  prevFrame() { this.playIdx = Math.max(this.playIdx - 1, 0); }
+}
+
 /* ====== 30_physics.js ====== */
 /* =====================================================================
  *  PHYSICS — rigid sphere with aerodynamics, Coulomb-friction impacts
@@ -1595,15 +2546,20 @@ const PH = {
   T_THICK: 0.025,
   E_TABLE: 0.870,           // normal COR ball/table (calibrated: 30.5cm drop -> 23cm  => sqrt(23/30.5)=0.868)
   E_TABLE_SPEED: 0.009,     // COR loss per m/s of impact speed
-  MU_TABLE: 0.20,           // Coulomb friction ball/table
-  ET_TABLE: 0.00,           // tangential restitution of the table (none)
+  MU_TABLE: 0.24,           // Coulomb friction ball/table (velocity-dependent, see bounceTable)
+  MU_TABLE_SPEED: 0.008,    // friction drops with sliding speed
+  ET_TABLE: 0.03,           // tangential restitution of the table (slight springiness)
 
   /* ---- net ---- */
   NET_H: 0.1525,            // net height above the table
   NET_OVERHANG: 0.1525,     // net extends past each side line
   NET_E: 0.10,              // how much comes back off a compliant net
+  NET_E_BOTTOM: 0.06,       // net is tighter at the bottom (less give)
+  NET_E_TOP: 0.14,          // net is looser near the tape (more give)
   NET_DAMP_T: 0.22,         // tangential energy kept
   NET_SPIN_KEEP: 0.25,
+  NET_SAG: 0.012,           // sag at the sides of the net [m]
+  NET_SKEW_FACTOR: 0.35,    // how much the net deflects tangentially
   TAPE_R: 0.008,            // the white tape at the top of the net
 
   /* ---- racket / rubber ---- */
@@ -1631,7 +2587,12 @@ function aeroAccel(out, v, w) {
   if (speed < 1e-5) { out.x = 0; out.y = -PH.G; out.z = 0; return out; }
   const wlen = V3.len(w);
   const S = (PH.R * wlen) / Math.max(speed, 0.6);     // spin ratio
-  const cd = PH.CD0 + PH.CD_SPIN * Math.min(S, 1.2);
+  // Reynolds-dependent drag: Cd drops in the critical regime Re ~ 3e5
+  // smooth cubic: 1.10 at Re=0 → 1.02 at Re=30k → 0.97 at Re=80k → 0.95 at Re=200k
+  const Re = (2 * PH.R * speed) / PH.NU;               // Reynolds number
+  const ReK = clamp(Re / 80000, 0, 1);                 // 0..1 over working range
+  const ReCorr = 1.10 - 0.21 * ReK + 0.14 * ReK * ReK - 0.06 * ReK * ReK * ReK;
+  const cd = (PH.CD0 + PH.CD_SPIN * Math.min(S, 1.2)) * ReCorr;
   const kd = 0.5 * PH.RHO * PH.AREA * cd / PH.M;      // 1/m * 0.5 rho A Cd
   // drag  a = -kd |v| v
   out.x = -kd * speed * v.x;
@@ -1641,6 +2602,10 @@ function aeroAccel(out, v, w) {
     // Magnus: F = 0.5 rho A Cl |v|^2 * unit(w x v),  Cl = f(S)
     let cl = Math.min(PH.CL_SLOPE * S, PH.CL_MAX);
     if (S > 1.25) cl *= 1 - 0.26 * Math.min((S - 1.25) / 1.2, 1);   // saturation
+    // lift crisis at extreme spin: boundary layer fully separated
+    if (S > 2.5) cl *= Math.max(0.08, 1 - 0.55 * (S - 2.5));
+    // Reynolds correction on Magnus: low Re reduces lift effectiveness
+    if (Re < 2.5e4) cl *= 0.75 + 0.25 * Re / 2.5e4;
     V3.cross(_acc_tmp, w, v);
     const cl_len = V3.len(_acc_tmp);
     if (cl_len > 1e-6) {
@@ -1736,7 +2701,10 @@ const N_UP = V3.new(0, 1, 0), ZERO3 = V3.new(0, 0, 0);
 function bounceTable(p, v, w) {
   const speed = -v.y;
   const e = clamp(PH.E_TABLE - PH.E_TABLE_SPEED * speed, 0.68, 0.92);
-  const info = impactSphere(v, w, N_UP, ZERO3, e, PH.MU_TABLE, PH.ET_TABLE);
+  // velocity-dependent friction: high sliding speed reduces grip
+  const vtEst = Math.sqrt(v.x * v.x + v.z * v.z);
+  const mu = Math.max(0.10, PH.MU_TABLE - PH.MU_TABLE_SPEED * vtEst);
+  const info = impactSphere(v, w, N_UP, ZERO3, e, mu, PH.ET_TABLE);
   p.y = PH.TABLE_Y + PH.R + 1e-5;
   return info;
 }
@@ -1747,42 +2715,90 @@ function bounceTable(p, v, w) {
  *  `quality` in [0..1] scales the effective COR (off-centre hits).
  * ---------------------------------------------------------------- */
 const SPIN_CAP = 1080;   // rad/s  (~172 rev/s, above the measured world best)
+
+/* ---- Rubber profiles: each type defines its own physics ---- */
+const RUBBER_PROFILES = {
+  CLASSIC:  { e: 0.800, mu: 1.05, et: 0.52, sponge: 1.8, tacky: 0.0, name: 'Классика' },
+  TENSOR:   { e: 0.830, mu: 1.10, et: 0.62, sponge: 2.1, tacky: 0.0, name: 'Тензор' },
+  TACKY:    { e: 0.750, mu: 1.28, et: 0.38, sponge: 1.5, tacky: 0.85, name: 'Липкая' },
+  LONGPIP:  { e: 0.620, mu: 0.80, et: 0.20, sponge: 0.8, tacky: 0.0, name: 'Длинные шипы' },
+  ANTISPIN: { e: 0.700, mu: 0.42, et: 0.12, sponge: 1.0, tacky: 0.5, name: 'Антискручивание' },
+  HARD:     { e: 0.760, mu: 0.95, et: 0.44, sponge: 1.2, tacky: 0.0, name: 'Жёсткая' },
+};
+
 function impactRacket(v, w, n, vR, quality = 1, rubber = {}) {
-  const e0 = (rubber.e ?? PH.E_RACKET) * (0.55 + 0.45 * quality);
-  const mu = (rubber.mu ?? PH.MU_RACKET) * (0.6 + 0.4 * quality);
-  const et = (rubber.et ?? PH.ET_RACKET) * (0.5 + 0.5 * quality);
+  // rubber profiles: read from profile if specified, else use passed values or defaults
+  const rp = rubber.profile ? RUBBER_PROFILES[rubber.profile] : null;
+  const baseE  = rp ? rp.e  : (rubber.e  ?? PH.E_RACKET);
+  const baseMu = rp ? rp.mu : (rubber.mu ?? PH.MU_RACKET);
+  const baseEt = rp ? rp.et : (rubber.et ?? PH.ET_RACKET);
+  const spongeThick = rp ? rp.sponge : (rubber.sponge ?? 1.8);  // mm
+  const tacky       = rp ? rp.tacky  : (rubber.tacky  ?? 0);    // 0..1
+  // sponge thickness scales the catapult (tangential restitution)
+  const spongeScale = 0.65 + 0.35 * clamp(spongeThick / 2.2, 0.3, 1.2);
+  // tacky rubber: higher friction but less catapult (ball "sticks")
+  const muBoost = 1 + 0.20 * tacky;
+  const etPenalty = 1 - 0.35 * tacky;
+  const e0 = baseE * (0.55 + 0.45 * quality);
+  const mu = baseMu * (0.6 + 0.4 * quality) * muBoost;
+  const et = baseEt * (0.5 + 0.5 * quality) * spongeScale * etPenalty;
   V3.sub(_u, v, vR);
   const closing = -V3.dot(_u, n);
   const e = clamp((e0 - PH.E_RACKET_SPEED * Math.max(0, closing)) * (rubber.damp ?? 1), 0.18, 0.92);
   const info = impactSphere(v, w, n, vR, e, mu, et);
   const wl = V3.len(w);
   if (wl > SPIN_CAP) V3.mul(w, w, SPIN_CAP / wl);
+  // long pimples: invert incoming spin
+  if (rp && rp === RUBBER_PROFILES.LONGPIP) {
+    w.x *= -0.55; w.y *= -0.55; w.z *= -0.55;
+  }
   return info;
 }
 
 /* ---------------------------------------------------------------- *
  *  Ball <-> net.  Highly inelastic, compliant, kills most spin.
  * ---------------------------------------------------------------- */
+/** Net sag model: height varies with x-position (tight at center, sags at sides). */
+function netHeightAt(x) {
+  const normX = clamp(Math.abs(x) / PH.NET_HALF_WID, 0, 1);
+  return PH.NET_H - PH.NET_SAG * normX * normX;
+}
+
 function bounceNet(p, v, w, side) {
+  const hRatio = clamp((p.y - PH.TABLE_Y) / PH.NET_H, 0, 1);
+  // height-dependent compliance: bottom=stiff, top=looser
+  const eNet = lerp(PH.NET_E_BOTTOM, PH.NET_E_TOP, hRatio);
+  // tangential response: skewed net deflects ball sideways
+  const vtEst = Math.sqrt(v.x * v.x + v.y * v.y);
+  const tangentialDamp = PH.NET_DAMP_T * (1 + PH.NET_SKEW_FACTOR * hRatio);
   const vz = v.z;
-  v.z = -vz * PH.NET_E;
-  v.x *= PH.NET_DAMP_T;
+  v.z = -vz * eNet;
+  v.x *= Math.min(tangentialDamp, 0.65);
   v.y = v.y * PH.NET_DAMP_T - Math.abs(vz) * 0.06;
-  // the mesh scatters a little
-  v.x += gauss(0.12 * Math.min(1, Math.abs(vz) / 6));
+  // the mesh scatters a little — more at higher speed
+  const scatter = Math.min(1, Math.abs(vz) / 6);
+  v.x += gauss(0.12 * scatter);
   v.y += gauss(0.08);
+  // glancing hits slide along the net and lose more energy
+  if (vtEst > 2) { v.x *= 0.85; v.y *= 0.85; }
   w.x *= PH.NET_SPIN_KEEP; w.y *= PH.NET_SPIN_KEEP; w.z *= PH.NET_SPIN_KEEP;
   p.z = side * (PH.R + 0.004);
 }
 
-/** Ball clips the top tape: deflect + big energy loss, classic net-cord. */
+/** Ball clips the top tape: deflect + big energy loss, classic net-cord.
+ *  Angle-dependent: direct hits absorb more; glancing hits deflect more. */
 function clipTape(p, v, w) {
   const sp = V3.len(v);
-  v.y = Math.abs(v.y) * 0.18 + sp * 0.07 + 0.25;
-  v.z *= 0.42;
-  v.x *= 0.58;
-  v.x += gauss(0.22);
-  v.z += gauss(0.10);
+  const vTangent = Math.sqrt(v.x * v.x + v.y * v.y);
+  const angle01 = clamp(Math.abs(v.z) / Math.max(sp, 0.1), 0, 1);  // 0=glancing, 1=direct
+  const absorb = lerp(0.60, 0.82, angle01);   // direct hits absorb more
+  const deflect = 1 - absorb;
+  v.y = Math.abs(v.y) * 0.18 * deflect + sp * 0.07 + 0.25;
+  v.z *= 0.42 * deflect;
+  v.x *= 0.58 * deflect;
+  // scatter proportional to speed
+  v.x += gauss(0.22 * Math.min(1, sp / 12));
+  v.z += gauss(0.10 * Math.min(1, sp / 12));
   w.x *= 0.45; w.y *= 0.45; w.z *= 0.45;
   p.y = PH.NET_TOP + PH.R + 0.002;
 }
@@ -1815,13 +2831,14 @@ function predict(p0, v0, w0, opts = {}) {
     if (out.path && (out.path.length < 400)) out.path.push(_pp.x, _pp.y, _pp.z);
     if (_pp.y > out.apex) out.apex = _pp.y;
 
-    // net plane
+    // net plane — uses sag-adjusted height
     if ((prevZ > 0) !== (_pp.z > 0)) {
       const a = Math.abs(prevZ) / (Math.abs(prevZ) + Math.abs(_pp.z) + 1e-9);
       const yAt = lerp(prevY, _pp.y, a);
       const xAt = lerp(prevX, _pp.x, a);
       out.netCross = { y: yAt, x: xAt, t };
-      if (yAt < PH.NET_TOP + PH.R * 0.5 && Math.abs(xAt) < PH.NET_HALF_WID) { out.hitNet = true; break; }
+      const netTopAtX = PH.TABLE_Y + netHeightAt(xAt) + PH.R * 0.5;
+      if (yAt < netTopAtX && Math.abs(xAt) < PH.NET_HALF_WID) { out.hitNet = true; break; }
     }
     // crossing of the table's horizontal plane anywhere (used to measure
     // how far a ball that misses actually overshoots)
@@ -4293,6 +5310,103 @@ class Trainer {
 
   sync() { this.g.ui && this.g.ui.trainSync(this); }
 
+  /* ================================================================
+   *  GHOST RACKET — shows the IDEAL racket trajectory for each drill.
+   *  Uses the same physics solver (predict + refineRacket) to compute
+   *  the correct racket position and face angle at each point in time,
+   *  then stores it as a keyframe sequence the renderer can interpolate.
+   * ================================================================ */
+  computeGhost() {
+    const g = this.g, b = g.ball, S = this.S;
+    if (!b.live || !S.feed) { this.ghost = null; return; }
+
+    // 1. predict where ball will be at intercept time
+    const predOut = {};
+    predict(V3.clone(b.p), V3.clone(b.v), V3.clone(b.w), {
+      dt: 1 / 240, maxT: 1.8,
+      stopZ: g.player.pos.z, stopDir: 1, stopAtPlane: true, out: predOut,
+    });
+    if (!predOut.reach) { this.ghost = null; return; }
+
+    // 2. build ideal stroke from drill definition
+    const archId = S.id === 'TOPSPIN' ? 'LOOP' : S.id === 'PUSH' ? 'PUSH'
+      : S.id === 'SIDE' ? 'HOOK' : S.id === 'SMASH' ? 'SMASH'
+      : S.id === 'TIMING' ? 'COUNTER' : 'DRIVE';
+    const A = ARCH[archId] || ARCH.DRIVE;
+
+    const idealRacket = makeRacket(1, archId, {
+      elev: A.elev, contact: A.contact,
+      azSwing: archId === 'HOOK' ? 0.8 : 0,
+      vmag: 8.5,
+      aim: { x: predOut.reach.x, z: predOut.reach.z > 0 ? predOut.reach.z * 0.7 : 0.6 },
+      quality: 0.95,
+    });
+
+    // 3. refine the racket stroke with high assist (shows the "answer")
+    const refined = refineRacket(b.p, b.v, b.w, idealRacket, 0.98, 0.95);
+
+    // 4. generate keyframes: 20 points over the swing arc
+    const keyframes = [];
+    const contactPt = { x: predOut.reach.x, y: predOut.reach.y, z: predOut.reach.z };
+    const swingDir = V3.clone(refined.vR);
+    V3.norm(swingDir, swingDir);
+    const normal = V3.clone(refined.normal);
+
+    for (let i = 0; i < 20; i++) {
+      const t = i / 19;  // 0 = backswing, 1 = contact
+      const pullback = t < 0.4 ? t / 0.4 : 1;
+      const forward = t > 0.4 ? (t - 0.4) / 0.6 : 0;
+      // backswing: racket pulls back from contact point
+      const bx = contactPt.x - swingDir.x * 0.28 * (1 - pullback);
+      const by = contactPt.y - swingDir.y * 0.28 * (1 - pullback) + 0.08 * (1 - pullback);
+      const bz = contactPt.z - swingDir.z * 0.28 * (1 - pullback);
+      // face opens during backswing, closes at contact
+      const faceTilt = (1 - t) * 0.35 * (A.back ? 1 : -1);
+      keyframes.push({
+        x: bx, y: clamp(by, PH.TABLE_Y + 0.10, PH.TABLE_Y + 0.70), z: bz,
+        nx: normal.x, ny: normal.y + faceTilt, nz: normal.z,
+        t: t, sw: forward,
+      });
+    }
+
+    this.ghost = {
+      keyframes,
+      contactPt,
+      strokeName: STROKES[archId] ? STROKES[archId].name : archId,
+      arch: A,
+      active: true,
+      playbackT: 0,
+      loopDur: 1.8,   // seconds per full loop
+    };
+  }
+
+  /** Update ghost animation */
+  updateGhost(dt) {
+    if (!this.ghost || !this.ghost.active) return;
+    this.ghost.playbackT += dt;
+    if (this.ghost.playbackT > this.ghost.loopDur) {
+      this.ghost.playbackT -= this.ghost.loopDur;
+    }
+  }
+
+  /** Get interpolated ghost racket state at current time */
+  getGhostState() {
+    const gh = this.ghost;
+    if (!gh || !gh.active || gh.keyframes.length < 2) return null;
+    const t = (gh.playbackT / gh.loopDur) % 1;
+    const idx = t * (gh.keyframes.length - 1);
+    const i0 = Math.floor(idx);
+    const i1 = Math.min(i0 + 1, gh.keyframes.length - 1);
+    const f = idx - i0;
+    const a = gh.keyframes[i0], b = gh.keyframes[i1];
+    return {
+      pos: { x: lerp(a.x, b.x, f), y: lerp(a.y, b.y, f), z: lerp(a.z, b.z, f) },
+      normal: { x: lerp(a.nx, b.nx, f), y: lerp(a.ny, b.ny, f), z: lerp(a.nz, b.nz, f) },
+      swing: lerp(a.sw, b.sw, f),
+      strokeName: gh.strokeName,
+    };
+  }
+
   /* ----------------------------- feeder --------------------------- */
   /** Serve one practice ball from the far side, shaped for the drill. */
   feed() {
@@ -4576,6 +5690,35 @@ class Game {
     this._fpsT = 0; this._fpsN = 0; this.fps = 60;
 
     this.bindInput();
+
+    // Career mode (roguelike tournament progression)
+    this.career = new Career(this);
+    // Online multiplayer
+    this.network = new NetworkManager(this);
+    this._careerSpinBoost = 1; this._careerSpeedBoost = 1;
+    this._careerTopspinBoost = 1; this._careerBackspinPenalty = 1;
+    this._careerSmashBoost = 1; this._careerCounterBoost = 1;
+    this._careerChopBoost = 1; this._careerSidespinBoost = 1;
+    this._careerDecisiveBoost = 0; this._careerFatigueReduce = 1;
+    this._careerRingSlow = 1; this._careerNetSafe = false;
+    this._careerAISlowdown = 1; this._careerSlowmoThreshold = 999;
+    this._careerSlowmoScale = 0.42;
+
+    // Shop + economy
+    this.economy = new Economy();
+    this.economy.applyToGame(this);
+    this._bladeSpeed = 1; this._bladeControl = 1; this._bladeSweetR = 0.055;
+    this._equippedRubberProfile = 'CLASSIC';
+    this._trailColor = '#ffffff';
+    this._equippedEffect = 'fx_default';
+
+    // Replay system
+    this.replay = new ReplayRecorder();
+    this.replayPlayer = new ReplayPlayer(this);
+
+    // Slow-mo mode (single player only, not in career or online)
+    this.slowmoActive = false;
+    this.slowmoManualScale = 0.25;  // 25% speed when manually activated
     this.resize();
     window.addEventListener('resize', () => this.resize());
   }
@@ -4705,6 +5848,20 @@ class Game {
       if (e.key === '+' || e.key === '=') { this.zoomBy(1 / (1 + 0.07 * step)); e.preventDefault(); }
       if (e.key === '-' || e.key === '_') { this.zoomBy(1 + 0.07 * step); e.preventDefault(); }
       if (e.key === '0' || e.key === ')') { this.camReset(); e.preventDefault(); }
+      // slow-mo toggle (single player only)
+      if (e.key === 's' || e.key === 'S' || e.key === 'ы' || e.key === 'Ы') {
+        if (!this.career.active && !this.network.isInMatch) {
+          this.slowmoActive = !this.slowmoActive;
+          this.msg(this.slowmoActive ? 'СЛОУМО ВКЛ' : 'СЛОУМО ВЫКЛ', 0.8, '#39c6ff');
+        }
+      }
+      // replay viewer toggle
+      if (e.key === 'v' || e.key === 'V' || e.key === 'м' || e.key === 'М') {
+        if (this.replay.hasHighlights) {
+          if (this.replayPlayer.active) { this.replayPlayer.stop(); }
+          else { this.replayPlayer.start(0); this.slowmoActive = false; }
+        }
+      }
     });
   }
 
@@ -4732,6 +5889,10 @@ class Game {
     this.server = Math.random() < 0.5 ? 1 : -1;
     this.servesLeft = 2;
     this.audio.init(); this.audio.resume();
+    // apply career slowdown to AI (always from base speed, not cumulative)
+    if (this._careerAISlowdown < 1) {
+      this.ai.maxSpeed = this.ai.L.move * this._careerAISlowdown;
+    }
     this.prepServe();
     this.msg(this.server === 1 ? 'ВАША ПОДАЧА' : 'ПОДАЁТ СОПЕРНИК', 1.6, '#7fd4ff');
   }
@@ -4779,6 +5940,7 @@ class Game {
     this.isServeBall = true;
     this.setState(GS.SERVE_READY);
     this.recorder.begin(this.time, s);
+    this.replay.onRallyStart();
     this.ai.setPressure(this.score[1], this.score[0], this.settings.targetScore);
     if (s < 0) this.aiServeTimer = rnd(0.7, 1.3);
   }
@@ -4813,6 +5975,17 @@ class Game {
     if (this.rally > this.bestRally) this.bestRally = this.rally;
     if (who > 0) this.stats.winners++; else this.stats.errors++;
 
+    // replay: score and save highlight
+    this.replay.onPointEnd(who, reason, this.rally, this.stats.maxSpeed);
+
+    // economy: earn coins
+    if (!this.career.active && !this.network.isInMatch) {
+      const reward = this.economy.earn(who > 0, this.rally, this.stats.maxSpeed, this.settings.difficulty);
+      if (reward.coins > 0) {
+        this.msg(`+${reward.coins} 🪙${reward.gems > 0 ? ` +${reward.gems} 💎` : ''}`, 1.2, '#ffd34d');
+      }
+    }
+
     // why did that happen? one sentence, only when it helps
     this.lastSwipeLate = (this.time - this.lastSwipeT) > 0.75;
     this.pointNote = this.analyst.analyse(this.recorder, who, reason, this);
@@ -4836,6 +6009,16 @@ class Game {
     const T = this.settings.targetScore;
     if ((this.score[0] >= T || this.score[1] >= T) && Math.abs(this.score[0] - this.score[1]) >= 2) {
       this.matchWinner = this.score[0] > this.score[1] ? 1 : -1;
+    }
+    // network: relay point to peer
+    if (this.network && this.network.isInMatch) {
+      this.network._send({ type: 'point', who, reason, score: this.score.slice() });
+    }
+    // career: decisive boost on match point
+    if (this.career && this.career.active && this._careerDecisiveBoost > 0) {
+      const isMatchPoint = (this.score[0] >= T - 1 && this.score[0] > this.score[1]) ||
+                           (this.score[1] >= T - 1 && this.score[1] > this.score[0]);
+      if (isMatchPoint) this._careerDecisiveActive = true;
     }
     this.ui && this.ui.syncScore();
   }
@@ -4938,6 +6121,7 @@ class Game {
       this.recorder.addShot(1, Object.assign({
         x: contactP.x, y: contactP.y, z: contactP.z, quality,
       }, this.lastShotInfo));
+      this.replay.onShot(this.lastShotInfo);
       if (this.training) this.training.onPlayerHit(this.lastShotInfo);
       this.buzz(Math.round(lerp(8, 26, clamp(speed / 90, 0, 1))));
       this.shakeIt(clamp(speed / 55, 0.03, 0.38), V3.new(rndSym(0.4), 0.5, 1));
@@ -5468,6 +6652,18 @@ class Game {
           this.setState(GS.MATCH_END);
           this.audio.gameOver(this.matchWinner > 0);
           this.ui && this.ui.showMatchEnd(this.matchWinner > 0);
+          // career progression
+          if (this.career && this.career.active) {
+            this.career.onMatchEnd(this.matchWinner);
+            if (this.career.state === 'RUN_END') {
+              this.ui && this.ui.showCareerRunEnd(this.career);
+            } else if (this.career.state === 'TOURNAMENT_END') {
+              this.ui && this.ui.showCareerTournamentEnd(this.career);
+            } else if (this.career.state === 'PERK_SELECT') {
+              this.ui && this.ui.showCareerPerks(this.career);
+            }
+            this.career.save();
+          }
         } else if (this.stateT > 1.35) {
           this.rally = 0;
           this.prepServe();
@@ -5488,6 +6684,31 @@ class Game {
       h.push(this.ball.p.x, this.ball.p.y, this.ball.p.z);
       if (h.length > 96 * 3) h.splice(0, 3);
     } else this._acc = 0;
+
+    // replay: record frame (aiPaddle.pos = rendered opponent racket position)
+    if (!this.replayPlayer.active && this.state !== GS.MENU && this.state !== GS.MATCH_END) {
+      this.replay.record(this.ball, this.player.pos, this.aiPaddle.pos, this.time);
+    }
+    // replay player
+    if (this.replayPlayer.active) {
+      this.replayPlayer.update(dtReal);
+    }
+    // slow-mo: manual mode overrides everything; punchSlowmo is automatic
+    const manualSlowmo = this.slowmoActive && !this.career.active && !this.network.isInMatch;
+    if (this.slowmoUntil && this.time > this.slowmoUntil) {
+      this.targetTimeScale = 1; this.slowmoUntil = 0;  // auto-clear punch
+    }
+    if (manualSlowmo) {
+      this.timeScale = lerp(this.timeScale, this.slowmoManualScale, 1 - Math.exp(-8 * dtReal));
+    } else {
+      this.timeScale = lerp(this.timeScale, this.targetTimeScale, 1 - Math.exp(-10 * dtReal));
+    }
+    // training ghost
+    if (this.training) {
+      this.training.updateGhost(dtReal);
+      // recompute ghost every 0.3s while ball is live
+      if (this.ball.live && this.frame % 18 === 0) this.training.computeGhost();
+    }
 
     this.updatePlayerPaddle(dtReal);
     this.updateStrikeWindow(dtReal);
@@ -5510,6 +6731,19 @@ class Game {
     P.sat = expSmooth(P.sat, 1.05 + (1 - this.timeScale) * 0.25, 4, dtReal);
     P.ca = expSmooth(P.ca, 0.55 + sp * 0.75, 4, dtReal);
     this.audio.setCrowd(clamp(this.rally / 18, 0, 1) * 0.6 + (this.state === GS.POINT ? 0.4 : 0));
+
+    // network: sync state (host) or input (guest)
+    if (this.network && this.network.isInMatch) {
+      if (this.network.isHost) this.network.sendGameState();
+      else this.network.sendInput();
+    }
+    // career: net-safe perk (always clear the net)
+    if (this._careerNetSafe && this.ball.live && this.ball.lastHitBy === 1) {
+      const nearNet = Math.abs(this.ball.p.z) < 0.15;
+      if (nearNet && this.ball.p.y < PH.NET_TOP + PH.R * 2 && this.ball.v.z < 0) {
+        this.ball.v.y += 0.8;  // gentle lift to clear net
+      }
+    }
 
     // fps
     this._fpsN++; this._fpsT += dtReal;
@@ -6276,6 +7510,330 @@ class UI {
         `<b>assist</b> ${(g.settings.assist * 100) | 0}%  <b>pos</b> ${(g.settings.posAssist * 100) | 0}%`;
     }
   }
+
+  /* ================================================================
+   *  CAREER MODE UI
+   * ================================================================ */
+  bindCareer() {
+    const g = this.game;
+    $('#careerStart').addEventListener('click', () => {
+      g.audio.init(); g.audio.resume(); g.audio.ui('click');
+      if (g.career.load()) {
+        this.showCareerIntro(g.career);
+      } else {
+        g.career.start();
+        this.showCareerIntro(g.career);
+      }
+    });
+    $('#crReady').addEventListener('click', () => {
+      g.audio.ui('click');
+      const c = g.career;
+      c.readyForOpponentSelect();
+      this.showCareerOpponentSelect(c);
+    });
+    $('#crEndRestart').addEventListener('click', () => {
+      g.audio.ui('click');
+      $('#careerEnd').classList.remove('on');
+      g.career.start();
+      this.showCareerIntro(g.career);
+    });
+    $('#crEndMenu').addEventListener('click', () => {
+      g.audio.ui('click');
+      $('#careerEnd').classList.remove('on');
+      $('#menu').classList.add('on');
+    });
+  }
+
+  showCareerIntro(career) {
+    const t = career.currentTournamentInfo;
+    $$('.screen').forEach(s => s.classList.remove('on'));
+    $('#crTournName').textContent = `${t.icon} ${t.name}`;
+    $('#crTournPlace').textContent = t.place;
+    $('#crTournInfo').textContent = `Раундов: ${t.rounds} · ELO ${t.eloMin}–${t.eloMax} · Побед: ${career.totalWins}`;
+    $('#careerIntro').classList.add('on');
+  }
+
+  showCareerOpponentSelect(career) {
+    const g = this.game;
+    $$('.screen').forEach(s => s.classList.remove('on'));
+    const list = $('#crOppList');
+    list.innerHTML = '';
+    career.opponents.forEach((opp, i) => {
+      const btn = document.createElement('button');
+      btn.className = 'opt';
+      btn.innerHTML = `<b>${opp.name}</b><s>${opp.style} · ELO ${opp.elo}</s>`;
+      btn.addEventListener('click', () => {
+        g.audio.ui('click');
+        $$('.screen').forEach(s => s.classList.remove('on'));
+        career.selectOpponent(i);
+      });
+      list.appendChild(btn);
+    });
+    const status = document.createElement('div');
+    status.className = 'note';
+    status.textContent = `Раунд ${career.currentRound + 1} из ${career.currentTournamentInfo.rounds} · Перков: ${career.perks.length}`;
+    status.style.marginTop = '10px';
+    list.appendChild(status);
+    $('#careerIntro').classList.add('on');
+  }
+
+  showCareerPerks(career) {
+    const g = this.game;
+    $$('.screen').forEach(s => s.classList.remove('on'));
+    const list = $('#crPerkList');
+    list.innerHTML = '';
+    career.pendingPerks.forEach((perk, i) => {
+      const btn = document.createElement('button');
+      btn.className = 'opt';
+      const colors = { green: '#4ee39a', blue: '#39c6ff', gold: '#ffd34d' };
+      btn.style.borderColor = colors[perk.rarity] || '#39c6ff';
+      btn.innerHTML = `<b style="color:${colors[perk.rarity]}">${perk.name}</b><s>${perk.desc}</s>`;
+      btn.addEventListener('click', () => {
+        g.audio.ui('click');
+        career.selectPerk(i);
+        $$('.screen').forEach(s => s.classList.remove('on'));
+        this.showCareerOpponentSelect(career);
+      });
+      list.appendChild(btn);
+    });
+    $('#careerPerk').classList.add('on');
+  }
+
+  showCareerTournamentEnd(career) {
+    const t = career.currentTournamentInfo;
+    this.showNote({ text: `${t.icon} ${t.name} ПОБЕЖДЁН!`, col: '#ffd34d', code: 'win' });
+    setTimeout(() => {
+      career.advanceTournament();
+      if (career.state === 'RUN_END') {
+        this.showCareerRunEnd(career);
+      } else {
+        this.showCareerIntro(career);
+      }
+    }, 2500);
+  }
+
+  showCareerRunEnd(career) {
+    $$('.screen').forEach(s => s.classList.remove('on'));
+    const t = TOURNAMENTS[Math.max(0, career.currentTournament - 1)] || TOURNAMENTS[0];
+    const isVictory = career.currentTournament >= TOURNAMENTS.length;
+    $('#crEndTitle').textContent = isVictory ? '👑 ЧЕМПИОН МИРА!' : `🏁 ${t.name}`;
+    $('#crEndSub').textContent = isVictory
+      ? 'Вы прошли все 12 турниров. Легенда.'
+      : `Выбыли на турнире: ${t.name}`;
+    const stats = $('#crEndStats');
+    stats.innerHTML = `
+      <div class="recap">
+        <div class="rc"><i style="background:#4ee39a"></i><b>${career.totalWins}</b><s>побед</s></div>
+        <div class="rc"><i style="background:#ff5d6e"></i><b>${career.totalLosses}</b><s>поражений</s></div>
+        <div class="rc"><i style="background:#39c6ff"></i><b>${career.perks.length}</b><s>перков</s></div>
+        <div class="rc"><i style="background:#ffd34d"></i><b>${Math.round(career.runStats.maxSpeed)}</b><s>км/ч макс</s></div>
+      </div>
+    `;
+    career.active = false;
+    try { localStorage.removeItem('topspin_career'); } catch(e) {}
+    $('#careerEnd').classList.add('on');
+  }
+
+  /* ================================================================
+   *  ONLINE MODE UI
+   * ================================================================ */
+  bindOnline() {
+    const g = this.game;
+    const net = g.network;
+    $('#onlineStart').addEventListener('click', () => {
+      g.audio.init(); g.audio.resume(); g.audio.ui('click');
+      $$('.screen').forEach(s => s.classList.remove('on'));
+      $('#netStatus').textContent = 'Подключение...';
+      $('#netRoomCode').style.display = 'none';
+      $('#onlineLobby').classList.add('on');
+      net.connect();
+    });
+    net.on('connected', () => {
+      $('#netStatus').textContent = 'Подключено! Создайте комнату.';
+      $('#netRoomCode').style.display = 'none';
+    });
+    net.on('assigned', (msg) => {
+      $('#netRoomCode').textContent = msg.room;
+      $('#netRoomCode').style.display = 'block';
+      $('#netStatus').textContent = msg.side === 1
+        ? 'Вы хост. Ждём соперника...'
+        : 'Подключены к комнате.';
+    });
+    net.on('matchStart', () => {
+      $$('.screen').forEach(s => s.classList.remove('on'));
+      g.startMatch();
+    });
+    net.on('disconnected', () => {
+      $('#netStatus').textContent = 'Отключено.';
+    });
+    net.on('error', (msg) => {
+      $('#netStatus').textContent = `Ошибка: ${msg}`;
+    });
+    net.on('peerLeft', () => {
+      g.msg('СОПЕРНИК ВЫШЕЛ', 2.0, '#ff8a8a');
+    });
+    $('#netCreate').addEventListener('click', () => {
+      g.audio.ui('click');
+      net.joinRoom();
+    });
+    $('#netJoin').addEventListener('click', () => {
+      g.audio.ui('click');
+      const code = prompt('Введите код комнаты:');
+      if (code) net.joinRoom(code.toUpperCase().trim());
+    });
+    $('#netClose').addEventListener('click', () => {
+      g.audio.ui('click');
+      net.disconnect();
+      $('#onlineLobby').classList.remove('on');
+      $('#menu').classList.add('on');
+    });
+  }
+
+  /* ================================================================
+   *  SHOP UI
+   * ================================================================ */
+  bindShop() {
+    const g = this.game;
+    const eco = g.economy;
+
+    const renderShop = () => {
+      $('#shopBalance').textContent = `🪙 ${eco.coins} · 💎 ${eco.gems}`;
+      // blades
+      const bladeContainer = $('#shopBlades');
+      bladeContainer.innerHTML = '';
+      Object.entries(SHOP_ITEMS).filter(([,v]) => v.cat === 'blade').forEach(([id, item]) => {
+        const owned = eco.owned.includes(id);
+        const equipped = eco.equipped.blade === id;
+        const btn = document.createElement('button');
+        btn.className = 'opt' + (equipped ? ' sel' : '');
+        btn.innerHTML = `<b>${item.name}</b><s>${owned ? (equipped ? 'ЭКИПИРОВАНО' : item.desc) : `${item.price} 🪙`}</s>`;
+        btn.addEventListener('click', () => {
+          g.audio.ui('click');
+          if (owned) { eco.equip(id); eco.applyToGame(g); }
+          else if (eco.buy(id)) { eco.equip(id); eco.applyToGame(g); }
+          renderShop();
+        });
+        bladeContainer.appendChild(btn);
+      });
+      // rubbers
+      const rubberContainer = $('#shopRubbers');
+      rubberContainer.innerHTML = '';
+      Object.entries(SHOP_ITEMS).filter(([,v]) => v.cat === 'rubber').forEach(([id, item]) => {
+        const owned = eco.owned.includes(id);
+        const equipped = eco.equipped.rubber === id;
+        const btn = document.createElement('button');
+        btn.className = 'opt' + (equipped ? ' sel' : '');
+        btn.innerHTML = `<b>${item.name}</b><s>${owned ? (equipped ? 'ЭКИПИРОВАНО' : item.desc) : `${item.price} ${item.currency === 'gems' ? '💎' : '🪙'}`}</s>`;
+        btn.addEventListener('click', () => {
+          g.audio.ui('click');
+          if (owned) { eco.equip(id); eco.applyToGame(g); }
+          else if (eco.buy(id)) { eco.equip(id); eco.applyToGame(g); }
+          renderShop();
+        });
+        rubberContainer.appendChild(btn);
+      });
+      // arenas
+      const arenaContainer = $('#shopArenas');
+      arenaContainer.innerHTML = '';
+      Object.entries(SHOP_ITEMS).filter(([,v]) => v.cat === 'arena').forEach(([id, item]) => {
+        const owned = eco.owned.includes(id);
+        const equipped = eco.equipped.arena === id;
+        const btn = document.createElement('button');
+        btn.className = 'opt' + (equipped ? ' sel' : '');
+        btn.innerHTML = `<b>${item.name}</b><s>${owned ? (equipped ? 'АКТИВНА' : item.desc) : `${item.price} ${item.currency === 'gems' ? '💎' : '🪙'}`}</s>`;
+        btn.addEventListener('click', () => {
+          g.audio.ui('click');
+          if (owned) eco.equip(id);
+          else if (eco.buy(id)) eco.equip(id);
+          renderShop();
+        });
+        arenaContainer.appendChild(btn);
+      });
+      // trails
+      const trailContainer = $('#shopTrails');
+      trailContainer.innerHTML = '';
+      Object.entries(SHOP_ITEMS).filter(([,v]) => v.cat === 'trail').forEach(([id, item]) => {
+        const owned = eco.owned.includes(id);
+        const equipped = eco.equipped.trail === id;
+        const btn = document.createElement('button');
+        btn.className = 'opt' + (equipped ? ' sel' : '');
+        btn.innerHTML = `<b>${item.name}</b><s>${owned ? (equipped ? 'АКТИВЕН' : item.desc) : `${item.price} ${item.currency === 'gems' ? '💎' : '🪙'}`}</s>`;
+        btn.addEventListener('click', () => {
+          g.audio.ui('click');
+          if (owned) { eco.equip(id); eco.applyToGame(g); }
+          else if (eco.buy(id)) { eco.equip(id); eco.applyToGame(g); }
+          renderShop();
+        });
+        trailContainer.appendChild(btn);
+      });
+    };
+
+    $('#btnShop').addEventListener('click', () => {
+      g.audio.ui('click');
+      renderShop();
+      $$('.screen').forEach(s => s.classList.remove('on'));
+      $('#shopPanel').classList.add('on');
+    });
+    $('#shopClose').addEventListener('click', () => {
+      g.audio.ui('click');
+      $('#shopPanel').classList.remove('on');
+      if (g.state === GS.MENU) $('#menu').classList.add('on');
+    });
+  }
+
+  /* ================================================================
+   *  REPLAY UI
+   * ================================================================ */
+  bindReplay() {
+    const g = this.game;
+    const rp = g.replayPlayer;
+
+    const updateReplayUI = () => {
+      if (!rp.active) return;
+      const h = rp.highlight;
+      $('#replayInfo').textContent = h
+        ? `Ралли: ${h.rallyLen} ударов · ${Math.round(h.maxSpeed)} км/ч`
+        : '';
+      $('#replaySpeed').textContent = `${rp.speed.toFixed(2)}×`;
+      $('#replaySpeed').style.color = rp.paused ? '#ff5d6e' : '#39c6ff';
+    };
+
+    $('#btnReplay').addEventListener('click', () => {
+      g.audio.ui('click');
+      if (g.replay.hasHighlights) {
+        rp.start(0);
+        $$('.screen').forEach(s => s.classList.remove('on'));
+        $('#replayPanel').classList.add('on');
+        updateReplayUI();
+      } else {
+        g.msg('НЕТ МОМЕНТОВ', 1.0, '#8da3bd');
+      }
+    });
+    $('#rplPause').addEventListener('click', () => { rp.togglePause(); updateReplayUI(); });
+    $('#rplPrev').addEventListener('click', () => { rp.prevFrame(); updateReplayUI(); });
+    $('#rplNext').addEventListener('click', () => { rp.nextFrame(); updateReplayUI(); });
+    $('#rplSlower').addEventListener('click', () => { rp.setSpeed(rp.speed * 0.7); updateReplayUI(); });
+    $('#rplFaster').addEventListener('click', () => { rp.setSpeed(rp.speed * 1.4); updateReplayUI(); });
+    $('#replayClose').addEventListener('click', () => {
+      g.audio.ui('click');
+      rp.stop();
+      $('#replayPanel').classList.remove('on');
+      if (g.state === GS.MENU) $('#menu').classList.add('on');
+    });
+  }
+
+  /* ================================================================
+   *  SLOW-MO BUTTON
+   * ================================================================ */
+  bindSlowmo() {
+    const g = this.game;
+    $('#btnSlowmo').addEventListener('click', () => {
+      if (g.career.active || g.network.isInMatch) return;
+      g.slowmoActive = !g.slowmoActive;
+      g.msg(g.slowmoActive ? 'СЛОУМО ВКЛ' : 'СЛОУМО ВЫКЛ', 0.8, '#39c6ff');
+      g.audio.ui('click');
+    });
+  }
 }
 
 const CSSFONT = '"Inter",ui-sans-serif,system-ui,-apple-system,sans-serif';
@@ -6311,6 +7869,11 @@ const ICON = {
       ui = new UI();
       game = new Game(canvas, ui);
       ui.attach(game);
+      ui.bindCareer();
+      ui.bindOnline();
+      ui.bindShop();
+      ui.bindReplay();
+      ui.bindSlowmo();
     } catch (err) {
       console.error(err);
       const loading = document.getElementById('loading');
@@ -6359,6 +7922,6 @@ const ICON = {
 })();
 
 </script>
-<!-- TOPSPIN ARENA · self-contained build 2026-10-10 · no external assets, no network required -->
+<!-- TOPSPIN ARENA · self-contained build 2026-10-11 · no external assets, no network required -->
 </body>
 </html>
