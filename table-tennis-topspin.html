@@ -477,6 +477,52 @@ body.is-reel #hud,body.is-reel #slow{opacity:.0}
         <button class="opt" id="wsOpen"><b>МАСТЕРСКАЯ</b><s id="wsCoins">0 монет</s></button>
         <button class="opt" id="dailyOpen"><b>ЗАДАНИЯ</b><s id="wsStreak">серия 1</s></button>
       </div>
+
+      <h3 class="sec">Режимы</h3>
+      <div class="row">
+        <button class="btn" id="careerStart" style="flex:1;background:linear-gradient(100deg,#ff7a2f,#ffd34d)">🏆 КАРЬЕРА</button>
+        <button class="btn" id="onlineStart" style="flex:1;background:linear-gradient(100deg,#39c6ff,#7ff0c0)">🌐 ОНЛАЙН</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ========================== CAREER ============================ -->
+  <div class="screen" id="careerIntro" role="dialog" aria-label="Карьера, вводная">
+    <div class="card">
+      <div class="logo" style="font-size:22px" id="crTournName">🏆 КАРЬЕРА</div>
+      <div class="sub" id="crTournPlace"></div>
+      <div class="note" id="crTournInfo"></div>
+      <div class="row" id="crOppList" style="margin-top:12px"></div>
+      <button class="btn" id="crReady">ВПЕРЁД</button>
+    </div>
+  </div>
+  <div class="screen" id="careerPerk" role="dialog" aria-label="Выбор перка">
+    <div class="card">
+      <div class="logo" style="font-size:20px">⚡ ВЫБЕРИ ПЕРК</div>
+      <div class="sub">Улучшение для следующих матчей</div>
+      <div class="row" id="crPerkList" style="margin-top:12px"></div>
+    </div>
+  </div>
+  <div class="screen" id="careerEnd" role="dialog" aria-label="Итоги карьеры">
+    <div class="card">
+      <div class="logo" style="font-size:20px" id="crEndTitle">🏁 КАРЬЕРА</div>
+      <div class="sub" id="crEndSub"></div>
+      <div id="crEndStats" style="margin-top:10px"></div>
+      <button class="btn" id="crEndRestart">НАЧАТЬ ЗАНОВО</button>
+      <button class="btn ghost" id="crEndMenu">В МЕНЮ</button>
+    </div>
+  </div>
+
+  <!-- ========================== ONLINE ============================ -->
+  <div class="screen" id="onlineLobby" role="dialog" aria-label="Онлайн лобби">
+    <div class="card">
+      <div class="logo" style="font-size:20px">🌐 ОНЛАЙН МАТЧ</div>
+      <div class="sub" id="netStatus">Подключение...</div>
+      <div id="netRoomCode" style="font-family:var(--mono);font-size:28px;letter-spacing:.2em;color:var(--acc);text-align:center;margin:12px 0;display:none"></div>
+      <button class="btn" id="netCreate">СОЗДАТЬ КОМНАТУ</button>
+      <button class="btn ghost" id="netJoin" style="margin-top:8px">ПРИСОЕДИНИТЬСЯ ПО КОДУ</button>
+      <div class="note" id="netNote">Релей-сервер задаётся параметром ?net=ws://… в адресе страницы (по умолчанию — боевой relay). Создайте комнату и передайте код другу.</div>
+      <button class="btn ghost" id="netClose" style="margin-top:12px">ЗАКРЫТЬ</button>
     </div>
   </div>
 
@@ -1792,6 +1838,542 @@ class Renderer {
   }
 }
 
+
+/* ====== 25_career.js ====== */
+/* =====================================================================
+ *  CAREER — Roguelike tournament mode: basement to world championship.
+ *
+ *  12 tournaments, each harder than the last. Between matches you pick
+ *  one of three perks that alter physics, assist or AI behaviour.
+ *  A loss ends the run; a win advances to the next tournament.
+ *  Every run is different because the perk pool is shuffled.
+ * ===================================================================== */
+
+/* ------------------------------------------------------------------ */
+/*  PERK DEFINITIONS                                                   */
+/* ------------------------------------------------------------------ */
+const PERKS = [
+  // --- GREEN (common, always available) ---
+  { id: 'steady_hand',   name: 'Стальная рука',       desc: 'Помощь прицела +8%',         rarity: 'green',
+    apply(g) { g.settings.assist = clamp(g.settings.assist + 0.08, 0, 1); } },
+  { id: 'quick_feet',    name: 'Быстрые ноги',         desc: 'Помощь позиции +10%',        rarity: 'green',
+    apply(g) { g.settings.posAssist = clamp(g.settings.posAssist + 0.10, 0, 1); } },
+  { id: 'heavy_spin',    name: 'Тяжёлое вращение',     desc: 'Вращение +12% на всех ударах', rarity: 'green',
+    apply(g) { g._careerSpinBoost = (g._careerSpinBoost || 1) * 1.12; } },
+  { id: 'fast_arms',     name: 'Быстрые руки',         desc: 'Макс. скорость замаха +15%',  rarity: 'green',
+    apply(g) { g._careerSpeedBoost = (g._careerSpeedBoost || 1) * 1.15; } },
+  { id: 'iron_will',     name: 'Железная воля',        desc: 'Помощь +12% на решающих очках', rarity: 'green',
+    apply(g) { g._careerDecisiveBoost = 0.12; } },
+  { id: 'deep_breath',   name: 'Глубокий вдох',        desc: 'Усталость -30%',              rarity: 'green',
+    apply(g) { g._careerFatigueReduce = 0.70; } },
+  { id: 'sharp_eye',     name: 'Зоркий глаз',          desc: 'Кольцо удара сжимается на 15% медленнее', rarity: 'green',
+    apply(g) { g._careerRingSlow = 0.85; } },
+  { id: 'net_touch',     name: 'Чутьё сетки',          desc: 'У сетки мяч всегда перелетает', rarity: 'green',
+    apply(g) { g._careerNetSafe = true; } },
+  // --- BLUE (uncommon, unlock after tournament 3) ---
+  { id: 'topspin_master',name: 'Мастер топспина',      desc: 'Топспин +25%, бэкспин -10%',  rarity: 'blue',
+    apply(g) { g._careerTopspinBoost = 1.25; g._careerBackspinPenalty = 0.90; } },
+  { id: 'smash_fury',    name: 'Ярость смеша',         desc: 'Смеш +30% скорости',          rarity: 'blue',
+    apply(g) { g._careerSmashBoost = 1.30; } },
+  { id: 'counter_punch', name: 'Контр-удар',           desc: 'Контр-топспин +40% вращения', rarity: 'blue',
+    apply(g) { g._careerCounterBoost = 1.40; } },
+  { id: 'chop_back',     name: 'Глубокая защита',      desc: 'Чоп +35% вращения, -20% скорость соперника', rarity: 'blue',
+    apply(g) { g._careerChopBoost = 1.35; g._careerAISlowdown = 0.80; } },
+  { id: 'deception',     name: 'Обманный удар',        desc: 'Боковое вращение +50%',       rarity: 'blue',
+    apply(g) { g._careerSidespinBoost = 1.50; } },
+  // --- GOLD (rare, unlock after tournament 7) ---
+  { id: 'berserker',     name: 'Берсерк',              desc: 'Assist = 0, все удары +25% мощности', rarity: 'gold',
+    apply(g) { g.settings.assist = 0; g._careerSpeedBoost = (g._careerSpeedBoost || 1) * 1.25; } },
+  { id: 'glass_cannon',  name: 'Стеклянная пушка',     desc: 'Скорость +35%, точность -15%', rarity: 'gold',
+    apply(g) { g._careerSpeedBoost = (g._careerSpeedBoost || 1) * 1.35; g.settings.assist = clamp(g.settings.assist - 0.15, 0, 1); } },
+  { id: 'time_master',   name: 'Повелитель времени',   desc: 'Замедление 0.3x при smash > 80 км/ч', rarity: 'gold',
+    apply(g) { g._careerSlowmoThreshold = 80; g._careerSlowmoScale = 0.3; } },
+];
+
+function getAvailablePerks(career) {
+  const t = career.currentTournament;
+  return PERKS.filter(p => {
+    if (p.rarity === 'blue' && t < 3) return false;
+    if (p.rarity === 'gold' && t < 7) return false;
+    if (career.perks.some(pk => pk.id === p.id)) return false;  // no duplicates
+    return true;
+});
+}
+
+function pickThreePerks(career) {
+  const pool = getAvailablePerks(career);
+  const shuffled = pool.slice().sort(() => Math.random() - 0.5);
+  return shuffled.slice(0, Math.min(3, shuffled.length));
+}
+
+/* ------------------------------------------------------------------ */
+/*  TOURNAMENT DEFINITIONS                                             */
+/* ------------------------------------------------------------------ */
+const TOURNAMENTS = [
+  { id: 0,  name: 'Подвальный пинг-понг',      place: 'Гараж',             eloMin: 600,  eloMax: 900,  rounds: 3, perkAfter: false, icon: '🏚️' },
+  { id: 1,  name: 'Районный чемпионат',          place: 'Дом культуры',      eloMin: 900,  eloMax: 1100, rounds: 3, perkAfter: true,  icon: '🏫' },
+  { id: 2,  name: 'Городская лига',              place: 'Спорткомплекс',     eloMin: 1100, eloMax: 1350, rounds: 3, perkAfter: true,  icon: '🏟️' },
+  { id: 3,  name: 'Областной турнир',            place: 'Дворец спорта',     eloMin: 1300, eloMax: 1550, rounds: 4, perkAfter: true,  icon: '🏛️' },
+  { id: 4,  name: 'Первенство региона',          place: 'Арена',             eloMin: 1500, eloMax: 1750, rounds: 4, perkAfter: true,  icon: '🏟️' },
+  { id: 5,  name: 'Кубок Федерации',             place: 'Центральный зал',   eloMin: 1700, eloMax: 1950, rounds: 4, perkAfter: true,  icon: '🏆' },
+  { id: 6,  name: 'Международный Гран-При',      place: 'Олимпийский зал',   eloMin: 1900, eloMax: 2150, rounds: 5, perkAfter: true,  icon: '🌍' },
+  { id: 7,  name: 'Чемпионат Европы',            place: 'Европа Арена',      eloMin: 2100, eloMax: 2350, rounds: 5, perkAfter: true,  icon: '🇪🇺' },
+  { id: 8,  name: 'Кубок Мира',                  place: 'Токио',             eloMin: 2300, eloMax: 2550, rounds: 5, perkAfter: true,  icon: '🌏' },
+  { id: 9,  name: 'Суперсерия',                  place: 'Шанхай',            eloMin: 2500, eloMax: 2700, rounds: 5, perkAfter: true,  icon: '⭐' },
+  { id: 10, name: 'Мировой Финал',               place: 'Дюссельдорф',       eloMin: 2700, eloMax: 2900, rounds: 6, perkAfter: true,  icon: '👑' },
+  { id: 11, name: 'Зал Славы',                   place: 'Легендарный зал',   eloMin: 2900, eloMax: 3100, rounds: 1, perkAfter: false, icon: '🔮' },
+];
+
+/* ------------------------------------------------------------------ */
+/*  OPPONENT NAME GENERATOR                                            */
+/* ------------------------------------------------------------------ */
+const OPP_FIRST = ['Алексей', 'Дмитрий', 'Сергей', 'Андрей', 'Михаил', 'Николай', 'Виктор', 'Игорь',
+  'Олег', 'Павел', 'Евгений', 'Роман', 'Максим', 'Артём', 'Кирилл', 'Тимур',
+  'Ван', 'Ли', 'Чжан', 'Линь', 'Чен', 'Ян', 'Хироши', 'Кэндзи', 'Юки',
+  'Тим', 'Ян-Ове', 'Кристиан', 'Маттиас', 'Феликс', 'Йонас', 'Каль'];
+const OPP_STYLE = ['Атакующий', 'Защитник', 'Универсал', 'Тактик', 'Агрессор', 'Стенка', 'Виртуоз', 'Пушер'];
+
+function generateOpponent(eloMin, eloMax) {
+  const elo = Math.round(eloMin + Math.random() * (eloMax - eloMin));
+  const name = OPP_FIRST[Math.floor(Math.random() * OPP_FIRST.length)];
+  const style = OPP_STYLE[Math.floor(Math.random() * OPP_STYLE.length)];
+  // map ELO to AI level (0-4) approximately
+  let level = 0;
+  if (elo >= 2500) level = 4; else if (elo >= 2000) level = 3;
+  else if (elo >= 1400) level = 2; else if (elo >= 1000) level = 1;
+  return { name, elo, style, level, id: Math.random().toString(36).slice(2, 8) };
+}
+
+/* ------------------------------------------------------------------ */
+/*  CAREER CLASS                                                       */
+/* ------------------------------------------------------------------ */
+class Career {
+  constructor(game) {
+    this.game = game;
+    this.active = false;
+    this.currentTournament = 0;
+    this.currentRound = 0;
+    this.totalWins = 0;
+    this.totalLosses = 0;
+    this.perks = [];
+    this.matchHistory = [];
+    this.opponents = [];        // current tournament bracket
+    this.pendingPerks = null;   // three perks to choose from
+    this.state = 'IDLE';        // IDLE TOURNAMENT_INTRO OPPONENT_SELECT PERK_SELECT MATCH MATCH_END TOURNAMENT_END RUN_END
+    this.runStats = { totalPoints: 0, totalRallies: 0, longestRally: 0, maxSpeed: 0 };
+  }
+
+  start() {
+    this.active = true;
+    this.currentTournament = 0;
+    this.currentRound = 0;
+    this.totalWins = 0;
+    this.totalLosses = 0;
+    this.perks = [];
+    this.matchHistory = [];
+    this.pendingPerks = null;
+    this.runStats = { totalPoints: 0, totalRallies: 0, longestRally: 0, maxSpeed: 0 };
+    this._resetCareerBoosts();
+    this.enterTournament();
+  }
+
+  _resetCareerBoosts() {
+    const g = this.game;
+    g._careerSpinBoost = 1; g._careerSpeedBoost = 1; g._careerTopspinBoost = 1;
+    g._careerBackspinPenalty = 1; g._careerSmashBoost = 1; g._careerCounterBoost = 1;
+    g._careerChopBoost = 1; g._careerSidespinBoost = 1; g._careerDecisiveBoost = 0;
+    g._careerFatigueReduce = 1; g._careerRingSlow = 1; g._careerNetSafe = false;
+    g._careerAISlowdown = 1; g._careerSlowmoThreshold = 999; g._careerSlowmoScale = 0.42;
+  }
+
+  enterTournament() {
+    const t = TOURNAMENTS[this.currentTournament];
+    if (!t) { this.state = 'RUN_END'; return; }
+    this.currentRound = 0;
+    // generate bracket
+    this.opponents = [];
+    for (let i = 0; i < t.rounds; i++) {
+      this.opponents.push(generateOpponent(t.eloMin, t.eloMax));
+    }
+    this.state = 'TOURNAMENT_INTRO';
+  }
+
+  /** Called by UI when the player dismisses the intro screen */
+  readyForOpponentSelect() {
+    this.state = 'OPPONENT_SELECT';
+  }
+
+  /** Called when the player selects an opponent to play */
+  selectOpponent(idx) {
+    if (idx < 0 || idx >= this.opponents.length) return;
+    this.selectedOpponent = this.opponents[idx];
+    const g = this.game;
+    // apply opponent
+    g.settings.difficulty = this.selectedOpponent.level;
+    g.ai.setLevel(this.selectedOpponent.level);
+    g.ai.reset();
+    // reset career decisive boost flag
+    if (g._careerDecisiveBoost) g._careerDecisiveActive = false;
+    this.state = 'MATCH';
+    g.startMatch(this.selectedOpponent.level);
+  }
+
+  /** Called by Game when a match ends */
+  onMatchEnd(winner) {
+    const won = winner === 1;
+    if (won) {
+      this.totalWins++;
+      this.currentRound++;
+      // remove beaten opponent
+      const idx = this.opponents.indexOf(this.selectedOpponent);
+      if (idx >= 0) this.opponents.splice(idx, 1);
+    } else {
+      this.totalLosses++;
+    }
+    this.matchHistory.push({
+      tournament: this.currentTournament, round: this.currentRound,
+      opponent: { ...this.selectedOpponent }, won,
+      score: [...this.game.score],
+    });
+    this.runStats.totalPoints += this.game.score[0];
+    this.runStats.maxSpeed = Math.max(this.runStats.maxSpeed, this.game.stats.maxSpeed);
+
+    if (!won) {
+      this.state = 'RUN_END';
+      return;
+    }
+    // check tournament complete
+    if (this.currentRound >= TOURNAMENTS[this.currentTournament].rounds) {
+      this.state = 'TOURNAMENT_END';
+      return;
+    }
+    // offer perks if applicable
+    const t = TOURNAMENTS[this.currentTournament];
+    if (t.perkAfter && this.currentRound === Math.ceil(t.rounds / 2)) {
+      this.pendingPerks = pickThreePerks(this);
+      if (this.pendingPerks.length > 0) {
+        this.state = 'PERK_SELECT';
+        return;
+      }
+    }
+    this.state = 'OPPONENT_SELECT';
+  }
+
+  /** Called when the player picks a perk */
+  selectPerk(idx) {
+    if (!this.pendingPerks || idx < 0 || idx >= this.pendingPerks.length) return;
+    const perk = this.pendingPerks[idx];
+    this.perks.push(perk);
+    perk.apply(this.game);
+    this.pendingPerks = null;
+    this.state = 'OPPONENT_SELECT';
+  }
+
+  /** Advance to next tournament */
+  advanceTournament() {
+    this.currentTournament++;
+    if (this.currentTournament >= TOURNAMENTS.length) {
+      this.state = 'RUN_END';
+      return;
+    }
+    this.enterTournament();
+  }
+
+  /** Tournament name for display */
+  get currentTournamentInfo() {
+    return TOURNAMENTS[this.currentTournament] || TOURNAMENTS[TOURNAMENTS.length - 1];
+  }
+
+  get isRunActive() {
+    return this.active && this.state !== 'RUN_END' && this.state !== 'IDLE';
+  }
+
+  /** Serialize for localStorage */
+  save() {
+    const data = {
+      currentTournament: this.currentTournament,
+      currentRound: this.currentRound,
+      totalWins: this.totalWins,
+      totalLosses: this.totalLosses,
+      perks: this.perks.map(p => p.id),
+      matchHistory: this.matchHistory.slice(-20),
+      runStats: this.runStats,
+    };
+    try { localStorage.setItem('topspin_career', JSON.stringify(data)); } catch(e) {}
+  }
+
+  load() {
+    try {
+      const raw = localStorage.getItem('topspin_career');
+      if (!raw) return false;
+      const data = JSON.parse(raw);
+      this.currentTournament = data.currentTournament || 0;
+      this.currentRound = data.currentRound || 0;
+      this.totalWins = data.totalWins || 0;
+      this.totalLosses = data.totalLosses || 0;
+      this.matchHistory = data.matchHistory || [];
+      this.runStats = data.runStats || this.runStats;
+      this.perks = (data.perks || []).map(id => PERKS.find(p => p.id === id)).filter(Boolean);
+      this.active = true;
+      this._resetCareerBoosts();
+      this.perks.forEach(p => p.apply(this.game));
+      this.enterTournament();
+      return true;
+    } catch(e) { return false; }
+  }
+}
+
+/* ====== 27_network.js ====== */
+/* =====================================================================
+ *  NETWORK — Online multiplayer with opponent racket visibility.
+ *
+ *  Architecture: WebSocket relay server. One player hosts (simulates
+ *  physics), the other is a guest (receives ball+racket state).
+ *  Both see each other's racket in real-time.
+ *
+ *  Protocol:
+ *    Client → Server:  { type: 'join', room? }
+ *    Server → Client:  { type: 'assigned', side, room, peerId }
+ *    Host → Server:    { type: 'state', ball:{p,v,w}, racket:{pos,normal,anim}, score, rally }
+ *    Server → Guest:   { type: 'state', ... }  (relayed from host)
+ *    Guest → Server:   { type: 'input', racket:{pos,normal,anim} }
+ *    Server → Host:    { type: 'input', ... }  (relayed from guest)
+ *    Either → Server:  { type: 'point', who, reason }
+ *    Server → Both:    { type: 'point', who, reason }
+ * ===================================================================== */
+
+const NET_SERVER_URL = 'wss://topspin-relay.fly.dev';  // configurable
+const NET_TICK_RATE = 20;        // Hz — state updates per second
+const NET_INPUT_RATE = 30;       // Hz — input updates per second
+const NET_INTERP_MS = 80;        // interpolation buffer in ms
+
+class NetworkManager {
+  constructor(game) {
+    this.game = game;
+    this.ws = null;
+    this.connected = false;
+    this.room = null;
+    this.side = 0;              // +1 = host (near), -1 = guest (far)
+    this.peerId = null;
+    this.isHost = false;
+    this.state = 'OFFLINE';     // OFFLINE CONNECTING LOBBY WAITING IN_MATCH DISCONNECTED
+    this.latency = 0;
+    this._pingT = 0;
+    this._lastStateT = 0;
+    this._lastInputT = 0;
+    this._interpBuf = [];       // ring buffer for interpolation
+    this._interpIdx = 0;
+    this._opponentRacket = {
+      pos: V3.new(0, PH.TABLE_Y + 0.25, -1.45),
+      normal: V3.new(0, 0, 1),
+      anim: { swing: 0, windup: 0, lean: 0 },
+    };
+    this._opponentScore = 0;
+    this._lastServerBall = null;
+    this._callbacks = {};
+  }
+
+  on(event, cb) { this._callbacks[event] = cb; }
+  _emit(event, data) { if (this._callbacks[event]) this._callbacks[event](data); }
+
+  connect(url) {
+    if (this.ws) this.disconnect();
+    this.state = 'CONNECTING';
+    // the relay is not part of the bundle: it is chosen per page load
+    // (?net=wss://your.host) or falls back to the default deployment
+    let target = url;
+    if (!target) {
+      try {
+        const q = new URLSearchParams(location.search).get('net');
+        if (q) target = q;
+      } catch (e) { /* no query string available */ }
+    }
+    try {
+      this.ws = new WebSocket(target || NET_SERVER_URL);
+    } catch(e) {
+      this.state = 'DISCONNECTED';
+      this._emit('error', 'Не удалось подключиться');
+      return;
+    }
+    this.ws.onopen = () => {
+      this.connected = true;
+      this.state = 'LOBBY';
+      this._emit('connected', {});
+      this._startPing();
+    };
+    this.ws.onmessage = (ev) => {
+      try { this._handle(JSON.parse(ev.data)); } catch(e) {}
+    };
+    this.ws.onclose = () => {
+      this.connected = false;
+      if (this.state === 'IN_MATCH') this.state = 'DISCONNECTED';
+      else this.state = 'OFFLINE';
+      this._emit('disconnected', {});
+    };
+    this.ws.onerror = () => {
+      this.state = 'DISCONNECTED';
+      this._emit('error', 'Ошибка соединения');
+    };
+  }
+
+  disconnect() {
+    this._stopPing();
+    if (this.ws) { this.ws.close(); this.ws = null; }
+    this.connected = false;
+    this.state = 'OFFLINE';
+    this.room = null;
+    this.side = 0;
+  }
+
+  joinRoom(roomId) {
+    if (!this.connected) return;
+    this.state = 'WAITING';
+    this._send({ type: 'join', room: roomId || undefined });
+  }
+
+  leaveRoom() {
+    this._send({ type: 'leave' });
+    this.room = null;
+    this.state = 'LOBBY';
+  }
+
+  /* ---- message handler ---- */
+  _handle(msg) {
+    switch (msg.type) {
+      case 'assigned':
+        this.room = msg.room;
+        this.side = msg.side;
+        this.peerId = msg.peerId;
+        this.isHost = msg.side === 1;
+        this._emit('assigned', msg);
+        break;
+      case 'ready':
+        this.state = 'IN_MATCH';
+        this._emit('matchStart', { side: this.side });
+        break;
+      case 'state':
+        // received from host (we are guest)
+        if (!this.isHost) this._applyRemoteState(msg);
+        break;
+      case 'input':
+        // received from guest (we are host)
+        if (this.isHost) this._applyRemoteInput(msg);
+        break;
+      case 'point':
+        this._emit('point', msg);
+        break;
+      case 'peer_left':
+        this._emit('peerLeft', {});
+        this.state = 'LOBBY';
+        break;
+      case 'pong':
+        this.latency = Date.now() - this._pingT;
+        break;
+      case 'error':
+        this._emit('error', msg.message || 'Server error');
+        break;
+    }
+  }
+
+  _send(obj) {
+    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+      this.ws.send(JSON.stringify(obj));
+    }
+  }
+
+  _startPing() {
+    this._stopPing();
+    this._pingInterval = setInterval(() => {
+      if (this.connected) {
+        this._pingT = Date.now();
+        this._send({ type: 'ping' });
+      } else {
+        this._stopPing();
+      }
+    }, 2000);
+  }
+  _stopPing() {
+    if (this._pingInterval) { clearInterval(this._pingInterval); this._pingInterval = null; }
+  }
+
+  /* ---- host: send game state to server ---- */
+  sendGameState() {
+    if (!this.isHost || this.state !== 'IN_MATCH') return;
+    const now = Date.now();
+    if (now - this._lastStateT < 1000 / NET_TICK_RATE) return;
+    this._lastStateT = now;
+    const g = this.game;
+    const b = g.ball;
+    const pad = g.player;
+    this._send({
+      type: 'state',
+      t: g.time,
+      ball: b.live ? { p: [b.p.x, b.p.y, b.p.z], v: [b.v.x, b.v.y, b.v.z], w: [b.w.x, b.w.y, b.w.z] } : null,
+      racket: { pos: [pad.pos.x, pad.pos.y, pad.pos.z], n: [pad.normal.x, pad.normal.y, pad.normal.z], sw: pad.swing },
+      score: g.score.slice(),
+      rally: g.rally,
+      shotId: g.shotId,
+    });
+  }
+
+  /* ---- guest: send input (racket position + normal) to server ---- */
+  sendInput() {
+    if (this.isHost || this.state !== 'IN_MATCH') return;
+    const now = Date.now();
+    if (now - this._lastInputT < 1000 / NET_INPUT_RATE) return;
+    this._lastInputT = now;
+    const pad = this.game.player;
+    this._send({
+      type: 'input',
+      pos: [pad.pos.x, pad.pos.y, pad.pos.z],
+      n: [pad.normal.x, pad.normal.y, pad.normal.z],
+      sw: pad.swing,
+    });
+  }
+
+  /* ---- guest: apply host state (interpolated) ---- */
+  _applyRemoteState(msg) {
+    this._interpBuf.push({ ...msg, receivedAt: Date.now() });
+    if (this._interpBuf.length > 30) this._interpBuf.shift();
+    // apply ball immediately (prediction handles smoothing)
+    if (msg.ball) {
+      const b = this.game.ball;
+      const bp = msg.ball.p, bv = msg.ball.v, bw = msg.ball.w;
+      // smooth lerp toward server state (corrects drift)
+      const k = 0.35;
+      if (b.live) {
+        b.p.x = lerp(b.p.x, bp[0], k); b.p.y = lerp(b.p.y, bp[1], k); b.p.z = lerp(b.p.z, bp[2], k);
+        b.v.x = lerp(b.v.x, bv[0], k); b.v.y = lerp(b.v.y, bv[1], k); b.v.z = lerp(b.v.z, bv[2], k);
+      } else {
+        V3.set(b.p, bp[0], bp[1], bp[2]); V3.set(b.v, bv[0], bv[1], bv[2]);
+        V3.set(b.w, bw[0], bw[1], bw[2]);
+        b.live = true;
+      }
+    }
+    // apply opponent racket (for rendering)
+    if (msg.racket) {
+      const op = this._opponentRacket;
+      const rp = msg.racket.pos, rn = msg.racket.n;
+      V3.set(op.pos, rp[0], rp[1], rp[2]);
+      V3.set(op.normal, rn[0], rn[1], rn[2]);
+      op.anim.swing = msg.racket.sw || 0;
+    }
+    // sync score
+    if (msg.score) this.game.score = msg.score;
+  }
+
+  /* ---- host: apply guest input ---- */
+  _applyRemoteInput(msg) {
+    const op = this._opponentRacket;
+    if (msg.pos) V3.set(op.pos, msg.pos[0], msg.pos[1], msg.pos[2]);
+    if (msg.n) V3.set(op.normal, msg.n[0], msg.n[1], msg.n[2]);
+    if (msg.sw !== undefined) op.anim.swing = msg.sw;
+  }
+
+  get opponentRacket() { return this._opponentRacket; }
+  get isConnected() { return this.connected; }
+  get isInMatch() { return this.state === 'IN_MATCH'; }
+}
 
 /* ====== 30_physics.js ====== */
 /* =====================================================================
@@ -6291,6 +6873,19 @@ class Game {
     this._fpsT = 0; this._fpsN = 0; this.fps = 60;
 
     this.bindInput();
+
+    // Career mode (roguelike tournament progression, ported from PR #1)
+    this.career = new Career(this);
+    this._careerSpinBoost = 1; this._careerSpeedBoost = 1;
+    this._careerTopspinBoost = 1; this._careerBackspinPenalty = 1;
+    this._careerSmashBoost = 1; this._careerCounterBoost = 1;
+    this._careerChopBoost = 1; this._careerSidespinBoost = 1;
+    this._careerDecisiveBoost = 0; this._careerNetSafe = false;
+    this._careerAISlowdown = 1;
+
+    // Online multiplayer over the relay (experimental)
+    this.network = new NetworkManager(this);
+
     this.resize();
     window.addEventListener('resize', () => this.resize());
   }
@@ -6455,6 +7050,12 @@ class Game {
     this.director.enabled = this.settings.adaptive;
     this.pointNote = null;
     if (diff !== undefined) { this.settings.difficulty = diff; this.ai.setLevel(diff); }
+    // career: the chop perk slows the opponent, always from the base speed
+    if (this.career.active && this._careerAISlowdown < 1) {
+      this.ai.maxSpeed = this.ai.L.move * this._careerAISlowdown;
+    }
+    // career and online are scored modes: no bullet time there
+    this.setSlowmoAllowed(!(this.career.active || this.network.isInMatch));
     this.score = [0, 0]; this.games = [0, 0];
     this.rally = 0; this.bestRally = 0;
     this.stats = { shots: 0, winners: 0, errors: 0, maxSpeed: 0, maxSpin: 0, byStroke: {}, totalSpin: 0, rallies: 0 };
@@ -6573,6 +7174,17 @@ class Game {
     if ((this.score[0] >= T || this.score[1] >= T) && Math.abs(this.score[0] - this.score[1]) >= 2) {
       this.matchWinner = this.score[0] > this.score[1] ? 1 : -1;
     }
+    // network: relay the point to the peer
+    if (this.network.isInMatch) {
+      this.network._send({ type: 'point', who, reason, score: this.score.slice() });
+    }
+    // career: the decisive perk arms itself on match point and pays out
+    // on the player's next shot (see applyHit)
+    if (this.career.active && this._careerDecisiveBoost > 0) {
+      const isMatchPoint = (this.score[0] >= T - 1 && this.score[0] > this.score[1]) ||
+                           (this.score[1] >= T - 1 && this.score[1] > this.score[0]);
+      if (isMatchPoint) this._careerDecisiveActive = true;
+    }
     this.ui && this.ui.syncScore();
   }
 
@@ -6645,6 +7257,22 @@ class Game {
     this.shotId++;                       // the opponent reacts once per shot
     this.rallyBounces.length = 0;
     this.netTouched = false;
+    // career perks act on the player's own shots: the chosen boosts scale
+    // speed/spin right after the impact resolves, before anything reads them
+    if (side > 0 && this.career.active) {
+      const sid = (racket.stroke && racket.stroke.id) || 'DRIVE';
+      let vm = this._careerSpeedBoost;
+      let wm = this._careerSpinBoost;
+      if (sid === 'LOOP' || sid === 'DRIVE' || sid === 'SMASH' || sid === 'COUNTER') wm *= this._careerTopspinBoost;
+      if (sid === 'PUSH' || sid === 'CHOP') wm *= this._careerBackspinPenalty;
+      if (sid === 'SMASH') vm *= this._careerSmashBoost;
+      if (sid === 'COUNTER') vm *= this._careerCounterBoost;
+      if (sid === 'CHOP') wm *= this._careerChopBoost;
+      if (sid === 'HOOK' || sid === 'SIDE' || sid === 'SERVE_SIDE') b.w.y *= this._careerSidespinBoost;
+      if (this._careerDecisiveActive) { vm *= 1 + this._careerDecisiveBoost; this._careerDecisiveActive = false; }
+      if (vm !== 1) { b.v.x *= vm; b.v.y *= vm; b.v.z *= vm; }
+      if (wm !== 1) { b.w.x *= wm; b.w.y *= wm; b.w.z *= wm; }
+    }
     if (!this.isServeBall) this.rally++;
 
     const speed = V3.len(b.v), spin = V3.len(b.w);
@@ -7426,6 +8054,17 @@ class Game {
           this.audio.gameOver(this.matchWinner > 0);
           this.settleMatch();
           this.ui && this.ui.showMatchEnd(this.matchWinner > 0);
+          // career progression over the results screen
+          if (this.career.active) {
+            this.career.onMatchEnd(this.matchWinner);
+            if (this.career.state === 'RUN_END') this.ui && this.ui.showCareerRunEnd(this.career);
+            else if (this.career.state === 'TOURNAMENT_END') this.ui && this.ui.showCareerTournamentEnd(this.career);
+            else if (this.career.state === 'PERK_SELECT') this.ui && this.ui.showCareerPerks(this.career);
+            // a win with no perk on offer still needs a way forward: PR #1
+            // left this branch with no screen and the run silently stalled
+            else if (this.career.state === 'OPPONENT_SELECT') this.ui && this.ui.showCareerOpponentSelect(this.career);
+            this.career.save();
+          }
         } else if (this.stateT > 1.35) {
           this.rally = 0;
           this.prepServe();
@@ -7451,6 +8090,12 @@ class Game {
     this.updateStrikeWindow(dtReal);
     if (this.state === GS.RALLY || this.state === GS.SERVE_TOSS) this.moments.push(this.time, this);
     if (this.training) this.training.update(dtReal);
+    else if (this.network.isInMatch) {
+      // online: the far paddle belongs to the peer, not to the AI
+      const op = this.network.opponentRacket;
+      V3.copy(this.aiPaddle.pos, op.pos);
+      V3.copy(this.aiPaddle.normal, op.normal);
+    }
     else this.ai.think(this, dt);
     this.tryAiHit();
     this.particles.update(dt);
@@ -7473,6 +8118,19 @@ class Game {
     P.sat = expSmooth(P.sat, 1.05 + (1 - this.timeScale) * 0.25, 4, dtReal);
     P.ca = expSmooth(P.ca, 0.55 + sp * 0.75, 4, dtReal);
     this.audio.setCrowd(clamp(this.rally / 18, 0, 1) * 0.6 + (this.state === GS.POINT ? 0.4 : 0));
+
+    // network: sync state (host) or input (guest)
+    if (this.network.isInMatch) {
+      if (this.network.isHost) this.network.sendGameState();
+      else this.network.sendInput();
+    }
+    // career: net-safe perk lifts the ball over the tape
+    if (this._careerNetSafe && this.ball.live && this.ball.lastHitBy === 1) {
+      const nearNet = Math.abs(this.ball.p.z) < 0.15;
+      if (nearNet && this.ball.p.y < PH.NET_TOP + PH.R * 2 && this.ball.v.z < 0) {
+        this.ball.v.y += 0.8;
+      }
+    }
 
     // fps
     this._fpsN++; this._fpsT += dtReal;
@@ -8677,6 +9335,184 @@ class UI {
         `<b>assist</b> ${(g.settings.assist * 100) | 0}%  <b>pos</b> ${(g.settings.posAssist * 100) | 0}%`;
     }
   }
+
+  /* ================================================================
+   *  CAREER MODE UI (ported from PR #1, screens reuse .screen/.opt)
+   * ================================================================ */
+  bindCareer() {
+    const g = this.game;
+    $('#careerStart').addEventListener('click', () => {
+      g.audio.init(); g.audio.resume(); g.audio.ui('click');
+      if (g.career.load()) {
+        this.showCareerIntro(g.career);
+      } else {
+        g.career.start();
+        this.showCareerIntro(g.career);
+      }
+    });
+    $('#crReady').addEventListener('click', () => {
+      g.audio.ui('click');
+      const c = g.career;
+      c.readyForOpponentSelect();
+      this.showCareerOpponentSelect(c);
+    });
+    $('#crEndRestart').addEventListener('click', () => {
+      g.audio.ui('click');
+      $('#careerEnd').classList.remove('on');
+      g.career.start();
+      this.showCareerIntro(g.career);
+    });
+    $('#crEndMenu').addEventListener('click', () => {
+      g.audio.ui('click');
+      $('#careerEnd').classList.remove('on');
+      $('#menu').classList.add('on');
+    });
+  }
+
+  showCareerIntro(career) {
+    const t = career.currentTournamentInfo;
+    $$('.screen').forEach(s => s.classList.remove('on'));
+    $('#crTournName').textContent = `${t.icon} ${t.name}`;
+    $('#crTournPlace').textContent = t.place;
+    $('#crTournInfo').textContent = `Раундов: ${t.rounds} · ELO ${t.eloMin}–${t.eloMax} · Побед: ${career.totalWins}`;
+    $('#careerIntro').classList.add('on');
+  }
+
+  showCareerOpponentSelect(career) {
+    const g = this.game;
+    $$('.screen').forEach(s => s.classList.remove('on'));
+    const list = $('#crOppList');
+    list.innerHTML = '';
+    career.opponents.forEach((opp, i) => {
+      const btn = document.createElement('button');
+      btn.className = 'opt';
+      btn.innerHTML = `<b>${opp.name}</b><s>${opp.style} · ELO ${opp.elo}</s>`;
+      btn.addEventListener('click', () => {
+        g.audio.ui('click');
+        $$('.screen').forEach(s => s.classList.remove('on'));
+        career.selectOpponent(i);
+      });
+      list.appendChild(btn);
+    });
+    const status = document.createElement('div');
+    status.className = 'note';
+    status.textContent = `Раунд ${career.currentRound + 1} из ${career.currentTournamentInfo.rounds} · Перков: ${career.perks.length}`;
+    status.style.marginTop = '10px';
+    list.appendChild(status);
+    $('#careerIntro').classList.add('on');
+  }
+
+  showCareerPerks(career) {
+    const g = this.game;
+    $$('.screen').forEach(s => s.classList.remove('on'));
+    const list = $('#crPerkList');
+    list.innerHTML = '';
+    career.pendingPerks.forEach((perk, i) => {
+      const btn = document.createElement('button');
+      btn.className = 'opt';
+      const colors = { green: '#4ee39a', blue: '#39c6ff', gold: '#ffd34d' };
+      btn.style.borderColor = colors[perk.rarity] || '#39c6ff';
+      btn.innerHTML = `<b style="color:${colors[perk.rarity]}">${perk.name}</b><s>${perk.desc}</s>`;
+      btn.addEventListener('click', () => {
+        g.audio.ui('click');
+        career.selectPerk(i);
+        $$('.screen').forEach(s => s.classList.remove('on'));
+        this.showCareerOpponentSelect(career);
+      });
+      list.appendChild(btn);
+    });
+    $('#careerPerk').classList.add('on');
+  }
+
+  showCareerTournamentEnd(career) {
+    const t = career.currentTournamentInfo;
+    this.showNote({ text: `${t.icon} ${t.name} ПОБЕЖДЁН!`, col: '#ffd34d', code: 'win' });
+    setTimeout(() => {
+      career.advanceTournament();
+      if (career.state === 'RUN_END') {
+        this.showCareerRunEnd(career);
+      } else {
+        this.showCareerIntro(career);
+      }
+    }, 2500);
+  }
+
+  showCareerRunEnd(career) {
+    $$('.screen').forEach(s => s.classList.remove('on'));
+    const t = TOURNAMENTS[Math.max(0, career.currentTournament - 1)] || TOURNAMENTS[0];
+    const isVictory = career.currentTournament >= TOURNAMENTS.length;
+    $('#crEndTitle').textContent = isVictory ? '👑 ЧЕМПИОН МИРА!' : `🏁 ${t.name}`;
+    $('#crEndSub').textContent = isVictory
+      ? 'Вы прошли все 12 турниров. Легенда.'
+      : `Выбыли на турнире: ${t.name}`;
+    const stats = $('#crEndStats');
+    stats.innerHTML = `
+      <div class="recap">
+        <div class="rc"><i style="background:#4ee39a"></i><b>${career.totalWins}</b><s>побед</s></div>
+        <div class="rc"><i style="background:#ff5d6e"></i><b>${career.totalLosses}</b><s>поражений</s></div>
+        <div class="rc"><i style="background:#39c6ff"></i><b>${career.perks.length}</b><s>перков</s></div>
+        <div class="rc"><i style="background:#ffd34d"></i><b>${Math.round(career.runStats.maxSpeed)}</b><s>км/ч макс</s></div>
+      </div>
+    `;
+    career.active = false;
+    try { localStorage.removeItem('topspin_career'); } catch(e) {}
+    $('#careerEnd').classList.add('on');
+  }
+
+  /* ================================================================
+   *  ONLINE MODE UI (relay; server picked via ?net= — see 27_network)
+   * ================================================================ */
+  bindOnline() {
+    const g = this.game;
+    const net = g.network;
+    $('#onlineStart').addEventListener('click', () => {
+      g.audio.init(); g.audio.resume(); g.audio.ui('click');
+      $$('.screen').forEach(s => s.classList.remove('on'));
+      $('#netStatus').textContent = 'Подключение...';
+      $('#netRoomCode').style.display = 'none';
+      $('#onlineLobby').classList.add('on');
+      net.connect();
+    });
+    net.on('connected', () => {
+      $('#netStatus').textContent = 'Подключено! Создайте комнату.';
+      $('#netRoomCode').style.display = 'none';
+    });
+    net.on('assigned', (msg) => {
+      $('#netRoomCode').textContent = msg.room;
+      $('#netRoomCode').style.display = 'block';
+      $('#netStatus').textContent = msg.side === 1
+        ? 'Вы хост. Ждём соперника...'
+        : 'Подключены к комнате.';
+    });
+    net.on('matchStart', () => {
+      $$('.screen').forEach(s => s.classList.remove('on'));
+      g.startMatch();
+    });
+    net.on('disconnected', () => {
+      $('#netStatus').textContent = 'Отключено.';
+    });
+    net.on('error', (msg) => {
+      $('#netStatus').textContent = `Ошибка: ${msg}`;
+    });
+    net.on('peerLeft', () => {
+      g.msg('СОПЕРНИК ВЫШЕЛ', 2.0, '#ff8a8a');
+    });
+    $('#netCreate').addEventListener('click', () => {
+      g.audio.ui('click');
+      net.joinRoom();
+    });
+    $('#netJoin').addEventListener('click', () => {
+      g.audio.ui('click');
+      const code = prompt('Введите код комнаты:');
+      if (code) net.joinRoom(code.toUpperCase().trim());
+    });
+    $('#netClose').addEventListener('click', () => {
+      g.audio.ui('click');
+      net.disconnect();
+      $('#onlineLobby').classList.remove('on');
+      $('#menu').classList.add('on');
+    });
+  }
 }
 
 const CSSFONT = '"Inter",ui-sans-serif,system-ui,-apple-system,sans-serif';
@@ -8712,6 +9548,8 @@ const ICON = {
       ui = new UI();
       game = new Game(canvas, ui);
       ui.attach(game);
+      ui.bindCareer();
+      ui.bindOnline();
     } catch (err) {
       console.error(err);
       const loading = document.getElementById('loading');

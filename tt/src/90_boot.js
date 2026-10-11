@@ -11,6 +11,8 @@
       ui = new UI();
       game = new Game(canvas, ui);
       ui.attach(game);
+      ui.bindCareer();
+      ui.bindOnline();
     } catch (err) {
       console.error(err);
       const loading = document.getElementById('loading');

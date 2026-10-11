@@ -951,6 +951,184 @@ class UI {
         `<b>assist</b> ${(g.settings.assist * 100) | 0}%  <b>pos</b> ${(g.settings.posAssist * 100) | 0}%`;
     }
   }
+
+  /* ================================================================
+   *  CAREER MODE UI (ported from PR #1, screens reuse .screen/.opt)
+   * ================================================================ */
+  bindCareer() {
+    const g = this.game;
+    $('#careerStart').addEventListener('click', () => {
+      g.audio.init(); g.audio.resume(); g.audio.ui('click');
+      if (g.career.load()) {
+        this.showCareerIntro(g.career);
+      } else {
+        g.career.start();
+        this.showCareerIntro(g.career);
+      }
+    });
+    $('#crReady').addEventListener('click', () => {
+      g.audio.ui('click');
+      const c = g.career;
+      c.readyForOpponentSelect();
+      this.showCareerOpponentSelect(c);
+    });
+    $('#crEndRestart').addEventListener('click', () => {
+      g.audio.ui('click');
+      $('#careerEnd').classList.remove('on');
+      g.career.start();
+      this.showCareerIntro(g.career);
+    });
+    $('#crEndMenu').addEventListener('click', () => {
+      g.audio.ui('click');
+      $('#careerEnd').classList.remove('on');
+      $('#menu').classList.add('on');
+    });
+  }
+
+  showCareerIntro(career) {
+    const t = career.currentTournamentInfo;
+    $$('.screen').forEach(s => s.classList.remove('on'));
+    $('#crTournName').textContent = `${t.icon} ${t.name}`;
+    $('#crTournPlace').textContent = t.place;
+    $('#crTournInfo').textContent = `Раундов: ${t.rounds} · ELO ${t.eloMin}–${t.eloMax} · Побед: ${career.totalWins}`;
+    $('#careerIntro').classList.add('on');
+  }
+
+  showCareerOpponentSelect(career) {
+    const g = this.game;
+    $$('.screen').forEach(s => s.classList.remove('on'));
+    const list = $('#crOppList');
+    list.innerHTML = '';
+    career.opponents.forEach((opp, i) => {
+      const btn = document.createElement('button');
+      btn.className = 'opt';
+      btn.innerHTML = `<b>${opp.name}</b><s>${opp.style} · ELO ${opp.elo}</s>`;
+      btn.addEventListener('click', () => {
+        g.audio.ui('click');
+        $$('.screen').forEach(s => s.classList.remove('on'));
+        career.selectOpponent(i);
+      });
+      list.appendChild(btn);
+    });
+    const status = document.createElement('div');
+    status.className = 'note';
+    status.textContent = `Раунд ${career.currentRound + 1} из ${career.currentTournamentInfo.rounds} · Перков: ${career.perks.length}`;
+    status.style.marginTop = '10px';
+    list.appendChild(status);
+    $('#careerIntro').classList.add('on');
+  }
+
+  showCareerPerks(career) {
+    const g = this.game;
+    $$('.screen').forEach(s => s.classList.remove('on'));
+    const list = $('#crPerkList');
+    list.innerHTML = '';
+    career.pendingPerks.forEach((perk, i) => {
+      const btn = document.createElement('button');
+      btn.className = 'opt';
+      const colors = { green: '#4ee39a', blue: '#39c6ff', gold: '#ffd34d' };
+      btn.style.borderColor = colors[perk.rarity] || '#39c6ff';
+      btn.innerHTML = `<b style="color:${colors[perk.rarity]}">${perk.name}</b><s>${perk.desc}</s>`;
+      btn.addEventListener('click', () => {
+        g.audio.ui('click');
+        career.selectPerk(i);
+        $$('.screen').forEach(s => s.classList.remove('on'));
+        this.showCareerOpponentSelect(career);
+      });
+      list.appendChild(btn);
+    });
+    $('#careerPerk').classList.add('on');
+  }
+
+  showCareerTournamentEnd(career) {
+    const t = career.currentTournamentInfo;
+    this.showNote({ text: `${t.icon} ${t.name} ПОБЕЖДЁН!`, col: '#ffd34d', code: 'win' });
+    setTimeout(() => {
+      career.advanceTournament();
+      if (career.state === 'RUN_END') {
+        this.showCareerRunEnd(career);
+      } else {
+        this.showCareerIntro(career);
+      }
+    }, 2500);
+  }
+
+  showCareerRunEnd(career) {
+    $$('.screen').forEach(s => s.classList.remove('on'));
+    const t = TOURNAMENTS[Math.max(0, career.currentTournament - 1)] || TOURNAMENTS[0];
+    const isVictory = career.currentTournament >= TOURNAMENTS.length;
+    $('#crEndTitle').textContent = isVictory ? '👑 ЧЕМПИОН МИРА!' : `🏁 ${t.name}`;
+    $('#crEndSub').textContent = isVictory
+      ? 'Вы прошли все 12 турниров. Легенда.'
+      : `Выбыли на турнире: ${t.name}`;
+    const stats = $('#crEndStats');
+    stats.innerHTML = `
+      <div class="recap">
+        <div class="rc"><i style="background:#4ee39a"></i><b>${career.totalWins}</b><s>побед</s></div>
+        <div class="rc"><i style="background:#ff5d6e"></i><b>${career.totalLosses}</b><s>поражений</s></div>
+        <div class="rc"><i style="background:#39c6ff"></i><b>${career.perks.length}</b><s>перков</s></div>
+        <div class="rc"><i style="background:#ffd34d"></i><b>${Math.round(career.runStats.maxSpeed)}</b><s>км/ч макс</s></div>
+      </div>
+    `;
+    career.active = false;
+    try { localStorage.removeItem('topspin_career'); } catch(e) {}
+    $('#careerEnd').classList.add('on');
+  }
+
+  /* ================================================================
+   *  ONLINE MODE UI (relay; server picked via ?net= — see 27_network)
+   * ================================================================ */
+  bindOnline() {
+    const g = this.game;
+    const net = g.network;
+    $('#onlineStart').addEventListener('click', () => {
+      g.audio.init(); g.audio.resume(); g.audio.ui('click');
+      $$('.screen').forEach(s => s.classList.remove('on'));
+      $('#netStatus').textContent = 'Подключение...';
+      $('#netRoomCode').style.display = 'none';
+      $('#onlineLobby').classList.add('on');
+      net.connect();
+    });
+    net.on('connected', () => {
+      $('#netStatus').textContent = 'Подключено! Создайте комнату.';
+      $('#netRoomCode').style.display = 'none';
+    });
+    net.on('assigned', (msg) => {
+      $('#netRoomCode').textContent = msg.room;
+      $('#netRoomCode').style.display = 'block';
+      $('#netStatus').textContent = msg.side === 1
+        ? 'Вы хост. Ждём соперника...'
+        : 'Подключены к комнате.';
+    });
+    net.on('matchStart', () => {
+      $$('.screen').forEach(s => s.classList.remove('on'));
+      g.startMatch();
+    });
+    net.on('disconnected', () => {
+      $('#netStatus').textContent = 'Отключено.';
+    });
+    net.on('error', (msg) => {
+      $('#netStatus').textContent = `Ошибка: ${msg}`;
+    });
+    net.on('peerLeft', () => {
+      g.msg('СОПЕРНИК ВЫШЕЛ', 2.0, '#ff8a8a');
+    });
+    $('#netCreate').addEventListener('click', () => {
+      g.audio.ui('click');
+      net.joinRoom();
+    });
+    $('#netJoin').addEventListener('click', () => {
+      g.audio.ui('click');
+      const code = prompt('Введите код комнаты:');
+      if (code) net.joinRoom(code.toUpperCase().trim());
+    });
+    $('#netClose').addEventListener('click', () => {
+      g.audio.ui('click');
+      net.disconnect();
+      $('#onlineLobby').classList.remove('on');
+      $('#menu').classList.add('on');
+    });
+  }
 }
 
 const CSSFONT = '"Inter",ui-sans-serif,system-ui,-apple-system,sans-serif';
