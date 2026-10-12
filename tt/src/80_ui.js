@@ -106,12 +106,27 @@ class UI {
     $('#adCoins').addEventListener('click', () => this.watchAd());
     $('#btnSettings').addEventListener('click', () => $('#settings').classList.toggle('on'));
     $('#setClose').addEventListener('click', () => $('#settings').classList.remove('on'));
-    $('#camReset').addEventListener('click', () => this.game.camReset());
+    /* the three free-camera sliders are gone: the rig is one of four authored
+       presets now, so there is nothing to reset from the settings card */
+    const cr = $('#camReset');
+    if (cr) cr.addEventListener('click', () => this.game.camReset());
     $('#btnMenu').addEventListener('click', () => { this.game.stopTraining(); $('#menu').classList.add('on'); });
     $('#btnSound').addEventListener('click', () => {
       const g = this.game; g.settings.sound = !g.settings.sound;
       g.audio.setMuted(!g.settings.sound);
       $('#btnSound').innerHTML = g.settings.sound ? ICON.sound : ICON.mute;
+    });
+    /* Spin dial: one tap cycles МЕНЬШЕ -> НОРМА -> БОЛЬШЕ. It biases how much
+       of the contact is brush (more spin, less pace) and how much is punch. */
+    const sbEl = $('#spinBias');
+    if (sbEl) sbEl.addEventListener('click', () => {
+      const g = this.game; if (!g) return;
+      const order = ['low', 'norm', 'high'];
+      const i = order.indexOf(g.settings.spinBias || 'norm');
+      g.settings.spinBias = order[(i + 1) % order.length];
+      g.saveSettings();
+      g.audio.init(); g.audio.ui('click');
+      this.syncSpinBias();
     });
     /* slow-mo: press and hold, on a phone or on the keyboard */
     const slow = $('#slow');
@@ -445,29 +460,24 @@ class UI {
         break;
       case 'target': s.targetScore = +v; $('#toWin').textContent = v; break;
       default: break;
-      case 'camYaw': g.camAdj.yaw = (-v) * Math.PI / 180; g.camAdjT = 1.2; this.syncCam(); return;
-      case 'camPitch': g.camAdj.pitch = v * Math.PI / 180; g.camAdjT = 1.2; this.syncCam(); return;
-      case 'camDist': g.camAdj.zoom = v / 100; g.camAdjT = 1.2; this.syncCam(); return;
     }
     g.saveSettings();
     g.audio.ui('click');
   }
 
-  /** Keep the three camera sliders and the live orbit in step, whichever
-   *  one the player actually touched. */
-  syncCam() {
-    const A = this.game.camAdj;
-    const yaw = Math.round(-A.yaw * 180 / Math.PI);
-    const pit = Math.round(A.pitch * 180 / Math.PI);
-    const dst = Math.round(A.zoom * 100);
-    const set = (id, vid, val, txt) => {
-      const el = $(id); if (!el) return;
-      if (document.activeElement !== el) el.value = val;
-      $(vid).textContent = txt;
-    };
-    set('#rYaw', '#vYaw', yaw, (yaw > 0 ? '+' : '') + yaw + '°');
-    set('#rPitch', '#vPitch', pit, (pit > 0 ? '+' : '') + pit + '°');
-    set('#rDist', '#vDist', dst, dst + '%');
+  /** The dial says what it is set to, in the band-safe top row. */
+  syncSpinBias() {
+    const g = this.game; if (!g) return;
+    const el = $('#spinBias'), lab = $('#spinBiasVal');
+    const v = g.settings.spinBias || 'norm';
+    if (lab) lab.textContent = v === 'high' ? 'БОЛЬШЕ' : v === 'low' ? 'МЕНЬШЕ' : 'НОРМА';
+    if (el) {
+      el.classList.toggle('high', v === 'high');
+      el.classList.toggle('low', v === 'low');
+      el.title = v === 'high' ? 'Вращение: больше (скользящий контакт, меньше скорости)'
+        : v === 'low' ? 'Вращение: меньше (плоский удар, больше скорости)'
+          : 'Вращение: нейтрально';
+    }
   }
 
   syncSettings() {
@@ -479,6 +489,7 @@ class UI {
     sel('coach', s.coach ? 'on' : 'off'); sel('adaptive', s.adaptive ? 'on' : 'off');
     sel('slowmoPlayer', s.slowmoPlayer !== false ? 'on' : 'off');
     $('#slow').classList.toggle('off', s.slowmoPlayer === false);
+    this.syncSpinBias();
     sel('haptics', s.haptics ? 'on' : 'off');
     sel('target', s.targetScore);
     $('#spin').classList.toggle('on', !!s.showTele);
@@ -487,7 +498,6 @@ class UI {
     $('#rPos').value = Math.round(s.posAssist * 100); $('#vPos').textContent = Math.round(s.posAssist * 100) + '%';
     $('#rSens').value = Math.round(s.sensitivity * 100); $('#vSens').textContent = s.sensitivity.toFixed(2) + '×';
     $('#rVol').value = Math.round(s.volume * 100); $('#vVol').textContent = Math.round(s.volume * 100) + '%';
-    this.syncCam();
   }
 
   /* ------------------------------ HUD ----------------------------- */
@@ -508,7 +518,13 @@ class UI {
     const n = $('#shotName');
     n.textContent = info.stroke.short || info.stroke.name;
     n.style.color = info.stroke.col;
-    $('#shotMeta').textContent = `${info.speed.toFixed(0)} км/ч · ${info.spin.toFixed(0)} об/с`;
+    /* The timing verdict is part of the badge: it is the one thing the player
+       can act on next time, and it belongs in the top band with the rest of
+       the text, never floating over the table. */
+    const extra = info.timing ? ` · ${info.timing}` : '';
+    $('#shotMeta').textContent = `${info.speed.toFixed(0)} км/ч · ${info.spin.toFixed(0)} об/с${extra}`;
+    const meta = $('#shotMeta');
+    if (meta) meta.style.color = info.rim ? 'var(--warn)' : '';
   }
   showAiShot() { /* the opponent's choice is readable from the ball itself */ }
 
@@ -842,38 +858,12 @@ class UI {
     }
     c.globalAlpha = 1;
 
-    // camera readout — only while you are actually moving the camera
-    if (g.camAdjT > 0) {
-      const A = g.camAdj;
-      const a = clamp(g.camAdjT / 0.5, 0, 1) * 0.92;
-      const yaw = Math.round(-A.yaw * 180 / Math.PI);
-      const pit = Math.round(A.pitch * 180 / Math.PI);
-      const txt = `${yaw > 0 ? '+' : ''}${yaw}°  ·  ${pit > 0 ? '+' : ''}${pit}°  ·  ${(A.zoom).toFixed(2)}×`;
-      c.save();
-      c.globalAlpha = a;
-      c.font = `600 ${11.5 * d}px ui-monospace,Menlo,Consolas,monospace`;
-      c.textAlign = 'center';
-      const tw = c.measureText(txt).width + 26 * d;
-      c.fillStyle = 'rgba(6,11,19,.74)';
-      roundRect(c, W / 2 - tw / 2, H - 112 * d, tw, 26 * d, 13 * d);
-      c.fill();
-      c.strokeStyle = 'rgba(120,180,240,.22)'; c.lineWidth = 1 * d; c.stroke();
-      c.fillStyle = '#bcd6f2';
-      c.fillText(txt, W / 2, H - 94 * d);
-      c.restore();
-    }
+    /* The free-camera readout used to be painted here, at the bottom of the
+       screen, while you dragged the view around. There is nothing to read
+       out any more — the rig is one of four presets and it says which one
+       in the band (ui.msg) the moment you switch. */
 
-    // match point
-    if (!tr) {
-      const T = g.settings.targetScore;
-      const mp = (g.score[0] >= T - 1 && g.score[0] >= g.score[1] + 1) || (g.score[1] >= T - 1 && g.score[1] >= g.score[0] + 1);
-      if (mp && (g.state === 'RALLY' || g.state === 'SERVE_READY' || g.state === 'SERVE_TOSS')) {
-        c.font = `900 ${13 * d}px ${CSSFONT}`;
-        c.textAlign = 'center';
-        c.fillStyle = g.score[0] > g.score[1] ? 'rgba(78,227,154,.85)' : 'rgba(255,93,110,.85)';
-        c.fillText(g.score[0] > g.score[1] ? 'МАТЧБОЛ' : 'МАТЧБОЛ СОПЕРНИКА', W / 2, 108 * d);
-      }
-    }
+    // match point moved into the top band (#mpInd) — see tick()
   }
 
   ripple(x, y, col) { this.ripples.push({ x, y, col, t: 0, life: 0.55 }); }
@@ -889,6 +879,36 @@ class UI {
         `<div class="msg${m.big ? ' big' : ''}" style="color:${m.col}">${m.text}</div>`).join('');
       this._nMsg = g.messages.length;
       this._m0 = g.messages[0] ? g.messages[0].text : null;
+    }
+
+    /* Match point used to be painted on the canvas at a fixed 108 px, which
+       is exactly where the scoreboard ends and the band begins. As a flex
+       child of the band it can never sit on the table or under the score. */
+    const mpi = $('#mpInd');
+    if (mpi) {
+      const T = g.settings.targetScore;
+      const live = g.state === 'RALLY' || g.state === 'SERVE_READY' || g.state === 'SERVE_TOSS';
+      const us = g.score[0] >= T - 1 && g.score[0] > g.score[1];
+      const them = g.score[1] >= T - 1 && g.score[1] > g.score[0];
+      const on = live && !g.training && (us || them);
+      mpi.classList.toggle('on', on);
+      mpi.classList.toggle('them', them && !us);
+      if (on) mpi.textContent = them && !us ? 'МАТЧБОЛ СОПЕРНИКА' : 'МАТЧБОЛ';
+    }
+
+    /* How much room the rig actually left between the scoreboard and the
+       table. Measured, not guessed: four rigs × eight aspect ratios give a
+       band from ~77 px (landscape phone) to ~330 px (1080p portrait), and
+       the type has to shrink at the bottom of that range rather than clip
+       or spill onto the playing surface. Recomputed only when something
+       that changes it changed. */
+    const band = $('#topband');
+    if (band && (this._bandH === undefined || this._bandSig !== g.hudBandY + '|' + window.innerHeight)) {
+      this._bandSig = g.hudBandY + '|' + window.innerHeight;
+      const h = band.clientHeight;
+      this._bandH = h;
+      band.classList.toggle('band-short', h < 150);
+      band.classList.toggle('band-tiny', h < 92);
     }
 
     const rb = $('#rally');

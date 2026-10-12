@@ -1,5 +1,5 @@
 <div id="app" role="application" aria-label="TOPSPIN ARENA — настольный теннис, управление свайпом">
-  <canvas id="gl" aria-label="Игровое поле. Свайп задаёт удар; двумя пальцами — ракурс камеры."></canvas>
+  <canvas id="gl" aria-label="Игровое поле. Свайп задаёт удар; камера — четыре фиксированных ракурса, клавиши 1–4."></canvas>
   <canvas id="fx"></canvas>
 
   <div id="hud">
@@ -18,19 +18,38 @@
       </div>
     </div>
 
-    <div id="note" role="status" aria-live="polite"><i></i><span></span></div>
-  <div id="rally" role="status" aria-live="off"></div>
-    <div id="msgs" role="log" aria-live="polite" aria-atomic="false"></div>
+    <!-- Every word the game says during a point lives in this ONE band: it
+         starts under the scoreboard and ends where the table's top edge is
+         projected (--band-y, published by the camera rig every frame). No
+         text can float over the playing surface any more. -->
+    <div id="topband">
+      <div id="mpInd" role="status" aria-live="off"></div>
+      <div id="rally" role="status" aria-live="off"></div>
+      <div id="mnToast"></div>
+      <div id="note" role="status" aria-live="polite"><i></i><span></span></div>
+      <div id="msgs" role="log" aria-live="polite" aria-atomic="false"></div>
+      <!-- last shot: one line, fades away on its own -->
+      <div id="shot"><b id="shotName">—</b><s id="shotMeta"></s></div>
+    </div>
+
     <div id="dbg"></div>
 
     <div id="topright">
+      <!-- spin dial: how much of the contact is brush and how much is punch -->
+      <button id="spinBias" class="pe" title="Вращение" aria-label="Регулятор вращения, нажмите для переключения">
+        <b>СПИН</b>
+        <s id="spinBiasVal">НОРМА</s>
+      </button>
+      <!-- slow-mo: hold to slow the world down (never in tournaments/PvP) -->
+      <button id="slow" class="pe" title="Замедление" aria-label="Замедление времени, удерживайте">
+        <i id="slowFill"></i>
+        <b>SLOW</b>
+        <s id="slowKey">SHIFT</s>
+      </button>
       <button class="ic pe" id="btnSound" title="Звук" aria-label="Звук вкл/выкл"></button>
       <button class="ic pe" id="btnSettings" title="Настройки" aria-label="Настройки"></button>
       <button class="ic pe" id="btnMenu" title="Меню" aria-label="В главное меню"></button>
     </div>
-
-    <!-- last shot: one line, fades away on its own -->
-    <div id="shot"><b id="shotName">—</b><s id="shotMeta"></s></div>
 
     <!-- interactive coach -->
     <div id="train" class="pe">
@@ -45,14 +64,6 @@
       </div>
     </div>
 
-    <!-- slow-mo: hold to slow the world down (never in tournaments/PvP) -->
-    <button id="slow" class="pe" title="Замедление" aria-label="Замедление времени, удерживайте">
-      <i id="slowFill"></i>
-      <b>SLOW-MO</b>
-      <s id="slowKey">SHIFT</s>
-    </button>
-
-    <div id="mnToast"></div>
     <div id="pauseInd" class="pe"><b>ПАУЗА</b><s>нажмите, чтобы продолжить · P</s></div>
   </div>
 
@@ -151,12 +162,16 @@
   <div class="screen" id="settings" role="dialog" aria-label="Настройки">
     <div class="card">
       <div class="logo" style="font-size:26px">НАСТРОЙКИ</div>
-      <h3 class="sec">Камера</h3>
+      <!-- Four authored rigs and nothing else. Free orbit/pinch/wheel was
+           removed on purpose: the table has to sit level and square in every
+           frame, and hand-tuning that with a mouse takes minutes. Each rig is
+           fitted offline for 8 aspect ratios, so it is already correct. -->
+      <h3 class="sec">Камера <span class="hintk">клавиши 1–4 · 0 — сброс · свободное вращение отключено</span></h3>
       <div class="row">
-        <button class="opt sel" data-set="cam" data-val="BROADCAST"><b>ТВ</b><s>трансляция</s></button>
-        <button class="opt" data-set="cam" data-val="DYNAMIC"><b>ДИНАМИКА</b><s>следит за мячом</s></button>
-        <button class="opt" data-set="cam" data-val="LOW"><b>НИЗКАЯ</b><s>от стола</s></button>
-        <button class="opt" data-set="cam" data-val="SIDE"><b>СБОКУ</b><s>анализ</s></button>
+        <button class="opt sel" data-set="cam" data-val="BROADCAST"><b>1 · ТВ</b><s>трансляция, стол ровно</s></button>
+        <button class="opt" data-set="cam" data-val="DYNAMIC"><b>2 · ДИНАМИКА</b><s>чуть ближе к мячу</s></button>
+        <button class="opt" data-set="cam" data-val="LOW"><b>3 · НИЗКАЯ</b><s>от стола, видно вращение</s></button>
+        <button class="opt" data-set="cam" data-val="SIDE"><b>4 · СБОКУ</b><s>разбор техники</s></button>
       </div>
       <h3 class="sec">Графика</h3>
       <div class="row">
@@ -183,14 +198,6 @@
         <div class="row"><button class="opt sel" data-set="adaptive" data-val="on"><b>АДАПТАЦИЯ</b><s>соперник подстраивается</s></button>
           <button class="opt" data-set="adaptive" data-val="off"><b>ВЫКЛ</b><s>чистый уровень</s></button></div>
       </div>
-      <h3 class="sec">Ракурс <span class="hintk">правая кнопка / два пальца · колесо · стрелки</span></h3>
-      <div class="sl"><label>Поворот</label>
-        <input type="range" id="rYaw" data-set="camYaw" min="-83" max="83" value="0"><span class="v" id="vYaw">0°</span></div>
-      <div class="sl"><label>Высота</label>
-        <input type="range" id="rPitch" data-set="camPitch" min="-23" max="54" value="0"><span class="v" id="vPitch">0°</span></div>
-      <div class="sl"><label>Дистанция</label>
-        <input type="range" id="rDist" data-set="camDist" min="45" max="240" value="100"><span class="v" id="vDist">100%</span></div>
-      <button class="opt" id="camReset" style="width:100%;margin-top:2px"><b>СБРОСИТЬ РАКУРС</b><s>клавиша 0</s></button>
       <h3 class="sec">Хват</h3>
       <div class="row">
         <button class="opt sel" data-set="hand" data-val="right"><b>ПРАВАЯ</b><s></s></button>

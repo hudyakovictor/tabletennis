@@ -64,10 +64,12 @@ class PaddleRig {
     return V3.norm(out, M4.transformDir(out, s.m, { x: 0, y: -1, z: 0 }));
   }
 
-  /** Paddle orientation: local +Z along the normal, rolled into the hand. */
-  paddleQuat(out, normal, hand, swing) {
+  /** Paddle orientation: local +Z along the normal, rolled into the hand.
+   *  `extraRoll` is the bank into a lateral step, so a bat that is moving
+   *  right is visibly turned right instead of sliding flat. */
+  paddleQuat(out, normal, hand, swing, extraRoll) {
     Q.lookRotation(out, normal, this._s.up);
-    const roll = (hand === 'left' ? 0.42 : -0.42) + (swing || 0) * 0.3;
+    const roll = (hand === 'left' ? 0.42 : -0.42) + (swing || 0) * 0.3 + (extraRoll || 0);
     Q.mul(out, out, Q.setAxisAngle(this._s.qr, 0, 0, 1, roll));
     return out;
   }
@@ -82,7 +84,7 @@ class PaddleRig {
     const s = this._s;
     const wd = clamp(o.windup || 0, 0, 1);
     const n = V3.norm(s.v1, o.normal);
-    const hdir = this.handleDir(s.v2, o.q || this.paddleQuat(s.q, n, o.hand, o.swing));
+    const hdir = this.handleDir(s.v2, o.q || this.paddleQuat(s.q, n, o.hand, o.swing, o.roll));
     // fist grips the handle a hand's width below the blade
     const fist = V3.addScaled(V3.new(), o.pos, hdir, RIG.HANDLE);
     // the forearm runs back and down from the fist; on a windup the elbow
@@ -137,7 +139,7 @@ class PaddleRig {
     this.build(R);
     const s = this._s;
     const n = V3.norm(s.v1, o.normal);
-    const q = o.q || this.paddleQuat(s.q, n, o.hand, o.swing);
+    const q = o.q || this.paddleQuat(s.q, n, o.hand, o.swing, o.roll);
     const me = S.mesh, ma = S.mat;
     const mats = o.mats || {};                       // the equipped racket's palette
     const wood = o.ghost ? this.ghostMat(o, o.ghostCol, 0.5) : (mats.wood || ma.bladeWood);
