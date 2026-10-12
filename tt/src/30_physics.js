@@ -44,7 +44,21 @@ const PH = {
   // outside the legal window; this pair gives 24.0 cm.
   E_TABLE: 0.930,           // normal COR ball/table at zero impact speed
   E_TABLE_SPEED: 0.0085,    // COR loss per m/s of impact speed
-  MU_TABLE: 0.25,           // Coulomb friction ball/table (ITTF T3 studies)
+  /* Coulomb friction ball/table. Calibrated, not guessed (bench suite 12,
+   * A/B over mu x et): the ITTF dead-ball rebound is 23.3 cm at EVERY value
+   * because a vertical drop has no tangential slip, so friction is free to
+   * be set by how the table should answer SPIN.
+   *   mu 0.25 (the old value): a heavy loop at 8 m/s kicked forward by 8.8 %
+   *     and at 12 m/s by 3.2 % — i.e. a fast topspin drive bounced like a
+   *     dead ball, which is why loops felt floaty and flat;
+   *   mu 0.40: +22.4 % at 8 m/s, +14.5 % at 12 m/s, a heavy chop brakes to
+   *     -61.8 % of its incoming speed (it dies short, as a chop should), and
+   *     a corkscrew ball is thrown 76 cm sideways in the 0.45 s after the
+   *     bounce — a sidespin serve now visibly jumps off the table;
+   *   mu 0.48: kicks hard enough to look cartoonish (+29.6 %/-72.8 %).
+   * ET_TABLE stays 0: it only acts in the gripping regime and moved no
+   * measured number by more than 1.5 cm. */
+  MU_TABLE: 0.40,           // Coulomb friction ball/table (calibrated above)
   ET_TABLE: 0.00,           // tangential restitution of the table (none)
 
   /* ---- net ---- */
@@ -64,6 +78,15 @@ const PH = {
 
   /* ---- floor ---- */
   E_FLOOR: 0.78, MU_FLOOR: 0.4,
+
+  /* The ONE integration step. The game runs the ball at 600 Hz, so every
+   * verdict a solver hands to the game has to be taken at 600 Hz too: at
+   * 300 Hz the bounce is detected up to 1.3 cm later along the flight, which
+   * is enough to turn a serve that the solver called legal into one that
+   * clips the tape in play (measured: the player's weak tap came back
+   * valid=true from the solver and then hit the net in the game). Coarse
+   * steps are still fine for SEARCHING; only the verdict must match. */
+  SIM_DT: 1 / 600,
 };
 PH.AREA = Math.PI * PH.R * PH.R;
 PH.TABLE_Y = PH.T_H;                 // playing surface height
@@ -113,9 +136,12 @@ function integrateBall(p, v, w, dt) {
   V3.addScaled(_vt, v, _k1, dt * 0.5); aeroAccel(_k2, _vt, w);
   V3.addScaled(_vt, v, _k2, dt * 0.5); aeroAccel(_k3, _vt, w);
   V3.addScaled(_vt, v, _k3, dt); aeroAccel(_k4, _vt, w);
-  const ax = (_k1.x + 2 * _k2.x + 2 * _k3.x + _k4.x) / 6;
-  const ay = (_k1.y + 2 * _k2.y + 2 * _k3.y + _k4.y) / 6;
-  const az = (_k1.z + 2 * _k2.z + 2 * _k3.z + _k4.z) / 6;
+  let ax = (_k1.x + 2 * _k2.x + 2 * _k3.x + _k4.x) / 6;
+  let ay = (_k1.y + 2 * _k2.y + 2 * _k3.y + _k4.y) / 6;
+  let az = (_k1.z + 2 * _k2.z + 2 * _k3.z + _k4.z) / 6;
+  if (!Number.isFinite(ax)) ax = 0;
+  if (!Number.isFinite(ay)) ay = 0;
+  if (!Number.isFinite(az)) az = 0;
   p.x += (v.x + ax * dt * 0.5) * dt;
   p.y += (v.y + ay * dt * 0.5) * dt;
   p.z += (v.z + az * dt * 0.5) * dt;
@@ -131,7 +157,49 @@ function integrateBall(p, v, w, dt) {
  *  Mutates v and w in place. Returns impact diagnostics.
  * ---------------------------------------------------------------- */
 const _u = V3.new(), _un = V3.new(), _ut = V3.new(), _vc = V3.new(), _jt = V3.new(), _tmpc = V3.new();
+/* ---------------------------------------------------------------- *
+ *  Input hygiene
+ *
+ *  A single NaN or Infinity — a broken touch driver, a synthetic pointer
+ *  event, a detached canvas reporting a zero-size rect, a normalised
+ *  zero-length normal — used to sail straight through the integrator and
+ *  the ball disappeared for the rest of the point, with the rally counter
+ *  still running. Measured before this gate: 11 of 36 hostile inputs
+ *  produced a NaN or threw. Everything that enters the physics is repaired
+ *  to the nearest physical state here, in one place, instead of being
+ *  checked at forty call sites.
+ * ---------------------------------------------------------------- */
+const V_MAX = 60;                     // m/s = 216 km/h, above any real shot
+
+function saneV(v) {
+  return !!v && Number.isFinite(v.x) && Number.isFinite(v.y) && Number.isFinite(v.z);
+}
+
+/** Clamp to the physical envelope; returns true if anything was repaired. */
+function sanitizeV(v, limit) {
+  if (!v) return true;
+  let fixed = false;
+  if (!Number.isFinite(v.x)) { v.x = 0; fixed = true; }
+  if (!Number.isFinite(v.y)) { v.y = 0; fixed = true; }
+  if (!Number.isFinite(v.z)) { v.z = 0; fixed = true; }
+  const L = Math.hypot(v.x, v.y, v.z);
+  const max = limit || V_MAX;
+  if (!Number.isFinite(L)) { v.x = v.y = v.z = 0; return true; }
+  if (L > max) { const k = max / L; v.x *= k; v.y *= k; v.z *= k; fixed = true; }
+  return fixed;
+}
+
+/** A direction the impact can be solved against: finite and not degenerate. */
+function saneN(n) {
+  if (!saneV(n)) return false;
+  const L = Math.hypot(n.x, n.y, n.z);
+  return Number.isFinite(L) && L > 1e-6;
+}
+
 function impactSphere(v, w, n, vSurf, e, mu, et) {
+  if (!saneN(n) || !v || !w) return null;
+  sanitizeV(v); sanitizeV(w, SPIN_CAP * 2);
+  if (vSurf) sanitizeV(vSurf); else vSurf = ZERO3;
   // relative velocity of the ball centre wrt the surface
   V3.sub(_u, v, vSurf);
   const un = V3.dot(_u, n);
@@ -182,11 +250,44 @@ function impactSphere(v, w, n, vSurf, e, mu, et) {
  *  Ball <-> table top
  * ---------------------------------------------------------------- */
 const N_UP = V3.new(0, 1, 0), ZERO3 = V3.new(0, 0, 0);
+/* 27 mm band around the white line where a contact counts as an edge ball. */
+PH.EDGE_BAND = PH.R * 1.35;
+const _edgeN = { x: 0, y: 1, z: 0 };
+
+/**
+ * Ball vs table top, including the white line.
+ *
+ * An edge ball is not a smaller version of a normal bounce: the contact
+ * normal points OUTWARD and up, so the rebound leaves steeper, slower and at
+ * an angle the receiver had no way of reading. That is why it wins points,
+ * and why leaving it out made the sidelines feel like the rest of the table.
+ * Implemented here — the single function the game, the replay and every
+ * solver go through — so the AI's prediction of a shot agrees with the ball
+ * the player actually sees.
+ */
 function bounceTable(p, v, w) {
-  const speed = -v.y;
-  const e = clamp(PH.E_TABLE - PH.E_TABLE_SPEED * speed, 0.68, 0.92);
-  const info = impactSphere(v, w, N_UP, ZERO3, e, PH.MU_TABLE, PH.ET_TABLE);
+  const speed = Math.max(0, -v.y);
+  let e = clamp(PH.E_TABLE - PH.E_TABLE_SPEED * speed, 0.68, 0.92);
+  let n = N_UP;
+  // signed distance inside each line; negative means the ball caught the
+  // corner itself (predict allows a bounce up to R beyond the line)
+  const ex = PH.T_HALF_WID - Math.abs(p.x);
+  const ez = PH.T_HALF_LEN - Math.abs(p.z);
+  const edge = Math.min(ex, ez);
+  let k = 0;
+  if (edge < PH.EDGE_BAND) {
+    k = 1 - clamp(edge / PH.EDGE_BAND, 0, 1);
+    // the side line throws the ball wide, the end line throws it long: both
+    // away from the middle of the table
+    _edgeN.x = ex < ez ? Math.sign(p.x || 1) * 0.62 * k : 0;
+    _edgeN.z = ex < ez ? 0 : Math.sign(p.z || 1) * 0.62 * k;
+    _edgeN.y = 1;
+    n = V3.norm(_edgeN, _edgeN);
+    e *= 1 - 0.30 * k;                  // a corner is wood and air, not a sprung top
+  }
+  const info = impactSphere(v, w, n, ZERO3, e, PH.MU_TABLE, PH.ET_TABLE);
   p.y = PH.TABLE_Y + PH.R + 1e-5;
+  if (info) { info.edge = k; info.edgeAxis = ex < ez ? 'x' : 'z'; }
   return info;
 }
 
@@ -197,6 +298,10 @@ function bounceTable(p, v, w) {
  * ---------------------------------------------------------------- */
 const SPIN_CAP = 1080;   // rad/s  (~172 rev/s, above the measured world best)
 function impactRacket(v, w, n, vR, quality = 1, rubber = {}) {
+  if (!saneN(n)) return null;
+  sanitizeV(vR);
+  const q = Number.isFinite(quality) ? clamp(quality, 0, 1) : 1;
+  quality = q;
   const e0 = (rubber.e ?? PH.E_RACKET) * (0.55 + 0.45 * quality);
   const mu = (rubber.mu ?? PH.MU_RACKET) * (0.6 + 0.4 * quality);
   const et = (rubber.et ?? PH.ET_RACKET) * (0.5 + 0.5 * quality);
@@ -250,10 +355,12 @@ function predict(p0, v0, w0, opts = {}) {
   const stopZ = opts.stopZ;              // stop when z crosses this plane (towards the player)
   const stopDir = opts.stopDir || 1;
   V3.copy(_pp, p0); V3.copy(_pv, v0); V3.copy(_pw, w0);
+  sanitizeV(_pp, 40); sanitizeV(_pv); sanitizeV(_pw, SPIN_CAP * 2);
   const out = opts.out || {};
   out.bounces = 0; out.hitNet = false; out.landed = null; out.b2 = null; out.apex = -1; out.cross = null;
   out.planeCross = null; out.netCross = null; out.floor = null;
   out.reachT = -1; out.reach = null; out.path = opts.path || null;
+  out.diverged = false; out.edge = 0;
   if (out.path) out.path.length = 0;
   let t = 0, prevX = _pp.x, prevY = _pp.y, prevZ = _pp.z;
   let bounceSide = 0;
@@ -261,6 +368,7 @@ function predict(p0, v0, w0, opts = {}) {
     prevX = _pp.x; prevY = _pp.y; prevZ = _pp.z;
     integrateBall(_pp, _pv, _pw, dt);
     t += dt;
+    if (!saneV(_pv) || !saneV(_pp)) { out.diverged = true; break; }
     if (out.path && (out.path.length < 400)) out.path.push(_pp.x, _pp.y, _pp.z);
     if (_pp.y > out.apex) out.apex = _pp.y;
 
@@ -284,7 +392,16 @@ function predict(p0, v0, w0, opts = {}) {
       if (out.bounces === 1) { out.landed = { x: _pp.x, z: _pp.z, t, vy: _pv.y, speed: V3.len(_pv) }; bounceSide = Math.sign(_pp.z); }
       else if (out.bounces === 2) out.b2 = { x: _pp.x, z: _pp.z, t, speed: V3.len(_pv) };
       if (opts.stopOnFirstBounce) break;
-      bounceTable(_pp, _pv, _pw);
+      /* The serve solver asks for exactly two bounces and nothing else: the
+       * rest of the flight (up to 1.5 s of RK4 at 300 Hz) was integrated and
+       * thrown away on every one of the ~150 candidates per serve, which is
+       * most of the 50-90 ms the search used to block the frame for. */
+      if (opts.stopAfterBounces && out.bounces >= opts.stopAfterBounces) break;
+      const bi = bounceTable(_pp, _pv, _pw);
+      if (bi && bi.edge > out.edge) {
+        out.edge = bi.edge;
+        out.edgeBounce = { x: _pp.x, z: _pp.z, k: bi.edge, axis: bi.edgeAxis, t };
+      }
     }
     // requested crossing plane (racket plane of a player)
     if (stopZ !== undefined && out.reachT < 0) {
@@ -334,6 +451,19 @@ function _tryLaunch(from, spin, speed, ux, uz, elev, netClear, out, dt) {
  *   player's power simply cannot stay on the table (0 = never).
  */
 function solveLaunch(from, target, spin, opts = {}) {
+  /* The solver is called with whatever the input layer produced, so it gets
+   * the same gate as everything else: a NaN target must not turn into a NaN
+   * launch that then poisons the ball for the rest of the point.
+   * NOTE: `target` is a landing POINT, and callers legitimately pass it as
+   * {x, z} with no y — demanding a finite y here silently disabled the whole
+   * assist layer (measured: player shots on the table fell from 83 % to 6 %,
+   * because refineRacket treats a null solve as "no opinion" and hands back
+   * the raw gesture). Positions are checked, never clamped: clamping a
+   * position vector as if it were a velocity would move the aim point. */
+  const finitePt = (p) => !!p && Number.isFinite(p.x) && Number.isFinite(p.z) &&
+    (p.y === undefined || Number.isFinite(p.y));
+  if (!finitePt(from) || !finitePt(target)) return null;
+  if (spin) sanitizeV(spin, SPIN_CAP * 2);
   const dirX = target.x - from.x, dirZ = target.z - from.z;
   const horiz = Math.hypot(dirX, dirZ) || 1e-6;
   let ux = dirX / horiz, uz = dirZ / horiz;

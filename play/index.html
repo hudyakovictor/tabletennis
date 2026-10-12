@@ -47,13 +47,38 @@ canvas{display:block;width:100%;height:100%}
 .serve-dot{width:9px;height:9px;border-radius:50%;background:#2a3444;transition:.25s;flex:0 0 auto}
 .serve-dot.on{background:var(--warn);box-shadow:0 0 12px var(--warn),0 0 26px rgba(255,211,77,.5)}
 
+/* =========================== top text band ===========================
+ * One place for everything the game says during a point: rally counter,
+ * network toast, coach note, big centre messages, last-shot badge. It starts
+ * under the scoreboard and ends at the table's projected top edge, which the
+ * camera rig publishes every frame as --band-y (a fraction of the viewport
+ * height, 0.40-0.49 across all four rigs and eight aspect ratios). No text
+ * can land on the playing surface any more, on any rig, on any aspect. */
+#topband{position:absolute;left:0;right:0;z-index:4;pointer-events:none;
+  top:calc(max(12px,env(safe-area-inset-top)) + 62px);
+  bottom:calc((1 - var(--band-y,0.44)) * 100%);
+  min-height:34px;display:flex;flex-direction:column;align-items:center;justify-content:center;
+  gap:5px;padding:0 max(14px,env(safe-area-inset-left));overflow:hidden;
+  transition:bottom .28s cubic-bezier(.3,.9,.3,1)}
+/* the rig cannot give us much room (landscape phone, short window): shrink
+   the type instead of letting the scoreboard or the table eat the text */
+#topband.band-short{gap:2px}
+#topband.band-short .msg{font-size:18px;margin:1px 0}
+#topband.band-short .msg.big{font-size:24px}
+#topband.band-short #note{padding:6px 12px 6px 10px}
+#topband.band-short #note span{font-size:12px}
+#topband.band-short #shot{padding:3px 11px}
+#topband.band-short #shot b{font-size:12px}
+#topband.band-tiny .msg{font-size:15px}
+#topband.band-tiny .msg.big{font-size:19px}
+#topband.band-tiny #rally{display:none}
+
 /* ========================= shot badge (transient) =================== */
-#shot{position:absolute;left:50%;bottom:max(16px,calc(env(safe-area-inset-bottom) + 10px));
-  transform:translate(-50%,10px);display:flex;align-items:baseline;gap:10px;
-  background:rgba(8,13,22,.72);border:1px solid var(--line);border-radius:999px;padding:6px 16px;
-  backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);opacity:0;
+#shot{display:flex;align-items:baseline;gap:10px;
+  background:rgba(8,13,22,.72);border:1px solid var(--line);border-radius:999px;padding:5px 15px;
+  backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);opacity:0;transform:translateY(9px);
   transition:opacity .18s,transform .18s;white-space:nowrap}
-#shot.on{opacity:1;transform:translate(-50%,0)}
+#shot.on{opacity:1;transform:none}
 #shot b{font-size:14px;font-weight:800;letter-spacing:.05em}
 #shot s{font-family:var(--mono);font-size:11px;color:var(--dim);text-decoration:none}
 
@@ -79,27 +104,33 @@ canvas{display:block;width:100%;height:100%}
 .tbt:hover{color:var(--txt);background:rgba(255,255,255,.09);border-color:var(--line2)}
 
 /* ============================ messages ============================== */
-#msgs{position:absolute;top:34%;left:0;right:0;text-align:center;pointer-events:none}
+#msgs{width:100%;text-align:center;pointer-events:none}
 .msg{font-size:26px;font-weight:900;letter-spacing:.06em;margin:4px 0;
   text-shadow:0 4px 28px rgba(0,0,0,.9),0 0 50px currentColor;animation:pop .35s cubic-bezier(.2,1.5,.4,1)}
 .msg.big{font-size:40px}
 @keyframes pop{from{transform:scale(.72) translateY(12px);opacity:0}to{transform:none;opacity:1}}
 
+/* ========================= match point badge ========================= */
+#mpInd{font-size:11.5px;font-weight:900;letter-spacing:.18em;color:var(--good);
+  padding:3px 13px;border-radius:20px;border:1px solid currentColor;background:rgba(0,0,0,.34);
+  opacity:0;transform:scale(.9);transition:.2s;text-transform:uppercase}
+#mpInd.on{opacity:1;transform:none}
+#mpInd.them{color:var(--warn)}
+
 /* ============================ rally badge =========================== */
-#rally{position:absolute;top:max(76px,calc(env(safe-area-inset-top) + 66px));left:50%;transform:translateX(-50%);
-  font-family:var(--mono);font-size:11px;letter-spacing:.12em;color:var(--dim);
+#rally{font-family:var(--mono);font-size:11px;letter-spacing:.12em;color:var(--dim);
   background:rgba(0,0,0,.42);border:1px solid var(--line);border-radius:20px;padding:3px 12px;opacity:0;transition:.2s}
 #rally.on{opacity:1}
 #rally b{color:var(--acc)}
 
 /* ======================= point analysis note ======================= */
-#note{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%) scale(.94);
+#note{transform:scale(.95);
   display:flex;align-items:center;gap:10px;max-width:min(78vw,520px);
-  padding:10px 18px 10px 14px;border-radius:14px;pointer-events:none;
+  padding:9px 16px 9px 13px;border-radius:14px;pointer-events:none;
   background:linear-gradient(180deg,rgba(10,13,20,.90),rgba(6,8,13,.94));
-  border:1px solid var(--line);box-shadow:0 18px 50px rgba(0,0,0,.6);
+  border:1px solid var(--line);box-shadow:0 14px 34px rgba(0,0,0,.55);
   opacity:0;transition:opacity .22s ease,transform .22s cubic-bezier(.2,.9,.3,1.2);z-index:6}
-#note.on{opacity:1;transform:translate(-50%,-50%) scale(1)}
+#note.on{opacity:1;transform:scale(1)}
 #note i{flex:0 0 4px;align-self:stretch;border-radius:3px;background:var(--acc)}
 #note span{font-size:14px;line-height:1.35;letter-spacing:.01em;color:#dfe6f2;font-weight:500}
 @media (max-width:560px){#note{max-width:84vw;padding:9px 14px 9px 11px}#note span{font-size:13px}}
@@ -167,7 +198,7 @@ h3.sec::after{content:"";flex:1;height:1px;background:var(--line)}
 
 /* ============================ misc ================================= */
 #topright{position:absolute;top:max(12px,env(safe-area-inset-top));right:max(12px,env(safe-area-inset-right));
-  display:flex;gap:7px}
+  display:flex;align-items:flex-start;gap:7px;z-index:7}
 .ic{width:34px;height:34px;border-radius:10px;border:1px solid var(--line);background:var(--glass);
   display:grid;place-items:center;cursor:pointer;backdrop-filter:blur(10px);transition:.16s;color:var(--dim);
   padding:0;appearance:none;-webkit-appearance:none;font:inherit}
@@ -226,23 +257,36 @@ body.is-paused #pauseInd{display:flex}
 @media (max-aspect-ratio:3/4){
   /* portrait: the dead band above the table is the only place a panel can
      live without covering your own bat */
-  #msgs{top:34%}
   #train{width:calc(100vw - 24px);left:12px;top:max(66px,calc(env(safe-area-inset-top) + 58px))}
-  #shot{bottom:max(14px,calc(env(safe-area-inset-bottom) + 10px))}
 }
 
 /* ============================ slow-mo =============================== */
-#slow{position:absolute;right:max(12px,env(safe-area-inset-right));
-  bottom:max(74px,calc(env(safe-area-inset-bottom) + 66px));
-  width:64px;height:64px;border-radius:50%;display:flex;flex-direction:column;
-  align-items:center;justify-content:center;gap:1px;pointer-events:auto;cursor:pointer;
+/* The spin dial: a chip in the same family as slow-mo, top-right, out of the
+   way of the thumb and out of the way of the table. */
+#spinBias{position:relative;height:34px;min-width:56px;border-radius:10px;display:flex;flex-direction:column;
+  align-items:center;justify-content:center;pointer-events:auto;cursor:pointer;padding:0 9px;
+  background:radial-gradient(circle at 50% 35%,rgba(40,60,44,.85),rgba(9,16,12,.85));
+  border:1px solid var(--line2);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);
+  color:var(--dim);transition:color .2s,border-color .2s,transform .12s;
+  appearance:none;-webkit-appearance:none;font:inherit}
+#spinBias:active{transform:scale(.94)}
+#spinBias b{font-size:8.5px;font-weight:900;letter-spacing:.09em;line-height:1.15}
+#spinBias s{font-family:var(--mono);font-size:7.5px;opacity:.72;text-decoration:none;line-height:1.15}
+#spinBias.high{color:#ffe9c9;border-color:rgba(255,170,80,.75);box-shadow:0 0 20px rgba(255,150,60,.22)}
+#spinBias.low{color:#dff2ff;border-color:rgba(120,200,255,.6)}
+
+/* Slow-mo used to be a 64 px circle floating in the bottom-right corner —
+ * exactly where a right-handed thumb plays. It is now a compact chip in the
+ * top-right button row, next to sound/settings/menu. */
+#slow{position:relative;height:34px;min-width:54px;border-radius:10px;display:flex;flex-direction:column;
+  align-items:center;justify-content:center;gap:0;pointer-events:auto;cursor:pointer;padding:0 9px;
   background:radial-gradient(circle at 50% 35%,rgba(30,48,74,.85),rgba(9,14,24,.85));
   border:1px solid var(--line2);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);
   color:var(--dim);overflow:hidden;transition:color .2s,border-color .2s,transform .12s;
   padding:0;appearance:none;-webkit-appearance:none;font:inherit}
 #slow:active{transform:scale(.94)}
-#slow b{font-size:8px;font-weight:900;letter-spacing:.06em;z-index:2}
-#slow s{font-family:var(--mono);font-size:8px;opacity:.6;text-decoration:none;z-index:2}
+#slow b{font-size:8.5px;font-weight:900;letter-spacing:.09em;z-index:2;line-height:1.15}
+#slow s{font-family:var(--mono);font-size:7.5px;opacity:.62;text-decoration:none;z-index:2;line-height:1.15}
 #slow i{position:absolute;left:0;right:0;bottom:0;height:100%;
   background:linear-gradient(180deg,rgba(57,198,255,.26),rgba(57,198,255,.05));transition:height .08s linear}
 #slow.on{color:#eaf6ff;border-color:rgba(57,198,255,.75);box-shadow:0 0 26px rgba(57,198,255,.35)}
@@ -284,11 +328,10 @@ body.is-slow #gl{filter:saturate(1.12) contrast(1.04)}
 .mrow .st i.f{background:var(--warn)}
 .mrow .go{font-size:10px;letter-spacing:.12em;color:var(--dim2)}
 .omrow{display:flex;flex-direction:column;gap:7px;margin:2px 0 14px}
-#mnToast{position:absolute;left:50%;top:max(104px,calc(env(safe-area-inset-top) + 94px));
-  transform:translateX(-50%) scale(.9);opacity:0;transition:.22s;pointer-events:none;
+#mnToast{transform:scale(.9);opacity:0;transition:.22s;pointer-events:none;
   font-family:var(--mono);font-size:10.5px;letter-spacing:.14em;color:#0a0f18;background:var(--warn);
   border-radius:20px;padding:4px 13px;font-weight:700}
-#mnToast.on{opacity:1;transform:translateX(-50%) scale(1)}
+#mnToast.on{opacity:1;transform:scale(1)}
 
 #reel .skip{pointer-events:auto;cursor:pointer}
 body.is-reel #hud,body.is-reel #slow{opacity:.0}
@@ -378,7 +421,7 @@ body.is-reel #hud,body.is-reel #slow{opacity:.0}
 </head>
 <body>
 <div id="app" role="application" aria-label="TOPSPIN ARENA — настольный теннис, управление свайпом">
-  <canvas id="gl" aria-label="Игровое поле. Свайп задаёт удар; двумя пальцами — ракурс камеры."></canvas>
+  <canvas id="gl" aria-label="Игровое поле. Свайп задаёт удар; камера — четыре фиксированных ракурса, клавиши 1–4."></canvas>
   <canvas id="fx"></canvas>
 
   <div id="hud">
@@ -397,19 +440,38 @@ body.is-reel #hud,body.is-reel #slow{opacity:.0}
       </div>
     </div>
 
-    <div id="note" role="status" aria-live="polite"><i></i><span></span></div>
-  <div id="rally" role="status" aria-live="off"></div>
-    <div id="msgs" role="log" aria-live="polite" aria-atomic="false"></div>
+    <!-- Every word the game says during a point lives in this ONE band: it
+         starts under the scoreboard and ends where the table's top edge is
+         projected (--band-y, published by the camera rig every frame). No
+         text can float over the playing surface any more. -->
+    <div id="topband">
+      <div id="mpInd" role="status" aria-live="off"></div>
+      <div id="rally" role="status" aria-live="off"></div>
+      <div id="mnToast"></div>
+      <div id="note" role="status" aria-live="polite"><i></i><span></span></div>
+      <div id="msgs" role="log" aria-live="polite" aria-atomic="false"></div>
+      <!-- last shot: one line, fades away on its own -->
+      <div id="shot"><b id="shotName">—</b><s id="shotMeta"></s></div>
+    </div>
+
     <div id="dbg"></div>
 
     <div id="topright">
+      <!-- spin dial: how much of the contact is brush and how much is punch -->
+      <button id="spinBias" class="pe" title="Вращение" aria-label="Регулятор вращения, нажмите для переключения">
+        <b>СПИН</b>
+        <s id="spinBiasVal">НОРМА</s>
+      </button>
+      <!-- slow-mo: hold to slow the world down (never in tournaments/PvP) -->
+      <button id="slow" class="pe" title="Замедление" aria-label="Замедление времени, удерживайте">
+        <i id="slowFill"></i>
+        <b>SLOW</b>
+        <s id="slowKey">SHIFT</s>
+      </button>
       <button class="ic pe" id="btnSound" title="Звук" aria-label="Звук вкл/выкл"></button>
       <button class="ic pe" id="btnSettings" title="Настройки" aria-label="Настройки"></button>
       <button class="ic pe" id="btnMenu" title="Меню" aria-label="В главное меню"></button>
     </div>
-
-    <!-- last shot: one line, fades away on its own -->
-    <div id="shot"><b id="shotName">—</b><s id="shotMeta"></s></div>
 
     <!-- interactive coach -->
     <div id="train" class="pe">
@@ -424,14 +486,6 @@ body.is-reel #hud,body.is-reel #slow{opacity:.0}
       </div>
     </div>
 
-    <!-- slow-mo: hold to slow the world down (never in tournaments/PvP) -->
-    <button id="slow" class="pe" title="Замедление" aria-label="Замедление времени, удерживайте">
-      <i id="slowFill"></i>
-      <b>SLOW-MO</b>
-      <s id="slowKey">SHIFT</s>
-    </button>
-
-    <div id="mnToast"></div>
     <div id="pauseInd" class="pe"><b>ПАУЗА</b><s>нажмите, чтобы продолжить · P</s></div>
   </div>
 
@@ -530,12 +584,16 @@ body.is-reel #hud,body.is-reel #slow{opacity:.0}
   <div class="screen" id="settings" role="dialog" aria-label="Настройки">
     <div class="card">
       <div class="logo" style="font-size:26px">НАСТРОЙКИ</div>
-      <h3 class="sec">Камера</h3>
+      <!-- Four authored rigs and nothing else. Free orbit/pinch/wheel was
+           removed on purpose: the table has to sit level and square in every
+           frame, and hand-tuning that with a mouse takes minutes. Each rig is
+           fitted offline for 8 aspect ratios, so it is already correct. -->
+      <h3 class="sec">Камера <span class="hintk">клавиши 1–4 · 0 — сброс · свободное вращение отключено</span></h3>
       <div class="row">
-        <button class="opt sel" data-set="cam" data-val="BROADCAST"><b>ТВ</b><s>трансляция</s></button>
-        <button class="opt" data-set="cam" data-val="DYNAMIC"><b>ДИНАМИКА</b><s>следит за мячом</s></button>
-        <button class="opt" data-set="cam" data-val="LOW"><b>НИЗКАЯ</b><s>от стола</s></button>
-        <button class="opt" data-set="cam" data-val="SIDE"><b>СБОКУ</b><s>анализ</s></button>
+        <button class="opt sel" data-set="cam" data-val="BROADCAST"><b>1 · ТВ</b><s>трансляция, стол ровно</s></button>
+        <button class="opt" data-set="cam" data-val="DYNAMIC"><b>2 · ДИНАМИКА</b><s>чуть ближе к мячу</s></button>
+        <button class="opt" data-set="cam" data-val="LOW"><b>3 · НИЗКАЯ</b><s>от стола, видно вращение</s></button>
+        <button class="opt" data-set="cam" data-val="SIDE"><b>4 · СБОКУ</b><s>разбор техники</s></button>
       </div>
       <h3 class="sec">Графика</h3>
       <div class="row">
@@ -562,14 +620,6 @@ body.is-reel #hud,body.is-reel #slow{opacity:.0}
         <div class="row"><button class="opt sel" data-set="adaptive" data-val="on"><b>АДАПТАЦИЯ</b><s>соперник подстраивается</s></button>
           <button class="opt" data-set="adaptive" data-val="off"><b>ВЫКЛ</b><s>чистый уровень</s></button></div>
       </div>
-      <h3 class="sec">Ракурс <span class="hintk">правая кнопка / два пальца · колесо · стрелки</span></h3>
-      <div class="sl"><label>Поворот</label>
-        <input type="range" id="rYaw" data-set="camYaw" min="-83" max="83" value="0"><span class="v" id="vYaw">0°</span></div>
-      <div class="sl"><label>Высота</label>
-        <input type="range" id="rPitch" data-set="camPitch" min="-23" max="54" value="0"><span class="v" id="vPitch">0°</span></div>
-      <div class="sl"><label>Дистанция</label>
-        <input type="range" id="rDist" data-set="camDist" min="45" max="240" value="100"><span class="v" id="vDist">100%</span></div>
-      <button class="opt" id="camReset" style="width:100%;margin-top:2px"><b>СБРОСИТЬ РАКУРС</b><s>клавиша 0</s></button>
       <h3 class="sec">Хват</h3>
       <div class="row">
         <button class="opt sel" data-set="hand" data-val="right"><b>ПРАВАЯ</b><s></s></button>
@@ -2421,7 +2471,21 @@ const PH = {
   // outside the legal window; this pair gives 24.0 cm.
   E_TABLE: 0.930,           // normal COR ball/table at zero impact speed
   E_TABLE_SPEED: 0.0085,    // COR loss per m/s of impact speed
-  MU_TABLE: 0.25,           // Coulomb friction ball/table (ITTF T3 studies)
+  /* Coulomb friction ball/table. Calibrated, not guessed (bench suite 12,
+   * A/B over mu x et): the ITTF dead-ball rebound is 23.3 cm at EVERY value
+   * because a vertical drop has no tangential slip, so friction is free to
+   * be set by how the table should answer SPIN.
+   *   mu 0.25 (the old value): a heavy loop at 8 m/s kicked forward by 8.8 %
+   *     and at 12 m/s by 3.2 % — i.e. a fast topspin drive bounced like a
+   *     dead ball, which is why loops felt floaty and flat;
+   *   mu 0.40: +22.4 % at 8 m/s, +14.5 % at 12 m/s, a heavy chop brakes to
+   *     -61.8 % of its incoming speed (it dies short, as a chop should), and
+   *     a corkscrew ball is thrown 76 cm sideways in the 0.45 s after the
+   *     bounce — a sidespin serve now visibly jumps off the table;
+   *   mu 0.48: kicks hard enough to look cartoonish (+29.6 %/-72.8 %).
+   * ET_TABLE stays 0: it only acts in the gripping regime and moved no
+   * measured number by more than 1.5 cm. */
+  MU_TABLE: 0.40,           // Coulomb friction ball/table (calibrated above)
   ET_TABLE: 0.00,           // tangential restitution of the table (none)
 
   /* ---- net ---- */
@@ -2441,6 +2505,15 @@ const PH = {
 
   /* ---- floor ---- */
   E_FLOOR: 0.78, MU_FLOOR: 0.4,
+
+  /* The ONE integration step. The game runs the ball at 600 Hz, so every
+   * verdict a solver hands to the game has to be taken at 600 Hz too: at
+   * 300 Hz the bounce is detected up to 1.3 cm later along the flight, which
+   * is enough to turn a serve that the solver called legal into one that
+   * clips the tape in play (measured: the player's weak tap came back
+   * valid=true from the solver and then hit the net in the game). Coarse
+   * steps are still fine for SEARCHING; only the verdict must match. */
+  SIM_DT: 1 / 600,
 };
 PH.AREA = Math.PI * PH.R * PH.R;
 PH.TABLE_Y = PH.T_H;                 // playing surface height
@@ -2490,9 +2563,12 @@ function integrateBall(p, v, w, dt) {
   V3.addScaled(_vt, v, _k1, dt * 0.5); aeroAccel(_k2, _vt, w);
   V3.addScaled(_vt, v, _k2, dt * 0.5); aeroAccel(_k3, _vt, w);
   V3.addScaled(_vt, v, _k3, dt); aeroAccel(_k4, _vt, w);
-  const ax = (_k1.x + 2 * _k2.x + 2 * _k3.x + _k4.x) / 6;
-  const ay = (_k1.y + 2 * _k2.y + 2 * _k3.y + _k4.y) / 6;
-  const az = (_k1.z + 2 * _k2.z + 2 * _k3.z + _k4.z) / 6;
+  let ax = (_k1.x + 2 * _k2.x + 2 * _k3.x + _k4.x) / 6;
+  let ay = (_k1.y + 2 * _k2.y + 2 * _k3.y + _k4.y) / 6;
+  let az = (_k1.z + 2 * _k2.z + 2 * _k3.z + _k4.z) / 6;
+  if (!Number.isFinite(ax)) ax = 0;
+  if (!Number.isFinite(ay)) ay = 0;
+  if (!Number.isFinite(az)) az = 0;
   p.x += (v.x + ax * dt * 0.5) * dt;
   p.y += (v.y + ay * dt * 0.5) * dt;
   p.z += (v.z + az * dt * 0.5) * dt;
@@ -2508,7 +2584,49 @@ function integrateBall(p, v, w, dt) {
  *  Mutates v and w in place. Returns impact diagnostics.
  * ---------------------------------------------------------------- */
 const _u = V3.new(), _un = V3.new(), _ut = V3.new(), _vc = V3.new(), _jt = V3.new(), _tmpc = V3.new();
+/* ---------------------------------------------------------------- *
+ *  Input hygiene
+ *
+ *  A single NaN or Infinity — a broken touch driver, a synthetic pointer
+ *  event, a detached canvas reporting a zero-size rect, a normalised
+ *  zero-length normal — used to sail straight through the integrator and
+ *  the ball disappeared for the rest of the point, with the rally counter
+ *  still running. Measured before this gate: 11 of 36 hostile inputs
+ *  produced a NaN or threw. Everything that enters the physics is repaired
+ *  to the nearest physical state here, in one place, instead of being
+ *  checked at forty call sites.
+ * ---------------------------------------------------------------- */
+const V_MAX = 60;                     // m/s = 216 km/h, above any real shot
+
+function saneV(v) {
+  return !!v && Number.isFinite(v.x) && Number.isFinite(v.y) && Number.isFinite(v.z);
+}
+
+/** Clamp to the physical envelope; returns true if anything was repaired. */
+function sanitizeV(v, limit) {
+  if (!v) return true;
+  let fixed = false;
+  if (!Number.isFinite(v.x)) { v.x = 0; fixed = true; }
+  if (!Number.isFinite(v.y)) { v.y = 0; fixed = true; }
+  if (!Number.isFinite(v.z)) { v.z = 0; fixed = true; }
+  const L = Math.hypot(v.x, v.y, v.z);
+  const max = limit || V_MAX;
+  if (!Number.isFinite(L)) { v.x = v.y = v.z = 0; return true; }
+  if (L > max) { const k = max / L; v.x *= k; v.y *= k; v.z *= k; fixed = true; }
+  return fixed;
+}
+
+/** A direction the impact can be solved against: finite and not degenerate. */
+function saneN(n) {
+  if (!saneV(n)) return false;
+  const L = Math.hypot(n.x, n.y, n.z);
+  return Number.isFinite(L) && L > 1e-6;
+}
+
 function impactSphere(v, w, n, vSurf, e, mu, et) {
+  if (!saneN(n) || !v || !w) return null;
+  sanitizeV(v); sanitizeV(w, SPIN_CAP * 2);
+  if (vSurf) sanitizeV(vSurf); else vSurf = ZERO3;
   // relative velocity of the ball centre wrt the surface
   V3.sub(_u, v, vSurf);
   const un = V3.dot(_u, n);
@@ -2559,11 +2677,44 @@ function impactSphere(v, w, n, vSurf, e, mu, et) {
  *  Ball <-> table top
  * ---------------------------------------------------------------- */
 const N_UP = V3.new(0, 1, 0), ZERO3 = V3.new(0, 0, 0);
+/* 27 mm band around the white line where a contact counts as an edge ball. */
+PH.EDGE_BAND = PH.R * 1.35;
+const _edgeN = { x: 0, y: 1, z: 0 };
+
+/**
+ * Ball vs table top, including the white line.
+ *
+ * An edge ball is not a smaller version of a normal bounce: the contact
+ * normal points OUTWARD and up, so the rebound leaves steeper, slower and at
+ * an angle the receiver had no way of reading. That is why it wins points,
+ * and why leaving it out made the sidelines feel like the rest of the table.
+ * Implemented here — the single function the game, the replay and every
+ * solver go through — so the AI's prediction of a shot agrees with the ball
+ * the player actually sees.
+ */
 function bounceTable(p, v, w) {
-  const speed = -v.y;
-  const e = clamp(PH.E_TABLE - PH.E_TABLE_SPEED * speed, 0.68, 0.92);
-  const info = impactSphere(v, w, N_UP, ZERO3, e, PH.MU_TABLE, PH.ET_TABLE);
+  const speed = Math.max(0, -v.y);
+  let e = clamp(PH.E_TABLE - PH.E_TABLE_SPEED * speed, 0.68, 0.92);
+  let n = N_UP;
+  // signed distance inside each line; negative means the ball caught the
+  // corner itself (predict allows a bounce up to R beyond the line)
+  const ex = PH.T_HALF_WID - Math.abs(p.x);
+  const ez = PH.T_HALF_LEN - Math.abs(p.z);
+  const edge = Math.min(ex, ez);
+  let k = 0;
+  if (edge < PH.EDGE_BAND) {
+    k = 1 - clamp(edge / PH.EDGE_BAND, 0, 1);
+    // the side line throws the ball wide, the end line throws it long: both
+    // away from the middle of the table
+    _edgeN.x = ex < ez ? Math.sign(p.x || 1) * 0.62 * k : 0;
+    _edgeN.z = ex < ez ? 0 : Math.sign(p.z || 1) * 0.62 * k;
+    _edgeN.y = 1;
+    n = V3.norm(_edgeN, _edgeN);
+    e *= 1 - 0.30 * k;                  // a corner is wood and air, not a sprung top
+  }
+  const info = impactSphere(v, w, n, ZERO3, e, PH.MU_TABLE, PH.ET_TABLE);
   p.y = PH.TABLE_Y + PH.R + 1e-5;
+  if (info) { info.edge = k; info.edgeAxis = ex < ez ? 'x' : 'z'; }
   return info;
 }
 
@@ -2574,6 +2725,10 @@ function bounceTable(p, v, w) {
  * ---------------------------------------------------------------- */
 const SPIN_CAP = 1080;   // rad/s  (~172 rev/s, above the measured world best)
 function impactRacket(v, w, n, vR, quality = 1, rubber = {}) {
+  if (!saneN(n)) return null;
+  sanitizeV(vR);
+  const q = Number.isFinite(quality) ? clamp(quality, 0, 1) : 1;
+  quality = q;
   const e0 = (rubber.e ?? PH.E_RACKET) * (0.55 + 0.45 * quality);
   const mu = (rubber.mu ?? PH.MU_RACKET) * (0.6 + 0.4 * quality);
   const et = (rubber.et ?? PH.ET_RACKET) * (0.5 + 0.5 * quality);
@@ -2627,10 +2782,12 @@ function predict(p0, v0, w0, opts = {}) {
   const stopZ = opts.stopZ;              // stop when z crosses this plane (towards the player)
   const stopDir = opts.stopDir || 1;
   V3.copy(_pp, p0); V3.copy(_pv, v0); V3.copy(_pw, w0);
+  sanitizeV(_pp, 40); sanitizeV(_pv); sanitizeV(_pw, SPIN_CAP * 2);
   const out = opts.out || {};
   out.bounces = 0; out.hitNet = false; out.landed = null; out.b2 = null; out.apex = -1; out.cross = null;
   out.planeCross = null; out.netCross = null; out.floor = null;
   out.reachT = -1; out.reach = null; out.path = opts.path || null;
+  out.diverged = false; out.edge = 0;
   if (out.path) out.path.length = 0;
   let t = 0, prevX = _pp.x, prevY = _pp.y, prevZ = _pp.z;
   let bounceSide = 0;
@@ -2638,6 +2795,7 @@ function predict(p0, v0, w0, opts = {}) {
     prevX = _pp.x; prevY = _pp.y; prevZ = _pp.z;
     integrateBall(_pp, _pv, _pw, dt);
     t += dt;
+    if (!saneV(_pv) || !saneV(_pp)) { out.diverged = true; break; }
     if (out.path && (out.path.length < 400)) out.path.push(_pp.x, _pp.y, _pp.z);
     if (_pp.y > out.apex) out.apex = _pp.y;
 
@@ -2661,7 +2819,16 @@ function predict(p0, v0, w0, opts = {}) {
       if (out.bounces === 1) { out.landed = { x: _pp.x, z: _pp.z, t, vy: _pv.y, speed: V3.len(_pv) }; bounceSide = Math.sign(_pp.z); }
       else if (out.bounces === 2) out.b2 = { x: _pp.x, z: _pp.z, t, speed: V3.len(_pv) };
       if (opts.stopOnFirstBounce) break;
-      bounceTable(_pp, _pv, _pw);
+      /* The serve solver asks for exactly two bounces and nothing else: the
+       * rest of the flight (up to 1.5 s of RK4 at 300 Hz) was integrated and
+       * thrown away on every one of the ~150 candidates per serve, which is
+       * most of the 50-90 ms the search used to block the frame for. */
+      if (opts.stopAfterBounces && out.bounces >= opts.stopAfterBounces) break;
+      const bi = bounceTable(_pp, _pv, _pw);
+      if (bi && bi.edge > out.edge) {
+        out.edge = bi.edge;
+        out.edgeBounce = { x: _pp.x, z: _pp.z, k: bi.edge, axis: bi.edgeAxis, t };
+      }
     }
     // requested crossing plane (racket plane of a player)
     if (stopZ !== undefined && out.reachT < 0) {
@@ -2711,6 +2878,19 @@ function _tryLaunch(from, spin, speed, ux, uz, elev, netClear, out, dt) {
  *   player's power simply cannot stay on the table (0 = never).
  */
 function solveLaunch(from, target, spin, opts = {}) {
+  /* The solver is called with whatever the input layer produced, so it gets
+   * the same gate as everything else: a NaN target must not turn into a NaN
+   * launch that then poisons the ball for the rest of the point.
+   * NOTE: `target` is a landing POINT, and callers legitimately pass it as
+   * {x, z} with no y — demanding a finite y here silently disabled the whole
+   * assist layer (measured: player shots on the table fell from 83 % to 6 %,
+   * because refineRacket treats a null solve as "no opinion" and hands back
+   * the raw gesture). Positions are checked, never clamped: clamping a
+   * position vector as if it were a velocity would move the aim point. */
+  const finitePt = (p) => !!p && Number.isFinite(p.x) && Number.isFinite(p.z) &&
+    (p.y === undefined || Number.isFinite(p.y));
+  if (!finitePt(from) || !finitePt(target)) return null;
+  if (spin) sanitizeV(spin, SPIN_CAP * 2);
   const dirX = target.x - from.x, dirZ = target.z - from.z;
   const horiz = Math.hypot(dirX, dirZ) || 1e-6;
   let ux = dirX / horiz, uz = dirZ / horiz;
@@ -2978,9 +3158,16 @@ const ARCH = {
   FADE: { elev: 28, contact: 56, speed: 1.00, lat: 1.70, back: false },
   DROP: { elev: -10, contact: 58, speed: 0.34, lat: 0.30, back: true, soft: 0.55, absorb: 0.30 },
   SERVE_TOP: { elev: 46, contact: 58, speed: 0.80, lat: 0.60, back: false },
-  SERVE_BACK: { elev: -40, contact: 72, speed: 0.75, lat: 0.60, back: true },
+  /* 0.75 -> 0.86: with the table's calibrated friction (MU_TABLE 0.40) a
+     heavy chop serve brakes hard at the first bounce and used to die 25 cm
+     past the net. Still the slowest of the four serves, but it arrives. */
+  SERVE_BACK: { elev: -40, contact: 72, speed: 0.86, lat: 0.60, back: true },
   SERVE_SIDE: { elev: 10, contact: 62, speed: 0.85, lat: 2.00, back: false },
-  SERVE_FAST: { elev: 2, contact: 26, speed: 1.00, lat: 0.60, back: false },
+  /* A fast serve is struck DOWN into the table, not flat: from a contact
+   * ~0.5 m above the playing surface a level launch has to crawl at 4 m/s to
+   * bounce on the server's own half at all. -13 deg buys a legal first
+   * bounce at full swing speed (measured: 24 -> 40+ km/h). */
+  SERVE_FAST: { elev: -13, contact: 24, speed: 1.12, lat: 0.60, back: false },
 };
 
 /** Pick the archetype. Ordering matters: situational shots win over generic. */
@@ -3109,9 +3296,36 @@ function deriveStroke(m, ctx) {
   const latTurn = -Math.sign(r || 1) * contact * DEG * 0.62 * latMix;
   azFace = clamp(azFace + latTurn, -1.25, 1.25);
 
+  /* The step yaw. The bat is turned into the direction it is moving (right
+   * step -> face opens right), and the same yaw is applied here so the face
+   * you SEE is the face that strikes. Without it the bat visibly banks one
+   * way while the ball comes off a square face — a mismatch the eye reads
+   * as the game cheating. */
+  const moveYaw = Number.isFinite(ctx.moveYaw) ? clamp(ctx.moveYaw, -0.6, 0.6) : 0;
+  if (moveYaw) azFace = clamp(azFace + moveYaw * 0.85, -1.25, 1.25);
+
   let vmag = 2.0 + 15.5 * Math.pow(sp01, 0.82);
   vmag = clamp(vmag * A.speed * (Number.isFinite(ctx.powerScale) ? ctx.powerScale : 1), 0.8, 19.5);
+  /* A serve is not a smash. Through this impact model a 19.5 m/s bat with a
+   * flat face launches the ball at ~30 m/s, and a fast swipe used to produce
+   * a 105-137 km/h "serve" — faster than anything ever measured on a real
+   * table, and unreturnable by design. Pro serves leave the bat at 10-15 m/s
+   * and arrive at 40-70 km/h, which is what 12.5 m/s of bat gives here. */
+  if (ctx.isServe) vmag = clamp(vmag, 1.2, 12.5);
   if (!Number.isFinite(vmag)) vmag = 4.0;          // last line of defence
+
+  /* The explicit spin dial (the chip in the top button row). The gesture
+   * decides HOW you brush the ball; this decides how much of the contact is
+   * brush and how much is punch — a more grazing face makes more spin and
+   * less pace, a flatter one the reverse. It exists because spin was only
+   * ever a side effect of the curl of a swipe: there was no way to ask for a
+   * heavy low backspin on purpose, and no way to see what you had asked for.
+   * Deterministic and persistent, so it can be learned. */
+  const sb = ctx.spinBias === 'high' ? 1 : ctx.spinBias === 'low' ? -1 : 0;
+  if (sb) {
+    contact = clamp(contact + sb * 9, 14, 80);
+    vmag = clamp(vmag * (1 - sb * 0.08), 0.8, 19.5);
+  }
 
   /* ---- 5. build the 3-D racket frame ------------------------------ */
   const eR = elev * DEG;
@@ -3171,8 +3385,12 @@ function deriveStroke(m, ctx) {
     stroke: st, arch: A, vR, normal, vmag, aim: { x: aimX, z: aimZ },
     power: sp01, quality, elev, contact, azSwing, azFace, spinIntent, rubber,
     swipe: m, side, isServe: !!ctx.isServe,
+    /* Air left over the tape. A push and a chop carry the least energy of any
+       stroke, and at the default 55 mm they were the least reliable shots in
+       the game (measured: 28.6 % on the table, 28.6 % into the net). */
     netClear: st.id === 'LOB' ? 0.50 : st.id === 'DROP' ? 0.035
-      : st.id === 'SMASH' ? 0.040 : st.id === 'CHOP' ? 0.075 : 0.055,
+      : (st.id === 'PUSH' || st.id === 'CHOP') ? 0.115
+      : st.id === 'SMASH' ? 0.040 : 0.055,
   };
 }
 
@@ -3225,42 +3443,165 @@ function strokeFrame(racket, dElev, dAz, scale, outSwing, outNormal) {
  * genuinely legal. Legality is returned, not implied.
  */
 const _svRep = {};
+/* Warm starts for the serve search, keyed loosely (side, archetype, aim
+ * bucket). The toss is authored, so consecutive serves differ only slightly
+ * and the candidate that solved the last one usually solves this one. Every
+ * warm start is re-verified at the production step before it is used, so a
+ * stale entry can never produce an illegal serve: it costs one flight and
+ * falls through to the full search. */
+/* Ceiling on the bat speed a serve may actually be given, in m/s. The search
+ * is allowed to scale the gesture up to make a serve legal and deep, and
+ * without this it scaled a capped 12.5 m/s swing by 4.2 and produced an
+ * 88 km/h "serve" — faster than any real serve ever measured, and a free
+ * point rather than a rally. 12.5 m/s of bat through this impact model is
+ * ~65-70 km/h of ball, which is the top of the professional range. */
+const SERVE_VMAX = 12.5;
+/* ...and the same ceiling expressed as ball speed, enforced inside the score
+ * so the search never *chooses* a serve that is too fast to be played: at
+ * 60 km/h off a 0.20 m contact the ball reaches the tape before it has had
+ * time to rise over it, and the result was a serve that faulted into the net
+ * in a third of attempts while looking like the player's own fault. */
+const SERVE_BALL_MAX = 17.5;                 // m/s = 63 km/h
+
+const SERVE_WARM = new Map();
+function serveWarmKey(side, racket) {
+  const st = racket.stroke || {};
+  const aim = racket.aim || {};
+  return side + '|' + (st.id || '?') + '|' + Math.round((aim.z || 0) * 3) + '|' + Math.round((aim.x || 0) * 3);
+}
+function ownFor(aim, side) {
+  return { x: aim.x * 0.35, z: side * (0.78 + Math.abs(aim.z) * 0.16) };
+}
+
 function solveServeStroke(ballP, racket, evalStroke, side, assist) {
-  const aimBase = racket.aim || { x: 0, z: -side * 0.95 };
+  const aimReq = racket.aim || { x: 0, z: -side * 0.95 };
   const v = V3.new(), w = V3.new();
   let legal = false, why = 'none';
 
+  /* Pace is part of the cost. The caller (AI level, tactic, or the player's
+   * own gesture) asked for racket.vmag; `sc` is how much of it survived the
+   * search. Geometry alone made the descent perfectly happy to halve the
+   * swing whenever a softer ball happened to sit 3 cm closer to the aim
+   * point — which is exactly why every serve in the game arrived at
+   * 17 km/h no matter who was serving or what they had chosen. log() keeps
+   * the penalty symmetric around the requested pace, and its weight is well
+   * below the cheapest illegal branch (6.0), so a fast serve is never
+   * bought with a fault. */
+  /* One-sided on purpose. Slowing the swing down below what was asked for is
+   * what produced the 17 km/h serve: geometry alone was happy to halve the
+   * swing whenever a softer ball sat a few cm closer to the aim point, and a
+   * symmetric penalty kept that habit. Going a little FASTER than asked is
+   * the normal way to make a serve both legal and deep, so it is charged at a
+   * fifth of the rate. */
+  const PACE_W = 0.85;
+  const PACE_W_UP = 0.17;
+  /* What the caller wanted the ball to LEAVE with, along the flight axis
+   * (rad/s). The search optimises placement and knows nothing about spin, so
+   * left alone it walks to whatever geometry lands best and quietly throws the
+   * corkscrew away: measured, a face turned 26 deg makes w.z = 0.10 of the cap
+   * raw and 0.00 after the solve. Charging for the loss keeps the character of
+   * the serve the server actually chose. Weight is well under the cheapest
+   * illegal branch, so spin is never bought with a fault. */
+  /* Weight sized against the rest of the score: losing the whole corkscrew
+   * (~120 rad/s) costs ~0.9, which outweighs a 90 cm placement error but is
+   * still an order of magnitude below the cheapest illegal branch (6.0), so
+   * spin can never be bought with a fault. At 2.5 the solver happily traded
+   * the entire w.z for a slightly better landing spot (measured: wanted
+   * -128 rad/s, delivered -16). */
+  const SPIN_W = 7.0;
+  const spinWant = racket.spinWant || 0;
+  /* Hard ceiling on the work one serve may do. The search is a heuristic and
+   * a pathological gesture (a 6-sample tap) used to walk every ladder, every
+   * recovery sweep and then be solved a second time by the caller: measured
+   * 730 ms, i.e. 44 dropped frames, on a ball that was never going to be a
+   * legal serve. Past the budget the search stops and returns the best
+   * candidate it has, so the worst case is bounded and known. */
+  const FLIGHT_BUDGET = 70;
+  let flights = 0;
+  /* Metres past the net a serve's second bounce must reach to be worth
+   * playing (the bat's step-in limit is 0.86 m from the centre line). */
+  const SERVE_MIN_PAST_NET = 0.52;
+  const paceCost = (sc) => {
+    const l = Math.log(clamp(sc, 0.16, 4.5));
+    return l < 0 ? PACE_W * -l : PACE_W_UP * l;
+  };
+
   const score = (own, aim, dE, dA, sc, dmp, fine) => {
+    flights++;
     evalStroke(dE, dA, sc, dmp, v, w);
     legal = false; why = 'none';
+    const pc0 = paceCost(sc);
     if (v.z * side > -0.30) { why = 'back'; return 60; }      // not going forward
+    const spd = V3.len(v);
+    if (spd > SERVE_BALL_MAX) { why = 'fast'; return 7 + (spd - SERVE_BALL_MAX) * 0.6; }
     predict(V3.clone(ballP), V3.clone(v), V3.clone(w),
-      { dt: fine ? 1 / 300 : 1 / 160, maxT: 2.4, out: _svRep });
+      /* maxT has to be the same for the coarse and the fine pass. Cutting the
+       * coarse pass to 1.6 s looked like free speed, but a soft serve needs
+       * ~1.8 s to complete BOTH bounces — so the search never saw a second
+       * bounce, scored the good solution as 'long', and walked away from it.
+       * That is why a weak tap was a fault in 100 % of cases at every assist
+       * level. stopAfterBounces already ends fast serves early, so the honest
+       * horizon costs almost nothing. */
+      { dt: fine ? PH.SIM_DT : 1 / 170, maxT: 2.2, stopAfterBounces: 2, out: _svRep });
     const r = _svRep;
     if (r.bounces === 0) { why = r.hitNet ? 'net' : 'none'; return 40 + (r.hitNet ? 4 : 0); }
-    if (Math.sign(r.landed.z) !== side) { why = 'wrongside'; return 26 + Math.abs(r.landed.z - own.z); }
+    if (Math.sign(r.landed.z) !== side) { why = 'wrongside'; return 26 + Math.abs(r.landed.z - own.z) + pc0; }
     const d1 = Math.hypot(r.landed.x - own.x, r.landed.z - own.z);
-    if (r.hitNet) { why = 'net'; return 12 + d1 * 0.3 + Math.max(0, PH.NET_TOP + PH.R - (r.netCross ? r.netCross.y : 0)) * 10; }
+    if (r.hitNet) { why = 'net'; return 12 + d1 * 0.3 + Math.max(0, PH.NET_TOP + PH.R - (r.netCross ? r.netCross.y : 0)) * 10 + pc0; }
     if (!r.b2) {                                              // flew past the table
       why = 'long';
       const pc = r.floor || r.planeCross;
       const miss = pc ? Math.hypot(pc.x - aim.x, pc.z - aim.z) : 1.2;
-      return 6 + miss * 0.6 + d1 * 0.15;                      // includes going wide
+      return 6 + miss * 0.6 + d1 * 0.15 + pc0;                // includes going wide
     }
-    if (Math.sign(r.b2.z) === side) { why = 'own'; return 9 + d1; }   // double bounce, own half
+    if (Math.sign(r.b2.z) === side) { why = 'own'; return 9 + d1 + pc0; }   // double bounce, own half
     legal = true; why = 'ok';
-    return Math.hypot(r.b2.x - aim.x, r.b2.z - aim.z) + d1 * 0.22;
+    const spinCost = spinWant ? SPIN_W * Math.abs(w.z - spinWant) / 1080 : 0;
+    /* A serve whose second bounce dies just behind the net is the single
+     * least playable ball in the game: it is legal, unreachable at pace, and
+     * the descent used to be happy to produce it because it happened to sit
+     * close to a shortened aim point. Penalise the dead zone hard — still far
+     * below the cheapest illegal branch, so it can never buy a fault. */
+    const pastNet = Math.abs(r.b2.z);
+    const dead = pastNet < SERVE_MIN_PAST_NET ? (SERVE_MIN_PAST_NET - pastNet) * 5.0 : 0;
+    return Math.hypot(r.b2.x - aim.x, r.b2.z - aim.z) + d1 * 0.22 + pc0 + dead + spinCost;
   };
 
   const SC = [0.30, 0.45, 0.65, 0.88, 1.15, 1.45];
   const DMP = [1, 0.58];
-  let bE = 0, bA = 0, bS = 1, bD = 1, bV = Infinity, bAim = aimBase, bOwn = null, solvedLegal = false;
+  let bE = 0, bA = 0, bS = 1, bD = 1, bV = Infinity, bAim = aimReq, bOwn = null, solvedLegal = false;
 
+  /* --- warm start: one verified flight instead of a whole search --------- */
+  const warmKey = serveWarmKey(side, racket);
+  const warm = SERVE_WARM.get(warmKey);
+  if (warm) {
+    const aimW = { x: aimReq.x, z: aimReq.z };
+    const ownW = ownFor(aimW, side);
+    const sv = score(ownW, aimW, warm.dE, warm.dA, warm.sc, warm.dmp, true);
+    if (legal && _svRep.b2 && Math.abs(_svRep.b2.z) >= SERVE_MIN_PAST_NET) {
+      bE = warm.dE; bA = warm.dA; bS = warm.sc; bD = warm.dmp;
+      bV = sv; bAim = aimW; bOwn = ownW; solvedLegal = true;
+    }
+  }
+
+  const aimBase = aimReq;
+
+  if (!solvedLegal) {
   // A hard topspin serve simply cannot be aimed at the very back line and
-  // stay legal on a bad toss, so shorten the target until it works.
-  for (const depthF of [1.0, 0.70]) {
+  // stay legal on a bad toss, so shorten the target until it works — but in
+  // small steps. The old jump straight to 0.70 was what turned a slightly
+  // mistossed serve into a ball that died behind the net and could not be
+  // reached at all.
+  for (const depthF of [1.0, 0.92, 0.84]) {
     const aim = { x: aimBase.x, z: aimBase.z * depthF };
-    const own = { x: aim.x * 0.35, z: side * (0.40 + Math.abs(aim.z) * 0.16) };
+    /* Where the FIRST bounce is wanted. It used to be 0.40 m in front of the
+     * net, i.e. ~0.9 m away from the server's own end line — a loopy ball
+     * that has to be hit upwards to arrive at all, which is half of why
+     * serves looked floaty. Real servers bounce it near their own end line
+     * and drive it through; 0.78 + a little of the requested depth does that
+     * and, measured, lifts the median second bounce from 0.44 m to ~1.1 m
+     * past the net. */
+    const own = { x: aim.x * 0.35, z: side * (0.78 + Math.abs(aim.z) * 0.16) };
 
     // stage 1 — how far must the swing direction be pulled back to centre?
     let aBest = 0, aBestV = Infinity;
@@ -3346,8 +3687,92 @@ function solveServeStroke(ballP, racket, evalStroke, side, assist) {
         if (s2 < vBest) { vBest = s2; eBest = e0 + ddE; }
       }
     }
+    /* Nothing legal at the speed the gesture produced. A weak tap is not a
+     * serve at all — the ball would double-bounce on the server's own half —
+     * and with assist on that must not become a fault: swing THROUGH it,
+     * harder, until the ball is at least a legal serve. The ceiling follows
+     * the assist slider, so assist 0 keeps the honest (faulting) result and
+     * assist 1 guarantees a playable one. Measured before this: a weak tap
+     * was legal in 0 % of cases even at full assist. */
+    if (!solvedLegal) {
+      const maxScale = Math.min(1.6 + 2.6 * clamp(assist, 0, 1),
+        SERVE_VMAX / Math.max(0.5, racket.vmag || 1));
+      for (const sc of [1.6, 2.2, 3.0, 4.0, 5.2]) {
+        if (sc > maxScale || sc <= sBest) continue;
+        const s2 = score(own, aim, eBest, aBest, sc, dBest, true);
+        if (legal) { vBest = s2; sBest = sc; solvedLegal = true; break; }
+        if (s2 < vBest) { vBest = s2; sBest = sc; }
+      }
+    }
+    /* A tap is a downward flick: the swing points at the floor, and no amount
+     * of scale turns a downward swing into a forward serve (score() rejects it
+     * as 'back' before it ever simulates). Rotate the launch into the narrow
+     * window a serve actually lives in — 30 deg down to 6 deg up — and re-solve
+     * the speed there. Measured before this: a weak tap was a fault in 100 % of
+     * cases at EVERY assist level, and the search burned 390 ms proving it. */
+    if (!solvedLegal && flights <= FLIGHT_BUDGET) {
+      /* Aim the FACE, not the swing. strokeFrame builds the face as
+       * phi = e - contact (or e + contact for a backspin arch), so a target
+       * written as a swing elevation means something completely different for
+       * a grazing 56 deg contact: it turned the face 86 deg down and slammed
+       * the ball into the server's own half. Expressed as a face angle, the
+       * four candidates below are the window a real serve lives in — from a
+       * slightly open face (slow, heavy) to a closed one (flat, fast). */
+      const e0 = clamp(racket.elev * DEG, -1.30, 1.40);
+      const cRad = clamp(racket.contact * DEG, 0, 1.40);
+      const isBack = !!(racket.arch && racket.arch.back);
+      const maxScale2 = Math.min(1.6 + 2.6 * clamp(assist, 0, 1),
+        SERVE_VMAX / Math.max(0.5, racket.vmag || 1));
+      for (const phi of [-0.26, -0.10, 0.06, 0.22]) {
+        const eW = isBack ? phi - cRad : phi + cRad;
+        const dE = clamp(eW - e0, -1.30, 1.30);
+        for (const sc of [1.0, 1.5, 2.2, 3.2]) {
+          if (sc > maxScale2) break;
+          const s2 = score(own, aim, dE, aBest, sc, dBest, true);
+          if (legal) { vBest = s2; eBest = dE; sBest = sc; solvedLegal = true; break; }
+          if (s2 < vBest) { vBest = s2; eBest = dE; sBest = sc; }
+        }
+        if (solvedLegal || flights > FLIGHT_BUDGET) break;
+      }
+    }
+    /* Only a DEPTH failure justifies another pass down the ladder. Walking
+     * the target shorter cannot fix a swing that points at the floor ('back'),
+     * a ball that finds the tape ('net') or one that goes wide — and each pass
+     * is a full search (~55 flights). Pruning on `why` is what took a failing
+     * soft serve from three searches to one. */
     if (vBest < bV) { bV = vBest; bE = eBest; bA = aBest; bS = sBest; bD = dBest; bAim = aim; bOwn = own; }
     if (solvedLegal) { bE = eBest; bA = aBest; bS = sBest; bD = dBest; bAim = aim; bOwn = own; solvedLegal = true; break; }
+    /* Only a DEPTH failure justifies another pass down the ladder: walking the
+     * target shorter cannot fix a swing that points at the floor ('back'), a
+     * ball that finds the tape ('net') or one that goes wide — and each pass is
+     * a full search (~55 flights). */
+    if (why !== 'long' && why !== 'own') break;
+    if (flights > FLIGHT_BUDGET) break;
+  }
+  }
+
+
+  /* If the winner is legal but its second bounce dies behind the net, buy the
+   * depth with swing speed rather than with another whole search: the flight
+   * is what it is, and a deeper serve is the same stroke hit harder. */
+  if (solvedLegal) {
+    score(bOwn, bAim, bE, bA, bS, bD, true);
+    let bz = _svRep.b2 ? Math.abs(_svRep.b2.z) : 0;
+    if (bz < SERVE_MIN_PAST_NET) {
+      const maxScale = Math.min(1.6 + 2.6 * clamp(assist, 0, 1),
+        SERVE_VMAX / Math.max(0.5, racket.vmag || 1));
+      let bestS = bS, bestV = Infinity;
+      for (const mul of [1.3, 1.7, 2.2, 2.9, 3.8]) {
+        const sc = bS * mul;
+        if (sc > maxScale) break;
+        const s2 = score(bOwn, bAim, bE, bA, sc, bD, true);
+        if (!legal) continue;
+        const z2 = _svRep.b2 ? Math.abs(_svRep.b2.z) : 0;
+        if (s2 < bestV) { bestV = s2; bestS = sc; }
+        if (z2 >= SERVE_MIN_PAST_NET) { bestV = s2; bestS = sc; break; }
+      }
+      if (bestV < Infinity) { bS = bestS; score(bOwn, bAim, bE, bA, bS, bD, true); }
+    }
   }
 
   // Safety net. If the player's gesture simply does not admit a legal serve
@@ -3356,7 +3781,7 @@ function solveServeStroke(ballP, racket, evalStroke, side, assist) {
   // to the solver is the one thing a serve must never do.
   if (!solvedLegal) {
     const own = { x: 0, z: side * 0.55 };
-    const aim = { x: 0, z: -side * 0.75 };
+    const aim = { x: 0, z: -side * 1.00 };   // deep and central: always reachable
     let sB = 0.8, dB = 1, eB = 0.0, aB = 0.0, svBest = Infinity;
     for (const sc of [0.5, 0.7, 0.95, 1.25]) for (const dmp of DMP) {
       const sv = score(own, aim, 0, 0, sc, dmp, false);
@@ -3381,11 +3806,78 @@ function solveServeStroke(ballP, racket, evalStroke, side, assist) {
   const k = clamp(0.45 + 0.55 * assist, 0, 1);
   const fE = bE * k, fA = bA * k, fS = 1 + (bS - 1) * k, fD = 1 + (bD - 1) * k;
   score(bOwn, bAim, fE, fA, fS, fD, true);
-  if (legal) return { dE: fE, dA: fA, sc: fS, dmp: fD, ok: true, target: bAim };
+  /* ...and never to the point of a ball that dies behind the net. The
+   * retained error is applied AFTER the search, so the search cannot see it:
+   * a weak server could ask for 1.05 m, solve it, then keep enough of its own
+   * wobble to drop the second bounce 25 cm past the net — legal, and
+   * unreturnable at pace. Inaccuracy should cost the opponent placement, not
+   * the receiver the point. Measured before this guard: 32.5 % of a beginner's
+   * serves landed shorter than 0.62 m; the solve itself was already deep. */
+  const deepEnough = legal && _svRep.b2 && Math.abs(_svRep.b2.z) >= SERVE_MIN_PAST_NET;
+  if (deepEnough) {
+    if (SERVE_WARM.size < 96) SERVE_WARM.set(warmKey, { dE: bE, dA: bA, sc: bS, dmp: bD });
+    return { dE: fE, dA: fA, sc: fS, dmp: fD, ok: true, target: bAim };
+  }
   // The player's own error would have produced an illegal serve: give them
   // the solved one instead. Only a truly absurd gesture can fail here.
   score(bOwn, bAim, bE, bA, bS, bD, true);
+  if (legal && _svRep.b2 && SERVE_WARM.size < 96)
+    SERVE_WARM.set(warmKey, { dE: bE, dA: bA, sc: bS, dmp: bD });
   return { dE: bE, dA: bA, sc: bS, dmp: bD, ok: legal, target: bAim };
+}
+
+/** Recover (face elevation, azimuth) from a world-space face normal, in the
+ *  exact convention strokeFrame() builds it with. Used whenever the bat's
+ *  real orientation — not an archetype — has to drive the impact, otherwise
+ *  the assist rebuilds a square face and the player's angle is thrown away. */
+function anglesFromNormal(n, side) {
+  const fwd = -side;
+  const ny = clamp(Number.isFinite(n.y) ? n.y : 0, -1, 1);
+  const phi = Math.asin(ny);
+  let az = Math.atan2(n.x || 0, fwd * (n.z || -fwd));
+  if (!Number.isFinite(az)) az = 0;
+  return { phi, az, elevDeg: phi / DEG, azDeg: az / DEG };
+}
+
+/**
+ * Passive contact (a block): the ball arrives at a bat that is not swinging.
+ *
+ * The face the player can see IS the physics here. Running the placement
+ * solver on a block was actively wrong: the assist chased an aim point a dead
+ * rubber cannot reach, lifted the face by up to 46 deg, returned valid=false,
+ * and popped the ball up and back towards the player at 4.6 m/s no matter
+ * which angle they were holding (measured, suite 7: lateral error 181 deg at a
+ * square face, i.e. the ball went the wrong way).
+ *
+ * So: keep the face, keep the bat's own velocity, and allow exactly one
+ * correction — if the block would go into the tape, lift the launch by the
+ * smallest of a few fixed steps that clears it. The lift is a pure +y offset
+ * on the normal, which leaves the x/z ratio untouched, so the lateral angle
+ * the player is holding survives exactly.
+ *
+ * @returns {{normal:object, liftDeg:number, hitNet:boolean}}
+ */
+const _blkV = V3.new(), _blkW = V3.new(), _blkRep = {};
+const BLOCK_LIFTS = [0, 4, 8, 13, 20];
+function solveBlockNormal(ballP, ballV, ballW, face, vR, quality, rubber, out) {
+  const o = out || {};
+  const up = { x: 0, y: 1, z: 0 };
+  let chosen = null, chosenLift = 0, clears = false;
+  for (let i = 0; i < BLOCK_LIFTS.length; i++) {
+    const lift = BLOCK_LIFTS[i];
+    const nl = V3.norm(V3.new(),
+      V3.addScaled(V3.new(), face, up, Math.tan(lift * DEG) * V3.len(face)));
+    V3.copy(_blkV, ballV); V3.copy(_blkW, ballW);
+    impactRacket(_blkV, _blkW, nl, vR, quality, rubber || {});
+    predict(V3.clone(ballP), V3.clone(_blkV), V3.clone(_blkW),
+      { dt: PH.SIM_DT, maxT: 1.4, stopOnFirstBounce: true, out: _blkRep });
+    if (!chosen) { chosen = nl; chosenLift = lift; }
+    if (!_blkRep.hitNet) { chosen = nl; chosenLift = lift; clears = true; break; }
+  }
+  o.normal = chosen || V3.clone(face);
+  o.liftDeg = chosenLift;
+  o.hitNet = !clears;
+  return o;
 }
 
 function refineRacket(ballP, ballV, ballW, racket, assist, quality) {
@@ -3409,6 +3901,10 @@ function refineRacket(ballP, ballV, ballW, racket, assist, quality) {
   if (racket.isServe) {
     const srv = solveServeStroke(ballP, racket, evalStroke, side, assist);
     strokeFrame(racket, srv.dE, srv.dA, srv.sc, _rs, _rn);
+    /* Last line of defence: whatever the search settled on, a serve never
+       leaves the bat faster than SERVE_VMAX. */
+    const spd = V3.len(_rs);
+    if (spd > SERVE_VMAX) V3.mul(_rs, _rs, SERVE_VMAX / spd);
     rubber.damp = srv.dmp;
     return Object.assign({}, racket, {
       normal: V3.clone(_rn), vR: V3.clone(_rs), rubber,
@@ -3566,7 +4062,7 @@ function refineRacket(ballP, ballV, ballW, racket, assist, quality) {
 /** Cheap post-hoc report of where a struck ball will actually go. */
 function shotReport(p, v, w, out) {
   return predict(V3.clone(p), V3.clone(v), V3.clone(w),
-    { dt: 1 / 300, maxT: 2.6, stopOnFirstBounce: true, out: out || _rout });
+    { dt: PH.SIM_DT, maxT: 2.6, stopOnFirstBounce: true, out: out || _rout });
 }
 
 
@@ -3811,7 +4307,7 @@ const AI_LEVELS = [
     react: 0.30, move: 2.1, posErr: 0.185, skill: 0.50, spinRead: 0.32,
     aggro: 0.14, variety: 0.55,
     vmagMin: 3.0, vmagMax: 5.5, paceOpen: 0.28, paceRamp: 0.045, paceMax: 0.54,
-    windup: 0.30, errBase: 0.165, errPress: 0.10, deepness: 0.52, placeSkill: 0.30,
+    windup: 0.30, errBase: 0.165, errPress: 0.10, deepness: 0.68, placeSkill: 0.30,
     counterRate: 0.06, smashRate: 0.22, dropRate: 0.05,
   },
   {
@@ -3819,7 +4315,7 @@ const AI_LEVELS = [
     react: 0.235, move: 2.9, posErr: 0.125, skill: 0.66, spinRead: 0.52,
     aggro: 0.30, variety: 0.68,
     vmagMin: 4.0, vmagMax: 8.0, paceOpen: 0.32, paceRamp: 0.060, paceMax: 0.74,
-    windup: 0.265, errBase: 0.112, errPress: 0.075, deepness: 0.62, placeSkill: 0.48,
+    windup: 0.265, errBase: 0.112, errPress: 0.075, deepness: 0.78, placeSkill: 0.48,
     counterRate: 0.14, smashRate: 0.40, dropRate: 0.07,
   },
   {
@@ -3827,7 +4323,7 @@ const AI_LEVELS = [
     react: 0.185, move: 3.5, posErr: 0.082, skill: 0.79, spinRead: 0.72,
     aggro: 0.44, variety: 0.78,
     vmagMin: 5.0, vmagMax: 10.8, paceOpen: 0.38, paceRamp: 0.075, paceMax: 0.90,
-    windup: 0.235, errBase: 0.062, errPress: 0.055, deepness: 0.70, placeSkill: 0.64,
+    windup: 0.235, errBase: 0.062, errPress: 0.055, deepness: 0.86, placeSkill: 0.64,
     counterRate: 0.26, smashRate: 0.58, dropRate: 0.08,
   },
   {
@@ -3835,7 +4331,7 @@ const AI_LEVELS = [
     react: 0.145, move: 4.3, posErr: 0.052, skill: 0.885, spinRead: 0.87,
     aggro: 0.60, variety: 0.84,
     vmagMin: 5.8, vmagMax: 13.2, paceOpen: 0.44, paceRamp: 0.090, paceMax: 1.0,
-    windup: 0.195, errBase: 0.054, errPress: 0.040, deepness: 0.78, placeSkill: 0.80,
+    windup: 0.195, errBase: 0.054, errPress: 0.040, deepness: 0.90, placeSkill: 0.80,
     counterRate: 0.40, smashRate: 0.74, dropRate: 0.09,
   },
   {
@@ -3843,7 +4339,7 @@ const AI_LEVELS = [
     react: 0.108, move: 5.2, posErr: 0.032, skill: 0.95, spinRead: 0.95,
     aggro: 0.74, variety: 0.90,
     vmagMin: 6.6, vmagMax: 15.4, paceOpen: 0.50, paceRamp: 0.105, paceMax: 1.0,
-    windup: 0.165, errBase: 0.040, errPress: 0.028, deepness: 0.84, placeSkill: 0.90,
+    windup: 0.165, errBase: 0.040, errPress: 0.028, deepness: 0.94, placeSkill: 0.90,
     counterRate: 0.54, smashRate: 0.86, dropRate: 0.10,
   },
 ];
@@ -3862,6 +4358,23 @@ const AI_TACTICS = {
   DEFEND: { id: 'DEFEND', pace: 0.62, risk: 0.22, depth: 0.72, wide: 0.30 },
 };
 
+/* Would this exact racket, played from this exact ball state, clip the net?
+ * Same call sequence the game uses to hit the ball (strokeFrame -> impactRacket
+ * -> predict at PH.SIM_DT), so the answer is about the shot that will really be
+ * played and not about a paraphrase of it. */
+function shotHitsNet(ball, racket) {
+  const tv = V3.clone(ball.v), tw = V3.clone(ball.w), sv = V3.new(), sn = V3.new();
+  strokeFrame(racket, 0, 0, 1, sv, sn);
+  impactRacket(tv, tw, sn, sv, racket.quality, racket.rubber || {});
+  const chk = {};
+  /* 1.2 s is all that is needed: the tape is ~1.6 m from the contact, so even
+   * a 4 m/s dink reaches it inside that, and the full 2.2 s made the check cost
+   * more than the solve it was protecting (13.6 ms median at the slowest
+   * level). stopOnFirstBounce ends it early on everything else. */
+  predict(V3.clone(ball.p), tv, tw, { dt: PH.SIM_DT, maxT: 1.2, stopOnFirstBounce: true, out: chk });
+  return !!chk.hitNet;
+}
+
 /** Build a racket descriptor that refineRacket() understands. */
 function makeRacket(side, archId, o) {
   const A = ARCH[archId] || ARCH.DRIVE;
@@ -3874,8 +4387,14 @@ function makeRacket(side, archId, o) {
     vmag: o.vmag !== undefined ? o.vmag : 11,
     aim: o.aim, quality: o.quality !== undefined ? o.quality : 0.85,
     isServe: !!o.isServe,
+    /* How much air the solver must leave between the ball and the tape. A
+     * push and a chop are the slowest, lowest-energy strokes in the game and
+     * with the default 55 mm they were the least reliable shots on the table
+     * (measured: 28.6 % on the table, 28.6 % into the net — the two softest
+     * archetypes accounted for nearly every failure). They need room. */
     netClear: o.netClear !== undefined ? o.netClear
-      : (archId === 'LOB' ? 0.50 : archId === 'DROP' ? 0.035 : archId === 'SMASH' ? 0.04 : 0.055),
+      : (archId === 'LOB' ? 0.50 : archId === 'DROP' ? 0.035 : archId === 'SMASH' ? 0.04
+        : (archId === 'PUSH' || archId === 'CHOP') ? 0.115 : 0.055),
     rubber: A.soft ? { e: PH.E_RACKET * A.soft, mu: PH.MU_RACKET, et: PH.ET_RACKET * (0.5 + 0.5 * A.soft) } : null,
     vR: V3.new(), normal: V3.new(0, 0, side > 0 ? -1 : 1),
     power: 0.6, spinIntent: 0.5, swipe: null,
@@ -4150,7 +4669,13 @@ class OpponentAI {
     if (archId === 'DROP') depth = rnd(0.06, 0.20);
     else if (archId === 'PUSH' || archId === 'CHOP') depth = rnd(0.55, 0.95) * T.depth + 0.08;
     else if (archId === 'SMASH') depth = rnd(0.45, 0.80);
-    else depth = clamp(L.deepness * T.depth + rndSym(0.18), 0.22, 0.97);
+    /* Depth is what makes a rally playable. The old numbers put the median
+     * landing 0.76-0.82 m past the net on a 1.37 m half — i.e. every ball was
+     * short, arriving at the bat in ~0.20 s, inside human reaction time, so
+     * the opponent looked like it was dumping everything into the front of the
+     * table on purpose. Deep shots are also what real players hit: short is a
+     * deliberate tactic (DROP, PUSH), not the default. */
+    else depth = clamp(L.deepness * T.depth + rndSym(0.16), 0.30, 0.98);
 
     const edge = PH.T_HALF_WID * (0.86 + T.risk * 0.08);
     return {
@@ -4334,10 +4859,18 @@ class OpponentAI {
     let vmag = C.vmag * this.handicap;
 
     if (slip) {
-      // one of: too flat (net), too long, or badly timed (weak + wide)
+      /* One of: too flat (net), too long, or badly timed (weak + wide).
+       * The weights used to be 40 / 38 / 22, i.e. two out of five opponent
+       * errors were straight into the tape — which is why "the computer keeps
+       * hitting the net" was the complaint. A net miss and a long miss cost the
+       * opponent the same point, but they read completely differently: a long
+       * ball is visibly a mistake, a netted ball kills the rally mid-swing and
+       * looks like the game broke. Same total error rate, less of it in the
+       * tape: 18 / 46 / 36. Measured net faults per level afterwards are in
+       * bench suite 8. */
       const kind = Math.random();
-      if (kind < 0.40) { contact -= 11 + Math.random() * 9; elev -= 7; }        // into the net
-      else if (kind < 0.78) { elev += 9 + Math.random() * 8; vmag *= 1.18; }    // long
+      if (kind < 0.18) { contact -= 11 + Math.random() * 9; elev -= 7; }        // into the net
+      else if (kind < 0.64) { elev += 9 + Math.random() * 8; vmag *= 1.18; }    // long
       else { vmag *= 0.6; contact += 9; }                                       // mistimed
       this.stats.errors++;
     }
@@ -4351,8 +4884,26 @@ class OpponentAI {
       aim: { x: C.tgt.x, z: C.tgt.z },
       quality: clamp(0.56 + L.skill * 0.44 + gauss(0.05) - (slip ? 0.22 : 0), 0.28, 1),
     });
-    const refined = refineRacket(ball.p, ball.v, ball.w, racket,
+    let refined = refineRacket(ball.p, ball.v, ball.w, racket,
       clamp(L.skill * this.handicap + gauss(0.045), 0, 1), racket.quality);
+
+    /* A net fault the error model did NOT choose is not a miss, it is an
+     * under-hit: the AI picked a landing point, solved for it, and still could
+     * not clear the tape on the way there. Play the shot it is actually about
+     * to play through the same physics the game uses, and if that clips, give
+     * the frame a higher arc and solve again. Deliberate slips are exempt —
+     * those ARE the difficulty curve. */
+    if (!slip && shotHitsNet(ball, refined)) {
+      this.stats.netSaved = (this.stats.netSaved || 0) + 1;
+      const r2 = makeRacket(this.side, archId, {
+        elev: elev + 7, contact, azSwing: azS, azFace: azS * 0.45,
+        vmag: clamp(vmag, 1.2, 18),
+        aim: { x: C.tgt.x, z: C.tgt.z },
+        quality: racket.quality,
+      });
+      refined = refineRacket(ball.p, ball.v, ball.w, r2,
+        clamp(L.skill * this.handicap, 0, 1), r2.quality);
+    }
 
     // residual execution noise: even a master is not a robot
     const n = (1 - L.skill) * 0.9;
@@ -4382,6 +4933,19 @@ class OpponentAI {
 
   /* ==================================================================
    *  SERVE
+   *
+   *  Two things used to be wrong here and both were felt immediately by
+   *  the player:
+   *   · the target for the second bounce was 0.30..1.05 m past the net,
+   *     i.e. the bot served SHORT by default — and a short serve that dies
+   *     behind the net is unreachable, so the player simply lost the point;
+   *   · racket speed was ~2.9 + 4.4·skill, which after the impact solver
+   *     came out as a floaty 25-35 km/h ball. A "ПРО" server that cannot
+   *     beat 40 km/h reads as broken, not as forgiving.
+   *  A serve is now deep by default (second bounce 0.78..1.30 m past the
+   *  net — a real long serve), short only as a deliberate, level-gated
+   *  tactic and never shorter than 0.62 m, and fast enough to matter.
+   *  tt/tools/analyze.js suite 2 measures all three per level.
    * ================================================================== */
   serve(game) {
     const L = this.L;
@@ -4394,29 +4958,87 @@ class OpponentAI {
           : [0.26, 0.32, 0.30, 0.12];
       let r = Math.random(), k = 0, acc = 0;
       for (let i = 0; i < 4; i++) { acc += w[i]; if (r <= acc) { k = i; break; } }
-      this._servePlan = { arch: kinds[k], left: 1 + (Math.random() < 0.45 ? 1 : 0), sideX: rndSym(1) };
+      this._servePlan = {
+        arch: kinds[k], left: 1 + (Math.random() < 0.45 ? 1 : 0), sideX: rndSym(1),
+        // a short serve is a decision, not an accident — and only the
+        // better levels are allowed to make it
+        short: Math.random() < clamp(L.placeSkill - 0.34, 0, 0.34),
+      };
     }
     this._servePlan.left--;
 
     const archId = this._servePlan.arch;
     const A = ARCH[archId];
     const wide = clamp(L.placeSkill, 0.2, 0.92);
-    const tx = sign(this._servePlan.sideX) * PH.T_HALF_WID * rnd(0.18, 0.74 * wide + 0.12);
-    const tz = archId === 'SERVE_FAST' ? rnd(0.85, PH.T_HALF_LEN - 0.12) : rnd(0.30, 1.05);
+    const tx = sign(this._servePlan.sideX) * PH.T_HALF_WID * rnd(0.22, 0.72 * wide + 0.16);
+
+    /* Depth of the SECOND bounce on the receiver's half, in metres past the
+     * net (the receiver's end line is at 1.37). Deep is the default; short
+     * is a planned exception with a hard floor. */
+    let tz;
+    if (archId === 'SERVE_FAST') tz = rnd(1.00, 1.30);
+    else if (this._servePlan.short) tz = rnd(0.62, 0.86);
+    else tz = rnd(0.78, 1.26);
+    // a weaker server cannot place it finely: pull everything a little deeper
+    tz = lerp(1.06, tz, clamp(0.45 + L.placeSkill, 0, 1));
+    tz = clamp(tz, 0.60, PH.T_HALF_LEN - 0.07);
+
+    /* Racket speed. Through this impact model ~7 m/s of bat on a nearly
+     * stationary ball is a 40 km/h serve and ~11 m/s is 60+ km/h, which is
+     * the band a club-to-pro server lives in. SERVE_BASE is the m/s anchor,
+     * `pace` is the dimensionless level/tactic multiplier on top of it. */
+    const SERVE_BASE = 9.2;
+    const pace = clamp(0.55 + 0.62 * (0.5 + L.skill * 0.5) + this.pressure * 0.05, 0.55, 1.35);
+    const vmag = clamp(SERVE_BASE * pace * (A.speed || 1) * rnd(0.94, 1.10), 3.4, 12.5);
+
+    /* A sidespin serve has to turn the FACE across the ball, the way a real
+     * server peels round the side of it. A sideways SWING alone only makes
+     * spin about the vertical axis, and that axis does nothing at all when the
+     * ball lands: the contact point sits on it (measured: 10-30 cm of drift,
+     * all of it in the air, none of it off the table). The axis that throws the
+     * ball sideways off the table is the one along the flight, and the only way
+     * to make it is a face turned sideways with a vertical brush — 46-76 cm of
+     * lateral throw after the bounce at the same spin rate. */
+    const lateral = A.lat >= 1.5 ? 1 : 0;
+    const kickTo = Math.sign(tx || 1);
+    /* The sweep (bench suite 13) says which frames are both LEGAL and spinny:
+     * a face turned 23-29 deg with a SQUARE swing and ~30 deg of elevation
+     * gives w.z = 0.10 of the cap plus w.y = 0.11 — and because the two come
+     * out with opposite signs, the ball curves one way in the air and throws
+     * the other way off the table. That is a reverse-sidespin serve, the one
+     * that actually beats people. Pairing the turned face with a random
+     * sideways swing (what this did before) produced almost no w.z at all and
+     * was illegal 17 % of the time. */
+    const azFace = lateral > 0 ? -kickTo * (0.40 + 0.10 * clamp(L.skill, 0, 1)) + rndSym(0.05) : rndSym(0.22);
+    const azSwing = lateral > 0 ? rndSym(0.10) : rndSym(0.45);
+    const elevBonus = lateral > 0 ? 20 : 0;
 
     const racket = makeRacket(this.side, archId, {
-      elev: A.elev + gauss(4.5 * (1 - L.skill) + 1.5),
-      contact: A.contact + gauss(5.5 * (1 - L.skill) + 1.5),
-      azSwing: rndSym(0.45), azFace: rndSym(0.22),
-      vmag: clamp((2.9 + 4.4 * (0.5 + L.skill * 0.5)) * (A.speed || 1) * (0.92 + Math.random() * 0.16), 2, 10.5),
+      elev: A.elev + elevBonus + gauss(3.5 * (1 - L.skill) + 1.0),
+      contact: A.contact + gauss(4.5 * (1 - L.skill) + 1.0),
+      azSwing: azSwing, azFace: azFace,
+      vmag: vmag,
       aim: { x: tx, z: tz },
       isServe: true,
       quality: clamp(0.58 + L.skill * 0.42 + gauss(0.04), 0.3, 1),
-      netClear: 0.055,
+      // a serve that clips the tape is a let, i.e. wasted time for everyone
+      netClear: archId === 'SERVE_FAST' ? 0.085 : 0.075,
     });
+    /* Measure what THIS frame would put on the ball if the solver left it
+     * alone, and hand that to the solver as the intent. Guessing the sign of
+     * w.z from the face azimuth is how the first attempt at a sidespin serve
+     * ended up with none: the solver was free to rotate the frame and it did. */
+    if (lateral > 0) {
+      const sv = V3.new(), sn = V3.new();
+      const tv = V3.clone(game.ball.v), tw = V3.new(0, 0, 0);
+      strokeFrame(racket, 0, 0, 1, sv, sn);
+      impactRacket(tv, tw, sn, sv, racket.quality, racket.rubber || {});
+      if (Number.isFinite(tw.z) && Math.abs(tw.z) > 20) racket.spinWant = tw.z;
+    }
+
     this.anim.swing = 1;
     this.tell = { kind: archId, t: 0.5, strength: 0.6 };
-    this.lastShot = { arch: archId, stroke: STROKES[archId], racket, slip: false };
+    this.lastShot = { arch: archId, stroke: STROKES[archId], racket, slip: false, serveDepth: tz };
     this.exchange = 0;
     this.pace = this.L.paceOpen;
     return refineRacket(game.ball.p, game.ball.v, game.ball.w, racket, clamp(L.skill, 0, 1), racket.quality);
@@ -4503,10 +5125,12 @@ class PaddleRig {
     return V3.norm(out, M4.transformDir(out, s.m, { x: 0, y: -1, z: 0 }));
   }
 
-  /** Paddle orientation: local +Z along the normal, rolled into the hand. */
-  paddleQuat(out, normal, hand, swing) {
+  /** Paddle orientation: local +Z along the normal, rolled into the hand.
+   *  `extraRoll` is the bank into a lateral step, so a bat that is moving
+   *  right is visibly turned right instead of sliding flat. */
+  paddleQuat(out, normal, hand, swing, extraRoll) {
     Q.lookRotation(out, normal, this._s.up);
-    const roll = (hand === 'left' ? 0.42 : -0.42) + (swing || 0) * 0.3;
+    const roll = (hand === 'left' ? 0.42 : -0.42) + (swing || 0) * 0.3 + (extraRoll || 0);
     Q.mul(out, out, Q.setAxisAngle(this._s.qr, 0, 0, 1, roll));
     return out;
   }
@@ -4521,7 +5145,7 @@ class PaddleRig {
     const s = this._s;
     const wd = clamp(o.windup || 0, 0, 1);
     const n = V3.norm(s.v1, o.normal);
-    const hdir = this.handleDir(s.v2, o.q || this.paddleQuat(s.q, n, o.hand, o.swing));
+    const hdir = this.handleDir(s.v2, o.q || this.paddleQuat(s.q, n, o.hand, o.swing, o.roll));
     // fist grips the handle a hand's width below the blade
     const fist = V3.addScaled(V3.new(), o.pos, hdir, RIG.HANDLE);
     // the forearm runs back and down from the fist; on a windup the elbow
@@ -4576,7 +5200,7 @@ class PaddleRig {
     this.build(R);
     const s = this._s;
     const n = V3.norm(s.v1, o.normal);
-    const q = o.q || this.paddleQuat(s.q, n, o.hand, o.swing);
+    const q = o.q || this.paddleQuat(s.q, n, o.hand, o.swing, o.roll);
     const me = S.mesh, ma = S.mat;
     const mats = o.mats || {};                       // the equipped racket's palette
     const wood = o.ghost ? this.ghostMat(o, o.ghostCol, 0.5) : (mats.wood || ma.bladeWood);
@@ -4634,6 +5258,429 @@ class PaddleRig {
     RR.uploadDyn(R, nv, ni);
     return R;
   }
+}
+
+
+/* ====== 57_camera.js ====== */
+/* =====================================================================
+ *  CAMERA — four FIXED rigs, and nothing else.
+ *
+ *  Why this file exists. The camera used to be a preset plus a free
+ *  orbit (drag / wheel / pinch / arrow keys / three sliders). A free
+ *  orbit means every player has to re-discover a playable framing by
+ *  hand, and "playable" is a narrow band: from too low the net hides
+ *  the ball, from too high the two halves squash together and depth is
+ *  gone, from the side your own bat leaves the frame. It also means the
+ *  table can be tilted in the picture, which is the single fastest way
+ *  to make a table-tennis game feel wrong.
+ *
+ *  So: the camera is now a choice between four authored rigs. Each one
+ *  has a fixed eye, a fixed look point and a fixed FOV — distance and
+ *  angle are decided here, once, and measured (tt/tools/analyze.js,
+ *  suite 5) on eight aspect ratios:
+ *
+ *    · the whole table (four corners + both net ends) is always inside
+ *      the frame, with margin;
+ *    · the camera never yaws off the table's centre line, so the table
+ *      is always straight — the net stays vertical in the picture and
+ *      the two sidelines converge symmetrically;
+ *    · the volume your bat can occupy is inside the frame too, so the
+ *      racket can never be parked off-screen;
+ *    · on narrow/portrait screens the rig is pushed back (never tilted)
+ *      until the table fits — the geometry stays authored, only the
+ *      distance adapts.
+ *
+ *  Everything here is a pure function of (mode, ball, aspect): no state,
+ *  no DOM, no renderer. The game calls it, the analysis bench calls the
+ *  very same code, so the measurement cannot drift from the build.
+ * ===================================================================== */
+
+/* ------------------------------------------------------------------ *
+ *  THE FOUR RIGS
+ *  eye/look are in metres, fov is vertical degrees authored for 16:9.
+ *  `follow` is the ONLY motion allowed, and it is a pure translation of
+ *  the whole rig (no pitching, no yawing) so the table cannot tilt.
+ * ------------------------------------------------------------------ */
+const CAMERA_PRESETS = {
+  /* The broadcast frame: over the player's shoulder, whole table in
+     shot, ~23° down. This is the one a TV director would cut to. */
+  BROADCAST: {
+    id: 'BROADCAST', ru: 'ТВ', short: 'ТРАНСТЛЯЦИЯ',
+    desc: 'Классический ракурс трансляции: весь стол и своя ракетка в кадре',
+    eye: { x: 0, y: 2.28, z: 3.22 }, look: { x: 0, y: 0.80, z: -0.30 }, fov: 42,
+    follow: { y: 0, z: 0 },
+  },
+  /* Slightly lower and closer, and it rides the ball's height a few
+     centimetres so a lob does not leave the top of the frame. */
+  DYNAMIC: {
+    id: 'DYNAMIC', ru: 'ДИНАМИКА', short: 'ДИНАМИКА',
+    desc: 'Чуть ниже и ближе, камера мягко едет за высотой мяча',
+    eye: { x: 0, y: 2.02, z: 2.94 }, look: { x: 0, y: 0.78, z: -0.34 }, fov: 46,
+    follow: { y: 0.10, z: 0.06 },
+  },
+  /* Low, from just above the playing surface: the net reads as a real
+     obstacle and the ball's height above it is obvious. */
+  LOW: {
+    id: 'LOW', ru: 'НИЗКАЯ', short: 'ОТ СТОЛА',
+    desc: 'Низкая камера у уровня стола: хорошо видна высота мяча над сеткой',
+    eye: { x: 0, y: 1.42, z: 3.12 }, look: { x: 0, y: 0.84, z: -0.36 }, fov: 48,
+    follow: { y: 0, z: 0 },
+  },
+  /* A true side view, symmetric about the net: for reading spin,
+     trajectory shape and the moment of contact. */
+  SIDE: {
+    id: 'SIDE', ru: 'СБОКУ', short: 'АНАЛИЗ',
+    desc: 'Ровно сбоку, симметрично сетке: форма траектории и вращение как на ладони',
+    eye: { x: 3.62, y: 1.66, z: 0 }, look: { x: 0, y: 0.86, z: 0 }, fov: 40,
+    follow: { y: 0, z: 0 },
+  },
+};
+const CAMERA_ORDER = ['BROADCAST', 'DYNAMIC', 'LOW', 'SIDE'];
+
+/* The box your bat is allowed to occupy. One source of truth: the game
+   clamps to it, the camera fits around it, the bench measures it. */
+const PADDLE_LIMITS = {
+  x: 1.02,                 // |x| of the bat, metres from the centre line
+  yLo: -0.24, yHi: 0.94,   // bat height relative to the playing surface
+  zNear: 1.02, zFar: 2.06, // bat depth: from just inside the table to well back
+  /* Extra reach, granted ONLY for a ball that dies short AND leaves time to
+   * get there (the game gates it on time-to-contact). 0.86 -> 0.66 because the
+   * opponent's shots used to land at a median 0.76-0.82 m past the net — every
+   * ball was a short ball, and a short ball arrives at the bat plane in
+   * ~0.20 s, which is inside human reaction time. Measured with the old value:
+   * 0-14 % of the opponent's returns were returnable at all. Leaning over the
+   * table to pick a ball out of the front half is a real thing players do.
+   * 0.46 is what a net-cord needs: a ball that clips the tape dribbles over and
+   * dies 0.15-0.35 m in, so the bat has to be able to get almost to the net.
+   * Checked against the frame rather than guessed: at 0.46 the step-in plane is
+   * on screen for all 4 rigs x 8 aspects (0/128 corners outside). */
+  zStepIn: 0.46,
+};
+
+const _cp = { eye: { x: 0, y: 0, z: 0 }, look: { x: 0, y: 0, z: 0 }, fov: 42, mode: 'BROADCAST' };
+
+/** Replicates Renderer.setCamera's narrow-screen rule: below 16:9 the
+ *  HORIZONTAL field of view is locked, so portrait phones zoom out
+ *  instead of cropping the table. */
+function effectiveFov(fovDeg, aspect) {
+  const REF = 16 / 9;
+  let vf = fovDeg * DEG;
+  if (aspect < REF) {
+    const hf = 2 * Math.atan(Math.tan(vf / 2) * REF);
+    const need = 2 * Math.atan(Math.tan(hf / 2) / Math.max(aspect, 0.30));
+    vf = Math.min(need, vf * 1.55, 84 * DEG);
+  }
+  return vf / DEG;
+}
+
+/** view·proj for a rig — the same matrices the renderer builds. */
+function rigViewProj(rig, aspect, out) {
+  const vf = effectiveFov(rig.fov, aspect) * DEG;
+  const proj = M4.perspective((out && out.proj) || M4.create(), vf, aspect, 0.05, 60);
+  const view = M4.lookAt((out && out.view) || M4.create(), rig.eye, rig.look, { x: 0, y: 1, z: 0 });
+  return M4.mul((out && out.vp) || M4.create(), proj, view);
+}
+
+/** World → normalised screen (0..1, y down). Matches Game.project(). */
+function projectPoint(vp, p, out) {
+  const o = out || {};
+  const cw = vp[3] * p.x + vp[7] * p.y + vp[11] * p.z + vp[15];
+  if (cw <= 1e-4) { o.ok = false; o.x = 0.5; o.y = 0.5; o.d = cw; return o; }
+  o.x = ((vp[0] * p.x + vp[4] * p.y + vp[8] * p.z + vp[12]) / cw) * 0.5 + 0.5;
+  o.y = 0.5 - ((vp[1] * p.x + vp[5] * p.y + vp[9] * p.z + vp[13]) / cw) * 0.5;
+  o.d = cw; o.ok = true;
+  return o;
+}
+
+/* ------------------------------------------------------------------ *
+ *  Framing test used by the fit below and by the analysis bench.
+ *
+ *  Two point sets, because they are not the same problem:
+ *    HARD — the table, the net and the volume the ball can occupy. These
+ *           decide how far the rig is pushed back. If a corner of the
+ *           table is out of frame the game is unplayable.
+ *    SOFT — the box your bat can occupy. This is *reported*, not fitted:
+ *           `clampPaddleToFrustum()` guarantees the bat itself is never
+ *           left off-screen, and fitting the camera to the bat's most
+ *           extreme pose (raised above the head, two metres back) would
+ *           push the table so far away that the ball becomes a speck.
+ * ------------------------------------------------------------------ */
+const FRAME_POINTS = [];
+for (const sx of [-1, 1]) for (const sz of [-1, 1]) {
+  FRAME_POINTS.push({ x: sx * PH.T_HALF_WID, y: PH.TABLE_Y, z: sz * PH.T_HALF_LEN, w: 1 });
+}
+FRAME_POINTS.push({ x: -PH.NET_HALF_WID, y: PH.NET_TOP, z: 0, w: 1 });
+FRAME_POINTS.push({ x: PH.NET_HALF_WID, y: PH.NET_TOP, z: 0, w: 1 });
+FRAME_POINTS.push({ x: 0, y: PH.TABLE_Y + 1.30, z: 0, w: 1 });            // a high lob
+FRAME_POINTS.push({ x: 0, y: PH.TABLE_Y + 0.55, z: -PH.T_HALF_LEN - 0.5, w: 1 });  // deep behind the bot
+FRAME_POINTS.push({ x: 0, y: PH.TABLE_Y + 0.45, z: PH.T_HALF_LEN + 0.45, w: 1 });   // short in front of you
+
+const PADDLE_POINTS = [];
+for (const sx of [-1, 1]) {
+  for (const sz of [PADDLE_LIMITS.zStepIn, PADDLE_LIMITS.zNear, PADDLE_LIMITS.zFar]) {
+    PADDLE_POINTS.push({ x: sx * PADDLE_LIMITS.x, y: PH.TABLE_Y + PADDLE_LIMITS.yLo, z: sz });
+    PADDLE_POINTS.push({ x: sx * PADDLE_LIMITS.x, y: PH.TABLE_Y + 0.55, z: sz });
+    PADDLE_POINTS.push({ x: sx * PADDLE_LIMITS.x, y: PH.TABLE_Y + PADDLE_LIMITS.yHi, z: sz });
+  }
+}
+
+/* Fairness set: the bat MUST be able to stand just outside both sidelines
+   at the heights and depths a return is actually played at, on every
+   preset and every aspect ratio. Without this a portrait phone quietly
+   turns every wide ball into an unreturnable one — and the bat leaves the
+   frame trying, which is the bug this whole file exists to prevent.
+   These are real contact poses, not the corners of the whole box: fitting
+   the extreme ones (bat at knee height two metres behind you) would push
+   the camera so far back that the ball becomes a speck. */
+const REACH_POSES = [
+  [0.943, 0.10, 0.46],       // reaching over the table for a net-cord dribbler
+  [0.943, 0.25, 1.02],
+  [0.943, 0.30, 1.40],       // the bread and butter: wide, at the end line
+  [0.943, 0.05, 1.55],       // wide and low
+  [0.943, 0.35, 1.75],
+  [0.943, 0.60, 1.95],       // a deep lob, taken high
+];
+const REACH_POINTS = [];
+for (const sx of [-1, 1]) {
+  for (const [x, y, z] of REACH_POSES) {
+    REACH_POINTS.push({ x: sx * x, y: PH.TABLE_Y + y, z: z, w: 1 });
+  }
+}
+const _fitVp = M4.create(), _fitS = {};
+function _marginOver(vp, pts, weighted) {
+  let worst = 1e9;
+  for (const p of pts) {
+    projectPoint(vp, p, _fitS);
+    let m = Math.min(_fitS.x, 1 - _fitS.x, _fitS.y, 1 - _fitS.y);
+    if (!_fitS.ok) m = -1;
+    if (weighted && p.w) m /= p.w;
+    if (m < worst) worst = m;
+  }
+  return worst;
+}
+function rigMargin(rig, aspect) {
+  rigViewProj(rig, aspect, { vp: _fitVp });
+  return Math.min(_marginOver(_fitVp, FRAME_POINTS, true), _marginOver(_fitVp, REACH_POINTS, false));
+}
+/** How much of the bat's volume this rig keeps on screen (0..1). */
+function paddleVolumeVisible(rig, aspect) {
+  rigViewProj(rig, aspect, { vp: _fitVp });
+  let ok = 0;
+  for (const p of PADDLE_POINTS) {
+    projectPoint(_fitVp, p, _fitS);
+    if (_fitS.ok && _fitS.x > 0.02 && _fitS.x < 0.98 && _fitS.y > 0.02 && _fitS.y < 0.98) ok++;
+  }
+  return ok / PADDLE_POINTS.length;
+}
+
+/* The push-back solve is a property of (mode, aspect) only, so it is
+   cached — one solve per resolution change, not per frame. */
+const _fitCache = new Map();
+const FIT_MARGIN = 0.035;              // 3.5 % of the screen, all around
+
+function fitRig(P, aspect) {
+  const key = P.id + '|' + Math.round(aspect * 1000);
+  const hit = _fitCache.get(key);
+  if (hit) return hit;
+  const rig = { eye: { x: P.eye.x, y: P.eye.y, z: P.eye.z },
+    look: { x: P.look.x, y: P.look.y, z: P.look.z }, fov: P.fov, mode: P.id };
+  if (rigMargin(rig, aspect) >= FIT_MARGIN) { _fitCache.set(key, rig); return rig; }
+  // Push straight back along the authored axis, and if that is not enough,
+  // raise the eye a little. Both keep the table square to the frame.
+  const dx = rig.eye.x - rig.look.x, dy = rig.eye.y - rig.look.y, dz = rig.eye.z - rig.look.z;
+  let best = null;
+  for (const lift of [0, 0.14, 0.30, 0.50, 0.75]) {
+    for (let k = 1.0; k <= 2.6; k += 0.05) {
+      const r = {
+        eye: { x: rig.look.x + dx * k, y: rig.look.y + dy * k + lift, z: rig.look.z + dz * k },
+        look: { x: rig.look.x, y: rig.look.y, z: rig.look.z }, fov: rig.fov, mode: rig.mode,
+      };
+      const m = rigMargin(r, aspect);
+      if (!best || m > best.m) best = { m, r };
+      if (m >= FIT_MARGIN) break;
+    }
+    if (best && best.m >= FIT_MARGIN) break;
+  }
+  const out = best ? best.r : rig;
+  _fitCache.set(key, out);
+  return out;
+}
+
+/**
+ * The camera for this frame. Pure: mode + ball + aspect in, rig out.
+ * The returned object is reused, so never hold on to it.
+ */
+function cameraRigFor(mode, ball, aspect, out) {
+  const P = CAMERA_PRESETS[mode] || CAMERA_PRESETS.BROADCAST;
+  const base = fitRig(P, aspect);
+  const o = out || _cp;
+  const f = P.follow;
+  let fy = 0, fz = 0;
+  if (f.y || f.z) {
+    // ride the ball's height/depth a few centimetres — a pure translation
+    const h = clamp(((ball ? ball.y : PH.TABLE_Y) - PH.TABLE_Y) / 1.4, 0, 1);
+    const d = clamp(((ball ? ball.z : 0) + 0.6) / 2.2, 0, 1);
+    fy = h * f.y; fz = d * f.z;
+  }
+  o.mode = P.id;
+  o.eye.x = base.eye.x; o.eye.y = base.eye.y + fy; o.eye.z = base.eye.z + fz;
+  o.look.x = base.look.x; o.look.y = base.look.y + fy; o.look.z = base.look.z + fz;
+  o.fov = base.fov;
+  return o;
+}
+
+/** Highest pixel the table itself occupies (0..1, y down). The HUD text
+ *  band must stay above this, or messages land on the playing surface. */
+function tableTopScreenY(mode, aspect, vpOut) {
+  const rig = cameraRigFor(mode, { x: 0, y: PH.TABLE_Y, z: 0 }, aspect);
+  const vp = rigViewProj(rig, aspect, vpOut || { vp: M4.create() });
+  const a = projectPoint(vp, { x: -PH.T_HALF_WID, y: PH.TABLE_Y, z: -PH.T_HALF_LEN }, {});
+  const b = projectPoint(vp, { x: PH.T_HALF_WID, y: PH.TABLE_Y, z: -PH.T_HALF_LEN }, {});
+  const c = projectPoint(vp, { x: 0, y: PH.NET_TOP, z: 0 }, {});
+  return Math.max(0.05, Math.min(a.y, b.y, c.y));
+}
+
+/* ------------------------------------------------------------------ *
+ *  POINTER → BAT
+ *  One function, used by the game and measured by the bench: the bat is
+ *  where the cursor is, always, and it can never be pushed outside the
+ *  frame (which is how it used to get lost off-screen and stay there).
+ * ------------------------------------------------------------------ */
+const _ptOut = { tx: 0, ty: 0, tz: 0 };
+
+/**
+ * @param px,py   pointer in normalised screen space (0..1, y down)
+ * @param stanceY the y the hand landed at — it sets how deep you stand,
+ *                so flicking the wrist upward cannot lunge you over the table
+ * @param sens    the player's sensitivity multiplier
+ */
+function paddleTargetFromPointer(px, py, stanceY, sens, out, opts) {
+  const o = out || _ptOut;
+  const s = clamp(Number.isFinite(sens) ? sens : 1, 0.4, 2.2);
+  const zNear = (opts && Number.isFinite(opts.zNear))
+    ? clamp(opts.zNear, PADDLE_LIMITS.zStepIn, PADDLE_LIMITS.zFar) : PADDLE_LIMITS.zNear;
+  let x = Number.isFinite(px) ? clamp(px, 0, 1) : 0.5;
+  let y = Number.isFinite(py) ? clamp(py, 0, 1) : 0.55;
+  let sy = Number.isFinite(stanceY) ? clamp(stanceY, 0, 1) : y;
+  // 0.5 on screen is the centre line; the reachable half-width is the
+  // authored limit, so the mapping is exact and independent of sensitivity
+  // at the centre and only the *gain* changes with the slider.
+  o.tx = (x - 0.5) * 2 * PADDLE_LIMITS.x * s;
+  o.ty = PH.TABLE_Y + 0.62 - (y - 0.18) * 0.95 * s;
+  o.tz = 1.44 + clamp(sy - 0.55, -0.34, 0.45) * 0.86 * (0.6 + 0.4 * s);
+  o.tx = clamp(o.tx, -PADDLE_LIMITS.x, PADDLE_LIMITS.x);
+  o.ty = clamp(o.ty, PH.TABLE_Y + PADDLE_LIMITS.yLo, PH.TABLE_Y + PADDLE_LIMITS.yHi);
+  o.tz = clamp(o.tz, zNear, PADDLE_LIMITS.zFar);
+  o.zNear = zNear;
+  return o;
+}
+
+const _clampS = {}, _clampA = {}, _clampP = { x: 0, y: 0, z: 0 };
+/* The pose the rig is authored around: dead centre, bat height, mid-depth.
+   Every rig keeps it on screen with margin to spare (verified in the
+   camera suite), which is what makes it a usable anchor for the clamp. */
+/* How long the bat owns the new point before the cursor gets it back. Shared
+ * by resetPaddle() and the home blend in updatePlayerPaddle(). */
+const RECENTER_S = 0.34;
+
+const PADDLE_HOME = { x: 0, y: PH.TABLE_Y + 0.62, z: 1.44 };
+
+function insideFrame(s, m) {
+  return s.ok && s.x > m && s.x < 1 - m && s.y > m && s.y < 1 - m;
+}
+
+/** Largest k in [0,1] with lerp(a,b,k) still inside the frame, given that a
+ *  is inside and b is not. The visible part of a perspective frustum is a
+ *  convex set, so the segment crosses the edge exactly once and bisection
+ *  converges monotonically — no gain to tune, no overshoot, no rig-specific
+ *  behaviour. 12 steps resolve the boundary to 1/4096 of the segment. */
+function bisectIntoFrame(vp, m, ax, ay, az, bx, by, bz) {
+  let lo = 0, hi = 1;
+  for (let i = 0; i < 12; i++) {
+    const k = 0.5 * (lo + hi);
+    _clampP.x = ax + (bx - ax) * k;
+    _clampP.y = ay + (by - ay) * k;
+    _clampP.z = az + (bz - az) * k;
+    if (insideFrame(projectPoint(vp, _clampP, _clampS), m)) lo = k; else hi = k;
+  }
+  return lo;
+}
+
+/**
+ * Pull the bat back inside the frame. Called after the pointer map and after
+ * every assist, so neither the cursor nor the intercept solver can park the
+ * racket somewhere the player cannot see it — the original complaint behind
+ * "the racket drifts off screen and stays there".
+ *
+ * The previous version nudged tx/ty by a fixed gain (3.1 / 2.2 per unit of
+ * overshoot) twice and then re-clamped to the authored limits, which could
+ * push it straight back out. Measured: 22 % of samples off-frame at
+ * sensitivity 1.0 and 51 % at 1.8. It also fought the player's intent — a
+ * horizontal overshoot dragged the bat's height with it.
+ */
+function clampPaddleToFrustum(vp, t, margin) {
+  const m = margin === undefined ? 0.045 : margin;
+  const s = projectPoint(vp, { x: t.tx, y: t.ty, z: t.tz }, _clampS);
+  /* Behind the camera no pull on any axis can help, and returning the pose
+   * untouched is exactly how the bat used to end up stranded off screen. Home
+   * is on screen by construction — bench suite 6 checks that anchor for every
+   * rig x aspect — so that is where the bat goes. */
+  if (!s.ok) { t.tx = PADDLE_HOME.x; t.ty = PADDLE_HOME.y; t.tz = PADDLE_HOME.z; return t; }
+  const outX = s.x < m || s.x > 1 - m;
+  const outY = s.y < m || s.y > 1 - m;
+  if (!outX && !outY) return t;
+
+  /* Offend on one axis only? Pull on that axis and leave the other alone, so
+     the height you chose survives a horizontal correction. Otherwise fall
+     back to the home pose, which is on screen by construction. */
+  const tries = outX !== outY
+    ? [[outX ? PADDLE_HOME.x : t.tx, outX ? t.ty : PADDLE_HOME.y, t.tz], [PADDLE_HOME.x, PADDLE_HOME.y, t.tz]]
+    : [[PADDLE_HOME.x, PADDLE_HOME.y, t.tz]];
+  for (let i = 0; i < tries.length; i++) {
+    const ax = tries[i][0], ay = tries[i][1], az = tries[i][2];
+    if (!insideFrame(projectPoint(vp, { x: ax, y: ay, z: az }, _clampA), m)) continue;
+    const k = bisectIntoFrame(vp, m, ax, ay, az, t.tx, t.ty, t.tz);
+    t.tx = ax + (t.tx - ax) * k;
+    t.ty = ay + (t.ty - ay) * k;
+    break;
+  }
+  /* If even the home pose cannot be shown at the depth that was asked for,
+   * then the DEPTH is the problem: a bat leaning over the table toward the net
+   * leaves the frame on rigs that were fitted for a body standing behind the
+   * end line. Walk the depth back toward the body until the pose fits, and
+   * report the depth settled on — the caller has to take t.tz back or the
+   * correction is silently thrown away. Measured cost of not doing it: 402 of
+   * 19 447 headless match frames with the bat off screen (worst 9 % of the
+   * viewport) after the step-in reach was deepened 0.86 -> 0.46. */
+  if (!insideFrame(projectPoint(vp, { x: t.tx, y: t.ty, z: t.tz }, _clampA), m)) {
+    for (let k = 1; k <= 4; k++) {
+      const f = k / 4;
+      const az = lerp(t.tz, PADDLE_LIMITS.zNear, f);
+      const ax = lerp(t.tx, PADDLE_HOME.x, f * 0.5), ay = lerp(t.ty, PADDLE_HOME.y, f * 0.5);
+      if (!insideFrame(projectPoint(vp, { x: ax, y: ay, z: az }, _clampA), m)) continue;
+      const kk = bisectIntoFrame(vp, m, ax, ay, az, t.tx, t.ty, az);
+      t.tx = ax + (t.tx - ax) * kk;
+      t.ty = ay + (t.ty - ay) * kk;
+      t.tz = az;
+      break;
+    }
+  }
+  /* Last resort, and the whole reason this function exists: if no depth shows
+   * the pose, the bat goes home instead of staying invisible. */
+  if (!insideFrame(projectPoint(vp, { x: t.tx, y: t.ty, z: t.tz }, _clampA), m)) {
+    t.tx = PADDLE_HOME.x; t.ty = PADDLE_HOME.y; t.tz = PADDLE_HOME.z;
+  }
+  t.tx = clamp(t.tx, -PADDLE_LIMITS.x, PADDLE_LIMITS.x);
+  t.ty = clamp(t.ty, PH.TABLE_Y + PADDLE_LIMITS.yLo, PH.TABLE_Y + PADDLE_LIMITS.yHi);
+  t.tz = clamp(t.tz, PADDLE_LIMITS.zStepIn, PADDLE_LIMITS.zFar);
+  return t;
+}
+
+function paddleVisibleOk(vp, t, margin) {
+  projectPoint(vp, { x: t.tx, y: t.ty, z: t.tz }, _clampS);
+  if (!_clampS.ok) return false;
+  const m = margin === undefined ? 0.0 : margin;
+  return _clampS.x > m && _clampS.x < 1 - m && _clampS.y > m && _clampS.y < 1 - m;
 }
 
 
@@ -6713,12 +7760,15 @@ const ECONOMY = {
  *  camera rig, VFX, replay recorder.
  * ===================================================================== */
 
+/* Where the opponent's bat meets its own toss, metres above the table. */
+const AI_SERVE_CONTACT_Y = 0.36;
+
 const GS = {
   MENU: 'MENU', SERVE_READY: 'SERVE_READY', SERVE_TOSS: 'SERVE_TOSS',
   RALLY: 'RALLY', POINT: 'POINT', REPLAY: 'REPLAY', MATCH_END: 'MATCH_END',
 };
 
-const PHYS_DT = 1 / 600;          // 600 Hz — a 40 mm ball at 30 m/s moves 5 cm/step
+const PHYS_DT = PH.SIM_DT;        // 600 Hz — and the same step every solver verdicts on
 
 /* --------------------------- particles ----------------------------- */
 class Particles {
@@ -6780,7 +7830,6 @@ class Game {
     this.profile = new Profile(this.platform);
     this.shop = new Shop(this.profile, this.platform, this.analytics);
     this.applyEquipment();
-    this.loadSettings();
     this.matchTasks = { topspin: 0, smash: 0, serves: 0, moments: 0 };
     this.iap = null;                     // the mobile wrapper sets this
     this.moments = new MomentRecorder();
@@ -6808,7 +7857,16 @@ class Game {
       slowmoPlayer: true,                // bullet time, for the player, in casual play only
       targetScore: 11,
       sensitivity: 1.0,
+      spinBias: 'norm',                  // low | norm | high — see deriveStroke
     };
+    /* Saved settings are applied AFTER the defaults exist. It used to run
+     * 60 lines earlier, while this.settings was still undefined, so
+     * Object.assign threw — and because boot() catches everything, a player
+     * who had EVER changed a setting got the "WebGL недоступен" screen on
+     * every following visit. A first visit worked (profile.data.settings is
+     * null then), which is why it survived to here. Found by the headless
+     * smoke suite: 2 of 3 matches failed to boot once localStorage was warm. */
+    this.loadSettings();
 
     this.ball = {
       p: V3.new(0, PH.TABLE_Y + 0.3, 1.2), v: V3.new(), w: V3.new(),
@@ -6849,10 +7907,15 @@ class Game {
     this.lastPoint = null;
     this.timeScale = 1; this.targetTimeScale = 1;
     this.shake = 0; this.shakeDir = V3.new();
-    // Manual orbit laid on top of whichever preset is active: yaw and pitch
-    // in radians, zoom as a multiplier of the preset distance.
-    this.camAdj = { yaw: 0, pitch: 0, zoom: 1 };
-    this.camAdjT = 0;                  // seconds left on the on-screen readout
+    /* The camera is a choice between four AUTHORED rigs (57_camera.js):
+     * fixed distance, fixed angle, table always square to the frame. There
+     * is deliberately no free orbit any more — hand-tuning yaw/pitch/zoom
+     * cost players minutes per session and could park the bat off-screen,
+     * and every framing it produced was worse than one of the four. */
+    this.camRig = { eye: V3.new(0, 2.28, 3.22), look: V3.new(0, 0.80, -0.30), fov: 42, mode: 'BROADCAST' };
+    this._rigBuf = { vp: M4.create(), proj: M4.create(), view: M4.create() };
+    this.camVP = M4.create();          // view·proj of the authored rig, no shake
+    this.hudBandY = 0.40;              // screen y where the table's far edge begins
     this.camPos = V3.new(0, 1.62, 3.05); this.camLook = V3.new(0, 0.92, -0.2);
     this.camPosT = V3.clone(this.camPos); this.camLookT = V3.clone(this.camLook);
     this.fov = 46; this.fovT = 46;
@@ -6904,29 +7967,24 @@ class Game {
       const h = r.height > 0 ? r.height : (c.clientHeight || 1);
       let x = (e.clientX - r.left) / w;
       let y = (e.clientY - r.top) / h;
-      if (!Number.isFinite(x)) x = 0.5; else x = clamp(x, -0.25, 1.25);
-      if (!Number.isFinite(y)) y = 0.5; else y = clamp(y, -0.25, 1.25);
+      /* Outside the canvas the coordinates used to be clamped to
+       * [-0.25 .. 1.25] — a quarter of a screen BEYOND each edge. That is
+       * how the bat got parked somewhere the camera never shows and, since
+       * no further move events arrive once the cursor leaves the window,
+       * it stayed there. The pointer is now always inside 0..1. */
+      if (!Number.isFinite(x)) x = 0.5; else x = clamp(x, 0, 1);
+      if (!Number.isFinite(y)) y = 0.5; else y = clamp(y, 0, 1);
       return { x, y };
     };
 
-    /* Two input languages share one surface:
-     *   one finger / left button  → the swipe, i.e. the stroke
-     *   two fingers / right-drag / wheel → the camera
-     * The moment a second finger lands the half-made stroke is thrown away,
-     * otherwise pinching would fire a wild shot. */
+    /* One input language: the pointer drives the bat and the swipe.
+     *   one finger / left button  → the stroke, and where the bat stands
+     *   a second finger           → throws the half-made stroke away
+     * The camera is NOT on the pointer any more (four authored rigs, keys
+     * 1..4 / C), so there is no orbit, no pinch-zoom and no wheel-zoom: a
+     * framing that has to be rebuilt by hand every session is a framing
+     * that is wrong most of the time. */
     const ptrs = new Map();
-    let orbit = null;
-    const centroid = () => {
-      let x = 0, y = 0, n = 0;
-      for (const p of ptrs.values()) { x += p.x; y += p.y; n++; }
-      x /= n; y /= n;
-      let d = 0;
-      if (n >= 2) {
-        const a = [...ptrs.values()];
-        d = Math.hypot(a[0].x - a[1].x, a[0].y - a[1].y);
-      }
-      return { x, y, d };
-    };
     const dropStroke = () => {
       this.swipe.cancel();
       this.pointerDown = false;
@@ -6938,17 +7996,13 @@ class Game {
       ptrs.set(e.pointerId, { x: e.clientX, y: e.clientY });
       e.preventDefault();
 
-      if (this.replayer.on) return;
-      if (e.button === 2 || e.button === 1) {        // right / middle: orbit
+      if (this.replayer.on) { this.skipReplay(); return; }   // tap = skip the reel
+      if (e.button === 2 || e.button === 1) {        // right / middle: not a stroke
         dropStroke();
-        orbit = { kind: 'drag', x: e.clientX, y: e.clientY };
         return;
       }
-      if (this.replayer.on) { this.skipReplay(); return; }   // tap = skip the reel
-      if (ptrs.size >= 2) {                          // second finger: orbit
+      if (ptrs.size >= 2) {                          // a second finger cancels
         dropStroke();
-        const g = centroid();
-        orbit = { kind: 'pinch', x: g.x, y: g.y, d: g.d };
         return;
       }
       const n = norm(e);
@@ -6957,39 +8011,33 @@ class Game {
       if (this.state === GS.SERVE_READY && this.server === 1) this.startToss();
     };
 
+    /* Where the bat wants to be. Tracked on the WINDOW, not on the canvas:
+     * a cursor that leaves the canvas keeps sending events here, so the bat
+     * keeps following it instead of freezing at the last in-canvas position
+     * (that freeze was the "bat and cursor are kilometres apart" bug). */
+    const track = (e) => {
+      const n = norm(e);
+      this.pointer = n;
+      this.pointerInside = n.x > 0.001 && n.x < 0.999 && n.y > 0.001 && n.y < 0.999;
+      return n;
+    };
+
     const move = (e) => {
       const p = ptrs.get(e.pointerId);
       if (p) { p.x = e.clientX; p.y = e.clientY; }
-      if (orbit) {
-        if (orbit.kind === 'drag') {
-          this.orbitBy(e.clientX - orbit.x, e.clientY - orbit.y);
-          orbit.x = e.clientX; orbit.y = e.clientY;
-        } else if (ptrs.size >= 2) {
-          const g = centroid();
-          this.orbitBy(g.x - orbit.x, g.y - orbit.y);
-          if (orbit.d > 10 && g.d > 10) this.zoomBy(orbit.d / g.d);
-          orbit.x = g.x; orbit.y = g.y; orbit.d = g.d;
-        }
-        e.preventDefault();
-        return;
-      }
-      const n = norm(e);
-      this.pointer = n;
-      if (this.swipe.active) {
+      const n = track(e);
+      if (this.swipe.active && ptrs.size < 2) {
         this.swipe.move(n.x, n.y, this.time);
         const sp = this.swipe.m.speed;
         if (sp > 1.6) this.audio.whoosh(clamp(sp / 4, 0, 1.4));
       }
-      e.preventDefault();
+      if (e.cancelable) e.preventDefault();
     };
 
     const up = (e) => {
       ptrs.delete(e.pointerId);
-      if (orbit) {
-        if (ptrs.size < 2) orbit = null;             // never fall back into a stroke
-        e.preventDefault();
-        return;
-      }
+      if (e.button === 2 || e.button === 1) { e.preventDefault(); return; }
+      if (ptrs.size >= 1) { e.preventDefault(); return; }   // still another finger down
       if (!this.swipe.active) return;
       const n = this.pointer || { x: 0.5, y: 0.5 };
       this.swipe.up(n.x, n.y, this.time);
@@ -7004,8 +8052,11 @@ class Game {
     c.addEventListener('pointerup', up);
     c.addEventListener('pointercancel', up);
     c.addEventListener('contextmenu', (e) => e.preventDefault());
+    /* the bat follows the cursor across the whole window, so leaving the
+       canvas can never strand it; the wheel no longer zooms (fixed rigs) */
+    window.addEventListener('pointermove', (e) => { if (!ptrs.size) track(e); }, { passive: true });
+    window.addEventListener('blur', () => { this.pointerDown = false; this.swipe.cancel(); });
     c.addEventListener('wheel', (e) => {
-      this.zoomBy(1 + clamp(e.deltaY, -120, 120) / 1100);
       e.preventDefault();
     }, { passive: false });
     c.style.touchAction = 'none';
@@ -7015,19 +8066,15 @@ class Game {
       if (e.key === 'p' || e.key === 'P' || e.key === 'з' || e.key === 'З') this.setPaused(!this.paused);
       if (e.key === 'F3') { this.settings.showDebug = !this.settings.showDebug; e.preventDefault(); }
       if (e.key === 'c' || e.key === 'C' || e.key === 'с' || e.key === 'С') {
-        const order = ['BROADCAST', 'DYNAMIC', 'LOW', 'SIDE'];
-        this.settings.camera = order[(order.indexOf(this.settings.camera) + 1) % order.length];
-        this.ui && this.ui.syncSettings();
+        const i = CAMERA_ORDER.indexOf(this.settings.camera);
+        this.setCameraPreset(CAMERA_ORDER[(i + 1) % CAMERA_ORDER.length]);
       }
-      /* --- camera on the keyboard --- */
-      const step = e.shiftKey ? 3 : 1;
-      if (e.key === 'ArrowLeft') { this.orbitBy(26 * step, 0); e.preventDefault(); }
-      if (e.key === 'ArrowRight') { this.orbitBy(-26 * step, 0); e.preventDefault(); }
-      if (e.key === 'ArrowUp') { this.orbitBy(0, -16 * step); e.preventDefault(); }
-      if (e.key === 'ArrowDown') { this.orbitBy(0, 16 * step); e.preventDefault(); }
-      if (e.key === '+' || e.key === '=') { this.zoomBy(1 / (1 + 0.07 * step)); e.preventDefault(); }
-      if (e.key === '-' || e.key === '_') { this.zoomBy(1 + 0.07 * step); e.preventDefault(); }
-      if (e.key === '0' || e.key === ')') { this.camReset(); e.preventDefault(); }
+      /* --- the four authored rigs, straight off the keyboard --- */
+      if (e.key >= '1' && e.key <= '4') {
+        this.setCameraPreset(CAMERA_ORDER[+e.key - 1]);
+        e.preventDefault();
+      }
+      if (e.key === '0' || e.key === ')') { this.setCameraPreset(CAMERA_ORDER[0]); e.preventDefault(); }
     });
   }
 
@@ -7044,6 +8091,12 @@ class Game {
     this.matchTasks = { topspin: 0, smash: 0, serves: 0, moments: 0 };
     this.training = null;
     this.matchWinner = 0;
+    this.messages.length = 0;
+    this.pointNote = null;
+    this.slowmo.energy = 1; this.slowmo.on = false; this.slowmo.active = false;
+    this.targetTimeScale = 1; this.timeScale = 1; this.slowmoUntil = 0;
+    if (CAMERA_ORDER.indexOf(this.settings.camera) < 0) this.settings.camera = CAMERA_ORDER[0];
+    this.resetPaddle(true);            // hard: the bat is placed, not glided
     this.ai.reset();
     this.analyst.reset();
     this.director.reset();
@@ -7108,6 +8161,9 @@ class Game {
     this.rallyBounces.length = 0;
     this.serveBounces = 0;
     this.isServeBall = true;
+    /* Every point begins from the same known state: bat back in the centre,
+     * cursor binding re-anchored, no stale intercept from the last rally. */
+    this.resetPaddle();
     this.setState(GS.SERVE_READY);
     this.recorder.begin(this.time, s);
     this.moments.beginRally(this.time, this.score);
@@ -7115,6 +8171,14 @@ class Game {
     if (s < 0) this.aiServeTimer = rnd(0.7, 1.3);
   }
   startToss() {
+    /* Not while the bat is still gliding home. The requirement is that every
+     * new point starts from the centre, and a toss struck mid-glide is struck
+     * from wherever the last rally happened to leave the bat — which is how
+     * "the racket drifts off and stays there" survived the reset. The click is
+     * NOT swallowed: it is queued and fired the instant the reset finishes, so
+     * serving immediately costs a third of a second of the intermission. */
+    if (this.recenterT > 0) { this.tossQueued = true; return; }
+    this.tossQueued = false;
     const b = this.ball;
     const pad = this.player;
     // ITTF requires a near-vertical toss of at least 16 cm; we throw ~30 cm
@@ -7189,8 +8253,8 @@ class Game {
   }
 
   /* ------------------------- ball <-> world ------------------------ */
-  onBounce(side, speed) {
-    this.audio.hitTable(speed, this.ball.p.x);
+  onBounce(side, speed, info) {
+    if (!(info && info.edge > 0.25)) this.audio.hitTable(speed, this.ball.p.x);
     this.addMark(this.ball.p.x, this.ball.p.z, speed);
     this.particles.burst(this.ball.p.x, PH.TABLE_Y + 0.005, this.ball.p.z,
       4 + (speed > 9 ? 4 : 0), 0.5 + speed * 0.06, 0.26, 0.016, 1, 1, 0.92, { x: 0, y: 0.7, z: 0 });
@@ -7284,7 +8348,10 @@ class Game {
     const name = racket.stroke ? racket.stroke.id : 'DRIVE';
     this.stats.byStroke[name] = (this.stats.byStroke[name] || 0) + 1;
 
-    this.audio.hitRacket(speed, info ? info.contactSlip : 0, !!(racket.arch && racket.arch.soft));
+    /* an off-centre contact sounds like wood, not like rubber */
+    const softHit = !!(racket.arch && racket.arch.soft) || (side > 0 && this.lastSweet !== undefined && this.lastSweet < 0.38);
+    this.audio.hitRacket(speed, info ? info.contactSlip : 0, softHit);
+    if (side > 0 && this.lastSweet !== undefined && this.lastSweet < 0.30) this.buzz(16);
     const col = racket.stroke ? hexToRgb(racket.stroke.col) : [1, 1, 1];
     this.particles.burst(contactP.x, contactP.y, contactP.z,
       side > 0 ? 14 : 9, 0.7 + speed * 0.05, 0.32, 0.019, col[0], col[1], col[2],
@@ -7297,6 +8364,9 @@ class Game {
         topspin: -b.w.x * side, sidespin: b.w.y, quality,
         power: racket.power, t: this.time,
         contact: racket.contact, elev: racket.elev,
+        timing: side > 0 ? (this.lastTiming || '') : '',
+        sweet: side > 0 ? (this.lastSweet !== undefined ? this.lastSweet : 1) : 1,
+        rim: side > 0 && this.lastSweet !== undefined && this.lastSweet < 0.42,
       };
       this.ui && this.ui.showShot(this.lastShotInfo);
       this.recorder.addShot(1, Object.assign({
@@ -7391,12 +8461,13 @@ class Game {
       showTrail: s.showTrail, showPredict: s.showPredict, showZone: s.showZone,
       showTele: s.showTele, haptics: s.haptics, coach: s.coach, adaptive: s.adaptive,
       slowmoPlayer: s.slowmoPlayer, targetScore: s.targetScore, sensitivity: s.sensitivity,
+      spinBias: s.spinBias,
     };
     this.profile.touch();
   }
 
   loadSettings() {
-    if (!this.profile || !this.profile.data.settings) return false;
+    if (!this.settings || !this.profile || !this.profile.data.settings) return false;
     Object.assign(this.settings, this.profile.data.settings);
     if (this.settings.volume !== undefined) this.audio.setVolume(this.settings.volume);
     if (this.settings.sound === false) this.audio.setMuted(true);
@@ -7540,17 +8611,21 @@ class Game {
       const inX = Math.abs(b.p.x) <= PH.T_HALF_WID + PH.R * 0.5;
       const inZ = Math.abs(b.p.z) <= PH.T_HALF_LEN + PH.R * 0.5;
       if (inX && inZ) {
-        const edgeX = Math.abs(b.p.x) > PH.T_HALF_WID - PH.R;
-        const edgeZ = Math.abs(b.p.z) > PH.T_HALF_LEN - PH.R;
         const sp = -b.v.y;
+        /* The white line is physics now (bounceTable tilts the contact normal
+         * outward and takes a third of the restitution off). The old handler
+         * did its own thing on top of it — v.y *= 0.45 and rndSym(1.2) m/s of
+         * sideways velocity — so the effect was applied twice and, worse, the
+         * same shot gave a different answer every time. An edge ball should be
+         * unreadable for the RECEIVER, not random for the game. */
         const info = bounceTable(b.p, b.v, b.w);
-        if (edgeX || edgeZ) {
-          // edge ball: unpredictable, shoots off low and fast
-          b.v.y *= 0.45; b.v.x += rndSym(1.2); b.v.z *= 1.12;
+        if (info && info.edge > 0.25) {
           this.audio.hitEdge();
-          this.msg('РЕБРО СТОЛА!', 1.0, '#ffd34d');
+          this.msg(info.edgeAxis === 'x' ? 'РЕБРО СТОЛА!' : 'ЗАДНЯЯ КРОМКА!', 1.0, '#ffd34d');
+          this.shakeIt(0.10 + 0.16 * info.edge, V3.new(0, 1, 0));
+          this.stats.edgeBalls = (this.stats.edgeBalls || 0) + 1;
         }
-        this.onBounce(Math.sign(b.p.z) || 1, sp);
+        this.onBounce(Math.sign(b.p.z) || 1, sp, info);
       }
     }
 
@@ -7660,6 +8735,15 @@ class Game {
        forgiving the rubber on it is (a soft topsheet costs less) */
     const sideParams = this.equip.forSide(1);
     const sweet = clamp((1 - hit.rad / radius) * (sideParams.sweet || this.equip.sweetK), 0, 1);
+    /* WHICH side of the blade it arrived on. An off-centre contact does not
+     * just lose pace (that part `quality` already did): the blade twists, so
+     * the ball leaves at an angle to the face you were holding. Deterministic
+     * by design — the same offset always costs the same — so it can be
+     * learned instead of being read as the game cheating. */
+    const offLat = clamp((hit.x - pad.pos.x) / Math.max(radius, 1e-4), -1, 1);
+    const offVer = clamp((hit.y - pad.pos.y) / Math.max(radius, 1e-4), -1, 1);
+    const offMag = clamp(Math.hypot(offLat, offVer), 0, 1);
+    this.lastSweet = sweet;
 
     // ---- build the stroke from the live gesture --------------------
     const sw = this.swipe;
@@ -7670,22 +8754,44 @@ class Game {
     let racket, quality;
     if (m && (m.speed > 0.22 || m.peakSpeed > 0.9)) {
       const timing = clamp(m.speed / Math.max(m.peakSpeed, 1e-3), 0.35, 1);
+      /* Banded, and the band is printed on the shot badge. A continuous
+       * multiplier is unteachable: the player cannot tell 0.83 from 0.79, but
+       * he can tell "РАНОВATO" from "ТОЧНО", and then fix it. */
+      const tband = timing >= 0.93 ? 'ТОЧНО' : timing >= 0.80 ? 'ХОРОШО'
+        : timing >= 0.62 ? 'РАНОВАТО' : 'ПОЗДНО';
+      const tq = timing >= 0.93 ? 1.08 : timing >= 0.80 ? 1.0 : timing >= 0.62 ? 0.90 : 0.74;
+      this.lastTiming = tband;
       const ctx = {
         side: 1, isServe: isServeStroke,
         ball: { y: contact.y, z: contact.z },
         ballSpin: b.w, ballSpeed: V3.len(b.v),
         powerScale: 1,
+        moveYaw: pad.yaw || 0,             // the face you see is the face that hits
         equip: sideParams,                 // the rubber object for this bat
+        spinBias: this.settings.spinBias || 'norm',   // the explicit spin dial
       };
       racket = deriveStroke(m, ctx);
       racket.vmag *= this.equip.vmagK;     // swing weight of the frame
-      quality = clamp(racket.quality * (0.55 + 0.45 * sweet) * (0.70 + 0.30 * timing), 0.18, 1);
+      /* Off-centre contact: pace off, and the launch twisted away from the
+         face by up to ~13 deg sideways / ~8 deg vertically at the rim. */
+      if (!isServeStroke) {
+        const miss = (1 - sweet) * offMag;
+        racket.vmag *= 1 - 0.18 * miss;
+        racket.azSwing = clamp(racket.azSwing + offLat * 0.23 * (1 - sweet), -1.35, 1.35);
+        racket.elev = clamp(racket.elev - offVer * 8.0 * (1 - sweet), -70, 78);
+      }
+      quality = clamp(racket.quality * (0.55 + 0.45 * sweet) * (0.70 + 0.30 * timing) * tq, 0.18, 1);
       racket.quality = quality;
       racket = refineRacket(contact, b.v, b.w, racket, this.settings.assist, quality);
       // Losing a point because the *solver* could not keep a serve on the
       // table is never acceptable: re-solve the serve with full execution
       // help, which is a legal serve by construction (ITTF 2.06.4).
-      if (isServeStroke && racket.valid === false) {
+      /* ...but only when the first attempt was not already at full assist:
+       * the serve solver searches the same space with the same budget, so a
+       * retry can only repeat the answer and doubles the worst-case cost of a
+       * serve that was never going to be legal (measured 230 -> 460 ms of
+       * frozen frames on a near-motionless tap). */
+      if (isServeStroke && racket.valid === false && clamp(this.settings.assist, 0, 1) < 0.999) {
         racket = refineRacket(contact, b.v, b.w, racket, 1, quality);
       }
       racket.sweet = sweet; racket.timing = timing;
@@ -7696,11 +8802,18 @@ class Game {
       const vR = V3.clone(pad.vel);
       const lim = V3.len(vR); if (lim > 2.6) V3.mul(vR, vR, 2.6 / lim);
       racket = makeRacket(1, 'BLOCK', { aim: { x: rndSym(0.26), z: -0.62 }, vmag: lim, quality: 0.5 });
-      racket.normal = V3.clone(pad.normal);
       racket.vR = vR;
       racket.rubber = { e: PH.E_RACKET * 0.42, mu: PH.MU_RACKET, et: PH.ET_RACKET * 0.7 };
       quality = 0.45 * (0.5 + 0.5 * sweet);
-      racket = refineRacket(contact, b.v, b.w, racket, clamp(this.settings.assist * 0.8 + 0.2, 0, 1), quality);
+      /* No placement solver on a block — see solveBlockNormal(). The face the
+       * player holds decides; the only correction allowed is the smallest
+       * lift that keeps the ball out of the tape. */
+      const blk = solveBlockNormal(contact, b.v, b.w, pad.normal, vR, quality, racket.rubber, this._blk || (this._blk = {}));
+      racket.normal = blk.normal;
+      racket.elev = blk.liftDeg;
+      racket.blockLift = blk.liftDeg;
+      racket.valid = !blk.hitNet;
+      racket.passive = true;
     }
 
     const info = impactRacket(b.v, b.w, racket.normal, racket.vR, quality, racket.rubber || {});
@@ -7739,15 +8852,59 @@ class Game {
   }
 
   /* ------------------------- paddle driving ------------------------ */
+  /**
+   * Every new point starts from a known state. The bat glides back to the
+   * centre, the cursor binding is re-anchored, and any intercept the
+   * previous rally left behind is thrown away — so the assist can never
+   * carry a stale target into the next point and strand the bat somewhere
+   * the cursor is not.
+   */
+  resetPaddle(hard) {
+    const pad = this.player;
+    this.pointer = { x: 0.5, y: 0.55 };
+    this.pointerInside = true;
+    this.pointerDown = false;
+    this.stanceY = undefined;
+    this.padYaw = 0; this.padRoll = 0;
+    /* 0.40 s, not 0.55: the window has to be over before a serve can possibly
+     * be struck, or the bat is still travelling when the ball is hit. Measured
+     * in the headless matches at 0.55 s: the closest the bat got to the centre
+     * before the strike was 0.081-0.173 m on 14 of 49 serves. */
+    this.recenterT = RECENTER_S;         // no footwork assist while re-centring
+    this.tossQueued = false;
+    this.swipe.cancel();
+    if (this._paddlePred) this._paddlePred.reach = null;
+    if (this._strikePred) this._strikePred.reach = null;
+    if (this._volleyPred) this._volleyPred.reach = null;
+    const broken = ![pad.pos.x, pad.pos.y, pad.pos.z].every(Number.isFinite);
+    if (hard || broken) {
+      V3.set(pad.pos, 0, PH.TABLE_Y + 0.25, 1.44);
+      V3.copy(pad.prevPos, pad.pos);
+      V3.copy(pad.prev, pad.pos);
+      V3.zero(pad.vel);
+    }
+    V3.set(pad.normal, 0, -0.05, -1); V3.norm(pad.normal, pad.normal);
+    pad.swing = 0;
+    this._ptTarget = { tx: 0, ty: PH.TABLE_Y + 0.25, tz: 1.44 };
+  }
+
   updatePlayerPaddle(dt) {
     const pad = this.player;
     V3.copy(pad.prev, pad.pos);
     pad.prevPos = pad.prevPos || V3.clone(pad.pos);
     V3.copy(pad.prevPos, pad.pos);
+    if (this.recenterT > 0) {
+      this.recenterT = Math.max(0, this.recenterT - dt);
+      /* release a serve the player asked for during the reset */
+      if (this.recenterT === 0 && this.tossQueued) {
+        this.tossQueued = false;
+        if (this.state === GS.SERVE_READY && this.server === 1) this.startToss();
+      }
+    }
 
-    let pt = this.pointer || { x: 0.5, y: 0.62 };
+    let pt = this.pointer || { x: 0.5, y: 0.55 };
     if (!Number.isFinite(pt.x) || !Number.isFinite(pt.y)) {
-      pt = { x: 0.5, y: 0.62 };
+      pt = { x: 0.5, y: 0.55 };
       this.pointer = pt;                 // self-heal: never stay broken
     }
     if (!Number.isFinite(this.stanceY)) this.stanceY = undefined;
@@ -7758,63 +8915,145 @@ class Game {
       if (this.stanceY === undefined) this.stanceY = this.swipe.m.sy;
     } else this.stanceY = pt.y;
     const depthY = this.stanceY !== undefined ? this.stanceY : pt.y;
-    let tx = (pt.x - 0.5) * 2.10 * sens;
-    let ty = PH.TABLE_Y + 0.62 - (pt.y - 0.18) * 0.95 * sens;
-    let tz = 1.44 + clamp((depthY - 0.55), -0.22, 0.45) * 0.80;
-    tx = clamp(tx, -1.15, 1.15);
-    ty = clamp(ty, PH.TABLE_Y - 0.26, PH.TABLE_Y + 0.92);
-    tz = clamp(tz, 1.18, 2.10);
+
+    /* A ball that dies short is a real table-tennis problem, and it used to
+     * be an impossible one: the bat's depth was hard-clamped at 1.18 m, so a
+     * short serve simply could not be reached no matter what you did. Now a
+     * predicted short ball grants the step-in depth. */
+    let zNear = PADDLE_LIMITS.zNear;
+    const A = this.settings.posAssist;
+    const o = this._paddlePred || (this._paddlePred = {});
+    const incoming = this.ball.live && this.ball.v.z > 0.4 && this.ball.lastHitBy === -1;
+    if (incoming && this.frame % 4 === 0) {
+      predict(V3.clone(this.ball.p), V3.clone(this.ball.v), V3.clone(this.ball.w),
+        { dt: PHYS_DT, maxT: 1.6, stopZ: pad.pos.z, stopDir: 1, stopAtPlane: true, out: o });
+    }
+    /* Stepping in is FOOTWORK, not a teleport: the feet need time to travel.
+     * Under ~0.34 s to contact the body cannot get there, so a fast short ball
+     * stays a reach problem instead of becoming a magic one — and a slow short
+     * ball is genuinely yours to pick up. */
+    const canStep = !(o.reachT > 0) || o.reachT > 0.34;
+    const shortBall = canStep && incoming && ((o.landed && o.landed.z > 0 && o.landed.z < 1.05) ||
+      (o.reach && o.reach.z < PADDLE_LIMITS.zNear + 0.16));
+    if (shortBall) zNear = PADDLE_LIMITS.zStepIn;
+    /* The step is visible: the body goes forward and down, the blade tips
+       into the ball. Without this the bat simply appeared 16 cm closer. */
+    pad.stepIn = expSmooth(pad.stepIn || 0, shortBall ? 1 : 0, 7, dt);
+
+    const t = paddleTargetFromPointer(pt.x, pt.y, depthY, sens,
+      this._ptTarget || (this._ptTarget = { tx: 0, ty: 0, tz: 0 }), { zNear });
+    let tx = t.tx, ty = t.ty, tz = t.tz;
+
+    /* On a new point the bat goes HOME first, and while that window is open
+     * the cursor is deliberately not obeyed. Without this the reset is
+     * cosmetic: the mapping is absolute, so a cursor sitting out at the edge
+     * pulls the bat straight back out on the very next pointermove — mice
+     * emit those constantly. Measured in the headless smoke run before this:
+     * 9 of 29 serves began with the bat up to 0.59 m off centre. The blend
+     * decays over the window, so control is handed back smoothly instead of
+     * snapping, and the cursor and the bat are never permanently divorced. */
+    if (this.recenterT > 0) {
+      /* Hold the bat AT the centre for the first three quarters of the window
+       * and hand control back over the last one. Blending from the very first
+       * frame meant a cursor parked off centre only ever dragged the bat
+       * partway home: measured closest approach 0.098-0.212 m on 14 of 49
+       * serves, i.e. the "the bat returns to the centre on every serve"
+       * requirement was visibly not met even though the glide was running. */
+      const kHome = clamp((this.recenterT / RECENTER_S - 0.25) / 0.75, 0, 1);
+      tx = lerp(tx, 0, kHome);
+      ty = lerp(ty, PH.TABLE_Y + 0.25, kHome);
+      tz = lerp(tz, 1.44, kHome);
+    }
 
     // during your own toss the bat slides under the ball: serving is about
     // the stroke you choose, not about pixel-hunting a 40 mm sphere
-    if (this.state === GS.SERVE_TOSS && this.server === 1 && this.ball.lastHitBy === 0) {
-      const k = 0.55 + 0.45 * this.settings.posAssist;
+    /* Not while the bat is still gliding home: the requirement is that the bat
+     * returns to the centre on EVERY new point, and a player who serves the
+     * instant the point ends would otherwise have the toss assist yank the bat
+     * sideways mid-glide. Measured in the headless matches: 43/45 serves
+     * re-centred, worst 0.234 m off, because the toss slide ran on top of the
+     * re-centring window. Half a second of glide first, then the slide. */
+    if (this.state === GS.SERVE_TOSS && this.server === 1 && this.ball.lastHitBy === 0 && this.recenterT <= 0) {
+      const k = 0.55 + 0.45 * A;
       tx = lerp(tx, this.ball.p.x, k);
       tz = lerp(tz, this.ball.p.z + 0.02, k);
       if (this.ball.v.y < 0) {          // meet the dropping ball
-        ty = lerp(ty, this.ball.p.y, 0.30 * this.settings.posAssist);
+        ty = lerp(ty, this.ball.p.y, 0.30 * A);
       }
     }
     // positional assist: slide towards the predicted intercept
-    const A = this.settings.posAssist;
-    if (A > 0.01 && this.ball.live && this.ball.v.z > 0.4 && this.ball.lastHitBy === -1) {
-      const o = this._paddlePred || (this._paddlePred = {});
-      if (this.frame % 4 === 0) {
-        predict(V3.clone(this.ball.p), V3.clone(this.ball.v), V3.clone(this.ball.w),
-          { dt: 1 / 200, maxT: 1.6, stopZ: tz, stopDir: 1, stopAtPlane: true, out: o });
-      }
+    if (A > 0.01 && incoming && this.recenterT <= 0) {
       if (o.reach) {
         // the closer the ball, the more the footwork assist commits
         const k = A * clamp(1.3 - o.reachT * 1.0, 0.30, 1);
-        tx = lerp(tx, clamp(o.reach.x, -1.1, 1.1), k);
-        ty = lerp(ty, clamp(o.reach.y, PH.TABLE_Y - 0.2, PH.TABLE_Y + 0.9), k * 0.95);
+        tx = lerp(tx, clamp(o.reach.x, -PADDLE_LIMITS.x, PADDLE_LIMITS.x), k);
+        ty = lerp(ty, clamp(o.reach.y, PH.TABLE_Y + PADDLE_LIMITS.yLo, PH.TABLE_Y + PADDLE_LIMITS.yHi), k * 0.95);
+        if (o.reach.z < tz) tz = Math.max(zNear, o.reach.z - 0.02);
       }
     }
+    /* Neither the cursor nor the assist may ever park the bat outside the
+     * frame — that is the bug that used to leave it stranded off-screen. */
+    if (this.camVPReady) {
+      t.tx = tx; t.ty = ty; t.tz = tz;
+      clampPaddleToFrustum(this.camVP, t, 0.05);
+      /* tz too: the clamp can now walk the depth back toward the body when the
+       * pose asked for cannot be shown at all, and a correction the caller
+       * throws away is the same as no correction. */
+      tx = t.tx; ty = t.ty; tz = t.tz;
+    }
+    tx = clamp(tx, -PADDLE_LIMITS.x, PADDLE_LIMITS.x);
+    ty = clamp(ty, PH.TABLE_Y + PADDLE_LIMITS.yLo, PH.TABLE_Y + PADDLE_LIMITS.yHi);
+    tz = clamp(tz, zNear, PADDLE_LIMITS.zFar);
 
-    const rate = 26;
+    // re-centring after a point is a visible glide, not a teleport
+    /* 20, not 13: the glide has to be over before a quick player can strike the
+     * serve, or "the bat returns to the centre" is only true for people who
+     * wait. Still visibly a glide (0.2-0.3 s), not a teleport. */
+    const rate = this.recenterT > 0 ? 20 : 26;
     pad.pos.x = expSmooth(pad.pos.x, tx, rate, dt);
     pad.pos.y = expSmooth(pad.pos.y, ty, rate, dt);
     pad.pos.z = expSmooth(pad.pos.z, tz, rate * 0.7, dt);
     V3.sub(pad.vel, pad.pos, pad.prevPos);
     V3.mul(pad.vel, pad.vel, 1 / Math.max(dt, 1e-4));
 
+    /* ---- the bat turns into the step ------------------------------- *
+     * Move right and the face opens to the right; move left and it opens
+     * to the left, with the wrist banking the way it does when you actually
+     * cover ground. This is what makes the bat read as held by a body
+     * instead of sliding around on a rail — and because the same yaw is fed
+     * into the stroke at contact, the face you SEE is the face that hits. */
+    const lat = clamp(pad.vel.x, -7, 7);
+    this.padYaw = expSmooth(this.padYaw || 0, clamp(lat * 0.062, -0.46, 0.46), 11, dt);
+    const handed = this.settings.hand === 'right' ? 1 : -1;
+    this.padRoll = expSmooth(this.padRoll || 0, clamp(-lat * 0.040, -0.30, 0.30) * handed, 9, dt);
+    pad.yaw = this.padYaw; pad.roll = this.padRoll;
+
     // orientation follows the live gesture so you SEE the face angle
     const sw = this.swipe;
     const m = sw.active && sw.m.samples > 1 ? sw.m : sw.lastReleased;
-    let want = V3.new(0, -0.05, -1);
+    let want = this._wantN || (this._wantN = V3.new(0, -0.05, -1));
+    V3.set(want, 0, -0.05, -1);
     if (m) {
-      const ctx = { side: 1, isServe: this.isServeBall, ball: { y: pad.pos.y, z: pad.pos.z }, ballSpin: this.ball.w, ballSpeed: V3.len(this.ball.v) };
+      const ctx = {
+        side: 1, isServe: this.isServeBall, ball: { y: pad.pos.y, z: pad.pos.z },
+        ballSpin: this.ball.w, ballSpeed: V3.len(this.ball.v), moveYaw: this.padYaw,
+      };
       const st = deriveStroke(m, ctx);
-      want = st.normal;
+      V3.copy(want, st.normal);
       this.liveStroke = st;
     } else this.liveStroke = null;
+    // apply the step yaw to the resting face as well
+    const cy = Math.cos(this.padYaw), sy = Math.sin(this.padYaw);
+    const wx = want.x * cy + want.z * sy, wz = -want.x * sy + want.z * cy;
+    want.x = wx; want.z = wz;
     V3.norm(want, want);
     pad.normal.x = expSmooth(pad.normal.x, want.x, 18, dt);
     pad.normal.y = expSmooth(pad.normal.y, want.y, 18, dt);
     pad.normal.z = expSmooth(pad.normal.z, want.z, 18, dt);
     V3.norm(pad.normal, pad.normal);
     pad.swing = Math.max(0, pad.swing - dt * 4.5);
-    pad.hitRadius = lerp(0.080, 0.165, this.settings.posAssist) * (this.state === GS.SERVE_TOSS ? 1.5 : 1);
+    pad.hitRadius = lerp(0.080, 0.165, A) * (this.state === GS.SERVE_TOSS ? 1.5 : 1)
+      * (zNear < PADDLE_LIMITS.zNear ? 1.12 : 1);
   }
 
   /**
@@ -7868,84 +9107,79 @@ class Game {
 
   /* ----------------------------- camera ---------------------------- */
 
-  /** Orbit by a screen-space drag, in CSS pixels. Dragging feels like
-   *  grabbing the hall and turning it, so the sign is inverted on yaw. */
-  orbitBy(dx, dy) {
-    const w = Math.max(320, window.innerWidth), h = Math.max(320, window.innerHeight);
-    this.camAdj.yaw = clamp(this.camAdj.yaw - (dx / w) * 3.2, -1.45, 1.45);
-    this.camAdj.pitch = clamp(this.camAdj.pitch + (dy / h) * 2.1, -0.40, 0.95);
-    this.camAdjT = 1.5;
-    this.ui && this.ui.syncCam();
+  /** Switch between the four authored rigs. Distance and angle belong to
+   *  the rig (57_camera.js), not to the player: there is nothing left to
+   *  fiddle with, so the table is square to the frame every single time. */
+  setCameraPreset(mode) {
+    const P = CAMERA_PRESETS[mode];
+    if (!P) return;
+    if (this.settings.camera === mode) return;
+    this.settings.camera = mode;
+    this.ui && this.ui.syncSettings && this.ui.syncSettings();
+    this.audio.ui('click');
+    this.msg('КАМЕРА · ' + P.ru, 1.1, '#9fd0ff');
+    this.saveSettings();
   }
-  zoomBy(f) {
-    this.camAdj.zoom = clamp(this.camAdj.zoom * f, 0.45, 2.00);
-    this.camAdjT = 1.5;
-    this.ui && this.ui.syncCam();
-  }
-  camReset() {
-    this.camAdj.yaw = 0; this.camAdj.pitch = 0; this.camAdj.zoom = 1;
-    this.camAdjT = 1.5;
-    this.ui && this.ui.syncCam();
-    this.audio.ui('back');
+  /** Kept as an alias: "reset the camera" now means "the authored rig". */
+  camReset() { this.setCameraPreset(CAMERA_ORDER[0]); }
+
+  /* The camera is rebuilt AFTER the paddle has been placed, so the clamp
+   * inside updatePlayerPaddle always works against the previous frame's view
+   * matrix. That is invisible while the rig is still and blatant during the
+   * point-end and replay cinematics, where the camera travels and leaves the
+   * bat parked outside the frame — measured 109 of 18 226 headless match
+   * frames, worst 20 % of the viewport past the bottom edge, with the bat
+   * frozen in POINT and REPLAY. One cheap re-check against the matrix this
+   * frame will actually be drawn with closes it. */
+  keepPaddleOnScreen() {
+    if (!this.camVPReady) return;
+    const pad = this.player;
+    const s = projectPoint(this.camVP, pad.pos, this._kosS || (this._kosS = {}));
+    const m = 0.05;
+    if (s.ok && s.x >= m && s.x <= 1 - m && s.y >= m && s.y <= 1 - m) return;
+    const t = this._kosT || (this._kosT = { tx: 0, ty: 0, tz: 0 });
+    t.tx = pad.pos.x; t.ty = pad.pos.y; t.tz = pad.pos.z;
+    clampPaddleToFrustum(this.camVP, t, m);
+    pad.pos.x = t.tx; pad.pos.y = t.ty; pad.pos.z = t.tz;
   }
 
   updateCamera(dt) {
-    const b = this.ball, mode = this.settings.camera;
-    let px = 0, py = 2.28, pz = 3.22, lx = 0, ly = 0.80, lz = -0.30, fov = 42;
-    const bx = clamp(b.p.x, -1.2, 1.2), bz = clamp(b.p.z, -2, 2.4);
-    if (mode === 'BROADCAST') {
-      // Over the player's shoulder: the WHOLE table and your own bat are in
-      // frame at once, and the pitch (~23 deg) makes depth readable.
-      px = bx * 0.09; py = 2.28; pz = 3.22;
-      lx = bx * 0.17; ly = 0.80 + clamp(b.p.y - PH.TABLE_Y, 0, 1) * 0.045; lz = -0.30 + bz * 0.05;
-      fov = 42;
-    } else if (mode === 'DYNAMIC') {
-      px = bx * 0.22; py = 2.06 + clamp(b.p.y - PH.TABLE_Y, 0, 1.2) * 0.10; pz = 2.92;
-      lx = bx * 0.40; ly = 0.82; lz = -0.34 + bz * 0.16;
-      fov = 46 + clamp(V3.len(b.v) / 30, 0, 1) * 4;
-    } else if (mode === 'LOW') {
-      px = bx * 0.16; py = 1.52; pz = 3.14;
-      lx = bx * 0.30; ly = 0.88; lz = -0.34;
-      fov = 46;
-    } else if (mode === 'SIDE') {
-      px = 3.6; py = 1.74; pz = 0.5 + bz * 0.18;
-      lx = 0; ly = 0.90; lz = bz * 0.3;
-      fov = 40;
-    }
-    // Narrow / portrait screens: step closer to the table instead of just
-    // widening the lens, otherwise the match is a postage stamp in the
-    // middle of an empty hall.
-    const ar = this.R.aspect();
-    if (ar < 1.3) {
-      const k = clamp((1.3 - ar) / 0.8, 0, 1);
-      pz = lerp(pz, pz * 0.74, k);
-      py = lerp(py, py * 0.94, k);
-      lz = lerp(lz, lz - 0.22, k);
-      ly = lerp(ly, ly - 0.30, k);
-    }
-    // Manual orbit: rebuild the eye in spherical coordinates around the look
-    // point, so the preset keeps driving the framing and the player only
-    // rotates / slides along it.
-    const A = this.camAdj;
-    if (A.yaw || A.pitch || A.zoom !== 1) {
-      const dx = px - lx, dy = py - ly, dz = pz - lz;
-      let r = Math.sqrt(dx * dx + dy * dy + dz * dz);
-      let yaw = Math.atan2(dx, dz);
-      let pitch = Math.asin(clamp(dy / Math.max(r, 1e-4), -1, 1));
-      yaw += A.yaw;
-      pitch = clamp(pitch + A.pitch, -0.06, 1.32);
-      r = clamp(r * A.zoom, 1.35, 8.6);
-      const cp = Math.cos(pitch);
-      px = lx + r * cp * Math.sin(yaw);
-      // stay above the playing surface and below the light rig: those two
-      // walls are where the illusion of a hall falls apart
-      py = clamp(ly + r * Math.sin(pitch), PH.TABLE_Y + 0.16, 2.80);
-      pz = lz + r * cp * Math.cos(yaw);
-    }
-    V3.set(this.camPosT, px, py, pz);
-    V3.set(this.camLookT, lx, ly, lz);
-    this.fovT = fov;
+    const aspect = this.R.aspect();
+    const rig = cameraRigFor(this.settings.camera, this.ball.p, aspect, this.camRig);
+    V3.set(this.camPosT, rig.eye.x, rig.eye.y, rig.eye.z);
+    V3.set(this.camLookT, rig.look.x, rig.look.y, rig.look.z);
+    this.fovT = rig.fov;
     this.applyCamera(dt);
+
+    /* The same rig, without shake, as matrices: two things need to know
+     * exactly what is on screen — the HUD text band (it must stop above the
+     * table) and the bat clamp (it must never be pushed out of frame). */
+    /* From the smoothed camera, not from the target rig: camVP is the contract
+     * for "what is on screen right now" (the band, the bat clamp, the strike
+     * ring), and applyCamera glides toward the rig over ~0.5 s, so building it
+     * from the destination made the clamp correct for a frame that had not
+     * happened yet. Shake is still excluded, as the field's comment promises. */
+    const lrig = this._liveRig || (this._liveRig = { eye: V3.new(), look: V3.new(), fov: 40 });
+    V3.copy(lrig.eye, this.camPos);
+    V3.copy(lrig.look, this.camLook);
+    lrig.fov = this.fov;
+    this.camVP = rigViewProj(lrig, aspect, this._rigBuf);
+    this.camVPReady = true;
+    const farL = projectPoint(this.camVP, this._bandA || (this._bandA = { x: -PH.T_HALF_WID, y: PH.TABLE_Y, z: -PH.T_HALF_LEN }), this._bp1 || (this._bp1 = {}));
+    const farR = projectPoint(this.camVP, this._bandB || (this._bandB = { x: PH.T_HALF_WID, y: PH.TABLE_Y, z: -PH.T_HALF_LEN }), this._bp2 || (this._bp2 = {}));
+    const netT = projectPoint(this.camVP, this._bandC || (this._bandC = { x: 0, y: PH.NET_TOP, z: 0 }), this._bp3 || (this._bp3 = {}));
+    const band = clamp(Math.min(farL.y, farR.y, netT.y) - 0.015, 0.16, 0.55);
+    if (Math.abs(band - this.hudBandY) > 0.002) {
+      this.hudBandY = band;
+      /* Unitless on purpose: the stylesheet computes
+       * calc((1 - var(--band-y)) * 100%), which needs a number, not a length. */
+      const css = band.toFixed(4);
+      if (css !== this._bandCss) {
+        this._bandCss = css;
+        if (typeof document !== 'undefined' && document.documentElement)
+          document.documentElement.style.setProperty('--band-y', css);
+      }
+    }
   }
 
   /** Smoothing, shake and the actual setCamera call — shared by the live
@@ -7959,7 +9193,6 @@ class Game {
     this.camLook.y = expSmooth(this.camLook.y, this.camLookT.y, k * 1.2, dt);
     this.camLook.z = expSmooth(this.camLook.z, this.camLookT.z, k * 1.2, dt);
     this.fov = expSmooth(this.fov, this.fovT, 5, dt);
-    if (this.camAdjT > 0) this.camAdjT -= dt;
 
     // shake
     this.shake = Math.max(0, this.shake - dt * 3.4);
@@ -7986,6 +9219,19 @@ class Game {
     V3.set(this.camLookT, b.x * 0.9, b.y * 0.9 + 0.06, b.z * 0.9);
     this.fovT = lerp(41, 34, e);
     this.applyCamera(dtReal);
+    /* camVP is the matrix everything on screen is projected with — the HUD text
+     * band, the bat clamp, the strike ring, the projected cursor. During a
+     * replay update() returns before updateCamera runs, so camVP used to stay
+     * frozen at whatever the LIVE camera last was while the picture was a
+     * 34-degree close-up swinging over the ball: every one of those overlays
+     * was anchored to a camera that no longer existed. Rebuild it from the
+     * camera the replay is actually drawing with. */
+    const rg = this._replayRig || (this._replayRig = { eye: V3.new(), look: V3.new(), fov: 40 });
+    V3.copy(rg.eye, this.camPos);
+    V3.copy(rg.look, this.camLook);
+    rg.fov = this.fov;
+    this.camVP = rigViewProj(rg, this.R.aspect(), this._rigBuf);
+    this.camVPReady = true;
   }
 
   /* ------------------------------ update --------------------------- */
@@ -8029,10 +9275,23 @@ class Game {
         }
         break;
       case GS.SERVE_TOSS:
-        if (this.server === -1 && this.time > this.aiSwingAt && this.ball.lastHitBy === 0) {
+        /* The opponent strikes at a HEIGHT, not at a deadline. `aiSwingAt`
+         * is real seconds while the ball integrates scaled seconds, so under
+         * slow-mo a fixed deadline met the ball 10-20 cm lower than intended
+         * and every slowed-down serve came out a different serve. The height
+         * is also what makes a fast serve geometrically possible: from 0.61 m
+         * above the table even a full-speed flat swing cannot bounce on the
+         * server's own half, so the solver used to halve it (measured: the
+         * fast serve left the bat at 24 km/h at swing scale 0.50). At 0.36 m
+         * on the way down it is a real serve. */
+        if (this.server === -1 && this.ball.lastHitBy === 0 && this.stateT > 0.10 &&
+          ((this.ball.v.y < 0 && this.ball.p.y <= PH.TABLE_Y + AI_SERVE_CONTACT_Y) ||
+            this.time > this.aiSwingAt + 0.6)) {
           let racket = this.ai.serve(this);
-          // the opponent does not get to donate points either
-          if (racket.valid === false) {
+          // the opponent does not get to donate points either — but a level
+          // whose skill is already 1.0 has been solved at full assist, and
+          // re-solving the same problem is pure frame time
+          if (racket.valid === false && clamp(this.ai.L.skill, 0, 1) < 0.999) {
             racket = refineRacket(this.ball.p, this.ball.v, this.ball.w, racket, 1, racket.quality);
           }
           const contact = V3.clone(this.ball.p);
@@ -8109,6 +9368,7 @@ class Game {
       this.profile.maybeSave(dtReal);
     }
     this.updateCamera(dtReal);
+    this.keepPaddleOnScreen();
 
     // post-processing reacts to the action
     const P = this.R.post;
@@ -8197,8 +9457,17 @@ class Game {
     const pad = this.player;
     const PM = this.paddleMats(S) || ma;
     const pq = Q.lookRotation(Q.new(), pad.normal, { x: 0, y: 1, z: 0 });
-    const roll = Q.setAxisAngle(Q.new(), 0, 0, 1, (this.settings.hand === 'right' ? -0.42 : 0.42) + pad.swing * 0.3);
+    /* pad.roll is the lean the bat picks up while you move it sideways: the
+       blade visibly turns into the direction of travel instead of staying
+       square to the camera. */
+    const roll = Q.setAxisAngle(Q.new(), 0, 0, 1,
+      (this.settings.hand === 'right' ? -0.42 : 0.42) + pad.swing * 0.3 + (pad.roll || 0));
     Q.mul(pq, pq, roll);
+    /* stepping in to a short ball tips the blade forward over the table */
+    if (pad.stepIn > 0.01) {
+      const lunge = Q.setAxisAngle(Q.new(), 1, 0, 0, -0.20 * pad.stepIn);
+      Q.mul(pq, pq, lunge);
+    }
     M4.compose(tmp.m, pad.pos, pq, V3.set(tmp.scl, 1, 1, 1));
     d(me.blade, tmp.m, PM.wood);
     if (!shadowPass) {
@@ -8237,7 +9506,7 @@ class Game {
     } else {
       this.rig.draw(R, S, {
         pos: ap.pos, normal: aiNorm, hand: this.settings.hand === 'right' ? 'left' : 'right',
-        swing: -this.ai.anim.swing, windup: wd,
+        swing: -this.ai.anim.swing, windup: wd, roll: (this.ai.anim.lean || 0) * 0.22,
         mats: this.paddleMats(S, this.aiEquip),
       });
     }
@@ -8490,12 +9759,27 @@ class UI {
     $('#adCoins').addEventListener('click', () => this.watchAd());
     $('#btnSettings').addEventListener('click', () => $('#settings').classList.toggle('on'));
     $('#setClose').addEventListener('click', () => $('#settings').classList.remove('on'));
-    $('#camReset').addEventListener('click', () => this.game.camReset());
+    /* the three free-camera sliders are gone: the rig is one of four authored
+       presets now, so there is nothing to reset from the settings card */
+    const cr = $('#camReset');
+    if (cr) cr.addEventListener('click', () => this.game.camReset());
     $('#btnMenu').addEventListener('click', () => { this.game.stopTraining(); $('#menu').classList.add('on'); });
     $('#btnSound').addEventListener('click', () => {
       const g = this.game; g.settings.sound = !g.settings.sound;
       g.audio.setMuted(!g.settings.sound);
       $('#btnSound').innerHTML = g.settings.sound ? ICON.sound : ICON.mute;
+    });
+    /* Spin dial: one tap cycles МЕНЬШЕ -> НОРМА -> БОЛЬШЕ. It biases how much
+       of the contact is brush (more spin, less pace) and how much is punch. */
+    const sbEl = $('#spinBias');
+    if (sbEl) sbEl.addEventListener('click', () => {
+      const g = this.game; if (!g) return;
+      const order = ['low', 'norm', 'high'];
+      const i = order.indexOf(g.settings.spinBias || 'norm');
+      g.settings.spinBias = order[(i + 1) % order.length];
+      g.saveSettings();
+      g.audio.init(); g.audio.ui('click');
+      this.syncSpinBias();
     });
     /* slow-mo: press and hold, on a phone or on the keyboard */
     const slow = $('#slow');
@@ -8829,29 +10113,24 @@ class UI {
         break;
       case 'target': s.targetScore = +v; $('#toWin').textContent = v; break;
       default: break;
-      case 'camYaw': g.camAdj.yaw = (-v) * Math.PI / 180; g.camAdjT = 1.2; this.syncCam(); return;
-      case 'camPitch': g.camAdj.pitch = v * Math.PI / 180; g.camAdjT = 1.2; this.syncCam(); return;
-      case 'camDist': g.camAdj.zoom = v / 100; g.camAdjT = 1.2; this.syncCam(); return;
     }
     g.saveSettings();
     g.audio.ui('click');
   }
 
-  /** Keep the three camera sliders and the live orbit in step, whichever
-   *  one the player actually touched. */
-  syncCam() {
-    const A = this.game.camAdj;
-    const yaw = Math.round(-A.yaw * 180 / Math.PI);
-    const pit = Math.round(A.pitch * 180 / Math.PI);
-    const dst = Math.round(A.zoom * 100);
-    const set = (id, vid, val, txt) => {
-      const el = $(id); if (!el) return;
-      if (document.activeElement !== el) el.value = val;
-      $(vid).textContent = txt;
-    };
-    set('#rYaw', '#vYaw', yaw, (yaw > 0 ? '+' : '') + yaw + '°');
-    set('#rPitch', '#vPitch', pit, (pit > 0 ? '+' : '') + pit + '°');
-    set('#rDist', '#vDist', dst, dst + '%');
+  /** The dial says what it is set to, in the band-safe top row. */
+  syncSpinBias() {
+    const g = this.game; if (!g) return;
+    const el = $('#spinBias'), lab = $('#spinBiasVal');
+    const v = g.settings.spinBias || 'norm';
+    if (lab) lab.textContent = v === 'high' ? 'БОЛЬШЕ' : v === 'low' ? 'МЕНЬШЕ' : 'НОРМА';
+    if (el) {
+      el.classList.toggle('high', v === 'high');
+      el.classList.toggle('low', v === 'low');
+      el.title = v === 'high' ? 'Вращение: больше (скользящий контакт, меньше скорости)'
+        : v === 'low' ? 'Вращение: меньше (плоский удар, больше скорости)'
+          : 'Вращение: нейтрально';
+    }
   }
 
   syncSettings() {
@@ -8863,6 +10142,7 @@ class UI {
     sel('coach', s.coach ? 'on' : 'off'); sel('adaptive', s.adaptive ? 'on' : 'off');
     sel('slowmoPlayer', s.slowmoPlayer !== false ? 'on' : 'off');
     $('#slow').classList.toggle('off', s.slowmoPlayer === false);
+    this.syncSpinBias();
     sel('haptics', s.haptics ? 'on' : 'off');
     sel('target', s.targetScore);
     $('#spin').classList.toggle('on', !!s.showTele);
@@ -8871,7 +10151,6 @@ class UI {
     $('#rPos').value = Math.round(s.posAssist * 100); $('#vPos').textContent = Math.round(s.posAssist * 100) + '%';
     $('#rSens').value = Math.round(s.sensitivity * 100); $('#vSens').textContent = s.sensitivity.toFixed(2) + '×';
     $('#rVol').value = Math.round(s.volume * 100); $('#vVol').textContent = Math.round(s.volume * 100) + '%';
-    this.syncCam();
   }
 
   /* ------------------------------ HUD ----------------------------- */
@@ -8892,7 +10171,13 @@ class UI {
     const n = $('#shotName');
     n.textContent = info.stroke.short || info.stroke.name;
     n.style.color = info.stroke.col;
-    $('#shotMeta').textContent = `${info.speed.toFixed(0)} км/ч · ${info.spin.toFixed(0)} об/с`;
+    /* The timing verdict is part of the badge: it is the one thing the player
+       can act on next time, and it belongs in the top band with the rest of
+       the text, never floating over the table. */
+    const extra = info.timing ? ` · ${info.timing}` : '';
+    $('#shotMeta').textContent = `${info.speed.toFixed(0)} км/ч · ${info.spin.toFixed(0)} об/с${extra}`;
+    const meta = $('#shotMeta');
+    if (meta) meta.style.color = info.rim ? 'var(--warn)' : '';
   }
   showAiShot() { /* the opponent's choice is readable from the ball itself */ }
 
@@ -9226,38 +10511,12 @@ class UI {
     }
     c.globalAlpha = 1;
 
-    // camera readout — only while you are actually moving the camera
-    if (g.camAdjT > 0) {
-      const A = g.camAdj;
-      const a = clamp(g.camAdjT / 0.5, 0, 1) * 0.92;
-      const yaw = Math.round(-A.yaw * 180 / Math.PI);
-      const pit = Math.round(A.pitch * 180 / Math.PI);
-      const txt = `${yaw > 0 ? '+' : ''}${yaw}°  ·  ${pit > 0 ? '+' : ''}${pit}°  ·  ${(A.zoom).toFixed(2)}×`;
-      c.save();
-      c.globalAlpha = a;
-      c.font = `600 ${11.5 * d}px ui-monospace,Menlo,Consolas,monospace`;
-      c.textAlign = 'center';
-      const tw = c.measureText(txt).width + 26 * d;
-      c.fillStyle = 'rgba(6,11,19,.74)';
-      roundRect(c, W / 2 - tw / 2, H - 112 * d, tw, 26 * d, 13 * d);
-      c.fill();
-      c.strokeStyle = 'rgba(120,180,240,.22)'; c.lineWidth = 1 * d; c.stroke();
-      c.fillStyle = '#bcd6f2';
-      c.fillText(txt, W / 2, H - 94 * d);
-      c.restore();
-    }
+    /* The free-camera readout used to be painted here, at the bottom of the
+       screen, while you dragged the view around. There is nothing to read
+       out any more — the rig is one of four presets and it says which one
+       in the band (ui.msg) the moment you switch. */
 
-    // match point
-    if (!tr) {
-      const T = g.settings.targetScore;
-      const mp = (g.score[0] >= T - 1 && g.score[0] >= g.score[1] + 1) || (g.score[1] >= T - 1 && g.score[1] >= g.score[0] + 1);
-      if (mp && (g.state === 'RALLY' || g.state === 'SERVE_READY' || g.state === 'SERVE_TOSS')) {
-        c.font = `900 ${13 * d}px ${CSSFONT}`;
-        c.textAlign = 'center';
-        c.fillStyle = g.score[0] > g.score[1] ? 'rgba(78,227,154,.85)' : 'rgba(255,93,110,.85)';
-        c.fillText(g.score[0] > g.score[1] ? 'МАТЧБОЛ' : 'МАТЧБОЛ СОПЕРНИКА', W / 2, 108 * d);
-      }
-    }
+    // match point moved into the top band (#mpInd) — see tick()
   }
 
   ripple(x, y, col) { this.ripples.push({ x, y, col, t: 0, life: 0.55 }); }
@@ -9273,6 +10532,36 @@ class UI {
         `<div class="msg${m.big ? ' big' : ''}" style="color:${m.col}">${m.text}</div>`).join('');
       this._nMsg = g.messages.length;
       this._m0 = g.messages[0] ? g.messages[0].text : null;
+    }
+
+    /* Match point used to be painted on the canvas at a fixed 108 px, which
+       is exactly where the scoreboard ends and the band begins. As a flex
+       child of the band it can never sit on the table or under the score. */
+    const mpi = $('#mpInd');
+    if (mpi) {
+      const T = g.settings.targetScore;
+      const live = g.state === 'RALLY' || g.state === 'SERVE_READY' || g.state === 'SERVE_TOSS';
+      const us = g.score[0] >= T - 1 && g.score[0] > g.score[1];
+      const them = g.score[1] >= T - 1 && g.score[1] > g.score[0];
+      const on = live && !g.training && (us || them);
+      mpi.classList.toggle('on', on);
+      mpi.classList.toggle('them', them && !us);
+      if (on) mpi.textContent = them && !us ? 'МАТЧБОЛ СОПЕРНИКА' : 'МАТЧБОЛ';
+    }
+
+    /* How much room the rig actually left between the scoreboard and the
+       table. Measured, not guessed: four rigs × eight aspect ratios give a
+       band from ~77 px (landscape phone) to ~330 px (1080p portrait), and
+       the type has to shrink at the bottom of that range rather than clip
+       or spill onto the playing surface. Recomputed only when something
+       that changes it changed. */
+    const band = $('#topband');
+    if (band && (this._bandH === undefined || this._bandSig !== g.hudBandY + '|' + window.innerHeight)) {
+      this._bandSig = g.hudBandY + '|' + window.innerHeight;
+      const h = band.clientHeight;
+      this._bandH = h;
+      band.classList.toggle('band-short', h < 150);
+      band.classList.toggle('band-tiny', h < 92);
     }
 
     const rb = $('#rally');
@@ -9598,6 +10887,6 @@ const ICON = {
 })();
 
 </script>
-<!-- TOPSPIN ARENA · self-contained build 2026-10-11 · no external assets, no network required -->
+<!-- TOPSPIN ARENA · self-contained build 2026-10-12 · no external assets, no network required -->
 </body>
 </html>

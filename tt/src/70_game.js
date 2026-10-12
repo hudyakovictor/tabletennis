@@ -4,12 +4,15 @@
  * ===================================================================== */
 'use strict';
 
+/* Where the opponent's bat meets its own toss, metres above the table. */
+const AI_SERVE_CONTACT_Y = 0.36;
+
 const GS = {
   MENU: 'MENU', SERVE_READY: 'SERVE_READY', SERVE_TOSS: 'SERVE_TOSS',
   RALLY: 'RALLY', POINT: 'POINT', REPLAY: 'REPLAY', MATCH_END: 'MATCH_END',
 };
 
-const PHYS_DT = 1 / 600;          // 600 Hz — a 40 mm ball at 30 m/s moves 5 cm/step
+const PHYS_DT = PH.SIM_DT;        // 600 Hz — and the same step every solver verdicts on
 
 /* --------------------------- particles ----------------------------- */
 class Particles {
@@ -71,7 +74,6 @@ class Game {
     this.profile = new Profile(this.platform);
     this.shop = new Shop(this.profile, this.platform, this.analytics);
     this.applyEquipment();
-    this.loadSettings();
     this.matchTasks = { topspin: 0, smash: 0, serves: 0, moments: 0 };
     this.iap = null;                     // the mobile wrapper sets this
     this.moments = new MomentRecorder();
@@ -99,7 +101,16 @@ class Game {
       slowmoPlayer: true,                // bullet time, for the player, in casual play only
       targetScore: 11,
       sensitivity: 1.0,
+      spinBias: 'norm',                  // low | norm | high — see deriveStroke
     };
+    /* Saved settings are applied AFTER the defaults exist. It used to run
+     * 60 lines earlier, while this.settings was still undefined, so
+     * Object.assign threw — and because boot() catches everything, a player
+     * who had EVER changed a setting got the "WebGL недоступен" screen on
+     * every following visit. A first visit worked (profile.data.settings is
+     * null then), which is why it survived to here. Found by the headless
+     * smoke suite: 2 of 3 matches failed to boot once localStorage was warm. */
+    this.loadSettings();
 
     this.ball = {
       p: V3.new(0, PH.TABLE_Y + 0.3, 1.2), v: V3.new(), w: V3.new(),
@@ -140,10 +151,15 @@ class Game {
     this.lastPoint = null;
     this.timeScale = 1; this.targetTimeScale = 1;
     this.shake = 0; this.shakeDir = V3.new();
-    // Manual orbit laid on top of whichever preset is active: yaw and pitch
-    // in radians, zoom as a multiplier of the preset distance.
-    this.camAdj = { yaw: 0, pitch: 0, zoom: 1 };
-    this.camAdjT = 0;                  // seconds left on the on-screen readout
+    /* The camera is a choice between four AUTHORED rigs (57_camera.js):
+     * fixed distance, fixed angle, table always square to the frame. There
+     * is deliberately no free orbit any more — hand-tuning yaw/pitch/zoom
+     * cost players minutes per session and could park the bat off-screen,
+     * and every framing it produced was worse than one of the four. */
+    this.camRig = { eye: V3.new(0, 2.28, 3.22), look: V3.new(0, 0.80, -0.30), fov: 42, mode: 'BROADCAST' };
+    this._rigBuf = { vp: M4.create(), proj: M4.create(), view: M4.create() };
+    this.camVP = M4.create();          // view·proj of the authored rig, no shake
+    this.hudBandY = 0.40;              // screen y where the table's far edge begins
     this.camPos = V3.new(0, 1.62, 3.05); this.camLook = V3.new(0, 0.92, -0.2);
     this.camPosT = V3.clone(this.camPos); this.camLookT = V3.clone(this.camLook);
     this.fov = 46; this.fovT = 46;
@@ -195,29 +211,24 @@ class Game {
       const h = r.height > 0 ? r.height : (c.clientHeight || 1);
       let x = (e.clientX - r.left) / w;
       let y = (e.clientY - r.top) / h;
-      if (!Number.isFinite(x)) x = 0.5; else x = clamp(x, -0.25, 1.25);
-      if (!Number.isFinite(y)) y = 0.5; else y = clamp(y, -0.25, 1.25);
+      /* Outside the canvas the coordinates used to be clamped to
+       * [-0.25 .. 1.25] — a quarter of a screen BEYOND each edge. That is
+       * how the bat got parked somewhere the camera never shows and, since
+       * no further move events arrive once the cursor leaves the window,
+       * it stayed there. The pointer is now always inside 0..1. */
+      if (!Number.isFinite(x)) x = 0.5; else x = clamp(x, 0, 1);
+      if (!Number.isFinite(y)) y = 0.5; else y = clamp(y, 0, 1);
       return { x, y };
     };
 
-    /* Two input languages share one surface:
-     *   one finger / left button  → the swipe, i.e. the stroke
-     *   two fingers / right-drag / wheel → the camera
-     * The moment a second finger lands the half-made stroke is thrown away,
-     * otherwise pinching would fire a wild shot. */
+    /* One input language: the pointer drives the bat and the swipe.
+     *   one finger / left button  → the stroke, and where the bat stands
+     *   a second finger           → throws the half-made stroke away
+     * The camera is NOT on the pointer any more (four authored rigs, keys
+     * 1..4 / C), so there is no orbit, no pinch-zoom and no wheel-zoom: a
+     * framing that has to be rebuilt by hand every session is a framing
+     * that is wrong most of the time. */
     const ptrs = new Map();
-    let orbit = null;
-    const centroid = () => {
-      let x = 0, y = 0, n = 0;
-      for (const p of ptrs.values()) { x += p.x; y += p.y; n++; }
-      x /= n; y /= n;
-      let d = 0;
-      if (n >= 2) {
-        const a = [...ptrs.values()];
-        d = Math.hypot(a[0].x - a[1].x, a[0].y - a[1].y);
-      }
-      return { x, y, d };
-    };
     const dropStroke = () => {
       this.swipe.cancel();
       this.pointerDown = false;
@@ -229,17 +240,13 @@ class Game {
       ptrs.set(e.pointerId, { x: e.clientX, y: e.clientY });
       e.preventDefault();
 
-      if (this.replayer.on) return;
-      if (e.button === 2 || e.button === 1) {        // right / middle: orbit
+      if (this.replayer.on) { this.skipReplay(); return; }   // tap = skip the reel
+      if (e.button === 2 || e.button === 1) {        // right / middle: not a stroke
         dropStroke();
-        orbit = { kind: 'drag', x: e.clientX, y: e.clientY };
         return;
       }
-      if (this.replayer.on) { this.skipReplay(); return; }   // tap = skip the reel
-      if (ptrs.size >= 2) {                          // second finger: orbit
+      if (ptrs.size >= 2) {                          // a second finger cancels
         dropStroke();
-        const g = centroid();
-        orbit = { kind: 'pinch', x: g.x, y: g.y, d: g.d };
         return;
       }
       const n = norm(e);
@@ -248,39 +255,33 @@ class Game {
       if (this.state === GS.SERVE_READY && this.server === 1) this.startToss();
     };
 
+    /* Where the bat wants to be. Tracked on the WINDOW, not on the canvas:
+     * a cursor that leaves the canvas keeps sending events here, so the bat
+     * keeps following it instead of freezing at the last in-canvas position
+     * (that freeze was the "bat and cursor are kilometres apart" bug). */
+    const track = (e) => {
+      const n = norm(e);
+      this.pointer = n;
+      this.pointerInside = n.x > 0.001 && n.x < 0.999 && n.y > 0.001 && n.y < 0.999;
+      return n;
+    };
+
     const move = (e) => {
       const p = ptrs.get(e.pointerId);
       if (p) { p.x = e.clientX; p.y = e.clientY; }
-      if (orbit) {
-        if (orbit.kind === 'drag') {
-          this.orbitBy(e.clientX - orbit.x, e.clientY - orbit.y);
-          orbit.x = e.clientX; orbit.y = e.clientY;
-        } else if (ptrs.size >= 2) {
-          const g = centroid();
-          this.orbitBy(g.x - orbit.x, g.y - orbit.y);
-          if (orbit.d > 10 && g.d > 10) this.zoomBy(orbit.d / g.d);
-          orbit.x = g.x; orbit.y = g.y; orbit.d = g.d;
-        }
-        e.preventDefault();
-        return;
-      }
-      const n = norm(e);
-      this.pointer = n;
-      if (this.swipe.active) {
+      const n = track(e);
+      if (this.swipe.active && ptrs.size < 2) {
         this.swipe.move(n.x, n.y, this.time);
         const sp = this.swipe.m.speed;
         if (sp > 1.6) this.audio.whoosh(clamp(sp / 4, 0, 1.4));
       }
-      e.preventDefault();
+      if (e.cancelable) e.preventDefault();
     };
 
     const up = (e) => {
       ptrs.delete(e.pointerId);
-      if (orbit) {
-        if (ptrs.size < 2) orbit = null;             // never fall back into a stroke
-        e.preventDefault();
-        return;
-      }
+      if (e.button === 2 || e.button === 1) { e.preventDefault(); return; }
+      if (ptrs.size >= 1) { e.preventDefault(); return; }   // still another finger down
       if (!this.swipe.active) return;
       const n = this.pointer || { x: 0.5, y: 0.5 };
       this.swipe.up(n.x, n.y, this.time);
@@ -295,8 +296,11 @@ class Game {
     c.addEventListener('pointerup', up);
     c.addEventListener('pointercancel', up);
     c.addEventListener('contextmenu', (e) => e.preventDefault());
+    /* the bat follows the cursor across the whole window, so leaving the
+       canvas can never strand it; the wheel no longer zooms (fixed rigs) */
+    window.addEventListener('pointermove', (e) => { if (!ptrs.size) track(e); }, { passive: true });
+    window.addEventListener('blur', () => { this.pointerDown = false; this.swipe.cancel(); });
     c.addEventListener('wheel', (e) => {
-      this.zoomBy(1 + clamp(e.deltaY, -120, 120) / 1100);
       e.preventDefault();
     }, { passive: false });
     c.style.touchAction = 'none';
@@ -306,19 +310,15 @@ class Game {
       if (e.key === 'p' || e.key === 'P' || e.key === 'з' || e.key === 'З') this.setPaused(!this.paused);
       if (e.key === 'F3') { this.settings.showDebug = !this.settings.showDebug; e.preventDefault(); }
       if (e.key === 'c' || e.key === 'C' || e.key === 'с' || e.key === 'С') {
-        const order = ['BROADCAST', 'DYNAMIC', 'LOW', 'SIDE'];
-        this.settings.camera = order[(order.indexOf(this.settings.camera) + 1) % order.length];
-        this.ui && this.ui.syncSettings();
+        const i = CAMERA_ORDER.indexOf(this.settings.camera);
+        this.setCameraPreset(CAMERA_ORDER[(i + 1) % CAMERA_ORDER.length]);
       }
-      /* --- camera on the keyboard --- */
-      const step = e.shiftKey ? 3 : 1;
-      if (e.key === 'ArrowLeft') { this.orbitBy(26 * step, 0); e.preventDefault(); }
-      if (e.key === 'ArrowRight') { this.orbitBy(-26 * step, 0); e.preventDefault(); }
-      if (e.key === 'ArrowUp') { this.orbitBy(0, -16 * step); e.preventDefault(); }
-      if (e.key === 'ArrowDown') { this.orbitBy(0, 16 * step); e.preventDefault(); }
-      if (e.key === '+' || e.key === '=') { this.zoomBy(1 / (1 + 0.07 * step)); e.preventDefault(); }
-      if (e.key === '-' || e.key === '_') { this.zoomBy(1 + 0.07 * step); e.preventDefault(); }
-      if (e.key === '0' || e.key === ')') { this.camReset(); e.preventDefault(); }
+      /* --- the four authored rigs, straight off the keyboard --- */
+      if (e.key >= '1' && e.key <= '4') {
+        this.setCameraPreset(CAMERA_ORDER[+e.key - 1]);
+        e.preventDefault();
+      }
+      if (e.key === '0' || e.key === ')') { this.setCameraPreset(CAMERA_ORDER[0]); e.preventDefault(); }
     });
   }
 
@@ -335,6 +335,12 @@ class Game {
     this.matchTasks = { topspin: 0, smash: 0, serves: 0, moments: 0 };
     this.training = null;
     this.matchWinner = 0;
+    this.messages.length = 0;
+    this.pointNote = null;
+    this.slowmo.energy = 1; this.slowmo.on = false; this.slowmo.active = false;
+    this.targetTimeScale = 1; this.timeScale = 1; this.slowmoUntil = 0;
+    if (CAMERA_ORDER.indexOf(this.settings.camera) < 0) this.settings.camera = CAMERA_ORDER[0];
+    this.resetPaddle(true);            // hard: the bat is placed, not glided
     this.ai.reset();
     this.analyst.reset();
     this.director.reset();
@@ -399,6 +405,9 @@ class Game {
     this.rallyBounces.length = 0;
     this.serveBounces = 0;
     this.isServeBall = true;
+    /* Every point begins from the same known state: bat back in the centre,
+     * cursor binding re-anchored, no stale intercept from the last rally. */
+    this.resetPaddle();
     this.setState(GS.SERVE_READY);
     this.recorder.begin(this.time, s);
     this.moments.beginRally(this.time, this.score);
@@ -406,6 +415,14 @@ class Game {
     if (s < 0) this.aiServeTimer = rnd(0.7, 1.3);
   }
   startToss() {
+    /* Not while the bat is still gliding home. The requirement is that every
+     * new point starts from the centre, and a toss struck mid-glide is struck
+     * from wherever the last rally happened to leave the bat — which is how
+     * "the racket drifts off and stays there" survived the reset. The click is
+     * NOT swallowed: it is queued and fired the instant the reset finishes, so
+     * serving immediately costs a third of a second of the intermission. */
+    if (this.recenterT > 0) { this.tossQueued = true; return; }
+    this.tossQueued = false;
     const b = this.ball;
     const pad = this.player;
     // ITTF requires a near-vertical toss of at least 16 cm; we throw ~30 cm
@@ -480,8 +497,8 @@ class Game {
   }
 
   /* ------------------------- ball <-> world ------------------------ */
-  onBounce(side, speed) {
-    this.audio.hitTable(speed, this.ball.p.x);
+  onBounce(side, speed, info) {
+    if (!(info && info.edge > 0.25)) this.audio.hitTable(speed, this.ball.p.x);
     this.addMark(this.ball.p.x, this.ball.p.z, speed);
     this.particles.burst(this.ball.p.x, PH.TABLE_Y + 0.005, this.ball.p.z,
       4 + (speed > 9 ? 4 : 0), 0.5 + speed * 0.06, 0.26, 0.016, 1, 1, 0.92, { x: 0, y: 0.7, z: 0 });
@@ -575,7 +592,10 @@ class Game {
     const name = racket.stroke ? racket.stroke.id : 'DRIVE';
     this.stats.byStroke[name] = (this.stats.byStroke[name] || 0) + 1;
 
-    this.audio.hitRacket(speed, info ? info.contactSlip : 0, !!(racket.arch && racket.arch.soft));
+    /* an off-centre contact sounds like wood, not like rubber */
+    const softHit = !!(racket.arch && racket.arch.soft) || (side > 0 && this.lastSweet !== undefined && this.lastSweet < 0.38);
+    this.audio.hitRacket(speed, info ? info.contactSlip : 0, softHit);
+    if (side > 0 && this.lastSweet !== undefined && this.lastSweet < 0.30) this.buzz(16);
     const col = racket.stroke ? hexToRgb(racket.stroke.col) : [1, 1, 1];
     this.particles.burst(contactP.x, contactP.y, contactP.z,
       side > 0 ? 14 : 9, 0.7 + speed * 0.05, 0.32, 0.019, col[0], col[1], col[2],
@@ -588,6 +608,9 @@ class Game {
         topspin: -b.w.x * side, sidespin: b.w.y, quality,
         power: racket.power, t: this.time,
         contact: racket.contact, elev: racket.elev,
+        timing: side > 0 ? (this.lastTiming || '') : '',
+        sweet: side > 0 ? (this.lastSweet !== undefined ? this.lastSweet : 1) : 1,
+        rim: side > 0 && this.lastSweet !== undefined && this.lastSweet < 0.42,
       };
       this.ui && this.ui.showShot(this.lastShotInfo);
       this.recorder.addShot(1, Object.assign({
@@ -682,12 +705,13 @@ class Game {
       showTrail: s.showTrail, showPredict: s.showPredict, showZone: s.showZone,
       showTele: s.showTele, haptics: s.haptics, coach: s.coach, adaptive: s.adaptive,
       slowmoPlayer: s.slowmoPlayer, targetScore: s.targetScore, sensitivity: s.sensitivity,
+      spinBias: s.spinBias,
     };
     this.profile.touch();
   }
 
   loadSettings() {
-    if (!this.profile || !this.profile.data.settings) return false;
+    if (!this.settings || !this.profile || !this.profile.data.settings) return false;
     Object.assign(this.settings, this.profile.data.settings);
     if (this.settings.volume !== undefined) this.audio.setVolume(this.settings.volume);
     if (this.settings.sound === false) this.audio.setMuted(true);
@@ -831,17 +855,21 @@ class Game {
       const inX = Math.abs(b.p.x) <= PH.T_HALF_WID + PH.R * 0.5;
       const inZ = Math.abs(b.p.z) <= PH.T_HALF_LEN + PH.R * 0.5;
       if (inX && inZ) {
-        const edgeX = Math.abs(b.p.x) > PH.T_HALF_WID - PH.R;
-        const edgeZ = Math.abs(b.p.z) > PH.T_HALF_LEN - PH.R;
         const sp = -b.v.y;
+        /* The white line is physics now (bounceTable tilts the contact normal
+         * outward and takes a third of the restitution off). The old handler
+         * did its own thing on top of it — v.y *= 0.45 and rndSym(1.2) m/s of
+         * sideways velocity — so the effect was applied twice and, worse, the
+         * same shot gave a different answer every time. An edge ball should be
+         * unreadable for the RECEIVER, not random for the game. */
         const info = bounceTable(b.p, b.v, b.w);
-        if (edgeX || edgeZ) {
-          // edge ball: unpredictable, shoots off low and fast
-          b.v.y *= 0.45; b.v.x += rndSym(1.2); b.v.z *= 1.12;
+        if (info && info.edge > 0.25) {
           this.audio.hitEdge();
-          this.msg('РЕБРО СТОЛА!', 1.0, '#ffd34d');
+          this.msg(info.edgeAxis === 'x' ? 'РЕБРО СТОЛА!' : 'ЗАДНЯЯ КРОМКА!', 1.0, '#ffd34d');
+          this.shakeIt(0.10 + 0.16 * info.edge, V3.new(0, 1, 0));
+          this.stats.edgeBalls = (this.stats.edgeBalls || 0) + 1;
         }
-        this.onBounce(Math.sign(b.p.z) || 1, sp);
+        this.onBounce(Math.sign(b.p.z) || 1, sp, info);
       }
     }
 
@@ -951,6 +979,15 @@ class Game {
        forgiving the rubber on it is (a soft topsheet costs less) */
     const sideParams = this.equip.forSide(1);
     const sweet = clamp((1 - hit.rad / radius) * (sideParams.sweet || this.equip.sweetK), 0, 1);
+    /* WHICH side of the blade it arrived on. An off-centre contact does not
+     * just lose pace (that part `quality` already did): the blade twists, so
+     * the ball leaves at an angle to the face you were holding. Deterministic
+     * by design — the same offset always costs the same — so it can be
+     * learned instead of being read as the game cheating. */
+    const offLat = clamp((hit.x - pad.pos.x) / Math.max(radius, 1e-4), -1, 1);
+    const offVer = clamp((hit.y - pad.pos.y) / Math.max(radius, 1e-4), -1, 1);
+    const offMag = clamp(Math.hypot(offLat, offVer), 0, 1);
+    this.lastSweet = sweet;
 
     // ---- build the stroke from the live gesture --------------------
     const sw = this.swipe;
@@ -961,22 +998,44 @@ class Game {
     let racket, quality;
     if (m && (m.speed > 0.22 || m.peakSpeed > 0.9)) {
       const timing = clamp(m.speed / Math.max(m.peakSpeed, 1e-3), 0.35, 1);
+      /* Banded, and the band is printed on the shot badge. A continuous
+       * multiplier is unteachable: the player cannot tell 0.83 from 0.79, but
+       * he can tell "РАНОВATO" from "ТОЧНО", and then fix it. */
+      const tband = timing >= 0.93 ? 'ТОЧНО' : timing >= 0.80 ? 'ХОРОШО'
+        : timing >= 0.62 ? 'РАНОВАТО' : 'ПОЗДНО';
+      const tq = timing >= 0.93 ? 1.08 : timing >= 0.80 ? 1.0 : timing >= 0.62 ? 0.90 : 0.74;
+      this.lastTiming = tband;
       const ctx = {
         side: 1, isServe: isServeStroke,
         ball: { y: contact.y, z: contact.z },
         ballSpin: b.w, ballSpeed: V3.len(b.v),
         powerScale: 1,
+        moveYaw: pad.yaw || 0,             // the face you see is the face that hits
         equip: sideParams,                 // the rubber object for this bat
+        spinBias: this.settings.spinBias || 'norm',   // the explicit spin dial
       };
       racket = deriveStroke(m, ctx);
       racket.vmag *= this.equip.vmagK;     // swing weight of the frame
-      quality = clamp(racket.quality * (0.55 + 0.45 * sweet) * (0.70 + 0.30 * timing), 0.18, 1);
+      /* Off-centre contact: pace off, and the launch twisted away from the
+         face by up to ~13 deg sideways / ~8 deg vertically at the rim. */
+      if (!isServeStroke) {
+        const miss = (1 - sweet) * offMag;
+        racket.vmag *= 1 - 0.18 * miss;
+        racket.azSwing = clamp(racket.azSwing + offLat * 0.23 * (1 - sweet), -1.35, 1.35);
+        racket.elev = clamp(racket.elev - offVer * 8.0 * (1 - sweet), -70, 78);
+      }
+      quality = clamp(racket.quality * (0.55 + 0.45 * sweet) * (0.70 + 0.30 * timing) * tq, 0.18, 1);
       racket.quality = quality;
       racket = refineRacket(contact, b.v, b.w, racket, this.settings.assist, quality);
       // Losing a point because the *solver* could not keep a serve on the
       // table is never acceptable: re-solve the serve with full execution
       // help, which is a legal serve by construction (ITTF 2.06.4).
-      if (isServeStroke && racket.valid === false) {
+      /* ...but only when the first attempt was not already at full assist:
+       * the serve solver searches the same space with the same budget, so a
+       * retry can only repeat the answer and doubles the worst-case cost of a
+       * serve that was never going to be legal (measured 230 -> 460 ms of
+       * frozen frames on a near-motionless tap). */
+      if (isServeStroke && racket.valid === false && clamp(this.settings.assist, 0, 1) < 0.999) {
         racket = refineRacket(contact, b.v, b.w, racket, 1, quality);
       }
       racket.sweet = sweet; racket.timing = timing;
@@ -987,11 +1046,18 @@ class Game {
       const vR = V3.clone(pad.vel);
       const lim = V3.len(vR); if (lim > 2.6) V3.mul(vR, vR, 2.6 / lim);
       racket = makeRacket(1, 'BLOCK', { aim: { x: rndSym(0.26), z: -0.62 }, vmag: lim, quality: 0.5 });
-      racket.normal = V3.clone(pad.normal);
       racket.vR = vR;
       racket.rubber = { e: PH.E_RACKET * 0.42, mu: PH.MU_RACKET, et: PH.ET_RACKET * 0.7 };
       quality = 0.45 * (0.5 + 0.5 * sweet);
-      racket = refineRacket(contact, b.v, b.w, racket, clamp(this.settings.assist * 0.8 + 0.2, 0, 1), quality);
+      /* No placement solver on a block — see solveBlockNormal(). The face the
+       * player holds decides; the only correction allowed is the smallest
+       * lift that keeps the ball out of the tape. */
+      const blk = solveBlockNormal(contact, b.v, b.w, pad.normal, vR, quality, racket.rubber, this._blk || (this._blk = {}));
+      racket.normal = blk.normal;
+      racket.elev = blk.liftDeg;
+      racket.blockLift = blk.liftDeg;
+      racket.valid = !blk.hitNet;
+      racket.passive = true;
     }
 
     const info = impactRacket(b.v, b.w, racket.normal, racket.vR, quality, racket.rubber || {});
@@ -1030,15 +1096,59 @@ class Game {
   }
 
   /* ------------------------- paddle driving ------------------------ */
+  /**
+   * Every new point starts from a known state. The bat glides back to the
+   * centre, the cursor binding is re-anchored, and any intercept the
+   * previous rally left behind is thrown away — so the assist can never
+   * carry a stale target into the next point and strand the bat somewhere
+   * the cursor is not.
+   */
+  resetPaddle(hard) {
+    const pad = this.player;
+    this.pointer = { x: 0.5, y: 0.55 };
+    this.pointerInside = true;
+    this.pointerDown = false;
+    this.stanceY = undefined;
+    this.padYaw = 0; this.padRoll = 0;
+    /* 0.40 s, not 0.55: the window has to be over before a serve can possibly
+     * be struck, or the bat is still travelling when the ball is hit. Measured
+     * in the headless matches at 0.55 s: the closest the bat got to the centre
+     * before the strike was 0.081-0.173 m on 14 of 49 serves. */
+    this.recenterT = RECENTER_S;         // no footwork assist while re-centring
+    this.tossQueued = false;
+    this.swipe.cancel();
+    if (this._paddlePred) this._paddlePred.reach = null;
+    if (this._strikePred) this._strikePred.reach = null;
+    if (this._volleyPred) this._volleyPred.reach = null;
+    const broken = ![pad.pos.x, pad.pos.y, pad.pos.z].every(Number.isFinite);
+    if (hard || broken) {
+      V3.set(pad.pos, 0, PH.TABLE_Y + 0.25, 1.44);
+      V3.copy(pad.prevPos, pad.pos);
+      V3.copy(pad.prev, pad.pos);
+      V3.zero(pad.vel);
+    }
+    V3.set(pad.normal, 0, -0.05, -1); V3.norm(pad.normal, pad.normal);
+    pad.swing = 0;
+    this._ptTarget = { tx: 0, ty: PH.TABLE_Y + 0.25, tz: 1.44 };
+  }
+
   updatePlayerPaddle(dt) {
     const pad = this.player;
     V3.copy(pad.prev, pad.pos);
     pad.prevPos = pad.prevPos || V3.clone(pad.pos);
     V3.copy(pad.prevPos, pad.pos);
+    if (this.recenterT > 0) {
+      this.recenterT = Math.max(0, this.recenterT - dt);
+      /* release a serve the player asked for during the reset */
+      if (this.recenterT === 0 && this.tossQueued) {
+        this.tossQueued = false;
+        if (this.state === GS.SERVE_READY && this.server === 1) this.startToss();
+      }
+    }
 
-    let pt = this.pointer || { x: 0.5, y: 0.62 };
+    let pt = this.pointer || { x: 0.5, y: 0.55 };
     if (!Number.isFinite(pt.x) || !Number.isFinite(pt.y)) {
-      pt = { x: 0.5, y: 0.62 };
+      pt = { x: 0.5, y: 0.55 };
       this.pointer = pt;                 // self-heal: never stay broken
     }
     if (!Number.isFinite(this.stanceY)) this.stanceY = undefined;
@@ -1049,63 +1159,145 @@ class Game {
       if (this.stanceY === undefined) this.stanceY = this.swipe.m.sy;
     } else this.stanceY = pt.y;
     const depthY = this.stanceY !== undefined ? this.stanceY : pt.y;
-    let tx = (pt.x - 0.5) * 2.10 * sens;
-    let ty = PH.TABLE_Y + 0.62 - (pt.y - 0.18) * 0.95 * sens;
-    let tz = 1.44 + clamp((depthY - 0.55), -0.22, 0.45) * 0.80;
-    tx = clamp(tx, -1.15, 1.15);
-    ty = clamp(ty, PH.TABLE_Y - 0.26, PH.TABLE_Y + 0.92);
-    tz = clamp(tz, 1.18, 2.10);
+
+    /* A ball that dies short is a real table-tennis problem, and it used to
+     * be an impossible one: the bat's depth was hard-clamped at 1.18 m, so a
+     * short serve simply could not be reached no matter what you did. Now a
+     * predicted short ball grants the step-in depth. */
+    let zNear = PADDLE_LIMITS.zNear;
+    const A = this.settings.posAssist;
+    const o = this._paddlePred || (this._paddlePred = {});
+    const incoming = this.ball.live && this.ball.v.z > 0.4 && this.ball.lastHitBy === -1;
+    if (incoming && this.frame % 4 === 0) {
+      predict(V3.clone(this.ball.p), V3.clone(this.ball.v), V3.clone(this.ball.w),
+        { dt: PHYS_DT, maxT: 1.6, stopZ: pad.pos.z, stopDir: 1, stopAtPlane: true, out: o });
+    }
+    /* Stepping in is FOOTWORK, not a teleport: the feet need time to travel.
+     * Under ~0.34 s to contact the body cannot get there, so a fast short ball
+     * stays a reach problem instead of becoming a magic one — and a slow short
+     * ball is genuinely yours to pick up. */
+    const canStep = !(o.reachT > 0) || o.reachT > 0.34;
+    const shortBall = canStep && incoming && ((o.landed && o.landed.z > 0 && o.landed.z < 1.05) ||
+      (o.reach && o.reach.z < PADDLE_LIMITS.zNear + 0.16));
+    if (shortBall) zNear = PADDLE_LIMITS.zStepIn;
+    /* The step is visible: the body goes forward and down, the blade tips
+       into the ball. Without this the bat simply appeared 16 cm closer. */
+    pad.stepIn = expSmooth(pad.stepIn || 0, shortBall ? 1 : 0, 7, dt);
+
+    const t = paddleTargetFromPointer(pt.x, pt.y, depthY, sens,
+      this._ptTarget || (this._ptTarget = { tx: 0, ty: 0, tz: 0 }), { zNear });
+    let tx = t.tx, ty = t.ty, tz = t.tz;
+
+    /* On a new point the bat goes HOME first, and while that window is open
+     * the cursor is deliberately not obeyed. Without this the reset is
+     * cosmetic: the mapping is absolute, so a cursor sitting out at the edge
+     * pulls the bat straight back out on the very next pointermove — mice
+     * emit those constantly. Measured in the headless smoke run before this:
+     * 9 of 29 serves began with the bat up to 0.59 m off centre. The blend
+     * decays over the window, so control is handed back smoothly instead of
+     * snapping, and the cursor and the bat are never permanently divorced. */
+    if (this.recenterT > 0) {
+      /* Hold the bat AT the centre for the first three quarters of the window
+       * and hand control back over the last one. Blending from the very first
+       * frame meant a cursor parked off centre only ever dragged the bat
+       * partway home: measured closest approach 0.098-0.212 m on 14 of 49
+       * serves, i.e. the "the bat returns to the centre on every serve"
+       * requirement was visibly not met even though the glide was running. */
+      const kHome = clamp((this.recenterT / RECENTER_S - 0.25) / 0.75, 0, 1);
+      tx = lerp(tx, 0, kHome);
+      ty = lerp(ty, PH.TABLE_Y + 0.25, kHome);
+      tz = lerp(tz, 1.44, kHome);
+    }
 
     // during your own toss the bat slides under the ball: serving is about
     // the stroke you choose, not about pixel-hunting a 40 mm sphere
-    if (this.state === GS.SERVE_TOSS && this.server === 1 && this.ball.lastHitBy === 0) {
-      const k = 0.55 + 0.45 * this.settings.posAssist;
+    /* Not while the bat is still gliding home: the requirement is that the bat
+     * returns to the centre on EVERY new point, and a player who serves the
+     * instant the point ends would otherwise have the toss assist yank the bat
+     * sideways mid-glide. Measured in the headless matches: 43/45 serves
+     * re-centred, worst 0.234 m off, because the toss slide ran on top of the
+     * re-centring window. Half a second of glide first, then the slide. */
+    if (this.state === GS.SERVE_TOSS && this.server === 1 && this.ball.lastHitBy === 0 && this.recenterT <= 0) {
+      const k = 0.55 + 0.45 * A;
       tx = lerp(tx, this.ball.p.x, k);
       tz = lerp(tz, this.ball.p.z + 0.02, k);
       if (this.ball.v.y < 0) {          // meet the dropping ball
-        ty = lerp(ty, this.ball.p.y, 0.30 * this.settings.posAssist);
+        ty = lerp(ty, this.ball.p.y, 0.30 * A);
       }
     }
     // positional assist: slide towards the predicted intercept
-    const A = this.settings.posAssist;
-    if (A > 0.01 && this.ball.live && this.ball.v.z > 0.4 && this.ball.lastHitBy === -1) {
-      const o = this._paddlePred || (this._paddlePred = {});
-      if (this.frame % 4 === 0) {
-        predict(V3.clone(this.ball.p), V3.clone(this.ball.v), V3.clone(this.ball.w),
-          { dt: 1 / 200, maxT: 1.6, stopZ: tz, stopDir: 1, stopAtPlane: true, out: o });
-      }
+    if (A > 0.01 && incoming && this.recenterT <= 0) {
       if (o.reach) {
         // the closer the ball, the more the footwork assist commits
         const k = A * clamp(1.3 - o.reachT * 1.0, 0.30, 1);
-        tx = lerp(tx, clamp(o.reach.x, -1.1, 1.1), k);
-        ty = lerp(ty, clamp(o.reach.y, PH.TABLE_Y - 0.2, PH.TABLE_Y + 0.9), k * 0.95);
+        tx = lerp(tx, clamp(o.reach.x, -PADDLE_LIMITS.x, PADDLE_LIMITS.x), k);
+        ty = lerp(ty, clamp(o.reach.y, PH.TABLE_Y + PADDLE_LIMITS.yLo, PH.TABLE_Y + PADDLE_LIMITS.yHi), k * 0.95);
+        if (o.reach.z < tz) tz = Math.max(zNear, o.reach.z - 0.02);
       }
     }
+    /* Neither the cursor nor the assist may ever park the bat outside the
+     * frame — that is the bug that used to leave it stranded off-screen. */
+    if (this.camVPReady) {
+      t.tx = tx; t.ty = ty; t.tz = tz;
+      clampPaddleToFrustum(this.camVP, t, 0.05);
+      /* tz too: the clamp can now walk the depth back toward the body when the
+       * pose asked for cannot be shown at all, and a correction the caller
+       * throws away is the same as no correction. */
+      tx = t.tx; ty = t.ty; tz = t.tz;
+    }
+    tx = clamp(tx, -PADDLE_LIMITS.x, PADDLE_LIMITS.x);
+    ty = clamp(ty, PH.TABLE_Y + PADDLE_LIMITS.yLo, PH.TABLE_Y + PADDLE_LIMITS.yHi);
+    tz = clamp(tz, zNear, PADDLE_LIMITS.zFar);
 
-    const rate = 26;
+    // re-centring after a point is a visible glide, not a teleport
+    /* 20, not 13: the glide has to be over before a quick player can strike the
+     * serve, or "the bat returns to the centre" is only true for people who
+     * wait. Still visibly a glide (0.2-0.3 s), not a teleport. */
+    const rate = this.recenterT > 0 ? 20 : 26;
     pad.pos.x = expSmooth(pad.pos.x, tx, rate, dt);
     pad.pos.y = expSmooth(pad.pos.y, ty, rate, dt);
     pad.pos.z = expSmooth(pad.pos.z, tz, rate * 0.7, dt);
     V3.sub(pad.vel, pad.pos, pad.prevPos);
     V3.mul(pad.vel, pad.vel, 1 / Math.max(dt, 1e-4));
 
+    /* ---- the bat turns into the step ------------------------------- *
+     * Move right and the face opens to the right; move left and it opens
+     * to the left, with the wrist banking the way it does when you actually
+     * cover ground. This is what makes the bat read as held by a body
+     * instead of sliding around on a rail — and because the same yaw is fed
+     * into the stroke at contact, the face you SEE is the face that hits. */
+    const lat = clamp(pad.vel.x, -7, 7);
+    this.padYaw = expSmooth(this.padYaw || 0, clamp(lat * 0.062, -0.46, 0.46), 11, dt);
+    const handed = this.settings.hand === 'right' ? 1 : -1;
+    this.padRoll = expSmooth(this.padRoll || 0, clamp(-lat * 0.040, -0.30, 0.30) * handed, 9, dt);
+    pad.yaw = this.padYaw; pad.roll = this.padRoll;
+
     // orientation follows the live gesture so you SEE the face angle
     const sw = this.swipe;
     const m = sw.active && sw.m.samples > 1 ? sw.m : sw.lastReleased;
-    let want = V3.new(0, -0.05, -1);
+    let want = this._wantN || (this._wantN = V3.new(0, -0.05, -1));
+    V3.set(want, 0, -0.05, -1);
     if (m) {
-      const ctx = { side: 1, isServe: this.isServeBall, ball: { y: pad.pos.y, z: pad.pos.z }, ballSpin: this.ball.w, ballSpeed: V3.len(this.ball.v) };
+      const ctx = {
+        side: 1, isServe: this.isServeBall, ball: { y: pad.pos.y, z: pad.pos.z },
+        ballSpin: this.ball.w, ballSpeed: V3.len(this.ball.v), moveYaw: this.padYaw,
+      };
       const st = deriveStroke(m, ctx);
-      want = st.normal;
+      V3.copy(want, st.normal);
       this.liveStroke = st;
     } else this.liveStroke = null;
+    // apply the step yaw to the resting face as well
+    const cy = Math.cos(this.padYaw), sy = Math.sin(this.padYaw);
+    const wx = want.x * cy + want.z * sy, wz = -want.x * sy + want.z * cy;
+    want.x = wx; want.z = wz;
     V3.norm(want, want);
     pad.normal.x = expSmooth(pad.normal.x, want.x, 18, dt);
     pad.normal.y = expSmooth(pad.normal.y, want.y, 18, dt);
     pad.normal.z = expSmooth(pad.normal.z, want.z, 18, dt);
     V3.norm(pad.normal, pad.normal);
     pad.swing = Math.max(0, pad.swing - dt * 4.5);
-    pad.hitRadius = lerp(0.080, 0.165, this.settings.posAssist) * (this.state === GS.SERVE_TOSS ? 1.5 : 1);
+    pad.hitRadius = lerp(0.080, 0.165, A) * (this.state === GS.SERVE_TOSS ? 1.5 : 1)
+      * (zNear < PADDLE_LIMITS.zNear ? 1.12 : 1);
   }
 
   /**
@@ -1159,84 +1351,79 @@ class Game {
 
   /* ----------------------------- camera ---------------------------- */
 
-  /** Orbit by a screen-space drag, in CSS pixels. Dragging feels like
-   *  grabbing the hall and turning it, so the sign is inverted on yaw. */
-  orbitBy(dx, dy) {
-    const w = Math.max(320, window.innerWidth), h = Math.max(320, window.innerHeight);
-    this.camAdj.yaw = clamp(this.camAdj.yaw - (dx / w) * 3.2, -1.45, 1.45);
-    this.camAdj.pitch = clamp(this.camAdj.pitch + (dy / h) * 2.1, -0.40, 0.95);
-    this.camAdjT = 1.5;
-    this.ui && this.ui.syncCam();
+  /** Switch between the four authored rigs. Distance and angle belong to
+   *  the rig (57_camera.js), not to the player: there is nothing left to
+   *  fiddle with, so the table is square to the frame every single time. */
+  setCameraPreset(mode) {
+    const P = CAMERA_PRESETS[mode];
+    if (!P) return;
+    if (this.settings.camera === mode) return;
+    this.settings.camera = mode;
+    this.ui && this.ui.syncSettings && this.ui.syncSettings();
+    this.audio.ui('click');
+    this.msg('КАМЕРА · ' + P.ru, 1.1, '#9fd0ff');
+    this.saveSettings();
   }
-  zoomBy(f) {
-    this.camAdj.zoom = clamp(this.camAdj.zoom * f, 0.45, 2.00);
-    this.camAdjT = 1.5;
-    this.ui && this.ui.syncCam();
-  }
-  camReset() {
-    this.camAdj.yaw = 0; this.camAdj.pitch = 0; this.camAdj.zoom = 1;
-    this.camAdjT = 1.5;
-    this.ui && this.ui.syncCam();
-    this.audio.ui('back');
+  /** Kept as an alias: "reset the camera" now means "the authored rig". */
+  camReset() { this.setCameraPreset(CAMERA_ORDER[0]); }
+
+  /* The camera is rebuilt AFTER the paddle has been placed, so the clamp
+   * inside updatePlayerPaddle always works against the previous frame's view
+   * matrix. That is invisible while the rig is still and blatant during the
+   * point-end and replay cinematics, where the camera travels and leaves the
+   * bat parked outside the frame — measured 109 of 18 226 headless match
+   * frames, worst 20 % of the viewport past the bottom edge, with the bat
+   * frozen in POINT and REPLAY. One cheap re-check against the matrix this
+   * frame will actually be drawn with closes it. */
+  keepPaddleOnScreen() {
+    if (!this.camVPReady) return;
+    const pad = this.player;
+    const s = projectPoint(this.camVP, pad.pos, this._kosS || (this._kosS = {}));
+    const m = 0.05;
+    if (s.ok && s.x >= m && s.x <= 1 - m && s.y >= m && s.y <= 1 - m) return;
+    const t = this._kosT || (this._kosT = { tx: 0, ty: 0, tz: 0 });
+    t.tx = pad.pos.x; t.ty = pad.pos.y; t.tz = pad.pos.z;
+    clampPaddleToFrustum(this.camVP, t, m);
+    pad.pos.x = t.tx; pad.pos.y = t.ty; pad.pos.z = t.tz;
   }
 
   updateCamera(dt) {
-    const b = this.ball, mode = this.settings.camera;
-    let px = 0, py = 2.28, pz = 3.22, lx = 0, ly = 0.80, lz = -0.30, fov = 42;
-    const bx = clamp(b.p.x, -1.2, 1.2), bz = clamp(b.p.z, -2, 2.4);
-    if (mode === 'BROADCAST') {
-      // Over the player's shoulder: the WHOLE table and your own bat are in
-      // frame at once, and the pitch (~23 deg) makes depth readable.
-      px = bx * 0.09; py = 2.28; pz = 3.22;
-      lx = bx * 0.17; ly = 0.80 + clamp(b.p.y - PH.TABLE_Y, 0, 1) * 0.045; lz = -0.30 + bz * 0.05;
-      fov = 42;
-    } else if (mode === 'DYNAMIC') {
-      px = bx * 0.22; py = 2.06 + clamp(b.p.y - PH.TABLE_Y, 0, 1.2) * 0.10; pz = 2.92;
-      lx = bx * 0.40; ly = 0.82; lz = -0.34 + bz * 0.16;
-      fov = 46 + clamp(V3.len(b.v) / 30, 0, 1) * 4;
-    } else if (mode === 'LOW') {
-      px = bx * 0.16; py = 1.52; pz = 3.14;
-      lx = bx * 0.30; ly = 0.88; lz = -0.34;
-      fov = 46;
-    } else if (mode === 'SIDE') {
-      px = 3.6; py = 1.74; pz = 0.5 + bz * 0.18;
-      lx = 0; ly = 0.90; lz = bz * 0.3;
-      fov = 40;
-    }
-    // Narrow / portrait screens: step closer to the table instead of just
-    // widening the lens, otherwise the match is a postage stamp in the
-    // middle of an empty hall.
-    const ar = this.R.aspect();
-    if (ar < 1.3) {
-      const k = clamp((1.3 - ar) / 0.8, 0, 1);
-      pz = lerp(pz, pz * 0.74, k);
-      py = lerp(py, py * 0.94, k);
-      lz = lerp(lz, lz - 0.22, k);
-      ly = lerp(ly, ly - 0.30, k);
-    }
-    // Manual orbit: rebuild the eye in spherical coordinates around the look
-    // point, so the preset keeps driving the framing and the player only
-    // rotates / slides along it.
-    const A = this.camAdj;
-    if (A.yaw || A.pitch || A.zoom !== 1) {
-      const dx = px - lx, dy = py - ly, dz = pz - lz;
-      let r = Math.sqrt(dx * dx + dy * dy + dz * dz);
-      let yaw = Math.atan2(dx, dz);
-      let pitch = Math.asin(clamp(dy / Math.max(r, 1e-4), -1, 1));
-      yaw += A.yaw;
-      pitch = clamp(pitch + A.pitch, -0.06, 1.32);
-      r = clamp(r * A.zoom, 1.35, 8.6);
-      const cp = Math.cos(pitch);
-      px = lx + r * cp * Math.sin(yaw);
-      // stay above the playing surface and below the light rig: those two
-      // walls are where the illusion of a hall falls apart
-      py = clamp(ly + r * Math.sin(pitch), PH.TABLE_Y + 0.16, 2.80);
-      pz = lz + r * cp * Math.cos(yaw);
-    }
-    V3.set(this.camPosT, px, py, pz);
-    V3.set(this.camLookT, lx, ly, lz);
-    this.fovT = fov;
+    const aspect = this.R.aspect();
+    const rig = cameraRigFor(this.settings.camera, this.ball.p, aspect, this.camRig);
+    V3.set(this.camPosT, rig.eye.x, rig.eye.y, rig.eye.z);
+    V3.set(this.camLookT, rig.look.x, rig.look.y, rig.look.z);
+    this.fovT = rig.fov;
     this.applyCamera(dt);
+
+    /* The same rig, without shake, as matrices: two things need to know
+     * exactly what is on screen — the HUD text band (it must stop above the
+     * table) and the bat clamp (it must never be pushed out of frame). */
+    /* From the smoothed camera, not from the target rig: camVP is the contract
+     * for "what is on screen right now" (the band, the bat clamp, the strike
+     * ring), and applyCamera glides toward the rig over ~0.5 s, so building it
+     * from the destination made the clamp correct for a frame that had not
+     * happened yet. Shake is still excluded, as the field's comment promises. */
+    const lrig = this._liveRig || (this._liveRig = { eye: V3.new(), look: V3.new(), fov: 40 });
+    V3.copy(lrig.eye, this.camPos);
+    V3.copy(lrig.look, this.camLook);
+    lrig.fov = this.fov;
+    this.camVP = rigViewProj(lrig, aspect, this._rigBuf);
+    this.camVPReady = true;
+    const farL = projectPoint(this.camVP, this._bandA || (this._bandA = { x: -PH.T_HALF_WID, y: PH.TABLE_Y, z: -PH.T_HALF_LEN }), this._bp1 || (this._bp1 = {}));
+    const farR = projectPoint(this.camVP, this._bandB || (this._bandB = { x: PH.T_HALF_WID, y: PH.TABLE_Y, z: -PH.T_HALF_LEN }), this._bp2 || (this._bp2 = {}));
+    const netT = projectPoint(this.camVP, this._bandC || (this._bandC = { x: 0, y: PH.NET_TOP, z: 0 }), this._bp3 || (this._bp3 = {}));
+    const band = clamp(Math.min(farL.y, farR.y, netT.y) - 0.015, 0.16, 0.55);
+    if (Math.abs(band - this.hudBandY) > 0.002) {
+      this.hudBandY = band;
+      /* Unitless on purpose: the stylesheet computes
+       * calc((1 - var(--band-y)) * 100%), which needs a number, not a length. */
+      const css = band.toFixed(4);
+      if (css !== this._bandCss) {
+        this._bandCss = css;
+        if (typeof document !== 'undefined' && document.documentElement)
+          document.documentElement.style.setProperty('--band-y', css);
+      }
+    }
   }
 
   /** Smoothing, shake and the actual setCamera call — shared by the live
@@ -1250,7 +1437,6 @@ class Game {
     this.camLook.y = expSmooth(this.camLook.y, this.camLookT.y, k * 1.2, dt);
     this.camLook.z = expSmooth(this.camLook.z, this.camLookT.z, k * 1.2, dt);
     this.fov = expSmooth(this.fov, this.fovT, 5, dt);
-    if (this.camAdjT > 0) this.camAdjT -= dt;
 
     // shake
     this.shake = Math.max(0, this.shake - dt * 3.4);
@@ -1277,6 +1463,19 @@ class Game {
     V3.set(this.camLookT, b.x * 0.9, b.y * 0.9 + 0.06, b.z * 0.9);
     this.fovT = lerp(41, 34, e);
     this.applyCamera(dtReal);
+    /* camVP is the matrix everything on screen is projected with — the HUD text
+     * band, the bat clamp, the strike ring, the projected cursor. During a
+     * replay update() returns before updateCamera runs, so camVP used to stay
+     * frozen at whatever the LIVE camera last was while the picture was a
+     * 34-degree close-up swinging over the ball: every one of those overlays
+     * was anchored to a camera that no longer existed. Rebuild it from the
+     * camera the replay is actually drawing with. */
+    const rg = this._replayRig || (this._replayRig = { eye: V3.new(), look: V3.new(), fov: 40 });
+    V3.copy(rg.eye, this.camPos);
+    V3.copy(rg.look, this.camLook);
+    rg.fov = this.fov;
+    this.camVP = rigViewProj(rg, this.R.aspect(), this._rigBuf);
+    this.camVPReady = true;
   }
 
   /* ------------------------------ update --------------------------- */
@@ -1320,10 +1519,23 @@ class Game {
         }
         break;
       case GS.SERVE_TOSS:
-        if (this.server === -1 && this.time > this.aiSwingAt && this.ball.lastHitBy === 0) {
+        /* The opponent strikes at a HEIGHT, not at a deadline. `aiSwingAt`
+         * is real seconds while the ball integrates scaled seconds, so under
+         * slow-mo a fixed deadline met the ball 10-20 cm lower than intended
+         * and every slowed-down serve came out a different serve. The height
+         * is also what makes a fast serve geometrically possible: from 0.61 m
+         * above the table even a full-speed flat swing cannot bounce on the
+         * server's own half, so the solver used to halve it (measured: the
+         * fast serve left the bat at 24 km/h at swing scale 0.50). At 0.36 m
+         * on the way down it is a real serve. */
+        if (this.server === -1 && this.ball.lastHitBy === 0 && this.stateT > 0.10 &&
+          ((this.ball.v.y < 0 && this.ball.p.y <= PH.TABLE_Y + AI_SERVE_CONTACT_Y) ||
+            this.time > this.aiSwingAt + 0.6)) {
           let racket = this.ai.serve(this);
-          // the opponent does not get to donate points either
-          if (racket.valid === false) {
+          // the opponent does not get to donate points either — but a level
+          // whose skill is already 1.0 has been solved at full assist, and
+          // re-solving the same problem is pure frame time
+          if (racket.valid === false && clamp(this.ai.L.skill, 0, 1) < 0.999) {
             racket = refineRacket(this.ball.p, this.ball.v, this.ball.w, racket, 1, racket.quality);
           }
           const contact = V3.clone(this.ball.p);
@@ -1400,6 +1612,7 @@ class Game {
       this.profile.maybeSave(dtReal);
     }
     this.updateCamera(dtReal);
+    this.keepPaddleOnScreen();
 
     // post-processing reacts to the action
     const P = this.R.post;
@@ -1488,8 +1701,17 @@ class Game {
     const pad = this.player;
     const PM = this.paddleMats(S) || ma;
     const pq = Q.lookRotation(Q.new(), pad.normal, { x: 0, y: 1, z: 0 });
-    const roll = Q.setAxisAngle(Q.new(), 0, 0, 1, (this.settings.hand === 'right' ? -0.42 : 0.42) + pad.swing * 0.3);
+    /* pad.roll is the lean the bat picks up while you move it sideways: the
+       blade visibly turns into the direction of travel instead of staying
+       square to the camera. */
+    const roll = Q.setAxisAngle(Q.new(), 0, 0, 1,
+      (this.settings.hand === 'right' ? -0.42 : 0.42) + pad.swing * 0.3 + (pad.roll || 0));
     Q.mul(pq, pq, roll);
+    /* stepping in to a short ball tips the blade forward over the table */
+    if (pad.stepIn > 0.01) {
+      const lunge = Q.setAxisAngle(Q.new(), 1, 0, 0, -0.20 * pad.stepIn);
+      Q.mul(pq, pq, lunge);
+    }
     M4.compose(tmp.m, pad.pos, pq, V3.set(tmp.scl, 1, 1, 1));
     d(me.blade, tmp.m, PM.wood);
     if (!shadowPass) {
@@ -1528,7 +1750,7 @@ class Game {
     } else {
       this.rig.draw(R, S, {
         pos: ap.pos, normal: aiNorm, hand: this.settings.hand === 'right' ? 'left' : 'right',
-        swing: -this.ai.anim.swing, windup: wd,
+        swing: -this.ai.anim.swing, windup: wd, roll: (this.ai.anim.lean || 0) * 0.22,
         mats: this.paddleMats(S, this.aiEquip),
       });
     }
