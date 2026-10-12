@@ -45,7 +45,7 @@ const AI_LEVELS = [
     react: 0.30, move: 2.1, posErr: 0.185, skill: 0.50, spinRead: 0.32,
     aggro: 0.14, variety: 0.55,
     vmagMin: 3.0, vmagMax: 5.5, paceOpen: 0.28, paceRamp: 0.045, paceMax: 0.54,
-    windup: 0.30, errBase: 0.165, errPress: 0.10, deepness: 0.52, placeSkill: 0.30,
+    windup: 0.30, errBase: 0.165, errPress: 0.10, deepness: 0.68, placeSkill: 0.30,
     counterRate: 0.06, smashRate: 0.22, dropRate: 0.05,
   },
   {
@@ -53,7 +53,7 @@ const AI_LEVELS = [
     react: 0.235, move: 2.9, posErr: 0.125, skill: 0.66, spinRead: 0.52,
     aggro: 0.30, variety: 0.68,
     vmagMin: 4.0, vmagMax: 8.0, paceOpen: 0.32, paceRamp: 0.060, paceMax: 0.74,
-    windup: 0.265, errBase: 0.112, errPress: 0.075, deepness: 0.62, placeSkill: 0.48,
+    windup: 0.265, errBase: 0.112, errPress: 0.075, deepness: 0.78, placeSkill: 0.48,
     counterRate: 0.14, smashRate: 0.40, dropRate: 0.07,
   },
   {
@@ -61,7 +61,7 @@ const AI_LEVELS = [
     react: 0.185, move: 3.5, posErr: 0.082, skill: 0.79, spinRead: 0.72,
     aggro: 0.44, variety: 0.78,
     vmagMin: 5.0, vmagMax: 10.8, paceOpen: 0.38, paceRamp: 0.075, paceMax: 0.90,
-    windup: 0.235, errBase: 0.062, errPress: 0.055, deepness: 0.70, placeSkill: 0.64,
+    windup: 0.235, errBase: 0.062, errPress: 0.055, deepness: 0.86, placeSkill: 0.64,
     counterRate: 0.26, smashRate: 0.58, dropRate: 0.08,
   },
   {
@@ -69,7 +69,7 @@ const AI_LEVELS = [
     react: 0.145, move: 4.3, posErr: 0.052, skill: 0.885, spinRead: 0.87,
     aggro: 0.60, variety: 0.84,
     vmagMin: 5.8, vmagMax: 13.2, paceOpen: 0.44, paceRamp: 0.090, paceMax: 1.0,
-    windup: 0.195, errBase: 0.054, errPress: 0.040, deepness: 0.78, placeSkill: 0.80,
+    windup: 0.195, errBase: 0.054, errPress: 0.040, deepness: 0.90, placeSkill: 0.80,
     counterRate: 0.40, smashRate: 0.74, dropRate: 0.09,
   },
   {
@@ -77,7 +77,7 @@ const AI_LEVELS = [
     react: 0.108, move: 5.2, posErr: 0.032, skill: 0.95, spinRead: 0.95,
     aggro: 0.74, variety: 0.90,
     vmagMin: 6.6, vmagMax: 15.4, paceOpen: 0.50, paceRamp: 0.105, paceMax: 1.0,
-    windup: 0.165, errBase: 0.040, errPress: 0.028, deepness: 0.84, placeSkill: 0.90,
+    windup: 0.165, errBase: 0.040, errPress: 0.028, deepness: 0.94, placeSkill: 0.90,
     counterRate: 0.54, smashRate: 0.86, dropRate: 0.10,
   },
 ];
@@ -96,6 +96,23 @@ const AI_TACTICS = {
   DEFEND: { id: 'DEFEND', pace: 0.62, risk: 0.22, depth: 0.72, wide: 0.30 },
 };
 
+/* Would this exact racket, played from this exact ball state, clip the net?
+ * Same call sequence the game uses to hit the ball (strokeFrame -> impactRacket
+ * -> predict at PH.SIM_DT), so the answer is about the shot that will really be
+ * played and not about a paraphrase of it. */
+function shotHitsNet(ball, racket) {
+  const tv = V3.clone(ball.v), tw = V3.clone(ball.w), sv = V3.new(), sn = V3.new();
+  strokeFrame(racket, 0, 0, 1, sv, sn);
+  impactRacket(tv, tw, sn, sv, racket.quality, racket.rubber || {});
+  const chk = {};
+  /* 1.2 s is all that is needed: the tape is ~1.6 m from the contact, so even
+   * a 4 m/s dink reaches it inside that, and the full 2.2 s made the check cost
+   * more than the solve it was protecting (13.6 ms median at the slowest
+   * level). stopOnFirstBounce ends it early on everything else. */
+  predict(V3.clone(ball.p), tv, tw, { dt: PH.SIM_DT, maxT: 1.2, stopOnFirstBounce: true, out: chk });
+  return !!chk.hitNet;
+}
+
 /** Build a racket descriptor that refineRacket() understands. */
 function makeRacket(side, archId, o) {
   const A = ARCH[archId] || ARCH.DRIVE;
@@ -108,8 +125,14 @@ function makeRacket(side, archId, o) {
     vmag: o.vmag !== undefined ? o.vmag : 11,
     aim: o.aim, quality: o.quality !== undefined ? o.quality : 0.85,
     isServe: !!o.isServe,
+    /* How much air the solver must leave between the ball and the tape. A
+     * push and a chop are the slowest, lowest-energy strokes in the game and
+     * with the default 55 mm they were the least reliable shots on the table
+     * (measured: 28.6 % on the table, 28.6 % into the net — the two softest
+     * archetypes accounted for nearly every failure). They need room. */
     netClear: o.netClear !== undefined ? o.netClear
-      : (archId === 'LOB' ? 0.50 : archId === 'DROP' ? 0.035 : archId === 'SMASH' ? 0.04 : 0.055),
+      : (archId === 'LOB' ? 0.50 : archId === 'DROP' ? 0.035 : archId === 'SMASH' ? 0.04
+        : (archId === 'PUSH' || archId === 'CHOP') ? 0.115 : 0.055),
     rubber: A.soft ? { e: PH.E_RACKET * A.soft, mu: PH.MU_RACKET, et: PH.ET_RACKET * (0.5 + 0.5 * A.soft) } : null,
     vR: V3.new(), normal: V3.new(0, 0, side > 0 ? -1 : 1),
     power: 0.6, spinIntent: 0.5, swipe: null,
@@ -384,7 +407,13 @@ class OpponentAI {
     if (archId === 'DROP') depth = rnd(0.06, 0.20);
     else if (archId === 'PUSH' || archId === 'CHOP') depth = rnd(0.55, 0.95) * T.depth + 0.08;
     else if (archId === 'SMASH') depth = rnd(0.45, 0.80);
-    else depth = clamp(L.deepness * T.depth + rndSym(0.18), 0.22, 0.97);
+    /* Depth is what makes a rally playable. The old numbers put the median
+     * landing 0.76-0.82 m past the net on a 1.37 m half — i.e. every ball was
+     * short, arriving at the bat in ~0.20 s, inside human reaction time, so
+     * the opponent looked like it was dumping everything into the front of the
+     * table on purpose. Deep shots are also what real players hit: short is a
+     * deliberate tactic (DROP, PUSH), not the default. */
+    else depth = clamp(L.deepness * T.depth + rndSym(0.16), 0.30, 0.98);
 
     const edge = PH.T_HALF_WID * (0.86 + T.risk * 0.08);
     return {
@@ -568,10 +597,18 @@ class OpponentAI {
     let vmag = C.vmag * this.handicap;
 
     if (slip) {
-      // one of: too flat (net), too long, or badly timed (weak + wide)
+      /* One of: too flat (net), too long, or badly timed (weak + wide).
+       * The weights used to be 40 / 38 / 22, i.e. two out of five opponent
+       * errors were straight into the tape — which is why "the computer keeps
+       * hitting the net" was the complaint. A net miss and a long miss cost the
+       * opponent the same point, but they read completely differently: a long
+       * ball is visibly a mistake, a netted ball kills the rally mid-swing and
+       * looks like the game broke. Same total error rate, less of it in the
+       * tape: 18 / 46 / 36. Measured net faults per level afterwards are in
+       * bench suite 8. */
       const kind = Math.random();
-      if (kind < 0.40) { contact -= 11 + Math.random() * 9; elev -= 7; }        // into the net
-      else if (kind < 0.78) { elev += 9 + Math.random() * 8; vmag *= 1.18; }    // long
+      if (kind < 0.18) { contact -= 11 + Math.random() * 9; elev -= 7; }        // into the net
+      else if (kind < 0.64) { elev += 9 + Math.random() * 8; vmag *= 1.18; }    // long
       else { vmag *= 0.6; contact += 9; }                                       // mistimed
       this.stats.errors++;
     }
@@ -585,8 +622,26 @@ class OpponentAI {
       aim: { x: C.tgt.x, z: C.tgt.z },
       quality: clamp(0.56 + L.skill * 0.44 + gauss(0.05) - (slip ? 0.22 : 0), 0.28, 1),
     });
-    const refined = refineRacket(ball.p, ball.v, ball.w, racket,
+    let refined = refineRacket(ball.p, ball.v, ball.w, racket,
       clamp(L.skill * this.handicap + gauss(0.045), 0, 1), racket.quality);
+
+    /* A net fault the error model did NOT choose is not a miss, it is an
+     * under-hit: the AI picked a landing point, solved for it, and still could
+     * not clear the tape on the way there. Play the shot it is actually about
+     * to play through the same physics the game uses, and if that clips, give
+     * the frame a higher arc and solve again. Deliberate slips are exempt —
+     * those ARE the difficulty curve. */
+    if (!slip && shotHitsNet(ball, refined)) {
+      this.stats.netSaved = (this.stats.netSaved || 0) + 1;
+      const r2 = makeRacket(this.side, archId, {
+        elev: elev + 7, contact, azSwing: azS, azFace: azS * 0.45,
+        vmag: clamp(vmag, 1.2, 18),
+        aim: { x: C.tgt.x, z: C.tgt.z },
+        quality: racket.quality,
+      });
+      refined = refineRacket(ball.p, ball.v, ball.w, r2,
+        clamp(L.skill * this.handicap, 0, 1), r2.quality);
+    }
 
     // residual execution noise: even a master is not a robot
     const n = (1 - L.skill) * 0.9;
@@ -616,6 +671,19 @@ class OpponentAI {
 
   /* ==================================================================
    *  SERVE
+   *
+   *  Two things used to be wrong here and both were felt immediately by
+   *  the player:
+   *   · the target for the second bounce was 0.30..1.05 m past the net,
+   *     i.e. the bot served SHORT by default — and a short serve that dies
+   *     behind the net is unreachable, so the player simply lost the point;
+   *   · racket speed was ~2.9 + 4.4·skill, which after the impact solver
+   *     came out as a floaty 25-35 km/h ball. A "ПРО" server that cannot
+   *     beat 40 km/h reads as broken, not as forgiving.
+   *  A serve is now deep by default (second bounce 0.78..1.30 m past the
+   *  net — a real long serve), short only as a deliberate, level-gated
+   *  tactic and never shorter than 0.62 m, and fast enough to matter.
+   *  tt/tools/analyze.js suite 2 measures all three per level.
    * ================================================================== */
   serve(game) {
     const L = this.L;
@@ -628,29 +696,87 @@ class OpponentAI {
           : [0.26, 0.32, 0.30, 0.12];
       let r = Math.random(), k = 0, acc = 0;
       for (let i = 0; i < 4; i++) { acc += w[i]; if (r <= acc) { k = i; break; } }
-      this._servePlan = { arch: kinds[k], left: 1 + (Math.random() < 0.45 ? 1 : 0), sideX: rndSym(1) };
+      this._servePlan = {
+        arch: kinds[k], left: 1 + (Math.random() < 0.45 ? 1 : 0), sideX: rndSym(1),
+        // a short serve is a decision, not an accident — and only the
+        // better levels are allowed to make it
+        short: Math.random() < clamp(L.placeSkill - 0.34, 0, 0.34),
+      };
     }
     this._servePlan.left--;
 
     const archId = this._servePlan.arch;
     const A = ARCH[archId];
     const wide = clamp(L.placeSkill, 0.2, 0.92);
-    const tx = sign(this._servePlan.sideX) * PH.T_HALF_WID * rnd(0.18, 0.74 * wide + 0.12);
-    const tz = archId === 'SERVE_FAST' ? rnd(0.85, PH.T_HALF_LEN - 0.12) : rnd(0.30, 1.05);
+    const tx = sign(this._servePlan.sideX) * PH.T_HALF_WID * rnd(0.22, 0.72 * wide + 0.16);
+
+    /* Depth of the SECOND bounce on the receiver's half, in metres past the
+     * net (the receiver's end line is at 1.37). Deep is the default; short
+     * is a planned exception with a hard floor. */
+    let tz;
+    if (archId === 'SERVE_FAST') tz = rnd(1.00, 1.30);
+    else if (this._servePlan.short) tz = rnd(0.62, 0.86);
+    else tz = rnd(0.78, 1.26);
+    // a weaker server cannot place it finely: pull everything a little deeper
+    tz = lerp(1.06, tz, clamp(0.45 + L.placeSkill, 0, 1));
+    tz = clamp(tz, 0.60, PH.T_HALF_LEN - 0.07);
+
+    /* Racket speed. Through this impact model ~7 m/s of bat on a nearly
+     * stationary ball is a 40 km/h serve and ~11 m/s is 60+ km/h, which is
+     * the band a club-to-pro server lives in. SERVE_BASE is the m/s anchor,
+     * `pace` is the dimensionless level/tactic multiplier on top of it. */
+    const SERVE_BASE = 9.2;
+    const pace = clamp(0.55 + 0.62 * (0.5 + L.skill * 0.5) + this.pressure * 0.05, 0.55, 1.35);
+    const vmag = clamp(SERVE_BASE * pace * (A.speed || 1) * rnd(0.94, 1.10), 3.4, 12.5);
+
+    /* A sidespin serve has to turn the FACE across the ball, the way a real
+     * server peels round the side of it. A sideways SWING alone only makes
+     * spin about the vertical axis, and that axis does nothing at all when the
+     * ball lands: the contact point sits on it (measured: 10-30 cm of drift,
+     * all of it in the air, none of it off the table). The axis that throws the
+     * ball sideways off the table is the one along the flight, and the only way
+     * to make it is a face turned sideways with a vertical brush — 46-76 cm of
+     * lateral throw after the bounce at the same spin rate. */
+    const lateral = A.lat >= 1.5 ? 1 : 0;
+    const kickTo = Math.sign(tx || 1);
+    /* The sweep (bench suite 13) says which frames are both LEGAL and spinny:
+     * a face turned 23-29 deg with a SQUARE swing and ~30 deg of elevation
+     * gives w.z = 0.10 of the cap plus w.y = 0.11 — and because the two come
+     * out with opposite signs, the ball curves one way in the air and throws
+     * the other way off the table. That is a reverse-sidespin serve, the one
+     * that actually beats people. Pairing the turned face with a random
+     * sideways swing (what this did before) produced almost no w.z at all and
+     * was illegal 17 % of the time. */
+    const azFace = lateral > 0 ? -kickTo * (0.40 + 0.10 * clamp(L.skill, 0, 1)) + rndSym(0.05) : rndSym(0.22);
+    const azSwing = lateral > 0 ? rndSym(0.10) : rndSym(0.45);
+    const elevBonus = lateral > 0 ? 20 : 0;
 
     const racket = makeRacket(this.side, archId, {
-      elev: A.elev + gauss(4.5 * (1 - L.skill) + 1.5),
-      contact: A.contact + gauss(5.5 * (1 - L.skill) + 1.5),
-      azSwing: rndSym(0.45), azFace: rndSym(0.22),
-      vmag: clamp((2.9 + 4.4 * (0.5 + L.skill * 0.5)) * (A.speed || 1) * (0.92 + Math.random() * 0.16), 2, 10.5),
+      elev: A.elev + elevBonus + gauss(3.5 * (1 - L.skill) + 1.0),
+      contact: A.contact + gauss(4.5 * (1 - L.skill) + 1.0),
+      azSwing: azSwing, azFace: azFace,
+      vmag: vmag,
       aim: { x: tx, z: tz },
       isServe: true,
       quality: clamp(0.58 + L.skill * 0.42 + gauss(0.04), 0.3, 1),
-      netClear: 0.055,
+      // a serve that clips the tape is a let, i.e. wasted time for everyone
+      netClear: archId === 'SERVE_FAST' ? 0.085 : 0.075,
     });
+    /* Measure what THIS frame would put on the ball if the solver left it
+     * alone, and hand that to the solver as the intent. Guessing the sign of
+     * w.z from the face azimuth is how the first attempt at a sidespin serve
+     * ended up with none: the solver was free to rotate the frame and it did. */
+    if (lateral > 0) {
+      const sv = V3.new(), sn = V3.new();
+      const tv = V3.clone(game.ball.v), tw = V3.new(0, 0, 0);
+      strokeFrame(racket, 0, 0, 1, sv, sn);
+      impactRacket(tv, tw, sn, sv, racket.quality, racket.rubber || {});
+      if (Number.isFinite(tw.z) && Math.abs(tw.z) > 20) racket.spinWant = tw.z;
+    }
+
     this.anim.swing = 1;
     this.tell = { kind: archId, t: 0.5, strength: 0.6 };
-    this.lastShot = { arch: archId, stroke: STROKES[archId], racket, slip: false };
+    this.lastShot = { arch: archId, stroke: STROKES[archId], racket, slip: false, serveDepth: tz };
     this.exchange = 0;
     this.pace = this.L.paceOpen;
     return refineRacket(game.ball.p, game.ball.v, game.ball.w, racket, clamp(L.skill, 0, 1), racket.quality);
