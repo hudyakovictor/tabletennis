@@ -161,9 +161,16 @@ const ARCH = {
   FADE: { elev: 28, contact: 56, speed: 1.00, lat: 1.70, back: false },
   DROP: { elev: -10, contact: 58, speed: 0.34, lat: 0.30, back: true, soft: 0.55, absorb: 0.30 },
   SERVE_TOP: { elev: 46, contact: 58, speed: 0.80, lat: 0.60, back: false },
-  SERVE_BACK: { elev: -40, contact: 72, speed: 0.75, lat: 0.60, back: true },
+  /* 0.75 -> 0.86: with the table's calibrated friction (MU_TABLE 0.40) a
+     heavy chop serve brakes hard at the first bounce and used to die 25 cm
+     past the net. Still the slowest of the four serves, but it arrives. */
+  SERVE_BACK: { elev: -40, contact: 72, speed: 0.86, lat: 0.60, back: true },
   SERVE_SIDE: { elev: 10, contact: 62, speed: 0.85, lat: 2.00, back: false },
-  SERVE_FAST: { elev: 2, contact: 26, speed: 1.00, lat: 0.60, back: false },
+  /* A fast serve is struck DOWN into the table, not flat: from a contact
+   * ~0.5 m above the playing surface a level launch has to crawl at 4 m/s to
+   * bounce on the server's own half at all. -13 deg buys a legal first
+   * bounce at full swing speed (measured: 24 -> 40+ km/h). */
+  SERVE_FAST: { elev: -13, contact: 24, speed: 1.12, lat: 0.60, back: false },
 };
 
 /** Pick the archetype. Ordering matters: situational shots win over generic. */
@@ -292,9 +299,36 @@ function deriveStroke(m, ctx) {
   const latTurn = -Math.sign(r || 1) * contact * DEG * 0.62 * latMix;
   azFace = clamp(azFace + latTurn, -1.25, 1.25);
 
+  /* The step yaw. The bat is turned into the direction it is moving (right
+   * step -> face opens right), and the same yaw is applied here so the face
+   * you SEE is the face that strikes. Without it the bat visibly banks one
+   * way while the ball comes off a square face — a mismatch the eye reads
+   * as the game cheating. */
+  const moveYaw = Number.isFinite(ctx.moveYaw) ? clamp(ctx.moveYaw, -0.6, 0.6) : 0;
+  if (moveYaw) azFace = clamp(azFace + moveYaw * 0.85, -1.25, 1.25);
+
   let vmag = 2.0 + 15.5 * Math.pow(sp01, 0.82);
   vmag = clamp(vmag * A.speed * (Number.isFinite(ctx.powerScale) ? ctx.powerScale : 1), 0.8, 19.5);
+  /* A serve is not a smash. Through this impact model a 19.5 m/s bat with a
+   * flat face launches the ball at ~30 m/s, and a fast swipe used to produce
+   * a 105-137 km/h "serve" — faster than anything ever measured on a real
+   * table, and unreturnable by design. Pro serves leave the bat at 10-15 m/s
+   * and arrive at 40-70 km/h, which is what 12.5 m/s of bat gives here. */
+  if (ctx.isServe) vmag = clamp(vmag, 1.2, 12.5);
   if (!Number.isFinite(vmag)) vmag = 4.0;          // last line of defence
+
+  /* The explicit spin dial (the chip in the top button row). The gesture
+   * decides HOW you brush the ball; this decides how much of the contact is
+   * brush and how much is punch — a more grazing face makes more spin and
+   * less pace, a flatter one the reverse. It exists because spin was only
+   * ever a side effect of the curl of a swipe: there was no way to ask for a
+   * heavy low backspin on purpose, and no way to see what you had asked for.
+   * Deterministic and persistent, so it can be learned. */
+  const sb = ctx.spinBias === 'high' ? 1 : ctx.spinBias === 'low' ? -1 : 0;
+  if (sb) {
+    contact = clamp(contact + sb * 9, 14, 80);
+    vmag = clamp(vmag * (1 - sb * 0.08), 0.8, 19.5);
+  }
 
   /* ---- 5. build the 3-D racket frame ------------------------------ */
   const eR = elev * DEG;
@@ -354,8 +388,12 @@ function deriveStroke(m, ctx) {
     stroke: st, arch: A, vR, normal, vmag, aim: { x: aimX, z: aimZ },
     power: sp01, quality, elev, contact, azSwing, azFace, spinIntent, rubber,
     swipe: m, side, isServe: !!ctx.isServe,
+    /* Air left over the tape. A push and a chop carry the least energy of any
+       stroke, and at the default 55 mm they were the least reliable shots in
+       the game (measured: 28.6 % on the table, 28.6 % into the net). */
     netClear: st.id === 'LOB' ? 0.50 : st.id === 'DROP' ? 0.035
-      : st.id === 'SMASH' ? 0.040 : st.id === 'CHOP' ? 0.075 : 0.055,
+      : (st.id === 'PUSH' || st.id === 'CHOP') ? 0.115
+      : st.id === 'SMASH' ? 0.040 : 0.055,
   };
 }
 
@@ -408,42 +446,165 @@ function strokeFrame(racket, dElev, dAz, scale, outSwing, outNormal) {
  * genuinely legal. Legality is returned, not implied.
  */
 const _svRep = {};
+/* Warm starts for the serve search, keyed loosely (side, archetype, aim
+ * bucket). The toss is authored, so consecutive serves differ only slightly
+ * and the candidate that solved the last one usually solves this one. Every
+ * warm start is re-verified at the production step before it is used, so a
+ * stale entry can never produce an illegal serve: it costs one flight and
+ * falls through to the full search. */
+/* Ceiling on the bat speed a serve may actually be given, in m/s. The search
+ * is allowed to scale the gesture up to make a serve legal and deep, and
+ * without this it scaled a capped 12.5 m/s swing by 4.2 and produced an
+ * 88 km/h "serve" — faster than any real serve ever measured, and a free
+ * point rather than a rally. 12.5 m/s of bat through this impact model is
+ * ~65-70 km/h of ball, which is the top of the professional range. */
+const SERVE_VMAX = 12.5;
+/* ...and the same ceiling expressed as ball speed, enforced inside the score
+ * so the search never *chooses* a serve that is too fast to be played: at
+ * 60 km/h off a 0.20 m contact the ball reaches the tape before it has had
+ * time to rise over it, and the result was a serve that faulted into the net
+ * in a third of attempts while looking like the player's own fault. */
+const SERVE_BALL_MAX = 17.5;                 // m/s = 63 km/h
+
+const SERVE_WARM = new Map();
+function serveWarmKey(side, racket) {
+  const st = racket.stroke || {};
+  const aim = racket.aim || {};
+  return side + '|' + (st.id || '?') + '|' + Math.round((aim.z || 0) * 3) + '|' + Math.round((aim.x || 0) * 3);
+}
+function ownFor(aim, side) {
+  return { x: aim.x * 0.35, z: side * (0.78 + Math.abs(aim.z) * 0.16) };
+}
+
 function solveServeStroke(ballP, racket, evalStroke, side, assist) {
-  const aimBase = racket.aim || { x: 0, z: -side * 0.95 };
+  const aimReq = racket.aim || { x: 0, z: -side * 0.95 };
   const v = V3.new(), w = V3.new();
   let legal = false, why = 'none';
 
+  /* Pace is part of the cost. The caller (AI level, tactic, or the player's
+   * own gesture) asked for racket.vmag; `sc` is how much of it survived the
+   * search. Geometry alone made the descent perfectly happy to halve the
+   * swing whenever a softer ball happened to sit 3 cm closer to the aim
+   * point — which is exactly why every serve in the game arrived at
+   * 17 km/h no matter who was serving or what they had chosen. log() keeps
+   * the penalty symmetric around the requested pace, and its weight is well
+   * below the cheapest illegal branch (6.0), so a fast serve is never
+   * bought with a fault. */
+  /* One-sided on purpose. Slowing the swing down below what was asked for is
+   * what produced the 17 km/h serve: geometry alone was happy to halve the
+   * swing whenever a softer ball sat a few cm closer to the aim point, and a
+   * symmetric penalty kept that habit. Going a little FASTER than asked is
+   * the normal way to make a serve both legal and deep, so it is charged at a
+   * fifth of the rate. */
+  const PACE_W = 0.85;
+  const PACE_W_UP = 0.17;
+  /* What the caller wanted the ball to LEAVE with, along the flight axis
+   * (rad/s). The search optimises placement and knows nothing about spin, so
+   * left alone it walks to whatever geometry lands best and quietly throws the
+   * corkscrew away: measured, a face turned 26 deg makes w.z = 0.10 of the cap
+   * raw and 0.00 after the solve. Charging for the loss keeps the character of
+   * the serve the server actually chose. Weight is well under the cheapest
+   * illegal branch, so spin is never bought with a fault. */
+  /* Weight sized against the rest of the score: losing the whole corkscrew
+   * (~120 rad/s) costs ~0.9, which outweighs a 90 cm placement error but is
+   * still an order of magnitude below the cheapest illegal branch (6.0), so
+   * spin can never be bought with a fault. At 2.5 the solver happily traded
+   * the entire w.z for a slightly better landing spot (measured: wanted
+   * -128 rad/s, delivered -16). */
+  const SPIN_W = 7.0;
+  const spinWant = racket.spinWant || 0;
+  /* Hard ceiling on the work one serve may do. The search is a heuristic and
+   * a pathological gesture (a 6-sample tap) used to walk every ladder, every
+   * recovery sweep and then be solved a second time by the caller: measured
+   * 730 ms, i.e. 44 dropped frames, on a ball that was never going to be a
+   * legal serve. Past the budget the search stops and returns the best
+   * candidate it has, so the worst case is bounded and known. */
+  const FLIGHT_BUDGET = 70;
+  let flights = 0;
+  /* Metres past the net a serve's second bounce must reach to be worth
+   * playing (the bat's step-in limit is 0.86 m from the centre line). */
+  const SERVE_MIN_PAST_NET = 0.52;
+  const paceCost = (sc) => {
+    const l = Math.log(clamp(sc, 0.16, 4.5));
+    return l < 0 ? PACE_W * -l : PACE_W_UP * l;
+  };
+
   const score = (own, aim, dE, dA, sc, dmp, fine) => {
+    flights++;
     evalStroke(dE, dA, sc, dmp, v, w);
     legal = false; why = 'none';
+    const pc0 = paceCost(sc);
     if (v.z * side > -0.30) { why = 'back'; return 60; }      // not going forward
+    const spd = V3.len(v);
+    if (spd > SERVE_BALL_MAX) { why = 'fast'; return 7 + (spd - SERVE_BALL_MAX) * 0.6; }
     predict(V3.clone(ballP), V3.clone(v), V3.clone(w),
-      { dt: fine ? 1 / 300 : 1 / 160, maxT: 2.4, out: _svRep });
+      /* maxT has to be the same for the coarse and the fine pass. Cutting the
+       * coarse pass to 1.6 s looked like free speed, but a soft serve needs
+       * ~1.8 s to complete BOTH bounces — so the search never saw a second
+       * bounce, scored the good solution as 'long', and walked away from it.
+       * That is why a weak tap was a fault in 100 % of cases at every assist
+       * level. stopAfterBounces already ends fast serves early, so the honest
+       * horizon costs almost nothing. */
+      { dt: fine ? PH.SIM_DT : 1 / 170, maxT: 2.2, stopAfterBounces: 2, out: _svRep });
     const r = _svRep;
     if (r.bounces === 0) { why = r.hitNet ? 'net' : 'none'; return 40 + (r.hitNet ? 4 : 0); }
-    if (Math.sign(r.landed.z) !== side) { why = 'wrongside'; return 26 + Math.abs(r.landed.z - own.z); }
+    if (Math.sign(r.landed.z) !== side) { why = 'wrongside'; return 26 + Math.abs(r.landed.z - own.z) + pc0; }
     const d1 = Math.hypot(r.landed.x - own.x, r.landed.z - own.z);
-    if (r.hitNet) { why = 'net'; return 12 + d1 * 0.3 + Math.max(0, PH.NET_TOP + PH.R - (r.netCross ? r.netCross.y : 0)) * 10; }
+    if (r.hitNet) { why = 'net'; return 12 + d1 * 0.3 + Math.max(0, PH.NET_TOP + PH.R - (r.netCross ? r.netCross.y : 0)) * 10 + pc0; }
     if (!r.b2) {                                              // flew past the table
       why = 'long';
       const pc = r.floor || r.planeCross;
       const miss = pc ? Math.hypot(pc.x - aim.x, pc.z - aim.z) : 1.2;
-      return 6 + miss * 0.6 + d1 * 0.15;                      // includes going wide
+      return 6 + miss * 0.6 + d1 * 0.15 + pc0;                // includes going wide
     }
-    if (Math.sign(r.b2.z) === side) { why = 'own'; return 9 + d1; }   // double bounce, own half
+    if (Math.sign(r.b2.z) === side) { why = 'own'; return 9 + d1 + pc0; }   // double bounce, own half
     legal = true; why = 'ok';
-    return Math.hypot(r.b2.x - aim.x, r.b2.z - aim.z) + d1 * 0.22;
+    const spinCost = spinWant ? SPIN_W * Math.abs(w.z - spinWant) / 1080 : 0;
+    /* A serve whose second bounce dies just behind the net is the single
+     * least playable ball in the game: it is legal, unreachable at pace, and
+     * the descent used to be happy to produce it because it happened to sit
+     * close to a shortened aim point. Penalise the dead zone hard — still far
+     * below the cheapest illegal branch, so it can never buy a fault. */
+    const pastNet = Math.abs(r.b2.z);
+    const dead = pastNet < SERVE_MIN_PAST_NET ? (SERVE_MIN_PAST_NET - pastNet) * 5.0 : 0;
+    return Math.hypot(r.b2.x - aim.x, r.b2.z - aim.z) + d1 * 0.22 + pc0 + dead + spinCost;
   };
 
   const SC = [0.30, 0.45, 0.65, 0.88, 1.15, 1.45];
   const DMP = [1, 0.58];
-  let bE = 0, bA = 0, bS = 1, bD = 1, bV = Infinity, bAim = aimBase, bOwn = null, solvedLegal = false;
+  let bE = 0, bA = 0, bS = 1, bD = 1, bV = Infinity, bAim = aimReq, bOwn = null, solvedLegal = false;
 
+  /* --- warm start: one verified flight instead of a whole search --------- */
+  const warmKey = serveWarmKey(side, racket);
+  const warm = SERVE_WARM.get(warmKey);
+  if (warm) {
+    const aimW = { x: aimReq.x, z: aimReq.z };
+    const ownW = ownFor(aimW, side);
+    const sv = score(ownW, aimW, warm.dE, warm.dA, warm.sc, warm.dmp, true);
+    if (legal && _svRep.b2 && Math.abs(_svRep.b2.z) >= SERVE_MIN_PAST_NET) {
+      bE = warm.dE; bA = warm.dA; bS = warm.sc; bD = warm.dmp;
+      bV = sv; bAim = aimW; bOwn = ownW; solvedLegal = true;
+    }
+  }
+
+  const aimBase = aimReq;
+
+  if (!solvedLegal) {
   // A hard topspin serve simply cannot be aimed at the very back line and
-  // stay legal on a bad toss, so shorten the target until it works.
-  for (const depthF of [1.0, 0.70]) {
+  // stay legal on a bad toss, so shorten the target until it works — but in
+  // small steps. The old jump straight to 0.70 was what turned a slightly
+  // mistossed serve into a ball that died behind the net and could not be
+  // reached at all.
+  for (const depthF of [1.0, 0.92, 0.84]) {
     const aim = { x: aimBase.x, z: aimBase.z * depthF };
-    const own = { x: aim.x * 0.35, z: side * (0.40 + Math.abs(aim.z) * 0.16) };
+    /* Where the FIRST bounce is wanted. It used to be 0.40 m in front of the
+     * net, i.e. ~0.9 m away from the server's own end line — a loopy ball
+     * that has to be hit upwards to arrive at all, which is half of why
+     * serves looked floaty. Real servers bounce it near their own end line
+     * and drive it through; 0.78 + a little of the requested depth does that
+     * and, measured, lifts the median second bounce from 0.44 m to ~1.1 m
+     * past the net. */
+    const own = { x: aim.x * 0.35, z: side * (0.78 + Math.abs(aim.z) * 0.16) };
 
     // stage 1 — how far must the swing direction be pulled back to centre?
     let aBest = 0, aBestV = Infinity;
@@ -529,8 +690,92 @@ function solveServeStroke(ballP, racket, evalStroke, side, assist) {
         if (s2 < vBest) { vBest = s2; eBest = e0 + ddE; }
       }
     }
+    /* Nothing legal at the speed the gesture produced. A weak tap is not a
+     * serve at all — the ball would double-bounce on the server's own half —
+     * and with assist on that must not become a fault: swing THROUGH it,
+     * harder, until the ball is at least a legal serve. The ceiling follows
+     * the assist slider, so assist 0 keeps the honest (faulting) result and
+     * assist 1 guarantees a playable one. Measured before this: a weak tap
+     * was legal in 0 % of cases even at full assist. */
+    if (!solvedLegal) {
+      const maxScale = Math.min(1.6 + 2.6 * clamp(assist, 0, 1),
+        SERVE_VMAX / Math.max(0.5, racket.vmag || 1));
+      for (const sc of [1.6, 2.2, 3.0, 4.0, 5.2]) {
+        if (sc > maxScale || sc <= sBest) continue;
+        const s2 = score(own, aim, eBest, aBest, sc, dBest, true);
+        if (legal) { vBest = s2; sBest = sc; solvedLegal = true; break; }
+        if (s2 < vBest) { vBest = s2; sBest = sc; }
+      }
+    }
+    /* A tap is a downward flick: the swing points at the floor, and no amount
+     * of scale turns a downward swing into a forward serve (score() rejects it
+     * as 'back' before it ever simulates). Rotate the launch into the narrow
+     * window a serve actually lives in — 30 deg down to 6 deg up — and re-solve
+     * the speed there. Measured before this: a weak tap was a fault in 100 % of
+     * cases at EVERY assist level, and the search burned 390 ms proving it. */
+    if (!solvedLegal && flights <= FLIGHT_BUDGET) {
+      /* Aim the FACE, not the swing. strokeFrame builds the face as
+       * phi = e - contact (or e + contact for a backspin arch), so a target
+       * written as a swing elevation means something completely different for
+       * a grazing 56 deg contact: it turned the face 86 deg down and slammed
+       * the ball into the server's own half. Expressed as a face angle, the
+       * four candidates below are the window a real serve lives in — from a
+       * slightly open face (slow, heavy) to a closed one (flat, fast). */
+      const e0 = clamp(racket.elev * DEG, -1.30, 1.40);
+      const cRad = clamp(racket.contact * DEG, 0, 1.40);
+      const isBack = !!(racket.arch && racket.arch.back);
+      const maxScale2 = Math.min(1.6 + 2.6 * clamp(assist, 0, 1),
+        SERVE_VMAX / Math.max(0.5, racket.vmag || 1));
+      for (const phi of [-0.26, -0.10, 0.06, 0.22]) {
+        const eW = isBack ? phi - cRad : phi + cRad;
+        const dE = clamp(eW - e0, -1.30, 1.30);
+        for (const sc of [1.0, 1.5, 2.2, 3.2]) {
+          if (sc > maxScale2) break;
+          const s2 = score(own, aim, dE, aBest, sc, dBest, true);
+          if (legal) { vBest = s2; eBest = dE; sBest = sc; solvedLegal = true; break; }
+          if (s2 < vBest) { vBest = s2; eBest = dE; sBest = sc; }
+        }
+        if (solvedLegal || flights > FLIGHT_BUDGET) break;
+      }
+    }
+    /* Only a DEPTH failure justifies another pass down the ladder. Walking
+     * the target shorter cannot fix a swing that points at the floor ('back'),
+     * a ball that finds the tape ('net') or one that goes wide — and each pass
+     * is a full search (~55 flights). Pruning on `why` is what took a failing
+     * soft serve from three searches to one. */
     if (vBest < bV) { bV = vBest; bE = eBest; bA = aBest; bS = sBest; bD = dBest; bAim = aim; bOwn = own; }
     if (solvedLegal) { bE = eBest; bA = aBest; bS = sBest; bD = dBest; bAim = aim; bOwn = own; solvedLegal = true; break; }
+    /* Only a DEPTH failure justifies another pass down the ladder: walking the
+     * target shorter cannot fix a swing that points at the floor ('back'), a
+     * ball that finds the tape ('net') or one that goes wide — and each pass is
+     * a full search (~55 flights). */
+    if (why !== 'long' && why !== 'own') break;
+    if (flights > FLIGHT_BUDGET) break;
+  }
+  }
+
+
+  /* If the winner is legal but its second bounce dies behind the net, buy the
+   * depth with swing speed rather than with another whole search: the flight
+   * is what it is, and a deeper serve is the same stroke hit harder. */
+  if (solvedLegal) {
+    score(bOwn, bAim, bE, bA, bS, bD, true);
+    let bz = _svRep.b2 ? Math.abs(_svRep.b2.z) : 0;
+    if (bz < SERVE_MIN_PAST_NET) {
+      const maxScale = Math.min(1.6 + 2.6 * clamp(assist, 0, 1),
+        SERVE_VMAX / Math.max(0.5, racket.vmag || 1));
+      let bestS = bS, bestV = Infinity;
+      for (const mul of [1.3, 1.7, 2.2, 2.9, 3.8]) {
+        const sc = bS * mul;
+        if (sc > maxScale) break;
+        const s2 = score(bOwn, bAim, bE, bA, sc, bD, true);
+        if (!legal) continue;
+        const z2 = _svRep.b2 ? Math.abs(_svRep.b2.z) : 0;
+        if (s2 < bestV) { bestV = s2; bestS = sc; }
+        if (z2 >= SERVE_MIN_PAST_NET) { bestV = s2; bestS = sc; break; }
+      }
+      if (bestV < Infinity) { bS = bestS; score(bOwn, bAim, bE, bA, bS, bD, true); }
+    }
   }
 
   // Safety net. If the player's gesture simply does not admit a legal serve
@@ -539,7 +784,7 @@ function solveServeStroke(ballP, racket, evalStroke, side, assist) {
   // to the solver is the one thing a serve must never do.
   if (!solvedLegal) {
     const own = { x: 0, z: side * 0.55 };
-    const aim = { x: 0, z: -side * 0.75 };
+    const aim = { x: 0, z: -side * 1.00 };   // deep and central: always reachable
     let sB = 0.8, dB = 1, eB = 0.0, aB = 0.0, svBest = Infinity;
     for (const sc of [0.5, 0.7, 0.95, 1.25]) for (const dmp of DMP) {
       const sv = score(own, aim, 0, 0, sc, dmp, false);
@@ -564,11 +809,78 @@ function solveServeStroke(ballP, racket, evalStroke, side, assist) {
   const k = clamp(0.45 + 0.55 * assist, 0, 1);
   const fE = bE * k, fA = bA * k, fS = 1 + (bS - 1) * k, fD = 1 + (bD - 1) * k;
   score(bOwn, bAim, fE, fA, fS, fD, true);
-  if (legal) return { dE: fE, dA: fA, sc: fS, dmp: fD, ok: true, target: bAim };
+  /* ...and never to the point of a ball that dies behind the net. The
+   * retained error is applied AFTER the search, so the search cannot see it:
+   * a weak server could ask for 1.05 m, solve it, then keep enough of its own
+   * wobble to drop the second bounce 25 cm past the net — legal, and
+   * unreturnable at pace. Inaccuracy should cost the opponent placement, not
+   * the receiver the point. Measured before this guard: 32.5 % of a beginner's
+   * serves landed shorter than 0.62 m; the solve itself was already deep. */
+  const deepEnough = legal && _svRep.b2 && Math.abs(_svRep.b2.z) >= SERVE_MIN_PAST_NET;
+  if (deepEnough) {
+    if (SERVE_WARM.size < 96) SERVE_WARM.set(warmKey, { dE: bE, dA: bA, sc: bS, dmp: bD });
+    return { dE: fE, dA: fA, sc: fS, dmp: fD, ok: true, target: bAim };
+  }
   // The player's own error would have produced an illegal serve: give them
   // the solved one instead. Only a truly absurd gesture can fail here.
   score(bOwn, bAim, bE, bA, bS, bD, true);
+  if (legal && _svRep.b2 && SERVE_WARM.size < 96)
+    SERVE_WARM.set(warmKey, { dE: bE, dA: bA, sc: bS, dmp: bD });
   return { dE: bE, dA: bA, sc: bS, dmp: bD, ok: legal, target: bAim };
+}
+
+/** Recover (face elevation, azimuth) from a world-space face normal, in the
+ *  exact convention strokeFrame() builds it with. Used whenever the bat's
+ *  real orientation — not an archetype — has to drive the impact, otherwise
+ *  the assist rebuilds a square face and the player's angle is thrown away. */
+function anglesFromNormal(n, side) {
+  const fwd = -side;
+  const ny = clamp(Number.isFinite(n.y) ? n.y : 0, -1, 1);
+  const phi = Math.asin(ny);
+  let az = Math.atan2(n.x || 0, fwd * (n.z || -fwd));
+  if (!Number.isFinite(az)) az = 0;
+  return { phi, az, elevDeg: phi / DEG, azDeg: az / DEG };
+}
+
+/**
+ * Passive contact (a block): the ball arrives at a bat that is not swinging.
+ *
+ * The face the player can see IS the physics here. Running the placement
+ * solver on a block was actively wrong: the assist chased an aim point a dead
+ * rubber cannot reach, lifted the face by up to 46 deg, returned valid=false,
+ * and popped the ball up and back towards the player at 4.6 m/s no matter
+ * which angle they were holding (measured, suite 7: lateral error 181 deg at a
+ * square face, i.e. the ball went the wrong way).
+ *
+ * So: keep the face, keep the bat's own velocity, and allow exactly one
+ * correction — if the block would go into the tape, lift the launch by the
+ * smallest of a few fixed steps that clears it. The lift is a pure +y offset
+ * on the normal, which leaves the x/z ratio untouched, so the lateral angle
+ * the player is holding survives exactly.
+ *
+ * @returns {{normal:object, liftDeg:number, hitNet:boolean}}
+ */
+const _blkV = V3.new(), _blkW = V3.new(), _blkRep = {};
+const BLOCK_LIFTS = [0, 4, 8, 13, 20];
+function solveBlockNormal(ballP, ballV, ballW, face, vR, quality, rubber, out) {
+  const o = out || {};
+  const up = { x: 0, y: 1, z: 0 };
+  let chosen = null, chosenLift = 0, clears = false;
+  for (let i = 0; i < BLOCK_LIFTS.length; i++) {
+    const lift = BLOCK_LIFTS[i];
+    const nl = V3.norm(V3.new(),
+      V3.addScaled(V3.new(), face, up, Math.tan(lift * DEG) * V3.len(face)));
+    V3.copy(_blkV, ballV); V3.copy(_blkW, ballW);
+    impactRacket(_blkV, _blkW, nl, vR, quality, rubber || {});
+    predict(V3.clone(ballP), V3.clone(_blkV), V3.clone(_blkW),
+      { dt: PH.SIM_DT, maxT: 1.4, stopOnFirstBounce: true, out: _blkRep });
+    if (!chosen) { chosen = nl; chosenLift = lift; }
+    if (!_blkRep.hitNet) { chosen = nl; chosenLift = lift; clears = true; break; }
+  }
+  o.normal = chosen || V3.clone(face);
+  o.liftDeg = chosenLift;
+  o.hitNet = !clears;
+  return o;
 }
 
 function refineRacket(ballP, ballV, ballW, racket, assist, quality) {
@@ -592,6 +904,10 @@ function refineRacket(ballP, ballV, ballW, racket, assist, quality) {
   if (racket.isServe) {
     const srv = solveServeStroke(ballP, racket, evalStroke, side, assist);
     strokeFrame(racket, srv.dE, srv.dA, srv.sc, _rs, _rn);
+    /* Last line of defence: whatever the search settled on, a serve never
+       leaves the bat faster than SERVE_VMAX. */
+    const spd = V3.len(_rs);
+    if (spd > SERVE_VMAX) V3.mul(_rs, _rs, SERVE_VMAX / spd);
     rubber.damp = srv.dmp;
     return Object.assign({}, racket, {
       normal: V3.clone(_rn), vR: V3.clone(_rs), rubber,
@@ -749,5 +1065,5 @@ function refineRacket(ballP, ballV, ballW, racket, assist, quality) {
 /** Cheap post-hoc report of where a struck ball will actually go. */
 function shotReport(p, v, w, out) {
   return predict(V3.clone(p), V3.clone(v), V3.clone(w),
-    { dt: 1 / 300, maxT: 2.6, stopOnFirstBounce: true, out: out || _rout });
+    { dt: PH.SIM_DT, maxT: 2.6, stopOnFirstBounce: true, out: out || _rout });
 }

@@ -35,13 +35,38 @@ canvas{display:block;width:100%;height:100%}
 .serve-dot{width:9px;height:9px;border-radius:50%;background:#2a3444;transition:.25s;flex:0 0 auto}
 .serve-dot.on{background:var(--warn);box-shadow:0 0 12px var(--warn),0 0 26px rgba(255,211,77,.5)}
 
+/* =========================== top text band ===========================
+ * One place for everything the game says during a point: rally counter,
+ * network toast, coach note, big centre messages, last-shot badge. It starts
+ * under the scoreboard and ends at the table's projected top edge, which the
+ * camera rig publishes every frame as --band-y (a fraction of the viewport
+ * height, 0.40-0.49 across all four rigs and eight aspect ratios). No text
+ * can land on the playing surface any more, on any rig, on any aspect. */
+#topband{position:absolute;left:0;right:0;z-index:4;pointer-events:none;
+  top:calc(max(12px,env(safe-area-inset-top)) + 62px);
+  bottom:calc((1 - var(--band-y,0.44)) * 100%);
+  min-height:34px;display:flex;flex-direction:column;align-items:center;justify-content:center;
+  gap:5px;padding:0 max(14px,env(safe-area-inset-left));overflow:hidden;
+  transition:bottom .28s cubic-bezier(.3,.9,.3,1)}
+/* the rig cannot give us much room (landscape phone, short window): shrink
+   the type instead of letting the scoreboard or the table eat the text */
+#topband.band-short{gap:2px}
+#topband.band-short .msg{font-size:18px;margin:1px 0}
+#topband.band-short .msg.big{font-size:24px}
+#topband.band-short #note{padding:6px 12px 6px 10px}
+#topband.band-short #note span{font-size:12px}
+#topband.band-short #shot{padding:3px 11px}
+#topband.band-short #shot b{font-size:12px}
+#topband.band-tiny .msg{font-size:15px}
+#topband.band-tiny .msg.big{font-size:19px}
+#topband.band-tiny #rally{display:none}
+
 /* ========================= shot badge (transient) =================== */
-#shot{position:absolute;left:50%;bottom:max(16px,calc(env(safe-area-inset-bottom) + 10px));
-  transform:translate(-50%,10px);display:flex;align-items:baseline;gap:10px;
-  background:rgba(8,13,22,.72);border:1px solid var(--line);border-radius:999px;padding:6px 16px;
-  backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);opacity:0;
+#shot{display:flex;align-items:baseline;gap:10px;
+  background:rgba(8,13,22,.72);border:1px solid var(--line);border-radius:999px;padding:5px 15px;
+  backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);opacity:0;transform:translateY(9px);
   transition:opacity .18s,transform .18s;white-space:nowrap}
-#shot.on{opacity:1;transform:translate(-50%,0)}
+#shot.on{opacity:1;transform:none}
 #shot b{font-size:14px;font-weight:800;letter-spacing:.05em}
 #shot s{font-family:var(--mono);font-size:11px;color:var(--dim);text-decoration:none}
 
@@ -67,27 +92,33 @@ canvas{display:block;width:100%;height:100%}
 .tbt:hover{color:var(--txt);background:rgba(255,255,255,.09);border-color:var(--line2)}
 
 /* ============================ messages ============================== */
-#msgs{position:absolute;top:34%;left:0;right:0;text-align:center;pointer-events:none}
+#msgs{width:100%;text-align:center;pointer-events:none}
 .msg{font-size:26px;font-weight:900;letter-spacing:.06em;margin:4px 0;
   text-shadow:0 4px 28px rgba(0,0,0,.9),0 0 50px currentColor;animation:pop .35s cubic-bezier(.2,1.5,.4,1)}
 .msg.big{font-size:40px}
 @keyframes pop{from{transform:scale(.72) translateY(12px);opacity:0}to{transform:none;opacity:1}}
 
+/* ========================= match point badge ========================= */
+#mpInd{font-size:11.5px;font-weight:900;letter-spacing:.18em;color:var(--good);
+  padding:3px 13px;border-radius:20px;border:1px solid currentColor;background:rgba(0,0,0,.34);
+  opacity:0;transform:scale(.9);transition:.2s;text-transform:uppercase}
+#mpInd.on{opacity:1;transform:none}
+#mpInd.them{color:var(--warn)}
+
 /* ============================ rally badge =========================== */
-#rally{position:absolute;top:max(76px,calc(env(safe-area-inset-top) + 66px));left:50%;transform:translateX(-50%);
-  font-family:var(--mono);font-size:11px;letter-spacing:.12em;color:var(--dim);
+#rally{font-family:var(--mono);font-size:11px;letter-spacing:.12em;color:var(--dim);
   background:rgba(0,0,0,.42);border:1px solid var(--line);border-radius:20px;padding:3px 12px;opacity:0;transition:.2s}
 #rally.on{opacity:1}
 #rally b{color:var(--acc)}
 
 /* ======================= point analysis note ======================= */
-#note{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%) scale(.94);
+#note{transform:scale(.95);
   display:flex;align-items:center;gap:10px;max-width:min(78vw,520px);
-  padding:10px 18px 10px 14px;border-radius:14px;pointer-events:none;
+  padding:9px 16px 9px 13px;border-radius:14px;pointer-events:none;
   background:linear-gradient(180deg,rgba(10,13,20,.90),rgba(6,8,13,.94));
-  border:1px solid var(--line);box-shadow:0 18px 50px rgba(0,0,0,.6);
+  border:1px solid var(--line);box-shadow:0 14px 34px rgba(0,0,0,.55);
   opacity:0;transition:opacity .22s ease,transform .22s cubic-bezier(.2,.9,.3,1.2);z-index:6}
-#note.on{opacity:1;transform:translate(-50%,-50%) scale(1)}
+#note.on{opacity:1;transform:scale(1)}
 #note i{flex:0 0 4px;align-self:stretch;border-radius:3px;background:var(--acc)}
 #note span{font-size:14px;line-height:1.35;letter-spacing:.01em;color:#dfe6f2;font-weight:500}
 @media (max-width:560px){#note{max-width:84vw;padding:9px 14px 9px 11px}#note span{font-size:13px}}
@@ -155,7 +186,7 @@ h3.sec::after{content:"";flex:1;height:1px;background:var(--line)}
 
 /* ============================ misc ================================= */
 #topright{position:absolute;top:max(12px,env(safe-area-inset-top));right:max(12px,env(safe-area-inset-right));
-  display:flex;gap:7px}
+  display:flex;align-items:flex-start;gap:7px;z-index:7}
 .ic{width:34px;height:34px;border-radius:10px;border:1px solid var(--line);background:var(--glass);
   display:grid;place-items:center;cursor:pointer;backdrop-filter:blur(10px);transition:.16s;color:var(--dim);
   padding:0;appearance:none;-webkit-appearance:none;font:inherit}
@@ -214,23 +245,36 @@ body.is-paused #pauseInd{display:flex}
 @media (max-aspect-ratio:3/4){
   /* portrait: the dead band above the table is the only place a panel can
      live without covering your own bat */
-  #msgs{top:34%}
   #train{width:calc(100vw - 24px);left:12px;top:max(66px,calc(env(safe-area-inset-top) + 58px))}
-  #shot{bottom:max(14px,calc(env(safe-area-inset-bottom) + 10px))}
 }
 
 /* ============================ slow-mo =============================== */
-#slow{position:absolute;right:max(12px,env(safe-area-inset-right));
-  bottom:max(74px,calc(env(safe-area-inset-bottom) + 66px));
-  width:64px;height:64px;border-radius:50%;display:flex;flex-direction:column;
-  align-items:center;justify-content:center;gap:1px;pointer-events:auto;cursor:pointer;
+/* The spin dial: a chip in the same family as slow-mo, top-right, out of the
+   way of the thumb and out of the way of the table. */
+#spinBias{position:relative;height:34px;min-width:56px;border-radius:10px;display:flex;flex-direction:column;
+  align-items:center;justify-content:center;pointer-events:auto;cursor:pointer;padding:0 9px;
+  background:radial-gradient(circle at 50% 35%,rgba(40,60,44,.85),rgba(9,16,12,.85));
+  border:1px solid var(--line2);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);
+  color:var(--dim);transition:color .2s,border-color .2s,transform .12s;
+  appearance:none;-webkit-appearance:none;font:inherit}
+#spinBias:active{transform:scale(.94)}
+#spinBias b{font-size:8.5px;font-weight:900;letter-spacing:.09em;line-height:1.15}
+#spinBias s{font-family:var(--mono);font-size:7.5px;opacity:.72;text-decoration:none;line-height:1.15}
+#spinBias.high{color:#ffe9c9;border-color:rgba(255,170,80,.75);box-shadow:0 0 20px rgba(255,150,60,.22)}
+#spinBias.low{color:#dff2ff;border-color:rgba(120,200,255,.6)}
+
+/* Slow-mo used to be a 64 px circle floating in the bottom-right corner —
+ * exactly where a right-handed thumb plays. It is now a compact chip in the
+ * top-right button row, next to sound/settings/menu. */
+#slow{position:relative;height:34px;min-width:54px;border-radius:10px;display:flex;flex-direction:column;
+  align-items:center;justify-content:center;gap:0;pointer-events:auto;cursor:pointer;padding:0 9px;
   background:radial-gradient(circle at 50% 35%,rgba(30,48,74,.85),rgba(9,14,24,.85));
   border:1px solid var(--line2);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);
   color:var(--dim);overflow:hidden;transition:color .2s,border-color .2s,transform .12s;
   padding:0;appearance:none;-webkit-appearance:none;font:inherit}
 #slow:active{transform:scale(.94)}
-#slow b{font-size:8px;font-weight:900;letter-spacing:.06em;z-index:2}
-#slow s{font-family:var(--mono);font-size:8px;opacity:.6;text-decoration:none;z-index:2}
+#slow b{font-size:8.5px;font-weight:900;letter-spacing:.09em;z-index:2;line-height:1.15}
+#slow s{font-family:var(--mono);font-size:7.5px;opacity:.62;text-decoration:none;z-index:2;line-height:1.15}
 #slow i{position:absolute;left:0;right:0;bottom:0;height:100%;
   background:linear-gradient(180deg,rgba(57,198,255,.26),rgba(57,198,255,.05));transition:height .08s linear}
 #slow.on{color:#eaf6ff;border-color:rgba(57,198,255,.75);box-shadow:0 0 26px rgba(57,198,255,.35)}
@@ -272,11 +316,10 @@ body.is-slow #gl{filter:saturate(1.12) contrast(1.04)}
 .mrow .st i.f{background:var(--warn)}
 .mrow .go{font-size:10px;letter-spacing:.12em;color:var(--dim2)}
 .omrow{display:flex;flex-direction:column;gap:7px;margin:2px 0 14px}
-#mnToast{position:absolute;left:50%;top:max(104px,calc(env(safe-area-inset-top) + 94px));
-  transform:translateX(-50%) scale(.9);opacity:0;transition:.22s;pointer-events:none;
+#mnToast{transform:scale(.9);opacity:0;transition:.22s;pointer-events:none;
   font-family:var(--mono);font-size:10.5px;letter-spacing:.14em;color:#0a0f18;background:var(--warn);
   border-radius:20px;padding:4px 13px;font-weight:700}
-#mnToast.on{opacity:1;transform:translateX(-50%) scale(1)}
+#mnToast.on{opacity:1;transform:scale(1)}
 
 #reel .skip{pointer-events:auto;cursor:pointer}
 body.is-reel #hud,body.is-reel #slow{opacity:.0}
