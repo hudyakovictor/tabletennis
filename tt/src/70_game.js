@@ -360,9 +360,21 @@ class Game {
     this.server = Math.random() < 0.5 ? 1 : -1;
     this.servesLeft = 2;
     this.audio.init(); this.audio.resume();
+    if (!this._keepDemo) this.demoMode = false;
+    this._keepDemo = false;
     this.prepServe();
-    this.msg(this.server === 1 ? 'ВАША ПОДАЧА' : 'ПОДАЁТ СОПЕРНИК', 1.6, '#7fd4ff');
-    this.msg('СВАЙП = УДАР · РАКЕТКА САМА ИДЁТ К МЯЧУ', 3.4, '#9fe0ff');
+    if (this.demoMode) {
+      this.msg('🤖 РЕЖИМ НАБЛЮДЕНИЯ: БОТ VS БОТ', 3.0, '#39c6ff', true);
+      this.msg('СМОТРИТЕ НА ТРАЕКТОРИЮ СВАЙПОВ', 3.0, '#7fd4ff');
+    } else {
+      this.msg(this.server === 1 ? 'ВАША ПОДАЧА' : 'ПОДАЁТ СОПЕРНИК', 1.6, '#7fd4ff');
+      this.msg('СВАЙП = УДАР · РАКЕТКА САМА ИДЁТ К МЯЧУ', 3.4, '#9fe0ff');
+    }
+  }
+  startDemo(diff = 2) {
+    this._keepDemo = true;
+    this.demoMode = true;
+    this.startMatch(diff);
   }
   restart() { this.startMatch(this.settings.difficulty); }
 
@@ -408,8 +420,8 @@ class Game {
   prepServe() {
     const s = this.server;
     const b = this.ball;
-    const x = s > 0 ? (this.settings.hand === 'right' ? -0.26 : 0.26) : rndSym(0.26);
-    V3.set(b.p, x, PH.TABLE_Y + 0.17, s * (PH.T_HALF_LEN + 0.22));
+    const x = s > 0 ? 0 : rndSym(0.26);
+    V3.set(b.p, x, PH.TABLE_Y + 0.17, s * (PH.T_HALF_LEN + 0.20));
     V3.zero(b.v); V3.zero(b.w); Q.identity(b.q);
     b.live = false; b.hist.length = 0; b.lastHitBy = 0; this.netTouched = false;
     this.rallyBounces.length = 0;
@@ -436,7 +448,7 @@ class Game {
     const b = this.ball;
     const pad = this.player;
     // ITTF requires a near-vertical toss of at least 16 cm; we throw ~30 cm
-    V3.set(b.p, pad.pos.x + (this.settings.hand === 'right' ? -0.07 : 0.07),
+    V3.set(b.p, pad.pos.x,
       PH.TABLE_Y + 0.14, clamp(pad.pos.z - 0.04, PH.T_HALF_LEN + 0.04, 2.0));
     V3.set(b.v, rndSym(0.03), 2.45 + rnd(0, 0.2), rndSym(0.03));
     this.tossApex = PH.TABLE_Y;
@@ -1501,6 +1513,111 @@ class Game {
     this.camVPReady = true;
   }
 
+  /* --------------------------- demo bot player ---------------------- */
+  updateDemoPlayer(dtReal) {
+    if (!this.demoMode) return;
+    const b = this.ball;
+
+    // Handle active demo gesture progression
+    if (this._demoGesture) {
+      const g = this._demoGesture;
+      g.t += dtReal;
+      const progress = clamp(g.t / g.dur, 0, 1);
+      const curX = lerp(g.x0, g.x1, progress);
+      const curY = lerp(g.y0, g.y1, progress);
+      this.pointer = { x: curX, y: curY };
+      this.pointerDown = true;
+      this.swipe.move(curX, curY, this.time);
+
+      if (progress >= 1) {
+        this.swipe.up(g.x1, g.y1, this.time);
+        this.pointerDown = false;
+        this.swipeReleasedAt = this.time;
+        this.lastSwipeT = this.time;
+        this._demoGesture = null;
+        this._demoCooldown = 0.22;
+      }
+      return;
+    }
+
+    if (this._demoCooldown > 0) {
+      this._demoCooldown -= dtReal;
+      return;
+    }
+
+    // 1. Serving as player 1
+    if (this.state === GS.SERVE_READY && this.server === 1) {
+      this.pointer = { x: 0.50, y: 0.65 };
+      this._demoServeWait = (this._demoServeWait || 0) + dtReal;
+      if (this._demoServeWait > 0.8) {
+        this._demoServeWait = 0;
+        this.startToss();
+      }
+      return;
+    }
+
+    // 2. Striking the toss on the way down
+    if (this.state === GS.SERVE_TOSS && this.server === 1 && b.lastHitBy === 0) {
+      if (b.v.y < 0 && b.p.y <= PH.TABLE_Y + 0.32) {
+        this.startDemoSwipe('serve');
+      }
+      return;
+    }
+
+    // 3. Returning balls during a rally
+    if (this.state === GS.RALLY && b.live && b.lastHitBy === -1) {
+      // Guide the pointer towards the incoming ball
+      const sp = this.project(b.p, this._pvDemo || (this._pvDemo = {}));
+      if (sp.ok) {
+        this.pointer = { x: clamp(sp.x, 0.20, 0.80), y: clamp(sp.y + 0.05, 0.45, 0.75) };
+      }
+      const w = this._strike;
+      const canHit = (w && w.on && w.ready > 0.45) || (b.p.z >= PH.T_HALF_LEN && b.v.z > 0.2);
+      if (canHit) {
+        this.startDemoSwipe('rally');
+      }
+    }
+  }
+
+  startDemoSwipe(kind) {
+    const sp = this.project(this.ball.p, this._pvDemo || (this._pvDemo = {}));
+    const cx = sp.ok ? clamp(sp.x, 0.25, 0.75) : 0.50;
+    const cy = sp.ok ? clamp(sp.y, 0.40, 0.80) : 0.65;
+
+    let dx = (Math.random() - 0.5) * 0.08;
+    let dy = -0.22; // default: crisp topspin swipe upward
+
+    if (kind === 'serve') {
+      dy = -0.24;
+      dx = (Math.random() - 0.5) * 0.06;
+    } else {
+      const rand = Math.random();
+      if (rand < 0.20) {
+        // slice / push downward
+        dy = 0.14;
+        dx = (Math.random() - 0.5) * 0.06;
+      } else if (rand < 0.45) {
+        // sidespin curve
+        dx = (Math.random() > 0.5 ? 1 : -1) * 0.16;
+        dy = -0.18;
+      }
+    }
+
+    const x0 = clamp(cx - dx * 0.3, 0.15, 0.85);
+    const y0 = clamp(cy - dy * 0.5, 0.25, 0.85);
+    const x1 = clamp(x0 + dx, 0.10, 0.90);
+    const y1 = clamp(y0 + dy, 0.15, 0.90);
+
+    this.pointer = { x: x0, y: y0 };
+    this.pointerDown = true;
+    this.swipe.down(x0, y0, this.time);
+    this._demoGesture = {
+      x0, y0, x1, y1,
+      t: 0,
+      dur: 0.12 + Math.random() * 0.03
+    };
+  }
+
   /* ------------------------------ update --------------------------- */
   update(dtReal) {
     this.frame++;
@@ -1522,6 +1639,10 @@ class Game {
     this.updateSlowmo(dtReal);
     this.timeScale = expSmooth(this.timeScale, this.targetTimeScale, 9, dtReal);
 
+    if (this.demoMode && !this.paused) {
+      this.updateDemoPlayer(dtReal);
+    }
+
     // state machine
     switch (this.state) {
       case GS.SERVE_READY:
@@ -1536,8 +1657,8 @@ class Game {
           }
         } else {
           this.serveHint = clamp(this.serveHint + dtReal, 0, 3);
-          // the ball rests in the free hand, just beside the bat
-          V3.set(this.ball.p, this.player.pos.x + (this.settings.hand === 'right' ? -0.16 : 0.16),
+          // the ball rests in front of the bat, aligned with the player
+          V3.set(this.ball.p, this.player.pos.x,
             PH.TABLE_Y + 0.14, clamp(this.player.pos.z - 0.04, PH.T_HALF_LEN + 0.04, 2.0));
         }
         break;

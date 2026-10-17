@@ -114,10 +114,33 @@ class UI {
     const cr = $('#camReset');
     if (cr) cr.addEventListener('click', () => this.game.camReset());
     $('#btnMenu').addEventListener('click', () => { this.game.stopTraining(); $('#menu').classList.add('on'); document.body.classList.remove('is-playing'); });
+    const startDemo = () => {
+      $$('.screen').forEach((s) => s.classList.remove('on'));
+      document.body.classList.add('is-playing');
+      this.trainHide();
+      this.game.training = null;
+      this.game.startDemo(2);
+    };
+    const bDemo = $('#demoStart');
+    if (bDemo) bDemo.addEventListener('click', startDemo);
+    const pDemo = $('#pauseDemo');
+    if (pDemo) pDemo.addEventListener('click', (e) => {
+      e.stopPropagation();
+      this.game.setPaused(false);
+      this.game.demoMode = true;
+      this.game.msg('🤖 АВТОИГРА ВКЛЮЧЕНА', 2.0, '#39c6ff', true);
+    });
+    const bDemoExit = $('#btnDemoExit');
+    if (bDemoExit) bDemoExit.addEventListener('click', (e) => {
+      e.stopPropagation();
+      this.game.demoMode = false;
+      this.game.msg('УПРАВЛЕНИЕ ВОЗВРАЩЕНО ИГРОКУ', 2.0, '#7fd4ff');
+    });
     const pResume = $('#pauseResume'), pMenu = $('#pauseToMenu');
     if (pResume) pResume.addEventListener('click', (e) => { e.stopPropagation(); this.game.setPaused(false); });
     if (pMenu) pMenu.addEventListener('click', (e) => {
       e.stopPropagation(); this.game.setPaused(false); this.game.stopTraining();
+      this.game.demoMode = false;
       $('#menu').classList.add('on'); document.body.classList.remove('is-playing');
     });
     $('#btnSound').addEventListener('click', () => {
@@ -853,6 +876,48 @@ class UI {
         c.fillText(st.stroke.short || st.stroke.name, hx, hy - 34 * d);
         c.globalAlpha = 1;
       }
+
+      this._lastRibbon = {
+        pts: sw.samples.map((p) => ({ x: p.x, y: p.y })),
+        col,
+        label: (st && sw.m.dist > 0.045) ? (st.stroke.short || st.stroke.name) : '',
+        fade: 1.0,
+      };
+    } else if (this._lastRibbon) {
+      this._lastRibbon.fade -= dt * 2.2;
+      if (this._lastRibbon.fade <= 0) {
+        this._lastRibbon = null;
+      } else {
+        const rb = this._lastRibbon;
+        const pts = rb.pts, n = pts.length;
+        if (n > 1) {
+          c.save();
+          c.lineCap = 'round'; c.lineJoin = 'round';
+          for (let i = 1; i < n; i++) {
+            const t = i / (n - 1);
+            c.strokeStyle = rb.col;
+            c.globalAlpha = (0.07 + t * 0.5) * rb.fade;
+            c.lineWidth = (1.5 + t * 11) * d;
+            c.beginPath();
+            c.moveTo(pts[i - 1].x * W, pts[i - 1].y * H);
+            c.lineTo(pts[i].x * W, pts[i].y * H);
+            c.stroke();
+          }
+          c.globalAlpha = rb.fade;
+          const hx = pts[n - 1].x * W, hy = pts[n - 1].y * H;
+          const rg = c.createRadialGradient(hx, hy, 0, hx, hy, 34 * d);
+          rg.addColorStop(0, rb.col + 'cc'); rg.addColorStop(1, rb.col + '00');
+          c.fillStyle = rg; c.beginPath(); c.arc(hx, hy, 34 * d, 0, TAU); c.fill();
+          if (rb.label) {
+            c.font = `800 ${12.5 * d}px ${CSSFONT}`;
+            c.textAlign = 'center';
+            c.fillStyle = rb.col;
+            c.globalAlpha = 0.95 * rb.fade;
+            c.fillText(rb.label, hx, hy - 34 * d);
+          }
+          c.restore();
+        }
+      }
     }
 
     // contact ripples
@@ -883,6 +948,8 @@ class UI {
     this.drawOverlay(dt);
 
     const box = $('#msgs');
+    const bDemo = $('#btnDemoExit');
+    if (bDemo) bDemo.style.display = (g.demoMode && g.state !== 'MENU' && g.state !== 'MATCH_END') ? 'block' : 'none';
     if (g.messages.length !== this._nMsg || (g.messages[0] && g.messages[0].text !== this._m0)) {
       box.innerHTML = g.messages.map((m) =>
         `<div class="msg${m.big ? ' big' : ''}" style="color:${m.col}">${m.text}</div>`).join('');
