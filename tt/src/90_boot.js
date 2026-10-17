@@ -31,11 +31,8 @@
     const pauseInd = document.getElementById('pauseInd');
     if (pauseInd) pauseInd.addEventListener('click', () => game.setPaused(false));
 
-    // icons
-    document.getElementById('btnFullscreen').innerHTML = ICON.fullscreen;
-    document.getElementById('btnSound').innerHTML = game.settings.sound ? ICON.sound : ICON.mute;
+    // The utility controls are stateful; UI.attach() supplies their icons and accessible labels.
     document.getElementById('btnSettings').innerHTML = ICON.gear;
-    document.getElementById('btnMenu').innerHTML = ICON.menu;
 
     document.getElementById('toWin').textContent = game.settings.targetScore;
     document.querySelectorAll('.opt[data-set="target"]').forEach((b) =>

@@ -1,18 +1,18 @@
 <div id="app" role="application" aria-label="TOPSPIN ARENA — настольный теннис, управление свайпом">
-  <canvas id="gl" aria-label="Игровое поле. Свайп задаёт удар; колесо мыши — масштаб, правая кнопка и движение вверх/вниз — высота камеры, C — сброс."></canvas>
+  <canvas id="gl" tabindex="0" aria-label="Игровое поле. Свайп задаёт удар; колесо мыши — масштаб, правая кнопка и движение вверх/вниз — высота камеры, C — сброс."></canvas>
   <canvas id="fx"></canvas>
 
   <div id="hud">
     <!-- scoreboard -->
-    <div id="score" class="pe" role="status" aria-label="Счёт матча">
-      <div class="sb-side">
-        <span class="serve-dot" id="servA"></span>
+    <div id="score" class="pe" role="status" aria-label="Счёт матча" aria-live="polite">
+      <div class="sb-side" id="scoreSideA">
+        <span class="serve-dot" id="servA" aria-hidden="true"></span>
         <span class="sb-nm">ВЫ</span>
         <span class="sb-pts" id="ptsA">0</span>
       </div>
       <div class="sb-mid"><b>ДО</b><span id="toWin">11</span></div>
-      <div class="sb-side right">
-        <span class="serve-dot" id="servB"></span>
+      <div class="sb-side right" id="scoreSideB">
+        <span class="serve-dot" id="servB" aria-hidden="true"></span>
         <span class="sb-nm" id="oppName">ПРО</span>
         <span class="sb-pts" id="ptsB">0</span>
       </div>
@@ -26,7 +26,7 @@
       <div id="note" role="status" aria-live="polite"><i></i><span></span></div>
       <div id="msgs" role="log" aria-live="polite" aria-atomic="false"></div>
       <!-- last shot: one line, fades away on its own -->
-      <div id="shot"><b id="shotName">—</b><s id="shotMeta"></s></div>
+      <div id="shot"><b id="shotName">—</b><small id="shotMeta"></small></div>
       <!-- interactive coach -->
       <div id="train" class="pe">
         <div class="th"><span id="trStep">1 / 6</span><b id="trTitle">ПОДАЧА</b></div>
@@ -52,82 +52,90 @@
       <button id="slow" class="pe" title="Замедление" aria-label="Замедление времени, удерживайте">
         <i id="slowFill"></i>
         <b>SLOW</b>
-        <s id="slowKey">SHIFT</s>
+        <small id="slowKey">SHIFT</small>
       </button>
-      <button class="ic pe" id="btnFullscreen" title="Полный экран (F)" aria-label="Полный экран"></button>
-      <button class="ic pe" id="btnSound" title="Звук" aria-label="Звук вкл/выкл"></button>
+      <button class="ic pe" id="btnFullscreen" title="Полный экран (F)" aria-label="Полный экран" aria-pressed="false"></button>
+      <button class="ic pe" id="btnSound" title="Выключить звук" aria-label="Выключить звук" aria-pressed="true"></button>
       <button class="ic pe" id="btnSettings" title="Настройки" aria-label="Настройки"></button>
-      <button class="ic pe" id="btnMenu" title="Меню" aria-label="В главное меню"></button>
+      <button class="ic pe" id="btnMenu" title="Пауза" aria-label="Пауза"></button>
     </div>
 
-    <div id="pauseInd" class="pe">
+    <div id="pauseInd" class="pe" role="dialog" aria-modal="true" aria-label="Пауза">
       <b>ПАУЗА</b>
-      <s>нажмите, чтобы продолжить · P</s>
-      <div style="margin-top:14px;display:flex;gap:8px;flex-wrap:wrap;justify-content:center">
-        <button id="pauseResume" class="tbt" style="pointer-events:auto;padding:7px 16px;font-size:11px">ПРОДОЛЖИТЬ</button>
-        <button id="pauseSettings" class="tbt" style="pointer-events:auto;padding:7px 16px;font-size:11px">⚙️ НАСТРОЙКИ</button>
-        <button id="pauseDebugMisses" class="tbt" style="pointer-events:auto;padding:7px 16px;font-size:11px;background:#ff4d6d;border-color:#ff4d6d;color:#fff">🔍 РАЗБОР ПРОМАХОВ</button>
-        <button id="pauseToMenu" class="tbt" style="pointer-events:auto;padding:7px 16px;font-size:11px">В МЕНЮ</button>
+      <small>Нажмите, чтобы продолжить · P</small>
+      <div class="pause-actions">
+        <button id="pauseResume" class="tbt">ПРОДОЛЖИТЬ</button>
+        <button id="pauseSettings" class="tbt"><span class="ui-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></span>НАСТРОЙКИ</button>
+        <button id="pauseDebugMisses" class="tbt"><span class="ui-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="10.8" cy="10.8" r="6.8"/><path d="m16 16 5 5"/></svg></span>ПОВТОРЫ ПРОМАХОВ</button>
+        <button id="pauseToMenu" class="tbt">В МЕНЮ</button>
       </div>
     </div>
   </div>
 
   <!-- ============================ MENU ============================ -->
-  <div class="screen on" id="menu" role="dialog" aria-label="Главное меню">
+  <div class="screen on" id="menu" role="dialog" aria-modal="true" aria-label="Главное меню">
     <div class="card">
-      <div class="brand-menu"><img class="brand-logo" src="{{BRAND_LOGO}}" alt="Table Tennis Ultimate" width="556" height="422"></div>
-      <div class="sub">Настольный теннис · физика ITTF · управление свайпом</div>
-
-      <h3 class="sec">Соперник</h3>
-      <div class="row">
-        <button class="opt" data-diff="0"><b>НОВИЧОК</b><s>легкий</s></button>
-        <button class="opt" data-diff="1"><b>ЛЮБИТЕЛЬ</b><s>средний</s></button>
-        <button class="opt sel" data-diff="2"><b>ПРО</b><s>опытный</s></button>
-        <button class="opt" data-diff="3"><b>МАСТЕР</b><s>сложный</s></button>
-        <button class="opt" data-diff="4"><b>ЛЕГЕНДА</b><s>максимум</s></button>
+      <div class="menu-brand">
+        <div class="brand-menu"><img class="brand-logo" src="{{BRAND_LOGO}}" alt="Table Tennis Ultimate" width="556" height="422"></div>
+        <div class="sub">Настольный теннис · 3D-физика · управление свайпом</div>
+        <div class="menu-utility" role="group" aria-label="Быстрые настройки">
+          <button class="ic" id="menuFullscreen" title="Полный экран (F)" aria-label="Полный экран" aria-pressed="false"></button>
+          <button class="ic" id="menuSound" title="Выключить звук" aria-label="Выключить звук" aria-pressed="true"></button>
+        </div>
       </div>
 
-      <button class="btn" id="play" style="margin-top:16px">НАЧАТЬ МАТЧ</button>
-
-      <div class="row" style="margin-top:10px">
-        <button class="btn ghost" id="menuOpenSettings" style="flex:1">⚙️ НАСТРОЙКИ</button>
-        <button class="btn ghost" id="train0" style="flex:1">🎓 ОБУЧЕНИЕ</button>
+      <div class="menu-play">
+        <h3 class="sec">Соперник</h3>
+        <div class="row menu-difficulty" role="group" aria-label="Сложность соперника">
+          <button class="opt" data-diff="0" aria-pressed="false"><b>НОВИЧОК</b><small>лёгкий</small></button>
+          <button class="opt" data-diff="1" aria-pressed="false"><b>ЛЮБИТЕЛЬ</b><small>средний</small></button>
+          <button class="opt sel" data-diff="2" aria-pressed="true"><b>ПРО</b><small>опытный</small></button>
+          <button class="opt" data-diff="3" aria-pressed="false"><b>МАСТЕР</b><small>сложный</small></button>
+          <button class="opt" data-diff="4" aria-pressed="false"><b>ЛЕГЕНДА</b><small>максимум</small></button>
+        </div>
+        <button class="btn" id="play">НАЧАТЬ МАТЧ</button>
       </div>
 
-      <h3 class="sec">Режимы</h3>
-      <div class="row">
-        <button class="btn ghost" id="careerStart" style="flex:1;border-color:rgba(255,122,47,.5);color:#ffd34d">🏆 КАРЬЕРА</button>
-        <button class="btn ghost" id="onlineStart" style="flex:1;border-color:rgba(57,198,255,.5);color:#7ff0c0">🌐 ОНЛАЙН</button>
-        <button class="btn ghost" id="demoStart" style="flex:1;border-color:rgba(155,81,224,.5);color:#c77dff">🤖 ДЕМО</button>
+      <div class="menu-actions row">
+        <button class="btn ghost" id="menuOpenSettings"><span class="ui-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></span>НАСТРОЙКИ</button>
+        <button class="btn ghost" id="train0"><span class="ui-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="m2 9 10-5 10 5-10 5L2 9Z"/><path d="M6 11.2v4.4c3.5 2.3 8.5 2.3 12 0v-4.4M22 9v6"/></svg></span>ОБУЧЕНИЕ</button>
       </div>
 
-      <div class="row" style="margin-top:9px">
-        <button class="opt" id="wsOpen"><b>МАСТЕРСКАЯ</b><s id="wsCoins">0 монет</s></button>
-        <button class="opt" id="dailyOpen"><b>ЗАДАНИЯ</b><s id="wsStreak">серия 1</s></button>
+      <div class="menu-modes">
+        <h3 class="sec">Режимы</h3>
+        <div class="row menu-mode-actions">
+          <button class="btn ghost" id="careerStart"><span class="ui-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M8 21h8m-4-4v4m-5-15h10v5a5 5 0 0 1-10 0V6Zm0 2H4v2a4 4 0 0 0 4 4m8-6h4v2a4 4 0 0 1-4 4"/></svg></span>КАРЬЕРА</button>
+          <button class="btn ghost" id="onlineStart"><span class="ui-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a15 15 0 0 1 0 18M12 3a15 15 0 0 0 0 18"/></svg></span>ОНЛАЙН</button>
+          <button class="btn ghost" id="demoStart"><span class="ui-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><rect x="5" y="7" width="14" height="13" rx="3"/><path d="M12 3v4m-3 5h.01M15 12h.01M9 16h6M3 11H5m14 0h2"/></svg></span>ДЕМО</button>
+        </div>
+        <div class="row menu-meta-actions">
+          <button class="opt" id="wsOpen"><b>МАСТЕРСКАЯ</b><small id="wsCoins">0 монет</small></button>
+          <button class="opt" id="dailyOpen"><b>ЗАДАНИЯ</b><small id="wsStreak">серия 1</small></button>
+        </div>
       </div>
     </div>
   </div>
 
   <!-- ========================== CAREER ============================ -->
-  <div class="screen" id="careerIntro" role="dialog" aria-label="Карьера, вводная">
+  <div class="screen" id="careerIntro" role="dialog" aria-modal="true" aria-label="Карьера, вводная">
     <div class="card">
-      <div class="logo" style="font-size:22px" id="crTournName">🏆 КАРЬЕРА</div>
+      <div class="career-heading"><span class="career-mark" id="crTournMark" aria-hidden="true">01</span><div class="logo" id="crTournName">КАРЬЕРА</div></div>
       <div class="sub" id="crTournPlace"></div>
       <div class="note" id="crTournInfo"></div>
       <div class="row" id="crOppList" style="margin-top:12px"></div>
       <button class="btn" id="crReady">ВПЕРЁД</button>
     </div>
   </div>
-  <div class="screen" id="careerPerk" role="dialog" aria-label="Выбор перка">
+  <div class="screen" id="careerPerk" role="dialog" aria-modal="true" aria-label="Выбор перка">
     <div class="card">
-      <div class="logo" style="font-size:20px">⚡ ВЫБЕРИ ПЕРК</div>
+      <div class="logo" style="font-size:20px">ВЫБЕРИ ПЕРК</div>
       <div class="sub">Улучшение для следующих матчей</div>
       <div class="row" id="crPerkList" style="margin-top:12px"></div>
     </div>
   </div>
-  <div class="screen" id="careerEnd" role="dialog" aria-label="Итоги карьеры">
+  <div class="screen" id="careerEnd" role="dialog" aria-modal="true" aria-label="Итоги карьеры">
     <div class="card">
-      <div class="logo" style="font-size:20px" id="crEndTitle">🏁 КАРЬЕРА</div>
+       <div class="logo" id="crEndTitle">КАРЬЕРА</div>
       <div class="sub" id="crEndSub"></div>
       <div id="crEndStats" style="margin-top:10px"></div>
       <button class="btn" id="crEndRestart">НАЧАТЬ ЗАНОВО</button>
@@ -136,9 +144,9 @@
   </div>
 
   <!-- ========================== ONLINE ============================ -->
-  <div class="screen" id="onlineLobby" role="dialog" aria-label="Онлайн лобби">
+  <div class="screen" id="onlineLobby" role="dialog" aria-modal="true" aria-label="Онлайн лобби">
     <div class="card">
-      <div class="logo" style="font-size:20px">🌐 ОНЛАЙН МАТЧ</div>
+       <div class="logo">ОНЛАЙН МАТЧ</div>
       <div class="sub" id="netStatus">Подключение...</div>
       <div id="netRoomCode" style="font-family:var(--mono);font-size:28px;letter-spacing:.2em;color:var(--acc);text-align:center;margin:12px 0;display:none"></div>
       <button class="btn" id="netCreate">СОЗДАТЬ КОМНАТУ</button>
@@ -149,15 +157,15 @@
   </div>
 
   <!-- ========================== SETTINGS ========================== -->
-  <div class="screen" id="settings" role="dialog" aria-label="Настройки">
-    <div class="card" style="max-width:460px">
+  <div class="screen" id="settings" role="dialog" aria-modal="true" aria-label="Настройки">
+    <div class="card settings-card">
       <div class="logo" style="font-size:24px">НАСТРОЙКИ</div>
       <div class="sub">Игра и камера</div>
 
       <h3 class="sec">1. ОБЛАСТЬ ПОПАДАНИЯ</h3>
       <div class="sl">
-        <label>Радиус приёма<s>захват мяча вокруг курсора</s></label>
-        <input type="range" id="rHitZone" data-set="hitZone" min="30" max="100" value="85">
+        <label for="rHitZone">Радиус приёма<small>захват мяча вокруг курсора</small></label>
+        <input type="range" id="rHitZone" data-set="hitZone" min="30" max="100" value="85" aria-valuetext="85 процентов">
         <span class="v" id="vHitZone">85%</span>
       </div>
       <div style="font-size:11px;color:var(--dim);line-height:1.5;margin:4px 0 16px">
@@ -166,8 +174,8 @@
 
       <h3 class="sec">2. ВЫРАВНИВАНИЕ УДАРА</h3>
       <div class="sl">
-        <label>Авто-доводка<s>исправление дуги на стол</s></label>
-        <input type="range" id="rAssist" data-set="assist" min="0" max="100" value="85">
+        <label for="rAssist">Авто-доводка<small>исправление дуги на стол</small></label>
+        <input type="range" id="rAssist" data-set="assist" min="0" max="100" value="85" aria-valuetext="85 процентов">
         <span class="v" id="vAssist">85%</span>
       </div>
       <div style="font-size:11px;color:var(--dim);line-height:1.5;margin:4px 0 16px">
@@ -188,7 +196,7 @@
   </div>
 
   <!-- ==================== WORKSHOP · SHOP · DAILY ================== -->
-  <div class="screen" id="workshop" role="dialog" aria-label="Мастерская, магазин и задания">
+  <div class="screen" id="workshop" role="dialog" aria-modal="true" aria-label="Мастерская, магазин и задания">
     <div class="card wide">
       <div class="wtop">
         <div class="logo" style="font-size:26px">МАСТЕРСКАЯ</div>
@@ -245,17 +253,17 @@
   </div>
 
   <!-- ====================== TRAINING COMPLETE ===================== -->
-  <div class="screen" id="tdone">
+  <div class="screen" id="tdone" role="dialog" aria-modal="true" aria-label="Обучение пройдено">
     <div class="card">
       <div class="logo" style="font-size:30px;">ОБУЧЕНИЕ ПРОЙДЕНО</div>
       <div class="sub">Шесть ударов в руках. Дальше — матч</div>
       <div class="recap">
-        <div class="rc"><i style="background:#4ee39a"></i><b>Вверх</b><s>топспин: мяч ныряет в стол</s></div>
-        <div class="rc"><i style="background:#39c6ff"></i><b>Вниз</b><s>подрезка: низко и медленно</s></div>
-        <div class="rc"><i style="background:#ffd34d"></i><b>Дугой вбок</b><s>боковое: мяч уходит вбок</s></div>
-        <div class="rc"><i style="background:#9aa7b8"></i><b>Коротко</b><s>блок: гасит чужую скорость</s></div>
-        <div class="rc"><i style="background:#ff7a2f"></i><b>Быстро и плоско</b><s>смеш по высокому мячу</s></div>
-        <div class="rc"><i style="background:#ff5d6e"></i><b>Момент</b><s>бей, когда кольцо сомкнулось</s></div>
+        <div class="rc"><i style="background:#4ee39a"></i><b>Вверх</b><small>топспин: мяч ныряет в стол</small></div>
+        <div class="rc"><i style="background:#39c6ff"></i><b>Вниз</b><small>подрезка: низко и медленно</small></div>
+        <div class="rc"><i style="background:#ffd34d"></i><b>Дугой вбок</b><small>боковое: мяч уходит вбок</small></div>
+        <div class="rc"><i style="background:#9aa7b8"></i><b>Коротко</b><small>блок: гасит чужую скорость</small></div>
+        <div class="rc"><i style="background:#ff7a2f"></i><b>Быстро и плоско</b><small>смеш по высокому мячу</small></div>
+        <div class="rc"><i style="background:#ff5d6e"></i><b>Момент</b><small>бей, когда кольцо сомкнулось</small></div>
       </div>
       <button class="btn" id="tdPlay">НАЧАТЬ МАТЧ</button>
       <button class="btn ghost" id="tdAgain">ПРОЙТИ ЕЩЁ РАЗ</button>
@@ -263,22 +271,22 @@
   </div>
 
   <!-- ========================= MATCH END ========================== -->
-  <div class="screen" id="over" role="dialog" aria-label="Итоги матча">
+  <div class="screen" id="over" role="dialog" aria-modal="true" aria-label="Итоги матча">
     <div class="card">
       <div class="logo" id="overTitle" style="font-size:34px">ПОБЕДА</div>
       <div class="sub" id="overScore" style="font-size:22px;letter-spacing:.1em;color:var(--txt)">0 : 0</div>
       <h3 class="sec">Статистика матча</h3>
       <div class="stats">
-        <div class="st"><s>Ударов</s><b id="stShots">0</b></div>
-        <div class="st"><s>Лучшее ралли</s><b id="stRally">0</b></div>
-        <div class="st"><s>Макс. скорость</s><b id="stMaxSpeed">0</b></div>
-        <div class="st"><s>Макс. вращение</s><b id="stMaxSpin">0</b></div>
-        <div class="st"><s>Среднее вращение</s><b id="stAvgSpin">0</b></div>
-        <div class="st"><s>Любимый удар</s><b id="stFav">—</b></div>
+        <div class="st"><small>Ударов</small><b id="stShots">0</b></div>
+        <div class="st"><small>Лучшее ралли</small><b id="stRally">0</b></div>
+        <div class="st"><small>Макс. скорость</small><b id="stMaxSpeed">0</b></div>
+        <div class="st"><small>Макс. вращение</small><b id="stMaxSpin">0</b></div>
+        <div class="st"><small>Среднее вращение</small><b id="stAvgSpin">0</b></div>
+        <div class="st"><small>Любимый удар</small><b id="stFav">—</b></div>
       </div>
       <div id="overMoments" class="omrow"></div>
-      <button class="btn" id="btnDebugMisses" style="background:linear-gradient(100deg,#ff4d6d,#ff7a2f);margin-top:8px">🔍 РАЗБОР ПРОМАХОВ (SLO-MO)</button>
       <button class="btn" id="again">РЕВАНШ</button>
+      <button class="btn ghost insight" id="btnDebugMisses"><span class="ui-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="10.8" cy="10.8" r="6.8"/><path d="m16 16 5 5"/></svg></span>ПОВТОРЫ ПРОМАХОВ</button>
       <button class="btn ghost" id="backMenu">В МЕНЮ</button>
     </div>
   </div>
@@ -300,12 +308,12 @@
     <div class="bar top"></div>
     <div class="bar bot"></div>
     <div class="tag" id="reelTag">ЛУЧШИЙ МОМЕНТ МАТЧА</div>
-    <div class="ttl"><b id="reelTitle">—</b><s id="reelMeta"></s></div>
-    <div class="skip" id="reelSkip">ПРОПУСТИТЬ ▸</div>
+    <div class="ttl"><b id="reelTitle">—</b><small id="reelMeta"></small></div>
+    <button class="skip" id="reelSkip" type="button" aria-label="Пропустить повтор">ПРОПУСТИТЬ ▸</button>
   </div>
 
   <!-- ====================== MOMENT LIBRARY ======================= -->
-  <div class="screen" id="reels" role="dialog" aria-label="Лучшие моменты матча">
+  <div class="screen" id="reels" role="dialog" aria-modal="true" aria-label="Лучшие моменты матча">
     <div class="card">
       <div class="logo" style="font-size:30px">ЛУЧШИЕ МОМЕНТЫ</div>
       <div class="sub">Игра запоминает только то, что стоит пересматривать</div>
@@ -315,29 +323,29 @@
   </div>
 
   <!-- ==================== DEBUG MISSES MODAL ===================== -->
-  <div class="screen" id="debugMissesModal" role="dialog" aria-label="Отладка промахов">
-    <div class="card" style="max-width:540px;max-height:85vh;overflow-y:auto">
-      <div class="logo" style="font-size:24px;color:#ff6b81">🔍 ОТЛАДКА ПРОМАХОВ</div>
-      <div class="sub">Записи всех не отбитых мячей для покадрового SLO-MO анализа физики</div>
-      <div id="debugMissList" class="mlist" style="margin-top:14px"></div>
-      <button class="btn ghost" id="debugMissesClose" style="margin-top:12px">ЗАКРЫТЬ</button>
+  <div class="screen" id="debugMissesModal" role="dialog" aria-modal="true" aria-label="Повторы промахов">
+    <div class="card insight-card">
+      <div class="logo insight-title">ПОВТОРЫ ПРОМАХОВ</div>
+      <div class="sub">Выберите розыгрыш — разберём его в замедленном повторе.</div>
+      <div id="debugMissList" class="mlist"></div>
+      <button class="btn ghost" id="debugMissesClose">ЗАКРЫТЬ</button>
     </div>
   </div>
 
   <!-- ==================== DEBUG REPLAY HUD ====================== -->
-  <div id="debugReplayHud" style="display:none;position:fixed;inset:0;pointer-events:none;z-index:95">
-    <div style="position:absolute;top:18px;left:50%;transform:translateX(-50%);background:rgba(15,20,30,0.92);border:1px solid #ff4d6d;border-radius:12px;padding:10px 18px;text-align:center;backdrop-filter:blur(8px);pointer-events:auto;min-width:320px;max-width:90vw">
-      <div style="font-size:12px;font-weight:900;letter-spacing:0.08em;color:#ff6b81" id="dbgReplayTitle">🔍 ОТЛАДКА ПРОМАХА #1</div>
-      <div style="font-size:13px;font-weight:700;color:#fff;margin:4px 0" id="dbgReplayVerdict">НЕ ДОТЯНУЛСЯ</div>
-      <div style="font-size:11px;font-family:var(--mono);color:#9fd4ff" id="dbgReplayMetrics">Дистанция: 0.35 м · Радиус ракетки: 0.22 м</div>
+  <div id="debugReplayHud" class="debug-replay" style="display:none">
+    <div class="debug-replay-info">
+      <div class="debug-replay-title" id="dbgReplayTitle">ПОВТОР ПРОМАХА #1</div>
+      <div class="debug-replay-verdict" id="dbgReplayVerdict">НЕ ДОТЯНУЛСЯ</div>
+      <div class="debug-replay-metrics" id="dbgReplayMetrics">Дистанция: 0.35 м · Радиус ракетки: 0.22 м</div>
     </div>
-    <div style="position:absolute;bottom:24px;left:50%;transform:translateX(-50%);display:flex;gap:8px;background:rgba(15,20,30,0.92);border:1px solid rgba(255,255,255,0.15);border-radius:24px;padding:8px 14px;backdrop-filter:blur(8px);pointer-events:auto;flex-wrap:wrap;justify-content:center">
-      <button class="tbt" id="dbgPrev" style="font-size:11px;padding:6px 12px">⯇ ПРЕДЫДУЩИЙ</button>
-      <button class="tbt" id="dbgRestart" style="font-size:11px;padding:6px 12px">🔁 ЗАНОВО</button>
-      <button class="tbt" id="dbgPause" style="font-size:11px;padding:6px 12px">⏸ ПАУЗА</button>
-      <button class="tbt" id="dbgSpeed" style="font-size:11px;padding:6px 12px">⚡ 0.20×</button>
-      <button class="tbt" id="dbgNext" style="font-size:11px;padding:6px 12px">СЛЕДУЮЩИЙ ⯈</button>
-      <button class="tbt" id="dbgExit" style="font-size:11px;padding:6px 12px;background:#ff4d6d;border-color:#ff4d6d;color:#fff">✕ ВЫЙТИ</button>
+    <div class="debug-replay-controls">
+      <button class="tbt" id="dbgPrev">НАЗАД</button>
+      <button class="tbt" id="dbgRestart">ЗАНОВО</button>
+      <button class="tbt" id="dbgPause">ПАУЗА</button>
+      <button class="tbt" id="dbgSpeed">0.20×</button>
+      <button class="tbt" id="dbgNext">ВПЕРЁД</button>
+      <button class="tbt" id="dbgExit">ВЫЙТИ</button>
     </div>
   </div>
 
