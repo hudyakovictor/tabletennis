@@ -158,13 +158,13 @@ class Game {
      * is deliberately no free orbit any more — hand-tuning yaw/pitch/zoom
      * cost players minutes per session and could park the bat off-screen,
      * and every framing it produced was worse than one of the four. */
-    this.camRig = { eye: V3.new(0, 1.68, 2.38), look: V3.new(0, 0.74, -0.25), fov: 48, mode: 'BROADCAST' };
+    this.camRig = { eye: V3.new(0, 2.28, 3.22), look: V3.new(0, 0.80, -0.30), fov: 42, mode: 'BROADCAST' };
     this._rigBuf = { vp: M4.create(), proj: M4.create(), view: M4.create() };
     this.camVP = M4.create();          // view·proj of the authored rig, no shake
     this.hudBandY = 0.40;              // screen y where the table's far edge begins
-    this.camPos = V3.new(0, 1.68, 2.38); this.camLook = V3.new(0, 0.74, -0.25);
+    this.camPos = V3.new(0, 1.62, 3.05); this.camLook = V3.new(0, 0.92, -0.2);
     this.camPosT = V3.clone(this.camPos); this.camLookT = V3.clone(this.camLook);
-    this.fov = 48; this.fovT = 48;
+    this.fov = 46; this.fovT = 46;
     this.marks = [];
     this.stats = {
       shots: 0, winners: 0, errors: 0, maxSpeed: 0, maxSpin: 0,
@@ -632,33 +632,6 @@ class Game {
     }
     if (!this.isServeBall) this.rally++;
 
-    if (side < 0) {
-      const isNovice = this.ai && this.ai.levelIndex === 0;
-      const isAmateur = this.ai && this.ai.levelIndex === 1;
-      if (isNovice) {
-        // Novice ball speed is capped to a gentle, welcoming pace (~13-16 km/h):
-        const maxVz = this.isServeBall ? 3.8 : 4.4;
-        if (b.v.z > maxVz) {
-          const factor = maxVz / b.v.z;
-          b.v.z = maxVz;
-          b.v.x *= factor;
-        }
-        // Friendly gentle arc over the net
-        b.v.y = clamp(b.v.y, 1.3, 2.5);
-        // Minimal spin (so it doesn't trick beginner players)
-        V3.mul(b.w, b.w, 0.05);
-      } else if (isAmateur) {
-        const maxVz = this.isServeBall ? 6.2 : 7.6;
-        if (b.v.z > maxVz) {
-          const factor = maxVz / b.v.z;
-          b.v.z = maxVz;
-          b.v.x *= factor;
-        }
-        b.v.y = clamp(b.v.y, 0.9, 2.6);
-        V3.mul(b.w, b.w, 0.45);
-      }
-    }
-
     const speed = V3.len(b.v), spin = V3.len(b.w);
     this.stats.shots++;
     this.stats.totalSpin += spin / TAU;
@@ -856,11 +829,6 @@ class Game {
 
   skipReplay() {
     if (!this.replayer.on) return;
-    if (this.isDebugReplay && this._missIndex !== undefined && this._missIndex < (this.missedRallies || []).length - 1) {
-      this._missIndex++;
-      this.watchMiss(this._missIndex, 0.22);
-      return;
-    }
     this.replayer.finish();
     this.endReplay();
   }
@@ -1289,7 +1257,7 @@ class Game {
         powerScale: 1,
         moveYaw: pad.yaw || 0,
         equip: sideParams,
-        spinBias: 'norm',
+        spinBias: this.settings.spinBias || 'norm',
       };
       racket = deriveStroke(m, ctx);
       racket.vmag *= this.equip.vmagK;
@@ -2083,6 +2051,40 @@ class Game {
       d(me.ball, tmp.m, ma.ball);
     }
 
+    /* player paddle */
+    {
+      const pad = this.player;
+      const PM = this.paddleMats(S) || ma;
+      const pq = Q.lookRotation(Q.new(), pad.normal, { x: 0, y: 1, z: 0 });
+      /* pad.roll is the lean the bat picks up while you move it sideways: the
+         blade visibly turns into the direction of travel instead of staying
+         square to the camera. */
+      const roll = Q.setAxisAngle(Q.new(), 0, 0, 1,
+        (this.settings.hand === 'right' ? -0.42 : 0.42) + pad.swing * 0.3 + (pad.roll || 0));
+      Q.mul(pq, pq, roll);
+      /* stepping in to a short ball tips the blade forward over the table */
+      if (pad.stepIn > 0.01) {
+        const lunge = Q.setAxisAngle(Q.new(), 1, 0, 0, -0.20 * pad.stepIn);
+        Q.mul(pq, pq, lunge);
+      }
+      M4.compose(tmp.m, pad.pos, pq, V3.set(tmp.scl, 1, 1, 1));
+      d(me.blade, tmp.m, PM.wood);
+      if (!shadowPass) {
+        M4.compose(tmp.m2, V3.addScaled(V3.new(), pad.pos, pad.normal, 0.0085), pq, V3.set(tmp.scl, 1, 1, 1));
+        R.draw(me.rubber, tmp.m2, PM.black);
+        M4.compose(tmp.m2, V3.addScaled(V3.new(), pad.pos, pad.normal, -0.0085), pq, V3.set(tmp.scl, 1, 1, 1));
+        R.draw(me.rubber, tmp.m2, PM.red);
+      }
+      // handle
+      {
+        const off = V3.new(0, -0.125, 0);
+        const wo = V3.new();
+        M4.transformDir(wo, tmp.m, off);
+        M4.compose(tmp.m2, V3.add(V3.new(), pad.pos, wo), pq, V3.set(tmp.scl, 1, 1, 1));
+        d(me.handle, tmp.m2, PM.grip);
+      }
+    }
+
     /* the opponent: paddle, hand, forearm and sleeve, all solved from
        the paddle's own position and normal (see 56_rig.js) */
     const ap = this.aiPaddle;
@@ -2123,6 +2125,9 @@ class Game {
       if (onTable(b.p.x, b.p.z) && b.p.y > TY - 0.02) S.blob(R, b.p.x, b.p.y, b.p.z, TY, 0.055, 0.62, 1);
       else S.blob(R, b.p.x, b.p.y, b.p.z, 0, 0.075, 0.40, 1);
     }
+    const pp = this.player.pos;
+    if (onTable(pp.x, pp.z)) S.blob(R, pp.x, pp.y, pp.z, TY, 0.115, 0.42, 1.25);
+    else S.blob(R, pp.x, pp.y, pp.z, 0, 0.16, 0.26, 1.25);
     const ap = this.aiPaddle.pos;
     if (onTable(ap.x, ap.z)) S.blob(R, ap.x, ap.y, ap.z, TY, 0.115, 0.42, 1.25);
     else S.blob(R, ap.x, ap.y, ap.z, 0, 0.16, 0.24, 1.25);

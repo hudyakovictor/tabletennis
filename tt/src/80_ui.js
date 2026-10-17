@@ -607,11 +607,32 @@ class UI {
   syncSpinBias() {
     const g = this.game; if (!g) return;
     const el = $('#spinBias'), lab = $('#spinBiasVal');
-    if (lab) lab.textContent = 'НОРМА';
+    const v = g.settings.spinBias || 'norm';
+    if (lab) lab.textContent = v === 'high' ? 'БОЛЬШЕ' : v === 'low' ? 'МЕНЬШЕ' : 'НОРМА';
+    if (el) {
+      el.classList.toggle('high', v === 'high');
+      el.classList.toggle('low', v === 'low');
+      el.title = v === 'high' ? 'Вращение: больше (скользящий контакт, меньше скорости)'
+        : v === 'low' ? 'Вращение: меньше (плоский удар, больше скорости)'
+          : 'Вращение: нейтрально';
+    }
   }
 
   syncSettings() {
     const s = this.game.settings;
+    const sel = (k, v) => $$(`.opt[data-set="${k}"]`).forEach((x) => x.classList.toggle('sel', x.dataset.val === String(v)));
+    sel('cam', s.camera); sel('quality', s.quality); sel('hand', s.hand);
+    sel('trail', s.showTrail ? 'on' : 'off'); sel('predict', s.showPredict ? 'on' : 'off');
+    sel('zone', s.showZone ? 'on' : 'off'); sel('tele', s.showTele ? 'on' : 'off');
+    sel('coach', s.coach ? 'on' : 'off'); sel('adaptive', s.adaptive ? 'on' : 'off');
+    sel('slowmoPlayer', s.slowmoPlayer !== false ? 'on' : 'off');
+    const slEl = $('#slow'); if (slEl) slEl.classList.toggle('off', s.slowmoPlayer === false);
+    this.syncSpinBias();
+    sel('haptics', s.haptics ? 'on' : 'off');
+    sel('target', s.targetScore);
+    const spEl = $('#spin'); if (spEl) spEl.classList.toggle('on', !!s.showTele);
+    const twEl = $('#toWin'); if (twEl) twEl.textContent = s.targetScore;
+
     const hzVal = Math.round((s.hitZone !== undefined ? s.hitZone : 0.85) * 100);
     const rHz = $('#rHitZone'), vHz = $('#vHitZone');
     if (rHz) rHz.value = hzVal;
@@ -621,6 +642,14 @@ class UI {
     const rAst = $('#rAssist'), vAst = $('#vAssist');
     if (rAst) rAst.value = astVal;
     if (vAst) vAst.textContent = astVal + '%';
+
+    const rSens = $('#rSens'), vSens = $('#vSens');
+    if (rSens) rSens.value = Math.round((s.sensitivity || 1) * 100);
+    if (vSens) vSens.textContent = (s.sensitivity || 1).toFixed(2) + '×';
+
+    const rVol = $('#rVol'), vVol = $('#vVol');
+    if (rVol) rVol.value = Math.round((s.volume || 0.9) * 100);
+    if (vVol) vVol.textContent = Math.round((s.volume || 0.9) * 100) + '%';
   }
 
   /* ------------------------------ HUD ----------------------------- */
@@ -720,16 +749,7 @@ class UI {
       b.addEventListener('click', () => this.showMoments());
       row.appendChild(b);
     }
-    // User requested: "сделай просто в конце матча вместо повтора сразу чтобы подряд шли все мои удары, в которых я промахнулся (потом я верну на место повтор лучшего момента)"
-    if (g.missedRallies && g.missedRallies.length && !this.suppressCinema) {
-      this.suppressCinema = true;
-      setTimeout(() => { this.suppressCinema = false; }, 400);   // one auto-play per match
-      $$('.screen').forEach((s) => s.classList.remove('on'));
-      g.playAllMissesSequential(() => {
-        $('#over').classList.add('on');
-      });
-      return;
-    } else if (best && !this.suppressCinema && (!g.missedRallies || !g.missedRallies.length)) {
+    if (best && !this.suppressCinema) {
       this.suppressCinema = true;
       setTimeout(() => { this.suppressCinema = false; }, 400);
       $$('.screen').forEach((s) => s.classList.remove('on'));

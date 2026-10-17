@@ -150,10 +150,10 @@ const STROKES = {
 const ARCH = {
   LOOP: { elev: 58, contact: 63, speed: 1.00, lat: 0.50, back: false },
   COUNTER: { elev: 46, contact: 56, speed: 1.06, lat: 0.50, back: false },
-  DRIVE: { elev: 24, contact: 33, speed: 1.00, lat: 0.60, back: false },
+  DRIVE: { elev: 26, contact: 36, speed: 0.95, lat: 0.60, back: false },
   SMASH: { elev: -5, contact: 22, speed: 1.10, lat: 0.45, back: false },
   FLICK: { elev: 50, contact: 58, speed: 0.90, lat: 0.60, back: false },
-  PUSH: { elev: -28, contact: 64, speed: 0.56, lat: 0.45, back: true, soft: 0.84 },
+  PUSH: { elev: -18, contact: 60, speed: 0.62, lat: 0.45, back: true, soft: 0.84 },
   CHOP: { elev: -50, contact: 68, speed: 0.66, lat: 0.40, back: true },
   BLOCK: { elev: 11, contact: 26, speed: 0.30, lat: 0.35, back: false, soft: 0.62, absorb: 0.26 },
   LOB: { elev: 66, contact: 50, speed: 0.60, lat: 0.35, back: false },

@@ -42,19 +42,19 @@
 const AI_LEVELS = [
   {
     id: 0, name: 'НОВИЧОК', tag: 'ROOKIE', elo: 900, style: 'PUSHER',
-    react: 0.38, move: 1.55, posErr: 0.28, skill: 0.30, spinRead: 0.16,
-    aggro: 0.06, variety: 0.35,
-    vmagMin: 2.0, vmagMax: 3.8, paceOpen: 0.16, paceRamp: 0.02, paceMax: 0.32,
-    windup: 0.38, errBase: 0.38, errPress: 0.16, deepness: 0.48, placeSkill: 0.12,
-    counterRate: 0.01, smashRate: 0.0, dropRate: 0.02,
+    react: 0.30, move: 2.1, posErr: 0.185, skill: 0.50, spinRead: 0.32,
+    aggro: 0.14, variety: 0.55,
+    vmagMin: 3.0, vmagMax: 5.5, paceOpen: 0.28, paceRamp: 0.045, paceMax: 0.54,
+    windup: 0.30, errBase: 0.165, errPress: 0.10, deepness: 0.68, placeSkill: 0.30,
+    counterRate: 0.06, smashRate: 0.22, dropRate: 0.05,
   },
   {
     id: 1, name: 'ЛЮБИТЕЛЬ', tag: 'AMATEUR', elo: 1400, style: 'ALLROUND',
-    react: 0.26, move: 2.5, posErr: 0.15, skill: 0.58, spinRead: 0.45,
-    aggro: 0.24, variety: 0.60,
-    vmagMin: 3.2, vmagMax: 6.8, paceOpen: 0.26, paceRamp: 0.045, paceMax: 0.62,
-    windup: 0.30, errBase: 0.20, errPress: 0.09, deepness: 0.70, placeSkill: 0.36,
-    counterRate: 0.08, smashRate: 0.20, dropRate: 0.05,
+    react: 0.235, move: 2.9, posErr: 0.125, skill: 0.66, spinRead: 0.52,
+    aggro: 0.30, variety: 0.68,
+    vmagMin: 4.0, vmagMax: 8.0, paceOpen: 0.32, paceRamp: 0.060, paceMax: 0.74,
+    windup: 0.265, errBase: 0.112, errPress: 0.075, deepness: 0.78, placeSkill: 0.48,
+    counterRate: 0.14, smashRate: 0.40, dropRate: 0.07,
   },
   {
     id: 2, name: 'ПРО', tag: 'PRO', elo: 1900, style: 'ALLROUND',
@@ -713,21 +713,20 @@ class OpponentAI {
      * net (the receiver's end line is at 1.37). Deep is the default; short
      * is a planned exception with a hard floor. */
     let tz;
-    if (archId === 'SERVE_FAST') tz = rnd(1.05, 1.30);
-    else if (this._servePlan.short) tz = rnd(0.85, 1.05);
-    else tz = rnd(0.96, 1.28);
-    // novice/amateur servers serve clean and deep, returnable by the player
-    if (L.id === 0) tz = rnd(1.08, 1.22);
-    else if (L.skill < 0.70) tz = lerp(1.10, tz, 0.4);
-    tz = clamp(tz, 0.80, PH.T_HALF_LEN - 0.07);
+    if (archId === 'SERVE_FAST') tz = rnd(1.00, 1.30);
+    else if (this._servePlan.short) tz = rnd(0.62, 0.86);
+    else tz = rnd(0.78, 1.26);
+    // a weaker server cannot place it finely: pull everything a little deeper
+    tz = lerp(1.06, tz, clamp(0.45 + L.placeSkill, 0, 1));
+    tz = clamp(tz, 0.60, PH.T_HALF_LEN - 0.07);
 
     /* Racket speed. Through this impact model ~7 m/s of bat on a nearly
      * stationary ball is a 40 km/h serve and ~11 m/s is 60+ km/h, which is
      * the band a club-to-pro server lives in. SERVE_BASE is the m/s anchor,
      * `pace` is the dimensionless level/tactic multiplier on top of it. */
-    const SERVE_BASE = L.id === 0 ? 4.8 : (L.id === 1 ? 7.6 : 9.2);
-    const pace = L.id === 0 ? 0.45 : clamp(0.50 + 0.55 * (0.4 + L.skill * 0.6) + this.pressure * 0.05, 0.45, 1.35);
-    const vmag = clamp(SERVE_BASE * pace * (A.speed || 1) * rnd(0.94, 1.06), 2.2, 12.5);
+    const SERVE_BASE = 9.2;
+    const pace = clamp(0.55 + 0.62 * (0.5 + L.skill * 0.5) + this.pressure * 0.05, 0.55, 1.35);
+    const vmag = clamp(SERVE_BASE * pace * (A.speed || 1) * rnd(0.94, 1.10), 3.4, 12.5);
 
     /* A sidespin serve has to turn the FACE across the ball, the way a real
      * server peels round the side of it. A sideways SWING alone only makes
@@ -737,7 +736,7 @@ class OpponentAI {
      * ball sideways off the table is the one along the flight, and the only way
      * to make it is a face turned sideways with a vertical brush — 46-76 cm of
      * lateral throw after the bounce at the same spin rate. */
-    const lateral = (A.lat >= 1.5 && L.id > 0) ? 1 : 0;
+    const lateral = A.lat >= 1.5 ? 1 : 0;
     const kickTo = Math.sign(tx || 1);
     /* The sweep (bench suite 13) says which frames are both LEGAL and spinny:
      * a face turned 23-29 deg with a SQUARE swing and ~30 deg of elevation

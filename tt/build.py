@@ -1,8 +1,12 @@
 #!/usr/bin/env python3
 """Bundle every source file into one standalone, offline-capable HTML."""
 import os, re, sys, datetime
+REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SRC = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'src')
-OUT = sys.argv[1] if len(sys.argv) > 1 else '/home/user/table-tennis-topspin.html'
+OUT_FILES = [sys.argv[1]] if len(sys.argv) > 1 else [
+    os.path.join(REPO_ROOT, 'table-tennis-topspin.html'),
+    os.path.join(REPO_ROOT, 'play', 'index.html')
+]
 
 JS_ORDER = ['10_math.js','20_gl.js','25_career.js','27_network.js','30_physics.js','40_swipe.js','50_audio.js',
             '55_ai.js','56_rig.js','57_camera.js','58_coach.js','59_replay.js','60_scene.js',
@@ -53,5 +57,6 @@ html = f"""<!DOCTYPE html>
 </body>
 </html>
 """
-with open(OUT,'w',encoding='utf-8') as f: f.write(html)
-print(f"built {OUT}  ({len(html)/1024:.1f} KB)")
+for out_path in OUT_FILES:
+    with open(out_path,'w',encoding='utf-8') as f: f.write(html)
+    print(f"built {out_path}  ({len(html)/1024:.1f} KB)")

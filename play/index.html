@@ -464,6 +464,11 @@ body.is-reel .screen,body.is-reel #pauseInd{display:none !important}
     <div id="dbg"></div>
 
     <div id="topright">
+      <!-- spin dial: how much of the contact is brush and how much is punch -->
+      <button id="spinBias" class="pe" title="Вращение" aria-label="Регулятор вращения, нажмите для переключения">
+        <b>СПИН</b>
+        <s id="spinBiasVal">НОРМА</s>
+      </button>
       <!-- slow-mo: hold to slow the world down (never in tournaments/PvP) -->
       <button id="slow" class="pe" title="Замедление" aria-label="Замедление времени, удерживайте">
         <i id="slowFill"></i>
@@ -509,11 +514,18 @@ body.is-reel .screen,body.is-reel #pauseInd{display:none !important}
 
       <h3 class="sec">Соперник</h3>
       <div class="row">
-        <button class="opt" data-diff="0"><b>НОВИЧОК</b><s>легкий</s></button>
-        <button class="opt" data-diff="1"><b>ЛЮБИТЕЛЬ</b><s>средний</s></button>
-        <button class="opt sel" data-diff="2"><b>ПРО</b><s>опытный</s></button>
-        <button class="opt" data-diff="3"><b>МАСТЕР</b><s>сложный</s></button>
-        <button class="opt" data-diff="4"><b>ЛЕГЕНДА</b><s>максимум</s></button>
+        <button class="opt" data-diff="0"><b>НОВИЧОК</b><s>ELO 900</s></button>
+        <button class="opt" data-diff="1"><b>ЛЮБИТЕЛЬ</b><s>ELO 1400</s></button>
+        <button class="opt sel" data-diff="2"><b>ПРО</b><s>ELO 1900</s></button>
+        <button class="opt" data-diff="3"><b>МАСТЕР</b><s>ELO 2300</s></button>
+        <button class="opt" data-diff="4"><b>ЛЕГЕНДА</b><s>ELO 2700</s></button>
+      </div>
+
+      <h3 class="sec">Матч до</h3>
+      <div class="row">
+        <button class="opt" data-set="target" data-val="5"><b>5</b><s>блиц</s></button>
+        <button class="opt sel" data-set="target" data-val="11"><b>11</b><s>стандарт ITTF</s></button>
+        <button class="opt" data-set="target" data-val="21"><b>21</b><s>классика</s></button>
       </div>
 
       <button class="btn" id="play" style="margin-top:16px">НАЧАТЬ МАТЧ</button>
@@ -579,30 +591,70 @@ body.is-reel .screen,body.is-reel #pauseInd{display:none !important}
 
   <!-- ========================== SETTINGS ========================== -->
   <div class="screen" id="settings" role="dialog" aria-label="Настройки">
-    <div class="card" style="max-width:460px">
+    <div class="card" style="max-width:480px;max-height:88vh;overflow-y:auto">
       <div class="logo" style="font-size:24px">НАСТРОЙКИ</div>
-      <div class="sub">2 основных параметра игры</div>
+      <div class="sub">Параметры игры, камеры и управления</div>
 
-      <h3 class="sec">1. ОБЛАСТЬ ПОПАДАНИЯ</h3>
+      <h3 class="sec">Помощь в игре</h3>
       <div class="sl">
         <label>Радиус приёма<s>захват мяча вокруг курсора</s></label>
         <input type="range" id="rHitZone" data-set="hitZone" min="30" max="100" value="85">
         <span class="v" id="vHitZone">85%</span>
       </div>
-      <div style="font-size:11px;color:var(--dim);line-height:1.5;margin:4px 0 16px">
-        Определяет, насколько близко прицел должен быть к мячу, чтобы удар состоялся. При высоком значении вы отбиваете мяч даже при неточном наведении.
-      </div>
-
-      <h3 class="sec">2. ВЫРАВНИВАНИЕ УДАРА</h3>
       <div class="sl">
         <label>Авто-доводка<s>исправление дуги на стол</s></label>
         <input type="range" id="rAssist" data-set="assist" min="0" max="100" value="85">
         <span class="v" id="vAssist">85%</span>
       </div>
-      <div style="font-size:11px;color:var(--dim);line-height:1.5;margin:4px 0 16px">
-        Корректирует траекторию, чтобы мяч стабильно перелетал сетку и ложился на стол соперника с хорошим вращением.
+
+      <h3 class="sec">Камера <span class="hintk">клавиши 1–4 · 0 — сброс</span></h3>
+      <div class="row">
+        <button class="opt sel" data-set="cam" data-val="BROADCAST"><b>1 · ТВ</b><s>трансляция</s></button>
+        <button class="opt" data-set="cam" data-val="DYNAMIC"><b>2 · ДИНАМИКА</b><s>за мячом</s></button>
+        <button class="opt" data-set="cam" data-val="LOW"><b>3 · НИЗКАЯ</b><s>от стола</s></button>
+        <button class="opt" data-set="cam" data-val="SIDE"><b>4 · СБОКУ</b><s>разбор</s></button>
       </div>
 
+      <h3 class="sec">Графика</h3>
+      <div class="row">
+        <button class="opt" data-set="quality" data-val="low"><b>НИЗКАЯ</b><s>макс. FPS</s></button>
+        <button class="opt" data-set="quality" data-val="medium"><b>СРЕДНЯЯ</b><s>баланс</s></button>
+        <button class="opt sel" data-set="quality" data-val="high"><b>ВЫСОКАЯ</b><s>всё включено</s></button>
+      </div>
+
+      <h3 class="sec">Хват</h3>
+      <div class="row">
+        <button class="opt sel" data-set="hand" data-val="right"><b>ПРАВАЯ</b><s></s></button>
+        <button class="opt" data-set="hand" data-val="left"><b>ЛЕВАЯ</b><s></s></button>
+      </div>
+
+      <h3 class="sec">Управление и звук</h3>
+      <div class="sl"><label>Чувствительность</label>
+        <input type="range" id="rSens" data-set="sens" min="50" max="180" value="100"><span class="v" id="vSens">1.00×</span></div>
+      <div class="sl"><label>Громкость</label>
+        <input type="range" id="rVol" data-set="vol" min="0" max="100" value="90"><span class="v" id="vVol">90%</span></div>
+
+      <h3 class="sec">Подсказки</h3>
+      <div class="cols">
+        <div class="row"><button class="opt sel" data-set="zone" data-val="on"><b>ЗОНА УДАРА</b><s>кольцо</s></button>
+          <button class="opt" data-set="zone" data-val="off"><b>ВЫКЛ</b><s></s></button></div>
+        <div class="row"><button class="opt sel" data-set="predict" data-val="on"><b>ПРИЦЕЛ ВКЛ</b><s>точка</s></button>
+          <button class="opt" data-set="predict" data-val="off"><b>ВЫКЛ</b><s></s></button></div>
+        <div class="row"><button class="opt sel" data-set="trail" data-val="on"><b>ШЛЕЙФ ВКЛ</b><s>вращение</s></button>
+          <button class="opt" data-set="trail" data-val="off"><b>ВЫКЛ</b><s></s></button></div>
+        <div class="row"><button class="opt sel" data-set="tele" data-val="on"><b>ТЕЛЕМЕТРИЯ</b><s>разбор</s></button>
+          <button class="opt sel" data-set="tele" data-val="off"><b>ВЫКЛ</b><s></s></button></div>
+        <div class="row"><button class="opt sel" data-set="haptics" data-val="on"><b>ВИБРО ВКЛ</b><s>отдача</s></button>
+          <button class="opt" data-set="haptics" data-val="off"><b>ВЫКЛ</b><s></s></button></div>
+        <div class="row"><button class="opt sel" data-set="slowmoPlayer" data-val="on"><b>SLOW-MO</b><s>замедление</s></button>
+          <button class="opt" data-set="slowmoPlayer" data-val="off"><b>ВЫКЛ</b><s></s></button></div>
+      </div>
+
+      <div style="font-size:10px;color:var(--dim2);margin-top:10px">
+        <span class="kbd">R</span> рестарт · <span class="kbd">P</span> пауза · <span class="kbd">C</span> пресет камеры · <span class="kbd">F3</span> телеметрия физики<br>
+        <span class="kbd">←</span><span class="kbd">→</span><span class="kbd">↑</span><span class="kbd">↓</span> ракурс ·
+        <span class="kbd">+</span><span class="kbd">−</span> дистанция · <span class="kbd">0</span> сброс
+      </div>
       <button class="btn" id="setClose">СОХРАНИТЬ И ЗАКРЫТЬ</button>
     </div>
   </div>
@@ -3143,10 +3195,10 @@ const STROKES = {
 const ARCH = {
   LOOP: { elev: 58, contact: 63, speed: 1.00, lat: 0.50, back: false },
   COUNTER: { elev: 46, contact: 56, speed: 1.06, lat: 0.50, back: false },
-  DRIVE: { elev: 24, contact: 33, speed: 1.00, lat: 0.60, back: false },
+  DRIVE: { elev: 26, contact: 36, speed: 0.95, lat: 0.60, back: false },
   SMASH: { elev: -5, contact: 22, speed: 1.10, lat: 0.45, back: false },
   FLICK: { elev: 50, contact: 58, speed: 0.90, lat: 0.60, back: false },
-  PUSH: { elev: -28, contact: 64, speed: 0.56, lat: 0.45, back: true, soft: 0.84 },
+  PUSH: { elev: -18, contact: 60, speed: 0.62, lat: 0.45, back: true, soft: 0.84 },
   CHOP: { elev: -50, contact: 68, speed: 0.66, lat: 0.40, back: true },
   BLOCK: { elev: 11, contact: 26, speed: 0.30, lat: 0.35, back: false, soft: 0.62, absorb: 0.26 },
   LOB: { elev: 66, contact: 50, speed: 0.60, lat: 0.35, back: false },
@@ -4300,19 +4352,19 @@ class AudioEngine {
 const AI_LEVELS = [
   {
     id: 0, name: 'НОВИЧОК', tag: 'ROOKIE', elo: 900, style: 'PUSHER',
-    react: 0.38, move: 1.55, posErr: 0.28, skill: 0.30, spinRead: 0.16,
-    aggro: 0.06, variety: 0.35,
-    vmagMin: 2.0, vmagMax: 3.8, paceOpen: 0.16, paceRamp: 0.02, paceMax: 0.32,
-    windup: 0.38, errBase: 0.38, errPress: 0.16, deepness: 0.48, placeSkill: 0.12,
-    counterRate: 0.01, smashRate: 0.0, dropRate: 0.02,
+    react: 0.30, move: 2.1, posErr: 0.185, skill: 0.50, spinRead: 0.32,
+    aggro: 0.14, variety: 0.55,
+    vmagMin: 3.0, vmagMax: 5.5, paceOpen: 0.28, paceRamp: 0.045, paceMax: 0.54,
+    windup: 0.30, errBase: 0.165, errPress: 0.10, deepness: 0.68, placeSkill: 0.30,
+    counterRate: 0.06, smashRate: 0.22, dropRate: 0.05,
   },
   {
     id: 1, name: 'ЛЮБИТЕЛЬ', tag: 'AMATEUR', elo: 1400, style: 'ALLROUND',
-    react: 0.26, move: 2.5, posErr: 0.15, skill: 0.58, spinRead: 0.45,
-    aggro: 0.24, variety: 0.60,
-    vmagMin: 3.2, vmagMax: 6.8, paceOpen: 0.26, paceRamp: 0.045, paceMax: 0.62,
-    windup: 0.30, errBase: 0.20, errPress: 0.09, deepness: 0.70, placeSkill: 0.36,
-    counterRate: 0.08, smashRate: 0.20, dropRate: 0.05,
+    react: 0.235, move: 2.9, posErr: 0.125, skill: 0.66, spinRead: 0.52,
+    aggro: 0.30, variety: 0.68,
+    vmagMin: 4.0, vmagMax: 8.0, paceOpen: 0.32, paceRamp: 0.060, paceMax: 0.74,
+    windup: 0.265, errBase: 0.112, errPress: 0.075, deepness: 0.78, placeSkill: 0.48,
+    counterRate: 0.14, smashRate: 0.40, dropRate: 0.07,
   },
   {
     id: 2, name: 'ПРО', tag: 'PRO', elo: 1900, style: 'ALLROUND',
@@ -4971,21 +5023,20 @@ class OpponentAI {
      * net (the receiver's end line is at 1.37). Deep is the default; short
      * is a planned exception with a hard floor. */
     let tz;
-    if (archId === 'SERVE_FAST') tz = rnd(1.05, 1.30);
-    else if (this._servePlan.short) tz = rnd(0.85, 1.05);
-    else tz = rnd(0.96, 1.28);
-    // novice/amateur servers serve clean and deep, returnable by the player
-    if (L.id === 0) tz = rnd(1.08, 1.22);
-    else if (L.skill < 0.70) tz = lerp(1.10, tz, 0.4);
-    tz = clamp(tz, 0.80, PH.T_HALF_LEN - 0.07);
+    if (archId === 'SERVE_FAST') tz = rnd(1.00, 1.30);
+    else if (this._servePlan.short) tz = rnd(0.62, 0.86);
+    else tz = rnd(0.78, 1.26);
+    // a weaker server cannot place it finely: pull everything a little deeper
+    tz = lerp(1.06, tz, clamp(0.45 + L.placeSkill, 0, 1));
+    tz = clamp(tz, 0.60, PH.T_HALF_LEN - 0.07);
 
     /* Racket speed. Through this impact model ~7 m/s of bat on a nearly
      * stationary ball is a 40 km/h serve and ~11 m/s is 60+ km/h, which is
      * the band a club-to-pro server lives in. SERVE_BASE is the m/s anchor,
      * `pace` is the dimensionless level/tactic multiplier on top of it. */
-    const SERVE_BASE = L.id === 0 ? 4.8 : (L.id === 1 ? 7.6 : 9.2);
-    const pace = L.id === 0 ? 0.45 : clamp(0.50 + 0.55 * (0.4 + L.skill * 0.6) + this.pressure * 0.05, 0.45, 1.35);
-    const vmag = clamp(SERVE_BASE * pace * (A.speed || 1) * rnd(0.94, 1.06), 2.2, 12.5);
+    const SERVE_BASE = 9.2;
+    const pace = clamp(0.55 + 0.62 * (0.5 + L.skill * 0.5) + this.pressure * 0.05, 0.55, 1.35);
+    const vmag = clamp(SERVE_BASE * pace * (A.speed || 1) * rnd(0.94, 1.10), 3.4, 12.5);
 
     /* A sidespin serve has to turn the FACE across the ball, the way a real
      * server peels round the side of it. A sideways SWING alone only makes
@@ -4995,7 +5046,7 @@ class OpponentAI {
      * ball sideways off the table is the one along the flight, and the only way
      * to make it is a face turned sideways with a vertical brush — 46-76 cm of
      * lateral throw after the bounce at the same spin rate. */
-    const lateral = (A.lat >= 1.5 && L.id > 0) ? 1 : 0;
+    const lateral = A.lat >= 1.5 ? 1 : 0;
     const kickTo = Math.sign(tx || 1);
     /* The sweep (bench suite 13) says which frames are both LEGAL and spinny:
      * a face turned 23-29 deg with a SQUARE swing and ~30 deg of elevation
@@ -5299,11 +5350,11 @@ class PaddleRig {
  * ------------------------------------------------------------------ */
 const CAMERA_PRESETS = {
   /* The broadcast frame: over the player's shoulder, whole table in
-     shot, ~23° down. Brought closer per user request ("сильнее приблизь камеру"). */
+     shot, ~23° down. This is the one a TV director would cut to. */
   BROADCAST: {
     id: 'BROADCAST', ru: 'ТВ', short: 'ТРАНСТЛЯЦИЯ',
-    desc: 'Классический ракурс трансляции: весь стол в кадре крупным планом',
-    eye: { x: 0, y: 1.68, z: 2.38 }, look: { x: 0, y: 0.74, z: -0.25 }, fov: 48,
+    desc: 'Классический ракурс трансляции: весь стол и своя ракетка в кадре',
+    eye: { x: 0, y: 2.28, z: 3.22 }, look: { x: 0, y: 0.80, z: -0.30 }, fov: 42,
     follow: { y: 0, z: 0 },
   },
   /* Slightly lower and closer, and it rides the ball's height a few
@@ -5311,7 +5362,7 @@ const CAMERA_PRESETS = {
   DYNAMIC: {
     id: 'DYNAMIC', ru: 'ДИНАМИКА', short: 'ДИНАМИКА',
     desc: 'Чуть ниже и ближе, камера мягко едет за высотой мяча',
-    eye: { x: 0, y: 1.52, z: 2.22 }, look: { x: 0, y: 0.74, z: -0.28 }, fov: 50,
+    eye: { x: 0, y: 2.02, z: 2.94 }, look: { x: 0, y: 0.78, z: -0.34 }, fov: 46,
     follow: { y: 0.10, z: 0.06 },
   },
   /* Low, from just above the playing surface: the net reads as a real
@@ -5319,7 +5370,7 @@ const CAMERA_PRESETS = {
   LOW: {
     id: 'LOW', ru: 'НИЗКАЯ', short: 'ОТ СТОЛА',
     desc: 'Низкая камера у уровня стола: хорошо видна высота мяча над сеткой',
-    eye: { x: 0, y: 1.20, z: 2.28 }, look: { x: 0, y: 0.78, z: -0.30 }, fov: 52,
+    eye: { x: 0, y: 1.42, z: 3.12 }, look: { x: 0, y: 0.84, z: -0.36 }, fov: 48,
     follow: { y: 0, z: 0 },
   },
   /* A true side view, symmetric about the net: for reading spin,
@@ -5327,7 +5378,7 @@ const CAMERA_PRESETS = {
   SIDE: {
     id: 'SIDE', ru: 'СБОКУ', short: 'АНАЛИЗ',
     desc: 'Ровно сбоку, симметрично сетке: форма траектории и вращение как на ладони',
-    eye: { x: 2.75, y: 1.44, z: 0 }, look: { x: 0, y: 0.82, z: 0 }, fov: 44,
+    eye: { x: 3.62, y: 1.66, z: 0 }, look: { x: 0, y: 0.86, z: 0 }, fov: 40,
     follow: { y: 0, z: 0 },
   },
 };
@@ -5407,9 +5458,9 @@ for (const sx of [-1, 1]) for (const sz of [-1, 1]) {
 }
 FRAME_POINTS.push({ x: -PH.NET_HALF_WID, y: PH.NET_TOP, z: 0, w: 1 });
 FRAME_POINTS.push({ x: PH.NET_HALF_WID, y: PH.NET_TOP, z: 0, w: 1 });
-FRAME_POINTS.push({ x: 0, y: PH.TABLE_Y + 1.10, z: 0, w: 1 });            // a high lob
-FRAME_POINTS.push({ x: 0, y: PH.TABLE_Y + 0.50, z: -PH.T_HALF_LEN - 0.35, w: 1 });  // deep behind the bot
-FRAME_POINTS.push({ x: 0, y: PH.TABLE_Y + 0.35, z: PH.T_HALF_LEN + 0.15, w: 1 });   // short in front of you
+FRAME_POINTS.push({ x: 0, y: PH.TABLE_Y + 1.30, z: 0, w: 1 });            // a high lob
+FRAME_POINTS.push({ x: 0, y: PH.TABLE_Y + 0.55, z: -PH.T_HALF_LEN - 0.5, w: 1 });  // deep behind the bot
+FRAME_POINTS.push({ x: 0, y: PH.TABLE_Y + 0.45, z: PH.T_HALF_LEN + 0.45, w: 1 });   // short in front of you
 
 const PADDLE_POINTS = [];
 for (const sx of [-1, 1]) {
@@ -5422,10 +5473,12 @@ for (const sx of [-1, 1]) {
 
 /* Fairness set: contact poses kept in frame */
 const REACH_POSES = [
-  [0.85, 0.10, 0.46],       // reaching over the table for a net-cord dribbler
-  [0.85, 0.25, 1.02],
-  [0.85, 0.28, 1.37],       // wide, at the end line
-  [0.85, 0.15, 1.48],       // wide and low
+  [0.943, 0.10, 0.46],       // reaching over the table for a net-cord dribbler
+  [0.943, 0.25, 1.02],
+  [0.943, 0.30, 1.40],       // the bread and butter: wide, at the end line
+  [0.943, 0.05, 1.55],       // wide and low
+  [0.943, 0.35, 1.75],
+  [0.943, 0.60, 1.95],       // a deep lob, taken high
 ];
 const REACH_POINTS = [];
 for (const sx of [-1, 1]) {
@@ -7895,13 +7948,13 @@ class Game {
      * is deliberately no free orbit any more — hand-tuning yaw/pitch/zoom
      * cost players minutes per session and could park the bat off-screen,
      * and every framing it produced was worse than one of the four. */
-    this.camRig = { eye: V3.new(0, 1.68, 2.38), look: V3.new(0, 0.74, -0.25), fov: 48, mode: 'BROADCAST' };
+    this.camRig = { eye: V3.new(0, 2.28, 3.22), look: V3.new(0, 0.80, -0.30), fov: 42, mode: 'BROADCAST' };
     this._rigBuf = { vp: M4.create(), proj: M4.create(), view: M4.create() };
     this.camVP = M4.create();          // view·proj of the authored rig, no shake
     this.hudBandY = 0.40;              // screen y where the table's far edge begins
-    this.camPos = V3.new(0, 1.68, 2.38); this.camLook = V3.new(0, 0.74, -0.25);
+    this.camPos = V3.new(0, 1.62, 3.05); this.camLook = V3.new(0, 0.92, -0.2);
     this.camPosT = V3.clone(this.camPos); this.camLookT = V3.clone(this.camLook);
-    this.fov = 48; this.fovT = 48;
+    this.fov = 46; this.fovT = 46;
     this.marks = [];
     this.stats = {
       shots: 0, winners: 0, errors: 0, maxSpeed: 0, maxSpin: 0,
@@ -8369,33 +8422,6 @@ class Game {
     }
     if (!this.isServeBall) this.rally++;
 
-    if (side < 0) {
-      const isNovice = this.ai && this.ai.levelIndex === 0;
-      const isAmateur = this.ai && this.ai.levelIndex === 1;
-      if (isNovice) {
-        // Novice ball speed is capped to a gentle, welcoming pace (~13-16 km/h):
-        const maxVz = this.isServeBall ? 3.8 : 4.4;
-        if (b.v.z > maxVz) {
-          const factor = maxVz / b.v.z;
-          b.v.z = maxVz;
-          b.v.x *= factor;
-        }
-        // Friendly gentle arc over the net
-        b.v.y = clamp(b.v.y, 1.3, 2.5);
-        // Minimal spin (so it doesn't trick beginner players)
-        V3.mul(b.w, b.w, 0.05);
-      } else if (isAmateur) {
-        const maxVz = this.isServeBall ? 6.2 : 7.6;
-        if (b.v.z > maxVz) {
-          const factor = maxVz / b.v.z;
-          b.v.z = maxVz;
-          b.v.x *= factor;
-        }
-        b.v.y = clamp(b.v.y, 0.9, 2.6);
-        V3.mul(b.w, b.w, 0.45);
-      }
-    }
-
     const speed = V3.len(b.v), spin = V3.len(b.w);
     this.stats.shots++;
     this.stats.totalSpin += spin / TAU;
@@ -8593,11 +8619,6 @@ class Game {
 
   skipReplay() {
     if (!this.replayer.on) return;
-    if (this.isDebugReplay && this._missIndex !== undefined && this._missIndex < (this.missedRallies || []).length - 1) {
-      this._missIndex++;
-      this.watchMiss(this._missIndex, 0.22);
-      return;
-    }
     this.replayer.finish();
     this.endReplay();
   }
@@ -9026,7 +9047,7 @@ class Game {
         powerScale: 1,
         moveYaw: pad.yaw || 0,
         equip: sideParams,
-        spinBias: 'norm',
+        spinBias: this.settings.spinBias || 'norm',
       };
       racket = deriveStroke(m, ctx);
       racket.vmag *= this.equip.vmagK;
@@ -9820,6 +9841,40 @@ class Game {
       d(me.ball, tmp.m, ma.ball);
     }
 
+    /* player paddle */
+    {
+      const pad = this.player;
+      const PM = this.paddleMats(S) || ma;
+      const pq = Q.lookRotation(Q.new(), pad.normal, { x: 0, y: 1, z: 0 });
+      /* pad.roll is the lean the bat picks up while you move it sideways: the
+         blade visibly turns into the direction of travel instead of staying
+         square to the camera. */
+      const roll = Q.setAxisAngle(Q.new(), 0, 0, 1,
+        (this.settings.hand === 'right' ? -0.42 : 0.42) + pad.swing * 0.3 + (pad.roll || 0));
+      Q.mul(pq, pq, roll);
+      /* stepping in to a short ball tips the blade forward over the table */
+      if (pad.stepIn > 0.01) {
+        const lunge = Q.setAxisAngle(Q.new(), 1, 0, 0, -0.20 * pad.stepIn);
+        Q.mul(pq, pq, lunge);
+      }
+      M4.compose(tmp.m, pad.pos, pq, V3.set(tmp.scl, 1, 1, 1));
+      d(me.blade, tmp.m, PM.wood);
+      if (!shadowPass) {
+        M4.compose(tmp.m2, V3.addScaled(V3.new(), pad.pos, pad.normal, 0.0085), pq, V3.set(tmp.scl, 1, 1, 1));
+        R.draw(me.rubber, tmp.m2, PM.black);
+        M4.compose(tmp.m2, V3.addScaled(V3.new(), pad.pos, pad.normal, -0.0085), pq, V3.set(tmp.scl, 1, 1, 1));
+        R.draw(me.rubber, tmp.m2, PM.red);
+      }
+      // handle
+      {
+        const off = V3.new(0, -0.125, 0);
+        const wo = V3.new();
+        M4.transformDir(wo, tmp.m, off);
+        M4.compose(tmp.m2, V3.add(V3.new(), pad.pos, wo), pq, V3.set(tmp.scl, 1, 1, 1));
+        d(me.handle, tmp.m2, PM.grip);
+      }
+    }
+
     /* the opponent: paddle, hand, forearm and sleeve, all solved from
        the paddle's own position and normal (see 56_rig.js) */
     const ap = this.aiPaddle;
@@ -9860,6 +9915,9 @@ class Game {
       if (onTable(b.p.x, b.p.z) && b.p.y > TY - 0.02) S.blob(R, b.p.x, b.p.y, b.p.z, TY, 0.055, 0.62, 1);
       else S.blob(R, b.p.x, b.p.y, b.p.z, 0, 0.075, 0.40, 1);
     }
+    const pp = this.player.pos;
+    if (onTable(pp.x, pp.z)) S.blob(R, pp.x, pp.y, pp.z, TY, 0.115, 0.42, 1.25);
+    else S.blob(R, pp.x, pp.y, pp.z, 0, 0.16, 0.26, 1.25);
     const ap = this.aiPaddle.pos;
     if (onTable(ap.x, ap.z)) S.blob(R, ap.x, ap.y, ap.z, TY, 0.115, 0.42, 1.25);
     else S.blob(R, ap.x, ap.y, ap.z, 0, 0.16, 0.24, 1.25);
@@ -10592,11 +10650,32 @@ class UI {
   syncSpinBias() {
     const g = this.game; if (!g) return;
     const el = $('#spinBias'), lab = $('#spinBiasVal');
-    if (lab) lab.textContent = 'НОРМА';
+    const v = g.settings.spinBias || 'norm';
+    if (lab) lab.textContent = v === 'high' ? 'БОЛЬШЕ' : v === 'low' ? 'МЕНЬШЕ' : 'НОРМА';
+    if (el) {
+      el.classList.toggle('high', v === 'high');
+      el.classList.toggle('low', v === 'low');
+      el.title = v === 'high' ? 'Вращение: больше (скользящий контакт, меньше скорости)'
+        : v === 'low' ? 'Вращение: меньше (плоский удар, больше скорости)'
+          : 'Вращение: нейтрально';
+    }
   }
 
   syncSettings() {
     const s = this.game.settings;
+    const sel = (k, v) => $$(`.opt[data-set="${k}"]`).forEach((x) => x.classList.toggle('sel', x.dataset.val === String(v)));
+    sel('cam', s.camera); sel('quality', s.quality); sel('hand', s.hand);
+    sel('trail', s.showTrail ? 'on' : 'off'); sel('predict', s.showPredict ? 'on' : 'off');
+    sel('zone', s.showZone ? 'on' : 'off'); sel('tele', s.showTele ? 'on' : 'off');
+    sel('coach', s.coach ? 'on' : 'off'); sel('adaptive', s.adaptive ? 'on' : 'off');
+    sel('slowmoPlayer', s.slowmoPlayer !== false ? 'on' : 'off');
+    const slEl = $('#slow'); if (slEl) slEl.classList.toggle('off', s.slowmoPlayer === false);
+    this.syncSpinBias();
+    sel('haptics', s.haptics ? 'on' : 'off');
+    sel('target', s.targetScore);
+    const spEl = $('#spin'); if (spEl) spEl.classList.toggle('on', !!s.showTele);
+    const twEl = $('#toWin'); if (twEl) twEl.textContent = s.targetScore;
+
     const hzVal = Math.round((s.hitZone !== undefined ? s.hitZone : 0.85) * 100);
     const rHz = $('#rHitZone'), vHz = $('#vHitZone');
     if (rHz) rHz.value = hzVal;
@@ -10606,6 +10685,14 @@ class UI {
     const rAst = $('#rAssist'), vAst = $('#vAssist');
     if (rAst) rAst.value = astVal;
     if (vAst) vAst.textContent = astVal + '%';
+
+    const rSens = $('#rSens'), vSens = $('#vSens');
+    if (rSens) rSens.value = Math.round((s.sensitivity || 1) * 100);
+    if (vSens) vSens.textContent = (s.sensitivity || 1).toFixed(2) + '×';
+
+    const rVol = $('#rVol'), vVol = $('#vVol');
+    if (rVol) rVol.value = Math.round((s.volume || 0.9) * 100);
+    if (vVol) vVol.textContent = Math.round((s.volume || 0.9) * 100) + '%';
   }
 
   /* ------------------------------ HUD ----------------------------- */
@@ -10705,16 +10792,7 @@ class UI {
       b.addEventListener('click', () => this.showMoments());
       row.appendChild(b);
     }
-    // User requested: "сделай просто в конце матча вместо повтора сразу чтобы подряд шли все мои удары, в которых я промахнулся (потом я верну на место повтор лучшего момента)"
-    if (g.missedRallies && g.missedRallies.length && !this.suppressCinema) {
-      this.suppressCinema = true;
-      setTimeout(() => { this.suppressCinema = false; }, 400);   // one auto-play per match
-      $$('.screen').forEach((s) => s.classList.remove('on'));
-      g.playAllMissesSequential(() => {
-        $('#over').classList.add('on');
-      });
-      return;
-    } else if (best && !this.suppressCinema && (!g.missedRallies || !g.missedRallies.length)) {
+    if (best && !this.suppressCinema) {
       this.suppressCinema = true;
       setTimeout(() => { this.suppressCinema = false; }, 400);
       $$('.screen').forEach((s) => s.classList.remove('on'));
