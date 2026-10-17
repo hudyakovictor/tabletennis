@@ -108,6 +108,10 @@ class UI {
     $('#wsBuyCry').addEventListener('click', () => this.buySelectionCrystals());
     $('#adCoins').addEventListener('click', () => this.watchAd());
     $('#btnSettings').addEventListener('click', () => $('#settings').classList.toggle('on'));
+    const btnMenuSet = $('#menuOpenSettings');
+    if (btnMenuSet) btnMenuSet.addEventListener('click', () => { this.syncSettings(); $('#settings').classList.add('on'); });
+    const btnPauseSet = $('#pauseSettings');
+    if (btnPauseSet) btnPauseSet.addEventListener('click', () => { this.syncSettings(); $('#settings').classList.add('on'); });
     $('#setClose').addEventListener('click', () => $('#settings').classList.remove('on'));
     /* the three free-camera sliders are gone: the rig is one of four authored
        presets now, so there is nothing to reset from the settings card */
@@ -561,8 +565,16 @@ class UI {
     const g = this.game; if (!g) return;
     const s = g.settings;
     switch (k) {
-      case 'assist': s.assist = v / 100; $('#vAssist').textContent = v + '%'; break;
-      case 'posAssist': s.posAssist = v / 100; $('#vPos').textContent = v + '%'; break;
+      case 'assist':
+        s.assist = v / 100;
+        $$('#vAssist, .vAssist').forEach(el => el.textContent = v + '%');
+        $$('#rAssist, .rAssist').forEach(el => el.value = v);
+        break;
+      case 'posAssist':
+        s.posAssist = v / 100;
+        $$('#vPos, .vPos').forEach(el => el.textContent = v + '%');
+        $$('#rPos, .rPos').forEach(el => el.value = v);
+        break;
       case 'sens': s.sensitivity = v / 100; $('#vSens').textContent = (v / 100).toFixed(2) + '×'; break;
       case 'vol': s.volume = v / 100; g.audio.setVolume(v / 100); $('#vVol').textContent = v + '%'; break;
       case 'cam': s.camera = v; break;
@@ -619,8 +631,12 @@ class UI {
     sel('target', s.targetScore);
     $('#spin').classList.toggle('on', !!s.showTele);
     $('#toWin').textContent = s.targetScore;
-    $('#rAssist').value = Math.round(s.assist * 100); $('#vAssist').textContent = Math.round(s.assist * 100) + '%';
-    $('#rPos').value = Math.round(s.posAssist * 100); $('#vPos').textContent = Math.round(s.posAssist * 100) + '%';
+    const aVal = Math.round(s.assist * 100);
+    $$('#rAssist, .rAssist').forEach(el => el.value = aVal);
+    $$('#vAssist, .vAssist').forEach(el => el.textContent = aVal + '%');
+    const pVal = Math.round(s.posAssist * 100);
+    $$('#rPos, .rPos').forEach(el => el.value = pVal);
+    $$('#vPos, .vPos').forEach(el => el.textContent = pVal + '%');
     $('#rSens').value = Math.round(s.sensitivity * 100); $('#vSens').textContent = s.sensitivity.toFixed(2) + '×';
     $('#rVol').value = Math.round(s.volume * 100); $('#vVol').textContent = Math.round(s.volume * 100) + '%';
   }
