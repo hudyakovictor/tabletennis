@@ -722,9 +722,19 @@ class UI {
       b.addEventListener('click', () => this.showMoments());
       row.appendChild(b);
     }
-    if (best && !this.suppressCinema) {
+    // User requested: "сделай просто в конце матча вместо повтора сразу чтобы подряд шли все мои удары, в которых я промахнулся (потом я верну на место повтор лучшего момента)"
+    if (g.missedRallies && g.missedRallies.length && !this.suppressCinema) {
       this.suppressCinema = true;
       setTimeout(() => { this.suppressCinema = false; }, 400);   // one auto-play per match
+      $$('.screen').forEach((s) => s.classList.remove('on'));
+      g.playAllMissesSequential(() => {
+        $('#over').classList.add('on');
+      });
+      return;
+    } else if (best && !this.suppressCinema && (!g.missedRallies || !g.missedRallies.length)) {
+      this.suppressCinema = true;
+      setTimeout(() => { this.suppressCinema = false; }, 400);
+      $$('.screen').forEach((s) => s.classList.remove('on'));
       g.watchMoment(best, true, () => { $('#over').classList.add('on'); });
       return;
     }

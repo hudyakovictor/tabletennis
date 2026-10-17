@@ -796,6 +796,10 @@ class Game {
     const back = this.state;
     this.replayFrom = back === GS.MATCH_END ? GS.MATCH_END : GS.POINT;
     this.setState(GS.REPLAY);
+    if (typeof document !== 'undefined') {
+      document.body.classList.add('is-reel');
+      document.querySelectorAll('.screen').forEach((s) => s.classList.remove('on'));
+    }
     this.ui && this.ui.replayShow(true, moment, !!hero);
     this.audio.applause(hero ? 1.4 : 0.6);
     if (this.profile) this.profile.taskProgress('replay', 0, 1);
@@ -805,6 +809,11 @@ class Game {
 
   skipReplay() {
     if (!this.replayer.on) return;
+    if (this.isDebugReplay && this._missIndex !== undefined && this._missIndex < (this.missedRallies || []).length - 1) {
+      this._missIndex++;
+      this.watchMiss(this._missIndex, 0.22);
+      return;
+    }
     this.replayer.finish();
     this.endReplay();
   }
@@ -812,6 +821,9 @@ class Game {
   endReplay() {
     this.ui && this.ui.replayShow(false);
     this.ui && this.ui.debugReplayShow && this.ui.debugReplayShow(false);
+    if (typeof document !== 'undefined') {
+      document.body.classList.remove('is-reel');
+    }
     this.isDebugReplay = false;
     this.camFov = undefined;
     if (this.state === GS.REPLAY) this.setState(this.replayFrom || GS.POINT);
@@ -889,8 +901,55 @@ class Game {
     const back = this.state;
     this.replayFrom = back === GS.MATCH_END ? GS.MATCH_END : (this.paused ? GS.SERVE_READY : GS.POINT);
     this.setState(GS.REPLAY);
+    if (typeof document !== 'undefined') {
+      document.body.classList.add('is-reel');
+      document.querySelectorAll('.screen').forEach((s) => s.classList.remove('on'));
+    }
     this.ui && this.ui.debugReplayShow && this.ui.debugReplayShow(true, miss, index, this.missedRallies.length);
     return true;
+  }
+
+  playAllMissesSequential(onComplete) {
+    if (!this.missedRallies || !this.missedRallies.length) {
+      if (onComplete) onComplete();
+      return;
+    }
+    this._missIndex = 0;
+    this.replayAfter = () => {
+      this._missIndex = 999;
+      if (onComplete) onComplete();
+    };
+
+    const playCurrent = () => {
+      if (this._missIndex >= this.missedRallies.length) {
+        this.endReplay();
+        if (onComplete) onComplete();
+        return;
+      }
+      const miss = this.missedRallies[this._missIndex];
+      this.currentMissIndex = this._missIndex;
+      this.isDebugReplay = true;
+      this.setSlowmoHold(false);
+      this.ball.live = true;
+      this.replayFrom = GS.MATCH_END;
+      this.setState(GS.REPLAY);
+
+      if (typeof document !== 'undefined') {
+        document.body.classList.add('is-reel');
+        document.querySelectorAll('.screen').forEach((s) => s.classList.remove('on'));
+      }
+
+      this.replayer.play(miss, 0.22, () => {
+        this._missIndex++;
+        playCurrent();
+      });
+
+      if (this.ui) {
+        this.ui.debugReplayShow(true, miss, this._missIndex, this.missedRallies.length);
+      }
+    };
+
+    playCurrent();
   }
 
   /** Everything that has to be written down when the last point lands. */
