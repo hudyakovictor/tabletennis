@@ -8,58 +8,60 @@
  *  hit it.
  * ===================================================================== */
 
+// Capabilities first, then actual pointer events in UI: a narrow desktop is
+// still a mouse device; a touchscreen laptop can switch without reloading.
+function detectInputMode(win = window, nav = navigator) {
+  const matches = query => !!(win.matchMedia && win.matchMedia(query).matches);
+  return matches('(pointer: coarse)') || ((nav.maxTouchPoints || 0) > 0 && !matches('(pointer: fine)')) ? 'touch' : 'mouse';
+}
+function trainingTip(step, mode) { return mode === 'touch' ? step.tip : step.mouseTip; }
+
 const TRAIN_STEPS = [
   {
     id: 'SERVE', title: 'ПОДАЧА', need: 2,
-    tip: 'Прижми палец и быстро проведи ВВЕРХ.',
-    why: 'Мяч должен сначала удариться на ТВОЕЙ половине, потом перелететь.',
+    tip: 'Проведите пальцем вверх.', mouseTip: 'Зажмите ЛКМ, ведите вверх.',
     gesture: [[0.50, 0.80], [0.50, 0.50]], speed: 1.0, dur: 0.15,
     feed: null,
   },
   {
-    id: 'TOPSPIN', title: 'НАКАТ · ТОПСПИН', need: 3,
-    tip: 'Свайп ВВЕРХ в момент, когда кольцо сомкнётся на мяче.',
-    why: 'Вверх = ракетка идёт по касательной вверх: верхнее вращение тянет мяч вниз, в стол.',
+    id: 'TOPSPIN', title: 'ТОПСПИН', need: 3,
+    tip: 'Свайп вверх при замыкании кольца.', mouseTip: 'ЛКМ + вверх при замыкании кольца.',
     gesture: [[0.49, 0.82], [0.525, 0.46]], speed: 1.0, dur: 0.16,
     feed: { kind: 'normal', spin: -95, speed: 6.0 },
     check: (g, s) => s.topspin > 45,
-    failHint: 'Нужно верхнее вращение: свайп строго ВВЕРХ и длиннее.',
+    failHint: 'Длиннее вверх.',
   },
   {
-    id: 'PUSH', title: 'ПОДРЕЗКА · НИЖНЕЕ', need: 2,
-    tip: 'Свайп ВНИЗ — коротко и мягко.',
-    why: 'Вниз = ракетка срезает мяч снизу: нижнее вращение, мяч летит низко и тормозит.',
+    id: 'PUSH', title: 'ПОДРЕЗКА', need: 2,
+    tip: 'Мягкий свайп вниз.', mouseTip: 'ЛКМ + мягкое движение вниз.',
     gesture: [[0.50, 0.52], [0.50, 0.80]], speed: 0.8, dur: 0.20,
     feed: { kind: 'normal', spin: 40, speed: 5.2 },
     check: (g, s) => s.topspin < -30,
-    failHint: 'Нужно нижнее вращение: веди палец ВНИЗ, не вверх.',
+    failHint: 'Ведите вниз.',
   },
   {
     id: 'SIDE', title: 'БОКОВОЕ ВРАЩЕНИЕ', need: 2,
-    tip: 'Свайп ДУГОЙ вбок — палец рисует запятую.',
-    why: 'Кривизна жеста = доворот кисти. Мяч уходит в сторону по дуге Магнуса.',
+    tip: 'Нарисуйте пальцем дугу вбок.', mouseTip: 'ЛКМ + дуга вбок.',
     gesture: [[0.455, 0.82], [0.472, 0.695], [0.517, 0.615], [0.605, 0.588]], speed: 1.1, dur: 0.15,
     feed: { kind: 'normal', spin: -40, speed: 5.6 },
     check: (g, s) => Math.abs(s.sidespin) > 32,
-    failHint: 'Жест должен быть изогнутым и вбок — прямая линия боковое не даёт.',
+    failHint: 'Дугой, не по прямой.',
   },
   {
-    id: 'TIMING', title: 'ТАЙМИНГ · БЫСТРЫЙ МЯЧ', need: 2,
-    tip: 'Мяч придёт быстро. Свайп — только когда кольцо сомкнулось.',
-    why: 'Рано — ракетка уже остановилась и получится вялый блок. Вовремя — удар на полной скорости.',
+    id: 'TIMING', title: 'ТАЙМИНГ', need: 2,
+    tip: 'Кольцо замкнулось — свайп вверх.', mouseTip: 'Кольцо замкнулось — ЛКМ + вверх.',
     gesture: [[0.50, 0.80], [0.515, 0.54]], speed: 1.25, dur: 0.13,
     feed: { kind: 'fast', spin: -110, speed: 10.2 },
     check: () => true,
-    failHint: 'Жди, пока кольцо сомкнётся на мяче, и только потом веди палец.',
+    failHint: 'Дождитесь замыкания кольца.',
   },
   {
     id: 'SMASH', title: 'СМЕШ', need: 2,
-    tip: 'Мяч высоко — очень резкий КОРОТКИЙ свайп вбок-вперёд.',
-    why: 'Мяч выше сетки — бей плоско: максимум скорости, вращение не нужно.',
+    tip: 'Резкий короткий свайп вбок.', mouseTip: 'ЛКМ + резкое движение вбок.',
     gesture: [[0.435, 0.655], [0.600, 0.690]], speed: 1.7, dur: 0.055,
     feed: { kind: 'high', spin: -15, v: [0, 3.6, 3.2], y0: 1.02 },
     check: (g, s) => s.speed > 55,
-    failHint: 'Нужен резкий быстрый жест — смотри на скорость удара.',
+    failHint: 'Быстрее и резче.',
   },
 ];
 
@@ -189,7 +191,7 @@ class Trainer {
     const s = this.lastShot;
     if (!s) return;
     if (!S.check || S.check(this.g, s)) this.pass();
-    else this.fail(S.failHint || 'Почти! Повтори жест точнее.');
+    else this.fail(S.failHint || 'Повторите жест.');
   }
 
   /** called instead of awardPoint while training */
@@ -198,10 +200,10 @@ class Trainer {
     if (who > 0) return;                       // the feeder "lost" the point: ignore
     const S = this.S;
     let r = reason;
-    if (reason === 'АУТ') r = 'Перелёт. Больше вращения или мягче удар.';
-    else if (reason === 'В СЕТКУ') r = 'В сетку. Подними траекторию — свайп длиннее.';
-    else if (reason === 'ВЫ НЕ ДОСТАЛИ МЯЧ') r = 'Не успел. Свайп нужно начать, когда кольцо почти сомкнулось.';
-    else if (reason.indexOf('ПОДАЧ') >= 0) r = 'Подача не прошла: мяч должен коснуться сперва своей половины.';
+    if (reason === 'АУТ') r = 'Аут. Бейте мягче.';
+    else if (reason === 'В СЕТКУ') r = 'Сетка. Ведите длиннее вверх.';
+    else if (reason === 'ВЫ НЕ ДОСТАЛИ МЯЧ' || reason === 'ОЧКО СОПЕРНИКУ') r = 'Бейте при замыкании кольца.';
+    else if (reason.indexOf('ПОДАЧ') >= 0) r = 'Сначала отскок на своей половине.';
     this.fail(r);
   }
 

@@ -692,7 +692,7 @@ class Renderer {
 
   aspect() { return this._w / Math.max(1, this._h); }
 
-  setCamera(eye, target, up, fovDeg, near, far) {
+  setCamera(eye, target, up, fovDeg, near, far, shiftY = 0) {
     const aspect = this._w / this._h;
     // The authored FOV is a VERTICAL one tuned for a 16:9 frame. On narrow
     // or portrait screens a fixed vertical FOV would zoom in brutally, so
@@ -705,6 +705,7 @@ class Renderer {
       vf = Math.min(need, vf * 1.55, 84 * DEG);                // never fish-eye
     }
     M4.perspective(this.proj, vf, aspect, near, far);
+    this.proj[9] = 2 * shiftY;
     M4.lookAt(this.view, eye, target, up);
     M4.mul(this.viewProj, this.proj, this.view);
     this.camPos = eye;
