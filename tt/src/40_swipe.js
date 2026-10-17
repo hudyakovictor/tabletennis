@@ -163,8 +163,8 @@ const ARCH = {
   SERVE_TOP: { elev: 46, contact: 58, speed: 0.80, lat: 0.60, back: false },
   /* 0.75 -> 0.86: with the table's calibrated friction (MU_TABLE 0.40) a
      heavy chop serve brakes hard at the first bounce and used to die 25 cm
-     past the net. Still the slowest of the four serves, but it arrives. */
-  SERVE_BACK: { elev: -40, contact: 72, speed: 0.86, lat: 0.60, back: true },
+     past the net. Tuned for clean returnable depth. */
+  SERVE_BACK: { elev: -34, contact: 64, speed: 0.95, lat: 0.50, back: true },
   SERVE_SIDE: { elev: 10, contact: 62, speed: 0.85, lat: 2.00, back: false },
   /* A fast serve is struck DOWN into the table, not flat: from a contact
    * ~0.5 m above the playing surface a level launch has to crawl at 4 m/s to
@@ -523,7 +523,7 @@ function solveServeStroke(ballP, racket, evalStroke, side, assist) {
   let flights = 0;
   /* Metres past the net a serve's second bounce must reach to be worth
    * playing (the bat's step-in limit is 0.86 m from the centre line). */
-  const SERVE_MIN_PAST_NET = 0.52;
+  const SERVE_MIN_PAST_NET = 0.70;
   const paceCost = (sc) => {
     const l = Math.log(clamp(sc, 0.16, 4.5));
     return l < 0 ? PACE_W * -l : PACE_W_UP * l;

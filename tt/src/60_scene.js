@@ -328,35 +328,18 @@ class Scene {
 
     M4.compose(m('floor'), V3.set(pos, 0, 0, 0), Q.identity(rot), V3.set(scl, 1, 1, 1));
 
-    // surrounding barriers (the classic low advertising boards)
+    // surrounding barriers removed per user request: clear unobstructed arena
     this.barriers = [];
-    const bH = 0.72, bY = bH / 2;
-    const addBarrier = (x, z, w, ry, long) => {
-      const mm = M4.create();
-      M4.compose(mm, V3.set(pos, x, bY, z), Q.setAxisAngle(rot, 0, 1, 0, ry), V3.set(scl, w, bH, 1));
-      this.barriers.push({ m: mm, w, long });
-    };
-    addBarrier(0, -4.3, 7.4, 0, false);
-    addBarrier(0, 4.3, 7.4, Math.PI, false);
-    addBarrier(-3.7, 0, 8.6, Math.PI / 2, true);
-    addBarrier(3.7, 0, 8.6, -Math.PI / 2, true);
 
-    // far wall + ceiling light bars
+    // far wall + ceiling
     this.walls = [];
     for (const [x, z, w, h, ry] of [[0, -11, 30, 10, 0], [0, 11, 30, 10, Math.PI], [-13, 0, 24, 10, Math.PI / 2], [13, 0, 24, 10, -Math.PI / 2]]) {
       const mm = M4.create();
       M4.compose(mm, V3.set(pos, x, h / 2 - 0.5, z), Q.setAxisAngle(rot, 0, 1, 0, ry), V3.set(scl, w, h, 1));
       this.walls.push(mm);
     }
+    // ceiling light bars removed per user request: no overhead clutter
     this.lights = []; this.lightBodies = [];
-    for (const z of [-2.4, -0.8, 0.8, 2.4]) {
-      const mm = M4.create();
-      M4.compose(mm, V3.set(pos, 0, 3.02, z), Q.setAxisAngle(rot, 1, 0, 0, Math.PI / 2), V3.set(scl, 3.4, 0.30, 1));
-      this.lights.push(mm);
-      const bb = M4.create();
-      M4.compose(bb, V3.set(pos, 0, 3.12, z), Q.identity(rot), V3.set(scl, 3.6, 0.17, 0.42));
-      this.lightBodies.push(bb);
-    }
     this.ceiling = M4.create();
     M4.compose(this.ceiling, V3.set(pos, 0, 5.4, 0), Q.setAxisAngle(rot, 1, 0, 0, Math.PI / 2), V3.set(scl, 26, 26, 1));
 
