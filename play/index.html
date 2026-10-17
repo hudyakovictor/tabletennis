@@ -8834,9 +8834,9 @@ class Game {
     if (!hit && serveCtx) {
       // ITTF 2.06: the ball must be struck while FALLING from the toss.
       const rad = V3.dist(b.p, pad.pos);
-      if (b.v.y < 0 && this.tossApex - PH.TABLE_Y > 0.16 && rad <= radius * 1.30) {
+      if (b.v.y < 0 && this.tossApex - PH.TABLE_Y > 0.14 && rad <= radius * 1.50) {
         const sw0 = this.swipe;
-        const live = (sw0.active && sw0.m.samples > 2 && sw0.m.dist > 0.035)
+        const live = (sw0.active && sw0.m.samples >= 2)
           || (sw0.lastReleased && this.time - (this.swipeReleasedAt || -9) < 0.60);
         if (live) hit = { t: 1, x: b.p.x, y: b.p.y, z: b.p.z, rad: rad * 0.55, px: pad.pos.x, py: pad.pos.y, pz: pad.pos.z };
       }
@@ -9417,16 +9417,21 @@ class Game {
     if (this.state === GS.SERVE_READY && this.server === 1) {
       this.pointer = { x: 0.50, y: 0.65 };
       this._demoServeWait = (this._demoServeWait || 0) + dtReal;
-      if (this._demoServeWait > 0.8) {
+      if (this._demoServeWait > 0.6) {
         this._demoServeWait = 0;
         this.startToss();
       }
       return;
     }
 
-    // 2. Striking the toss on the way down
+    // 2. Striking the toss right as it reaches apex and begins falling
     if (this.state === GS.SERVE_TOSS && this.server === 1 && b.lastHitBy === 0) {
-      if (b.v.y < 0 && b.p.y <= PH.TABLE_Y + 0.32) {
+      const sp = this.project(b.p, this._pvDemo || (this._pvDemo = {}));
+      if (sp.ok) {
+        this.pointer = { x: clamp(sp.x, 0.35, 0.65), y: clamp(sp.y, 0.45, 0.75) };
+      }
+      // Start the stroke as soon as apex is crested
+      if ((b.v.y <= 0.15 && this.stateT > 0.16) || b.p.y < (this.tossApex || 1) - 0.02) {
         this.startDemoSwipe('serve');
       }
       return;
@@ -9452,27 +9457,30 @@ class Game {
     const cx = sp.ok ? clamp(sp.x, 0.25, 0.75) : 0.50;
     const cy = sp.ok ? clamp(sp.y, 0.40, 0.80) : 0.65;
 
-    let dx = (Math.random() - 0.5) * 0.08;
-    let dy = -0.22; // default: crisp topspin swipe upward
+    let dx = (Math.random() - 0.5) * 0.04;
+    let dy = -0.25; // default: crisp topspin swipe upward
+    let dur = 0.08;
 
     if (kind === 'serve') {
-      dy = -0.24;
-      dx = (Math.random() - 0.5) * 0.06;
+      dy = -0.28; // fast, solid upward swipe for serve
+      dx = (Math.random() - 0.5) * 0.03;
+      dur = 0.07;
     } else {
+      dur = 0.10 + Math.random() * 0.02;
       const rand = Math.random();
       if (rand < 0.20) {
         // slice / push downward
         dy = 0.14;
-        dx = (Math.random() - 0.5) * 0.06;
+        dx = (Math.random() - 0.5) * 0.04;
       } else if (rand < 0.45) {
         // sidespin curve
         dx = (Math.random() > 0.5 ? 1 : -1) * 0.16;
-        dy = -0.18;
+        dy = -0.20;
       }
     }
 
-    const x0 = clamp(cx - dx * 0.3, 0.15, 0.85);
-    const y0 = clamp(cy - dy * 0.5, 0.25, 0.85);
+    const x0 = clamp(cx, 0.15, 0.85);
+    const y0 = clamp(cy + 0.10, 0.25, 0.85);
     const x1 = clamp(x0 + dx, 0.10, 0.90);
     const y1 = clamp(y0 + dy, 0.15, 0.90);
 
@@ -9482,7 +9490,7 @@ class Game {
     this._demoGesture = {
       x0, y0, x1, y1,
       t: 0,
-      dur: 0.12 + Math.random() * 0.03
+      dur
     };
   }
 
