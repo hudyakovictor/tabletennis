@@ -493,9 +493,10 @@ body.is-reel #hud,body.is-reel #slow{opacity:.0}
     <div id="pauseInd" class="pe">
       <b>ПАУЗА</b>
       <s>нажмите, чтобы продолжить · P</s>
-      <div style="margin-top:14px;display:flex;gap:8px">
+      <div style="margin-top:14px;display:flex;gap:8px;flex-wrap:wrap;justify-content:center">
         <button id="pauseResume" class="tbt" style="pointer-events:auto;padding:7px 16px;font-size:11px">ПРОДОЛЖИТЬ</button>
         <button id="pauseDemo" class="tbt" style="pointer-events:auto;padding:7px 16px;font-size:11px">🤖 ВКЛ АВТОИГРУ</button>
+        <button id="pauseDebugMisses" class="tbt" style="pointer-events:auto;padding:7px 16px;font-size:11px;background:#ff4d6d;border-color:#ff4d6d;color:#fff">🔍 РАЗБОР ПРОМАХОВ</button>
         <button id="pauseToMenu" class="tbt" style="pointer-events:auto;padding:7px 16px;font-size:11px">В МЕНЮ</button>
       </div>
     </div>
@@ -744,6 +745,7 @@ body.is-reel #hud,body.is-reel #slow{opacity:.0}
         <div class="st"><s>Любимый удар</s><b id="stFav">—</b></div>
       </div>
       <div id="overMoments" class="omrow"></div>
+      <button class="btn" id="btnDebugMisses" style="background:linear-gradient(100deg,#ff4d6d,#ff7a2f);margin-top:8px">🔍 РАЗБОР ПРОМАХОВ (SLO-MO)</button>
       <button class="btn" id="again">РЕВАНШ</button>
       <button class="btn ghost" id="backMenu">В МЕНЮ</button>
     </div>
@@ -777,6 +779,33 @@ body.is-reel #hud,body.is-reel #slow{opacity:.0}
       <div class="sub">Игра запоминает только то, что стоит пересматривать</div>
       <div id="momentList" class="mlist"></div>
       <button class="btn ghost" id="reelsClose">ЗАКРЫТЬ</button>
+    </div>
+  </div>
+
+  <!-- ==================== DEBUG MISSES MODAL ===================== -->
+  <div class="screen" id="debugMissesModal" role="dialog" aria-label="Отладка промахов">
+    <div class="card" style="max-width:540px;max-height:85vh;overflow-y:auto">
+      <div class="logo" style="font-size:24px;color:#ff6b81">🔍 ОТЛАДКА ПРОМАХОВ</div>
+      <div class="sub">Записи всех не отбитых мячей для покадрового SLO-MO анализа физики</div>
+      <div id="debugMissList" class="mlist" style="margin-top:14px"></div>
+      <button class="btn ghost" id="debugMissesClose" style="margin-top:12px">ЗАКРЫТЬ</button>
+    </div>
+  </div>
+
+  <!-- ==================== DEBUG REPLAY HUD ====================== -->
+  <div id="debugReplayHud" style="display:none;position:fixed;inset:0;pointer-events:none;z-index:95">
+    <div style="position:absolute;top:18px;left:50%;transform:translateX(-50%);background:rgba(15,20,30,0.92);border:1px solid #ff4d6d;border-radius:12px;padding:10px 18px;text-align:center;backdrop-filter:blur(8px);pointer-events:auto;min-width:320px;max-width:90vw">
+      <div style="font-size:12px;font-weight:900;letter-spacing:0.08em;color:#ff6b81" id="dbgReplayTitle">🔍 ОТЛАДКА ПРОМАХА #1</div>
+      <div style="font-size:13px;font-weight:700;color:#fff;margin:4px 0" id="dbgReplayVerdict">НЕ ДОТЯНУЛСЯ</div>
+      <div style="font-size:11px;font-family:var(--mono);color:#9fd4ff" id="dbgReplayMetrics">Дистанция: 0.35 м · Радиус ракетки: 0.22 м</div>
+    </div>
+    <div style="position:absolute;bottom:24px;left:50%;transform:translateX(-50%);display:flex;gap:8px;background:rgba(15,20,30,0.92);border:1px solid rgba(255,255,255,0.15);border-radius:24px;padding:8px 14px;backdrop-filter:blur(8px);pointer-events:auto;flex-wrap:wrap;justify-content:center">
+      <button class="tbt" id="dbgPrev" style="font-size:11px;padding:6px 12px">⯇ ПРЕДЫДУЩИЙ</button>
+      <button class="tbt" id="dbgRestart" style="font-size:11px;padding:6px 12px">🔁 ЗАНОВО</button>
+      <button class="tbt" id="dbgPause" style="font-size:11px;padding:6px 12px">⏸ ПАУЗА</button>
+      <button class="tbt" id="dbgSpeed" style="font-size:11px;padding:6px 12px">⚡ 0.20×</button>
+      <button class="tbt" id="dbgNext" style="font-size:11px;padding:6px 12px">СЛЕДУЮЩИЙ ⯈</button>
+      <button class="tbt" id="dbgExit" style="font-size:11px;padding:6px 12px;background:#ff4d6d;border-color:#ff4d6d;color:#fff">✕ ВЫЙТИ</button>
     </div>
   </div>
 
@@ -6072,6 +6101,17 @@ class MomentRecorder {
   addContact(t, e) { this.events.push(Object.assign({ t }, e)); }
   addBounce(isNet) { if (isNet) this.netClip = true; }
 
+  /** Capture the current rally's frames for debug replay regardless of beauty score */
+  captureClip(t) {
+    const len = Math.min(this.n, Math.max(25, Math.round((t - this.rallyT) * REPLAY_HZ) + 4));
+    const clip = new Float32Array(len * REPLAY_FLOATS);
+    for (let k = 0; k < len; k++) {
+      const src = ((this.head - len + k) % this.cap + this.cap) % this.cap;
+      clip.set(this.f.subarray(src * REPLAY_FLOATS, src * REPLAY_FLOATS + REPLAY_FLOATS), k * REPLAY_FLOATS);
+    }
+    return { frames: clip, hz: REPLAY_HZ, len };
+  }
+
   /**
    * Cut the rally out of the ring and decide whether it survives.
    * meta = { winner, reason, score, target, serve, tossT }
@@ -8102,6 +8142,9 @@ class Game {
     this.score = [0, 0]; this.games = [0, 0];
     this.rally = 0; this.bestRally = 0;
     this.stats = { shots: 0, winners: 0, errors: 0, maxSpeed: 0, maxSpin: 0, byStroke: {}, totalSpin: 0, rallies: 0 };
+    this.missedRallies = [];
+    this.isDebugReplay = false;
+    this.currentMissIndex = -1;
     this.server = Math.random() < 0.5 ? 1 : -1;
     this.servesLeft = 2;
     this.audio.init(); this.audio.resume();
@@ -8172,6 +8215,7 @@ class Game {
     this.rallyBounces.length = 0;
     this.serveBounces = 0;
     this.isServeBall = true;
+    this._minBallPaddleDist = 99;
     /* Every point begins from the same known state: bat back in the centre,
      * cursor binding re-anchored, no stale intercept from the last rally. */
     this.resetPaddle();
@@ -8237,6 +8281,9 @@ class Game {
 
     this.audio.point(who > 0);
     this.msg(reason, 1.5, who > 0 ? '#6ee7a8' : '#ff8a8a', true);
+    if (who === -1 && !this.training) {
+      this.recordMissedPoint(reason);
+    }
     // the filter: keep this rally only if it is worth watching again
     this.lastMoment = this.moments.endRally(this.time, this, {
       winner: who, reason, score: this.score, target: this.settings.targetScore,
@@ -8549,10 +8596,86 @@ class Game {
 
   endReplay() {
     this.ui && this.ui.replayShow(false);
+    this.ui && this.ui.debugReplayShow && this.ui.debugReplayShow(false);
+    this.isDebugReplay = false;
     this.camFov = undefined;
     if (this.state === GS.REPLAY) this.setState(this.replayFrom || GS.POINT);
     const cb = this.replayAfter; this.replayAfter = null;
     if (cb) cb();
+  }
+
+  recordMissedPoint(reason) {
+    if (!this.missedRallies) this.missedRallies = [];
+    const clipData = this.moments.captureClip(this.time);
+    const b = this.ball, pad = this.player;
+    const curDist = V3.dist(b.p, pad.pos);
+    const minDist = Math.min(this._minBallPaddleDist !== undefined ? this._minBallPaddleDist : 99, curDist);
+    const rad = pad.hitRadius || 0.22;
+    const hadSwipe = (this.time - (this.swipeReleasedAt || -99)) < 0.85 || (this.swipe && this.swipe.active);
+    const strokeName = this.liveStroke ? (this.liveStroke.stroke.short || this.liveStroke.stroke.name)
+      : (this.swipe.lastReleased ? 'СВАЙП' : 'НЕТ СВАЙПА');
+
+    let verdict = '';
+    let isReachIssue = false;
+    if (!hadSwipe) {
+      verdict = 'Свайп не был выполнен (пропуск мяча)';
+    } else if (minDist > rad * 1.45) {
+      verdict = `Не дотянулся: мяч в ${minDist.toFixed(2)} м (радиус ракетки ${rad.toFixed(2)} м)`;
+      isReachIssue = true;
+    } else if (reason === 'В СЕТКУ') {
+      verdict = 'Удар выполнен, но мяч попал в сетку (слишком низкая дуга)';
+    } else if (reason === 'АУТ') {
+      verdict = 'Удар выполнен, но мяч улетел в аут (слишком сильный удар/высокая дуга)';
+    } else if (reason === 'МЯЧ НЕ ПЕРЕЛЕТЕЛ') {
+      verdict = 'Касание было, но мяч сорвался с ракетки';
+    } else {
+      verdict = `${reason} (дистанция до мяча ${minDist.toFixed(2)} м)`;
+    }
+
+    const miss = {
+      id: this.missedRallies.length + 1,
+      time: this.time,
+      score: [this.score[0], this.score[1]],
+      reason,
+      verdict,
+      isReachIssue,
+      shots: this.rally,
+      minDist,
+      hitRadius: rad,
+      hadSwipe,
+      strokeName,
+      frames: clipData.frames,
+      hz: clipData.hz,
+      ballP: { x: b.p.x, y: b.p.y, z: b.p.z },
+      paddleP: { x: pad.pos.x, y: pad.pos.y, z: pad.pos.z }
+    };
+    this.missedRallies.push(miss);
+    if (this.missedRallies.length > 50) this.missedRallies.shift();
+  }
+
+  watchMiss(index, speed = 0.20) {
+    if (!this.missedRallies || !this.missedRallies[index]) return false;
+    const miss = this.missedRallies[index];
+    this.currentMissIndex = index;
+    this.isDebugReplay = true;
+    this.setSlowmoHold(false);
+    this.ball.live = true;
+
+    // Use MomentPlayer to replay the miss clip at ultra slowmo
+    this.replayer.play(miss, speed, () => {
+      // Loop replay smoothly so player can inspect
+      if (this.replayer && this.isDebugReplay) {
+        this.replayer.i = 0;
+        this.replayer.hold = 0;
+        this.replayer.on = true;
+      }
+    });
+
+    const back = this.state;
+    this.replayFrom = back === GS.MATCH_END ? GS.MATCH_END : (this.paused ? GS.SERVE_READY : GS.POINT);
+    this.setState(GS.REPLAY);
+    this.ui && this.ui.debugReplayShow && this.ui.debugReplayShow(true, miss, index, this.missedRallies.length);
+    return true;
   }
 
   /** Everything that has to be written down when the last point lands. */
@@ -9586,8 +9709,8 @@ class Game {
       d(me.ball, tmp.m, ma.ball);
     }
 
-    /* player paddle (hidden per user request: "ракетку скрой") */
-    if (this.settings.showPlayerPaddle) {
+    /* player paddle (hidden per user request: "ракетку скрой", but visible in debug replay!) */
+    if (this.settings.showPlayerPaddle || this.isDebugReplay) {
       const pad = this.player;
       const PM = this.paddleMats(S) || ma;
       const pq = Q.lookRotation(Q.new(), pad.normal, { x: 0, y: 1, z: 0 });
@@ -9660,7 +9783,7 @@ class Game {
       if (onTable(b.p.x, b.p.z) && b.p.y > TY - 0.02) S.blob(R, b.p.x, b.p.y, b.p.z, TY, 0.055, 0.62, 1);
       else S.blob(R, b.p.x, b.p.y, b.p.z, 0, 0.075, 0.40, 1);
     }
-    if (this.settings.showPlayerPaddle) {
+    if (this.settings.showPlayerPaddle || this.isDebugReplay) {
       const pp = this.player.pos;
       if (onTable(pp.x, pp.z)) S.blob(R, pp.x, pp.y, pp.z, TY, 0.115, 0.42, 1.25);
       else S.blob(R, pp.x, pp.y, pp.z, 0, 0.16, 0.26, 1.25);
@@ -9926,6 +10049,61 @@ class UI {
       this.game.demoMode = false;
       this.game.msg('УПРАВЛЕНИЕ ВОЗВРАЩЕНО ИГРОКУ', 2.0, '#7fd4ff');
     });
+    const bDbgMisses = $('#btnDebugMisses');
+    if (bDbgMisses) bDbgMisses.addEventListener('click', () => this.showDebugMissesList());
+    const pDbgMisses = $('#pauseDebugMisses');
+    if (pDbgMisses) pDbgMisses.addEventListener('click', (e) => {
+      e.stopPropagation();
+      this.showDebugMissesList();
+    });
+    const bDbgClose = $('#debugMissesClose');
+    if (bDbgClose) bDbgClose.addEventListener('click', () => $('#debugMissesModal').classList.remove('on'));
+
+    // Debug replay HUD controls
+    const dbgPrev = $('#dbgPrev');
+    if (dbgPrev) dbgPrev.addEventListener('click', () => {
+      const g = this.game;
+      if (g && g.missedRallies && g.missedRallies.length) {
+        g.watchMiss(Math.max(0, (g.currentMissIndex || 0) - 1));
+      }
+    });
+    const dbgNext = $('#dbgNext');
+    if (dbgNext) dbgNext.addEventListener('click', () => {
+      const g = this.game;
+      if (g && g.missedRallies && g.missedRallies.length) {
+        g.watchMiss(Math.min(g.missedRallies.length - 1, (g.currentMissIndex || 0) + 1));
+      }
+    });
+    const dbgRestart = $('#dbgRestart');
+    if (dbgRestart) dbgRestart.addEventListener('click', () => {
+      const g = this.game;
+      if (g && g.replayer) { g.replayer.i = 0; g.replayer.hold = 0; g.replayer.on = true; }
+    });
+    const dbgPause = $('#dbgPause');
+    let dbgPaused = false;
+    if (dbgPause) dbgPause.addEventListener('click', () => {
+      const g = this.game;
+      if (!g || !g.replayer) return;
+      dbgPaused = !dbgPaused;
+      if (dbgPaused) { g._savedReplaySpeed = g.replayer.speed; g.replayer.speed = 0.0001; dbgPause.textContent = '▶ ПУСК'; }
+      else { g.replayer.speed = g._savedReplaySpeed || 0.20; dbgPause.textContent = '⏸ ПАУЗА'; }
+    });
+    const dbgSpeed = $('#dbgSpeed');
+    const speeds = [0.15, 0.25, 0.40];
+    let spIdx = 0;
+    if (dbgSpeed) dbgSpeed.addEventListener('click', () => {
+      const g = this.game;
+      spIdx = (spIdx + 1) % speeds.length;
+      const sp = speeds[spIdx];
+      if (g && g.replayer) g.replayer.speed = sp;
+      dbgSpeed.textContent = `⚡ ${sp.toFixed(2)}×`;
+    });
+    const dbgExit = $('#dbgExit');
+    if (dbgExit) dbgExit.addEventListener('click', () => {
+      const g = this.game;
+      if (g) g.endReplay();
+      this.showDebugMissesList();
+    });
     const pResume = $('#pauseResume'), pMenu = $('#pauseToMenu');
     if (pResume) pResume.addEventListener('click', (e) => { e.stopPropagation(); this.game.setPaused(false); });
     if (pMenu) pMenu.addEventListener('click', (e) => {
@@ -10034,6 +10212,44 @@ class UI {
       g.watchMoment(g.moments.kept[+b.dataset.i], true);
     }));
     $('#reels').classList.add('on');
+  }
+
+  debugReplayShow(on, miss, index, total) {
+    const hud = $('#debugReplayHud');
+    if (!hud) return;
+    hud.style.display = on ? 'block' : 'none';
+    if (!on || !miss) return;
+    const tEl = $('#dbgReplayTitle'), vEl = $('#dbgReplayVerdict'), mEl = $('#dbgReplayMetrics');
+    if (tEl) tEl.textContent = `🔍 ОТЛАДКА ПРОМАХА #${(index || 0) + 1} ИЗ ${total || 1}`;
+    if (vEl) vEl.textContent = miss.verdict || miss.reason;
+    if (mEl) mEl.textContent = `Дистанция: ${(miss.minDist || 0).toFixed(2)} м (радиус: ${(miss.hitRadius || 0.22).toFixed(2)} м) · Свайп: ${miss.strokeName || 'НЕТ'} · Счёт: ${miss.score ? miss.score.join(':') : '0:0'}`;
+  }
+
+  showDebugMissesList() {
+    const g = this.game; if (!g) return;
+    const list = $('#debugMissList');
+    if (!list) return;
+    const misses = g.missedRallies || [];
+    if (!misses.length) {
+      list.innerHTML = `<div style="padding:24px;text-align:center;color:var(--dim);font-size:13px">В этом матче пока нет не отбитых мячей.<br>Сыграйте несколько очков против бота, и здесь появятся все ваши промахи для замедленного разбора.</div>`;
+    } else {
+      list.innerHTML = misses.map((m, i) => {
+        const col = m.isReachIssue ? '#ff4d6d' : '#39c6ff';
+        return `<button class="mrow" data-miss="${i}" style="border-left:3px solid ${col};margin-bottom:8px">
+          <span class="num">${i + 1}</span>
+          <span class="d">
+            <b style="color:#fff">${m.reason} · Счёт ${m.score[0]}:${m.score[1]}</b>
+            <s style="color:${col}">${m.verdict}</s>
+          </span>
+          <span class="go" style="color:#39c6ff;font-weight:800">0.20× SLO-MO \u203a</span>
+        </button>`;
+      }).join('');
+      Array.from(list.querySelectorAll('.mrow')).forEach((b) => b.addEventListener('click', () => {
+        $('#debugMissesModal').classList.remove('on');
+        g.watchMiss(+b.dataset.miss, 0.20);
+      }));
+    }
+    $('#debugMissesModal').classList.add('on');
   }
 
   /* --------------------- workshop · shop · daily ------------------- */
@@ -10579,37 +10795,23 @@ class UI {
     }
     if (!play || !this.hasFinePointer || !g.pointer) return;
 
+    // Only ONE unified, clean reticle directly under the pointer
     const hx = g.pointer.x * W, hy = g.pointer.y * H;
-    const pp = g.project(g.player.pos, this._pv2);
-
-    if (pp.ok) {
-      const bx = pp.x * W, by = pp.y * H;
-      c.save();
-      c.setLineDash([4 * d, 6 * d]);
-      c.strokeStyle = 'rgba(160,210,255,.40)';
-      c.lineWidth = 1.3 * d;
-      c.beginPath(); c.moveTo(hx, hy); c.lineTo(bx, by); c.stroke();
-      c.setLineDash([]);
-      c.globalAlpha = 0.9;
-      c.strokeStyle = 'rgba(255,180,90,.92)';
-      c.lineWidth = 2 * d;
-      c.beginPath(); c.arc(bx, by, 12 * d, 0, TAU); c.stroke();
-      c.beginPath();
-      c.moveTo(bx - 19 * d, by); c.lineTo(bx - 13 * d, by);
-      c.moveTo(bx + 13 * d, by); c.lineTo(bx + 19 * d, by);
-      c.moveTo(bx, by - 19 * d); c.lineTo(bx, by - 13 * d);
-      c.moveTo(bx, by + 13 * d); c.lineTo(bx, by + 19 * d);
-      c.stroke();
-      c.restore();
-    }
 
     c.save();
-    c.globalAlpha = 0.85;
+    c.globalAlpha = 0.90;
     c.strokeStyle = 'rgba(57,198,255,.95)';
     c.lineWidth = 2 * d;
-    c.beginPath(); c.arc(hx, hy, 9 * d, 0, TAU); c.stroke();
-    c.globalAlpha = 0.45;
-    c.beginPath(); c.arc(hx, hy, 16 * d, 0, TAU); c.stroke();
+    c.beginPath(); c.arc(hx, hy, 11 * d, 0, TAU); c.stroke();
+    // Subtle crosshair ticks on the single reticle
+    c.beginPath();
+    c.moveTo(hx - 16 * d, hy); c.lineTo(hx - 12 * d, hy);
+    c.moveTo(hx + 12 * d, hy); c.lineTo(hx + 16 * d, hy);
+    c.moveTo(hx, hy - 16 * d); c.lineTo(hx, hy - 12 * d);
+    c.moveTo(hx, hy + 12 * d); c.lineTo(hx, hy + 16 * d);
+    c.stroke();
+    c.globalAlpha = 0.35;
+    c.beginPath(); c.arc(hx, hy, 18 * d, 0, TAU); c.stroke();
     c.globalAlpha = 1; c.fillStyle = 'rgba(57,198,255,.95)';
     c.beginPath(); c.arc(hx, hy, 2.5 * d, 0, TAU); c.fill();
     c.restore();
@@ -10623,6 +10825,51 @@ class UI {
 
     this.drawStrikeRing(c, W, H, d);
     this.drawHand(c, W, H, d);
+
+    // Debug replay analysis: reach indicator & distance between paddle and ball
+    if (g.isDebugReplay && g.replayer && g.replayer.on) {
+      const pBall = g.project(g.ball.p, this._pvDbgB || (this._pvDbgB = {}));
+      const pPad = g.project(g.player.pos, this._pvDbgP || (this._pvDbgP = {}));
+      if (pPad.ok && pBall.ok) {
+        const bx = pBall.x * W, by = pBall.y * H;
+        const px = pPad.x * W, py = pPad.y * H;
+        const dist3d = V3.dist(g.ball.p, g.player.pos);
+        const hitRad = (g.player.hitRadius || 0.22) * 1.45;
+        const inReach = dist3d <= hitRad;
+        const col = inReach ? '#4ee39a' : '#ff4d6d';
+
+        c.save();
+        // 1. Paddle reach ring
+        c.strokeStyle = col;
+        c.lineWidth = 2 * d;
+        c.setLineDash([5 * d, 5 * d]);
+        c.beginPath();
+        c.arc(px, py, 32 * d, 0, TAU);
+        c.stroke();
+        c.setLineDash([]);
+
+        // 2. Connecting line
+        c.strokeStyle = col;
+        c.lineWidth = 1.8 * d;
+        c.beginPath();
+        c.moveTo(bx, by);
+        c.lineTo(px, py);
+        c.stroke();
+
+        // 3. Floating distance badge
+        const midX = (bx + px) * 0.5, midY = (by + py) * 0.5 - 14 * d;
+        c.font = `800 ${11.5 * d}px ${CSSFONT}`;
+        c.textAlign = 'center';
+        c.fillStyle = '#0a101d';
+        c.fillRect(midX - 36 * d, midY - 10 * d, 72 * d, 18 * d);
+        c.strokeStyle = col;
+        c.lineWidth = 1.5 * d;
+        c.strokeRect(midX - 36 * d, midY - 10 * d, 72 * d, 18 * d);
+        c.fillStyle = col;
+        c.fillText(`${dist3d.toFixed(2)} м`, midX, midY + 4 * d);
+        c.restore();
+      }
+    }
 
     // coach's ghost gesture, only while the drill is waiting for you
     const tr = g.training;

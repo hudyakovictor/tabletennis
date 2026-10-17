@@ -357,6 +357,9 @@ class Game {
     this.score = [0, 0]; this.games = [0, 0];
     this.rally = 0; this.bestRally = 0;
     this.stats = { shots: 0, winners: 0, errors: 0, maxSpeed: 0, maxSpin: 0, byStroke: {}, totalSpin: 0, rallies: 0 };
+    this.missedRallies = [];
+    this.isDebugReplay = false;
+    this.currentMissIndex = -1;
     this.server = Math.random() < 0.5 ? 1 : -1;
     this.servesLeft = 2;
     this.audio.init(); this.audio.resume();
@@ -427,6 +430,7 @@ class Game {
     this.rallyBounces.length = 0;
     this.serveBounces = 0;
     this.isServeBall = true;
+    this._minBallPaddleDist = 99;
     /* Every point begins from the same known state: bat back in the centre,
      * cursor binding re-anchored, no stale intercept from the last rally. */
     this.resetPaddle();
@@ -492,6 +496,9 @@ class Game {
 
     this.audio.point(who > 0);
     this.msg(reason, 1.5, who > 0 ? '#6ee7a8' : '#ff8a8a', true);
+    if (who === -1 && !this.training) {
+      this.recordMissedPoint(reason);
+    }
     // the filter: keep this rally only if it is worth watching again
     this.lastMoment = this.moments.endRally(this.time, this, {
       winner: who, reason, score: this.score, target: this.settings.targetScore,
@@ -804,10 +811,86 @@ class Game {
 
   endReplay() {
     this.ui && this.ui.replayShow(false);
+    this.ui && this.ui.debugReplayShow && this.ui.debugReplayShow(false);
+    this.isDebugReplay = false;
     this.camFov = undefined;
     if (this.state === GS.REPLAY) this.setState(this.replayFrom || GS.POINT);
     const cb = this.replayAfter; this.replayAfter = null;
     if (cb) cb();
+  }
+
+  recordMissedPoint(reason) {
+    if (!this.missedRallies) this.missedRallies = [];
+    const clipData = this.moments.captureClip(this.time);
+    const b = this.ball, pad = this.player;
+    const curDist = V3.dist(b.p, pad.pos);
+    const minDist = Math.min(this._minBallPaddleDist !== undefined ? this._minBallPaddleDist : 99, curDist);
+    const rad = pad.hitRadius || 0.22;
+    const hadSwipe = (this.time - (this.swipeReleasedAt || -99)) < 0.85 || (this.swipe && this.swipe.active);
+    const strokeName = this.liveStroke ? (this.liveStroke.stroke.short || this.liveStroke.stroke.name)
+      : (this.swipe.lastReleased ? 'СВАЙП' : 'НЕТ СВАЙПА');
+
+    let verdict = '';
+    let isReachIssue = false;
+    if (!hadSwipe) {
+      verdict = 'Свайп не был выполнен (пропуск мяча)';
+    } else if (minDist > rad * 1.45) {
+      verdict = `Не дотянулся: мяч в ${minDist.toFixed(2)} м (радиус ракетки ${rad.toFixed(2)} м)`;
+      isReachIssue = true;
+    } else if (reason === 'В СЕТКУ') {
+      verdict = 'Удар выполнен, но мяч попал в сетку (слишком низкая дуга)';
+    } else if (reason === 'АУТ') {
+      verdict = 'Удар выполнен, но мяч улетел в аут (слишком сильный удар/высокая дуга)';
+    } else if (reason === 'МЯЧ НЕ ПЕРЕЛЕТЕЛ') {
+      verdict = 'Касание было, но мяч сорвался с ракетки';
+    } else {
+      verdict = `${reason} (дистанция до мяча ${minDist.toFixed(2)} м)`;
+    }
+
+    const miss = {
+      id: this.missedRallies.length + 1,
+      time: this.time,
+      score: [this.score[0], this.score[1]],
+      reason,
+      verdict,
+      isReachIssue,
+      shots: this.rally,
+      minDist,
+      hitRadius: rad,
+      hadSwipe,
+      strokeName,
+      frames: clipData.frames,
+      hz: clipData.hz,
+      ballP: { x: b.p.x, y: b.p.y, z: b.p.z },
+      paddleP: { x: pad.pos.x, y: pad.pos.y, z: pad.pos.z }
+    };
+    this.missedRallies.push(miss);
+    if (this.missedRallies.length > 50) this.missedRallies.shift();
+  }
+
+  watchMiss(index, speed = 0.20) {
+    if (!this.missedRallies || !this.missedRallies[index]) return false;
+    const miss = this.missedRallies[index];
+    this.currentMissIndex = index;
+    this.isDebugReplay = true;
+    this.setSlowmoHold(false);
+    this.ball.live = true;
+
+    // Use MomentPlayer to replay the miss clip at ultra slowmo
+    this.replayer.play(miss, speed, () => {
+      // Loop replay smoothly so player can inspect
+      if (this.replayer && this.isDebugReplay) {
+        this.replayer.i = 0;
+        this.replayer.hold = 0;
+        this.replayer.on = true;
+      }
+    });
+
+    const back = this.state;
+    this.replayFrom = back === GS.MATCH_END ? GS.MATCH_END : (this.paused ? GS.SERVE_READY : GS.POINT);
+    this.setState(GS.REPLAY);
+    this.ui && this.ui.debugReplayShow && this.ui.debugReplayShow(true, miss, index, this.missedRallies.length);
+    return true;
   }
 
   /** Everything that has to be written down when the last point lands. */
@@ -1841,8 +1924,8 @@ class Game {
       d(me.ball, tmp.m, ma.ball);
     }
 
-    /* player paddle (hidden per user request: "ракетку скрой") */
-    if (this.settings.showPlayerPaddle) {
+    /* player paddle (hidden per user request: "ракетку скрой", but visible in debug replay!) */
+    if (this.settings.showPlayerPaddle || this.isDebugReplay) {
       const pad = this.player;
       const PM = this.paddleMats(S) || ma;
       const pq = Q.lookRotation(Q.new(), pad.normal, { x: 0, y: 1, z: 0 });
@@ -1915,7 +1998,7 @@ class Game {
       if (onTable(b.p.x, b.p.z) && b.p.y > TY - 0.02) S.blob(R, b.p.x, b.p.y, b.p.z, TY, 0.055, 0.62, 1);
       else S.blob(R, b.p.x, b.p.y, b.p.z, 0, 0.075, 0.40, 1);
     }
-    if (this.settings.showPlayerPaddle) {
+    if (this.settings.showPlayerPaddle || this.isDebugReplay) {
       const pp = this.player.pos;
       if (onTable(pp.x, pp.z)) S.blob(R, pp.x, pp.y, pp.z, TY, 0.115, 0.42, 1.25);
       else S.blob(R, pp.x, pp.y, pp.z, 0, 0.16, 0.26, 1.25);

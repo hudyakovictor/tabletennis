@@ -136,6 +136,61 @@ class UI {
       this.game.demoMode = false;
       this.game.msg('УПРАВЛЕНИЕ ВОЗВРАЩЕНО ИГРОКУ', 2.0, '#7fd4ff');
     });
+    const bDbgMisses = $('#btnDebugMisses');
+    if (bDbgMisses) bDbgMisses.addEventListener('click', () => this.showDebugMissesList());
+    const pDbgMisses = $('#pauseDebugMisses');
+    if (pDbgMisses) pDbgMisses.addEventListener('click', (e) => {
+      e.stopPropagation();
+      this.showDebugMissesList();
+    });
+    const bDbgClose = $('#debugMissesClose');
+    if (bDbgClose) bDbgClose.addEventListener('click', () => $('#debugMissesModal').classList.remove('on'));
+
+    // Debug replay HUD controls
+    const dbgPrev = $('#dbgPrev');
+    if (dbgPrev) dbgPrev.addEventListener('click', () => {
+      const g = this.game;
+      if (g && g.missedRallies && g.missedRallies.length) {
+        g.watchMiss(Math.max(0, (g.currentMissIndex || 0) - 1));
+      }
+    });
+    const dbgNext = $('#dbgNext');
+    if (dbgNext) dbgNext.addEventListener('click', () => {
+      const g = this.game;
+      if (g && g.missedRallies && g.missedRallies.length) {
+        g.watchMiss(Math.min(g.missedRallies.length - 1, (g.currentMissIndex || 0) + 1));
+      }
+    });
+    const dbgRestart = $('#dbgRestart');
+    if (dbgRestart) dbgRestart.addEventListener('click', () => {
+      const g = this.game;
+      if (g && g.replayer) { g.replayer.i = 0; g.replayer.hold = 0; g.replayer.on = true; }
+    });
+    const dbgPause = $('#dbgPause');
+    let dbgPaused = false;
+    if (dbgPause) dbgPause.addEventListener('click', () => {
+      const g = this.game;
+      if (!g || !g.replayer) return;
+      dbgPaused = !dbgPaused;
+      if (dbgPaused) { g._savedReplaySpeed = g.replayer.speed; g.replayer.speed = 0.0001; dbgPause.textContent = '▶ ПУСК'; }
+      else { g.replayer.speed = g._savedReplaySpeed || 0.20; dbgPause.textContent = '⏸ ПАУЗА'; }
+    });
+    const dbgSpeed = $('#dbgSpeed');
+    const speeds = [0.15, 0.25, 0.40];
+    let spIdx = 0;
+    if (dbgSpeed) dbgSpeed.addEventListener('click', () => {
+      const g = this.game;
+      spIdx = (spIdx + 1) % speeds.length;
+      const sp = speeds[spIdx];
+      if (g && g.replayer) g.replayer.speed = sp;
+      dbgSpeed.textContent = `⚡ ${sp.toFixed(2)}×`;
+    });
+    const dbgExit = $('#dbgExit');
+    if (dbgExit) dbgExit.addEventListener('click', () => {
+      const g = this.game;
+      if (g) g.endReplay();
+      this.showDebugMissesList();
+    });
     const pResume = $('#pauseResume'), pMenu = $('#pauseToMenu');
     if (pResume) pResume.addEventListener('click', (e) => { e.stopPropagation(); this.game.setPaused(false); });
     if (pMenu) pMenu.addEventListener('click', (e) => {
@@ -244,6 +299,44 @@ class UI {
       g.watchMoment(g.moments.kept[+b.dataset.i], true);
     }));
     $('#reels').classList.add('on');
+  }
+
+  debugReplayShow(on, miss, index, total) {
+    const hud = $('#debugReplayHud');
+    if (!hud) return;
+    hud.style.display = on ? 'block' : 'none';
+    if (!on || !miss) return;
+    const tEl = $('#dbgReplayTitle'), vEl = $('#dbgReplayVerdict'), mEl = $('#dbgReplayMetrics');
+    if (tEl) tEl.textContent = `🔍 ОТЛАДКА ПРОМАХА #${(index || 0) + 1} ИЗ ${total || 1}`;
+    if (vEl) vEl.textContent = miss.verdict || miss.reason;
+    if (mEl) mEl.textContent = `Дистанция: ${(miss.minDist || 0).toFixed(2)} м (радиус: ${(miss.hitRadius || 0.22).toFixed(2)} м) · Свайп: ${miss.strokeName || 'НЕТ'} · Счёт: ${miss.score ? miss.score.join(':') : '0:0'}`;
+  }
+
+  showDebugMissesList() {
+    const g = this.game; if (!g) return;
+    const list = $('#debugMissList');
+    if (!list) return;
+    const misses = g.missedRallies || [];
+    if (!misses.length) {
+      list.innerHTML = `<div style="padding:24px;text-align:center;color:var(--dim);font-size:13px">В этом матче пока нет не отбитых мячей.<br>Сыграйте несколько очков против бота, и здесь появятся все ваши промахи для замедленного разбора.</div>`;
+    } else {
+      list.innerHTML = misses.map((m, i) => {
+        const col = m.isReachIssue ? '#ff4d6d' : '#39c6ff';
+        return `<button class="mrow" data-miss="${i}" style="border-left:3px solid ${col};margin-bottom:8px">
+          <span class="num">${i + 1}</span>
+          <span class="d">
+            <b style="color:#fff">${m.reason} · Счёт ${m.score[0]}:${m.score[1]}</b>
+            <s style="color:${col}">${m.verdict}</s>
+          </span>
+          <span class="go" style="color:#39c6ff;font-weight:800">0.20× SLO-MO \u203a</span>
+        </button>`;
+      }).join('');
+      Array.from(list.querySelectorAll('.mrow')).forEach((b) => b.addEventListener('click', () => {
+        $('#debugMissesModal').classList.remove('on');
+        g.watchMiss(+b.dataset.miss, 0.20);
+      }));
+    }
+    $('#debugMissesModal').classList.add('on');
   }
 
   /* --------------------- workshop · shop · daily ------------------- */
@@ -789,37 +882,23 @@ class UI {
     }
     if (!play || !this.hasFinePointer || !g.pointer) return;
 
+    // Only ONE unified, clean reticle directly under the pointer
     const hx = g.pointer.x * W, hy = g.pointer.y * H;
-    const pp = g.project(g.player.pos, this._pv2);
-
-    if (pp.ok) {
-      const bx = pp.x * W, by = pp.y * H;
-      c.save();
-      c.setLineDash([4 * d, 6 * d]);
-      c.strokeStyle = 'rgba(160,210,255,.40)';
-      c.lineWidth = 1.3 * d;
-      c.beginPath(); c.moveTo(hx, hy); c.lineTo(bx, by); c.stroke();
-      c.setLineDash([]);
-      c.globalAlpha = 0.9;
-      c.strokeStyle = 'rgba(255,180,90,.92)';
-      c.lineWidth = 2 * d;
-      c.beginPath(); c.arc(bx, by, 12 * d, 0, TAU); c.stroke();
-      c.beginPath();
-      c.moveTo(bx - 19 * d, by); c.lineTo(bx - 13 * d, by);
-      c.moveTo(bx + 13 * d, by); c.lineTo(bx + 19 * d, by);
-      c.moveTo(bx, by - 19 * d); c.lineTo(bx, by - 13 * d);
-      c.moveTo(bx, by + 13 * d); c.lineTo(bx, by + 19 * d);
-      c.stroke();
-      c.restore();
-    }
 
     c.save();
-    c.globalAlpha = 0.85;
+    c.globalAlpha = 0.90;
     c.strokeStyle = 'rgba(57,198,255,.95)';
     c.lineWidth = 2 * d;
-    c.beginPath(); c.arc(hx, hy, 9 * d, 0, TAU); c.stroke();
-    c.globalAlpha = 0.45;
-    c.beginPath(); c.arc(hx, hy, 16 * d, 0, TAU); c.stroke();
+    c.beginPath(); c.arc(hx, hy, 11 * d, 0, TAU); c.stroke();
+    // Subtle crosshair ticks on the single reticle
+    c.beginPath();
+    c.moveTo(hx - 16 * d, hy); c.lineTo(hx - 12 * d, hy);
+    c.moveTo(hx + 12 * d, hy); c.lineTo(hx + 16 * d, hy);
+    c.moveTo(hx, hy - 16 * d); c.lineTo(hx, hy - 12 * d);
+    c.moveTo(hx, hy + 12 * d); c.lineTo(hx, hy + 16 * d);
+    c.stroke();
+    c.globalAlpha = 0.35;
+    c.beginPath(); c.arc(hx, hy, 18 * d, 0, TAU); c.stroke();
     c.globalAlpha = 1; c.fillStyle = 'rgba(57,198,255,.95)';
     c.beginPath(); c.arc(hx, hy, 2.5 * d, 0, TAU); c.fill();
     c.restore();
@@ -833,6 +912,51 @@ class UI {
 
     this.drawStrikeRing(c, W, H, d);
     this.drawHand(c, W, H, d);
+
+    // Debug replay analysis: reach indicator & distance between paddle and ball
+    if (g.isDebugReplay && g.replayer && g.replayer.on) {
+      const pBall = g.project(g.ball.p, this._pvDbgB || (this._pvDbgB = {}));
+      const pPad = g.project(g.player.pos, this._pvDbgP || (this._pvDbgP = {}));
+      if (pPad.ok && pBall.ok) {
+        const bx = pBall.x * W, by = pBall.y * H;
+        const px = pPad.x * W, py = pPad.y * H;
+        const dist3d = V3.dist(g.ball.p, g.player.pos);
+        const hitRad = (g.player.hitRadius || 0.22) * 1.45;
+        const inReach = dist3d <= hitRad;
+        const col = inReach ? '#4ee39a' : '#ff4d6d';
+
+        c.save();
+        // 1. Paddle reach ring
+        c.strokeStyle = col;
+        c.lineWidth = 2 * d;
+        c.setLineDash([5 * d, 5 * d]);
+        c.beginPath();
+        c.arc(px, py, 32 * d, 0, TAU);
+        c.stroke();
+        c.setLineDash([]);
+
+        // 2. Connecting line
+        c.strokeStyle = col;
+        c.lineWidth = 1.8 * d;
+        c.beginPath();
+        c.moveTo(bx, by);
+        c.lineTo(px, py);
+        c.stroke();
+
+        // 3. Floating distance badge
+        const midX = (bx + px) * 0.5, midY = (by + py) * 0.5 - 14 * d;
+        c.font = `800 ${11.5 * d}px ${CSSFONT}`;
+        c.textAlign = 'center';
+        c.fillStyle = '#0a101d';
+        c.fillRect(midX - 36 * d, midY - 10 * d, 72 * d, 18 * d);
+        c.strokeStyle = col;
+        c.lineWidth = 1.5 * d;
+        c.strokeRect(midX - 36 * d, midY - 10 * d, 72 * d, 18 * d);
+        c.fillStyle = col;
+        c.fillText(`${dist3d.toFixed(2)} м`, midX, midY + 4 * d);
+        c.restore();
+      }
+    }
 
     // coach's ghost gesture, only while the drill is waiting for you
     const tr = g.training;
