@@ -37,11 +37,6 @@
     <div id="dbg"></div>
 
     <div id="topright">
-      <!-- spin dial: how much of the contact is brush and how much is punch -->
-      <button id="spinBias" class="pe" title="Вращение" aria-label="Регулятор вращения, нажмите для переключения">
-        <b>СПИН</b>
-        <s id="spinBiasVal">НОРМА</s>
-      </button>
       <!-- slow-mo: hold to slow the world down (never in tournaments/PvP) -->
       <button id="slow" class="pe" title="Замедление" aria-label="Замедление времени, удерживайте">
         <i id="slowFill"></i>
@@ -157,81 +152,31 @@
 
   <!-- ========================== SETTINGS ========================== -->
   <div class="screen" id="settings" role="dialog" aria-label="Настройки">
-    <div class="card">
-      <div class="logo" style="font-size:26px">НАСТРОЙКИ</div>
-      <!-- Four authored rigs and nothing else. Free orbit/pinch/wheel was
-           removed on purpose: the table has to sit level and square in every
-           frame, and hand-tuning that with a mouse takes minutes. Each rig is
-           fitted offline for 8 aspect ratios, so it is already correct. -->
-      <h3 class="sec">Камера <span class="hintk">клавиши 1–4 · 0 — сброс · свободное вращение отключено</span></h3>
-      <div class="row">
-        <button class="opt sel" data-set="cam" data-val="BROADCAST"><b>1 · ТВ</b><s>трансляция, стол ровно</s></button>
-        <button class="opt" data-set="cam" data-val="DYNAMIC"><b>2 · ДИНАМИКА</b><s>чуть ближе к мячу</s></button>
-        <button class="opt" data-set="cam" data-val="LOW"><b>3 · НИЗКАЯ</b><s>от стола, видно вращение</s></button>
-        <button class="opt" data-set="cam" data-val="SIDE"><b>4 · СБОКУ</b><s>разбор техники</s></button>
-      </div>
-      <h3 class="sec">Графика</h3>
-      <div class="row">
-        <button class="opt" data-set="quality" data-val="low"><b>НИЗКАЯ</b><s>макс. FPS</s></button>
-        <button class="opt" data-set="quality" data-val="medium"><b>СРЕДНЯЯ</b><s>баланс</s></button>
-        <button class="opt sel" data-set="quality" data-val="high"><b>ВЫСОКАЯ</b><s>всё включено</s></button>
-      </div>
-      <h3 class="sec">Помощь в игре</h3>
+    <div class="card" style="max-width:460px">
+      <div class="logo" style="font-size:24px">НАСТРОЙКИ</div>
+      <div class="sub">2 основных параметра игры</div>
+
+      <h3 class="sec">1. ОБЛАСТЬ ПОПАДАНИЯ</h3>
       <div class="sl">
-        <label>Техника удара<s>авто-доводка дуги и вращения</s></label>
-        <input type="range" class="rAssist" data-set="assist" min="0" max="100" value="72">
-        <span class="v vAssist">72%</span>
+        <label>Радиус приёма<s>захват мяча вокруг курсора</s></label>
+        <input type="range" id="rHitZone" data-set="hitZone" min="30" max="100" value="85">
+        <span class="v" id="vHitZone">85%</span>
       </div>
+      <div style="font-size:11px;color:var(--dim);line-height:1.5;margin:4px 0 16px">
+        Определяет, насколько близко прицел должен быть к мячу, чтобы удар состоялся. При высоком значении вы отбиваете мяч даже при неточном наведении.
+      </div>
+
+      <h3 class="sec">2. ВЫРАВНИВАНИЕ УДАРА</h3>
       <div class="sl">
-        <label>Доводка ракетки<s>притягивание ракетки к мячу</s></label>
-        <input type="range" class="rPos" data-set="posAssist" min="0" max="100" value="80">
-        <span class="v vPos">80%</span>
+        <label>Авто-доводка<s>исправление дуги на стол</s></label>
+        <input type="range" id="rAssist" data-set="assist" min="0" max="100" value="85">
+        <span class="v" id="vAssist">85%</span>
       </div>
-      <h3 class="sec">Длина матча</h3>
-      <div class="row">
-        <button class="opt" data-set="target" data-val="5"><b>5 ОЧКОВ</b><s>быстрый блиц</s></button>
-        <button class="opt sel" data-set="target" data-val="11"><b>11 ОЧКОВ</b><s>стандарт ITTF</s></button>
-        <button class="opt" data-set="target" data-val="21"><b>21 ОЧКО</b><s>классика</s></button>
+      <div style="font-size:11px;color:var(--dim);line-height:1.5;margin:4px 0 16px">
+        Корректирует траекторию, чтобы мяч стабильно перелетал сетку и ложился на стол соперника с хорошим вращением.
       </div>
-      <h3 class="sec">Подсказки</h3>
-      <div class="cols">
-        <div class="row"><button class="opt sel" data-set="zone" data-val="on"><b>ЗОНА УДАРА</b><s>кольцо на мяче</s></button>
-          <button class="opt" data-set="zone" data-val="off"><b>ВЫКЛ</b><s></s></button></div>
-        <div class="row"><button class="opt sel" data-set="predict" data-val="on"><b>ПРИЦЕЛ ВКЛ</b><s>точка приземления</s></button>
-          <button class="opt" data-set="predict" data-val="off"><b>ВЫКЛ</b><s></s></button></div>
-        <div class="row"><button class="opt sel" data-set="trail" data-val="on"><b>ШЛЕЙФ ВКЛ</b><s>цвет = вращение</s></button>
-          <button class="opt" data-set="trail" data-val="off"><b>ВЫКЛ</b><s></s></button></div>
-        <div class="row"><button class="opt" data-set="tele" data-val="on"><b>ТЕЛЕМЕТРИЯ</b><s>для разбора</s></button>
-          <button class="opt sel" data-set="tele" data-val="off"><b>ВЫКЛ</b><s></s></button></div>
-        <div class="row"><button class="opt sel" data-set="haptics" data-val="on"><b>ВИБРО ВКЛ</b><s>отдача в руку</s></button>
-          <button class="opt" data-set="haptics" data-val="off"><b>ВЫКЛ</b><s></s></button></div>
-        <div class="row"><button class="opt sel" data-set="slowmoPlayer" data-val="on"><b>SLOW-MO</b><s>замедление в матче</s></button>
-          <button class="opt" data-set="slowmoPlayer" data-val="off"><b>ВЫКЛ</b><s>для турниров и PvP</s></button></div>
-        <div class="row"><button class="opt sel" data-set="coach" data-val="on"><b>РАЗБОР ОЧКА</b><s>почему проиграно</s></button>
-          <button class="opt" data-set="coach" data-val="off"><b>ВЫКЛ</b><s></s></button></div>
-        <div class="row"><button class="opt sel" data-set="adaptive" data-val="on"><b>АДАПТАЦИЯ</b><s>соперник подстраивается</s></button>
-          <button class="opt" data-set="adaptive" data-val="off"><b>ВЫКЛ</b><s>чистый уровень</s></button></div>
-      </div>
-      <h3 class="sec">Хват</h3>
-      <div class="row">
-        <button class="opt sel" data-set="hand" data-val="right"><b>ПРАВАЯ</b><s></s></button>
-        <button class="opt" data-set="hand" data-val="left"><b>ЛЕВАЯ</b><s></s></button>
-      </div>
-      <h3 class="sec">Управление и звук</h3>
-      <div class="sl">
-        <label>Чувствительность<s>скорость отклика ракетки на курсор/палец</s></label>
-        <input type="range" id="rSens" data-set="sens" min="50" max="180" value="100"><span class="v" id="vSens">1.00×</span>
-      </div>
-      <div class="sl">
-        <label>Громкость<s>звуковые эффекты ударов и стола</s></label>
-        <input type="range" id="rVol" data-set="vol" min="0" max="100" value="90"><span class="v" id="vVol">90%</span>
-      </div>
-      <div style="font-size:10px;color:var(--dim2);margin-top:10px">
-        <span class="kbd">R</span> рестарт · <span class="kbd">P</span> пауза · <span class="kbd">C</span> пресет камеры · <span class="kbd">F3</span> телеметрия физики<br>
-        <span class="kbd">←</span><span class="kbd">→</span><span class="kbd">↑</span><span class="kbd">↓</span> ракурс ·
-        <span class="kbd">+</span><span class="kbd">−</span> дистанция · <span class="kbd">0</span> сброс
-      </div>
-      <button class="btn" id="setClose">ЗАКРЫТЬ</button>
+
+      <button class="btn" id="setClose">СОХРАНИТЬ И ЗАКРЫТЬ</button>
     </div>
   </div>
 
