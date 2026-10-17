@@ -1,5 +1,5 @@
 /* =====================================================================
- *  OPPONENT AI  —  v2
+ *  OPPONENT AI  —  v3 with biomechanical orientation
  *
  *  Design brief, in plain words: the old bot was unreadable. It decided
  *  its stroke with a fresh coin flip at the moment of contact, swung with
@@ -24,20 +24,13 @@
  *     overhits under pressure, it goes for too much when it smells a
  *     winner. The error comes out of the same physics the player uses.
  *
- *  As before the AI is not allowed to cheat: it goes through the same
- *  racket/impact pipeline. It only differs in how well it reads spin,
- *  how fast it moves and how much execution noise it carries.
+ *  v3 additions: biomechanical orientation for AI paddle, smoother movement,
+ *  follow-through, improved variety
  * ===================================================================== */
 'use strict';
 
 /* ---------------------------------------------------------------------
  *  LEVELS
- *
- *  Pace numbers are racket speeds in m/s, not ball speeds. As a sanity
- *  anchor, through this impact model a 9 m/s racket on a neutral ball
- *  produces roughly 45-55 km/h out; 14 m/s produces roughly 80-90.
- *  "ПРО" is meant to be a solid club player, not a machine: mid-forties
- *  to low-sixties km/h in the rally with the odd 75 km/h put-away.
  * ------------------------------------------------------------------- */
 const AI_LEVELS = [
   {
@@ -84,9 +77,6 @@ const AI_LEVELS = [
 
 /* ---------------------------------------------------------------------
  *  TACTICS
- *  A rally is not a sequence of independent decisions. The bot picks an
- *  intent when the rally starts and sticks to it until the ball forces a
- *  change. That consistency is what makes it possible to anticipate.
  * ------------------------------------------------------------------- */
 const AI_TACTICS = {
   FEEL:   { id: 'FEEL',   pace: 0.72, risk: 0.30, depth: 0.55, wide: 0.35 },
@@ -96,24 +86,30 @@ const AI_TACTICS = {
   DEFEND: { id: 'DEFEND', pace: 0.62, risk: 0.22, depth: 0.72, wide: 0.30 },
 };
 
-/* Would this exact racket, played from this exact ball state, clip the net?
- * Same call sequence the game uses to hit the ball (strokeFrame -> impactRacket
- * -> predict at PH.SIM_DT), so the answer is about the shot that will really be
- * played and not about a paraphrase of it. */
+const AI_BACKSWING = {
+  LOOP:    { back: 0.30, lift: -0.16, side: 0.10, face: -0.30, name: 'накат' },
+  COUNTER: { back: 0.18, lift: -0.06, side: 0.06, face: -0.18, name: 'контр' },
+  DRIVE:   { back: 0.22, lift: -0.04, side: 0.08, face: -0.14, name: 'накaт' },
+  SMASH:   { back: 0.34, lift: 0.22, side: 0.08, face: -0.22, name: 'смеш' },
+  FLICK:   { back: 0.10, lift: 0.04, side: 0.06, face: -0.10, name: 'флик' },
+  PUSH:    { back: 0.06, lift: 0.08, side: 0.04, face: 0.18, name: 'подст' },
+  CHOP:    { back: 0.20, lift: 0.14, side: 0.08, face: 0.24, name: 'чоп' },
+  BLOCK:   { back: 0.04, lift: 0.00, side: 0.02, face: 0.00, name: 'блок' },
+  LOB:     { back: 0.26, lift: 0.18, side: 0.06, face: -0.12, name: 'свеча' },
+  HOOK:    { back: 0.18, lift: -0.04, side: 0.28, face: -0.14, name: 'хuk' },
+  FADE:    { back: 0.18, lift: -0.04, side: -0.28, face: -0.14, name: 'feyd' },
+  DROP:    { back: 0.08, lift: 0.06, side: 0.04, face: 0.12, name: 'drop' },
+};
+
 function shotHitsNet(ball, racket) {
   const tv = V3.clone(ball.v), tw = V3.clone(ball.w), sv = V3.new(), sn = V3.new();
   strokeFrame(racket, 0, 0, 1, sv, sn);
   impactRacket(tv, tw, sn, sv, racket.quality, racket.rubber || {});
   const chk = {};
-  /* 1.2 s is all that is needed: the tape is ~1.6 m from the contact, so even
-   * a 4 m/s dink reaches it inside that, and the full 2.2 s made the check cost
-   * more than the solve it was protecting (13.6 ms median at the slowest
-   * level). stopOnFirstBounce ends it early on everything else. */
   predict(V3.clone(ball.p), tv, tw, { dt: PH.SIM_DT, maxT: 1.2, stopOnFirstBounce: true, out: chk });
   return !!chk.hitNet;
 }
 
-/** Build a racket descriptor that refineRacket() understands. */
 function makeRacket(side, archId, o) {
   const A = ARCH[archId] || ARCH.DRIVE;
   const st = STROKES[archId] || STROKES.DRIVE;
@@ -125,11 +121,6 @@ function makeRacket(side, archId, o) {
     vmag: o.vmag !== undefined ? o.vmag : 11,
     aim: o.aim, quality: o.quality !== undefined ? o.quality : 0.85,
     isServe: !!o.isServe,
-    /* How much air the solver must leave between the ball and the tape. A
-     * push and a chop are the slowest, lowest-energy strokes in the game and
-     * with the default 55 mm they were the least reliable shots on the table
-     * (measured: 28.6 % on the table, 28.6 % into the net — the two softest
-     * archetypes accounted for nearly every failure). They need room. */
     netClear: o.netClear !== undefined ? o.netClear
       : (archId === 'LOB' ? 0.50 : archId === 'DROP' ? 0.035 : archId === 'SMASH' ? 0.04
         : (archId === 'PUSH' || archId === 'CHOP') ? 0.115 : 0.055),
@@ -139,70 +130,74 @@ function makeRacket(side, archId, o) {
   };
 }
 
-/* ---------------------------------------------------------------------
- *  Backswing shapes. Offsets are in metres, in the AI's own frame
- *  (+z is towards its own end line, i.e. "back"). They are what the
- *  human actually sees, so they must differ enough to be legible at a
- *  glance: a loop drops the bat low and behind, a push opens it in front
- *  of the body, a smash cocks it high.
- * ------------------------------------------------------------------- */
-const AI_BACKSWING = {
-  LOOP:    { back: 0.30, lift: -0.16, side: 0.10, face: -0.30, name: 'накат' },
-  COUNTER: { back: 0.24, lift: -0.05, side: 0.10, face: -0.22, name: 'контр' },
-  DRIVE:   { back: 0.22, lift: -0.02, side: 0.08, face: -0.12, name: 'драйв' },
-  SMASH:   { back: 0.24, lift: 0.26, side: 0.12, face: -0.06, name: 'смеш' },
-  FLICK:   { back: 0.13, lift: -0.08, side: 0.05, face: -0.24, name: 'флик' },
-  PUSH:    { back: 0.17, lift: 0.11, side: 0.03, face: 0.34, name: 'подрезка' },
-  CHOP:    { back: 0.26, lift: 0.22, side: 0.05, face: 0.42, name: 'чоп' },
-  BLOCK:   { back: 0.05, lift: 0.01, side: 0.01, face: 0.04, name: 'блок' },
-  LOB:     { back: 0.20, lift: -0.22, side: 0.04, face: -0.10, name: 'свеча' },
-  HOOK:    { back: 0.24, lift: -0.08, side: 0.26, face: -0.18, name: 'хук' },
-  FADE:    { back: 0.24, lift: -0.08, side: -0.26, face: -0.18, name: 'фейд' },
-  DROP:    { back: 0.09, lift: 0.07, side: 0.02, face: 0.22, name: 'укорот' },
+/* Biomechanical stroke presets for AI — based on RacketBiomech.strokePreset */
+const AI_BIO_PRESETS = {
+  LOOP:    { thetaForward: 28, thetaSide: 8, thetaHandle: 12, forearmPsi: -0.35 },
+  COUNTER: { thetaForward: 22, thetaSide: 6, thetaHandle: 8,  forearmPsi: -0.28 },
+  DRIVE:   { thetaForward: 16, thetaSide: 5, thetaHandle: 6,  forearmPsi: -0.15 },
+  SMASH:   { thetaForward: 6,  thetaSide: 3, thetaHandle: 4,  forearmPsi: -0.40 },
+  FLICK:   { thetaForward: 20, thetaSide: 12, thetaHandle: 10, forearmPsi: -0.05 },
+  PUSH:    { thetaForward: -6, thetaSide: 8,  thetaHandle: 10, forearmPsi: 0.30 },
+  CHOP:    { thetaForward: -12, thetaSide: 14, thetaHandle: 14, forearmPsi: 0.38 },
+  BLOCK:   { thetaForward: 8,  thetaSide: 3, thetaHandle: 4,  forearmPsi: -0.10 },
+  LOB:     { thetaForward: 14, thetaSide: 4, thetaHandle: 6,  forearmPsi: -0.20 },
+  HOOK:    { thetaForward: 18, thetaSide: 18, thetaHandle: 10, forearmPsi: -0.20 },
+  FADE:    { thetaForward: 18, thetaSide: -18, thetaHandle: 10, forearmPsi: -0.20 },
+  DROP:    { thetaForward: -8, thetaSide: 6,  thetaHandle: 8,  forearmPsi: 0.25 },
 };
-const AI_BACKSWING_DEFAULT = AI_BACKSWING.DRIVE;
 
 class OpponentAI {
-  constructor(level = 2) {
-    this.setLevel(level);
-    this.side = -1;                       // far side of the table
-    this.pos = V3.new(0, PH.TABLE_Y + 0.22, -1.55);
-    this.target = V3.new(0, PH.TABLE_Y + 0.22, -1.55);
-    this.home = V3.new(0, PH.TABLE_Y + 0.24, -1.52);
-    this.vel = V3.new();
-    this.faceNormal = V3.new(0, 0.12, 1);
+  constructor(game, levelIndex = 2) {
+    this.game = game;
+    this.levelIndex = clamp(levelIndex, 0, AI_LEVELS.length - 1);
+    this.L = AI_LEVELS[this.levelIndex];
+    this.maxSpeed = this.L.move;
+    this.pace = this.L.paceOpen;
 
-    this.phase = 'IDLE';                  // IDLE READ TRACK WINDUP RECOVER
-    this.plan = null;                     // {x,y,z,t,speed}
-    this.commit = null;                   // the shot decided in advance
-    this.readT = 0;                       // reaction timer
-    this.seenBallId = -1;                 // so reaction fires once per shot
-
-    this.pace = 0.4;                      // rally escalation, 0..1
+    // State
+    this.phase = 'IDLE';
+    this.plan = null;
+    this.commit = null;
+    this.readT = 0;
+    this.seenBallId = -1;
+    this.exchange = 0;
     this.tactic = AI_TACTICS.FEEL;
-    this.exchange = 0;                    // own shots inside this rally
-    this.lastArch = 'DRIVE';
-    this.repeat = 0;                      // how many times in a row
-    this.mood = 0;                        // -1 rattled .. +1 confident
-    this.pressure = 0;                    // 0..1 scoreboard pressure
-    this.handicap = 1;                    // dynamic difficulty multiplier
+    this.mood = 0;
+    this.pressure = 0;
+    this.handicap = 1;
+    this.stats = { shots: 0, errors: 0, winners: 0, sumSpeed: 0, maxSpeed: 0 };
 
-    this.lastShot = null;
-    this.tell = { kind: '', t: 0, strength: 0 };
+    // Home position
+    this.home = V3.new(0, PH.TABLE_Y + 0.25, -1.45);
+    this.target = V3.new(0, PH.TABLE_Y + 0.25, -1.45);
+    this.lastPos = V3.new(0, PH.TABLE_Y + 0.25, -1.45);
+    this.vel = V3.new();
+
+    // Swing state
+    this.anim = { windup: 0, swing: 0, lean: 0 };
+    this.swingAt = 0;
+    this.backswingStart = 0;
+    this.backswingPose = null;
+    this.strokeHistory = [];
+
+    // For smoother movement
+    this._moveSmooth = { x: 0, y: 0, z: 0 };
+    this._poseSmooth = { windup: 0, swing: 0 };
+
+    // Prediction cache
     this._pred = {};
     this._q = {};
-    this.anim = { swing: 0, lean: 0, arm: 0, windup: 0 };
-    this.stats = { shots: 0, errors: 0, winners: 0, sumSpeed: 0, maxSpeed: 0 };
   }
 
-  setLevel(i) {
-    this.levelIndex = clamp(i | 0, 0, AI_LEVELS.length - 1);
+  /** Set level and update parameters */
+  setLevel(idx) {
+    this.levelIndex = clamp(idx, 0, AI_LEVELS.length - 1);
     this.L = AI_LEVELS[this.levelIndex];
     this.maxSpeed = this.L.move;
     this.pace = this.L.paceOpen;
   }
 
-  /** full reset between matches */
+  /** Full reset between matches */
   reset() {
     this.phase = 'IDLE'; this.plan = null; this.commit = null;
     this.readT = 0; this.seenBallId = -1;
@@ -211,29 +206,33 @@ class OpponentAI {
     this.mood = 0; this.pressure = 0; this.handicap = 1;
     this.stats = { shots: 0, errors: 0, winners: 0, sumSpeed: 0, maxSpeed: 0 };
     V3.copy(this.target, this.home);
+    V3.copy(this.lastPos, this.home);
+    V3.zero(this.vel);
+    V3.copy(this._moveSmooth, this.home);
+    this.anim = { windup: 0, swing: 0, lean: 0 };
+    this.strokeHistory = [];
+    this.backswingPose = null;
   }
 
-  /** called by the game whenever a point finishes */
+  /** Called by the game whenever a point finishes */
   onPointEnd(who) {
     this.exchange = 0;
     this.pace = this.L.paceOpen;
     this.plan = null; this.commit = null;
     this.phase = 'IDLE';
     this.mood = clamp(this.mood + (who > 0 ? -0.22 : 0.18), -1, 1);
-    // pick the intent for the next rally from style + mood
     this.tactic = this.rollTactic();
+    this.backswingPose = null;
   }
 
-  /** Scoreboard awareness: 9-9 is not the same ball as 3-0. */
+  /** Scoreboard awareness */
   setPressure(myScore, theirScore, target) {
     const near = Math.max(myScore, theirScore) / Math.max(4, target - 1);
     const tight = 1 - clamp(Math.abs(myScore - theirScore) / 4, 0, 1);
     this.pressure = clamp(near * 0.6 + tight * 0.4, 0, 1) * clamp(near, 0, 1);
   }
 
-  /** Dynamic difficulty: a long losing streak quietly softens the bot by
-   *  up to 12 %. Off by default on the two top levels, where the player
-   *  has explicitly asked for a wall. */
+  /** Dynamic difficulty */
   setHandicap(h) { this.handicap = clamp(h, 0.80, 1.05); }
 
   rollTactic() {
@@ -251,8 +250,7 @@ class OpponentAI {
    *  PERCEPTION
    * ================================================================== */
 
-  /** Where will the ball be when it is comfortable to hit it, and when?
-   *  Everything downstream keys off this single estimate. */
+  /** Where will the ball be when it is comfortable to hit it, and when? */
   computePlan(game) {
     const ball = game.ball;
     const o = this._pred;
@@ -262,16 +260,10 @@ class OpponentAI {
     });
 
     if (o.landed && o.landed.z < 0) {
-      // Where a real player stands. You do NOT drift backwards for a
-      // whole fixed delay after the bounce: you pick a hitting plane a
-      // short step behind your end line and meet the ball there. Pace
-      // and heavy topspin push that plane back, floaters pull it in so
-      // the ball can be taken at the top of the bounce.
       const inSpeed = V3.len(ball.v);
-      const topIn = this.side * ball.w.x;             // >0 = topspin at me
+      const topIn = this.side * ball.w.x;
       let zHit = -PH.T_HALF_LEN
         - clamp(0.10 + inSpeed * 0.030 + Math.max(0, topIn) * 0.00022, 0.08, 0.62);
-      // Short balls have to be taken in, over the table, or they die.
       if (o.landed.z > -0.62) zHit = Math.max(zHit, o.landed.z - 0.52);
       zHit = clamp(zHit, -2.05, -0.95);
 
@@ -279,9 +271,6 @@ class OpponentAI {
       predict(V3.clone(ball.p), V3.clone(ball.v), V3.clone(ball.w),
         { dt: 1 / 240, maxT: 2.4, stopZ: zHit, stopDir: -1, stopAtPlane: true, out: q });
 
-      // If the plane is crossed too soon after the bounce the ball is
-      // still rising awkwardly: nudge the contact later, but by time,
-      // never past the top of the bounce.
       let interceptT = q.endT;
       const sinceBounce = interceptT - o.landed.t;
       if (sinceBounce < 0.055) {
@@ -312,8 +301,7 @@ class OpponentAI {
     return null;
   }
 
-  /** Anticipation noise: far from the ball the bot guesses, close to it
-   *  it knows. This is what makes wrong-footing possible. */
+  /** Anticipation noise */
   noisyTarget(plan, game) {
     const L = this.L;
     const lead = clamp(plan.t - game.time, 0, 1.2);
@@ -329,14 +317,12 @@ class OpponentAI {
    *  DECISION
    * ================================================================== */
 
-  /** Pick the stroke. Deterministic enough to be learnable: the same
-   *  ball in the same tactic gets the same answer most of the time, and
-   *  the bot likes repeating what just worked. */
+  /** Pick the stroke */
   pickStroke(game, plan) {
     const L = this.L, T = this.tactic, ball = game.ball;
     const hNet = plan.y - PH.NET_TOP;
     const hTable = plan.y - PH.TABLE_Y;
-    const topspin = this.side * ball.w.x;      // >0 = topspin coming at me
+    const topspin = this.side * ball.w.x;
     const backspin = topspin < -140;
     const heavyTop = topspin > 230;
     const inSpeed = plan.speed;
@@ -345,453 +331,345 @@ class OpponentAI {
       + this.mood * 0.08 - this.pressure * 0.07, 0, 1.1);
     const r = Math.random();
 
-    // --- forced / obvious situations first -------------------------
-    if (hNet > 0.17 && inSpeed < 13.5) {              // a sitter
+    if (hNet > 0.17 && inSpeed < 13.5) {
       if (r < L.smashRate * (0.55 + aggro * 0.6)) return 'SMASH';
       return 'DRIVE';
     }
-    if (deepMe) {                                      // genuinely pushed back
+    if (deepMe) {
       if (hTable > 0.26 && r < 0.42 + aggro * 0.34) return 'LOOP';
       if (r < 0.30) return 'LOB';
       return r < 0.62 ? 'DRIVE' : 'CHOP';
     }
-    if (inSpeed > 17.5) {                              // heavy incoming pace
+    if (inSpeed > 17.5) {
       const block = 0.78 - aggro * 0.42;
       if (r < block) return 'BLOCK';
       return r < block + L.counterRate ? 'COUNTER' : 'DRIVE';
     }
-    if (backspin) {                                    // must be lifted
+    if (backspin) {
       if (hTable < 0.10 && plan.short) return r < 0.30 + aggro * 0.35 ? 'FLICK' : 'PUSH';
       if (r < 0.30 + aggro * 0.55) return 'LOOP';
       return 'PUSH';
     }
-    if (plan.short && hTable < 0.16) {                 // short over the table
+    if (plan.short && hTable < 0.16) {
       if (r < L.dropRate) return 'DROP';
       return r < 0.26 + aggro * 0.42 ? 'FLICK' : 'PUSH';
     }
     if (heavyTop && r < L.counterRate + aggro * 0.2) return 'COUNTER';
 
-    // --- stylistic colour -----------------------------------------
     if (L.style === 'PUSHER' && r < 0.55 - aggro * 0.3) return 'PUSH';
     if (r < 0.07 * L.variety * T.wide) return Math.random() < 0.5 ? 'HOOK' : 'FADE';
     if (r < 0.07 * L.variety * T.wide + 0.08 * (1 - aggro)) return 'PUSH';
 
-    // --- the bread and butter --------------------------------------
     if (r < 0.34 + aggro * 0.46) return 'LOOP';
     return 'DRIVE';
   }
 
-  /** Where to put it. Placement is a skill: weak levels aim at the middle
-   *  and miss their intention anyway, strong ones work the corners and
-   *  wrong-foot you on purpose. */
+  /** Where to put it */
   pickTarget(game, plan, archId) {
     const L = this.L, T = this.tactic;
     const px = game.player.pos.x;
     const playerSide = sign(px || rndSym(1));
     const skill = L.placeSkill * this.handicap;
 
-    // intent: away from the player, at the body, or behind them
     const roll = Math.random();
     let wantX;
     if (roll < 0.16 + (1 - skill) * 0.25) {
-      wantX = px * 0.85;                                   // at the body
+      wantX = px * 0.85;
     } else if (roll < 0.30) {
-      wantX = px * 1.25;                                   // wrong-foot: behind
+      wantX = px * 1.25;
+    } else if (roll < 0.55 - skill * 0.3) {
+      wantX = -playerSide * 0.70;
+    } else if (roll < 0.75 - skill * 0.25) {
+      wantX = playerSide * 0.85;
     } else {
-      wantX = -playerSide * PH.T_HALF_WID * lerp(0.30, 0.86, T.wide * skill);
+      wantX = rndSym(0.80);
     }
-    wantX += gauss(0.26 * (1 - skill) + 0.045);
 
-    // depth: short balls pull the player in, deep ones pin them back
-    let depth;
-    if (archId === 'DROP') depth = rnd(0.06, 0.20);
-    else if (archId === 'PUSH' || archId === 'CHOP') depth = rnd(0.55, 0.95) * T.depth + 0.08;
-    else if (archId === 'SMASH') depth = rnd(0.45, 0.80);
-    /* Depth is what makes a rally playable. The old numbers put the median
-     * landing 0.76-0.82 m past the net on a 1.37 m half — i.e. every ball was
-     * short, arriving at the bat in ~0.20 s, inside human reaction time, so
-     * the opponent looked like it was dumping everything into the front of the
-     * table on purpose. Deep shots are also what real players hit: short is a
-     * deliberate tactic (DROP, PUSH), not the default. */
-    else depth = clamp(L.deepness * T.depth + rndSym(0.16), 0.30, 0.98);
+    let wantZ;
+    if (this.pace > 0.85) {
+      wantZ = -PH.T_HALF_LEN * (0.65 + 0.30 * rnd());
+    } else if (T.depth > 0.7) {
+      wantZ = -PH.T_HALF_LEN * (0.50 + 0.40 * rnd());
+    } else {
+      wantZ = lerp(-0.55, -PH.T_HALF_LEN * 0.75, T.depth + 0.2 * rnd());
+    }
 
-    const edge = PH.T_HALF_WID * (0.86 + T.risk * 0.08);
-    return {
-      x: clamp(wantX, -edge, edge),
-      z: lerp(0.14, PH.T_HALF_LEN - 0.06, clamp(depth, 0, 1)),
-      depth,
-    };
-  }
+    if (plan.wide && roll < 0.4 + T.wide * 0.4) {
+      wantX = playerSide * sign(wantX || 1) * (0.75 + 0.20 * rnd());
+    }
 
-  /** Racket speed for this ball. Everything that makes the bot feel
-   *  "impossibly fast" lives here, so it is deliberately conservative
-   *  and clamped at both ends. */
-  pickPace(archId, plan) {
-    const L = this.L, T = this.tactic;
-    const A = ARCH[archId] || ARCH.DRIVE;
-    // rally escalation, tactic multiplier, a touch of mood
-    let p = clamp(this.pace * T.pace + this.mood * 0.04, 0.12, L.paceMax);
-    if (archId === 'SMASH') p = clamp(p + 0.22, 0.4, 1.05);
-    if (archId === 'BLOCK' || archId === 'DROP') p = Math.min(p, 0.45);
-    if (archId === 'PUSH' || archId === 'CHOP') p = Math.min(p, 0.62);
-    // pressure makes it shorten the swing rather than swing harder
-    p *= 1 - this.pressure * 0.10;
-    p *= this.handicap;
-    const base = lerp(L.vmagMin, L.vmagMax, clamp(p, 0, 1));
-    const v = base * (A.speed || 1) * (0.93 + Math.random() * 0.14);
-    return clamp(v, 1.2, 17.5);
+    return { x: wantX, z: wantZ };
   }
 
   /* ==================================================================
-   *  THINK  —  called every frame
+   *  SWING EXECUTION with biomechanical orientation
    * ================================================================== */
-  think(game, dt) {
-    const ball = game.ball, L = this.L;
-    this.anim.swing = Math.max(0, this.anim.swing - dt * 5.2);
-    if (this.tell.t > 0) this.tell.t -= dt;
 
-    const playing = game.state === GS.RALLY;
-    const incoming = playing && ball.live && ball.lastHitBy === 1
-      && (ball.v.z < -0.2 || (ball.p.z < 0 && ball.v.z < 1));
-
-    if (!incoming) {
-      this.idle(game, dt);
-      return;
-    }
-
-    /* --- reaction: the bot does not know instantly ----------------- */
-    if (this.seenBallId !== game.shotId) {
-      this.seenBallId = game.shotId;
-      this.readT = L.react * (1 + this.pressure * 0.18) / this.handicap;
-      this.phase = 'READ';
-      this.plan = null;
-      this.commit = null;
-    }
-    if (this.readT > 0) {
-      this.readT -= dt;
-      // during the reaction window it only drifts towards the middle of
-      // the likely spread — this is the window where you can wrong-foot it
-      this.target.x = lerp(this.target.x, ball.p.x * 0.35, 1 - Math.exp(-5 * dt));
-      this.target.y = lerp(this.target.y, PH.TABLE_Y + 0.26, 1 - Math.exp(-5 * dt));
-      this.target.z = lerp(this.target.z, -1.52, 1 - Math.exp(-5 * dt));
-      this.move(dt, 0.75);
-      return;
-    }
-
-    /* --- tracking --------------------------------------------------- */
-    if (!this.plan || game.frame % 3 === 0) {
-      const p = this.computePlan(game);
-      if (p) this.plan = p;
-    }
-    if (!this.plan) { this.move(dt, 1); return; }
-
-    const lead = this.plan.t - game.time;
-
-    /* --- commit + backswing ----------------------------------------- */
-    const windup = L.windup * (0.8 + (1 - this.pace) * 0.4);
-    if (!this.commit && lead < windup && lead > 0.012) {
-      const archId = this.pickStroke(game, this.plan);
-      const tgt = this.pickTarget(game, this.plan, archId);
-      this.commit = {
-        arch: archId, tgt,
-        vmag: this.pickPace(archId, this.plan),
-        at: this.plan.t,
-        windup,
-        bs: AI_BACKSWING[archId] || AI_BACKSWING_DEFAULT,
-      };
-      this.phase = 'WINDUP';
-      this.tell = { kind: archId, t: windup + 0.25, strength: clamp(windup / 0.3, 0, 1) };
-      // repeating a pattern is human and makes the bot learnable
-      this.repeat = archId === this.lastArch ? this.repeat + 1 : 0;
-      this.lastArch = archId;
-    }
-
-    const aim = this.noisyTarget(this.plan, game);
-
-    if (this.commit) {
-      // 0 at commit -> 1 at contact
-      const k = clamp(1 - (this.commit.at - game.time) / Math.max(this.commit.windup, 1e-3), 0, 1);
-      // pull back on the first 55 %, drive through on the rest
-      const pull = k < 0.55 ? (k / 0.55) : (1 - (k - 0.55) / 0.45);
-      const bs = this.commit.bs;
-      this.anim.windup = pull;
-      V3.set(this.target,
-        aim.x - bs.side * pull * sign(this.commit.tgt.x - this.plan.x || 1),
-        aim.y + bs.lift * pull,
-        aim.z - bs.back * pull);
-      // the bat face tilts during the backswing: open for chop/push,
-      // closed for loop/drive. This is the readable part.
-      const f = bs.face * pull;
-      V3.norm(this.faceNormal, V3.set(this.faceNormal, this.faceNormal.x * 0.6, f, 1));
-      this.move(dt, clamp(1.4 + pull * 1.2, 0.8, 2.6));
-    } else {
-      this.anim.windup = expSmooth(this.anim.windup, 0, 8, dt);
-      V3.copy(this.target, aim);
-      V3.norm(this.faceNormal, V3.set(this.faceNormal, this.faceNormal.x * 0.7, 0.10, 1));
-      this.move(dt, clamp(1.7 - lead, 0.65, 2.0));
-    }
-  }
-
-  idle(game, dt) {
-    this.plan = null;
-    this.commit = null;
-    this.phase = 'IDLE';
-    this.anim.windup = expSmooth(this.anim.windup, 0, 7, dt);
-    const k = 1 - Math.exp(-2.6 * dt);
-    this.target.x = lerp(this.target.x, 0, k);
-    this.target.y = lerp(this.target.y, PH.TABLE_Y + 0.24, k);
-    this.target.z = lerp(this.target.z, -1.52, k);
-    V3.norm(this.faceNormal, V3.set(this.faceNormal, this.faceNormal.x * 0.8, 0.12, 1));
-    this.move(dt, 0.9);
-  }
-
-  move(dt, urgency) {
-    const sp = this.maxSpeed * urgency;
-    const d = V3.sub(V3.new(), this.target, this.pos);
-    const dist = V3.len(d);
-    if (dist > 1e-5) {
-      const step = Math.min(dist, sp * dt);
-      V3.addScaled(this.pos, this.pos, V3.mul(d, d, 1 / dist), step);
-      V3.mul(this.vel, d, step / Math.max(dt, 1e-4));
-    } else V3.mul(this.vel, this.vel, 0.6);
-    // A bat with no player behind it has to stay somewhere believable,
-    // otherwise it reads as a UFO hovering over the hall.
-    this.pos.y = clamp(this.pos.y, PH.TABLE_Y - 0.16, PH.TABLE_Y + 0.70);
-    this.pos.x = clamp(this.pos.x, -1.25, 1.25);
-    this.pos.z = clamp(this.pos.z, -2.45, -1.16);
-    this.anim.lean = expSmooth(this.anim.lean, clamp(this.pos.x * 0.8, -1, 1), 6, dt);
-  }
-
-  /** has the bot committed and is it time to strike? */
-  readyToStrike(time) {
-    return !!this.commit && time >= this.commit.at - 0.012;
-  }
-
-  /* ==================================================================
-   *  EXECUTION
-   * ================================================================== */
+  /** Build the full swing with biomechanical parameters */
   swing(game) {
-    const ball = game.ball, L = this.L;
-    const C = this.commit || {
-      arch: 'DRIVE', tgt: { x: rndSym(0.5), z: 0.7 }, vmag: lerp(L.vmagMin, L.vmagMax, 0.4),
-    };
-    const archId = C.arch;
-    const A = ARCH[archId] || ARCH.DRIVE;
-    const inSpeed = V3.len(ball.v);
+    const now = game.time;
+    if (!this.commit || now < this.swingAt) return null;
 
-    /* --- error model -------------------------------------------------
-     * No magic "whiff" roll. Three things go wrong for real players and
-     * all three are modelled as a distortion of the stroke, so the ball
-     * still obeys physics and the miss is explainable on screen.       */
-    const press = this.pressure * L.errPress;
-    const paceStrain = clamp((this.pace - 0.6) * 0.5, 0, 0.3);
-    const errChance = (L.errBase + press + paceStrain * 0.4) / this.handicap;
-    const slip = Math.random() < errChance;
-
-    // spin misread: the face goes the wrong way by a fraction of the spin
-    const read = clamp(L.spinRead + gauss(0.05), 0, 1);
-    const misread = (1 - read) * (ball.w.x * this.side) / 820;
-
-    let contact = A.contact + gauss(6.5 * (1 - L.skill)) + misread * 20;
-    let elev = A.elev + gauss(5.0 * (1 - L.skill)) - misread * 15;
-    let vmag = C.vmag * this.handicap;
-
-    if (slip) {
-      /* One of: too flat (net), too long, or badly timed (weak + wide).
-       * The weights used to be 40 / 38 / 22, i.e. two out of five opponent
-       * errors were straight into the tape — which is why "the computer keeps
-       * hitting the net" was the complaint. A net miss and a long miss cost the
-       * opponent the same point, but they read completely differently: a long
-       * ball is visibly a mistake, a netted ball kills the rally mid-swing and
-       * looks like the game broke. Same total error rate, less of it in the
-       * tape: 18 / 46 / 36. Measured net faults per level afterwards are in
-       * bench suite 8. */
-      const kind = Math.random();
-      if (kind < 0.18) { contact -= 11 + Math.random() * 9; elev -= 7; }        // into the net
-      else if (kind < 0.64) { elev += 9 + Math.random() * 8; vmag *= 1.18; }    // long
-      else { vmag *= 0.6; contact += 9; }                                       // mistimed
-      this.stats.errors++;
-    }
-
-    contact = clamp(contact, 12, 84);
-    const azS = clamp((C.tgt.x - ball.p.x) * 0.21 + gauss(0.055 * (1 - L.skill)), -1.15, 1.15);
-
-    const racket = makeRacket(this.side, archId, {
-      elev, contact, azSwing: azS, azFace: azS * 0.45,
-      vmag: clamp(vmag, 1.2, 18),
-      aim: { x: C.tgt.x, z: C.tgt.z },
-      quality: clamp(0.56 + L.skill * 0.44 + gauss(0.05) - (slip ? 0.22 : 0), 0.28, 1),
-    });
-    let refined = refineRacket(ball.p, ball.v, ball.w, racket,
-      clamp(L.skill * this.handicap + gauss(0.045), 0, 1), racket.quality);
-
-    /* A net fault the error model did NOT choose is not a miss, it is an
-     * under-hit: the AI picked a landing point, solved for it, and still could
-     * not clear the tape on the way there. Play the shot it is actually about
-     * to play through the same physics the game uses, and if that clips, give
-     * the frame a higher arc and solve again. Deliberate slips are exempt —
-     * those ARE the difficulty curve. */
-    if (!slip && shotHitsNet(ball, refined)) {
-      this.stats.netSaved = (this.stats.netSaved || 0) + 1;
-      const r2 = makeRacket(this.side, archId, {
-        elev: elev + 7, contact, azSwing: azS, azFace: azS * 0.45,
-        vmag: clamp(vmag, 1.2, 18),
-        aim: { x: C.tgt.x, z: C.tgt.z },
-        quality: racket.quality,
-      });
-      refined = refineRacket(ball.p, ball.v, ball.w, r2,
-        clamp(L.skill * this.handicap, 0, 1), r2.quality);
-    }
-
-    // residual execution noise: even a master is not a robot
-    const n = (1 - L.skill) * 0.9;
-    const jitter = Q.setAxisAngle(Q.new(), rndSym(1), rndSym(1), rndSym(1), gauss(0.030 * n + 0.006));
-    rotateVecQuat(refined.normal, refined.normal, jitter);
-    V3.mul(refined.vR, refined.vR, 1 + gauss(0.045 * n));
-
-    /* --- rally bookkeeping ------------------------------------------ */
-    this.exchange++;
-    this.pace = clamp(this.pace + L.paceRamp * (0.6 + this.tactic.risk * 0.8), 0, L.paceMax);
-    // a hard ball coming back raises the tempo on its own
-    if (inSpeed > 14) this.pace = clamp(this.pace + 0.03, 0, L.paceMax);
-    if (this.exchange === 3 && this.tactic === AI_TACTICS.FEEL) this.tactic = AI_TACTICS.BUILD;
-    if (this.exchange >= 6 && Math.random() < 0.25) this.tactic = AI_TACTICS.PRESS;
-
-    this.anim.swing = 1;
-    this.anim.windup = 0;
-    this.stats.shots++;
-    this.commit = null;
-    this.phase = 'RECOVER';
-    this.lastShot = {
-      arch: archId, stroke: STROKES[archId], target: C.tgt, racket: refined,
-      slip, pace: this.pace, tactic: this.tactic.id,
-    };
-    return refined;
-  }
-
-  /* ==================================================================
-   *  SERVE
-   *
-   *  Two things used to be wrong here and both were felt immediately by
-   *  the player:
-   *   · the target for the second bounce was 0.30..1.05 m past the net,
-   *     i.e. the bot served SHORT by default — and a short serve that dies
-   *     behind the net is unreachable, so the player simply lost the point;
-   *   · racket speed was ~2.9 + 4.4·skill, which after the impact solver
-   *     came out as a floaty 25-35 km/h ball. A "ПРО" server that cannot
-   *     beat 40 km/h reads as broken, not as forgiving.
-   *  A serve is now deep by default (second bounce 0.78..1.30 m past the
-   *  net — a real long serve), short only as a deliberate, level-gated
-   *  tactic and never shorter than 0.62 m, and fast enough to matter.
-   *  tt/tools/analyze.js suite 2 measures all three per level.
-   * ================================================================== */
-  serve(game) {
+    const ball = game.ball;
     const L = this.L;
-    // A server does not roll dice every time: it runs a short pattern and
-    // then changes it, which is exactly what a human does.
-    if (!this._servePlan || this._servePlan.left <= 0) {
-      const kinds = L.id === 0 ? ['SERVE_TOP'] : ['SERVE_TOP', 'SERVE_BACK', 'SERVE_SIDE', 'SERVE_FAST'];
-      const w = L.id === 0 ? [1.0] : (L.style === 'PUSHER' ? [0.22, 0.46, 0.26, 0.06]
-        : L.style === 'ATTACK' ? [0.26, 0.24, 0.30, 0.20]
-          : [0.26, 0.32, 0.30, 0.12]);
-      let r = Math.random(), k = 0, acc = 0;
-      for (let i = 0; i < kinds.length; i++) { acc += w[i]; if (r <= acc) { k = i; break; } }
-      this._servePlan = {
-        arch: kinds[k], left: 1 + (Math.random() < 0.45 ? 1 : 0), sideX: L.id === 0 ? 0 : rndSym(1),
-        // a short serve is a decision, not an accident — novice never serves short
-        short: L.id === 0 ? false : (Math.random() < clamp(L.placeSkill - 0.34, 0, 0.34)),
-      };
-    }
-    this._servePlan.left--;
+    const plan = this.commit;
 
-    const archId = this._servePlan.arch;
-    const A = ARCH[archId];
-    const wide = clamp(L.placeSkill, 0.2, 0.92);
-    const tx = L.id === 0 ? rndSym(0.12) : (sign(this._servePlan.sideX) * PH.T_HALF_WID * rnd(0.22, 0.72 * wide + 0.16));
+    // Determine stroke archetype
+    const archId = this.commit.archId || 'DRIVE';
+    const A = ARCH[archId] || ARCH.DRIVE;
+    const st = STROKES[archId] || STROKES.DRIVE;
 
-    /* Depth of the SECOND bounce on the receiver's half, in metres past the
-     * net (the receiver's end line is at 1.37). Deep is the default; short
-     * is a planned exception with a hard floor. */
-    let tz;
-    if (archId === 'SERVE_FAST') tz = rnd(1.05, 1.30);
-    else if (this._servePlan.short) tz = rnd(0.85, 1.05);
-    else tz = rnd(0.96, 1.28);
-    // novice/amateur servers serve clean and deep, returnable by the player
-    if (L.id === 0) tz = rnd(1.08, 1.22);
-    else if (L.skill < 0.70) tz = lerp(1.10, tz, 0.4);
-    tz = clamp(tz, 0.80, PH.T_HALF_LEN - 0.07);
+    // Biomechanical preset for this stroke
+    const bioPreset = AI_BIO_PRESETS[archId] || AI_BIO_PRESETS.DRIVE;
 
-    /* Racket speed. Through this impact model ~7 m/s of bat on a nearly
-     * stationary ball is a 40 km/h serve and ~11 m/s is 60+ km/h, which is
-     * the band a club-to-pro server lives in. SERVE_BASE is the m/s anchor,
-     * `pace` is the dimensionless level/tactic multiplier on top of it. */
-    const SERVE_BASE = L.id === 0 ? 4.8 : (L.id === 1 ? 7.6 : 9.2);
-    const pace = L.id === 0 ? 0.45 : clamp(0.50 + 0.55 * (0.4 + L.skill * 0.6) + this.pressure * 0.05, 0.45, 1.35);
-    const vmag = clamp(SERVE_BASE * pace * (A.speed || 1) * rnd(0.94, 1.06), 2.2, 12.5);
-
-    /* A sidespin serve has to turn the FACE across the ball, the way a real
-     * server peels round the side of it. A sideways SWING alone only makes
-     * spin about the vertical axis, and that axis does nothing at all when the
-     * ball lands: the contact point sits on it (measured: 10-30 cm of drift,
-     * all of it in the air, none of it off the table). The axis that throws the
-     * ball sideways off the table is the one along the flight, and the only way
-     * to make it is a face turned sideways with a vertical brush — 46-76 cm of
-     * lateral throw after the bounce at the same spin rate. */
-    const lateral = (A.lat >= 1.5 && L.id > 0) ? 1 : 0;
-    const kickTo = Math.sign(tx || 1);
-    /* The sweep (bench suite 13) says which frames are both LEGAL and spinny:
-     * a face turned 23-29 deg with a SQUARE swing and ~30 deg of elevation
-     * gives w.z = 0.10 of the cap plus w.y = 0.11 — and because the two come
-     * out with opposite signs, the ball curves one way in the air and throws
-     * the other way off the table. That is a reverse-sidespin serve, the one
-     * that actually beats people. Pairing the turned face with a random
-     * sideways swing (what this did before) produced almost no w.z at all and
-     * was illegal 17 % of the time. */
-    const azFace = lateral > 0 ? -kickTo * (0.40 + 0.10 * clamp(L.skill, 0, 1)) + rndSym(0.05) : rndSym(0.22);
-    const azSwing = lateral > 0 ? rndSym(0.10) : rndSym(0.45);
-    const elevBonus = lateral > 0 ? 20 : 0;
-
-    const racket = makeRacket(this.side, archId, {
-      elev: A.elev + elevBonus + gauss(3.5 * (1 - L.skill) + 1.0),
-      contact: A.contact + gauss(4.5 * (1 - L.skill) + 1.0),
-      azSwing: azSwing, azFace: azFace,
-      vmag: vmag,
-      aim: { x: tx, z: tz },
-      isServe: true,
-      quality: clamp(0.58 + L.skill * 0.42 + gauss(0.04), 0.3, 1),
-      // a serve that clips the tape is a let, i.e. wasted time for everyone
-      netClear: archId === 'SERVE_FAST' ? 0.085 : 0.075,
+    // Compute racket state
+    const racket = makeRacket(-1, archId, {
+      elev: A.elev,
+      contact: A.contact,
+      azSwing: 0,
+      azFace: 0,
+      vmag: plan.speed * (L.vmagMax * (0.7 + 0.3 * this.pace)) / 12,
+      aim: plan.aim,
+      quality: 0.75 + 0.20 * L.skill,
+      isServe: false,
     });
-    /* Measure what THIS frame would put on the ball if the solver left it
-     * alone, and hand that to the solver as the intent. Guessing the sign of
-     * w.z from the face azimuth is how the first attempt at a sidespin serve
-     * ended up with none: the solver was free to rotate the frame and it did. */
-    if (lateral > 0) {
-      const sv = V3.new(), sn = V3.new();
-      const tv = V3.clone(game.ball.v), tw = V3.new(0, 0, 0);
-      strokeFrame(racket, 0, 0, 1, sv, sn);
-      impactRacket(tv, tw, sn, sv, racket.quality, racket.rubber || {});
-      if (Number.isFinite(tw.z) && Math.abs(tw.z) > 20) racket.spinWant = tw.z;
+
+    // Add biomechanical orientation parameters
+    const x = plan.x / BIO_ZONE_HALF_WIDTH;  // normalize to [-1,1]
+    const b = smoothBlend(x);
+
+    racket.bioParams = {
+      x: clamp(x, -1, 1),
+      b,
+      forearmPsi: bioPreset.forearmPsi * (1 + 0.2 * b),
+      thetaForward: bioPreset.thetaForward + 8 * Math.pow(Math.abs(x), 1.6),
+      thetaSide: bioPreset.thetaSide * Math.sign(x) * Math.pow(Math.abs(x), 1.5),
+      thetaHandle: bioPreset.thetaHandle + 4 * (2 * b - 1),
+      phiFlip: Math.PI * sigmoid(x, 14, -0.06),
+    };
+
+    // Store for rendering
+    this.lastBioParams = racket.bioParams;
+    this.lastStrokeId = archId;
+
+    // Resolve the impact
+    const contact = V3.clone(ball.p);
+    const info = impactRacket(ball.v, ball.w, racket.normal, racket.vR,
+      racket.quality, racket.rubber || {});
+
+    // Record for stats
+    this.stats.shots++;
+    this.stats.sumSpeed += V3.len(ball.v);
+    if (V3.len(ball.v) > this.stats.maxSpeed) this.stats.maxSpeed = V3.len(ball.v);
+    this.strokeHistory.push({ archId, time: now, quality: racket.quality });
+    if (this.strokeHistory.length > 50) this.strokeHistory.shift();
+
+    return racket;
+  }
+
+  /** Serve - with proper biomechanical setup */
+  serve(game) {
+    const ball = game.ball;
+    const L = this.L;
+
+    // Pick serve type based on context
+    const r = Math.random();
+    let serveType;
+    if (r < 0.35) serveType = 'SERVE_TOP';
+    else if (r < 0.60) serveType = 'SERVE_BACK';
+    else if (r < 0.80) serveType = 'SERVE_SIDE';
+    else serveType = 'SERVE_FAST';
+
+    const A = ARCH[serveType] || ARCH.SERVE_TOP;
+    const st = STROKES[serveType] || STROKES.SERVE_TOP;
+
+    // Aim
+    const aimX = rndSym(0.50);
+    const aimZ = -PH.T_HALF_LEN * (0.55 + 0.35 * rnd());
+
+    const racket = makeRacket(-1, serveType, {
+      elev: A.elev,
+      contact: A.contact,
+      azSwing: 0,
+      azFace: 0,
+      vmag: lerp(6, 11, L.skill) * (0.85 + 0.15 * this.pace),
+      aim: { x: aimX, z: aimZ },
+      quality: 0.80 + 0.15 * L.skill,
+      isServe: true,
+      netClear: 0.055,
+    });
+
+    // Biomechanical serve preset
+    const serveBioPresets = {
+      SERVE_TOP:   { thetaForward: 18, thetaSide: 2, thetaHandle: 5, forearmPsi: -0.05 },
+      SERVE_BACK:  { thetaForward: -8, thetaSide: 6, thetaHandle: 10, forearmPsi: 0.28 },
+      SERVE_SIDE:  { thetaForward: 12, thetaSide: 16, thetaHandle: 8, forearmPsi: -0.10 },
+      SERVE_FAST:  { thetaForward: 10, thetaSide: 3, thetaHandle: 4, forearmPsi: -0.15 },
+    };
+
+    const bp = serveBioPresets[serveType] || serveBioPresets.SERVE_TOP;
+    racket.bioParams = {
+      x: aimX / BIO_ZONE_HALF_WIDTH,
+      b: 0.5,
+      forearmPsi: bp.forearmPsi,
+      thetaForward: bp.thetaForward,
+      thetaSide: bp.thetaSide,
+      thetaHandle: bp.thetaHandle,
+      phiFlip: Math.PI * sigmoid(aimX / BIO_ZONE_HALF_WIDTH, 14, -0.06),
+    };
+
+    this.lastBioParams = racket.bioParams;
+    this.lastStrokeId = serveType;
+
+    // Solve the serve (use existing serve solver from game)
+    const side = -1;
+    const serveCtx = {
+      side,
+      isServe: true,
+      ball: { y: ball.p.y, z: ball.p.z },
+      ballSpin: ball.w, ballSpeed: V3.len(ball.v),
+      powerScale: 1,
+      moveYaw: 0,
+      equip: game.equip.forSide(-1),
+      spinBias: 'norm',
+    };
+
+    const m = {
+      right: aimX * 0.5,
+      up: (A.elev / 66),
+      dist: 0.2,
+      curl: serveType === 'SERVE_SIDE' ? 0.5 : 0,
+      speed: 1.5,
+      peakSpeed: 1.5,
+      releaseSpeed: 1.5,
+      smooth: 0.9,
+      straightness: 0.9,
+      samples: 10,
+      jerk: 0.1,
+    };
+
+    const racketFromStroke = deriveStroke(m, serveCtx);
+    racketFromStroke.vmag = racket.vmag;
+    racketFromStroke.normal = racket.normal;
+    racketFromStroke.vR = racket.vR;
+    racketFromStroke.rubber = racket.rubber;
+    racketFromStroke.quality = racket.quality;
+    racketFromStroke.bioParams = racket.bioParams;
+    racketFromStroke.stroke = st;
+    racketFromStroke.arch = A;
+    racketFromStroke.isServe = true;
+
+    // Use refineRacket for legal serve
+    let finalRacket = refineRacket(ball.p, ball.v, ball.w, racketFromStroke,
+      this.handicap, racket.quality);
+
+    if (!finalRacket.valid && this.handicap < 0.999) {
+      finalRacket = refineRacket(ball.p, ball.v, ball.w, racketFromStroke,
+        1, racket.quality);
     }
 
-    this.anim.swing = 1;
-    this.tell = { kind: archId, t: 0.5, strength: 0.6 };
-    this.lastShot = { arch: archId, stroke: STROKES[archId], racket, slip: false, serveDepth: tz };
-    this.exchange = 0;
-    this.pace = this.L.paceOpen;
-    return refineRacket(game.ball.p, game.ball.v, game.ball.w, racket, clamp(L.skill, 0, 1), racket.quality);
+    return finalRacket;
   }
-}
 
-/** rotate a vector by a quaternion (in place safe) */
-function rotateVecQuat(out, v, q) {
-  const { x, y, z } = v, qx = q.x, qy = q.y, qz = q.z, qw = q.w;
-  const ix = qw * x + qy * z - qz * y;
-  const iy = qw * y + qz * x - qx * z;
-  const iz = qw * z + qx * y - qy * x;
-  const iw = -qx * x - qy * y - qz * z;
-  out.x = ix * qw + iw * -qx + iy * -qz - iz * -qy;
-  out.y = iy * qw + iw * -qy + iz * -qx - ix * -qz;
-  out.z = iz * qw + iw * -qz + ix * -qy - iy * -qx;
-  return out;
+  /** Check if AI is ready to strike (timing) */
+  readyToStrike(now) {
+    if (!this.commit) return false;
+    if (now < this.swingAt - 0.30) return false;  // too early
+    if (now > this.swingAt + 0.15) return false;  // too late
+    return true;
+  }
+
+  /** Think - main AI update */
+  think(game, dt) {
+    const now = game.time;
+    const ball = game.ball;
+
+    // Update readiness
+    if (this.phase === 'IDLE') {
+      this.plan = this.computePlan(game);
+      if (this.plan) {
+        this.commit = this.plan;
+        this.readT = now;
+        this.phase = 'READY';
+        this.backswingStart = now;
+        this.backswingPose = {
+          pos: V3.new(this.target.x, this.target.y, this.target.z),
+          windup: 0,
+        };
+      }
+    }
+
+    // Update tactic based on rally progression
+    if (game.rally > 0 && game.rally % 5 === 0) {
+      this.tactic = this.rollTactic();
+    }
+
+    // Update pace based on rally
+    if (game.rally > 0) {
+      this.exchange = game.rally;
+      this.pace = clamp(this.L.paceOpen + (game.rally - 1) * this.L.paceRamp, 0, this.L.paceMax);
+    }
+
+    // Move towards target with smooth interpolation
+    if (this.plan && this.phase !== 'IDLE') {
+      const t = this.noisyTarget(this.plan, game);
+      V3.copy(this.target, t);
+
+      // Smooth movement
+      const moveRate = clamp(this.L.move * 2.5, 2, 12);
+      this._moveSmooth.x = expSmooth(this._moveSmooth.x, this.target.x, moveRate, dt);
+      this._moveSmooth.y = expSmooth(this._moveSmooth.y, this.target.y, moveRate, dt);
+      this._moveSmooth.z = expSmooth(this._moveSmooth.z, this.target.z, moveRate * 0.9, dt);
+
+      // Store position for rendering
+      game.ai.pos = V3.new(
+        this._moveSmooth.x,
+        this._moveSmooth.y,
+        this._moveSmooth.z
+      );
+
+      // Compute velocity for visual purposes
+      V3.sub(this.vel, game.ai.pos, this.lastPos);
+      V3.mul(this.vel, this.vel, 1 / Math.max(dt, 1e-4));
+      V3.copy(this.lastPos, game.ai.pos);
+    }
+
+    // Swing timing
+    if (this.plan && this.phase !== 'IDLE') {
+      const timeToContact = this.commit.t - now;
+      if (timeToContact < 0.35 && timeToContact > 0) {
+        // Wind-up phase
+        const windupProgress = 1 - timeToContact / 0.35;
+        this.anim.windup = clamp(windupProgress, 0, 1) * this.L.windup;
+
+        // Start swing commitment
+        if (!this.commit || now >= this.swingAt) {
+          this.swingAt = now + 0.02;
+        }
+      }
+
+      // Execute swing
+      if (this.readyToStrike(now)) {
+        const racket = this.swing(game);
+        if (racket) {
+          this.phase = 'SWING';
+          this.anim.swing = 1;
+          this.anim.lean = racket.bioParams ? racket.bioParams.thetaSide * 0.15 : 0;
+        }
+      }
+    }
+
+    // Decay animations
+    this.anim.swing = Math.max(0, this.anim.swing - dt * 3);
+    this.anim.windup = Math.max(0, this.anim.windup - dt * 2);
+    this.anim.lean = Math.max(0, this.anim.lean - dt * 4);
+
+    // Phase transition
+    if (this.phase === 'SWING' && this.anim.swing < 0.1) {
+      this.phase = 'RECOVER';
+    }
+    if (this.phase === 'RECOVER' && !ball.live) {
+      this.phase = 'IDLE';
+    }
+  }
 }
