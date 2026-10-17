@@ -153,6 +153,21 @@ class Game {
     this.lastPoint = null;
     this.timeScale = 1; this.targetTimeScale = 1;
     this.shake = 0; this.shakeDir = V3.new();
+    this.motionQuery = typeof window !== 'undefined' && window.matchMedia
+      ? window.matchMedia('(prefers-reduced-motion: reduce)') : null;
+    this.reducedMotion = !!(this.motionQuery && this.motionQuery.matches);
+    if (this.motionQuery) {
+      const onMotionPreference = (event) => {
+        this.reducedMotion = !!event.matches;
+        if (this.reducedMotion) {
+          this.shake = 0; this.hitFlash = 0;
+          this.marks.length = 0; this.particles.n = 0;
+          if (this.R && this.R.post) { this.R.post.radial = 0; this.R.post.flash = 0; }
+        }
+      };
+      if (this.motionQuery.addEventListener) this.motionQuery.addEventListener('change', onMotionPreference);
+      else if (this.motionQuery.addListener) this.motionQuery.addListener(onMotionPreference);
+    }
     // Presets are the baseline; mouse controls are session-local and resettable.
     this.cameraControls = { zoom: 1, height: 0 };
     this.camShiftY = 0;
@@ -401,7 +416,7 @@ class Game {
     this._keepDemo = false;
     this.prepServe();
     if (this.demoMode) {
-      this.msg('🤖 РЕЖИМ НАБЛЮДЕНИЯ: БОТ VS БОТ', 3.0, '#39c6ff', true);
+      this.msg('РЕЖИМ НАБЛЮДЕНИЯ · БОТ ПРОТИВ БОТА', 3.0, '#39c6ff', true);
       this.msg('СМОТРИТЕ НА ТРАЕКТОРИЮ СВАЙПОВ', 3.0, '#7fd4ff');
     } else {
       this.msg(this.server === 1 ? 'ВАША ПОДАЧА' : 'ПОДАЁТ СОПЕРНИК', 1.6, '#7fd4ff');
@@ -602,7 +617,7 @@ class Game {
   onBounce(side, speed, info) {
     if (!(info && info.edge > 0.25)) this.audio.hitTable(speed, this.ball.p.x);
     this.addMark(this.ball.p.x, this.ball.p.z, speed);
-    this.particles.burst(this.ball.p.x, PH.TABLE_Y + 0.005, this.ball.p.z,
+    this.emitParticles(this.ball.p.x, PH.TABLE_Y + 0.005, this.ball.p.z,
       4 + (speed > 9 ? 4 : 0), 0.5 + speed * 0.06, 0.26, 0.016, 1, 1, 0.92, { x: 0, y: 0.7, z: 0 });
     this.shakeIt(clamp(speed / 46, 0, 0.26), V3.new(0, 1, 0));
 
@@ -652,11 +667,17 @@ class Game {
   }
 
   addMark(x, z, speed) {
+    if (this.reducedMotion) return;
     this.marks.push({ x, z, t: 0, life: 1.5, s: clamp(0.05 + speed * 0.004, 0.05, 0.12) });
     if (this.marks.length > 14) this.marks.shift();
   }
 
+  emitParticles(...args) {
+    if (!this.reducedMotion) this.particles.burst(...args);
+  }
+
   shakeIt(amount, dir) {
+    if (this.reducedMotion) return;
     this.shake = Math.min(1.1, this.shake + amount);
     if (dir) V3.copy(this.shakeDir, V3.norm(dir, dir));
   }
@@ -706,7 +727,7 @@ class Game {
     this.audio.hitRacket(speed, info ? info.contactSlip : 0, softHit);
     if (side > 0 && this.lastSweet !== undefined && this.lastSweet < 0.30) this.buzz(16);
     const col = racket.stroke ? hexToRgb(racket.stroke.col) : [1, 1, 1];
-    this.particles.burst(contactP.x, contactP.y, contactP.z,
+    this.emitParticles(contactP.x, contactP.y, contactP.z,
       side > 0 ? 14 : 9, 0.7 + speed * 0.05, 0.32, 0.019, col[0], col[1], col[2],
       { x: -racket.normal.x * 0.6, y: -racket.normal.y * 0.6, z: -racket.normal.z * 0.6 });
 
@@ -988,11 +1009,11 @@ class Game {
       let arrow = '•';
       if (dist >= 0.02) {
         if (Math.abs(dy) > Math.abs(dx) * 1.5) {
-          if (dy < 0) { dirName = 'СВАЙП ВВЕРХ (ТОПСПИН)'; arrow = '⬆'; }
-          else { dirName = 'СВАЙП ВНИЗ (ПОДРЕЗКА)'; arrow = '⬇'; }
+          if (dy < 0) { dirName = 'СВАЙП ВВЕРХ (ТОПСПИН)'; arrow = '↑'; }
+          else { dirName = 'СВАЙП ВНИЗ (ПОДРЕЗКА)'; arrow = '↓'; }
         } else if (Math.abs(dx) > Math.abs(dy) * 1.5) {
-          if (dx > 0) { dirName = 'СВАЙП ВПРАВО'; arrow = '➡'; }
-          else { dirName = 'СВАЙП ВЛЕВО'; arrow = '⬅'; }
+          if (dx > 0) { dirName = 'СВАЙП ВПРАВО'; arrow = '→'; }
+          else { dirName = 'СВАЙП ВЛЕВО'; arrow = '←'; }
         } else {
           if (dy < 0) {
             if (dx > 0) { dirName = 'СВАЙП ВВЕРХ-ВПРАВО'; arrow = '↗'; }
@@ -1201,12 +1222,12 @@ class Game {
           clipTape(b.p, b.v, b.w);
           this.audio.hitNet();
           this.msg('СЕТКА — ЭДЖ!', 1.1, '#ffd34d');
-          this.particles.burst(xAt, PH.NET_TOP, 0, 8, 1.1, 0.3, 0.014, 1, 0.9, 0.5);
+          this.emitParticles(xAt, PH.NET_TOP, 0, 8, 1.1, 0.3, 0.014, 1, 0.9, 0.5);
           this.netTouched = true;
         } else if (yAt < PH.NET_TOP) {
           bounceNet(b.p, b.v, b.w, Math.sign(p0.z) || 1);
           this.audio.hitNet();
-          this.particles.burst(xAt, yAt, 0, 7, 0.7, 0.3, 0.013, 0.8, 0.85, 1);
+          this.emitParticles(xAt, yAt, 0, 7, 0.7, 0.3, 0.013, 0.8, 0.85, 1);
           this.netTouched = true;
           this.moments.addBounce(true);
         }
@@ -1733,9 +1754,9 @@ class Game {
     this.camLook.z = expSmooth(this.camLook.z, this.camLookT.z, k * 1.2, dt);
     this.fov = expSmooth(this.fov, this.fovT, 5, dt);
 
-    // shake
-    this.shake = Math.max(0, this.shake - dt * 3.4);
-    const s = this.shake * this.shake * 0.055;
+    // Camera shake is an optional impact effect, not part of the simulation.
+    this.shake = this.reducedMotion ? 0 : Math.max(0, this.shake - dt * 3.4);
+    const s = this.reducedMotion ? 0 : this.shake * this.shake * 0.055;
     const t = this.time * 46;
     const ox = (noise1(t) - 0.5) * s, oy = (noise1(t + 17.3) - 0.5) * s, oz = (noise1(t + 41.7) - 0.5) * s;
     const eye = V3.new(this.camPos.x + ox, this.camPos.y + oy, this.camPos.z + oz);
@@ -1750,14 +1771,21 @@ class Game {
    *  photograph instead of a video of a game. */
   updateCameraReplay(dtReal) {
     const rp = this.replayer, b = this.ball.p;
-    const prog = rp.moment ? clamp(rp.i / Math.max(1, rp.lastFrame), 0, 1) : 0;
-    const t = clamp((prog - 0.42) / 0.5, 0, 1);
-    const e = t * t * (3 - 2 * t);                     // smoothstep
-    const wx = clamp(b.x * 0.35, -1.4, 1.4), wz = clamp(b.z * 0.25 + 3.35, 2.4, 4.0);
-    const ox = clamp(b.x * 0.75, -1.5, 1.5), oz = clamp(b.z + 1.35, 0.55, 3.1);
-    V3.set(this.camPosT, lerp(wx, ox, e), lerp(2.02, 1.34, e) + Math.sin(this.time * 0.7) * 0.02, lerp(wz, oz, e));
-    V3.set(this.camLookT, b.x * 0.9, b.y * 0.9 + 0.06, b.z * 0.9);
-    this.fovT = lerp(41, 34, e);
+    if (this.reducedMotion) {
+      // Keep the live framing fixed; the ball still follows its full replay trajectory.
+      V3.copy(this.camPosT, this.camPos);
+      V3.copy(this.camLookT, this.camLook);
+      this.fovT = this.fov;
+    } else {
+      const prog = rp.moment ? clamp(rp.i / Math.max(1, rp.lastFrame), 0, 1) : 0;
+      const t = clamp((prog - 0.42) / 0.5, 0, 1);
+      const e = t * t * (3 - 2 * t);                     // smoothstep
+      const wx = clamp(b.x * 0.35, -1.4, 1.4), wz = clamp(b.z * 0.25 + 3.35, 2.4, 4.0);
+      const ox = clamp(b.x * 0.75, -1.5, 1.5), oz = clamp(b.z + 1.35, 0.55, 3.1);
+      V3.set(this.camPosT, lerp(wx, ox, e), lerp(2.02, 1.34, e) + Math.sin(this.time * 0.7) * 0.02, lerp(wz, oz, e));
+      V3.set(this.camLookT, b.x * 0.9, b.y * 0.9 + 0.06, b.z * 0.9);
+      this.fovT = lerp(41, 34, e);
+    }
     this.applyCamera(dtReal);
     /* camVP is the matrix everything on screen is projected with — the HUD text
      * band, the bat clamp, the strike ring, the projected cursor. During a
@@ -2052,8 +2080,12 @@ class Game {
     // post-processing reacts to the action
     const P = this.R.post;
     const sp = clamp(V3.len(this.ball.v) / 30, 0, 1);
-    P.radial = expSmooth(P.radial, this.ball.live ? sp * sp * 0.85 : 0, 5, dtReal);
-    P.flash = expSmooth(P.flash, this.hitFlash * 0.05, 10, dtReal);
+    if (this.reducedMotion) {
+      P.radial = 0; P.flash = 0;
+    } else {
+      P.radial = expSmooth(P.radial, this.ball.live ? sp * sp * 0.85 : 0, 5, dtReal);
+      P.flash = expSmooth(P.flash, this.hitFlash * 0.05, 10, dtReal);
+    }
     P.sat = expSmooth(P.sat, 1.05 + (1 - this.timeScale) * 0.25, 4, dtReal);
     P.ca = expSmooth(P.ca, 0.55 + sp * 0.75, 4, dtReal);
     this.audio.setCrowd(clamp(this.rally / 18, 0, 1) * 0.6 + (this.state === GS.POINT ? 0.4 : 0));
@@ -2080,7 +2112,7 @@ class Game {
   buildTrail() {
     const h = this.ball.hist, R = this.R, m = this.scene.mesh.trail;
     const n = h.length / 3;
-    if (n < 3 || !this.settings.showTrail) { m.count = 0; return; }
+    if (n < 3 || !this.settings.showTrail || this.reducedMotion) { m.count = 0; return; }
     const cam = this.R.camPos;
     let nv = 0, ni = 0;
     const maxW = clamp(0.004 + V3.len(this.ball.v) * 0.0008, 0.004, 0.016);
@@ -2233,7 +2265,7 @@ class Game {
     /* predicted landing spot */
     if (this.settings.showPredict && this.ball.live && this.predictOut.landed && this.ball.lastHitBy === 1) {
       const L = this.predictOut.landed;
-      const pulse = 0.055 + Math.sin(this.time * 9) * 0.008;
+      const pulse = this.reducedMotion ? 0.055 : 0.055 + Math.sin(this.time * 9) * 0.008;
       M4.compose(tmp.m, V3.new(L.x, PH.TABLE_Y + 0.004, L.z),
         Q.setAxisAngle(Q.new(), 1, 0, 0, -Math.PI / 2), V3.new(pulse, pulse, pulse));
       R.draw(me.quad, tmp.m, {
@@ -2285,7 +2317,7 @@ class Game {
     this.drawDynamic(false);           // ball + bats (opaque)
     this.scene.drawNet(R);             // alpha-blended net on top of them
     this.drawFX();                     // additive trail / particles / decals
-    R.present(this.time);
+    R.present(this.reducedMotion ? 0 : this.time);
   }
 }
 

@@ -19,6 +19,17 @@ class UI {
     this.noteTimer = 0;
     this.ripples = [];
     this.ghostT = 0;
+    this.motionQuery = typeof window !== 'undefined' && window.matchMedia
+      ? window.matchMedia('(prefers-reduced-motion: reduce)') : null;
+    this.reducedMotion = !!(this.motionQuery && this.motionQuery.matches);
+    if (this.motionQuery) {
+      const onMotionPreference = (event) => {
+        this.reducedMotion = !!event.matches;
+        if (this.reducedMotion) this._lastRibbon = null;
+      };
+      if (this.motionQuery.addEventListener) this.motionQuery.addEventListener('change', onMotionPreference);
+      else if (this.motionQuery.addListener) this.motionQuery.addListener(onMotionPreference);
+    }
     this._pv = {};
     this._pv2 = {};
     this._cur = '';
@@ -27,18 +38,80 @@ class UI {
     document.addEventListener('pointerdown', e => this.setInputMode(e.pointerType), { capture: true, passive: true });
     this.bindMenu();
     this.resize();
-    window.addEventListener('resize', () => this.resize());
+    window.addEventListener('resize', () => { this.resize(); this.syncMenuScrollHint(); });
+    this.dialogObserver = typeof MutationObserver !== 'undefined' ? new MutationObserver(() => this.syncDialogFocus()) : null;
+    if (this.dialogObserver) this.dialogObserver.observe(document.body, { subtree: true, attributes: true, attributeFilter: ['class'] });
+    document.addEventListener('keydown', (event) => {
+      if (event.key === 'Tab') this.trapDialogFocus(event);
+    }, true);
   }
   attach(game) {
     this.game = game;
+    this.syncDialogFocus();
     this.pendingDiff = game.settings.difficulty;
     this.updateInputCopy();
     this.syncSettings();
+    this.syncFullscreen();
+    this.syncSoundControls();
+    this.syncPauseControl();
     this.refreshMenuBits();
+    this.syncMenuScrollHint();
     this.game.analytics && this.game.analytics.send('session:start', {
       platform: this.game.platform.label, touch: this.game.platform.touch,
       level: this.game.profile.data.level, coins: this.game.profile.data.coins,
     });
+  }
+
+  activeDialog() {
+    const screens = $$('.screen.on[aria-modal="true"]');
+    if (screens.length) return screens[screens.length - 1];
+    return this.game && this.game.paused ? $('#pauseInd') : null;
+  }
+  dialogFocusables(dialog) {
+    if (!dialog) return [];
+    return Array.from(dialog.querySelectorAll('a[href],button:not([disabled]),input:not([disabled]),select:not([disabled]),textarea:not([disabled]),[tabindex]:not([tabindex="-1"])'))
+      .filter(el => !el.hidden && el.getAttribute('aria-hidden') !== 'true' && el.getClientRects().length > 0);
+  }
+  syncDialogFocus() {
+    const dialog = this.activeDialog();
+    if (dialog === this._focusDialog) return;
+    this._focusDialog = dialog;
+    if (!dialog) {
+      const previous = this._dialogReturnFocus;
+      this._dialogReturnFocus = null;
+      requestAnimationFrame(() => {
+        if (this.activeDialog()) return;
+        const owner = previous && previous.closest && previous.closest('.screen');
+        const pauseOwner = previous && previous.closest && previous.closest('#pauseInd');
+        const stillVisible = previous && previous.isConnected &&
+          (!owner || owner.classList.contains('on')) && (!pauseOwner || (this.game && this.game.paused));
+        if (stillVisible && typeof previous.focus === 'function') previous.focus({ preventScroll: true });
+        else if (this.game && this.game.state !== GS.MENU && this.game.state !== GS.MATCH_END) $('#gl').focus({ preventScroll: true });
+      });
+      return;
+    }
+    if (!this._dialogReturnFocus) this._dialogReturnFocus = document.activeElement;
+    requestAnimationFrame(() => {
+      if (this.activeDialog() !== dialog) return;
+      const target = dialog.id === 'menu' ? $('#play') : this.dialogFocusables(dialog)[0];
+      if (target) target.focus({ preventScroll: true });
+      else {
+        if (!dialog.hasAttribute('tabindex')) dialog.setAttribute('tabindex', '-1');
+        dialog.focus({ preventScroll: true });
+      }
+    });
+  }
+  trapDialogFocus(event) {
+    const dialog = this.activeDialog();
+    if (!dialog) return;
+    const items = this.dialogFocusables(dialog);
+    if (!items.length) { event.preventDefault(); dialog.focus(); return; }
+    const first = items[0], last = items[items.length - 1], active = document.activeElement;
+    if (event.shiftKey && (active === first || !dialog.contains(active))) {
+      event.preventDefault(); last.focus();
+    } else if (!event.shiftKey && (active === last || !dialog.contains(active))) {
+      event.preventDefault(); first.focus();
+    }
   }
 
   setInputMode(pointerType) {
@@ -81,10 +154,50 @@ class UI {
     this.syncFullscreen();
   }
   syncFullscreen() {
-    const button = $('#btnFullscreen'), on = !!document.fullscreenElement;
-    button.setAttribute('aria-pressed', String(on));
-    button.title = on ? 'Выйти из полного экрана (F)' : 'Полный экран (F)';
-    button.setAttribute('aria-label', button.title);
+    const app = document.getElementById('app');
+    const supported = !!(app && typeof app.requestFullscreen === 'function' && document.fullscreenEnabled !== false);
+    const on = !!document.fullscreenElement;
+    for (const button of [$('#btnFullscreen'), $('#menuFullscreen')]) {
+      if (!button) continue;
+      button.hidden = !supported;
+      button.innerHTML = ICON.fullscreen;
+      button.setAttribute('aria-pressed', String(on));
+      button.title = on ? 'Выйти из полного экрана (F)' : 'Полный экран (F)';
+      button.setAttribute('aria-label', button.title);
+    }
+  }
+  syncSoundControls() {
+    if (!this.game) return;
+    const on = !!this.game.settings.sound;
+    const label = on ? 'Выключить звук' : 'Включить звук';
+    for (const button of [$('#btnSound'), $('#menuSound')]) {
+      if (!button) continue;
+      button.innerHTML = on ? ICON.sound : ICON.mute;
+      button.setAttribute('aria-pressed', String(on));
+      button.setAttribute('aria-label', label);
+      button.title = label;
+    }
+  }
+  syncPauseControl() {
+    const button = $('#btnMenu'), g = this.game;
+    if (!button || !g) return;
+    const key = `${g.state}|${g.paused}`;
+    if (button.dataset.syncState === key) return;
+    button.dataset.syncState = key;
+    const inPlay = g.state !== GS.MENU && g.state !== GS.MATCH_END;
+    const label = g.paused ? 'В главное меню' : 'Пауза';
+    button.innerHTML = g.paused ? ICON.menu : ICON.pause;
+    button.setAttribute('aria-label', label);
+    button.title = label;
+    button.setAttribute('aria-pressed', String(!g.paused && inPlay));
+  }
+  toggleSound() {
+    const g = this.game;
+    if (!g) return;
+    g.settings.sound = !g.settings.sound;
+    g.audio.setMuted(!g.settings.sound);
+    g.saveSettings();
+    this.syncSoundControls();
   }
 
   showMainMenu() {
@@ -93,6 +206,22 @@ class UI {
     $$('.screen').forEach(s => s.classList.remove('on'));
     $('#menu').classList.add('on');
     this.refreshMenuBits();
+    this.syncMenuScrollHint();
+  }
+
+  syncMenuScrollHint() {
+    const card = $('#menu .card');
+    if (!card) return;
+    const update = () => {
+      const needed = card.scrollHeight > card.clientHeight + 2;
+      card.classList.toggle('scroll-needed', needed);
+      card.classList.toggle('scroll-start', needed && card.scrollTop < 24);
+    };
+    if (!card.dataset.scrollHintBound) {
+      card.dataset.scrollHintBound = 'true';
+      card.addEventListener('scroll', update, { passive: true });
+    }
+    update();
   }
 
   resize() {
@@ -107,8 +236,11 @@ class UI {
   /* ------------------------------ menu ---------------------------- */
   bindMenu() {
     $$('#menu .opt[data-diff]').forEach((b) => b.addEventListener('click', () => {
-      $$('#menu .opt[data-diff]').forEach((x) => x.classList.remove('sel'));
-      b.classList.add('sel');
+      $$('#menu .opt[data-diff]').forEach((x) => {
+        const selected = x === b;
+        x.classList.toggle('sel', selected);
+        x.setAttribute('aria-pressed', String(selected));
+      });
       this.pendingDiff = +b.dataset.diff;
       if (this.game) this.game.audio.ui('click');
     }));
@@ -175,7 +307,13 @@ class UI {
     $('#setClose').addEventListener('click', () => this.closeSettings());
     $$('#cameraViews [data-camera]').forEach(button => button.addEventListener('click', () => this.game.setCameraPreset(button.dataset.camera)));
     $('#camReset').addEventListener('click', () => this.game.camReset());
-    $('#btnMenu').addEventListener('click', () => this.showMainMenu());
+    $('#btnMenu').addEventListener('click', () => {
+      if (this.game.paused) this.showMainMenu();
+      else this.game.setPaused(true);
+      this.syncPauseControl();
+    });
+    $('#menuFullscreen').addEventListener('click', () => this.toggleFullscreen());
+    $('#menuSound').addEventListener('click', () => this.toggleSound());
     const startDemo = () => {
       $$('.screen').forEach((s) => s.classList.remove('on'));
       document.body.classList.add('is-playing');
@@ -228,8 +366,8 @@ class UI {
       const g = this.game;
       if (!g || !g.replayer) return;
       dbgPaused = !dbgPaused;
-      if (dbgPaused) { g._savedReplaySpeed = g.replayer.speed; g.replayer.speed = 0.0001; dbgPause.textContent = '▶ ПУСК'; }
-      else { g.replayer.speed = g._savedReplaySpeed || 0.20; dbgPause.textContent = '⏸ ПАУЗА'; }
+      if (dbgPaused) { g._savedReplaySpeed = g.replayer.speed; g.replayer.speed = 0.0001; dbgPause.textContent = 'ВОСПРОИЗВЕСТИ'; }
+      else { g.replayer.speed = g._savedReplaySpeed || 0.20; dbgPause.textContent = 'ПАУЗА'; }
     });
     const dbgSpeed = $('#dbgSpeed');
     const speeds = [0.15, 0.25, 0.40];
@@ -239,7 +377,7 @@ class UI {
       spIdx = (spIdx + 1) % speeds.length;
       const sp = speeds[spIdx];
       if (g && g.replayer) g.replayer.speed = sp;
-      dbgSpeed.textContent = `⚡ ${sp.toFixed(2)}×`;
+      dbgSpeed.textContent = `СКОРОСТЬ ${sp.toFixed(2)}×`;
     });
     const dbgExit = $('#dbgExit');
     if (dbgExit) dbgExit.addEventListener('click', () => {
@@ -258,12 +396,7 @@ class UI {
       if (e.key.toLowerCase() === 'f' && !e.repeat && !e.ctrlKey && !e.metaKey && !e.altKey &&
           !(e.target && /^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName))) { e.preventDefault(); this.toggleFullscreen(); }
     });
-    $('#btnSound').addEventListener('click', () => {
-      const g = this.game; g.settings.sound = !g.settings.sound;
-      g.audio.setMuted(!g.settings.sound);
-      $('#btnSound').innerHTML = g.settings.sound ? ICON.sound : ICON.mute;
-      g.saveSettings();
-    });
+    $('#btnSound').addEventListener('click', () => this.toggleSound());
     /* Spin dial: one tap cycles МЕНЬШЕ -> НОРМА -> БОЛЬШЕ. It biases how much
        of the contact is brush (more spin, less pace) and how much is punch. */
     const sbEl = $('#spinBias');
@@ -297,7 +430,7 @@ class UI {
       if ((e.key === 'Shift' || e.key === ' ') && !e.repeat) this.game && this.game.setSlowmoHold(true);
       if ((e.key === 'm' || e.key === 'M' || e.key === 'ь' || e.key === 'Ь')) this.showMoments();
     });
-    $('#reelSkip').addEventListener('pointerdown', () => this.game && this.game.skipReplay());
+    $('#reelSkip').addEventListener('click', () => this.game && this.game.skipReplay());
     $('#reelsClose').addEventListener('click', () => { $('#reels').classList.remove('on'); this.game && this.game.audio.ui('click'); });
     $('#again').addEventListener('click', () => { $('#over').classList.remove('on'); this.game.restart(); });
     $('#backMenu').addEventListener('click', () => this.showMainMenu());
@@ -310,8 +443,8 @@ class UI {
     const t = $('#mnToast');
     if (!t) return;
     const n = this.game.moments.kept.length;
-    t.textContent = idx === 0 && n > 1 ? '\u2605 ЛУЧШИЙ МОМЕНТ МАТЧА'
-      : '\u2605 В КОПИЛКУ МОМЕНТОВ \u00b7 ' + m.shots + ' УДАРОВ';
+    t.textContent = idx === 0 && n > 1 ? 'ЛУЧШИЙ МОМЕНТ МАТЧА'
+      : 'В КОПИЛКУ МОМЕНТОВ · ' + m.shots + ' УДАРОВ';
     t.classList.add('on');
     clearTimeout(this._mnT);
     this._mnT = setTimeout(() => t.classList.remove('on'), 1700);
@@ -324,7 +457,13 @@ class UI {
     if (!r) return;
     r.classList.toggle('on', !!on);
     r.classList.toggle('hero', !!hero);
+    r.setAttribute('aria-hidden', String(!on));
     document.body.classList.toggle('is-reel', !!on);
+    if (!on && document.activeElement === $('#reelSkip')) {
+      const dialog = this.activeDialog();
+      const target = dialog ? (this.dialogFocusables(dialog)[0] || dialog) : $('#gl');
+      if (target) target.focus({ preventScroll: true });
+    }
     if (!on || !moment) return;
     const names = { SMASH: 'СМЕШ', LOOP: 'ТОПСПИН', COUNTER: 'КОНТРАТАКА', DRIVE: 'НАКАТ',
       FLICK: 'ФЛИК', LOB: 'СВЕЧА', CHOP: 'ПОДРЕЗКА', PUSH: 'ТОЛЧОК', BLOCK: 'БЛОК',
@@ -352,7 +491,7 @@ class UI {
         m.meta.deficit >= 2 ? 'отставал ' + m.meta.deficit + ':' + 0 : '', m.shots >= 12 ? 'долгий розыгрыш' : ''].filter(Boolean)[0] || 'чисто исполнено';
       return `<button class="mrow" data-i="${i}"><span class="num">${i + 1}</span>
         <span class="d"><b>${(names[m.finish] || m.finish)} · ${m.shots} ударов</b>
-        <s>${Math.round(m.speed)} км/ч · ${Math.round(m.spin)} об/с · ${why}</s></span>
+        <small>${Math.round(m.speed)} км/ч · ${Math.round(m.spin)} об/с · ${why}</small></span>
         <span class="st">${st}</span><span class="go">СМОТРЕТЬ \u203a</span></button>`;
     }).join('');
     Array.from(list.querySelectorAll('.mrow')).forEach((b) => b.addEventListener('click', () => {
@@ -368,7 +507,7 @@ class UI {
     hud.style.display = on ? 'block' : 'none';
     if (!on || !miss) return;
     const tEl = $('#dbgReplayTitle'), vEl = $('#dbgReplayVerdict'), mEl = $('#dbgReplayMetrics');
-    if (tEl) tEl.textContent = `🔍 ОТЛАДКА ПРОМАХА #${(index || 0) + 1} ИЗ ${total || 1}`;
+    if (tEl) tEl.textContent = `ПОВТОР ПРОМАХА #${(index || 0) + 1} ИЗ ${total || 1}`;
     if (vEl) vEl.textContent = miss.verdict || miss.reason;
     if (mEl) mEl.textContent = `Дистанция: ${(miss.minDist || 0).toFixed(2)} м (радиус: ${(miss.hitRadius || 0.22).toFixed(2)} м) · Свайп: ${miss.strokeName || 'НЕТ'} · Счёт: ${miss.score ? miss.score.join(':') : '0:0'}`;
   }
@@ -387,7 +526,7 @@ class UI {
           <span class="num">${i + 1}</span>
           <span class="d">
             <b style="color:#fff">${m.reason} · Счёт ${m.score[0]}:${m.score[1]}</b>
-            <s style="color:${col}">${m.verdict}</s>
+            <small style="color:${col}">${m.verdict}</small>
           </span>
           <span class="go" style="color:#39c6ff;font-weight:800">0.20× SLO-MO \u203a</span>
         </button>`;
@@ -405,7 +544,11 @@ class UI {
   showWorkshop(tab) {
     const g = this.game, p = g.profile;
     if (!p) return;
-    $$('#workshop .tab').forEach((b) => b.classList.toggle('on', b.dataset.tab === tab));
+    $$('#workshop .tab').forEach((b) => {
+      const selected = b.dataset.tab === tab;
+      b.classList.toggle('on', selected);
+      b.setAttribute('aria-pressed', String(selected));
+    });
     $$('#workshop .pane').forEach((x) => x.classList.remove('on'));
     $('#pane' + (tab === 'racket' ? 'Racket' : tab === 'shop' ? 'Shop' : 'Daily')).classList.add('on');
     $('#wsBal').textContent = p.data.coins;
@@ -431,7 +574,7 @@ class UI {
       const cry = !owned && it.crystals ? ` <em class="cry">${it.crystals} \u25c8</em>` : '';
       return `<button class="irow${it.id === current ? ' sel' : ''}${owned ? '' : ' locked'}" data-id="${it.id}">
         <span class="sw" style="background:${col}"></span>
-        <span class="d"><b>${it.name}</b><s>${it.ru}${owned ? '' : ' · не куплено'}</s></span>${cry}${price}</button>`;
+        <span class="d"><b>${it.name}</b><small>${it.ru}${owned ? '' : ' · не куплено'}</small></span>${cry}${price}</button>`;
     }).join('');
     Array.from(box.querySelectorAll('.irow')).forEach((b) => b.addEventListener('click', () => {
       const id = b.dataset.id, it = ITEMS[id];
@@ -476,7 +619,7 @@ class UI {
     const rows = STAT_KEYS.map((k) => {
       const v = t[k];
       const d = v - cur.stats[k];
-      return `<div class="sbar"><s>${STAT_RU[k]}</s><span class="gr"><i style="width:${v}%"></i></span>
+      return `<div class="sbar"><small>${STAT_RU[k]}</small><span class="gr"><i style="width:${v}%"></i></span>
         <b style="color:${d > 0 ? 'var(--good)' : d < 0 ? 'var(--bad)' : 'var(--dim2)'}">${v}${d ? (d > 0 ? ' ▲' : ' ▼') : ''}</b></div>`;
     }).join('');
     $('#statCard').innerHTML = rows;
@@ -520,7 +663,7 @@ class UI {
       const it = o.item;
       const s = itemStats(it);
       const line = STAT_KEYS.map((k) => `${STAT_RU[k].slice(0, 4)} ${Math.round(s[k])}`).join(' · ');
-      return `<div class="sitem"><b>${it.name} · ${it.ru}</b><s>${line}</s>
+      return `<div class="sitem"><b>${it.name} · ${it.ru}</b><small>${line}</small>
         <span class="buy"><span class="price">${o.price} монет</span>
         <button data-buy="${it.id}">КУПИТЬ</button></span></div>`;
     }).join('') : '<div class="snote">Все ракетки открыты. Играйте.</div>';
@@ -534,7 +677,7 @@ class UI {
     $('#shopCosmetics').innerHTML = cos.map((c) => {
       const price = c.cur === 'coins' ? `${c.price} монет` : c.cur === 'crystals' ? `${c.price} кр.` : 'за карьеру';
       return `<div class="sitem ${c.owned ? 'owned' : ''}"><b>${c.ru}</b>
-        <s>${c.owned ? 'открыто' : c.cur === 'career' ? 'награда за кубок мира' : 'косметика'}</s>
+        <small>${c.owned ? 'открыто' : c.cur === 'career' ? 'награда за кубок мира' : 'косметика'}</small>
         <span class="buy"><span class="price">${c.owned ? '—' : price}</span>
         <button data-cos="${c.id}" ${c.owned ? 'disabled' : ''}>${c.owned ? 'ЕСТЬ' : 'КУПИТЬ'}</button></span></div>`;
     }).join('');
@@ -549,7 +692,7 @@ class UI {
     const iap = shop.iapOffers();
     $('#shopIapWrap').style.display = iap.length ? 'block' : 'none';
     $('#shopIap').innerHTML = iap.map((b) => `<div class="sitem ${b.owned ? 'owned' : ''}">
-      <b>${b.ru}</b><s>${b.note || (b.crystals ? b.crystals + ' кристаллов' : '')}</s>
+      <b>${b.ru}</b><small>${b.note || (b.crystals ? b.crystals + ' кристаллов' : '')}</small>
       <span class="buy"><span class="price">${b.price} €</span>
       <button data-iap="${b.id}" ${b.owned && b.once ? 'disabled' : ''}>${b.owned && b.once ? 'КУПЛЕНО' : 'КУПИТЬ'}</button></span></div>`).join('');
     Array.from($('#shopIap').querySelectorAll('button[data-iap]')).forEach((b) => b.addEventListener('click', () => {
@@ -579,7 +722,7 @@ class UI {
     $('#taskList').innerHTML = DAILY_TASKS.map((t) => {
       const cur = Math.min(d.tasks[t.id] || 0, t.need);
       const done = d.done.indexOf(t.id) >= 0, claimed = d.claimed.indexOf(t.id) >= 0;
-      return `<div class="trow"><span class="d"><b>${t.ru}</b><s>${cur}/${t.need} · ${t.coins} монет</s></span>
+      return `<div class="trow"><span class="d"><b>${t.ru}</b><small>${cur}/${t.need} · ${t.coins} монет</small></span>
         <button data-claim="${t.id}" ${done && !claimed ? '' : 'disabled'}>${claimed ? 'ПОЛУЧЕНО' : done ? 'ЗАБРАТЬ' : 'В ПРОЦЕССЕ'}</button></div>`;
     }).join('');
     Array.from($('#taskList').querySelectorAll('button[data-claim]')).forEach((b) => b.addEventListener('click', () => {
@@ -624,11 +767,15 @@ class UI {
     switch (k) {
       case 'hitZone':
         s.hitZone = v / 100;
-        const hzEl = $('#vHitZone'); if (hzEl) hzEl.textContent = v + '%';
+        const hzEl = $('#vHitZone'), hzRange = $('#rHitZone');
+        if (hzEl) hzEl.textContent = v + '%';
+        if (hzRange) hzRange.setAttribute('aria-valuetext', v + ' процентов');
         break;
       case 'assist':
         s.assist = v / 100;
-        const astEl = $('#vAssist'); if (astEl) astEl.textContent = v + '%';
+        const astEl = $('#vAssist'), astRange = $('#rAssist');
+        if (astEl) astEl.textContent = v + '%';
+        if (astRange) astRange.setAttribute('aria-valuetext', v + ' процентов');
         break;
       case 'posAssist':
         s.posAssist = v / 100;
@@ -671,12 +818,12 @@ class UI {
     const s = this.game.settings;
     const hzVal = Math.round((s.hitZone !== undefined ? s.hitZone : 0.85) * 100);
     const rHz = $('#rHitZone'), vHz = $('#vHitZone');
-    if (rHz) rHz.value = hzVal;
+    if (rHz) { rHz.value = hzVal; rHz.setAttribute('aria-valuetext', hzVal + ' процентов'); }
     if (vHz) vHz.textContent = hzVal + '%';
 
     const astVal = Math.round((s.assist !== undefined ? s.assist : 0.85) * 100);
     const rAst = $('#rAssist'), vAst = $('#vAssist');
-    if (rAst) rAst.value = astVal;
+    if (rAst) { rAst.value = astVal; rAst.setAttribute('aria-valuetext', astVal + ' процентов'); }
     if (vAst) vAst.textContent = astVal + '%';
     this.syncCameraControls();
   }
@@ -692,8 +839,21 @@ class UI {
   syncScore() {
     const g = this.game;
     const a = $('#ptsA'), b = $('#ptsB');
-    if (a.textContent !== String(g.score[0])) { a.textContent = g.score[0]; a.classList.add('bump'); setTimeout(() => a.classList.remove('bump'), 220); }
-    if (b.textContent !== String(g.score[1])) { b.textContent = g.score[1]; b.classList.add('bump'); setTimeout(() => b.classList.remove('bump'), 220); }
+    const changedA = a.textContent !== String(g.score[0]);
+    const changedB = b.textContent !== String(g.score[1]);
+    const pulse = (el, className, duration) => {
+      if (!el) return;
+      el.classList.remove(className);
+      void el.offsetWidth; // restart the score pop when points land back-to-back
+      el.classList.add(className);
+      clearTimeout(el._pulseTimer);
+      el._pulseTimer = setTimeout(() => el.classList.remove(className), duration);
+    };
+    if (changedA) { a.textContent = g.score[0]; pulse(a, 'bump', 480); }
+    if (changedB) { b.textContent = g.score[1]; pulse(b, 'bump', 480); }
+    if ((changedA || changedB) && g.lastPoint) {
+      pulse(g.lastPoint.who > 0 ? $('#scoreSideA') : $('#scoreSideB'), 'scored', 680);
+    }
     $('#servA').classList.toggle('on', g.server === 1);
     $('#servB').classList.toggle('on', g.server === -1);
     $('#oppName').textContent = g.ai.L.name;
@@ -749,6 +909,8 @@ class UI {
 
   showMatchEnd(won) {
     const g = this.game, s = g.stats;
+    $('#over').classList.toggle('won', !!won);
+    $('#over').classList.toggle('lost', !won);
     $('#overTitle').textContent = won ? 'ПОБЕДА' : 'ПОРАЖЕНИЕ';
     $('#overTitle').style.color = won ? 'var(--good)' : 'var(--bad)';
     $('#overScore').textContent = g.score[0] + ' : ' + g.score[1];
@@ -844,9 +1006,10 @@ class UI {
    *  over the bright table as well as over the dark floor. */
   drawGhost(c, W, H, d, pts, speed, col) {
     const CYCLE = 2.0;
-    const T = (this.ghostT * speed) % CYCLE;
+    const T = this.reducedMotion ? 0 : (this.ghostT * speed) % CYCLE;
     const play = clamp(T / 0.95, 0, 1);
-    const fade = T > 1.40 ? clamp((CYCLE - T) / 0.42, 0, 1) : clamp(T / 0.12, 0, 1);
+    const fade = this.reducedMotion ? 0.9
+      : T > 1.40 ? clamp((CYCLE - T) / 0.42, 0, 1) : clamp(T / 0.12, 0, 1);
     if (fade <= 0.01) return;
 
     let P = pts.map((q) => [q[0] * W, q[1] * H]);
@@ -1034,7 +1197,7 @@ class UI {
         }
 
         // 2. Point of click: pulsating glowing target ring & label
-        const pulse = 1 + 0.12 * Math.sin(Date.now() * 0.007);
+        const pulse = this.reducedMotion ? 1 : 1 + 0.12 * Math.sin(Date.now() * 0.007);
         c.shadowBlur = 16 * d;
         c.shadowColor = '#00ffcc';
         c.strokeStyle = '#00ffcc';
@@ -1053,7 +1216,7 @@ class UI {
         c.font = `800 ${11 * d}px ${CSSFONT}`;
         c.textAlign = 'center';
         c.textBaseline = 'middle';
-        const clkText = '🎯 ТОЧКА КЛИКА';
+         const clkText = 'МЕСТО КАСАНИЯ';
         const ctw = c.measureText(clkText).width + 16 * d;
         c.fillStyle = 'rgba(4, 18, 28, 0.92)';
         c.fillRect(cx - ctw * 0.5, badgeY - 11 * d, ctw, 22 * d);
@@ -1070,7 +1233,7 @@ class UI {
         c.font = `800 ${13 * d}px ${CSSFONT}`;
         c.textAlign = 'center';
         c.textBaseline = 'middle';
-        const msg = '⚠️ В ЭТОМ РОЗЫГРЫШЕ НЕ БЫЛО КЛИКА (ПРОПУСК БЕЗ СВАЙПА)';
+        const msg = 'НЕТ СВАЙПА — ПРОПУСК МЯЧА В ЭТОМ РОЗЫГРЫШЕ';
         const mw = c.measureText(msg).width + 24 * d;
         c.fillStyle = 'rgba(25, 10, 15, 0.90)';
         c.fillRect(W * 0.5 - mw * 0.5, H * 0.82 - 14 * d, mw, 28 * d);
@@ -1123,8 +1286,8 @@ class UI {
         fade: 1.0,
       };
     } else if (this._lastRibbon) {
-      this._lastRibbon.fade -= dt * 2.2;
-      if (this._lastRibbon.fade <= 0) {
+      if (this.reducedMotion) this._lastRibbon = null;
+      else if ((this._lastRibbon.fade -= dt * 2.2) <= 0) {
         this._lastRibbon = null;
       } else {
         const rb = this._lastRibbon;
@@ -1167,11 +1330,12 @@ class UI {
     // Live words are DOM text in the lower play band, never painted on the table.
   }
 
-  ripple(x, y, col) { this.ripples.push({ x, y, col, t: 0, life: 0.55 }); }
+  ripple(x, y, col) { if (!this.reducedMotion) this.ripples.push({ x, y, col, t: 0, life: 0.55 }); }
 
   /* ------------------------------ tick ----------------------------- */
   tick(dt) {
     const g = this.game; if (!g) return;
+    this.syncPauseControl();
     this.drawOverlay(dt);
     // A single short status, never a stack of messages/telemetry/hints.
     const status = $('#playStatus');
@@ -1218,12 +1382,16 @@ class UI {
 
     // Adapt typography to the free space BELOW the table; no guessed pixels.
     const band = $('#playband');
-    if (band && (this._bandH === undefined || this._bandSig !== g.hudBandY + '|' + window.innerHeight)) {
-      this._bandSig = g.hudBandY + '|' + window.innerHeight;
-      const h = band.clientHeight;
-      this._bandH = h;
-      band.classList.toggle('band-short', h < 150);
-      band.classList.toggle('band-tiny', h < 92);
+    if (band) {
+      band.classList.toggle('training-compact', !!g.training && window.innerHeight <= 520);
+      const bandSig = `${g.hudBandY}|${window.innerWidth}|${window.innerHeight}|${!!g.training}`;
+      if (this._bandH === undefined || this._bandSig !== bandSig) {
+        this._bandSig = bandSig;
+        const h = band.clientHeight;
+        this._bandH = h;
+        band.classList.toggle('band-short', h < 150);
+        band.classList.toggle('band-tiny', h < 92);
+      }
     }
 
     const rb = $('#rally');
@@ -1326,7 +1494,8 @@ class UI {
     $$('.screen').forEach(s => s.classList.remove('on'));
     $('#crOppList').replaceChildren();
     $('#crReady').hidden = false;
-    $('#crTournName').textContent = `${t.icon} ${t.name}`;
+    $('#crTournName').textContent = t.name;
+    $('#crTournMark').textContent = String(t.id + 1).padStart(2, '0');
     $('#crTournPlace').textContent = t.place;
     $('#crTournInfo').textContent = `Раундов: ${t.rounds} · ELO ${t.eloMin}–${t.eloMax} · Побед: ${career.totalWins}`;
     $('#careerIntro').classList.add('on');
@@ -1336,7 +1505,8 @@ class UI {
     const g = this.game;
     $$('.screen').forEach(s => s.classList.remove('on'));
     const t = career.currentTournamentInfo;
-    $('#crTournName').textContent = `${t.icon} ${t.name}`;
+    $('#crTournName').textContent = t.name;
+    $('#crTournMark').textContent = String(t.id + 1).padStart(2, '0');
     $('#crReady').hidden = true;
     const list = $('#crOppList');
     list.innerHTML = '';
@@ -1371,7 +1541,7 @@ class UI {
       btn.className = 'opt';
       const colors = { green: '#4ee39a', blue: '#39c6ff', gold: '#ffd34d' };
       btn.style.borderColor = colors[perk.rarity] || '#39c6ff';
-      btn.innerHTML = `<b style="color:${colors[perk.rarity]}">${perk.name}</b><s>${perk.desc}</s>`;
+      btn.innerHTML = `<b style="color:${colors[perk.rarity]}">${perk.name}</b><small>${perk.desc}</small>`;
       btn.addEventListener('click', () => {
         g.audio.ui('click');
         career.selectPerk(i);
@@ -1385,7 +1555,7 @@ class UI {
 
   showCareerTournamentEnd(career) {
     const t = career.currentTournamentInfo;
-    this.showNote({ text: `${t.icon} ${t.name} ПОБЕЖДЁН!`, col: '#ffd34d', code: 'win' });
+    this.showNote({ text: `${t.name} ПОБЕЖДЁН!`, col: '#ffd34d', code: 'win' });
     clearTimeout(this._careerTimer);
     this._careerTimer = setTimeout(() => {
       if (!career.active || career.state !== 'TOURNAMENT_END') return;
@@ -1402,17 +1572,18 @@ class UI {
     $$('.screen').forEach(s => s.classList.remove('on'));
     const t = TOURNAMENTS[Math.min(career.currentTournament, TOURNAMENTS.length - 1)] || TOURNAMENTS[0];
     const isVictory = career.currentTournament >= TOURNAMENTS.length;
-    $('#crEndTitle').textContent = isVictory ? '👑 ЧЕМПИОН МИРА!' : `🏁 ${t.name}`;
+    $('#crEndTitle').textContent = isVictory ? 'ЧЕМПИОН МИРА!' : t.name;
+    $('#careerEnd').classList.toggle('career-victory', isVictory);
     $('#crEndSub').textContent = isVictory
       ? 'Вы прошли все 12 турниров. Легенда.'
       : `Выбыли на турнире: ${t.name}`;
     const stats = $('#crEndStats');
     stats.innerHTML = `
       <div class="recap">
-        <div class="rc"><i style="background:#4ee39a"></i><b>${career.totalWins}</b><s>побед</s></div>
-        <div class="rc"><i style="background:#ff5d6e"></i><b>${career.totalLosses}</b><s>поражений</s></div>
-        <div class="rc"><i style="background:#39c6ff"></i><b>${career.perks.length}</b><s>перков</s></div>
-        <div class="rc"><i style="background:#ffd34d"></i><b>${Math.round(career.runStats.maxSpeed)}</b><s>км/ч макс</s></div>
+        <div class="rc"><i style="background:#4ee39a"></i><b>${career.totalWins}</b><small>побед</small></div>
+        <div class="rc"><i style="background:#ff5d6e"></i><b>${career.totalLosses}</b><small>поражений</small></div>
+        <div class="rc"><i style="background:#39c6ff"></i><b>${career.perks.length}</b><small>перков</small></div>
+        <div class="rc"><i style="background:#ffd34d"></i><b>${Math.round(career.runStats.maxSpeed)}</b><small>км/ч макс</small></div>
       </div>
     `;
     career.stop();
@@ -1495,4 +1666,5 @@ const ICON = {
   mute: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><line x1="23" y1="9" x2="17" y2="15"/><line x1="17" y1="9" x2="23" y2="15"/></svg>',
   gear: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>',
   menu: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>',
+  pause: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><line x1="8" y1="5" x2="8" y2="19"/><line x1="16" y1="5" x2="16" y2="19"/></svg>',
 };

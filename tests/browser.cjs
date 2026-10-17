@@ -157,6 +157,17 @@ const { root } = require('./helpers.cjs');
           const b=tableScreenBounds(g.R.viewProj);
           return b.top>0 && b.bottom<.91 && opponentScreenTop(g.R.viewProj)>=CAMERA_HEADROOM-.001;
         });
+        check('replay skip is a visible touch target only during replay and returns focus safely', () => {
+          const skip=document.getElementById('reelSkip'),reel=document.getElementById('reel');
+          const hidden=getComputedStyle(skip).visibility==='hidden' && reel.getAttribute('aria-hidden')==='true';
+          skip.focus();const notFocusable=document.activeElement!==skip;
+          g.ui.replayShow(true,{finish:'DRIVE',winner:1,shots:3,speed:42,spin:5},false);
+          const box=skip.getBoundingClientRect();
+          const active=getComputedStyle(skip).visibility==='visible' && reel.getAttribute('aria-hidden')==='false' &&
+            skip.tabIndex===0 && box.width>=44 && box.height>=44 && skip.getAttribute('aria-label');
+          skip.focus();g.ui.replayShow(false);
+          return hidden && notFocusable && active && document.activeElement!==skip;
+        });
         check('score is upper-left and does not overlap right-hand controls', () => {
           const score=document.getElementById('score').getBoundingClientRect();
           const controls=document.getElementById('topright').getBoundingClientRect();
@@ -174,12 +185,15 @@ const { root } = require('./helpers.cjs');
           try {g.drawFX();} finally {g.R.draw=oldDraw;g.ball.hist=oldHist;}
           return opacity===.2;
         });
-        check('match exits to MENU and cannot keep scoring', () => {
+        check('pause control pauses first, then exits to MENU without further scoring', () => {
           g.startMatch(2); g.server = -1; g.prepServe();
-          document.getElementById('btnMenu').click();
+          const menu = document.getElementById('btnMenu');
+          menu.click();
+          const paused = g.paused && document.body.classList.contains('is-paused') && menu.getAttribute('aria-label') === 'В главное меню';
+          menu.click();
           const t = g.time, score = g.score.join();
           for (let i=0; i<360; i++) g.update(1/60);
-          return g.state === GS.MENU && !g.ball.live && g.time === t && g.score.join() === score;
+          return paused && g.state === GS.MENU && !g.ball.live && g.time === t && g.score.join() === score;
         });
         check('R in menu does not start an invisible game', () => {
           window.dispatchEvent(new KeyboardEvent('keydown', { key: 'r' })); return g.state === GS.MENU;
@@ -294,6 +308,36 @@ const { root } = require('./helpers.cjs');
       });
       for (const r of results) { console.log(`${r.ok ? 'PASS' : 'FAIL'} ${width}x${height}: ${r.name}${r.error ? ' — '+r.error : ''}`); count++; }
       assert.deepEqual(results.filter(r => !r.ok), []);
+      await page.emulateMediaFeatures([{ name: 'prefers-reduced-motion', value: 'reduce' }]);
+      await page.waitForFunction(() => window.__game && window.__game.reducedMotion);
+      const reducedMotionWorks = await page.evaluate(() => {
+        const g = window.__game;
+        g.shake = 0; g.shakeIt(.8);
+        const noShake = g.shake === 0;
+        const camera = [g.camPos.x, g.camPos.y, g.camPos.z, g.camLook.x, g.camLook.y, g.camLook.z, g.fov];
+        g.replayer.on = true; g.updateCameraReplay(1 / 60); g.replayer.on = false;
+        const fixedCamera = camera.every((v, i) => Math.abs(v - [g.camPos.x, g.camPos.y, g.camPos.z, g.camLook.x, g.camLook.y, g.camLook.z, g.fov][i]) < 1e-8);
+        g.particles.n=0;g.marks.length=0;g.emitParticles(0,0,0,4,.5,.4,.01,1,1,1);g.addMark(0,0,5);
+        const noImpactVfx=g.particles.n===0 && g.marks.length===0;
+        const oldTrail=g.settings.showTrail,oldHist=g.ball.hist;g.settings.showTrail=true;g.ball.hist=[0,1,0,.1,1,0,.2,1,0];g.buildTrail();
+        const noTrail=g.scene.mesh.trail.count===0;g.settings.showTrail=oldTrail;g.ball.hist=oldHist;
+        const oldRipples=g.ui.ripples.length;g.ui.ripple(.5,.5,'#fff');
+        const noUiRipple=g.ui.ripples.length===oldRipples;g.ui._lastRibbon={pts:[],fade:1,col:'#fff'};g.ui.drawOverlay(1/60);
+        const noUiRibbon=g.ui._lastRibbon===null;
+        g.setState(GS.RALLY);g.ball.live=true;g.ball.lastHitBy=-1;
+        V3.set(g.ball.p,0,PH.TABLE_Y+1,0);V3.set(g.ball.v,1,0,0);V3.zero(g.ball.w);
+        g.R.post.radial=.5;g.R.post.flash=.2;
+        const beforeX=g.ball.p.x,beforeTime=g.time;g.update(1/60);
+        const physicsContinues=g.time>beforeTime && g.ball.p.x!==beforeX;
+        const noPostFx=g.R.post.radial===0 && g.R.post.flash===0;
+        g.returnToMenu();
+        return g.reducedMotion && g.ui.reducedMotion && noShake && fixedCamera && noImpactVfx && noTrail &&
+          noUiRipple && noUiRibbon && noPostFx && physicsContinues;
+      });
+      assert.equal(reducedMotionWorks, true, 'reduced motion suppresses optional camera, particle, trail, post-processing and UI movement while preserving ball simulation');
+      count++; console.log(`PASS ${width}x${height}: reduced motion suppresses optional VFX and UI motion, physics remains active`);
+      await page.emulateMediaFeatures([{ name: 'prefers-reduced-motion', value: 'no-preference' }]);
+      await page.waitForFunction(() => window.__game && !window.__game.reducedMotion);
       await page.evaluate(() => {
         const g = window.__game;
         g.settings.hitZone = .42; g.settings.volume = .13; g.settings.sound = false;
@@ -353,6 +397,21 @@ const { root } = require('./helpers.cjs');
         assert.equal(await page.evaluate(()=>window.__game.settings.camera==='DYNAMIC'),true);
         await tap('#camReset');await tap('#setClose');
         count++;console.log(`PASS ${width}x${height}: actual touch switches instructions and selects a camera without a mouse`);
+        await tap('#btnMenu');
+        assert.equal(await page.evaluate(()=>window.__game.paused&&document.body.classList.contains('is-paused')),true);
+        await tap('#pauseSettings');
+        assert.equal(await page.evaluate(()=>window.__game.paused&&document.getElementById('settings').classList.contains('on')),true);
+        await tap('#setClose');
+        assert.equal(await page.evaluate(()=>window.__game.paused&&!document.getElementById('settings').classList.contains('on')),true);
+        await tap('#pauseResume');
+        assert.equal(await page.evaluate(()=>!window.__game.paused),true);
+        await tap('#btnMenu');await tap('#btnMenu');
+        assert.equal(await page.evaluate(()=>window.__game.state===GS.MENU&&document.getElementById('menu').classList.contains('on')),true);
+        const soundBefore=await page.evaluate(()=>window.__game.settings.sound);await tap('#menuSound');
+        assert.equal(await page.evaluate(before=>window.__game.settings.sound!==before&&
+          document.getElementById('menuSound').getAttribute('aria-pressed')===String(!before)&&
+          document.getElementById('btnSound').getAttribute('aria-pressed')===String(!before),soundBefore),true);
+        count++;console.log(`PASS ${width}x${height}: real touch pauses, opens settings safely, resumes, exits, and toggles sound`);
       }
       const audioRender = await page.evaluate(async () => {
         const context = new OfflineAudioContext(2, 44100 * 4, 44100);
