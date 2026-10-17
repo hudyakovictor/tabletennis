@@ -32,7 +32,8 @@
     if (pauseInd) pauseInd.addEventListener('click', () => game.setPaused(false));
 
     // icons
-    document.getElementById('btnSound').innerHTML = ICON.sound;
+    document.getElementById('btnFullscreen').innerHTML = ICON.fullscreen;
+    document.getElementById('btnSound').innerHTML = game.settings.sound ? ICON.sound : ICON.mute;
     document.getElementById('btnSettings').innerHTML = ICON.gear;
     document.getElementById('btnMenu').innerHTML = ICON.menu;
 
@@ -53,7 +54,16 @@
     }
     requestAnimationFrame((t) => { last = t; frame(t); });
 
-    setTimeout(() => document.getElementById('loading').classList.add('off'), 260);
+    // A real brand splash, dismissible immediately once the game is ready.
+    const splash = document.getElementById('loading');
+    const dismissSplash = () => {
+      splash.classList.add('off');
+      window.removeEventListener('keydown', splashKey);
+    };
+    const splashKey = (e) => { if (e.key === 'Enter' || e.key === ' ') dismissSplash(); };
+    splash.addEventListener('pointerdown', dismissSplash, { once: true });
+    window.addEventListener('keydown', splashKey);
+    setTimeout(dismissSplash, 1600);
   };
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start);

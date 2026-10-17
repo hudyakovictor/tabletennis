@@ -47,6 +47,7 @@ class SwipeTracker {
   cancel() {
     this.active = false;
     this.samples.length = 0;
+    this.lastReleased = null;
     this.m = this.blankMetrics();
   }
   up(x, y, t) {

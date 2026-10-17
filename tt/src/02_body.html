@@ -1,5 +1,5 @@
 <div id="app" role="application" aria-label="TOPSPIN ARENA — настольный теннис, управление свайпом">
-  <canvas id="gl" aria-label="Игровое поле. Свайп задаёт удар; камера — четыре фиксированных ракурса, клавиши 1–4."></canvas>
+  <canvas id="gl" aria-label="Игровое поле. Свайп задаёт удар; колесо мыши — масштаб, правая кнопка и движение вверх/вниз — высота камеры, C — сброс."></canvas>
   <canvas id="fx"></canvas>
 
   <div id="hud">
@@ -18,11 +18,8 @@
       </div>
     </div>
 
-    <!-- Every word the game says during a point lives in this ONE band: it
-         starts under the scoreboard and ends where the table's top edge is
-         projected (--band-y, published by the camera rig every frame). No
-         text can float over the playing surface any more. -->
-    <div id="topband">
+    <!-- One quiet, consistent reading area BELOW the complete table. -->
+    <div id="playband">
       <div id="mpInd" role="status" aria-live="off"></div>
       <div id="rally" role="status" aria-live="off"></div>
       <div id="mnToast"></div>
@@ -30,9 +27,23 @@
       <div id="msgs" role="log" aria-live="polite" aria-atomic="false"></div>
       <!-- last shot: one line, fades away on its own -->
       <div id="shot"><b id="shotName">—</b><s id="shotMeta"></s></div>
-    </div>
+      <!-- interactive coach -->
+      <div id="train" class="pe">
+        <div class="th"><span id="trStep">1 / 6</span><b id="trTitle">ПОДАЧА</b></div>
+        <div class="tpips" id="trPips"></div>
+        <div class="ttip" id="trTip"></div>
+        <div class="tmsg" id="trMsg"></div>
+        <div class="tbtns">
+          <button class="tbt" id="trSkip">ДАЛЬШЕ ▸</button>
+          <button class="tbt" id="trExit">ВЫЙТИ</button>
+        </div>
+      </div>
 
-    <button id="btnDemoExit" style="display:none;position:fixed;top:62px;left:50%;transform:translateX(-50%);z-index:90;background:rgba(20,25,40,.88);border:1px solid #39c6ff;color:#39c6ff;padding:6px 16px;border-radius:20px;font-size:12px;font-weight:700;cursor:pointer;backdrop-filter:blur(8px);pointer-events:auto">🤖 ДЕМО (БОТ VS БОТ) · НАЖМИТЕ ДЛЯ ВЫХОДА</button>
+      <button id="btnDemoExit" class="tbt pe" style="display:none">ДЕМО · ВЕРНУТЬ УПРАВЛЕНИЕ</button>
+      <div id="timingCue" role="status" aria-live="off"></div>
+      <div id="gestureCue" aria-live="off"></div>
+      <div id="playStatus" role="status" aria-live="polite"></div>
+    </div>
 
     <div id="dbg"></div>
 
@@ -43,22 +54,10 @@
         <b>SLOW</b>
         <s id="slowKey">SHIFT</s>
       </button>
+      <button class="ic pe" id="btnFullscreen" title="Полный экран (F)" aria-label="Полный экран"></button>
       <button class="ic pe" id="btnSound" title="Звук" aria-label="Звук вкл/выкл"></button>
       <button class="ic pe" id="btnSettings" title="Настройки" aria-label="Настройки"></button>
       <button class="ic pe" id="btnMenu" title="Меню" aria-label="В главное меню"></button>
-    </div>
-
-    <!-- interactive coach -->
-    <div id="train" class="pe">
-      <div class="th"><span id="trStep">1 / 6</span><b id="trTitle">ПОДАЧА</b></div>
-      <div class="tpips" id="trPips"></div>
-      <div class="ttip" id="trTip"></div>
-      <div class="twhy" id="trWhy"></div>
-      <div class="tmsg" id="trMsg"></div>
-      <div class="tbtns">
-        <button class="tbt" id="trSkip">ДАЛЬШЕ ▸</button>
-        <button class="tbt" id="trExit">ВЫЙТИ</button>
-      </div>
     </div>
 
     <div id="pauseInd" class="pe">
@@ -67,7 +66,6 @@
       <div style="margin-top:14px;display:flex;gap:8px;flex-wrap:wrap;justify-content:center">
         <button id="pauseResume" class="tbt" style="pointer-events:auto;padding:7px 16px;font-size:11px">ПРОДОЛЖИТЬ</button>
         <button id="pauseSettings" class="tbt" style="pointer-events:auto;padding:7px 16px;font-size:11px">⚙️ НАСТРОЙКИ</button>
-        <button id="pauseDemo" class="tbt" style="pointer-events:auto;padding:7px 16px;font-size:11px">🤖 ВКЛ АВТОИГРУ</button>
         <button id="pauseDebugMisses" class="tbt" style="pointer-events:auto;padding:7px 16px;font-size:11px;background:#ff4d6d;border-color:#ff4d6d;color:#fff">🔍 РАЗБОР ПРОМАХОВ</button>
         <button id="pauseToMenu" class="tbt" style="pointer-events:auto;padding:7px 16px;font-size:11px">В МЕНЮ</button>
       </div>
@@ -77,7 +75,7 @@
   <!-- ============================ MENU ============================ -->
   <div class="screen on" id="menu" role="dialog" aria-label="Главное меню">
     <div class="card">
-      <div class="logo">TOPSPIN<span style="opacity:.45">·</span>ARENA</div>
+      <div class="brand-menu"><img class="brand-logo" src="{{BRAND_LOGO}}" alt="Table Tennis Ultimate" width="556" height="422"></div>
       <div class="sub">Настольный теннис · физика ITTF · управление свайпом</div>
 
       <h3 class="sec">Соперник</h3>
@@ -145,7 +143,7 @@
       <div id="netRoomCode" style="font-family:var(--mono);font-size:28px;letter-spacing:.2em;color:var(--acc);text-align:center;margin:12px 0;display:none"></div>
       <button class="btn" id="netCreate">СОЗДАТЬ КОМНАТУ</button>
       <button class="btn ghost" id="netJoin" style="margin-top:8px">ПРИСОЕДИНИТЬСЯ ПО КОДУ</button>
-      <div class="note" id="netNote">Релей-сервер задаётся параметром ?net=ws://… в адресе страницы (по умолчанию — боевой relay). Создайте комнату и передайте код другу.</div>
+      <div class="note" id="netNote">Экспериментальный режим: синхронизация игрового процесса ещё не завершена. Для тестирования комнат укажите свой relay через ?net=wss://… в адресе страницы.</div>
       <button class="btn ghost" id="netClose" style="margin-top:12px">ЗАКРЫТЬ</button>
     </div>
   </div>
@@ -154,7 +152,7 @@
   <div class="screen" id="settings" role="dialog" aria-label="Настройки">
     <div class="card" style="max-width:460px">
       <div class="logo" style="font-size:24px">НАСТРОЙКИ</div>
-      <div class="sub">2 основных параметра игры</div>
+      <div class="sub">Игра и камера</div>
 
       <h3 class="sec">1. ОБЛАСТЬ ПОПАДАНИЯ</h3>
       <div class="sl">
@@ -163,7 +161,7 @@
         <span class="v" id="vHitZone">85%</span>
       </div>
       <div style="font-size:11px;color:var(--dim);line-height:1.5;margin:4px 0 16px">
-        Определяет, насколько близко прицел должен быть к мячу, чтобы удар состоялся. При высоком значении вы отбиваете мяч даже при неточном наведении.
+        Больше радиус — проще попасть.
       </div>
 
       <h3 class="sec">2. ВЫРАВНИВАНИЕ УДАРА</h3>
@@ -173,8 +171,17 @@
         <span class="v" id="vAssist">85%</span>
       </div>
       <div style="font-size:11px;color:var(--dim);line-height:1.5;margin:4px 0 16px">
-        Корректирует траекторию, чтобы мяч стабильно перелетал сетку и ложился на стол соперника с хорошим вращением.
+        Помогает направить мяч на стол.
       </div>
+
+      <h3 class="sec">КАМЕРА</h3>
+      <div class="row" id="cameraViews" role="group" aria-label="Вид камеры">
+        <button class="opt" data-camera="BROADCAST"><b>ИГРА</b></button>
+        <button class="opt" data-camera="DYNAMIC"><b>ОБЗОР</b></button>
+        <button class="opt" data-camera="LOW"><b>БЛИЖЕ</b></button>
+      </div>
+      <p class="note" id="cameraHelp"></p>
+      <button class="tbt" id="camReset">СБРОСИТЬ ВИД</button>
 
       <button class="btn" id="setClose">СОХРАНИТЬ И ЗАКРЫТЬ</button>
     </div>
@@ -334,5 +341,12 @@
     </div>
   </div>
 
-  <div id="loading" role="status" aria-label="Загрузка"><div class="spinner"></div></div>
+  <div id="loading" role="status" aria-label="Загрузка Table Tennis Ultimate">
+    <div class="splash-brand">
+      <img src="{{BRAND_LOGO}}" alt="Table Tennis Ultimate" width="556" height="422" draggable="false">
+      <div class="splash-caption">ТВОЙ СТОЛ. ТВОЯ ИГРА.</div>
+      <div class="splash-progress" aria-hidden="true"><i></i></div>
+      <span class="splash-hint">Нажмите, чтобы начать</span>
+    </div>
+  </div>
 </div>

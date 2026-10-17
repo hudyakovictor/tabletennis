@@ -1,78 +1,23 @@
 /* =====================================================================
- *  CAMERA — four FIXED rigs, and nothing else.
- *
- *  Why this file exists. The camera used to be a preset plus a free
- *  orbit (drag / wheel / pinch / arrow keys / three sliders). A free
- *  orbit means every player has to re-discover a playable framing by
- *  hand, and "playable" is a narrow band: from too low the net hides
- *  the ball, from too high the two halves squash together and depth is
- *  gone, from the side your own bat leaves the frame. It also means the
- *  table can be tilted in the picture, which is the single fastest way
- *  to make a table-tennis game feel wrong.
- *
- *  So: the camera is now a choice between four authored rigs. Each one
- *  has a fixed eye, a fixed look point and a fixed FOV — distance and
- *  angle are decided here, once, and measured (tt/tools/analyze.js,
- *  suite 5) on eight aspect ratios:
- *
- *    · the whole table (four corners + both net ends) is always inside
- *      the frame, with margin;
- *    · the camera never yaws off the table's centre line, so the table
- *      is always straight — the net stays vertical in the picture and
- *      the two sidelines converge symmetrically;
- *    · the volume your bat can occupy is inside the frame too, so the
- *      racket can never be parked off-screen;
- *    · on narrow/portrait screens the rig is pushed back (never tilted)
- *      until the table fits — the geometry stays authored, only the
- *      distance adapts.
- *
- *  Everything here is a pure function of (mode, ball, aspect): no state,
- *  no DOM, no renderer. The game calls it, the analysis bench calls the
- *  very same code, so the measurement cannot drift from the build.
+ * CAMERA — stable elevated presets + independent height and dolly.
+ * Headroom includes the opponent racket and serve toss, not just the table.
+ * Renderer and all hit-test/HUD matrices share the same framing shift.
  * ===================================================================== */
 'use strict';
 
-/* ------------------------------------------------------------------ *
- *  THE FOUR RIGS
- *  eye/look are in metres, fov is vertical degrees authored for 16:9.
- *  `follow` is the ONLY motion allowed, and it is a pure translation of
- *  the whole rig (no pitching, no yawing) so the table cannot tilt.
- * ------------------------------------------------------------------ */
+// Stable front-facing views. Legacy IDs keep existing saves compatible.
 const CAMERA_PRESETS = {
-  /* The broadcast frame: over the player's shoulder, whole table in
-     shot, ~23° down. Brought closer per user request ("сильнее приблизь камеру"). */
-  BROADCAST: {
-    id: 'BROADCAST', ru: 'ТВ', short: 'ТРАНСТЛЯЦИЯ',
-    desc: 'Классический ракурс трансляции: весь стол в кадре крупным планом',
-    eye: { x: 0, y: 1.68, z: 2.38 }, look: { x: 0, y: 0.74, z: -0.25 }, fov: 48,
-    follow: { y: 0, z: 0 },
-  },
-  /* Slightly lower and closer, and it rides the ball's height a few
-     centimetres so a lob does not leave the top of the frame. */
-  DYNAMIC: {
-    id: 'DYNAMIC', ru: 'ДИНАМИКА', short: 'ДИНАМИКА',
-    desc: 'Чуть ниже и ближе, камера мягко едет за высотой мяча',
-    eye: { x: 0, y: 1.52, z: 2.22 }, look: { x: 0, y: 0.74, z: -0.28 }, fov: 50,
-    follow: { y: 0.10, z: 0.06 },
-  },
-  /* Low, from just above the playing surface: the net reads as a real
-     obstacle and the ball's height above it is obvious. */
-  LOW: {
-    id: 'LOW', ru: 'НИЗКАЯ', short: 'ОТ СТОЛА',
-    desc: 'Низкая камера у уровня стола: хорошо видна высота мяча над сеткой',
-    eye: { x: 0, y: 1.20, z: 2.28 }, look: { x: 0, y: 0.78, z: -0.30 }, fov: 52,
-    follow: { y: 0, z: 0 },
-  },
-  /* A true side view, symmetric about the net: for reading spin,
-     trajectory shape and the moment of contact. */
-  SIDE: {
-    id: 'SIDE', ru: 'СБОКУ', short: 'АНАЛИЗ',
-    desc: 'Ровно сбоку, симметрично сетке: форма траектории и вращение как на ладони',
-    eye: { x: 2.75, y: 1.44, z: 0 }, look: { x: 0, y: 0.82, z: 0 }, fov: 44,
-    follow: { y: 0, z: 0 },
-  },
+  BROADCAST: { id: 'BROADCAST', ru: 'ИГРОВАЯ', short: 'ИГРА',
+    desc: 'Весь стол и обе половины', pitch: 25, height: 0.63,
+    eye: { x: 0, y: 2.25, z: 3.2 }, look: { x: 0, y: 0.76, z: 0 }, fov: 43, follow: { y: 0, z: 0 } },
+  DYNAMIC: { id: 'DYNAMIC', ru: 'ОБЗОР', short: 'ОБЗОР',
+    desc: 'Выше: легче читать отскок', pitch: 33, height: 0.63,
+    eye: { x: 0, y: 2.85, z: 3.2 }, look: { x: 0, y: 0.76, z: 0 }, fov: 43, follow: { y: 0, z: 0 } },
+  LOW: { id: 'LOW', ru: 'БЛИЖЕ', short: 'БЛИЖЕ',
+    desc: 'Крупнее, без вида из-под стола', pitch: 22, height: 0.69,
+    eye: { x: 0, y: 2.05, z: 3.2 }, look: { x: 0, y: 0.76, z: 0 }, fov: 40, follow: { y: 0, z: 0 } },
 };
-const CAMERA_ORDER = ['BROADCAST', 'DYNAMIC', 'LOW', 'SIDE'];
+const CAMERA_ORDER = ['BROADCAST', 'DYNAMIC', 'LOW'];
 
 /* The box your bat is allowed to occupy. One source of truth: the game
    clamps to it, the camera fits around it, the bench measures it. */
@@ -114,6 +59,7 @@ function effectiveFov(fovDeg, aspect) {
 function rigViewProj(rig, aspect, out) {
   const vf = effectiveFov(rig.fov, aspect) * DEG;
   const proj = M4.perspective((out && out.proj) || M4.create(), vf, aspect, 0.05, 60);
+  proj[9] = 2 * (rig.shiftY || 0);
   const view = M4.lookAt((out && out.view) || M4.create(), rig.eye, rig.look, { x: 0, y: 1, z: 0 });
   return M4.mul((out && out.vp) || M4.create(), proj, view);
 }
@@ -210,35 +156,21 @@ function fitRig(P, aspect) {
   const key = P.id + '|' + Math.round(aspect * 1000);
   const hit = _fitCache.get(key);
   if (hit) return hit;
-  const rig = { eye: { x: P.eye.x, y: P.eye.y, z: P.eye.z },
-    look: { x: P.look.x, y: P.look.y, z: P.look.z }, fov: P.fov, mode: P.id };
-  if (rigMargin(rig, aspect) >= FIT_MARGIN) { _fitCache.set(key, rig); return rig; }
-  // Push straight back along the authored axis, and if that is not enough,
-  // raise the eye a little. Both keep the table square to the frame.
-  const dx = rig.eye.x - rig.look.x, dy = rig.eye.y - rig.look.y, dz = rig.eye.z - rig.look.z;
-  let best = null;
-  for (const lift of [0, 0.14, 0.30, 0.50, 0.75]) {
-    for (let k = 1.0; k <= 2.6; k += 0.05) {
-      const r = {
-        eye: { x: rig.look.x + dx * k, y: rig.look.y + dy * k + lift, z: rig.look.z + dz * k },
-        look: { x: rig.look.x, y: rig.look.y, z: rig.look.z }, fov: rig.fov, mode: rig.mode,
-      };
-      const m = rigMargin(r, aspect);
-      if (!best || m > best.m) best = { m, r };
-      if (m >= FIT_MARGIN) break;
-    }
-    if (best && best.m >= FIT_MARGIN) break;
-  }
-  const out = best ? best.r : rig;
-  _fitCache.set(key, out);
-  return out;
+  const phone = 1 - smoothstep(0.85, 1.3, aspect);
+  const pitch = P.pitch * DEG; // Identical angle on phone and desktop.
+  const rig = { eye: { x: 0, y: PH.TABLE_Y + Math.tan(pitch) * 3.32, z: 3.2 },
+    look: { x: 0, y: PH.TABLE_Y, z: -0.12 }, fov: lerp(P.fov, 34, phone), mode: P.id };
+  // No automatic lift or ball-following: the chosen view stays predictable.
+  fitTablePresentation(rig, aspect, P.height, phone > 0.5 ? 0.045 : 0.055);
+  _fitCache.set(key, rig);
+  return rig;
 }
 
 /**
  * The camera for this frame. Pure: mode + ball + aspect in, rig out.
  * The returned object is reused, so never hold on to it.
  */
-function cameraRigFor(mode, ball, aspect, out) {
+function cameraRigFor(mode, ball, aspect, out, controls) {
   const P = CAMERA_PRESETS[mode] || CAMERA_PRESETS.BROADCAST;
   const base = fitRig(P, aspect);
   const o = out || _cp;
@@ -254,7 +186,78 @@ function cameraRigFor(mode, ball, aspect, out) {
   o.eye.x = base.eye.x; o.eye.y = base.eye.y + fy; o.eye.z = base.eye.z + fz;
   o.look.x = base.look.x; o.look.y = base.look.y + fy; o.look.z = base.look.z + fz;
   o.fov = base.fov;
+  o.shiftY = 0;
+  if (controls) {
+    // Height is independent of zoom: RMB raises the eye, wheel dollies.
+    const height = clamp(Number.isFinite(controls.height) ? controls.height : 0, -1, 2.5);
+    const depth = Math.hypot(o.eye.x - o.look.x, o.eye.z - o.look.z);
+    o.eye.y = o.look.y + clamp(o.eye.y - o.look.y + height,
+      Math.tan(18 * DEG) * depth, Math.tan(42 * DEG) * depth);
+    const zoom = clamp(Number.isFinite(controls.zoom) ? controls.zoom : 1, 0.72, 1.6);
+    o.eye.x = o.look.x + (o.eye.x - o.look.x) * zoom;
+    o.eye.y = o.look.y + (o.eye.y - o.look.y) * zoom;
+    o.eye.z = o.look.z + (o.eye.z - o.look.z) * zoom;
+    if (zoom !== 1 || height !== 0) fitTablePresentation(o, aspect, 0.72, 0.025, 0.80);
+  }
   return o;
+}
+
+// Full table silhouette, including the feet: text must not cover its legs.
+const TABLE_FRAME_POINTS = [];
+for (const sx of [-1, 1]) for (const sz of [-1, 1]) {
+  TABLE_FRAME_POINTS.push({ x: sx * PH.T_HALF_WID, y: PH.TABLE_Y, z: sz * PH.T_HALF_LEN });
+  TABLE_FRAME_POINTS.push({ x: sx * (PH.T_HALF_WID - 0.14), y: 0, z: sz * (PH.T_HALF_LEN - 0.22) });
+}
+for (const sx of [-1, 1]) TABLE_FRAME_POINTS.push({ x: sx * PH.NET_HALF_WID, y: PH.NET_TOP + 0.025, z: 0 });
+function tableScreenBounds(vp, out = {}) {
+  out.top = 1; out.bottom = 0; out.left = 1; out.right = 0;
+  const p = {};
+  for (const pt of TABLE_FRAME_POINTS) {
+    projectPoint(vp, pt, p);
+    if (!p.ok) continue;
+    out.top = Math.min(out.top, p.y); out.bottom = Math.max(out.bottom, p.y);
+    out.left = Math.min(out.left, p.x); out.right = Math.max(out.right, p.x);
+  }
+  return out;
+}
+// AI think() allows bat centres up to TABLE_Y + .70 and z -2.45..-1.16.
+// Include the whole blade/handle, plus a small margin for the serve toss.
+// This is a fixed volume: no camera bobbing as the ball or racket moves.
+const OPPONENT_FRAME_POINTS = [];
+for (const x of [-1.4, 0, 1.4]) for (const z of [-2.65, -1.0])
+  OPPONENT_FRAME_POINTS.push({ x, y: PH.TABLE_Y + 0.90, z });
+const CAMERA_HEADROOM = 0.10;
+function opponentScreenTop(vp) {
+  let top = 1;
+  const p = {};
+  for (const point of OPPONENT_FRAME_POINTS) {
+    projectPoint(vp, point, p);
+    if (!p.ok) return -1;
+    top = Math.min(top, p.y);
+  }
+  return top;
+}
+const _frameBuffer = { vp: M4.create(), proj: M4.create(), view: M4.create() }, _frameBounds = {};
+function fitTablePresentation(rig, aspect, maxHeight = 0.60, margin = 0.05, maxPlayHeight = 0.76) {
+  // Leave usable reading room below the feet, not just below the tabletop.
+  for (let i = 0; i < 50; i++) {
+    const vp = rigViewProj(rig, aspect, _frameBuffer);
+    const b = tableScreenBounds(vp, _frameBounds);
+    const playTop = Math.min(b.top, opponentScreenTop(vp));
+    if (b.bottom - b.top <= maxHeight && b.bottom - playTop <= maxPlayHeight &&
+        b.left >= margin && b.right <= 1 - margin) break;
+    rig.eye.x = rig.look.x + (rig.eye.x - rig.look.x) * 1.025;
+    rig.eye.y = rig.look.y + (rig.eye.y - rig.look.y) * 1.025;
+    rig.eye.z = rig.look.z + (rig.eye.z - rig.look.z) * 1.025;
+  }
+}
+function tableFrameShift(rig, aspect) {
+  const vp = rigViewProj({ ...rig, shiftY: 0 }, aspect, _frameBuffer);
+  const b = tableScreenBounds(vp, _frameBounds);
+  // Prefer the old lower reading room, but never crop the opponent to keep
+  // an exact 1:3 ratio. Move the complete play volume down into the frame.
+  const preferred = (1 - b.bottom - 3 * b.top) / 4;
+  return Math.max(preferred, CAMERA_HEADROOM - opponentScreenTop(vp));
 }
 
 /** Highest pixel the table itself occupies (0..1, y down). The HUD text
