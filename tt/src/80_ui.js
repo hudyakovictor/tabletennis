@@ -22,19 +22,77 @@ class UI {
     this._pv = {};
     this._pv2 = {};
     this._cur = '';
-    this.hasFinePointer = !!(window.matchMedia && window.matchMedia('(pointer: fine)').matches);
+    this.inputMode = detectInputMode();
+    this.hasFinePointer = this.inputMode === 'mouse';
+    document.addEventListener('pointerdown', e => this.setInputMode(e.pointerType), { capture: true, passive: true });
     this.bindMenu();
     this.resize();
     window.addEventListener('resize', () => this.resize());
   }
   attach(game) {
     this.game = game;
+    this.pendingDiff = game.settings.difficulty;
+    this.updateInputCopy();
     this.syncSettings();
     this.refreshMenuBits();
     this.game.analytics && this.game.analytics.send('session:start', {
       platform: this.game.platform.label, touch: this.game.platform.touch,
       level: this.game.profile.data.level, coins: this.game.profile.data.coins,
     });
+  }
+
+  setInputMode(pointerType) {
+    const mode = pointerType === 'touch' || pointerType === 'pen' ? 'touch' : pointerType === 'mouse' ? 'mouse' : null;
+    if (!mode || mode === this.inputMode) return;
+    this.inputMode = mode; this.hasFinePointer = mode === 'mouse';
+    if (mode === 'touch' && this.game) {
+      this.game.cameraControls.zoom = 1; this.game.cameraControls.height = 0;
+    }
+    this.updateInputCopy();
+  }
+  updateInputCopy() {
+    const touch = this.inputMode === 'touch';
+    $('#cameraHelp').textContent = touch ? 'Виды настроены. Выберите удобный.' : 'Колесо — масштаб. ПКМ ↕ — высота.';
+    $('#slowKey').textContent = touch ? 'ДЕРЖАТЬ' : 'SHIFT';
+    $('#gl').setAttribute('aria-label', touch ? 'Игровое поле. Удар — свайп. Камера — в настройках.'
+      : 'Игровое поле. Удар — ЛКМ и движение. Колесо — масштаб, ПКМ вверх/вниз — высота камеры, C — сброс.');
+    if (this.game && this.game.training) this.trainSync(this.game.training);
+  }
+
+  openSettings() {
+    this.syncSettings();
+    this._settingsWasPaused = this.game.paused;
+    this.game.setPaused(true);
+    $('#settings').classList.add('on');
+  }
+  closeSettings() {
+    $('#settings').classList.remove('on');
+    if (!this._settingsWasPaused) this.game.setPaused(false);
+    this.game.profile.save(true);
+  }
+
+  async toggleFullscreen() {
+    try {
+      if (document.fullscreenElement) await document.exitFullscreen();
+      else if (document.getElementById('app').requestFullscreen)
+        await document.getElementById('app').requestFullscreen();
+    } catch (_) { /* embedding browsers may not grant fullscreen */ }
+    this.game && this.game.resize(); this.resize();
+    this.syncFullscreen();
+  }
+  syncFullscreen() {
+    const button = $('#btnFullscreen'), on = !!document.fullscreenElement;
+    button.setAttribute('aria-pressed', String(on));
+    button.title = on ? 'Выйти из полного экрана (F)' : 'Полный экран (F)';
+    button.setAttribute('aria-label', button.title);
+  }
+
+  showMainMenu() {
+    clearTimeout(this._careerTimer);
+    this.game.returnToMenu();
+    $$('.screen').forEach(s => s.classList.remove('on'));
+    $('#menu').classList.add('on');
+    this.refreshMenuBits();
   }
 
   resize() {
@@ -70,6 +128,8 @@ class UI {
       this.trainHide();
       this.game.training = null;
       this.game.analytics && this.game.analytics.send('match:start', { diff: d, mode: 'casual', assist: this.game.settings.assist });
+      this.game.career.stop();
+      this.game.network.disconnect();
       this.game.startMatch(d);
     };
     const startTrain = () => {
@@ -107,38 +167,30 @@ class UI {
     $('#wsEquip').addEventListener('click', () => this.equipSelection());
     $('#wsBuyCry').addEventListener('click', () => this.buySelectionCrystals());
     $('#adCoins').addEventListener('click', () => this.watchAd());
-    $('#btnSettings').addEventListener('click', () => $('#settings').classList.toggle('on'));
+    $('#btnSettings').addEventListener('click', () => $('#settings').classList.contains('on') ? this.closeSettings() : this.openSettings());
     const btnMenuSet = $('#menuOpenSettings');
-    if (btnMenuSet) btnMenuSet.addEventListener('click', () => { this.syncSettings(); $('#settings').classList.add('on'); });
+    if (btnMenuSet) btnMenuSet.addEventListener('click', () => this.openSettings());
     const btnPauseSet = $('#pauseSettings');
-    if (btnPauseSet) btnPauseSet.addEventListener('click', () => { this.syncSettings(); $('#settings').classList.add('on'); });
-    $('#setClose').addEventListener('click', () => $('#settings').classList.remove('on'));
-    /* the three free-camera sliders are gone: the rig is one of four authored
-       presets now, so there is nothing to reset from the settings card */
-    const cr = $('#camReset');
-    if (cr) cr.addEventListener('click', () => this.game.camReset());
-    $('#btnMenu').addEventListener('click', () => { this.game.stopTraining(); $('#menu').classList.add('on'); document.body.classList.remove('is-playing'); });
+    if (btnPauseSet) btnPauseSet.addEventListener('click', (e) => { e.stopPropagation(); this.openSettings(); });
+    $('#setClose').addEventListener('click', () => this.closeSettings());
+    $$('#cameraViews [data-camera]').forEach(button => button.addEventListener('click', () => this.game.setCameraPreset(button.dataset.camera)));
+    $('#camReset').addEventListener('click', () => this.game.camReset());
+    $('#btnMenu').addEventListener('click', () => this.showMainMenu());
     const startDemo = () => {
       $$('.screen').forEach((s) => s.classList.remove('on'));
       document.body.classList.add('is-playing');
       this.trainHide();
       this.game.training = null;
+      this.game.career.stop();
+      this.game.network.disconnect();
       this.game.startDemo(2);
     };
     const bDemo = $('#demoStart');
     if (bDemo) bDemo.addEventListener('click', startDemo);
-    const pDemo = $('#pauseDemo');
-    if (pDemo) pDemo.addEventListener('click', (e) => {
-      e.stopPropagation();
-      this.game.setPaused(false);
-      this.game.demoMode = true;
-      this.game.msg('🤖 АВТОИГРА ВКЛЮЧЕНА', 2.0, '#39c6ff', true);
-    });
     const bDemoExit = $('#btnDemoExit');
     if (bDemoExit) bDemoExit.addEventListener('click', (e) => {
       e.stopPropagation();
-      this.game.demoMode = false;
-      this.game.msg('УПРАВЛЕНИЕ ВОЗВРАЩЕНО ИГРОКУ', 2.0, '#7fd4ff');
+      this.game.stopDemo();
     });
     const bDbgMisses = $('#btnDebugMisses');
     if (bDbgMisses) bDbgMisses.addEventListener('click', () => this.showDebugMissesList());
@@ -198,14 +250,19 @@ class UI {
     const pResume = $('#pauseResume'), pMenu = $('#pauseToMenu');
     if (pResume) pResume.addEventListener('click', (e) => { e.stopPropagation(); this.game.setPaused(false); });
     if (pMenu) pMenu.addEventListener('click', (e) => {
-      e.stopPropagation(); this.game.setPaused(false); this.game.stopTraining();
-      this.game.demoMode = false;
-      $('#menu').classList.add('on'); document.body.classList.remove('is-playing');
+      e.stopPropagation(); this.showMainMenu();
+    });
+    $('#btnFullscreen').addEventListener('click', () => this.toggleFullscreen());
+    document.addEventListener('fullscreenchange', () => { this.game && this.game.resize(); this.resize(); this.syncFullscreen(); });
+    window.addEventListener('keydown', e => {
+      if (e.key.toLowerCase() === 'f' && !e.repeat && !e.ctrlKey && !e.metaKey && !e.altKey &&
+          !(e.target && /^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName))) { e.preventDefault(); this.toggleFullscreen(); }
     });
     $('#btnSound').addEventListener('click', () => {
       const g = this.game; g.settings.sound = !g.settings.sound;
       g.audio.setMuted(!g.settings.sound);
       $('#btnSound').innerHTML = g.settings.sound ? ICON.sound : ICON.mute;
+      g.saveSettings();
     });
     /* Spin dial: one tap cycles МЕНЬШЕ -> НОРМА -> БОЛЬШЕ. It biases how much
        of the contact is brush (more spin, less pace) and how much is punch. */
@@ -243,7 +300,7 @@ class UI {
     $('#reelSkip').addEventListener('pointerdown', () => this.game && this.game.skipReplay());
     $('#reelsClose').addEventListener('click', () => { $('#reels').classList.remove('on'); this.game && this.game.audio.ui('click'); });
     $('#again').addEventListener('click', () => { $('#over').classList.remove('on'); this.game.restart(); });
-    $('#backMenu').addEventListener('click', () => { $('#over').classList.remove('on'); $('#menu').classList.add('on'); document.body.classList.remove('is-playing'); });
+    $('#backMenu').addEventListener('click', () => this.showMainMenu());
   }
 
   /* -------------------------- best moments ------------------------- */
@@ -621,6 +678,14 @@ class UI {
     const rAst = $('#rAssist'), vAst = $('#vAssist');
     if (rAst) rAst.value = astVal;
     if (vAst) vAst.textContent = astVal + '%';
+    this.syncCameraControls();
+  }
+  syncCameraControls() {
+    const g = this.game;
+    $$('#cameraViews [data-camera]').forEach(b => {
+      const selected = b.dataset.camera === g.settings.camera;
+      b.classList.toggle('sel', selected); b.setAttribute('aria-pressed', String(selected));
+    });
   }
 
   /* ------------------------------ HUD ----------------------------- */
@@ -672,8 +737,7 @@ class UI {
     const S = t.S;
     $('#trStep').textContent = (t.step + 1) + ' / ' + TRAIN_STEPS.length;
     $('#trTitle').textContent = S.title;
-    $('#trTip').textContent = S.tip;
-    $('#trWhy').textContent = S.why;
+    $('#trTip').textContent = trainingTip(S, this.inputMode);
     const m = $('#trMsg');
     m.textContent = t.msg || '';
     m.style.color = t.msgCol || 'var(--good)';
@@ -771,16 +835,6 @@ class UI {
     c.setLineDash([5 * d, 6 * d]);
     c.beginPath(); c.arc(x, y, r0, 0, TAU); c.stroke();
     c.setLineDash([]);
-    if (hot > 0.82) {
-      const txt = w.kind === 'serve' ? 'СВАЙП ВВЕРХ' : 'БЕЙ!';
-      c.globalAlpha = w.k * (0.70 + 0.30 * Math.sin(g.time * 26));
-      c.font = `900 ${14 * d}px ${CSSFONT}`;
-      c.textAlign = 'center';
-      c.lineWidth = 4 * d; c.strokeStyle = 'rgba(3,7,13,.85)'; c.lineJoin = 'round';
-      c.strokeText(txt, x, y - R - 14 * d);
-      c.fillStyle = '#ffe98a';
-      c.fillText(txt, x, y - R - 14 * d);
-    }
     c.restore();
   }
 
@@ -1062,16 +1116,6 @@ class UI {
       rg.addColorStop(0, col + 'cc'); rg.addColorStop(1, col + '00');
       c.fillStyle = rg; c.beginPath(); c.arc(hx, hy, 34 * d, 0, TAU); c.fill();
 
-      // the one label that matters: which shot this gesture is becoming
-      if (st && sw.m.dist > 0.045) {
-        c.font = `800 ${12.5 * d}px ${CSSFONT}`;
-        c.textAlign = 'center';
-        c.fillStyle = col;
-        c.globalAlpha = 0.95;
-        c.fillText(st.stroke.short || st.stroke.name, hx, hy - 34 * d);
-        c.globalAlpha = 1;
-      }
-
       this._lastRibbon = {
         pts: sw.samples.map((p) => ({ x: p.x, y: p.y })),
         col,
@@ -1103,13 +1147,6 @@ class UI {
           const rg = c.createRadialGradient(hx, hy, 0, hx, hy, 34 * d);
           rg.addColorStop(0, rb.col + 'cc'); rg.addColorStop(1, rb.col + '00');
           c.fillStyle = rg; c.beginPath(); c.arc(hx, hy, 34 * d, 0, TAU); c.fill();
-          if (rb.label) {
-            c.font = `800 ${12.5 * d}px ${CSSFONT}`;
-            c.textAlign = 'center';
-            c.fillStyle = rb.col;
-            c.globalAlpha = 0.95 * rb.fade;
-            c.fillText(rb.label, hx, hy - 34 * d);
-          }
           c.restore();
         }
       }
@@ -1127,12 +1164,7 @@ class UI {
     }
     c.globalAlpha = 1;
 
-    /* The free-camera readout used to be painted here, at the bottom of the
-       screen, while you dragged the view around. There is nothing to read
-       out any more — the rig is one of four presets and it says which one
-       in the band (ui.msg) the moment you switch. */
-
-    // match point moved into the top band (#mpInd) — see tick()
+    // Live words are DOM text in the lower play band, never painted on the table.
   }
 
   ripple(x, y, col) { this.ripples.push({ x, y, col, t: 0, life: 0.55 }); }
@@ -1141,20 +1173,37 @@ class UI {
   tick(dt) {
     const g = this.game; if (!g) return;
     this.drawOverlay(dt);
+    // A single short status, never a stack of messages/telemetry/hints.
+    const status = $('#playStatus');
+    let statusText = '';
+    if (g.state === GS.POINT && g.stateT < 0.95)
+      statusText = g.lastPoint ? (g.lastPoint.who > 0 ? 'Очко ваше' : 'Очко сопернику') : 'Переигровка';
+    else if (g.state === GS.SERVE_READY || g.state === GS.SERVE_TOSS)
+      statusText = g.server === 1 ? (this.inputMode === 'touch' ? 'Свайп — подача' : 'ЛКМ + вверх — подача') : 'Подаёт соперник';
 
+    if (g.training || g.demoMode || g.paused) statusText = '';
+    status.textContent = statusText;
+    status.hidden = !statusText;
+
+    const timing = $('#timingCue'), gesture = $('#gestureCue');
+    const strike = g._strike;
+    const hot = strike && strike.on && strike.ready > 0.82 && strike.k > 0.1;
+    timing.classList.toggle('on', !!hot && !g.training);
+    if (hot) timing.textContent = strike.kind === 'serve' ? 'Подача · свайп вверх' : 'Мяч в зоне · бейте';
+    const live = g.swipe.active && g.liveStroke && g.swipe.m.dist > 0.045;
+    gesture.classList.toggle('on', !!live);
+    if (live) gesture.textContent = 'Удар · ' + (g.liveStroke.stroke.short || g.liveStroke.stroke.name);
     const box = $('#msgs');
     const bDemo = $('#btnDemoExit');
     if (bDemo) bDemo.style.display = (g.demoMode && g.state !== 'MENU' && g.state !== 'MATCH_END') ? 'block' : 'none';
-    if (g.messages.length !== this._nMsg || (g.messages[0] && g.messages[0].text !== this._m0)) {
-      box.innerHTML = g.messages.map((m) =>
+    const messageSignature = g.messages.slice(-2).map(m => m.text + '|' + m.col).join('\n');
+    if (messageSignature !== this._messageSignature) {
+      this._messageSignature = messageSignature;
+      box.innerHTML = g.messages.slice(-2).map((m) =>
         `<div class="msg${m.big ? ' big' : ''}" style="color:${m.col}">${m.text}</div>`).join('');
-      this._nMsg = g.messages.length;
-      this._m0 = g.messages[0] ? g.messages[0].text : null;
     }
 
-    /* Match point used to be painted on the canvas at a fixed 108 px, which
-       is exactly where the scoreboard ends and the band begins. As a flex
-       child of the band it can never sit on the table or under the score. */
+    // Match point joins the other cues below the table.
     const mpi = $('#mpInd');
     if (mpi) {
       const T = g.settings.targetScore;
@@ -1167,13 +1216,8 @@ class UI {
       if (on) mpi.textContent = them && !us ? 'МАТЧБОЛ СОПЕРНИКА' : 'МАТЧБОЛ';
     }
 
-    /* How much room the rig actually left between the scoreboard and the
-       table. Measured, not guessed: four rigs × eight aspect ratios give a
-       band from ~77 px (landscape phone) to ~330 px (1080p portrait), and
-       the type has to shrink at the bottom of that range rather than clip
-       or spill onto the playing surface. Recomputed only when something
-       that changes it changed. */
-    const band = $('#topband');
+    // Adapt typography to the free space BELOW the table; no guessed pixels.
+    const band = $('#playband');
     if (band && (this._bandH === undefined || this._bandSig !== g.hudBandY + '|' + window.innerHeight)) {
       this._bandSig = g.hudBandY + '|' + window.innerHeight;
       const h = band.clientHeight;
@@ -1251,7 +1295,9 @@ class UI {
     $('#careerStart').addEventListener('click', () => {
       g.audio.init(); g.audio.resume(); g.audio.ui('click');
       if (g.career.load()) {
-        this.showCareerIntro(g.career);
+        if (g.career.state === 'PERK_SELECT') this.showCareerPerks(g.career);
+        else if (g.career.state === 'TOURNAMENT_END') this.showCareerTournamentEnd(g.career);
+        else this.showCareerIntro(g.career);
       } else {
         g.career.start();
         this.showCareerIntro(g.career);
@@ -1271,14 +1317,15 @@ class UI {
     });
     $('#crEndMenu').addEventListener('click', () => {
       g.audio.ui('click');
-      $('#careerEnd').classList.remove('on');
-      $('#menu').classList.add('on');
+      this.showMainMenu();
     });
   }
 
   showCareerIntro(career) {
     const t = career.currentTournamentInfo;
     $$('.screen').forEach(s => s.classList.remove('on'));
+    $('#crOppList').replaceChildren();
+    $('#crReady').hidden = false;
     $('#crTournName').textContent = `${t.icon} ${t.name}`;
     $('#crTournPlace').textContent = t.place;
     $('#crTournInfo').textContent = `Раундов: ${t.rounds} · ELO ${t.eloMin}–${t.eloMax} · Побед: ${career.totalWins}`;
@@ -1288,12 +1335,17 @@ class UI {
   showCareerOpponentSelect(career) {
     const g = this.game;
     $$('.screen').forEach(s => s.classList.remove('on'));
+    const t = career.currentTournamentInfo;
+    $('#crTournName').textContent = `${t.icon} ${t.name}`;
+    $('#crReady').hidden = true;
     const list = $('#crOppList');
     list.innerHTML = '';
     career.opponents.forEach((opp, i) => {
       const btn = document.createElement('button');
       btn.className = 'opt';
-      btn.innerHTML = `<b>${opp.name}</b><s>${opp.style} · ELO ${opp.elo}</s>`;
+      const name = document.createElement('b'), detail = document.createElement('s');
+      name.textContent = opp.name; detail.textContent = `${opp.style} · ELO ${opp.elo}`;
+      btn.append(name, detail);
       btn.addEventListener('click', () => {
         g.audio.ui('click');
         $$('.screen').forEach(s => s.classList.remove('on'));
@@ -1334,7 +1386,9 @@ class UI {
   showCareerTournamentEnd(career) {
     const t = career.currentTournamentInfo;
     this.showNote({ text: `${t.icon} ${t.name} ПОБЕЖДЁН!`, col: '#ffd34d', code: 'win' });
-    setTimeout(() => {
+    clearTimeout(this._careerTimer);
+    this._careerTimer = setTimeout(() => {
+      if (!career.active || career.state !== 'TOURNAMENT_END') return;
       career.advanceTournament();
       if (career.state === 'RUN_END') {
         this.showCareerRunEnd(career);
@@ -1346,7 +1400,7 @@ class UI {
 
   showCareerRunEnd(career) {
     $$('.screen').forEach(s => s.classList.remove('on'));
-    const t = TOURNAMENTS[Math.max(0, career.currentTournament - 1)] || TOURNAMENTS[0];
+    const t = TOURNAMENTS[Math.min(career.currentTournament, TOURNAMENTS.length - 1)] || TOURNAMENTS[0];
     const isVictory = career.currentTournament >= TOURNAMENTS.length;
     $('#crEndTitle').textContent = isVictory ? '👑 ЧЕМПИОН МИРА!' : `🏁 ${t.name}`;
     $('#crEndSub').textContent = isVictory
@@ -1361,7 +1415,7 @@ class UI {
         <div class="rc"><i style="background:#ffd34d"></i><b>${Math.round(career.runStats.maxSpeed)}</b><s>км/ч макс</s></div>
       </div>
     `;
-    career.active = false;
+    career.stop();
     try { localStorage.removeItem('topspin_career'); } catch(e) {}
     $('#careerEnd').classList.add('on');
   }
@@ -1373,6 +1427,7 @@ class UI {
     const g = this.game;
     const net = g.network;
     $('#onlineStart').addEventListener('click', () => {
+      g.returnToMenu();
       g.audio.init(); g.audio.resume(); g.audio.ui('click');
       $$('.screen').forEach(s => s.classList.remove('on'));
       $('#netStatus').textContent = 'Подключение...';
@@ -1396,13 +1451,15 @@ class UI {
       g.startMatch();
     });
     net.on('disconnected', () => {
-      $('#netStatus').textContent = 'Отключено.';
+      this.showMainMenu();
+      this.toast('СОЕДИНЕНИЕ ПРЕРВАНО');
     });
     net.on('error', (msg) => {
       $('#netStatus').textContent = `Ошибка: ${msg}`;
     });
     net.on('peerLeft', () => {
-      g.msg('СОПЕРНИК ВЫШЕЛ', 2.0, '#ff8a8a');
+      this.showMainMenu();
+      this.toast('СОПЕРНИК ВЫШЕЛ');
     });
     $('#netCreate').addEventListener('click', () => {
       g.audio.ui('click');
@@ -1415,9 +1472,7 @@ class UI {
     });
     $('#netClose').addEventListener('click', () => {
       g.audio.ui('click');
-      net.disconnect();
-      $('#onlineLobby').classList.remove('on');
-      $('#menu').classList.add('on');
+      this.showMainMenu();
     });
   }
 }
@@ -1435,6 +1490,7 @@ function roundRect(c, x, y, w, h, r) {
 }
 
 const ICON = {
+  fullscreen: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 3H3v5m13-5h5v5M3 16v5h5m13-5v5h-5"/></svg>',
   sound: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/></svg>',
   mute: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><line x1="23" y1="9" x2="17" y2="15"/><line x1="17" y1="9" x2="23" y2="15"/></svg>',
   gear: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>',

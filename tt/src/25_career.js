@@ -123,6 +123,8 @@ class Career {
   }
 
   start() {
+    this.stop();
+    this._baseSettings = { assist: this.game.settings.assist, posAssist: this.game.settings.posAssist, difficulty: this.game.settings.difficulty };
     this.active = true;
     this.currentTournament = 0;
     this.currentRound = 0;
@@ -134,10 +136,19 @@ class Career {
     this.runStats = { totalPoints: 0, totalRallies: 0, longestRally: 0, maxSpeed: 0 };
     this._resetCareerBoosts();
     this.enterTournament();
+    this.save();
+  }
+
+  stop() {
+    if (this._baseSettings) Object.assign(this.game.settings, this._baseSettings);
+    this._baseSettings = null;
+    this.active = false;
+    this._resetCareerBoosts();
   }
 
   _resetCareerBoosts() {
     const g = this.game;
+    g._careerDecisiveActive = false;
     g._careerSpinBoost = 1; g._careerSpeedBoost = 1; g._careerTopspinBoost = 1;
     g._careerBackspinPenalty = 1; g._careerSmashBoost = 1; g._careerCounterBoost = 1;
     g._careerChopBoost = 1; g._careerSidespinBoost = 1; g._careerDecisiveBoost = 0;
@@ -159,12 +170,14 @@ class Career {
 
   /** Called by UI when the player dismisses the intro screen */
   readyForOpponentSelect() {
+    if (this.state !== 'TOURNAMENT_INTRO') return;
     this.state = 'OPPONENT_SELECT';
+    this.save();
   }
 
   /** Called when the player selects an opponent to play */
   selectOpponent(idx) {
-    if (idx < 0 || idx >= this.opponents.length) return;
+    if (this.state !== 'OPPONENT_SELECT' || !Number.isInteger(idx) || idx < 0 || idx >= this.opponents.length) return;
     this.selectedOpponent = this.opponents[idx];
     const g = this.game;
     // apply opponent
@@ -174,11 +187,13 @@ class Career {
     // reset career decisive boost flag
     if (g._careerDecisiveBoost) g._careerDecisiveActive = false;
     this.state = 'MATCH';
+    this.save();
     g.startMatch(this.selectedOpponent.level);
   }
 
   /** Called by Game when a match ends */
   onMatchEnd(winner) {
+    if (this.state !== 'MATCH') return;
     const won = winner === 1;
     if (won) {
       this.totalWins++;
@@ -220,22 +235,26 @@ class Career {
 
   /** Called when the player picks a perk */
   selectPerk(idx) {
-    if (!this.pendingPerks || idx < 0 || idx >= this.pendingPerks.length) return;
+    if (this.state !== 'PERK_SELECT' || !this.pendingPerks || !Number.isInteger(idx) || idx < 0 || idx >= this.pendingPerks.length) return;
     const perk = this.pendingPerks[idx];
     this.perks.push(perk);
     perk.apply(this.game);
     this.pendingPerks = null;
     this.state = 'OPPONENT_SELECT';
+    this.save();
   }
 
   /** Advance to next tournament */
   advanceTournament() {
+    if (this.state !== 'TOURNAMENT_END') return;
     this.currentTournament++;
     if (this.currentTournament >= TOURNAMENTS.length) {
       this.state = 'RUN_END';
+      this.save();
       return;
     }
     this.enterTournament();
+    this.save();
   }
 
   /** Tournament name for display */
@@ -247,37 +266,62 @@ class Career {
     return this.active && this.state !== 'RUN_END' && this.state !== 'IDLE';
   }
 
-  /** Serialize for localStorage */
+  /** Save a checkpoint, not just the counters: bracket and perk choice matter. */
   save() {
-    const data = {
-      currentTournament: this.currentTournament,
-      currentRound: this.currentRound,
-      totalWins: this.totalWins,
-      totalLosses: this.totalLosses,
-      perks: this.perks.map(p => p.id),
-      matchHistory: this.matchHistory.slice(-20),
-      runStats: this.runStats,
-    };
-    try { localStorage.setItem('topspin_career', JSON.stringify(data)); } catch(e) {}
+    try {
+      if (this.state === 'RUN_END') {
+        localStorage.removeItem('topspin_career');
+        return;
+      }
+      if (!this.active) return; // a suspended checkpoint must survive pagehide
+      localStorage.setItem('topspin_career', JSON.stringify({
+        v: 2, state: this.state,
+        currentTournament: this.currentTournament, currentRound: this.currentRound,
+        totalWins: this.totalWins, totalLosses: this.totalLosses,
+        perks: this.perks.map(p => p.id), pendingPerks: this.pendingPerks && this.pendingPerks.map(p => p.id),
+        opponents: this.opponents, matchHistory: this.matchHistory.slice(-20), runStats: this.runStats,
+      }));
+    } catch(e) { /* storage may be unavailable */ }
   }
 
   load() {
+    let data;
     try {
-      const raw = localStorage.getItem('topspin_career');
-      if (!raw) return false;
-      const data = JSON.parse(raw);
-      this.currentTournament = data.currentTournament || 0;
-      this.currentRound = data.currentRound || 0;
-      this.totalWins = data.totalWins || 0;
-      this.totalLosses = data.totalLosses || 0;
-      this.matchHistory = data.matchHistory || [];
-      this.runStats = data.runStats || this.runStats;
-      this.perks = (data.perks || []).map(id => PERKS.find(p => p.id === id)).filter(Boolean);
-      this.active = true;
-      this._resetCareerBoosts();
-      this.perks.forEach(p => p.apply(this.game));
-      this.enterTournament();
-      return true;
+      data = JSON.parse(localStorage.getItem('topspin_career'));
+      if (!data || typeof data !== 'object' || Array.isArray(data)) return false;
+      if (!Number.isInteger(data.currentTournament) || !TOURNAMENTS[data.currentTournament] ||
+          data.state === 'RUN_END' || data.totalLosses > 0) return false;
+      const rounds = TOURNAMENTS[data.currentTournament].rounds;
+      if (!Number.isInteger(data.currentRound) || data.currentRound < 0 || data.currentRound > rounds) return false;
+      if (data.v === 2 && (!Array.isArray(data.opponents) || data.opponents.length !== rounds - data.currentRound ||
+          !data.opponents.every(o => o && typeof o.name === 'string' && o.name.length < 80 &&
+            typeof o.style === 'string' && o.style.length < 80 && Number.isFinite(o.elo) &&
+            Number.isInteger(o.level) && o.level >= 0 && o.level <= 4))) return false;
     } catch(e) { return false; }
+    this.stop();
+    this._baseSettings = { assist: this.game.settings.assist, posAssist: this.game.settings.posAssist, difficulty: this.game.settings.difficulty };
+    this.active = true;
+    this.currentTournament = data.currentTournament;
+    this.enterTournament();
+    this.currentRound = data.currentRound;
+    this.opponents = data.v === 2 ? data.opponents : this.opponents.slice(this.currentRound);
+    const count = v => Number.isInteger(v) && v >= 0 && v <= 10000 ? v : 0;
+    this.totalWins = count(data.totalWins);
+    this.totalLosses = 0;
+    this.matchHistory = Array.isArray(data.matchHistory) ? data.matchHistory.slice(-20) : [];
+    for (const k of Object.keys(this.runStats)) {
+      const v = data.runStats && data.runStats[k];
+      this.runStats[k] = Number.isFinite(v) && v >= 0 ? Math.min(v, 1e9) : 0;
+    }
+    const ids = Array.isArray(data.perks) ? [...new Set(data.perks)] : [];
+    this.perks = ids.map(id => PERKS.find(p => p.id === id)).filter(Boolean);
+    this._resetCareerBoosts();
+    this.perks.forEach(p => p.apply(this.game));
+    this.pendingPerks = Array.isArray(data.pendingPerks) ? [...new Set(data.pendingPerks)]
+      .map(id => PERKS.find(p => p.id === id && !ids.includes(id))).filter(Boolean).slice(0, 3) : null;
+    this.state = this.currentRound === this.currentTournamentInfo.rounds ? 'TOURNAMENT_END'
+      : data.state === 'PERK_SELECT' && this.pendingPerks && this.pendingPerks.length ? 'PERK_SELECT'
+      : 'TOURNAMENT_INTRO';
+    return true;
   }
 }

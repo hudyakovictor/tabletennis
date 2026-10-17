@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Bundle every source file into one standalone, offline-capable HTML."""
-import os, re, sys, datetime
+import os, re, sys, datetime, base64
 SRC = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'src')
-OUT = sys.argv[1] if len(sys.argv) > 1 else '/home/user/table-tennis-topspin.html'
+OUT = sys.argv[1] if len(sys.argv) > 1 else os.path.join(os.path.dirname(SRC), '..', 'table-tennis-topspin.html')
 
 JS_ORDER = ['10_math.js','20_gl.js','25_career.js','27_network.js','30_physics.js','40_swipe.js','50_audio.js',
             '55_ai.js','56_rig.js','57_camera.js','58_coach.js','59_replay.js','60_scene.js',
@@ -19,6 +19,9 @@ if _missing or _extra:
 
 css  = open(os.path.join(SRC,'05_style.css'),encoding='utf-8').read()
 body = open(os.path.join(SRC,'02_body.html'),encoding='utf-8').read()
+with open(os.path.join(os.path.dirname(SRC), 'assets', 'table-tennis-ultimate.png'), 'rb') as asset:
+    logo = 'data:image/png;base64,' + base64.b64encode(asset.read()).decode('ascii')
+body = body.replace('{{BRAND_LOGO}}', logo)
 js_parts=[]
 for f in JS_ORDER:
     p=os.path.join(SRC,f)
@@ -54,4 +57,7 @@ html = f"""<!DOCTYPE html>
 </html>
 """
 with open(OUT,'w',encoding='utf-8') as f: f.write(html)
+if len(sys.argv) <= 1:
+    with open(os.path.join(os.path.dirname(SRC), '..', 'play', 'index.html'), 'w', encoding='utf-8') as f:
+        f.write(html)
 print(f"built {OUT}  ({len(html)/1024:.1f} KB)")
