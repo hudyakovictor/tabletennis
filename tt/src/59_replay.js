@@ -79,6 +79,17 @@ class MomentRecorder {
   addContact(t, e) { this.events.push(Object.assign({ t }, e)); }
   addBounce(isNet) { if (isNet) this.netClip = true; }
 
+  /** Capture the current rally's frames for debug replay regardless of beauty score */
+  captureClip(t) {
+    const len = Math.min(this.n, Math.max(25, Math.round((t - this.rallyT) * REPLAY_HZ) + 4));
+    const clip = new Float32Array(len * REPLAY_FLOATS);
+    for (let k = 0; k < len; k++) {
+      const src = ((this.head - len + k) % this.cap + this.cap) % this.cap;
+      clip.set(this.f.subarray(src * REPLAY_FLOATS, src * REPLAY_FLOATS + REPLAY_FLOATS), k * REPLAY_FLOATS);
+    }
+    return { frames: clip, hz: REPLAY_HZ, len };
+  }
+
   /**
    * Cut the rally out of the ring and decide whether it survives.
    * meta = { winner, reason, score, target, serve, tossT }
