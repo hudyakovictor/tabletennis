@@ -66,6 +66,7 @@ class UI {
     const startMatch = () => {
       const d = this.pendingDiff !== undefined ? this.pendingDiff : 2;
       $$('.screen').forEach((s) => s.classList.remove('on'));
+      document.body.classList.add('is-playing');
       this.trainHide();
       this.game.training = null;
       this.game.analytics && this.game.analytics.send('match:start', { diff: d, mode: 'casual', assist: this.game.settings.assist });
@@ -73,6 +74,7 @@ class UI {
     };
     const startTrain = () => {
       $$('.screen').forEach((s) => s.classList.remove('on'));
+      document.body.classList.add('is-playing');
       this.game.analytics && this.game.analytics.send('tutorial:start', {});
       this.game.startTraining();
     };
@@ -83,6 +85,7 @@ class UI {
     $('#trSkip').addEventListener('click', () => { const t = this.game.training; if (t) { t.skip(); this.game.audio.ui('click'); } });
     $('#trExit').addEventListener('click', () => {
       this.game.stopTraining();
+      document.body.classList.remove('is-playing');
       $('#menu').classList.add('on');
     });
     /* --- workshop / shop / daily --- */
@@ -110,7 +113,13 @@ class UI {
        presets now, so there is nothing to reset from the settings card */
     const cr = $('#camReset');
     if (cr) cr.addEventListener('click', () => this.game.camReset());
-    $('#btnMenu').addEventListener('click', () => { this.game.stopTraining(); $('#menu').classList.add('on'); });
+    $('#btnMenu').addEventListener('click', () => { this.game.stopTraining(); $('#menu').classList.add('on'); document.body.classList.remove('is-playing'); });
+    const pResume = $('#pauseResume'), pMenu = $('#pauseToMenu');
+    if (pResume) pResume.addEventListener('click', (e) => { e.stopPropagation(); this.game.setPaused(false); });
+    if (pMenu) pMenu.addEventListener('click', (e) => {
+      e.stopPropagation(); this.game.setPaused(false); this.game.stopTraining();
+      $('#menu').classList.add('on'); document.body.classList.remove('is-playing');
+    });
     $('#btnSound').addEventListener('click', () => {
       const g = this.game; g.settings.sound = !g.settings.sound;
       g.audio.setMuted(!g.settings.sound);
@@ -152,7 +161,7 @@ class UI {
     $('#reelSkip').addEventListener('pointerdown', () => this.game && this.game.skipReplay());
     $('#reelsClose').addEventListener('click', () => { $('#reels').classList.remove('on'); this.game && this.game.audio.ui('click'); });
     $('#again').addEventListener('click', () => { $('#over').classList.remove('on'); this.game.restart(); });
-    $('#backMenu').addEventListener('click', () => { $('#over').classList.remove('on'); $('#menu').classList.add('on'); });
+    $('#backMenu').addEventListener('click', () => { $('#over').classList.remove('on'); $('#menu').classList.add('on'); document.body.classList.remove('is-playing'); });
   }
 
   /* -------------------------- best moments ------------------------- */
