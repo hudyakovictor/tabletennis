@@ -70,26 +70,26 @@ canvas{display:block;width:100%;height:100%}
 #shot b{font-size:14px;font-weight:800;letter-spacing:.05em}
 #shot s{font-family:var(--mono);font-size:11px;color:var(--dim);text-decoration:none}
 
-/* ============================= coach panel ========================== */
-#train{position:absolute;left:max(12px,env(safe-area-inset-left));top:max(12px,env(safe-area-inset-top));
-  width:min(306px,56vw);background:var(--glass2);border:1px solid var(--line2);border-radius:16px;
-  padding:13px 15px 12px;backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);
-  box-shadow:0 18px 50px rgba(0,0,0,.6);display:none}
+/* ============================= coach text (compact) ================= */
+#train{position:absolute;left:max(14px,env(safe-area-inset-left));top:max(12px,env(safe-area-inset-top));
+  max-width:min(340px,70vw);background:none;border:none;border-radius:0;
+  padding:0;backdrop-filter:none;-webkit-backdrop-filter:none;
+  box-shadow:none;display:none;pointer-events:none;z-index:5}
 #train.on{display:block}
-#train .th{display:flex;align-items:baseline;gap:9px;margin-bottom:9px}
-#train .th span{font-family:var(--mono);font-size:10px;color:var(--acc);letter-spacing:.1em}
-#train .th b{font-size:15px;font-weight:900;letter-spacing:.03em}
-.tpips{display:flex;gap:5px;margin-bottom:10px}
-.tpips i{flex:1;height:4px;border-radius:3px;background:rgba(255,255,255,.12);transition:.25s}
-.tpips i.on{background:var(--good);box-shadow:0 0 10px rgba(78,227,154,.6)}
-.ttip{font-size:13px;line-height:1.45;font-weight:600;color:var(--txt)}
-.twhy{font-size:10.5px;line-height:1.5;color:var(--dim);margin-top:6px}
-.tmsg{font-size:11.5px;line-height:1.45;font-weight:700;margin-top:9px;min-height:0;color:var(--good)}
+#train .th{display:flex;align-items:baseline;gap:8px;margin-bottom:2px}
+#train .th span{font-family:var(--mono);font-size:9.5px;color:var(--acc);letter-spacing:.08em;text-shadow:0 1px 4px rgba(0,0,0,.9)}
+#train .th b{font-size:13px;font-weight:900;letter-spacing:.04em;color:#fff;text-shadow:0 1px 4px rgba(0,0,0,.9)}
+.tpips{display:flex;gap:4px;margin-bottom:5px;max-width:130px}
+.tpips i{flex:1;height:3px;border-radius:2px;background:rgba(255,255,255,.2);transition:.25s}
+.tpips i.on{background:var(--good);box-shadow:0 0 6px rgba(78,227,154,.6)}
+.ttip{font-size:12px;line-height:1.35;font-weight:600;color:#fff;text-shadow:0 1px 4px rgba(0,0,0,.95),0 2px 8px rgba(0,0,0,.9)}
+.twhy{font-size:10px;line-height:1.35;color:var(--dim);margin-top:3px;text-shadow:0 1px 4px rgba(0,0,0,.9)}
+.tmsg{font-size:11.5px;line-height:1.35;font-weight:700;margin-top:5px;min-height:0;color:var(--good);text-shadow:0 1px 4px rgba(0,0,0,.95)}
 .tmsg:empty{display:none}
-.tbtns{display:flex;gap:7px;margin-top:11px}
-.tbt{flex:1;padding:7px 4px;border-radius:9px;border:1px solid var(--line);background:rgba(255,255,255,.04);
-  color:var(--dim);font-family:inherit;font-size:10px;font-weight:700;letter-spacing:.1em;cursor:pointer;transition:.16s}
-.tbt:hover{color:var(--txt);background:rgba(255,255,255,.09);border-color:var(--line2)}
+.tbtns{display:flex;gap:6px;margin-top:7px;pointer-events:auto}
+.tbt{padding:4px 9px;border-radius:6px;border:1px solid rgba(255,255,255,.18);background:rgba(0,0,0,.4);
+  color:var(--dim);font-family:inherit;font-size:9.5px;font-weight:700;letter-spacing:.08em;cursor:pointer;transition:.16s}
+.tbt:hover{color:var(--txt);background:rgba(255,255,255,.15);border-color:var(--line2)}
 
 /* ============================ messages ============================== */
 #msgs{width:100%;text-align:center;pointer-events:none}
@@ -237,16 +237,18 @@ body.is-paused #pauseInd{display:flex}
   .logo{font-size:30px}.card{padding:20px 18px 18px}
   .msg{font-size:20px}.msg.big{font-size:29px}
   .recap{grid-template-columns:1fr}
-  #train{width:min(268px,70vw);padding:11px 12px 10px}
-  #train .th b{font-size:13.5px}.ttip{font-size:12px}.twhy{font-size:10px}
+  #train{max-width:calc(100vw - 28px);padding:0}
+  #train .th b{font-size:12px}.ttip{font-size:11px}.twhy{font-size:9.5px}
 }
-@media (max-height:460px){ #spin{display:none} #train{transform:scale(.88);transform-origin:0 0} }
+@media (max-height:460px){ #spin{display:none} #train{transform:scale(.92);transform-origin:0 0} }
 @media (max-width:420px){ #spin{display:none} }
 @media (max-aspect-ratio:3/4){
-  /* portrait: the dead band above the table is the only place a panel can
-     live without covering your own bat */
-  #train{width:calc(100vw - 24px);left:12px;top:max(66px,calc(env(safe-area-inset-top) + 58px))}
+  #train{max-width:calc(100vw - 28px);left:14px;top:max(56px,calc(env(safe-area-inset-top) + 50px));padding:0}
 }
+
+/* Hide menu button during active play ("во время игры скрой меню") */
+body.is-playing #btnMenu { display: none !important; }
+body.is-playing.is-paused #btnMenu { display: flex !important; }
 
 /* ============================ slow-mo =============================== */
 /* The spin dial: a chip in the same family as slow-mo, top-right, out of the

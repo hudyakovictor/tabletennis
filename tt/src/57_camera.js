@@ -40,11 +40,11 @@
  * ------------------------------------------------------------------ */
 const CAMERA_PRESETS = {
   /* The broadcast frame: over the player's shoulder, whole table in
-     shot, ~23° down. This is the one a TV director would cut to. */
+     shot, ~23° down. Brought closer per user request ("сильнее приблизь камеру"). */
   BROADCAST: {
     id: 'BROADCAST', ru: 'ТВ', short: 'ТРАНСТЛЯЦИЯ',
-    desc: 'Классический ракурс трансляции: весь стол и своя ракетка в кадре',
-    eye: { x: 0, y: 2.28, z: 3.22 }, look: { x: 0, y: 0.80, z: -0.30 }, fov: 42,
+    desc: 'Классический ракурс трансляции: весь стол в кадре крупным планом',
+    eye: { x: 0, y: 1.68, z: 2.38 }, look: { x: 0, y: 0.74, z: -0.25 }, fov: 48,
     follow: { y: 0, z: 0 },
   },
   /* Slightly lower and closer, and it rides the ball's height a few
@@ -52,7 +52,7 @@ const CAMERA_PRESETS = {
   DYNAMIC: {
     id: 'DYNAMIC', ru: 'ДИНАМИКА', short: 'ДИНАМИКА',
     desc: 'Чуть ниже и ближе, камера мягко едет за высотой мяча',
-    eye: { x: 0, y: 2.02, z: 2.94 }, look: { x: 0, y: 0.78, z: -0.34 }, fov: 46,
+    eye: { x: 0, y: 1.52, z: 2.22 }, look: { x: 0, y: 0.74, z: -0.28 }, fov: 50,
     follow: { y: 0.10, z: 0.06 },
   },
   /* Low, from just above the playing surface: the net reads as a real
@@ -60,7 +60,7 @@ const CAMERA_PRESETS = {
   LOW: {
     id: 'LOW', ru: 'НИЗКАЯ', short: 'ОТ СТОЛА',
     desc: 'Низкая камера у уровня стола: хорошо видна высота мяча над сеткой',
-    eye: { x: 0, y: 1.42, z: 3.12 }, look: { x: 0, y: 0.84, z: -0.36 }, fov: 48,
+    eye: { x: 0, y: 1.20, z: 2.28 }, look: { x: 0, y: 0.78, z: -0.30 }, fov: 52,
     follow: { y: 0, z: 0 },
   },
   /* A true side view, symmetric about the net: for reading spin,
@@ -68,7 +68,7 @@ const CAMERA_PRESETS = {
   SIDE: {
     id: 'SIDE', ru: 'СБОКУ', short: 'АНАЛИЗ',
     desc: 'Ровно сбоку, симметрично сетке: форма траектории и вращение как на ладони',
-    eye: { x: 3.62, y: 1.66, z: 0 }, look: { x: 0, y: 0.86, z: 0 }, fov: 40,
+    eye: { x: 2.75, y: 1.44, z: 0 }, look: { x: 0, y: 0.82, z: 0 }, fov: 44,
     follow: { y: 0, z: 0 },
   },
 };
@@ -148,9 +148,9 @@ for (const sx of [-1, 1]) for (const sz of [-1, 1]) {
 }
 FRAME_POINTS.push({ x: -PH.NET_HALF_WID, y: PH.NET_TOP, z: 0, w: 1 });
 FRAME_POINTS.push({ x: PH.NET_HALF_WID, y: PH.NET_TOP, z: 0, w: 1 });
-FRAME_POINTS.push({ x: 0, y: PH.TABLE_Y + 1.30, z: 0, w: 1 });            // a high lob
-FRAME_POINTS.push({ x: 0, y: PH.TABLE_Y + 0.55, z: -PH.T_HALF_LEN - 0.5, w: 1 });  // deep behind the bot
-FRAME_POINTS.push({ x: 0, y: PH.TABLE_Y + 0.45, z: PH.T_HALF_LEN + 0.45, w: 1 });   // short in front of you
+FRAME_POINTS.push({ x: 0, y: PH.TABLE_Y + 1.10, z: 0, w: 1 });            // a high lob
+FRAME_POINTS.push({ x: 0, y: PH.TABLE_Y + 0.50, z: -PH.T_HALF_LEN - 0.35, w: 1 });  // deep behind the bot
+FRAME_POINTS.push({ x: 0, y: PH.TABLE_Y + 0.35, z: PH.T_HALF_LEN + 0.15, w: 1 });   // short in front of you
 
 const PADDLE_POINTS = [];
 for (const sx of [-1, 1]) {
@@ -161,21 +161,12 @@ for (const sx of [-1, 1]) {
   }
 }
 
-/* Fairness set: the bat MUST be able to stand just outside both sidelines
-   at the heights and depths a return is actually played at, on every
-   preset and every aspect ratio. Without this a portrait phone quietly
-   turns every wide ball into an unreturnable one — and the bat leaves the
-   frame trying, which is the bug this whole file exists to prevent.
-   These are real contact poses, not the corners of the whole box: fitting
-   the extreme ones (bat at knee height two metres behind you) would push
-   the camera so far back that the ball becomes a speck. */
+/* Fairness set: contact poses kept in frame */
 const REACH_POSES = [
-  [0.943, 0.10, 0.46],       // reaching over the table for a net-cord dribbler
-  [0.943, 0.25, 1.02],
-  [0.943, 0.30, 1.40],       // the bread and butter: wide, at the end line
-  [0.943, 0.05, 1.55],       // wide and low
-  [0.943, 0.35, 1.75],
-  [0.943, 0.60, 1.95],       // a deep lob, taken high
+  [0.85, 0.10, 0.46],       // reaching over the table for a net-cord dribbler
+  [0.85, 0.25, 1.02],
+  [0.85, 0.28, 1.37],       // wide, at the end line
+  [0.85, 0.15, 1.48],       // wide and low
 ];
 const REACH_POINTS = [];
 for (const sx of [-1, 1]) {

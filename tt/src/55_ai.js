@@ -714,12 +714,12 @@ class OpponentAI {
      * net (the receiver's end line is at 1.37). Deep is the default; short
      * is a planned exception with a hard floor. */
     let tz;
-    if (archId === 'SERVE_FAST') tz = rnd(1.00, 1.30);
-    else if (this._servePlan.short) tz = rnd(0.62, 0.86);
-    else tz = rnd(0.78, 1.26);
-    // a weaker server cannot place it finely: pull everything a little deeper
-    tz = lerp(1.06, tz, clamp(0.45 + L.placeSkill, 0, 1));
-    tz = clamp(tz, 0.60, PH.T_HALF_LEN - 0.07);
+    if (archId === 'SERVE_FAST') tz = rnd(1.05, 1.30);
+    else if (this._servePlan.short) tz = rnd(0.85, 1.05);
+    else tz = rnd(0.96, 1.28);
+    // novice/amateur servers serve clean and deep, returnable by the player
+    if (L.skill < 0.70) tz = lerp(1.10, tz, 0.4);
+    tz = clamp(tz, 0.80, PH.T_HALF_LEN - 0.07);
 
     /* Racket speed. Through this impact model ~7 m/s of bat on a nearly
      * stationary ball is a 40 km/h serve and ~11 m/s is 60+ km/h, which is

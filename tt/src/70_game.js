@@ -97,6 +97,7 @@ class Game {
       coach: true,                       // one-line point analysis
       adaptive: true,                    // dynamic difficulty
       showDebug: false,
+      showPlayerPaddle: false,           // "ракетку скрой" - hide player paddle by default
       slowmoOnBigShots: true,
       slowmoPlayer: true,                // bullet time, for the player, in casual play only
       targetScore: 11,
@@ -156,13 +157,13 @@ class Game {
      * is deliberately no free orbit any more — hand-tuning yaw/pitch/zoom
      * cost players minutes per session and could park the bat off-screen,
      * and every framing it produced was worse than one of the four. */
-    this.camRig = { eye: V3.new(0, 2.28, 3.22), look: V3.new(0, 0.80, -0.30), fov: 42, mode: 'BROADCAST' };
+    this.camRig = { eye: V3.new(0, 1.68, 2.38), look: V3.new(0, 0.74, -0.25), fov: 48, mode: 'BROADCAST' };
     this._rigBuf = { vp: M4.create(), proj: M4.create(), view: M4.create() };
     this.camVP = M4.create();          // view·proj of the authored rig, no shake
     this.hudBandY = 0.40;              // screen y where the table's far edge begins
-    this.camPos = V3.new(0, 1.62, 3.05); this.camLook = V3.new(0, 0.92, -0.2);
+    this.camPos = V3.new(0, 1.68, 2.38); this.camLook = V3.new(0, 0.74, -0.25);
     this.camPosT = V3.clone(this.camPos); this.camLookT = V3.clone(this.camLook);
-    this.fov = 46; this.fovT = 46;
+    this.fov = 48; this.fovT = 48;
     this.marks = [];
     this.stats = {
       shots: 0, winners: 0, errors: 0, maxSpeed: 0, maxSpin: 0,
@@ -374,10 +375,19 @@ class Game {
     this.training = new Trainer(this);
     this.training.begin();
     this.ui && this.ui.trainShow(this.training);
+    if (typeof document !== 'undefined' && document.body) document.body.classList.add('is-playing');
   }
-  stopTraining() { if (this.training) this.training.quit(); }
+  stopTraining() {
+    if (this.training) this.training.quit();
+    if (typeof document !== 'undefined' && document.body) document.body.classList.remove('is-playing');
+  }
 
-  setState(s) { this.state = s; this.stateT = 0; if (this.paused) this.setPaused(false); }
+  setState(s) {
+    this.state = s; this.stateT = 0; if (this.paused) this.setPaused(false);
+    if (typeof document !== 'undefined' && document.body) {
+      document.body.classList.toggle('is-playing', s !== GS.MENU && s !== GS.MATCH_END);
+    }
+  }
 
   /* Pause only makes sense during a live rally or serve prep; leaving the play
      state (restart, match end) always clears it so the overlay can't stick. */
@@ -951,6 +961,20 @@ class Game {
         if (live) hit = { t: 1, x: b.p.x, y: b.p.y, z: b.p.z, rad: rad * 0.55, px: pad.pos.x, py: pad.pos.y, pz: pad.pos.z };
       }
     }
+    if (!hit) {
+      // Forgiving return reach for balls from opponent: after bouncing on player half,
+      // a deliberate swipe when close to the ball connects reliably!
+      const receiveCtx = b.lastHitBy === -1 && (this.rallyBounces.some((s) => s > 0) || b.p.z >= PH.T_HALF_LEN);
+      if (receiveCtx) {
+        const rad = V3.dist(b.p, pad.pos);
+        const sw0 = this.swipe;
+        const live = (sw0.active && sw0.m.samples > 2 && sw0.m.dist > 0.025)
+          || (sw0.lastReleased && this.time - (this.swipeReleasedAt || -9) < 0.42);
+        if (live && rad <= radius * 1.50) {
+          hit = { t: 1, x: b.p.x, y: b.p.y, z: b.p.z, rad: rad * 0.60, px: pad.pos.x, py: pad.pos.y, pz: pad.pos.z };
+        }
+      }
+    }
     if (!hit) return;
     if (b.lastHitBy === 1) return;                 // you already hit it
 
@@ -1170,19 +1194,18 @@ class Game {
     const incoming = this.ball.live && this.ball.v.z > 0.4 && this.ball.lastHitBy === -1;
     if (incoming && this.frame % 4 === 0) {
       predict(V3.clone(this.ball.p), V3.clone(this.ball.v), V3.clone(this.ball.w),
-        { dt: PHYS_DT, maxT: 1.6, stopZ: pad.pos.z, stopDir: 1, stopAtPlane: true, out: o });
+        { dt: PHYS_DT, maxT: 1.6, stopZ: pad.pos.z, stopDir: 1, out: o });
+      if (!o.reach && o.landed && o.landed.z > 0) {
+        o.reach = { x: o.landed.x, y: PH.TABLE_Y + 0.22, z: clamp(o.landed.z + 0.25, PADDLE_LIMITS.zStepIn, PADDLE_LIMITS.zFar), vx: 0, vy: 0, vz: 4 };
+        o.reachT = Math.max(0.05, o.landed.t + 0.10);
+      }
     }
-    /* Stepping in is FOOTWORK, not a teleport: the feet need time to travel.
-     * Under ~0.34 s to contact the body cannot get there, so a fast short ball
-     * stays a reach problem instead of becoming a magic one — and a slow short
-     * ball is genuinely yours to pick up. */
-    const canStep = !(o.reachT > 0) || o.reachT > 0.34;
-    const shortBall = canStep && incoming && ((o.landed && o.landed.z > 0 && o.landed.z < 1.05) ||
-      (o.reach && o.reach.z < PADDLE_LIMITS.zNear + 0.16));
+    const shortBall = incoming && ((o.landed && o.landed.z > 0 && o.landed.z < 1.15) ||
+      (o.reach && o.reach.z < PADDLE_LIMITS.zNear + 0.22) || this.ball.p.z < 1.15);
     if (shortBall) zNear = PADDLE_LIMITS.zStepIn;
     /* The step is visible: the body goes forward and down, the blade tips
        into the ball. Without this the bat simply appeared 16 cm closer. */
-    pad.stepIn = expSmooth(pad.stepIn || 0, shortBall ? 1 : 0, 7, dt);
+    pad.stepIn = expSmooth(pad.stepIn || 0, shortBall ? 1 : 0, 8, dt);
 
     const t = paddleTargetFromPointer(pt.x, pt.y, depthY, sens,
       this._ptTarget || (this._ptTarget = { tx: 0, ty: 0, tz: 0 }), { zNear });
@@ -1697,36 +1720,38 @@ class Game {
       d(me.ball, tmp.m, ma.ball);
     }
 
-    /* player paddle */
-    const pad = this.player;
-    const PM = this.paddleMats(S) || ma;
-    const pq = Q.lookRotation(Q.new(), pad.normal, { x: 0, y: 1, z: 0 });
-    /* pad.roll is the lean the bat picks up while you move it sideways: the
-       blade visibly turns into the direction of travel instead of staying
-       square to the camera. */
-    const roll = Q.setAxisAngle(Q.new(), 0, 0, 1,
-      (this.settings.hand === 'right' ? -0.42 : 0.42) + pad.swing * 0.3 + (pad.roll || 0));
-    Q.mul(pq, pq, roll);
-    /* stepping in to a short ball tips the blade forward over the table */
-    if (pad.stepIn > 0.01) {
-      const lunge = Q.setAxisAngle(Q.new(), 1, 0, 0, -0.20 * pad.stepIn);
-      Q.mul(pq, pq, lunge);
-    }
-    M4.compose(tmp.m, pad.pos, pq, V3.set(tmp.scl, 1, 1, 1));
-    d(me.blade, tmp.m, PM.wood);
-    if (!shadowPass) {
-      M4.compose(tmp.m2, V3.addScaled(V3.new(), pad.pos, pad.normal, 0.0085), pq, V3.set(tmp.scl, 1, 1, 1));
-      R.draw(me.rubber, tmp.m2, PM.black);
-      M4.compose(tmp.m2, V3.addScaled(V3.new(), pad.pos, pad.normal, -0.0085), pq, V3.set(tmp.scl, 1, 1, 1));
-      R.draw(me.rubber, tmp.m2, PM.red);
-    }
-    // handle
-    {
-      const off = V3.new(0, -0.125, 0);
-      const wo = V3.new();
-      M4.transformDir(wo, tmp.m, off);
-      M4.compose(tmp.m2, V3.add(V3.new(), pad.pos, wo), pq, V3.set(tmp.scl, 1, 1, 1));
-      d(me.handle, tmp.m2, PM.grip);
+    /* player paddle (hidden per user request: "ракетку скрой") */
+    if (this.settings.showPlayerPaddle) {
+      const pad = this.player;
+      const PM = this.paddleMats(S) || ma;
+      const pq = Q.lookRotation(Q.new(), pad.normal, { x: 0, y: 1, z: 0 });
+      /* pad.roll is the lean the bat picks up while you move it sideways: the
+         blade visibly turns into the direction of travel instead of staying
+         square to the camera. */
+      const roll = Q.setAxisAngle(Q.new(), 0, 0, 1,
+        (this.settings.hand === 'right' ? -0.42 : 0.42) + pad.swing * 0.3 + (pad.roll || 0));
+      Q.mul(pq, pq, roll);
+      /* stepping in to a short ball tips the blade forward over the table */
+      if (pad.stepIn > 0.01) {
+        const lunge = Q.setAxisAngle(Q.new(), 1, 0, 0, -0.20 * pad.stepIn);
+        Q.mul(pq, pq, lunge);
+      }
+      M4.compose(tmp.m, pad.pos, pq, V3.set(tmp.scl, 1, 1, 1));
+      d(me.blade, tmp.m, PM.wood);
+      if (!shadowPass) {
+        M4.compose(tmp.m2, V3.addScaled(V3.new(), pad.pos, pad.normal, 0.0085), pq, V3.set(tmp.scl, 1, 1, 1));
+        R.draw(me.rubber, tmp.m2, PM.black);
+        M4.compose(tmp.m2, V3.addScaled(V3.new(), pad.pos, pad.normal, -0.0085), pq, V3.set(tmp.scl, 1, 1, 1));
+        R.draw(me.rubber, tmp.m2, PM.red);
+      }
+      // handle
+      {
+        const off = V3.new(0, -0.125, 0);
+        const wo = V3.new();
+        M4.transformDir(wo, tmp.m, off);
+        M4.compose(tmp.m2, V3.add(V3.new(), pad.pos, wo), pq, V3.set(tmp.scl, 1, 1, 1));
+        d(me.handle, tmp.m2, PM.grip);
+      }
     }
 
     /* the opponent: paddle, hand, forearm and sleeve, all solved from
@@ -1769,9 +1794,11 @@ class Game {
       if (onTable(b.p.x, b.p.z) && b.p.y > TY - 0.02) S.blob(R, b.p.x, b.p.y, b.p.z, TY, 0.055, 0.62, 1);
       else S.blob(R, b.p.x, b.p.y, b.p.z, 0, 0.075, 0.40, 1);
     }
-    const pp = this.player.pos;
-    if (onTable(pp.x, pp.z)) S.blob(R, pp.x, pp.y, pp.z, TY, 0.115, 0.42, 1.25);
-    else S.blob(R, pp.x, pp.y, pp.z, 0, 0.16, 0.26, 1.25);
+    if (this.settings.showPlayerPaddle) {
+      const pp = this.player.pos;
+      if (onTable(pp.x, pp.z)) S.blob(R, pp.x, pp.y, pp.z, TY, 0.115, 0.42, 1.25);
+      else S.blob(R, pp.x, pp.y, pp.z, 0, 0.16, 0.26, 1.25);
+    }
     const ap = this.aiPaddle.pos;
     if (onTable(ap.x, ap.z)) S.blob(R, ap.x, ap.y, ap.z, TY, 0.115, 0.42, 1.25);
     else S.blob(R, ap.x, ap.y, ap.z, 0, 0.16, 0.24, 1.25);
