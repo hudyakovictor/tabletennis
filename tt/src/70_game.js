@@ -777,13 +777,21 @@ class Game {
     const s = this.settings;
     this.profile.data.settings = {
       assist: s.assist, posAssist: s.posAssist, difficulty: s.difficulty, quality: s.quality,
+      hitZone: s.hitZone,
       sound: s.sound, volume: s.volume, camera: s.camera, hand: s.hand,
       showTrail: s.showTrail, showPredict: s.showPredict, showZone: s.showZone,
       showTele: s.showTele, haptics: s.haptics, coach: s.coach, adaptive: s.adaptive,
       slowmoPlayer: s.slowmoPlayer, targetScore: s.targetScore, sensitivity: s.sensitivity,
       spinBias: s.spinBias,
     };
+    /* touch() only marks the profile dirty; the write itself happens at most
+     * every 4 s (maybeSave) or when something else forces it. A setting the
+     * player just changed was therefore lost whenever the session ended
+     * inside that window — closing the tab right after moving the assist
+     * slider threw the change away. The settings screen is a place where
+     * people change a value and then leave, so this write is forced. */
     this.profile.touch();
+    this.profile.save(true);
   }
 
   loadSettings() {
@@ -1062,9 +1070,14 @@ class Game {
     const p = this.profile;
     if (!p) return;
     const res = p.onMatchEnd(won, this.score, this.stats, this.moments.kept.length);
-    p.taskProgress('topspin', 0, this.matchTasks.topspin >= 10 ? 10 : 0);
-    p.taskProgress('smash', 0, this.matchTasks.smash >= 3 ? 3 : 0);
-    p.taskProgress('serves', 0, this.matchTasks.serves >= 5 ? 5 : 0);
+    /* The daily tasks are DAILY: "10 topspins", "3 smashes", "5 legal serves".
+     * They used to be written with the absolute form, so every match REPLACED
+     * the counter instead of adding to it: two matches of five topspins each
+     * ended the day on zero, and the task could only ever be finished by a
+     * single match that hit the whole quota. The counters now accumulate. */
+    p.taskProgress('topspin', this.matchTasks.topspin || 0);
+    p.taskProgress('smash', this.matchTasks.smash || 0);
+    p.taskProgress('serves', this.matchTasks.serves || 0);
     if (this.bestRally >= 8) p.taskProgress('rally8', 0, 1);
     this.analytics && this.analytics.send('match:end', {
       won, score: this.score.join('-'), rally: this.bestRally, shots: this.stats.shots,
@@ -1289,7 +1302,11 @@ class Game {
         powerScale: 1,
         moveYaw: pad.yaw || 0,
         equip: sideParams,
-        spinBias: 'norm',
+        /* The spin dial is a real control: the UI cycles it low / norm / high
+         * and stores it, and deriveStroke() reads ctx.spinBias to trade pace
+         * for brush. It was hard-wired to 'norm' here, so the dial did
+         * nothing at all — the setting was saved, shown and ignored. */
+        spinBias: this.settings.spinBias || 'norm',
       };
       racket = deriveStroke(m, ctx);
       racket.vmag *= this.equip.vmagK;
@@ -1304,7 +1321,15 @@ class Game {
       // Parameter 2: Выравнивание удара
       const assistLvl = this.settings.assist !== undefined ? this.settings.assist : 0.85;
       racket = refineRacket(contact, b.v, b.w, racket, assistLvl, quality);
-      if (isServeStroke && racket.valid === false && clamp(assistLvl, 0, 1) < 0.999) {
+      /* The assist gets a second chance — but it only got one for serves.
+       * A rally shot whose first solve comes back "not legal" (into the net
+       * or on the player's own half) was played exactly as it was, so the
+       * point was lost. Measured on the bench's own rally scenario at
+       * assist 0.5: 26.5 % of the shots came back illegal, and the
+       * re-solve the bench was already doing (but the game was not)
+       * recovered 21 of those points — 71.0 % of the shots on the table
+       * instead of 92.0 %. */
+      if (racket.valid === false && clamp(assistLvl, 0, 1) < 0.999) {
         racket = refineRacket(contact, b.v, b.w, racket, 1, quality);
       }
       racket.sweet = sweet; racket.timing = timing;
@@ -1862,6 +1887,12 @@ class Game {
 
   /* ------------------------------ update --------------------------- */
   update(dtReal) {
+    /* The pause belongs to the GAME, not to the caller. The boot loop
+     * happens to check game.paused before calling update(), but every
+     * other caller (the demo, the tests, a future menu) would have run
+     * the simulation anyway: the ball kept moving, the AI kept playing
+     * and the score changed behind the pause overlay. */
+    if (this.paused) return;
     this.frame++;
     /* ---- a replay owns the whole update: physics is off, the clip is
        the truth, and the camera is a filmmaker rather than a spectator ---- */
@@ -1977,7 +2008,19 @@ class Game {
 
     this.updatePlayerPaddle(dtReal);
     this.updateStrikeWindow(dtReal);
-    if (this.state === GS.RALLY || this.state === GS.SERVE_TOSS) this.moments.push(this.time, this);
+    if (this.state === GS.RALLY || this.state === GS.SERVE_TOSS) {
+      /* The replay ring is indexed at REPLAY_HZ (30 Hz). Pushing one frame
+       * per RENDERED frame filled the ring at 60 Hz, i.e. twice as fast as
+       * the clip arithmetic assumes, so endRally() cut a clip that covered
+       * only the last half of the rally and played it back at half speed.
+       * Measured before the fix: 60 frames pushed per second into a ring
+       * that indexes at 30 Hz; a 1.1 s rally produced a 33-frame clip —
+       * 0.55 s of play, stretched to 1.1 s on screen. */
+      if (this.time - (this._momT || -1) >= 1 / REPLAY_HZ - 1e-6) {
+        this._momT = this.time;
+        this.moments.push(this.time, this);
+      }
+    }
     if (this.training) this.training.update(dtReal);
     else if (this.network.isInMatch) {
       // online: the far paddle belongs to the peer, not to the AI
@@ -2086,25 +2129,39 @@ class Game {
     /* the opponent: paddle, hand, forearm and sleeve, all solved from
        the paddle's own position and normal (see 56_rig.js) */
     const ap = this.aiPaddle;
-    const an = V3.norm(V3.new(), V3.sub(V3.new(), this.ball.p, this.ai.pos));
+    /* In an online match the far bat belongs to the PEER. The AI does not
+     * think at all in that mode, so this.ai.pos is a stale leftover from
+     * the last local game — and this block used to copy the AI's position
+     * over whatever the network had put there, so the opponent's racket was
+     * drawn in the wrong place for the whole match. */
+    const online = this.network.isInMatch;
+    const peer = online ? this.network.opponentRacket : null;
+    const an = V3.norm(V3.new(), V3.sub(V3.new(), this.ball.p, online ? peer.pos : this.ai.pos));
     an.z = Math.abs(an.z) * 1 || 1;
     // Blend "look at the ball" with the stroke's own face angle, so the
     // backswing visibly opens for a chop and closes for a loop.
-    const fn = this.ai.faceNormal, wd = clamp(this.ai.anim.windup, 0, 1);
+    const fn = this.ai.faceNormal, wd = clamp(online ? 0 : this.ai.anim.windup, 0, 1);
     const aiNorm = V3.norm(V3.new(), V3.new(
       an.x * 0.4 * (1 - wd * 0.5),
       lerp(-0.1 + an.y * 0.3, fn.y * 1.5, wd),
       1));
-    V3.copy(ap.normal, aiNorm);
-    V3.copy(ap.pos, this.ai.pos);
+    if (online) {
+      V3.copy(ap.pos, peer.pos);
+      V3.copy(ap.normal, peer.normal);
+    } else {
+      V3.copy(ap.normal, aiNorm);
+      V3.copy(ap.pos, this.ai.pos);
+    }
+    const faceN = online ? ap.normal : aiNorm;
     if (shadowPass) {
-      const aqS = Q.lookRotation(Q.new(), aiNorm, { x: 0, y: 1, z: 0 });
+      const aqS = Q.lookRotation(Q.new(), faceN, { x: 0, y: 1, z: 0 });
       M4.compose(tmp.m, ap.pos, aqS, V3.set(tmp.scl, 1, 1, 1));
       R.drawShadow(me.blade, tmp.m, null, 0);
     } else {
       this.rig.draw(R, S, {
-        pos: ap.pos, normal: aiNorm, hand: this.settings.hand === 'right' ? 'left' : 'right',
-        swing: -this.ai.anim.swing, windup: wd, roll: (this.ai.anim.lean || 0) * 0.22,
+        pos: ap.pos, normal: faceN, hand: this.settings.hand === 'right' ? 'left' : 'right',
+        swing: online ? -(peer.anim.swing || 0) : -this.ai.anim.swing,
+        windup: wd, roll: (this.ai.anim.lean || 0) * 0.22,
         mats: this.paddleMats(S, this.aiEquip),
       });
     }

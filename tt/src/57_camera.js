@@ -19,7 +19,11 @@
  *      the frame, with margin;
  *    · the camera never yaws off the table's centre line, so the table
  *      is always straight — the net stays vertical in the picture and
- *      the two sidelines converge symmetrically;
+ *      the two sidelines converge symmetrically. (The SIDE rig is the one
+ *      exception and says so: it is a true side view, eye.x = 2.75 m,
+ *      deliberately off the centre line. The invariant above is about
+ *      the three rigs behind the player — the old header claimed it for
+ *      all four, which the code contradicted.);
  *    · the volume your bat can occupy is inside the frame too, so the
  *      racket can never be parked off-screen;
  *    · on narrow/portrait screens the rig is pushed back (never tilted)
@@ -348,6 +352,17 @@ function bisectIntoFrame(vp, m, ax, ay, az, bx, by, bz) {
  */
 function clampPaddleToFrustum(vp, t, margin) {
   const m = margin === undefined ? 0.045 : margin;
+  /* The authored limits come FIRST. The frustum correction interpolates
+   * between a safe anchor (the home pose) and the target, so as long as
+   * both ends are inside the limit box the result can never leave it. The
+   * old order did it the other way round: the frustum correction ran first
+   * and the closing clamp undid it, which pushed the bat back out of the
+   * frame (measured: 12 of the 160 limit-box corners landed off screen on
+   * the BROADCAST / DYNAMIC / LOW rigs — the clamp had "fixed" the pose
+   * and then the clamp undid the fix). */
+  t.tx = clamp(t.tx, -PADDLE_LIMITS.x, PADDLE_LIMITS.x);
+  t.ty = clamp(t.ty, PH.TABLE_Y + PADDLE_LIMITS.yLo, PH.TABLE_Y + PADDLE_LIMITS.yHi);
+  t.tz = clamp(t.tz, PADDLE_LIMITS.zStepIn, PADDLE_LIMITS.zFar);
   const s = projectPoint(vp, { x: t.tx, y: t.ty, z: t.tz }, _clampS);
   /* Behind the camera no pull on any axis can help, and returning the pose
    * untouched is exactly how the bat used to end up stranded off screen. Home
@@ -398,9 +413,6 @@ function clampPaddleToFrustum(vp, t, margin) {
   if (!insideFrame(projectPoint(vp, { x: t.tx, y: t.ty, z: t.tz }, _clampA), m)) {
     t.tx = PADDLE_HOME.x; t.ty = PADDLE_HOME.y; t.tz = PADDLE_HOME.z;
   }
-  t.tx = clamp(t.tx, -PADDLE_LIMITS.x, PADDLE_LIMITS.x);
-  t.ty = clamp(t.ty, PH.TABLE_Y + PADDLE_LIMITS.yLo, PH.TABLE_Y + PADDLE_LIMITS.yHi);
-  t.tz = clamp(t.tz, PADDLE_LIMITS.zStepIn, PADDLE_LIMITS.zFar);
   return t;
 }
 

@@ -8,7 +8,13 @@ const TAU = Math.PI * 2;
 const DEG = Math.PI / 180;
 const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
 const lerp = (a, b, t) => a + (b - a) * t;
-const smoothstep = (e0, e1, x) => { const t = clamp((x - e0) / (e1 - e0), 0, 1); return t * t * (3 - 2 * t); };
+const smoothstep = (e0, e1, x) => {
+  /* e0 === e1 used to divide by zero and return NaN for every x. A
+   * degenerate edge pair is a programmer error, not a NaN generator. */
+  if (!(e1 - e0)) return x < e0 ? 0 : 1;
+  const t = clamp((x - e0) / (e1 - e0), 0, 1);
+  return t * t * (3 - 2 * t);
+};
 const sign = Math.sign;
 const rnd = (a = 1, b) => (b === undefined ? Math.random() * a : a + Math.random() * (b - a));
 const rndSym = (a) => (Math.random() * 2 - 1) * a;

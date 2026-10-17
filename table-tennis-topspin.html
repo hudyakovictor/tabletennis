@@ -159,13 +159,15 @@ h3.sec::after{content:"";flex:1;height:1px;background:var(--line)}
 .opt b{display:block;font-size:12.5px;font-weight:700;letter-spacing:.02em}
 .opt s{display:block;font-size:9.5px;color:var(--dim);text-decoration:none;margin-top:2px}
 .sl{display:flex;align-items:center;gap:11px;margin:9px 0}
-.sl label{font-size:11px;color:var(--dim);width:124px;flex:0 0 auto;letter-spacing:.04em}
+.sl label{font-size:11px;color:var(--dim);width:134px;flex:0 0 auto;letter-spacing:.04em;line-height:1.25}
+.sl label s{display:block;font-size:8.5px;color:var(--dim2);text-decoration:none;margin-top:2px;font-weight:normal}
 .sl input[type=range]{flex:1;-webkit-appearance:none;appearance:none;height:4px;border-radius:3px;
   background:linear-gradient(90deg,var(--acc),var(--acc2));outline:none}
 .sl input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:16px;height:16px;border-radius:50%;
   background:#fff;cursor:pointer;box-shadow:0 2px 9px rgba(0,0,0,.6)}
 .sl input[type=range]::-moz-range-thumb{width:16px;height:16px;border:0;border-radius:50%;background:#fff;cursor:pointer}
 .sl .v{font-family:var(--mono);font-size:11px;color:var(--acc);width:50px;text-align:right}
+#settings.on{z-index:20}
 .btn{display:block;width:100%;margin-top:18px;padding:14px;border:0;border-radius:12px;cursor:pointer;
   font-family:inherit;font-size:14px;font-weight:800;letter-spacing:.14em;color:#04121c;
   background:linear-gradient(100deg,var(--acc),#7ff0c0);transition:.18s;text-transform:uppercase}
@@ -462,11 +464,6 @@ body.is-reel .screen,body.is-reel #pauseInd{display:none !important}
     <div id="dbg"></div>
 
     <div id="topright">
-      <!-- spin dial: how much of the contact is brush and how much is punch -->
-      <button id="spinBias" class="pe" title="Вращение" aria-label="Регулятор вращения, нажмите для переключения">
-        <b>СПИН</b>
-        <s id="spinBiasVal">НОРМА</s>
-      </button>
       <!-- slow-mo: hold to slow the world down (never in tournaments/PvP) -->
       <button id="slow" class="pe" title="Замедление" aria-label="Замедление времени, удерживайте">
         <i id="slowFill"></i>
@@ -496,6 +493,7 @@ body.is-reel .screen,body.is-reel #pauseInd{display:none !important}
       <s>нажмите, чтобы продолжить · P</s>
       <div style="margin-top:14px;display:flex;gap:8px;flex-wrap:wrap;justify-content:center">
         <button id="pauseResume" class="tbt" style="pointer-events:auto;padding:7px 16px;font-size:11px">ПРОДОЛЖИТЬ</button>
+        <button id="pauseSettings" class="tbt" style="pointer-events:auto;padding:7px 16px;font-size:11px">⚙️ НАСТРОЙКИ</button>
         <button id="pauseDemo" class="tbt" style="pointer-events:auto;padding:7px 16px;font-size:11px">🤖 ВКЛ АВТОИГРУ</button>
         <button id="pauseDebugMisses" class="tbt" style="pointer-events:auto;padding:7px 16px;font-size:11px;background:#ff4d6d;border-color:#ff4d6d;color:#fff">🔍 РАЗБОР ПРОМАХОВ</button>
         <button id="pauseToMenu" class="tbt" style="pointer-events:auto;padding:7px 16px;font-size:11px">В МЕНЮ</button>
@@ -509,50 +507,32 @@ body.is-reel .screen,body.is-reel #pauseInd{display:none !important}
       <div class="logo">TOPSPIN<span style="opacity:.45">·</span>ARENA</div>
       <div class="sub">Настольный теннис · физика ITTF · управление свайпом</div>
 
-      <button class="btn" id="train0">ОБУЧЕНИЕ — 6 ШАГОВ</button>
-      <div class="note">Тренер подаёт мячи и проверяет каждый удар по реальной физике. Пройти стоит один раз — дальше всё понятно.</div>
-
       <h3 class="sec">Соперник</h3>
       <div class="row">
-        <button class="opt" data-diff="0"><b>НОВИЧОК</b><s>ELO 900</s></button>
-        <button class="opt" data-diff="1"><b>ЛЮБИТЕЛЬ</b><s>ELO 1400</s></button>
-        <button class="opt sel" data-diff="2"><b>ПРО</b><s>ELO 1900</s></button>
-        <button class="opt" data-diff="3"><b>МАСТЕР</b><s>ELO 2300</s></button>
-        <button class="opt" data-diff="4"><b>ЛЕГЕНДА</b><s>ELO 2700</s></button>
+        <button class="opt" data-diff="0"><b>НОВИЧОК</b><s>легкий</s></button>
+        <button class="opt" data-diff="1"><b>ЛЮБИТЕЛЬ</b><s>средний</s></button>
+        <button class="opt sel" data-diff="2"><b>ПРО</b><s>опытный</s></button>
+        <button class="opt" data-diff="3"><b>МАСТЕР</b><s>сложный</s></button>
+        <button class="opt" data-diff="4"><b>ЛЕГЕНДА</b><s>максимум</s></button>
       </div>
 
-      <h3 class="sec">Матч до</h3>
-      <div class="row">
-        <button class="opt" data-set="target" data-val="5"><b>5</b><s>блиц</s></button>
-        <button class="opt sel" data-set="target" data-val="11"><b>11</b><s>стандарт ITTF</s></button>
-        <button class="opt" data-set="target" data-val="21"><b>21</b><s>классика</s></button>
-      </div>
+      <button class="btn" id="play" style="margin-top:16px">НАЧАТЬ МАТЧ</button>
 
-      <h3 class="sec">Помощь в исполнении</h3>
-      <div class="sl">
-        <label>Техника удара</label>
-        <input type="range" id="rAssist" data-set="assist" min="0" max="100" value="72">
-        <span class="v" id="vAssist">72%</span>
-      </div>
-      <div class="sl">
-        <label>Доводка ракетки</label>
-        <input type="range" id="rPos" data-set="posAssist" min="0" max="100" value="80">
-        <span class="v" id="vPos">80%</span>
-      </div>
-
-      <button class="btn ghost" id="play">НАЧАТЬ МАТЧ</button>
-      <div class="row" style="margin-top:9px">
-        <button class="opt" id="wsOpen"><b>МАСТЕРСКАЯ</b><s id="wsCoins">0 монет</s></button>
-        <button class="opt" id="dailyOpen"><b>ЗАДАНИЯ</b><s id="wsStreak">серия 1</s></button>
+      <div class="row" style="margin-top:10px">
+        <button class="btn ghost" id="menuOpenSettings" style="flex:1">⚙️ НАСТРОЙКИ</button>
+        <button class="btn ghost" id="train0" style="flex:1">🎓 ОБУЧЕНИЕ</button>
       </div>
 
       <h3 class="sec">Режимы</h3>
       <div class="row">
-        <button class="btn" id="careerStart" style="flex:1;background:linear-gradient(100deg,#ff7a2f,#ffd34d)">🏆 КАРЬЕРА</button>
-        <button class="btn" id="onlineStart" style="flex:1;background:linear-gradient(100deg,#39c6ff,#7ff0c0)">🌐 ОНЛАЙН</button>
+        <button class="btn ghost" id="careerStart" style="flex:1;border-color:rgba(255,122,47,.5);color:#ffd34d">🏆 КАРЬЕРА</button>
+        <button class="btn ghost" id="onlineStart" style="flex:1;border-color:rgba(57,198,255,.5);color:#7ff0c0">🌐 ОНЛАЙН</button>
+        <button class="btn ghost" id="demoStart" style="flex:1;border-color:rgba(155,81,224,.5);color:#c77dff">🤖 ДЕМО</button>
       </div>
-      <div class="row" style="margin-top:8px">
-        <button class="btn" id="demoStart" style="flex:1;background:linear-gradient(100deg,#9b51e0,#39c6ff)">🤖 НАБЛЮДЕНИЕ (БОТ VS БОТ)</button>
+
+      <div class="row" style="margin-top:9px">
+        <button class="opt" id="wsOpen"><b>МАСТЕРСКАЯ</b><s id="wsCoins">0 монет</s></button>
+        <button class="opt" id="dailyOpen"><b>ЗАДАНИЯ</b><s id="wsStreak">серия 1</s></button>
       </div>
     </div>
   </div>
@@ -599,60 +579,31 @@ body.is-reel .screen,body.is-reel #pauseInd{display:none !important}
 
   <!-- ========================== SETTINGS ========================== -->
   <div class="screen" id="settings" role="dialog" aria-label="Настройки">
-    <div class="card">
-      <div class="logo" style="font-size:26px">НАСТРОЙКИ</div>
-      <!-- Four authored rigs and nothing else. Free orbit/pinch/wheel was
-           removed on purpose: the table has to sit level and square in every
-           frame, and hand-tuning that with a mouse takes minutes. Each rig is
-           fitted offline for 8 aspect ratios, so it is already correct. -->
-      <h3 class="sec">Камера <span class="hintk">клавиши 1–4 · 0 — сброс · свободное вращение отключено</span></h3>
-      <div class="row">
-        <button class="opt sel" data-set="cam" data-val="BROADCAST"><b>1 · ТВ</b><s>трансляция, стол ровно</s></button>
-        <button class="opt" data-set="cam" data-val="DYNAMIC"><b>2 · ДИНАМИКА</b><s>чуть ближе к мячу</s></button>
-        <button class="opt" data-set="cam" data-val="LOW"><b>3 · НИЗКАЯ</b><s>от стола, видно вращение</s></button>
-        <button class="opt" data-set="cam" data-val="SIDE"><b>4 · СБОКУ</b><s>разбор техники</s></button>
+    <div class="card" style="max-width:460px">
+      <div class="logo" style="font-size:24px">НАСТРОЙКИ</div>
+      <div class="sub">2 основных параметра игры</div>
+
+      <h3 class="sec">1. ОБЛАСТЬ ПОПАДАНИЯ</h3>
+      <div class="sl">
+        <label>Радиус приёма<s>захват мяча вокруг курсора</s></label>
+        <input type="range" id="rHitZone" data-set="hitZone" min="30" max="100" value="85">
+        <span class="v" id="vHitZone">85%</span>
       </div>
-      <h3 class="sec">Графика</h3>
-      <div class="row">
-        <button class="opt" data-set="quality" data-val="low"><b>НИЗКАЯ</b><s>макс. FPS</s></button>
-        <button class="opt" data-set="quality" data-val="medium"><b>СРЕДНЯЯ</b><s>баланс</s></button>
-        <button class="opt sel" data-set="quality" data-val="high"><b>ВЫСОКАЯ</b><s>всё включено</s></button>
+      <div style="font-size:11px;color:var(--dim);line-height:1.5;margin:4px 0 16px">
+        Определяет, насколько близко прицел должен быть к мячу, чтобы удар состоялся. При высоком значении вы отбиваете мяч даже при неточном наведении.
       </div>
-      <h3 class="sec">Подсказки</h3>
-      <div class="cols">
-        <div class="row"><button class="opt sel" data-set="zone" data-val="on"><b>ЗОНА УДАРА</b><s>кольцо на мяче</s></button>
-          <button class="opt" data-set="zone" data-val="off"><b>ВЫКЛ</b><s></s></button></div>
-        <div class="row"><button class="opt sel" data-set="predict" data-val="on"><b>ПРИЦЕЛ ВКЛ</b><s>точка приземления</s></button>
-          <button class="opt" data-set="predict" data-val="off"><b>ВЫКЛ</b><s></s></button></div>
-        <div class="row"><button class="opt sel" data-set="trail" data-val="on"><b>ШЛЕЙФ ВКЛ</b><s>цвет = вращение</s></button>
-          <button class="opt" data-set="trail" data-val="off"><b>ВЫКЛ</b><s></s></button></div>
-        <div class="row"><button class="opt" data-set="tele" data-val="on"><b>ТЕЛЕМЕТРИЯ</b><s>для разбора</s></button>
-          <button class="opt sel" data-set="tele" data-val="off"><b>ВЫКЛ</b><s></s></button></div>
-        <div class="row"><button class="opt sel" data-set="haptics" data-val="on"><b>ВИБРО ВКЛ</b><s>отдача в руку</s></button>
-          <button class="opt" data-set="haptics" data-val="off"><b>ВЫКЛ</b><s></s></button></div>
-        <div class="row"><button class="opt sel" data-set="slowmoPlayer" data-val="on"><b>SLOW-MO</b><s>замедление в матче</s></button>
-          <button class="opt" data-set="slowmoPlayer" data-val="off"><b>ВЫКЛ</b><s>для турниров и PvP</s></button></div>
-        <div class="row"><button class="opt sel" data-set="coach" data-val="on"><b>РАЗБОР ОЧКА</b><s>почему проиграно</s></button>
-          <button class="opt" data-set="coach" data-val="off"><b>ВЫКЛ</b><s></s></button></div>
-        <div class="row"><button class="opt sel" data-set="adaptive" data-val="on"><b>АДАПТАЦИЯ</b><s>соперник подстраивается</s></button>
-          <button class="opt" data-set="adaptive" data-val="off"><b>ВЫКЛ</b><s>чистый уровень</s></button></div>
+
+      <h3 class="sec">2. ВЫРАВНИВАНИЕ УДАРА</h3>
+      <div class="sl">
+        <label>Авто-доводка<s>исправление дуги на стол</s></label>
+        <input type="range" id="rAssist" data-set="assist" min="0" max="100" value="85">
+        <span class="v" id="vAssist">85%</span>
       </div>
-      <h3 class="sec">Хват</h3>
-      <div class="row">
-        <button class="opt sel" data-set="hand" data-val="right"><b>ПРАВАЯ</b><s></s></button>
-        <button class="opt" data-set="hand" data-val="left"><b>ЛЕВАЯ</b><s></s></button>
+      <div style="font-size:11px;color:var(--dim);line-height:1.5;margin:4px 0 16px">
+        Корректирует траекторию, чтобы мяч стабильно перелетал сетку и ложился на стол соперника с хорошим вращением.
       </div>
-      <h3 class="sec">Управление и звук</h3>
-      <div class="sl"><label>Чувствительность</label>
-        <input type="range" id="rSens" data-set="sens" min="50" max="180" value="100"><span class="v" id="vSens">1.00×</span></div>
-      <div class="sl"><label>Громкость</label>
-        <input type="range" id="rVol" data-set="vol" min="0" max="100" value="90"><span class="v" id="vVol">90%</span></div>
-      <div style="font-size:10px;color:var(--dim2);margin-top:10px">
-        <span class="kbd">R</span> рестарт · <span class="kbd">P</span> пауза · <span class="kbd">C</span> пресет камеры · <span class="kbd">F3</span> телеметрия физики<br>
-        <span class="kbd">←</span><span class="kbd">→</span><span class="kbd">↑</span><span class="kbd">↓</span> ракурс ·
-        <span class="kbd">+</span><span class="kbd">−</span> дистанция · <span class="kbd">0</span> сброс
-      </div>
-      <button class="btn" id="setClose">ЗАКРЫТЬ</button>
+
+      <button class="btn" id="setClose">СОХРАНИТЬ И ЗАКРЫТЬ</button>
     </div>
   </div>
 
@@ -825,7 +776,13 @@ const TAU = Math.PI * 2;
 const DEG = Math.PI / 180;
 const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
 const lerp = (a, b, t) => a + (b - a) * t;
-const smoothstep = (e0, e1, x) => { const t = clamp((x - e0) / (e1 - e0), 0, 1); return t * t * (3 - 2 * t); };
+const smoothstep = (e0, e1, x) => {
+  /* e0 === e1 used to divide by zero and return NaN for every x. A
+   * degenerate edge pair is a programmer error, not a NaN generator. */
+  if (!(e1 - e0)) return x < e0 ? 0 : 1;
+  const t = clamp((x - e0) / (e1 - e0), 0, 1);
+  return t * t * (3 - 2 * t);
+};
 const sign = Math.sign;
 const rnd = (a = 1, b) => (b === undefined ? Math.random() * a : a + Math.random() * (b - a));
 const rndSym = (a) => (Math.random() * 2 - 1) * a;
@@ -1183,8 +1140,15 @@ function makeCylinder(rTop, rBot, h, seg = 24, caps = true) {
         geoPush(g, c * r, y, s * r, 0, ny, 0, c * 0.5 + 0.5, s * 0.5 + 0.5);
       }
       for (let i = 0; i < seg; i++) {
-        if (ny > 0) geoTri(g, cI, start + i, start + i + 1);
-        else geoTri(g, cI, start + i + 1, start + i);
+        /* The cap has to wind the same way round as the barrel: the barrel
+         * quad is (top_i, top_i+1, bot_i+1, bot_i) and faces OUTSIDE, so the
+         * lid has to run the other way (centre, next, this) to face up /
+         * down. Wound the same way round as the barrel the lid faced INWARD
+         * and the renderer culled it (gl.cullFace(BACK)): every cylinder in
+         * the scene lost its top and its bottom — the net posts showed an
+         * open tube. */
+        if (ny > 0) geoTri(g, cI, start + i + 1, start + i);
+        else geoTri(g, cI, start + i, start + i + 1);
       }
     }
   }
@@ -2056,6 +2020,7 @@ class Career {
     this.pendingPerks = null;   // three perks to choose from
     this.state = 'IDLE';        // IDLE TOURNAMENT_INTRO OPPONENT_SELECT PERK_SELECT MATCH MATCH_END TOURNAMENT_END RUN_END
     this.runStats = { totalPoints: 0, totalRallies: 0, longestRally: 0, maxSpeed: 0 };
+    this._perkDelta = { assist: 0, posAssist: 0 };   // what the perks changed
   }
 
   start() {
@@ -2068,8 +2033,32 @@ class Career {
     this.matchHistory = [];
     this.pendingPerks = null;
     this.runStats = { totalPoints: 0, totalRallies: 0, longestRally: 0, maxSpeed: 0 };
+    /* Undo the sliders the previous run's perks wrote into, BEFORE the new
+     * run starts: they used to leak, and the next run began with an assist
+     * the player had never chosen (measured: 0.580 -> 0.580 across two
+     * runs). The multiplier reset (_resetCareerBoosts) was not enough —
+     * the perk had written into the player's own settings. */
+    this._undoPerkSettings();
     this._resetCareerBoosts();
     this.enterTournament();
+  }
+
+  /* The perks that write into the live settings are tracked so they can be
+   * taken back out again, exactly and only as far as they went in. */
+  _applyPerk(perk) {
+    const s = this.game.settings;
+    const a0 = s.assist, p0 = s.posAssist;
+    perk.apply(this.game);
+    this._perkDelta.assist += s.assist - a0;
+    this._perkDelta.posAssist += s.posAssist - p0;
+  }
+
+  _undoPerkSettings() {
+    const s = this.game.settings;
+    s.assist = clamp(s.assist - this._perkDelta.assist, 0, 1);
+    s.posAssist = clamp(s.posAssist - this._perkDelta.posAssist, 0, 1);
+    this._perkDelta.assist = 0;
+    this._perkDelta.posAssist = 0;
   }
 
   _resetCareerBoosts() {
@@ -2159,7 +2148,7 @@ class Career {
     if (!this.pendingPerks || idx < 0 || idx >= this.pendingPerks.length) return;
     const perk = this.pendingPerks[idx];
     this.perks.push(perk);
-    perk.apply(this.game);
+    this._applyPerk(perk);
     this.pendingPerks = null;
     this.state = 'OPPONENT_SELECT';
   }
@@ -2208,10 +2197,11 @@ class Career {
       this.totalLosses = data.totalLosses || 0;
       this.matchHistory = data.matchHistory || [];
       this.runStats = data.runStats || this.runStats;
-      this.perks = (data.perks || []).map(id => PERKS.find(p => p.id === id)).filter(Boolean);
-      this.active = true;
-      this._resetCareerBoosts();
-      this.perks.forEach(p => p.apply(this.game));
+        this.perks = (data.perks || []).map(id => PERKS.find(p => p.id === id)).filter(Boolean);
+        this.active = true;
+        this._resetCareerBoosts();
+        this._perkDelta = { assist: 0, posAssist: 0 };
+        this.perks.forEach(p => this._applyPerk(p));
       this.enterTournament();
       return true;
     } catch(e) { return false; }
@@ -4349,19 +4339,19 @@ class AudioEngine {
 const AI_LEVELS = [
   {
     id: 0, name: 'НОВИЧОК', tag: 'ROOKIE', elo: 900, style: 'PUSHER',
-    react: 0.30, move: 2.1, posErr: 0.185, skill: 0.50, spinRead: 0.32,
-    aggro: 0.14, variety: 0.55,
-    vmagMin: 3.0, vmagMax: 5.5, paceOpen: 0.28, paceRamp: 0.045, paceMax: 0.54,
-    windup: 0.30, errBase: 0.165, errPress: 0.10, deepness: 0.68, placeSkill: 0.30,
-    counterRate: 0.06, smashRate: 0.22, dropRate: 0.05,
+    react: 0.38, move: 1.55, posErr: 0.28, skill: 0.30, spinRead: 0.16,
+    aggro: 0.06, variety: 0.35,
+    vmagMin: 2.0, vmagMax: 3.8, paceOpen: 0.16, paceRamp: 0.02, paceMax: 0.32,
+    windup: 0.38, errBase: 0.38, errPress: 0.16, deepness: 0.48, placeSkill: 0.12,
+    counterRate: 0.01, smashRate: 0.0, dropRate: 0.02,
   },
   {
     id: 1, name: 'ЛЮБИТЕЛЬ', tag: 'AMATEUR', elo: 1400, style: 'ALLROUND',
-    react: 0.235, move: 2.9, posErr: 0.125, skill: 0.66, spinRead: 0.52,
-    aggro: 0.30, variety: 0.68,
-    vmagMin: 4.0, vmagMax: 8.0, paceOpen: 0.32, paceRamp: 0.060, paceMax: 0.74,
-    windup: 0.265, errBase: 0.112, errPress: 0.075, deepness: 0.78, placeSkill: 0.48,
-    counterRate: 0.14, smashRate: 0.40, dropRate: 0.07,
+    react: 0.26, move: 2.5, posErr: 0.15, skill: 0.58, spinRead: 0.45,
+    aggro: 0.24, variety: 0.60,
+    vmagMin: 3.2, vmagMax: 6.8, paceOpen: 0.26, paceRamp: 0.045, paceMax: 0.62,
+    windup: 0.30, errBase: 0.20, errPress: 0.09, deepness: 0.70, placeSkill: 0.36,
+    counterRate: 0.08, smashRate: 0.20, dropRate: 0.05,
   },
   {
     id: 2, name: 'ПРО', tag: 'PRO', elo: 1900, style: 'ALLROUND',
@@ -4997,17 +4987,16 @@ class OpponentAI {
     // A server does not roll dice every time: it runs a short pattern and
     // then changes it, which is exactly what a human does.
     if (!this._servePlan || this._servePlan.left <= 0) {
-      const kinds = ['SERVE_TOP', 'SERVE_BACK', 'SERVE_SIDE', 'SERVE_FAST'];
-      const w = L.style === 'PUSHER' ? [0.22, 0.46, 0.26, 0.06]
+      const kinds = L.id === 0 ? ['SERVE_TOP'] : ['SERVE_TOP', 'SERVE_BACK', 'SERVE_SIDE', 'SERVE_FAST'];
+      const w = L.id === 0 ? [1.0] : (L.style === 'PUSHER' ? [0.22, 0.46, 0.26, 0.06]
         : L.style === 'ATTACK' ? [0.26, 0.24, 0.30, 0.20]
-          : [0.26, 0.32, 0.30, 0.12];
+          : [0.26, 0.32, 0.30, 0.12]);
       let r = Math.random(), k = 0, acc = 0;
-      for (let i = 0; i < 4; i++) { acc += w[i]; if (r <= acc) { k = i; break; } }
+      for (let i = 0; i < kinds.length; i++) { acc += w[i]; if (r <= acc) { k = i; break; } }
       this._servePlan = {
-        arch: kinds[k], left: 1 + (Math.random() < 0.45 ? 1 : 0), sideX: rndSym(1),
-        // a short serve is a decision, not an accident — and only the
-        // better levels are allowed to make it
-        short: Math.random() < clamp(L.placeSkill - 0.34, 0, 0.34),
+        arch: kinds[k], left: 1 + (Math.random() < 0.45 ? 1 : 0), sideX: L.id === 0 ? 0 : rndSym(1),
+        // a short serve is a decision, not an accident — novice never serves short
+        short: L.id === 0 ? false : (Math.random() < clamp(L.placeSkill - 0.34, 0, 0.34)),
       };
     }
     this._servePlan.left--;
@@ -5015,7 +5004,7 @@ class OpponentAI {
     const archId = this._servePlan.arch;
     const A = ARCH[archId];
     const wide = clamp(L.placeSkill, 0.2, 0.92);
-    const tx = sign(this._servePlan.sideX) * PH.T_HALF_WID * rnd(0.22, 0.72 * wide + 0.16);
+    const tx = L.id === 0 ? rndSym(0.12) : (sign(this._servePlan.sideX) * PH.T_HALF_WID * rnd(0.22, 0.72 * wide + 0.16));
 
     /* Depth of the SECOND bounce on the receiver's half, in metres past the
      * net (the receiver's end line is at 1.37). Deep is the default; short
@@ -5025,16 +5014,17 @@ class OpponentAI {
     else if (this._servePlan.short) tz = rnd(0.85, 1.05);
     else tz = rnd(0.96, 1.28);
     // novice/amateur servers serve clean and deep, returnable by the player
-    if (L.skill < 0.70) tz = lerp(1.10, tz, 0.4);
+    if (L.id === 0) tz = rnd(1.08, 1.22);
+    else if (L.skill < 0.70) tz = lerp(1.10, tz, 0.4);
     tz = clamp(tz, 0.80, PH.T_HALF_LEN - 0.07);
 
     /* Racket speed. Through this impact model ~7 m/s of bat on a nearly
      * stationary ball is a 40 km/h serve and ~11 m/s is 60+ km/h, which is
      * the band a club-to-pro server lives in. SERVE_BASE is the m/s anchor,
      * `pace` is the dimensionless level/tactic multiplier on top of it. */
-    const SERVE_BASE = 9.2;
-    const pace = clamp(0.55 + 0.62 * (0.5 + L.skill * 0.5) + this.pressure * 0.05, 0.55, 1.35);
-    const vmag = clamp(SERVE_BASE * pace * (A.speed || 1) * rnd(0.94, 1.10), 3.4, 12.5);
+    const SERVE_BASE = L.id === 0 ? 4.8 : (L.id === 1 ? 7.6 : 9.2);
+    const pace = L.id === 0 ? 0.45 : clamp(0.50 + 0.55 * (0.4 + L.skill * 0.6) + this.pressure * 0.05, 0.45, 1.35);
+    const vmag = clamp(SERVE_BASE * pace * (A.speed || 1) * rnd(0.94, 1.06), 2.2, 12.5);
 
     /* A sidespin serve has to turn the FACE across the ball, the way a real
      * server peels round the side of it. A sideways SWING alone only makes
@@ -5044,7 +5034,7 @@ class OpponentAI {
      * ball sideways off the table is the one along the flight, and the only way
      * to make it is a face turned sideways with a vertical brush — 46-76 cm of
      * lateral throw after the bounce at the same spin rate. */
-    const lateral = A.lat >= 1.5 ? 1 : 0;
+    const lateral = (A.lat >= 1.5 && L.id > 0) ? 1 : 0;
     const kickTo = Math.sign(tx || 1);
     /* The sweep (bench suite 13) says which frames are both LEGAL and spinny:
      * a face turned 23-29 deg with a SQUARE swing and ~30 deg of elevation
@@ -5328,7 +5318,11 @@ class PaddleRig {
  *      the frame, with margin;
  *    · the camera never yaws off the table's centre line, so the table
  *      is always straight — the net stays vertical in the picture and
- *      the two sidelines converge symmetrically;
+ *      the two sidelines converge symmetrically. (The SIDE rig is the one
+ *      exception and says so: it is a true side view, eye.x = 2.75 m,
+ *      deliberately off the centre line. The invariant above is about
+ *      the three rigs behind the player — the old header claimed it for
+ *      all four, which the code contradicted.);
  *    · the volume your bat can occupy is inside the frame too, so the
  *      racket can never be parked off-screen;
  *    · on narrow/portrait screens the rig is pushed back (never tilted)
@@ -5656,6 +5650,17 @@ function bisectIntoFrame(vp, m, ax, ay, az, bx, by, bz) {
  */
 function clampPaddleToFrustum(vp, t, margin) {
   const m = margin === undefined ? 0.045 : margin;
+  /* The authored limits come FIRST. The frustum correction interpolates
+   * between a safe anchor (the home pose) and the target, so as long as
+   * both ends are inside the limit box the result can never leave it. The
+   * old order did it the other way round: the frustum correction ran first
+   * and the closing clamp undid it, which pushed the bat back out of the
+   * frame (measured: 12 of the 160 limit-box corners landed off screen on
+   * the BROADCAST / DYNAMIC / LOW rigs — the clamp had "fixed" the pose
+   * and then the clamp undid the fix). */
+  t.tx = clamp(t.tx, -PADDLE_LIMITS.x, PADDLE_LIMITS.x);
+  t.ty = clamp(t.ty, PH.TABLE_Y + PADDLE_LIMITS.yLo, PH.TABLE_Y + PADDLE_LIMITS.yHi);
+  t.tz = clamp(t.tz, PADDLE_LIMITS.zStepIn, PADDLE_LIMITS.zFar);
   const s = projectPoint(vp, { x: t.tx, y: t.ty, z: t.tz }, _clampS);
   /* Behind the camera no pull on any axis can help, and returning the pose
    * untouched is exactly how the bat used to end up stranded off screen. Home
@@ -5706,9 +5711,6 @@ function clampPaddleToFrustum(vp, t, margin) {
   if (!insideFrame(projectPoint(vp, { x: t.tx, y: t.ty, z: t.tz }, _clampA), m)) {
     t.tx = PADDLE_HOME.x; t.ty = PADDLE_HOME.y; t.tz = PADDLE_HOME.z;
   }
-  t.tx = clamp(t.tx, -PADDLE_LIMITS.x, PADDLE_LIMITS.x);
-  t.ty = clamp(t.ty, PH.TABLE_Y + PADDLE_LIMITS.yLo, PH.TABLE_Y + PADDLE_LIMITS.yHi);
-  t.tz = clamp(t.tz, PADDLE_LIMITS.zStepIn, PADDLE_LIMITS.zFar);
   return t;
 }
 
@@ -6095,6 +6097,7 @@ class MomentRecorder {
     f[i + 15] = g.ball.live ? 1 : 0;
     this.head = (this.head + 1) % this.cap;
     if (this.n < this.cap) this.n++;
+    this.rallyFrames = (this.rallyFrames || 0) + 1;
     this.t = t;
   }
 
@@ -6104,7 +6107,11 @@ class MomentRecorder {
 
   /** Capture the current rally's frames for debug replay regardless of beauty score */
   captureClip(t) {
-    const len = Math.min(this.n, Math.max(25, Math.round((t - this.rallyT) * REPLAY_HZ) + 4));
+    /* The length is counted in RECORDED frames, not in wall-clock time: the
+     * ring is filled at REPLAY_HZ, and on a device that renders slower than
+     * that the two no longer agree — the old time-based formula then cut a
+     * clip longer than the rally and played the tail twice. */
+    const len = Math.min(this.n, Math.max(25, (this.rallyFrames || 0) + 4));
     const clip = new Float32Array(len * REPLAY_FLOATS);
     for (let k = 0; k < len; k++) {
       const src = ((this.head - len + k) % this.cap + this.cap) % this.cap;
@@ -6122,7 +6129,7 @@ class MomentRecorder {
     if (shots < 3) { this.beginRally(t, null); return null; }   // a 2-shot point is never beautiful
 
     // ring → linear clip, oldest first
-    const len = Math.min(this.n, Math.round((t - this.rallyT) * REPLAY_HZ) + 3);
+    const len = Math.min(this.n, (this.rallyFrames || 0) + 3);
     const clip = new Float32Array(len * REPLAY_FLOATS);
     for (let k = 0; k < len; k++) {
       const src = ((this.head - len + k) % this.cap + this.cap) % this.cap;
@@ -7085,7 +7092,13 @@ function rubberPhysics(r) {
   };
 }
 
-const ITEMS = {};
+/* A prototype-less object: the catalogue is looked up by id from the save
+ * file, and a plain {} answers '__proto__' and 'constructor' with objects
+ * that are not catalogue items. The save sanitiser used exactly that
+ * lookup ("is this a real item id?"), so a hand-edited save could smuggle
+ * '__proto__' into the inventory — and then the code that walks the
+ * inventory would read properties off Object.prototype. */
+const ITEMS = Object.create(null);
 for (const b of BLADES) ITEMS[b.id] = { kind: 'blade', ...b, phys: bladePhysics(b) };
 for (const r of RUBBERS) ITEMS[r.id] = { kind: 'rubber', ...r, phys: rubberPhysics(r) };
 const ITEM_LIST = BLADES.concat(RUBBERS).map((i) => ITEMS[i.id]);
@@ -7245,6 +7258,51 @@ function num(v, d, lo, hi) {
 const int = (v, d, lo, hi) => Math.round(num(v, d, lo, hi));
 const bool = (v, d) => (typeof v === 'boolean' ? v : d);
 const strList = (v, ok, cap) => (Array.isArray(v) ? v.filter((x) => typeof x === 'string' && ok(x)).slice(0, cap) : []);
+
+/* ------------------------------------------------------------------ *
+ *  Settings: the only values the game will ever act on.
+ *
+ *  The save file carries the settings straight into the game: loadSettings()
+ *  does a blind Object.assign of whatever was on disk. A save that was
+ *  hand-edited, half-written by a crash, or simply written by an older
+ *  build could carry assist:"abc" or sensitivity:null — and the game then
+ *  multiplied by a string, or by null, and the assist silently switched
+ *  itself off. Every value is therefore range- and type-checked here, the
+ *  same way every other field of the save is checked.
+ * ------------------------------------------------------------------ */
+const SETTING_BOUNDS = {
+  assist: [0, 1, 0.85], posAssist: [0, 1, 0.85], hitZone: [0.30, 1.00, 0.85],
+  volume: [0, 1, 0.9], sensitivity: [0.2, 3, 1.0], difficulty: [0, 4, 0],
+  targetScore: [1, 21, 11],
+};
+const SETTING_FLAGS = {
+  sound: true, showTrail: true, showPredict: true, showZone: true, showTele: false,
+  haptics: true, coach: true, adaptive: true, showDebug: false,
+  showPlayerPaddle: false, slowmoOnBigShots: true, slowmoPlayer: true,
+};
+const SETTING_ENUMS = {
+  quality: ['low', 'medium', 'high', 'high'],
+  camera: ['BROADCAST', 'DYNAMIC', 'LOW', 'SIDE', 'BROADCAST'],
+  hand: ['left', 'right', 'right'],
+  spinBias: ['low', 'norm', 'high', 'norm'],
+};
+function sanitizeSettings(s) {
+  const src = (s && typeof s === 'object') ? s : {};
+  const out = {};
+  for (const k of Object.keys(SETTING_BOUNDS)) {
+    const lo = SETTING_BOUNDS[k][0], hi = SETTING_BOUNDS[k][1], df = SETTING_BOUNDS[k][2];
+    const v = src[k];
+    out[k] = (typeof v === 'number' && Number.isFinite(v)) ? Math.min(Math.max(v, lo), hi) : df;
+  }
+  for (const k of Object.keys(SETTING_FLAGS)) {
+    out[k] = typeof src[k] === 'boolean' ? src[k] : SETTING_FLAGS[k];
+  }
+  for (const k of Object.keys(SETTING_ENUMS)) {
+    const e = SETTING_ENUMS[k];
+    out[k] = e.indexOf(src[k]) >= 0 ? src[k] : e[3];
+  }
+  return out;
+}
 
 /* ------------------------------------------------------------------ *
  *  Platform: where are we running, and what is allowed here?
@@ -7470,6 +7528,12 @@ class Profile {
     d.career.trophies = strList(d.career.trophies, () => true, 100);
     /* settings: the game applies ranges on top, but it must be an object */
     if (d.settings !== null && (typeof d.settings !== 'object' || Array.isArray(d.settings))) d.settings = null;
+    /* ... and every value in it has to be a value the game can act on. The
+     * old check only looked at the TYPE of the container: a save carrying
+     * assist:"abc" / sensitivity:null / camera:"orbit" was accepted and
+     * handed straight to the game, where the assist multiplier became a
+     * string and the whole assist path quietly switched off. */
+    if (d.settings) d.settings = sanitizeSettings(d.settings);
     return d;
   }
 
@@ -7867,9 +7931,10 @@ class Game {
     this.replayer.onEnd = () => this.endReplay();
 
     this.settings = {
-      assist: 0.72,
-      posAssist: 0.80,
-      difficulty: 2,
+      hitZone: 0.85,                     // 1. Область попадания (0.30 .. 1.00)
+      assist: 0.85,                      // 2. Выравнивание удара (0.00 .. 1.00)
+      posAssist: 0.85,
+      difficulty: 0,
       quality: 'high',
       sound: true,
       volume: 0.9,
@@ -7888,7 +7953,7 @@ class Game {
       slowmoPlayer: true,                // bullet time, for the player, in casual play only
       targetScore: 11,
       sensitivity: 1.0,
-      spinBias: 'norm',                  // low | norm | high — see deriveStroke
+      spinBias: 'norm',                  // spin is always on
     };
     /* Saved settings are applied AFTER the defaults exist. It used to run
      * 60 lines earlier, while this.settings was still undefined, so
@@ -8038,6 +8103,12 @@ class Game {
       }
       const n = norm(e);
       this.swipe.down(n.x, n.y, this.time);
+      this._lastPointSwipe = {
+        startT: this.time,
+        sx: n.x, sy: n.y,
+        samples: [{ x: n.x, y: n.y, t: this.time }],
+        stroke: null
+      };
       this.pointer = n; this.pointerDown = true;
       if (this.state === GS.SERVE_READY && this.server === 1) this.startToss();
     };
@@ -8059,6 +8130,10 @@ class Game {
       const n = track(e);
       if (this.swipe.active && ptrs.size < 2) {
         this.swipe.move(n.x, n.y, this.time);
+        if (this._lastPointSwipe) {
+          this._lastPointSwipe.samples.push({ x: n.x, y: n.y, t: this.time });
+          if (this.liveStroke) this._lastPointSwipe.stroke = { ...this.liveStroke.stroke };
+        }
         const sp = this.swipe.m.speed;
         if (sp > 1.6) this.audio.whoosh(clamp(sp / 4, 0, 1.4));
       }
@@ -8072,6 +8147,14 @@ class Game {
       if (!this.swipe.active) return;
       const n = this.pointer || { x: 0.5, y: 0.5 };
       this.swipe.up(n.x, n.y, this.time);
+      if (this._lastPointSwipe) {
+        this._lastPointSwipe.samples.push({ x: n.x, y: n.y, t: this.time });
+        this._lastPointSwipe.endT = this.time;
+        this._lastPointSwipe.ex = n.x;
+        this._lastPointSwipe.ey = n.y;
+        this._lastPointSwipe.dist = Math.hypot(n.x - this._lastPointSwipe.sx, n.y - this._lastPointSwipe.sy);
+        if (this.liveStroke) this._lastPointSwipe.stroke = { ...this.liveStroke.stroke };
+      }
       this.pointerDown = false;
       this.swipeReleasedAt = this.time;
       this.lastSwipeT = this.time;
@@ -8217,6 +8300,7 @@ class Game {
     this.serveBounces = 0;
     this.isServeBall = true;
     this._minBallPaddleDist = 99;
+    this._lastPointSwipe = null;
     /* Every point begins from the same known state: bat back in the centre,
      * cursor binding re-anchored, no stale intercept from the last rally. */
     this.resetPaddle();
@@ -8398,6 +8482,33 @@ class Game {
     }
     if (!this.isServeBall) this.rally++;
 
+    if (side < 0) {
+      const isNovice = this.ai && this.ai.levelIndex === 0;
+      const isAmateur = this.ai && this.ai.levelIndex === 1;
+      if (isNovice) {
+        // Novice ball speed is capped to a gentle, welcoming pace (~13-16 km/h):
+        const maxVz = this.isServeBall ? 3.8 : 4.4;
+        if (b.v.z > maxVz) {
+          const factor = maxVz / b.v.z;
+          b.v.z = maxVz;
+          b.v.x *= factor;
+        }
+        // Friendly gentle arc over the net
+        b.v.y = clamp(b.v.y, 1.3, 2.5);
+        // Minimal spin (so it doesn't trick beginner players)
+        V3.mul(b.w, b.w, 0.05);
+      } else if (isAmateur) {
+        const maxVz = this.isServeBall ? 6.2 : 7.6;
+        if (b.v.z > maxVz) {
+          const factor = maxVz / b.v.z;
+          b.v.z = maxVz;
+          b.v.x *= factor;
+        }
+        b.v.y = clamp(b.v.y, 0.9, 2.6);
+        V3.mul(b.w, b.w, 0.45);
+      }
+    }
+
     const speed = V3.len(b.v), spin = V3.len(b.w);
     this.stats.shots++;
     this.stats.totalSpin += spin / TAU;
@@ -8516,13 +8627,21 @@ class Game {
     const s = this.settings;
     this.profile.data.settings = {
       assist: s.assist, posAssist: s.posAssist, difficulty: s.difficulty, quality: s.quality,
+      hitZone: s.hitZone,
       sound: s.sound, volume: s.volume, camera: s.camera, hand: s.hand,
       showTrail: s.showTrail, showPredict: s.showPredict, showZone: s.showZone,
       showTele: s.showTele, haptics: s.haptics, coach: s.coach, adaptive: s.adaptive,
       slowmoPlayer: s.slowmoPlayer, targetScore: s.targetScore, sensitivity: s.sensitivity,
       spinBias: s.spinBias,
     };
+    /* touch() only marks the profile dirty; the write itself happens at most
+     * every 4 s (maybeSave) or when something else forces it. A setting the
+     * player just changed was therefore lost whenever the session ended
+     * inside that window — closing the tab right after moving the assist
+     * slider threw the change away. The settings screen is a place where
+     * people change a value and then leave, so this write is forced. */
     this.profile.touch();
+    this.profile.save(true);
   }
 
   loadSettings() {
@@ -8645,6 +8764,62 @@ class Game {
       verdict = `${reason} (дистанция до мяча ${minDist.toFixed(2)} м)`;
     }
 
+    let sw = this._lastPointSwipe;
+    if (!sw && this.swipe && this.swipe.lastReleased) {
+      const lr = this.swipe.lastReleased;
+      sw = {
+        sx: lr.sx, sy: lr.sy,
+        ex: lr.x, ey: lr.y,
+        dist: lr.dist,
+        samples: [{ x: lr.sx, y: lr.sy }, { x: lr.x, y: lr.y }],
+        stroke: this.liveStroke ? { ...this.liveStroke.stroke } : null
+      };
+    } else if (!sw && this.swipe && this.swipe.active && this.swipe.samples && this.swipe.samples.length) {
+      const s0 = this.swipe.samples[0], sN = this.swipe.samples[this.swipe.samples.length - 1];
+      sw = {
+        sx: s0.x, sy: s0.y,
+        ex: sN.x, ey: sN.y,
+        dist: Math.hypot(sN.x - s0.x, sN.y - s0.y),
+        samples: this.swipe.samples.map(p => ({ x: p.x, y: p.y })),
+        stroke: this.liveStroke ? { ...this.liveStroke.stroke } : null
+      };
+    }
+
+    let swipeData = null;
+    if (sw) {
+      const sx = sw.sx, sy = sw.sy;
+      const ex = sw.ex !== undefined ? sw.ex : sx;
+      const ey = sw.ey !== undefined ? sw.ey : sy;
+      const dx = ex - sx, dy = ey - sy;
+      const dist = sw.dist !== undefined ? sw.dist : Math.hypot(dx, dy);
+
+      let dirName = 'ТОЛЬКО КЛИК (БЕЗ СВАЙПА)';
+      let arrow = '•';
+      if (dist >= 0.02) {
+        if (Math.abs(dy) > Math.abs(dx) * 1.5) {
+          if (dy < 0) { dirName = 'СВАЙП ВВЕРХ (ТОПСПИН)'; arrow = '⬆'; }
+          else { dirName = 'СВАЙП ВНИЗ (ПОДРЕЗКА)'; arrow = '⬇'; }
+        } else if (Math.abs(dx) > Math.abs(dy) * 1.5) {
+          if (dx > 0) { dirName = 'СВАЙП ВПРАВО'; arrow = '➡'; }
+          else { dirName = 'СВАЙП ВЛЕВО'; arrow = '⬅'; }
+        } else {
+          if (dy < 0) {
+            if (dx > 0) { dirName = 'СВАЙП ВВЕРХ-ВПРАВО'; arrow = '↗'; }
+            else { dirName = 'СВАЙП ВВЕРХ-ВЛЕВО'; arrow = '↖'; }
+          } else {
+            if (dx > 0) { dirName = 'СВАЙП ВНИЗ-ВПРАВО'; arrow = '↘'; }
+            else { dirName = 'СВАЙП ВНИЗ-ВЛЕВО'; arrow = '↙'; }
+          }
+        }
+      }
+
+      swipeData = {
+        sx, sy, ex, ey, dx, dy, dist, dirName, arrow,
+        samples: sw.samples && sw.samples.length ? sw.samples.map(p => ({ x: p.x, y: p.y })) : [{ x: sx, y: sy }, { x: ex, y: ey }],
+        stroke: sw.stroke || (this.liveStroke ? { ...this.liveStroke.stroke } : null)
+      };
+    }
+
     const miss = {
       id: this.missedRallies.length + 1,
       time: this.time,
@@ -8655,8 +8830,9 @@ class Game {
       shots: this.rally,
       minDist,
       hitRadius: rad,
-      hadSwipe,
+      hadSwipe: !!swipeData,
       strokeName,
+      swipeData,
       frames: clipData.frames,
       hz: clipData.hz,
       ballP: { x: b.p.x, y: b.p.y, z: b.p.z },
@@ -8744,9 +8920,14 @@ class Game {
     const p = this.profile;
     if (!p) return;
     const res = p.onMatchEnd(won, this.score, this.stats, this.moments.kept.length);
-    p.taskProgress('topspin', 0, this.matchTasks.topspin >= 10 ? 10 : 0);
-    p.taskProgress('smash', 0, this.matchTasks.smash >= 3 ? 3 : 0);
-    p.taskProgress('serves', 0, this.matchTasks.serves >= 5 ? 5 : 0);
+    /* The daily tasks are DAILY: "10 topspins", "3 smashes", "5 legal serves".
+     * They used to be written with the absolute form, so every match REPLACED
+     * the counter instead of adding to it: two matches of five topspins each
+     * ended the day on zero, and the task could only ever be finished by a
+     * single match that hit the whole quota. The counters now accumulate. */
+    p.taskProgress('topspin', this.matchTasks.topspin || 0);
+    p.taskProgress('smash', this.matchTasks.smash || 0);
+    p.taskProgress('serves', this.matchTasks.serves || 0);
     if (this.bestRally >= 8) p.taskProgress('rally8', 0, 1);
     this.analytics && this.analytics.send('match:end', {
       won, score: this.score.join('-'), rally: this.bestRally, shots: this.stats.shots,
@@ -8887,49 +9068,53 @@ class Game {
   tryPlayerHit(p0) {
     const pad = this.player, b = this.ball;
     if (!b.live) return;
-    if (b.v.z < 0 && b.p.z < pad.pos.z - 0.25) return;
-    const radius = pad.hitRadius;
+    if (b.v.z < 0 && b.p.z < pad.pos.z - 0.35) return;
+
+    // Parameter 1: Область попадания (hitZone: 30% .. 100% -> 0.45м .. 1.30м)
+    const hzSetting = this.settings.hitZone !== undefined ? this.settings.hitZone : 0.85;
+    const reachRadius = 0.35 + hzSetting * 0.95;
+
     const serveCtx = this.state === GS.SERVE_TOSS && this.server === 1 && b.lastHitBy === 0;
-    let hit = this.sweepPaddle(pad, p0, b.p, radius);
-    if (!hit && serveCtx) {
+    let hit = null;
+
+    if (serveCtx) {
       // ITTF 2.06: the ball must be struck while FALLING from the toss.
       const rad = V3.dist(b.p, pad.pos);
-      if (b.v.y < 0 && this.tossApex - PH.TABLE_Y > 0.14 && rad <= radius * 1.50) {
+      if (b.v.y < 0 && this.tossApex - PH.TABLE_Y > 0.10 && rad <= reachRadius) {
         const sw0 = this.swipe;
-        const live = (sw0.active && sw0.m.samples >= 2)
-          || (sw0.lastReleased && this.time - (this.swipeReleasedAt || -9) < 0.60);
-        if (live) hit = { t: 1, x: b.p.x, y: b.p.y, z: b.p.z, rad: rad * 0.55, px: pad.pos.x, py: pad.pos.y, pz: pad.pos.z };
+        const live = (sw0.active && sw0.m.samples >= 1)
+          || (sw0.lastReleased && this.time - (this.swipeReleasedAt || -9) < 0.90);
+        if (live) hit = { t: 1, x: b.p.x, y: b.p.y, z: b.p.z, rad: rad * 0.40, px: pad.pos.x, py: pad.pos.y, pz: pad.pos.z };
       }
-    }
-    if (!hit) {
-      // Forgiving return reach for balls from opponent: after bouncing on player half,
-      // a deliberate swipe when close to the ball connects reliably!
-      const receiveCtx = b.lastHitBy === -1 && (this.rallyBounces.some((s) => s > 0) || b.p.z >= PH.T_HALF_LEN);
-      if (receiveCtx) {
-        const rad = V3.dist(b.p, pad.pos);
+    } else {
+      // Receiving ball from opponent: forgiving capture across the player's zone
+      const incoming = b.lastHitBy === -1 && (this.rallyBounces.some((s) => s > 0) || b.p.z >= 0.50);
+      if (incoming) {
+        const dist2d = Math.hypot(b.p.x - pad.pos.x, b.p.y - pad.pos.y);
+        const distZ = Math.abs(b.p.z - pad.pos.z);
         const sw0 = this.swipe;
-        const live = (sw0.active && sw0.m.samples > 2 && sw0.m.dist > 0.025)
-          || (sw0.lastReleased && this.time - (this.swipeReleasedAt || -9) < 0.42);
-        if (live && rad <= radius * 1.50) {
-          hit = { t: 1, x: b.p.x, y: b.p.y, z: b.p.z, rad: rad * 0.60, px: pad.pos.x, py: pad.pos.y, pz: pad.pos.z };
+        const live = (sw0.active && sw0.m.samples >= 1)
+          || (sw0.lastReleased && this.time - (this.swipeReleasedAt || -9) < 0.95);
+
+        if (live && dist2d <= reachRadius && (distZ <= 0.85 || b.p.z >= 0.70)) {
+          hit = { t: 1, x: b.p.x, y: b.p.y, z: b.p.z, rad: dist2d * 0.35, px: pad.pos.x, py: pad.pos.y, pz: pad.pos.z };
         }
       }
+    }
+
+    if (!hit) {
+      hit = this.sweepPaddle(pad, p0, b.p, reachRadius);
     }
     if (!hit) return;
     if (b.lastHitBy === 1) return;                 // you already hit it
 
     // volley check: returning before the ball bounced on your own half.
-    // A ball that was flying OUT anyway is not a point you can lose: the
-    // bat simply never meets it, exactly like a player pulling their hand
-    // away, so cheap "obstruction" losses can never happen.
     if (!this.isServeBall && b.lastHitBy === -1 && !this.rallyBounces.some((s) => s > 0) && b.p.z < PH.T_HALF_LEN) {
       const o = this._volleyPred || (this._volleyPred = {});
       predict(V3.clone(b.p), V3.clone(b.v), V3.clone(b.w),
         { dt: 1 / 240, maxT: 2.0, stopOnFirstBounce: true, out: o });
       const landsIn = o.landed && o.landed.z > 0.01 && Math.abs(o.landed.x) <= PH.T_HALF_WID + PH.R;
       if (!landsIn) { this.hintOut = this.time; return; }
-      // the ball is about to bounce right there: treat it as a normal return
-      // instead of punishing a few centimetres of timing
       if (o.landed.z > b.p.z - 0.50) return;
       this.awardPoint(-1, 'УДАР С ЛЁТА НАД СТОЛОМ');
       b.live = false;
@@ -8939,15 +9124,9 @@ class Game {
     const isServeStroke = this.isServeBall && b.lastHitBy === 0 && this.server === 1;
     pad.lastHitT = this.time;
     const contact = V3.new(hit.x, hit.y, hit.z);
-    /* the tolerance of THIS face: the frame's sweet spot scaled by how
-       forgiving the rubber on it is (a soft topsheet costs less) */
     const sideParams = this.equip.forSide(1);
-    const sweet = clamp((1 - hit.rad / radius) * (sideParams.sweet || this.equip.sweetK), 0, 1);
-    /* WHICH side of the blade it arrived on. An off-centre contact does not
-     * just lose pace (that part `quality` already did): the blade twists, so
-     * the ball leaves at an angle to the face you were holding. Deterministic
-     * by design — the same offset always costs the same — so it can be
-     * learned instead of being read as the game cheating. */
+    const radius = pad.hitRadius || 0.095;
+    const sweet = clamp((1 - hit.rad / reachRadius) * (sideParams.sweet || this.equip.sweetK), 0, 1);
     const offLat = clamp((hit.x - pad.pos.x) / Math.max(radius, 1e-4), -1, 1);
     const offVer = clamp((hit.y - pad.pos.y) / Math.max(radius, 1e-4), -1, 1);
     const offMag = clamp(Math.hypot(offLat, offVer), 0, 1);
@@ -8956,15 +9135,12 @@ class Game {
     // ---- build the stroke from the live gesture --------------------
     const sw = this.swipe;
     let m = null;
-    if (sw.active && sw.m.samples > 2) m = sw.m;
-    else if (sw.lastReleased && this.time - (this.swipeReleasedAt || -9) < (this.isServeBall ? 0.60 : 0.26)) m = sw.lastReleased;
+    if (sw.active && sw.m.samples >= 1) m = sw.m;
+    else if (sw.lastReleased && this.time - (this.swipeReleasedAt || -9) < 0.95) m = sw.lastReleased;
 
     let racket, quality;
-    if (m && (m.speed > 0.22 || m.peakSpeed > 0.9)) {
+    if (m) {
       const timing = clamp(m.speed / Math.max(m.peakSpeed, 1e-3), 0.35, 1);
-      /* Banded, and the band is printed on the shot badge. A continuous
-       * multiplier is unteachable: the player cannot tell 0.83 from 0.79, but
-       * he can tell "РАНОВATO" from "ТОЧНО", and then fix it. */
       const tband = timing >= 0.93 ? 'ТОЧНО' : timing >= 0.80 ? 'ХОРОШО'
         : timing >= 0.62 ? 'РАНОВАТО' : 'ПОЗДНО';
       const tq = timing >= 0.93 ? 1.08 : timing >= 0.80 ? 1.0 : timing >= 0.62 ? 0.90 : 0.74;
@@ -8974,54 +9150,45 @@ class Game {
         ball: { y: contact.y, z: contact.z },
         ballSpin: b.w, ballSpeed: V3.len(b.v),
         powerScale: 1,
-        moveYaw: pad.yaw || 0,             // the face you see is the face that hits
-        equip: sideParams,                 // the rubber object for this bat
-        spinBias: this.settings.spinBias || 'norm',   // the explicit spin dial
+        moveYaw: pad.yaw || 0,
+        equip: sideParams,
+        /* The spin dial is a real control: the UI cycles it low / norm / high
+         * and stores it, and deriveStroke() reads ctx.spinBias to trade pace
+         * for brush. It was hard-wired to 'norm' here, so the dial did
+         * nothing at all — the setting was saved, shown and ignored. */
+        spinBias: this.settings.spinBias || 'norm',
       };
       racket = deriveStroke(m, ctx);
-      racket.vmag *= this.equip.vmagK;     // swing weight of the frame
-      /* Off-centre contact: pace off, and the launch twisted away from the
-         face by up to ~13 deg sideways / ~8 deg vertically at the rim. */
+      racket.vmag *= this.equip.vmagK;
       if (!isServeStroke) {
         const miss = (1 - sweet) * offMag;
         racket.vmag *= 1 - 0.18 * miss;
         racket.azSwing = clamp(racket.azSwing + offLat * 0.23 * (1 - sweet), -1.35, 1.35);
         racket.elev = clamp(racket.elev - offVer * 8.0 * (1 - sweet), -70, 78);
       }
-      quality = clamp(racket.quality * (0.55 + 0.45 * sweet) * (0.70 + 0.30 * timing) * tq, 0.18, 1);
+      quality = clamp(racket.quality * (0.60 + 0.40 * sweet) * (0.70 + 0.30 * timing) * tq, 0.25, 1);
       racket.quality = quality;
-      racket = refineRacket(contact, b.v, b.w, racket, this.settings.assist, quality);
-      // Losing a point because the *solver* could not keep a serve on the
-      // table is never acceptable: re-solve the serve with full execution
-      // help, which is a legal serve by construction (ITTF 2.06.4).
-      /* ...but only when the first attempt was not already at full assist:
-       * the serve solver searches the same space with the same budget, so a
-       * retry can only repeat the answer and doubles the worst-case cost of a
-       * serve that was never going to be legal (measured 230 -> 460 ms of
-       * frozen frames on a near-motionless tap). */
-      if (isServeStroke && racket.valid === false && clamp(this.settings.assist, 0, 1) < 0.999) {
+      // Parameter 2: Выравнивание удара
+      const assistLvl = this.settings.assist !== undefined ? this.settings.assist : 0.85;
+      racket = refineRacket(contact, b.v, b.w, racket, assistLvl, quality);
+      /* The assist gets a second chance — but it only got one for serves.
+       * A rally shot whose first solve comes back "not legal" (into the net
+       * or on the player's own half) was played exactly as it was, so the
+       * point was lost. Measured on the bench's own rally scenario at
+       * assist 0.5: 26.5 % of the shots came back illegal, and the
+       * re-solve the bench was already doing (but the game was not)
+       * recovered 21 of those points — 71.0 % of the shots on the table
+       * instead of 92.0 %. */
+      if (racket.valid === false && clamp(assistLvl, 0, 1) < 0.999) {
         racket = refineRacket(contact, b.v, b.w, racket, 1, quality);
       }
       racket.sweet = sweet; racket.timing = timing;
     } else {
-      // Passive contact: the ball meets a bat that is not swinging. Real
-      // soft hands absorb most of the pace, so this is a short, safe block
-      // rather than an accidental rocket off the end of the table.
-      const vR = V3.clone(pad.vel);
-      const lim = V3.len(vR); if (lim > 2.6) V3.mul(vR, vR, 2.6 / lim);
-      racket = makeRacket(1, 'BLOCK', { aim: { x: rndSym(0.26), z: -0.62 }, vmag: lim, quality: 0.5 });
-      racket.vR = vR;
-      racket.rubber = { e: PH.E_RACKET * 0.42, mu: PH.MU_RACKET, et: PH.ET_RACKET * 0.7 };
-      quality = 0.45 * (0.5 + 0.5 * sweet);
-      /* No placement solver on a block — see solveBlockNormal(). The face the
-       * player holds decides; the only correction allowed is the smallest
-       * lift that keeps the ball out of the tape. */
-      const blk = solveBlockNormal(contact, b.v, b.w, pad.normal, vR, quality, racket.rubber, this._blk || (this._blk = {}));
-      racket.normal = blk.normal;
-      racket.elev = blk.liftDeg;
-      racket.blockLift = blk.liftDeg;
-      racket.valid = !blk.hitNet;
-      racket.passive = true;
+      // Gentle assisted return
+      racket = makeRacket(1, 'DRIVE', { aim: { x: 0, z: -0.85 }, vmag: 4.8, quality: 0.65 });
+      const assistLvl = this.settings.assist !== undefined ? this.settings.assist : 0.85;
+      racket = refineRacket(contact, b.v, b.w, racket, assistLvl, 0.65);
+      quality = 0.65;
     }
 
     const info = impactRacket(b.v, b.w, racket.normal, racket.vR, quality, racket.rubber || {});
@@ -9129,7 +9296,7 @@ class Game {
      * short serve simply could not be reached no matter what you did. Now a
      * predicted short ball grants the step-in depth. */
     let zNear = PADDLE_LIMITS.zNear;
-    const A = this.settings.posAssist;
+    const A = this.settings.assist !== undefined ? this.settings.assist : 0.85;
     const o = this._paddlePred || (this._paddlePred = {});
     const incoming = this.ball.live && this.ball.v.z > 0.4 && this.ball.lastHitBy === -1;
     if (incoming && this.frame % 4 === 0) {
@@ -9456,9 +9623,18 @@ class Game {
       this.pointer = { x: curX, y: curY };
       this.pointerDown = true;
       this.swipe.move(curX, curY, this.time);
+      if (this._lastPointSwipe) {
+        this._lastPointSwipe.samples.push({ x: curX, y: curY, t: this.time });
+      }
 
       if (progress >= 1) {
         this.swipe.up(g.x1, g.y1, this.time);
+        if (this._lastPointSwipe) {
+          this._lastPointSwipe.endT = this.time;
+          this._lastPointSwipe.ex = g.x1;
+          this._lastPointSwipe.ey = g.y1;
+          this._lastPointSwipe.dist = Math.hypot(g.x1 - g.x0, g.y1 - g.y0);
+        }
         this.pointerDown = false;
         this.swipeReleasedAt = this.time;
         this.lastSwipeT = this.time;
@@ -9547,6 +9723,11 @@ class Game {
     this.pointer = { x: x0, y: y0 };
     this.pointerDown = true;
     this.swipe.down(x0, y0, this.time);
+    this._lastPointSwipe = {
+      startT: this.time, sx: x0, sy: y0,
+      samples: [{ x: x0, y: y0, t: this.time }],
+      stroke: { name: 'ТОПСПИН', short: 'ТОП', col: '#4ee39a' }
+    };
     this._demoGesture = {
       x0, y0, x1, y1,
       t: 0,
@@ -9556,6 +9737,12 @@ class Game {
 
   /* ------------------------------ update --------------------------- */
   update(dtReal) {
+    /* The pause belongs to the GAME, not to the caller. The boot loop
+     * happens to check game.paused before calling update(), but every
+     * other caller (the demo, the tests, a future menu) would have run
+     * the simulation anyway: the ball kept moving, the AI kept playing
+     * and the score changed behind the pause overlay. */
+    if (this.paused) return;
     this.frame++;
     /* ---- a replay owns the whole update: physics is off, the clip is
        the truth, and the camera is a filmmaker rather than a spectator ---- */
@@ -9671,7 +9858,19 @@ class Game {
 
     this.updatePlayerPaddle(dtReal);
     this.updateStrikeWindow(dtReal);
-    if (this.state === GS.RALLY || this.state === GS.SERVE_TOSS) this.moments.push(this.time, this);
+    if (this.state === GS.RALLY || this.state === GS.SERVE_TOSS) {
+      /* The replay ring is indexed at REPLAY_HZ (30 Hz). Pushing one frame
+       * per RENDERED frame filled the ring at 60 Hz, i.e. twice as fast as
+       * the clip arithmetic assumes, so endRally() cut a clip that covered
+       * only the last half of the rally and played it back at half speed.
+       * Measured before the fix: 60 frames pushed per second into a ring
+       * that indexes at 30 Hz; a 1.1 s rally produced a 33-frame clip —
+       * 0.55 s of play, stretched to 1.1 s on screen. */
+      if (this.time - (this._momT || -1) >= 1 / REPLAY_HZ - 1e-6) {
+        this._momT = this.time;
+        this.moments.push(this.time, this);
+      }
+    }
     if (this.training) this.training.update(dtReal);
     else if (this.network.isInMatch) {
       // online: the far paddle belongs to the peer, not to the AI
@@ -9777,62 +9976,42 @@ class Game {
       d(me.ball, tmp.m, ma.ball);
     }
 
-    /* player paddle (hidden per user request: "ракетку скрой", but visible in debug replay!) */
-    if (this.settings.showPlayerPaddle || this.isDebugReplay) {
-      const pad = this.player;
-      const PM = this.paddleMats(S) || ma;
-      const pq = Q.lookRotation(Q.new(), pad.normal, { x: 0, y: 1, z: 0 });
-      /* pad.roll is the lean the bat picks up while you move it sideways: the
-         blade visibly turns into the direction of travel instead of staying
-         square to the camera. */
-      const roll = Q.setAxisAngle(Q.new(), 0, 0, 1,
-        (this.settings.hand === 'right' ? -0.42 : 0.42) + pad.swing * 0.3 + (pad.roll || 0));
-      Q.mul(pq, pq, roll);
-      /* stepping in to a short ball tips the blade forward over the table */
-      if (pad.stepIn > 0.01) {
-        const lunge = Q.setAxisAngle(Q.new(), 1, 0, 0, -0.20 * pad.stepIn);
-        Q.mul(pq, pq, lunge);
-      }
-      M4.compose(tmp.m, pad.pos, pq, V3.set(tmp.scl, 1, 1, 1));
-      d(me.blade, tmp.m, PM.wood);
-      if (!shadowPass) {
-        M4.compose(tmp.m2, V3.addScaled(V3.new(), pad.pos, pad.normal, 0.0085), pq, V3.set(tmp.scl, 1, 1, 1));
-        R.draw(me.rubber, tmp.m2, PM.black);
-        M4.compose(tmp.m2, V3.addScaled(V3.new(), pad.pos, pad.normal, -0.0085), pq, V3.set(tmp.scl, 1, 1, 1));
-        R.draw(me.rubber, tmp.m2, PM.red);
-      }
-      // handle
-      {
-        const off = V3.new(0, -0.125, 0);
-        const wo = V3.new();
-        M4.transformDir(wo, tmp.m, off);
-        M4.compose(tmp.m2, V3.add(V3.new(), pad.pos, wo), pq, V3.set(tmp.scl, 1, 1, 1));
-        d(me.handle, tmp.m2, PM.grip);
-      }
-    }
-
     /* the opponent: paddle, hand, forearm and sleeve, all solved from
        the paddle's own position and normal (see 56_rig.js) */
     const ap = this.aiPaddle;
-    const an = V3.norm(V3.new(), V3.sub(V3.new(), this.ball.p, this.ai.pos));
+    /* In an online match the far bat belongs to the PEER. The AI does not
+     * think at all in that mode, so this.ai.pos is a stale leftover from
+     * the last local game — and this block used to copy the AI's position
+     * over whatever the network had put there, so the opponent's racket was
+     * drawn in the wrong place for the whole match. */
+    const online = this.network.isInMatch;
+    const peer = online ? this.network.opponentRacket : null;
+    const an = V3.norm(V3.new(), V3.sub(V3.new(), this.ball.p, online ? peer.pos : this.ai.pos));
     an.z = Math.abs(an.z) * 1 || 1;
     // Blend "look at the ball" with the stroke's own face angle, so the
     // backswing visibly opens for a chop and closes for a loop.
-    const fn = this.ai.faceNormal, wd = clamp(this.ai.anim.windup, 0, 1);
+    const fn = this.ai.faceNormal, wd = clamp(online ? 0 : this.ai.anim.windup, 0, 1);
     const aiNorm = V3.norm(V3.new(), V3.new(
       an.x * 0.4 * (1 - wd * 0.5),
       lerp(-0.1 + an.y * 0.3, fn.y * 1.5, wd),
       1));
-    V3.copy(ap.normal, aiNorm);
-    V3.copy(ap.pos, this.ai.pos);
+    if (online) {
+      V3.copy(ap.pos, peer.pos);
+      V3.copy(ap.normal, peer.normal);
+    } else {
+      V3.copy(ap.normal, aiNorm);
+      V3.copy(ap.pos, this.ai.pos);
+    }
+    const faceN = online ? ap.normal : aiNorm;
     if (shadowPass) {
-      const aqS = Q.lookRotation(Q.new(), aiNorm, { x: 0, y: 1, z: 0 });
+      const aqS = Q.lookRotation(Q.new(), faceN, { x: 0, y: 1, z: 0 });
       M4.compose(tmp.m, ap.pos, aqS, V3.set(tmp.scl, 1, 1, 1));
       R.drawShadow(me.blade, tmp.m, null, 0);
     } else {
       this.rig.draw(R, S, {
-        pos: ap.pos, normal: aiNorm, hand: this.settings.hand === 'right' ? 'left' : 'right',
-        swing: -this.ai.anim.swing, windup: wd, roll: (this.ai.anim.lean || 0) * 0.22,
+        pos: ap.pos, normal: faceN, hand: this.settings.hand === 'right' ? 'left' : 'right',
+        swing: online ? -(peer.anim.swing || 0) : -this.ai.anim.swing,
+        windup: wd, roll: (this.ai.anim.lean || 0) * 0.22,
         mats: this.paddleMats(S, this.aiEquip),
       });
     }
@@ -9850,11 +10029,6 @@ class Game {
     if (b.live || this.state === GS.SERVE_READY) {
       if (onTable(b.p.x, b.p.z) && b.p.y > TY - 0.02) S.blob(R, b.p.x, b.p.y, b.p.z, TY, 0.055, 0.62, 1);
       else S.blob(R, b.p.x, b.p.y, b.p.z, 0, 0.075, 0.40, 1);
-    }
-    if (this.settings.showPlayerPaddle || this.isDebugReplay) {
-      const pp = this.player.pos;
-      if (onTable(pp.x, pp.z)) S.blob(R, pp.x, pp.y, pp.z, TY, 0.115, 0.42, 1.25);
-      else S.blob(R, pp.x, pp.y, pp.z, 0, 0.16, 0.26, 1.25);
     }
     const ap = this.aiPaddle.pos;
     if (onTable(ap.x, ap.z)) S.blob(R, ap.x, ap.y, ap.z, TY, 0.115, 0.42, 1.25);
@@ -10089,6 +10263,10 @@ class UI {
     $('#wsBuyCry').addEventListener('click', () => this.buySelectionCrystals());
     $('#adCoins').addEventListener('click', () => this.watchAd());
     $('#btnSettings').addEventListener('click', () => $('#settings').classList.toggle('on'));
+    const btnMenuSet = $('#menuOpenSettings');
+    if (btnMenuSet) btnMenuSet.addEventListener('click', () => { this.syncSettings(); $('#settings').classList.add('on'); });
+    const btnPauseSet = $('#pauseSettings');
+    if (btnPauseSet) btnPauseSet.addEventListener('click', () => { this.syncSettings(); $('#settings').classList.add('on'); });
     $('#setClose').addEventListener('click', () => $('#settings').classList.remove('on'));
     /* the three free-camera sliders are gone: the rig is one of four authored
        presets now, so there is nothing to reset from the settings card */
@@ -10542,10 +10720,19 @@ class UI {
     const g = this.game; if (!g) return;
     const s = g.settings;
     switch (k) {
-      case 'assist': s.assist = v / 100; $('#vAssist').textContent = v + '%'; break;
-      case 'posAssist': s.posAssist = v / 100; $('#vPos').textContent = v + '%'; break;
-      case 'sens': s.sensitivity = v / 100; $('#vSens').textContent = (v / 100).toFixed(2) + '×'; break;
-      case 'vol': s.volume = v / 100; g.audio.setVolume(v / 100); $('#vVol').textContent = v + '%'; break;
+      case 'hitZone':
+        s.hitZone = v / 100;
+        const hzEl = $('#vHitZone'); if (hzEl) hzEl.textContent = v + '%';
+        break;
+      case 'assist':
+        s.assist = v / 100;
+        const astEl = $('#vAssist'); if (astEl) astEl.textContent = v + '%';
+        break;
+      case 'posAssist':
+        s.posAssist = v / 100;
+        break;
+      case 'sens': s.sensitivity = v / 100; break;
+      case 'vol': s.volume = v / 100; g.audio.setVolume(v / 100); break;
       case 'cam': s.camera = v; break;
       case 'quality': s.quality = v; g.R.quality = v; g.resize(); break;
       case 'hand': s.hand = v; break;
@@ -10575,35 +10762,22 @@ class UI {
   syncSpinBias() {
     const g = this.game; if (!g) return;
     const el = $('#spinBias'), lab = $('#spinBiasVal');
+    if (!lab) return;
     const v = g.settings.spinBias || 'norm';
-    if (lab) lab.textContent = v === 'high' ? 'БОЛЬШЕ' : v === 'low' ? 'МЕНЬШЕ' : 'НОРМА';
-    if (el) {
-      el.classList.toggle('high', v === 'high');
-      el.classList.toggle('low', v === 'low');
-      el.title = v === 'high' ? 'Вращение: больше (скользящий контакт, меньше скорости)'
-        : v === 'low' ? 'Вращение: меньше (плоский удар, больше скорости)'
-          : 'Вращение: нейтрально';
-    }
+    lab.textContent = v === 'high' ? 'БОЛЬШЕ' : v === 'low' ? 'МЕНЬШЕ' : 'НОРМА';
   }
 
   syncSettings() {
     const s = this.game.settings;
-    const sel = (k, v) => $$(`.opt[data-set="${k}"]`).forEach((x) => x.classList.toggle('sel', x.dataset.val === String(v)));
-    sel('cam', s.camera); sel('quality', s.quality); sel('hand', s.hand);
-    sel('trail', s.showTrail ? 'on' : 'off'); sel('predict', s.showPredict ? 'on' : 'off');
-    sel('zone', s.showZone ? 'on' : 'off'); sel('tele', s.showTele ? 'on' : 'off');
-    sel('coach', s.coach ? 'on' : 'off'); sel('adaptive', s.adaptive ? 'on' : 'off');
-    sel('slowmoPlayer', s.slowmoPlayer !== false ? 'on' : 'off');
-    $('#slow').classList.toggle('off', s.slowmoPlayer === false);
-    this.syncSpinBias();
-    sel('haptics', s.haptics ? 'on' : 'off');
-    sel('target', s.targetScore);
-    $('#spin').classList.toggle('on', !!s.showTele);
-    $('#toWin').textContent = s.targetScore;
-    $('#rAssist').value = Math.round(s.assist * 100); $('#vAssist').textContent = Math.round(s.assist * 100) + '%';
-    $('#rPos').value = Math.round(s.posAssist * 100); $('#vPos').textContent = Math.round(s.posAssist * 100) + '%';
-    $('#rSens').value = Math.round(s.sensitivity * 100); $('#vSens').textContent = s.sensitivity.toFixed(2) + '×';
-    $('#rVol').value = Math.round(s.volume * 100); $('#vVol').textContent = Math.round(s.volume * 100) + '%';
+    const hzVal = Math.round((s.hitZone !== undefined ? s.hitZone : 0.85) * 100);
+    const rHz = $('#rHitZone'), vHz = $('#vHitZone');
+    if (rHz) rHz.value = hzVal;
+    if (vHz) vHz.textContent = hzVal + '%';
+
+    const astVal = Math.round((s.assist !== undefined ? s.assist : 0.85) * 100);
+    const rAst = $('#rAssist'), vAst = $('#vAssist');
+    if (rAst) rAst.value = astVal;
+    if (vAst) vAst.textContent = astVal + '%';
   }
 
   /* ------------------------------ HUD ----------------------------- */
@@ -10904,47 +11078,110 @@ class UI {
     this.drawStrikeRing(c, W, H, d);
     this.drawHand(c, W, H, d);
 
-    // Debug replay analysis: reach indicator & distance between paddle and ball
-    if (g.isDebugReplay && g.replayer && g.replayer.on) {
-      const pBall = g.project(g.ball.p, this._pvDbgB || (this._pvDbgB = {}));
-      const pPad = g.project(g.player.pos, this._pvDbgP || (this._pvDbgP = {}));
-      if (pPad.ok && pBall.ok) {
-        const bx = pBall.x * W, by = pBall.y * H;
-        const px = pPad.x * W, py = pPad.y * H;
-        const dist3d = V3.dist(g.ball.p, g.player.pos);
-        const hitRad = (g.player.hitRadius || 0.22) * 1.45;
-        const inReach = dist3d <= hitRad;
-        const col = inReach ? '#4ee39a' : '#ff4d6d';
+    // Replay analysis: Player Click Point & Swipe Direction
+    if (g.replayer && g.replayer.on) {
+      const mo = g.replayer.moment;
+      const swd = mo ? mo.swipeData : null;
+
+      if (swd) {
+        const cx = swd.sx * W, cy = swd.sy * H;
+        const ex = swd.ex * W, ey = swd.ey * H;
+        const dx = ex - cx, dy = ey - cy;
+        const distPx = Math.hypot(dx, dy);
 
         c.save();
-        // 1. Paddle reach ring
-        c.strokeStyle = col;
-        c.lineWidth = 2 * d;
-        c.setLineDash([5 * d, 5 * d]);
-        c.beginPath();
-        c.arc(px, py, 32 * d, 0, TAU);
-        c.stroke();
-        c.setLineDash([]);
 
-        // 2. Connecting line
-        c.strokeStyle = col;
-        c.lineWidth = 1.8 * d;
-        c.beginPath();
-        c.moveTo(bx, by);
-        c.lineTo(px, py);
-        c.stroke();
+        // 1. If there was a swipe movement (distPx > 10 * d): draw glowing line and directional arrow
+        if (distPx > 10 * d) {
+          const col = (swd.stroke && swd.stroke.col) || '#39c6ff';
+          const angle = Math.atan2(dy, dx);
 
-        // 3. Floating distance badge
-        const midX = (bx + px) * 0.5, midY = (by + py) * 0.5 - 14 * d;
-        c.font = `800 ${11.5 * d}px ${CSSFONT}`;
+          // Glowing trail line
+          c.shadowBlur = 14 * d;
+          c.shadowColor = col;
+          c.strokeStyle = col;
+          c.lineWidth = 5 * d;
+          c.lineCap = 'round';
+          c.beginPath();
+          c.moveTo(cx, cy);
+          c.lineTo(ex, ey);
+          c.stroke();
+
+          // Arrow head at end point
+          const arrowLen = 18 * d;
+          c.fillStyle = col;
+          c.beginPath();
+          c.moveTo(ex, ey);
+          c.lineTo(ex - arrowLen * Math.cos(angle - Math.PI / 6), ey - arrowLen * Math.sin(angle - Math.PI / 6));
+          c.lineTo(ex - (arrowLen * 0.6) * Math.cos(angle), ey - (arrowLen * 0.6) * Math.sin(angle));
+          c.lineTo(ex - arrowLen * Math.cos(angle + Math.PI / 6), ey - arrowLen * Math.sin(angle + Math.PI / 6));
+          c.closePath();
+          c.fill();
+          c.shadowBlur = 0;
+
+          // Direction label at the end of the swipe
+          const lblX = clamp(ex + 22 * d * Math.cos(angle), 90 * d, W - 90 * d);
+          const lblY = clamp(ey + 22 * d * Math.sin(angle), 40 * d, H - 35 * d);
+          c.font = `800 ${12 * d}px ${CSSFONT}`;
+          c.textAlign = 'center';
+          c.textBaseline = 'middle';
+          const text = `${swd.arrow} ${swd.dirName}`;
+          const tw = c.measureText(text).width + 18 * d;
+          c.fillStyle = 'rgba(6, 12, 24, 0.90)';
+          c.fillRect(lblX - tw * 0.5, lblY - 12 * d, tw, 24 * d);
+          c.strokeStyle = col;
+          c.lineWidth = 1.5 * d;
+          c.strokeRect(lblX - tw * 0.5, lblY - 12 * d, tw, 24 * d);
+          c.fillStyle = '#ffffff';
+          c.fillText(text, lblX, lblY);
+        }
+
+        // 2. Point of click: pulsating glowing target ring & label
+        const pulse = 1 + 0.12 * Math.sin(Date.now() * 0.007);
+        c.shadowBlur = 16 * d;
+        c.shadowColor = '#00ffcc';
+        c.strokeStyle = '#00ffcc';
+        c.lineWidth = 3 * d;
+        c.beginPath();
+        c.arc(cx, cy, 14 * d * pulse, 0, TAU);
+        c.stroke();
+        c.fillStyle = '#ffffff';
+        c.beginPath();
+        c.arc(cx, cy, 5 * d, 0, TAU);
+        c.fill();
+        c.shadowBlur = 0;
+
+        // Click label badge
+        const badgeY = cy > 55 * d ? cy - 26 * d : cy + 28 * d;
+        c.font = `800 ${11 * d}px ${CSSFONT}`;
         c.textAlign = 'center';
-        c.fillStyle = '#0a101d';
-        c.fillRect(midX - 36 * d, midY - 10 * d, 72 * d, 18 * d);
-        c.strokeStyle = col;
+        c.textBaseline = 'middle';
+        const clkText = '🎯 ТОЧКА КЛИКА';
+        const ctw = c.measureText(clkText).width + 16 * d;
+        c.fillStyle = 'rgba(4, 18, 28, 0.92)';
+        c.fillRect(cx - ctw * 0.5, badgeY - 11 * d, ctw, 22 * d);
+        c.strokeStyle = '#00ffcc';
         c.lineWidth = 1.5 * d;
-        c.strokeRect(midX - 36 * d, midY - 10 * d, 72 * d, 18 * d);
-        c.fillStyle = col;
-        c.fillText(`${dist3d.toFixed(2)} м`, midX, midY + 4 * d);
+        c.strokeRect(cx - ctw * 0.5, badgeY - 11 * d, ctw, 22 * d);
+        c.fillStyle = '#00ffcc';
+        c.fillText(clkText, cx, badgeY);
+
+        c.restore();
+      } else if (mo && (!mo.hadSwipe || !mo.swipeData)) {
+        // No click was made in this point
+        c.save();
+        c.font = `800 ${13 * d}px ${CSSFONT}`;
+        c.textAlign = 'center';
+        c.textBaseline = 'middle';
+        const msg = '⚠️ В ЭТОМ РОЗЫГРЫШЕ НЕ БЫЛО КЛИКА (ПРОПУСК БЕЗ СВАЙПА)';
+        const mw = c.measureText(msg).width + 24 * d;
+        c.fillStyle = 'rgba(25, 10, 15, 0.90)';
+        c.fillRect(W * 0.5 - mw * 0.5, H * 0.82 - 14 * d, mw, 28 * d);
+        c.strokeStyle = '#ff4d6d';
+        c.lineWidth = 1.5 * d;
+        c.strokeRect(W * 0.5 - mw * 0.5, H * 0.82 - 14 * d, mw, 28 * d);
+        c.fillStyle = '#ff758f';
+        c.fillText(msg, W * 0.5, H * 0.82);
         c.restore();
       }
     }

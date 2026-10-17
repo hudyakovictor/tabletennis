@@ -110,8 +110,15 @@ function makeCylinder(rTop, rBot, h, seg = 24, caps = true) {
         geoPush(g, c * r, y, s * r, 0, ny, 0, c * 0.5 + 0.5, s * 0.5 + 0.5);
       }
       for (let i = 0; i < seg; i++) {
-        if (ny > 0) geoTri(g, cI, start + i, start + i + 1);
-        else geoTri(g, cI, start + i + 1, start + i);
+        /* The cap has to wind the same way round as the barrel: the barrel
+         * quad is (top_i, top_i+1, bot_i+1, bot_i) and faces OUTSIDE, so the
+         * lid has to run the other way (centre, next, this) to face up /
+         * down. Wound the same way round as the barrel the lid faced INWARD
+         * and the renderer culled it (gl.cullFace(BACK)): every cylinder in
+         * the scene lost its top and its bottom — the net posts showed an
+         * open tube. */
+        if (ny > 0) geoTri(g, cI, start + i + 1, start + i);
+        else geoTri(g, cI, start + i, start + i + 1);
       }
     }
   }

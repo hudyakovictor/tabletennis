@@ -607,7 +607,9 @@ class UI {
   syncSpinBias() {
     const g = this.game; if (!g) return;
     const el = $('#spinBias'), lab = $('#spinBiasVal');
-    if (lab) lab.textContent = 'НОРМА';
+    if (!lab) return;
+    const v = g.settings.spinBias || 'norm';
+    lab.textContent = v === 'high' ? 'БОЛЬШЕ' : v === 'low' ? 'МЕНЬШЕ' : 'НОРМА';
   }
 
   syncSettings() {

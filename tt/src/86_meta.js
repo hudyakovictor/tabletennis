@@ -56,6 +56,51 @@ const bool = (v, d) => (typeof v === 'boolean' ? v : d);
 const strList = (v, ok, cap) => (Array.isArray(v) ? v.filter((x) => typeof x === 'string' && ok(x)).slice(0, cap) : []);
 
 /* ------------------------------------------------------------------ *
+ *  Settings: the only values the game will ever act on.
+ *
+ *  The save file carries the settings straight into the game: loadSettings()
+ *  does a blind Object.assign of whatever was on disk. A save that was
+ *  hand-edited, half-written by a crash, or simply written by an older
+ *  build could carry assist:"abc" or sensitivity:null — and the game then
+ *  multiplied by a string, or by null, and the assist silently switched
+ *  itself off. Every value is therefore range- and type-checked here, the
+ *  same way every other field of the save is checked.
+ * ------------------------------------------------------------------ */
+const SETTING_BOUNDS = {
+  assist: [0, 1, 0.85], posAssist: [0, 1, 0.85], hitZone: [0.30, 1.00, 0.85],
+  volume: [0, 1, 0.9], sensitivity: [0.2, 3, 1.0], difficulty: [0, 4, 0],
+  targetScore: [1, 21, 11],
+};
+const SETTING_FLAGS = {
+  sound: true, showTrail: true, showPredict: true, showZone: true, showTele: false,
+  haptics: true, coach: true, adaptive: true, showDebug: false,
+  showPlayerPaddle: false, slowmoOnBigShots: true, slowmoPlayer: true,
+};
+const SETTING_ENUMS = {
+  quality: ['low', 'medium', 'high', 'high'],
+  camera: ['BROADCAST', 'DYNAMIC', 'LOW', 'SIDE', 'BROADCAST'],
+  hand: ['left', 'right', 'right'],
+  spinBias: ['low', 'norm', 'high', 'norm'],
+};
+function sanitizeSettings(s) {
+  const src = (s && typeof s === 'object') ? s : {};
+  const out = {};
+  for (const k of Object.keys(SETTING_BOUNDS)) {
+    const lo = SETTING_BOUNDS[k][0], hi = SETTING_BOUNDS[k][1], df = SETTING_BOUNDS[k][2];
+    const v = src[k];
+    out[k] = (typeof v === 'number' && Number.isFinite(v)) ? Math.min(Math.max(v, lo), hi) : df;
+  }
+  for (const k of Object.keys(SETTING_FLAGS)) {
+    out[k] = typeof src[k] === 'boolean' ? src[k] : SETTING_FLAGS[k];
+  }
+  for (const k of Object.keys(SETTING_ENUMS)) {
+    const e = SETTING_ENUMS[k];
+    out[k] = e.indexOf(src[k]) >= 0 ? src[k] : e[3];
+  }
+  return out;
+}
+
+/* ------------------------------------------------------------------ *
  *  Platform: where are we running, and what is allowed here?
  * ------------------------------------------------------------------ */
 class Platform {
@@ -279,6 +324,12 @@ class Profile {
     d.career.trophies = strList(d.career.trophies, () => true, 100);
     /* settings: the game applies ranges on top, but it must be an object */
     if (d.settings !== null && (typeof d.settings !== 'object' || Array.isArray(d.settings))) d.settings = null;
+    /* ... and every value in it has to be a value the game can act on. The
+     * old check only looked at the TYPE of the container: a save carrying
+     * assist:"abc" / sensitivity:null / camera:"orbit" was accepted and
+     * handed straight to the game, where the assist multiplier became a
+     * string and the whole assist path quietly switched off. */
+    if (d.settings) d.settings = sanitizeSettings(d.settings);
     return d;
   }
 

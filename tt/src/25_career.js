@@ -120,6 +120,7 @@ class Career {
     this.pendingPerks = null;   // three perks to choose from
     this.state = 'IDLE';        // IDLE TOURNAMENT_INTRO OPPONENT_SELECT PERK_SELECT MATCH MATCH_END TOURNAMENT_END RUN_END
     this.runStats = { totalPoints: 0, totalRallies: 0, longestRally: 0, maxSpeed: 0 };
+    this._perkDelta = { assist: 0, posAssist: 0 };   // what the perks changed
   }
 
   start() {
@@ -132,8 +133,32 @@ class Career {
     this.matchHistory = [];
     this.pendingPerks = null;
     this.runStats = { totalPoints: 0, totalRallies: 0, longestRally: 0, maxSpeed: 0 };
+    /* Undo the sliders the previous run's perks wrote into, BEFORE the new
+     * run starts: they used to leak, and the next run began with an assist
+     * the player had never chosen (measured: 0.580 -> 0.580 across two
+     * runs). The multiplier reset (_resetCareerBoosts) was not enough —
+     * the perk had written into the player's own settings. */
+    this._undoPerkSettings();
     this._resetCareerBoosts();
     this.enterTournament();
+  }
+
+  /* The perks that write into the live settings are tracked so they can be
+   * taken back out again, exactly and only as far as they went in. */
+  _applyPerk(perk) {
+    const s = this.game.settings;
+    const a0 = s.assist, p0 = s.posAssist;
+    perk.apply(this.game);
+    this._perkDelta.assist += s.assist - a0;
+    this._perkDelta.posAssist += s.posAssist - p0;
+  }
+
+  _undoPerkSettings() {
+    const s = this.game.settings;
+    s.assist = clamp(s.assist - this._perkDelta.assist, 0, 1);
+    s.posAssist = clamp(s.posAssist - this._perkDelta.posAssist, 0, 1);
+    this._perkDelta.assist = 0;
+    this._perkDelta.posAssist = 0;
   }
 
   _resetCareerBoosts() {
@@ -223,7 +248,7 @@ class Career {
     if (!this.pendingPerks || idx < 0 || idx >= this.pendingPerks.length) return;
     const perk = this.pendingPerks[idx];
     this.perks.push(perk);
-    perk.apply(this.game);
+    this._applyPerk(perk);
     this.pendingPerks = null;
     this.state = 'OPPONENT_SELECT';
   }
@@ -272,10 +297,11 @@ class Career {
       this.totalLosses = data.totalLosses || 0;
       this.matchHistory = data.matchHistory || [];
       this.runStats = data.runStats || this.runStats;
-      this.perks = (data.perks || []).map(id => PERKS.find(p => p.id === id)).filter(Boolean);
-      this.active = true;
-      this._resetCareerBoosts();
-      this.perks.forEach(p => p.apply(this.game));
+        this.perks = (data.perks || []).map(id => PERKS.find(p => p.id === id)).filter(Boolean);
+        this.active = true;
+        this._resetCareerBoosts();
+        this._perkDelta = { assist: 0, posAssist: 0 };
+        this.perks.forEach(p => this._applyPerk(p));
       this.enterTournament();
       return true;
     } catch(e) { return false; }

@@ -72,6 +72,7 @@ class MomentRecorder {
     f[i + 15] = g.ball.live ? 1 : 0;
     this.head = (this.head + 1) % this.cap;
     if (this.n < this.cap) this.n++;
+    this.rallyFrames = (this.rallyFrames || 0) + 1;
     this.t = t;
   }
 
@@ -81,7 +82,11 @@ class MomentRecorder {
 
   /** Capture the current rally's frames for debug replay regardless of beauty score */
   captureClip(t) {
-    const len = Math.min(this.n, Math.max(25, Math.round((t - this.rallyT) * REPLAY_HZ) + 4));
+    /* The length is counted in RECORDED frames, not in wall-clock time: the
+     * ring is filled at REPLAY_HZ, and on a device that renders slower than
+     * that the two no longer agree — the old time-based formula then cut a
+     * clip longer than the rally and played the tail twice. */
+    const len = Math.min(this.n, Math.max(25, (this.rallyFrames || 0) + 4));
     const clip = new Float32Array(len * REPLAY_FLOATS);
     for (let k = 0; k < len; k++) {
       const src = ((this.head - len + k) % this.cap + this.cap) % this.cap;
@@ -99,7 +104,7 @@ class MomentRecorder {
     if (shots < 3) { this.beginRally(t, null); return null; }   // a 2-shot point is never beautiful
 
     // ring → linear clip, oldest first
-    const len = Math.min(this.n, Math.round((t - this.rallyT) * REPLAY_HZ) + 3);
+    const len = Math.min(this.n, (this.rallyFrames || 0) + 3);
     const clip = new Float32Array(len * REPLAY_FLOATS);
     for (let k = 0; k < len; k++) {
       const src = ((this.head - len + k) % this.cap + this.cap) % this.cap;

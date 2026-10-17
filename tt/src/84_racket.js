@@ -123,7 +123,13 @@ function rubberPhysics(r) {
   };
 }
 
-const ITEMS = {};
+/* A prototype-less object: the catalogue is looked up by id from the save
+ * file, and a plain {} answers '__proto__' and 'constructor' with objects
+ * that are not catalogue items. The save sanitiser used exactly that
+ * lookup ("is this a real item id?"), so a hand-edited save could smuggle
+ * '__proto__' into the inventory — and then the code that walks the
+ * inventory would read properties off Object.prototype. */
+const ITEMS = Object.create(null);
 for (const b of BLADES) ITEMS[b.id] = { kind: 'blade', ...b, phys: bladePhysics(b) };
 for (const r of RUBBERS) ITEMS[r.id] = { kind: 'rubber', ...r, phys: rubberPhysics(r) };
 const ITEM_LIST = BLADES.concat(RUBBERS).map((i) => ITEMS[i.id]);
