@@ -690,17 +690,16 @@ class OpponentAI {
     // A server does not roll dice every time: it runs a short pattern and
     // then changes it, which is exactly what a human does.
     if (!this._servePlan || this._servePlan.left <= 0) {
-      const kinds = ['SERVE_TOP', 'SERVE_BACK', 'SERVE_SIDE', 'SERVE_FAST'];
-      const w = L.style === 'PUSHER' ? [0.22, 0.46, 0.26, 0.06]
+      const kinds = L.id === 0 ? ['SERVE_TOP'] : ['SERVE_TOP', 'SERVE_BACK', 'SERVE_SIDE', 'SERVE_FAST'];
+      const w = L.id === 0 ? [1.0] : (L.style === 'PUSHER' ? [0.22, 0.46, 0.26, 0.06]
         : L.style === 'ATTACK' ? [0.26, 0.24, 0.30, 0.20]
-          : [0.26, 0.32, 0.30, 0.12];
+          : [0.26, 0.32, 0.30, 0.12]);
       let r = Math.random(), k = 0, acc = 0;
-      for (let i = 0; i < 4; i++) { acc += w[i]; if (r <= acc) { k = i; break; } }
+      for (let i = 0; i < kinds.length; i++) { acc += w[i]; if (r <= acc) { k = i; break; } }
       this._servePlan = {
-        arch: kinds[k], left: 1 + (Math.random() < 0.45 ? 1 : 0), sideX: rndSym(1),
-        // a short serve is a decision, not an accident — and only the
-        // better levels are allowed to make it
-        short: Math.random() < clamp(L.placeSkill - 0.34, 0, 0.34),
+        arch: kinds[k], left: 1 + (Math.random() < 0.45 ? 1 : 0), sideX: L.id === 0 ? 0 : rndSym(1),
+        // a short serve is a decision, not an accident — novice never serves short
+        short: L.id === 0 ? false : (Math.random() < clamp(L.placeSkill - 0.34, 0, 0.34)),
       };
     }
     this._servePlan.left--;
@@ -708,7 +707,7 @@ class OpponentAI {
     const archId = this._servePlan.arch;
     const A = ARCH[archId];
     const wide = clamp(L.placeSkill, 0.2, 0.92);
-    const tx = sign(this._servePlan.sideX) * PH.T_HALF_WID * rnd(0.22, 0.72 * wide + 0.16);
+    const tx = L.id === 0 ? rndSym(0.12) : (sign(this._servePlan.sideX) * PH.T_HALF_WID * rnd(0.22, 0.72 * wide + 0.16));
 
     /* Depth of the SECOND bounce on the receiver's half, in metres past the
      * net (the receiver's end line is at 1.37). Deep is the default; short
@@ -718,16 +717,17 @@ class OpponentAI {
     else if (this._servePlan.short) tz = rnd(0.85, 1.05);
     else tz = rnd(0.96, 1.28);
     // novice/amateur servers serve clean and deep, returnable by the player
-    if (L.skill < 0.70) tz = lerp(1.10, tz, 0.4);
+    if (L.id === 0) tz = rnd(1.08, 1.22);
+    else if (L.skill < 0.70) tz = lerp(1.10, tz, 0.4);
     tz = clamp(tz, 0.80, PH.T_HALF_LEN - 0.07);
 
     /* Racket speed. Through this impact model ~7 m/s of bat on a nearly
      * stationary ball is a 40 km/h serve and ~11 m/s is 60+ km/h, which is
      * the band a club-to-pro server lives in. SERVE_BASE is the m/s anchor,
      * `pace` is the dimensionless level/tactic multiplier on top of it. */
-    const SERVE_BASE = L.id === 0 ? 6.2 : (L.id === 1 ? 7.8 : 9.2);
-    const pace = clamp(0.50 + 0.55 * (0.4 + L.skill * 0.6) + this.pressure * 0.05, 0.45, 1.35);
-    const vmag = clamp(SERVE_BASE * pace * (A.speed || 1) * rnd(0.94, 1.08), 2.8, 12.5);
+    const SERVE_BASE = L.id === 0 ? 4.8 : (L.id === 1 ? 7.6 : 9.2);
+    const pace = L.id === 0 ? 0.45 : clamp(0.50 + 0.55 * (0.4 + L.skill * 0.6) + this.pressure * 0.05, 0.45, 1.35);
+    const vmag = clamp(SERVE_BASE * pace * (A.speed || 1) * rnd(0.94, 1.06), 2.2, 12.5);
 
     /* A sidespin serve has to turn the FACE across the ball, the way a real
      * server peels round the side of it. A sideways SWING alone only makes
