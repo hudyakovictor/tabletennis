@@ -173,6 +173,18 @@ class OpponentAI {
     this.lastPos = V3.new(0, PH.TABLE_Y + 0.25, -1.45);
     this.vel = V3.new();
 
+    /* Where the opponent stands right now, and which way its bat face
+     * points. The renderer reads BOTH of these every frame (70_game.js
+     * drawDynamic: `this.ai.pos` and `this.ai.faceNormal`). They used to
+     * be assigned only deep inside the "the AI is moving right now"
+     * branch, so at the start of a match — when the AI is idle and has
+     * not moved yet — they were `undefined`, and the very first frame of
+     * the first rally threw a TypeError that killed the render loop and
+     * left the player with a black screen. They are owned by the AI from
+     * now on, and they exist from the constructor onwards. */
+    this.pos = V3.new(0, PH.TABLE_Y + 0.25, -1.45);
+    this.faceNormal = V3.new(0, -0.12, 1);
+
     // Swing state
     this.anim = { windup: 0, swing: 0, lean: 0 };
     this.swingAt = 0;
@@ -209,6 +221,8 @@ class OpponentAI {
     V3.copy(this.lastPos, this.home);
     V3.zero(this.vel);
     V3.copy(this._moveSmooth, this.home);
+    V3.copy(this.pos, this.home);
+    V3.set(this.faceNormal, 0, -0.12, 1);
     this.anim = { windup: 0, swing: 0, lean: 0 };
     this.strokeHistory = [];
     this.backswingPose = null;
@@ -451,6 +465,9 @@ class OpponentAI {
     // Store for rendering
     this.lastBioParams = racket.bioParams;
     this.lastStrokeId = archId;
+    /* The face of the bat at the moment of contact is what the renderer
+     * needs to tilt the opponent's racket during the follow-through. */
+    V3.copy(this.faceNormal, racket.normal);
 
     // Resolve the impact
     const contact = V3.clone(ball.p);
@@ -621,17 +638,20 @@ class OpponentAI {
       this._moveSmooth.y = expSmooth(this._moveSmooth.y, this.target.y, moveRate, dt);
       this._moveSmooth.z = expSmooth(this._moveSmooth.z, this.target.z, moveRate * 0.9, dt);
 
-      // Store position for rendering
-      game.ai.pos = V3.new(
-        this._moveSmooth.x,
-        this._moveSmooth.y,
-        this._moveSmooth.z
-      );
+      // Store position for rendering. Written IN PLACE: the old code
+      // allocated a fresh V3 every frame, and only while the AI happened
+      // to be moving.
+      V3.set(this.pos, this._moveSmooth.x, this._moveSmooth.y, this._moveSmooth.z);
 
       // Compute velocity for visual purposes
-      V3.sub(this.vel, game.ai.pos, this.lastPos);
+      V3.sub(this.vel, this.pos, this.lastPos);
       V3.mul(this.vel, this.vel, 1 / Math.max(dt, 1e-4));
-      V3.copy(this.lastPos, game.ai.pos);
+      V3.copy(this.lastPos, this.pos);
+    } else {
+      /* Idle: the opponent still has a position, and the renderer still
+       * draws its bat there. Without this the bat would jump from wherever
+       * it last stopped to the home position every time the AI went quiet. */
+      V3.set(this.pos, this._moveSmooth.x, this._moveSmooth.y, this._moveSmooth.z);
     }
 
     // Swing timing
@@ -663,6 +683,8 @@ class OpponentAI {
     this.anim.swing = Math.max(0, this.anim.swing - dt * 3);
     this.anim.windup = Math.max(0, this.anim.windup - dt * 2);
     this.anim.lean = Math.max(0, this.anim.lean - dt * 4);
+    /* Between shots the bat face relaxes back to the ready angle. */
+    this.faceNormal.y = lerp(-0.12, this.faceNormal.y, 1 - Math.min(1, dt * 4));
 
     // Phase transition
     if (this.phase === 'SWING' && this.anim.swing < 0.1) {

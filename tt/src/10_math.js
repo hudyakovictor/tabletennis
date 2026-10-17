@@ -35,6 +35,12 @@ const V3 = {
   add: (o, a, b) => { o.x = a.x + b.x; o.y = a.y + b.y; o.z = a.z + b.z; return o; },
   sub: (o, a, b) => { o.x = a.x - b.x; o.y = a.y - b.y; o.z = a.z - b.z; return o; },
   mul: (o, a, s) => { o.x = a.x * s; o.y = a.y * s; o.z = a.z * s; return o; },
+  /* `scale` is the name most call sites use for "multiply a vector by a
+   * scalar in place" — it is an alias of mul, with the same (o, a, s)
+   * signature. It was used in 56_rig.js, 70_game.js and 85_bioRacket.js
+   * while only `mul` existed, so those calls were an immediate
+   * "V3.scale is not a function". */
+  scale: (o, a, s) => { o.x = a.x * s; o.y = a.y * s; o.z = a.z * s; return o; },
   addScaled: (o, a, b, s) => { o.x = a.x + b.x * s; o.y = a.y + b.y * s; o.z = a.z + b.z * s; return o; },
   dot: (a, b) => a.x * b.x + a.y * b.y + a.z * b.z,
   cross: (o, a, b) => {
@@ -103,6 +109,24 @@ const M4 = {
     o[13] = -(yx * eye.x + yy * eye.y + yz * eye.z);
     o[14] = -(zx * eye.x + zy * eye.y + zz * eye.z);
     o[15] = 1;
+    return o;
+  },
+
+  /* Rotation matrix about an arbitrary axis, in radians.
+   * Used by the arm rig to turn a direction vector around the forearm and
+   * wrist axes. It was called from 56_rig.js while M4 had no such method. */
+  setAxisAngle(o, axis, rad) {
+    const { x, y, z } = axis;
+    const h = rad * 0.5, s = Math.sin(h), l = Math.hypot(x, y, z) || 1e-9;
+    const qx = (x / l) * s, qy = (y / l) * s, qz = (z / l) * s, qw = Math.cos(h);
+    const x2 = qx + qx, y2 = qy + qy, z2 = qz + qz;
+    const xx = qx * qx, xy = qx * qy, xz = qx * qz;
+    const yy = qy * qy, yz = qy * qz, zz = qz * qz;
+    const wx = qw * x2, wy = qw * y2, wz = qw * z2;
+    o[0] = 1 - (yy + zz); o[1] = xy + wz;       o[2] = xz - wy;       o[3] = 0;
+    o[4] = xy - wz;       o[5] = 1 - (xx + zz); o[6] = yz + wx;       o[7] = 0;
+    o[8] = xz + wy;       o[9] = yz - wx;       o[10] = 1 - (xx + yy); o[11] = 0;
+    o[12] = 0; o[13] = 0; o[14] = 0; o[15] = 1;
     return o;
   },
 

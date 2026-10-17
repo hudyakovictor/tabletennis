@@ -1,10 +1,13 @@
 {
   "name": "topspin-arena",
   "private": true,
+  "engines": { "node": ">=22" },
   "scripts": {
     "build": "python3 tt/build.py",
     "test": "node --test tests/*.test.js",
     "test:browser": "node tests/browser.cjs",
+    "test:builder-guard": "node --test tests/build.test.js",
+    "verify": "npm test && npm run build && npm run test:browser",
     "relay": "node tt/server.js"
   },
   "dependencies": { "ws": "^8.18.3" },

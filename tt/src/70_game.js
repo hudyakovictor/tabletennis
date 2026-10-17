@@ -66,8 +66,15 @@ class Game {
     this.swipe = new SwipeTracker();
     this.particles = new Particles();
     this.rig = new PaddleRig();
-    this.bioRacket = new (require('./85_bioRacket').RacketBiomech || function(){});
-    // Fallback if module system doesn't work — inline minimal version
+    /* RacketBiomech is declared in 85_bioRacket.js, which the bundler
+     * concatenates into THIS SAME script scope — so the class is already in
+     * scope here. The old `require('./85_bioRacket')` was CommonJS: in the
+     * browser `require` is not defined, and the ReferenceError was thrown
+     * inside the Game constructor, which boot() swallowed into the
+     * "WebGL недоступен" screen. Every player saw that screen instead of
+     * the game. */
+    this.bioRacket = typeof RacketBiomech === 'function' ? new RacketBiomech() : null;
+    // Fallback if the class is missing — the rig then works without it
     if (!this.bioRacket || typeof this.bioRacket.compute !== 'function') {
       this.bioRacket = null;
     }
@@ -1628,7 +1635,7 @@ class Game {
     pad.stepIn = expSmooth(pad.stepIn || 0, shortBall ? 1 : 0, 8, dt);
 
     // During anticipation, pull the paddle back visually
-    let anticipationOffset = V3.zero();
+    let anticipationOffset = V3.zero(V3.new());
     if (this.anticipation.active && this.anticipation.t < this.anticipation.duration) {
       const progress = this.anticipation.t / this.anticipation.duration;
       const pullAmount = Math.sin(progress * Math.PI) * this.anticipation.intensity * 0.12;
@@ -2722,6 +2729,9 @@ function classifyStrokeForBio(m) {
   return 'DRIVE';
 }
 
-/* BIO constants for use in game (imported conceptually from 85_bioRacket.js) */
+/* BIO constants for use in game (imported conceptually from 85_bioRacket.js).
+ * DEG deliberately does NOT live here: it is declared once, at the top level
+ * of 10_math.js, and this file is concatenated into the same script scope by
+ * the bundler — a second `const DEG` was a hard SyntaxError that killed the
+ * whole bundle, not just this file. */
 const BIO_ZONE_HALF_WIDTH = 0.85;
-const DEG = Math.PI / 180;

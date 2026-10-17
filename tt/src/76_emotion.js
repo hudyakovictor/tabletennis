@@ -93,8 +93,10 @@ class EmotionalSystem {
     // Visual: subtle vignette darkening
     // Could add CSS class to canvas
 
-    // Text message
-    const isPlayerServing = g.server === 1;
+    // Text message. `g` was a bare reference here — this method takes no
+    // state argument, so reaching for it threw a ReferenceError on the
+    // first match point and killed the frame.
+    const isPlayerServing = this.game.server === 1;
     const msg = isPlayerServing
       ? 'МATCH POINT — ВАША ПОДАЧА'
       : 'МATCH POINT — СОПЕРНИК ПОДАЁТ';
@@ -196,8 +198,11 @@ class EmotionalSystem {
    * Winner moment.
    */
   _onWinner(g) {
-    // Flash effect
-    g.hitFlash = Math.min(1, g.hitFlash + 0.3);
+    // Flash effect. The flash lives on the GAME, not on the state
+    // snapshot this method was handed — writing to the snapshot threw the
+    // flash away.
+    const game = this.game;
+    game.hitFlash = Math.min(1, game.hitFlash + 0.3);
 
     // Music spike
     if (this.game.music && this.game.music._initialized) {
@@ -205,10 +210,10 @@ class EmotionalSystem {
     }
 
     // Message
-    g.msg('ОЧКО!', 1.2, '#6ee7a8', true);
+    game.msg('ОЧКО!', 1.2, '#6ee7a8', true);
 
     // Haptic celebration
-    if (navigator.vibrate && g.settings?.haptics) {
+    if (navigator.vibrate && game.settings && game.settings.haptics) {
       try { navigator.vibrate([15, 30, 15, 30]); } catch (e) {}
     }
   }
@@ -218,13 +223,14 @@ class EmotionalSystem {
    */
   _onNetCord(g) {
     // Flash
-    g.hitFlash = Math.min(1, g.hitFlash + 0.2);
+    const game = this.game;
+    game.hitFlash = Math.min(1, game.hitFlash + 0.2);
 
     // Message
-    g.msg('СЕТКА!', 1.0, '#ffd34d', true);
+    game.msg('СЕТКА!', 1.0, '#ffd34d', true);
 
     // Haptic
-    if (navigator.vibrate && g.settings?.haptics) {
+    if (navigator.vibrate && game.settings && game.settings.haptics) {
       try { navigator.vibrate([10, 20, 10]); } catch (e) {}
     }
   }
@@ -234,11 +240,12 @@ class EmotionalSystem {
    */
   _onEdge(g) {
     // Flash
-    g.hitFlash = Math.min(1, g.hitFlash + 0.25);
+    const game = this.game;
+    game.hitFlash = Math.min(1, game.hitFlash + 0.25);
 
     // Already has message from physics, but enhance
     // Haptic surprise
-    if (navigator.vibrate && g.settings?.haptics) {
+    if (navigator.vibrate && game.settings && game.settings.haptics) {
       try { navigator.vibrate([8, 30, 8]); } catch (e) {}
     }
   }

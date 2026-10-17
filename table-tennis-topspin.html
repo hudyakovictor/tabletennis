@@ -1033,6 +1033,12 @@ const V3 = {
   add: (o, a, b) => { o.x = a.x + b.x; o.y = a.y + b.y; o.z = a.z + b.z; return o; },
   sub: (o, a, b) => { o.x = a.x - b.x; o.y = a.y - b.y; o.z = a.z - b.z; return o; },
   mul: (o, a, s) => { o.x = a.x * s; o.y = a.y * s; o.z = a.z * s; return o; },
+  /* `scale` is the name most call sites use for "multiply a vector by a
+   * scalar in place" — it is an alias of mul, with the same (o, a, s)
+   * signature. It was used in 56_rig.js, 70_game.js and 85_bioRacket.js
+   * while only `mul` existed, so those calls were an immediate
+   * "V3.scale is not a function". */
+  scale: (o, a, s) => { o.x = a.x * s; o.y = a.y * s; o.z = a.z * s; return o; },
   addScaled: (o, a, b, s) => { o.x = a.x + b.x * s; o.y = a.y + b.y * s; o.z = a.z + b.z * s; return o; },
   dot: (a, b) => a.x * b.x + a.y * b.y + a.z * b.z,
   cross: (o, a, b) => {
@@ -1101,6 +1107,24 @@ const M4 = {
     o[13] = -(yx * eye.x + yy * eye.y + yz * eye.z);
     o[14] = -(zx * eye.x + zy * eye.y + zz * eye.z);
     o[15] = 1;
+    return o;
+  },
+
+  /* Rotation matrix about an arbitrary axis, in radians.
+   * Used by the arm rig to turn a direction vector around the forearm and
+   * wrist axes. It was called from 56_rig.js while M4 had no such method. */
+  setAxisAngle(o, axis, rad) {
+    const { x, y, z } = axis;
+    const h = rad * 0.5, s = Math.sin(h), l = Math.hypot(x, y, z) || 1e-9;
+    const qx = (x / l) * s, qy = (y / l) * s, qz = (z / l) * s, qw = Math.cos(h);
+    const x2 = qx + qx, y2 = qy + qy, z2 = qz + qz;
+    const xx = qx * qx, xy = qx * qy, xz = qx * qz;
+    const yy = qy * qy, yz = qy * qz, zz = qz * qz;
+    const wx = qw * x2, wy = qw * y2, wz = qw * z2;
+    o[0] = 1 - (yy + zz); o[1] = xy + wz;       o[2] = xz - wy;       o[3] = 0;
+    o[4] = xy - wz;       o[5] = 1 - (xx + zz); o[6] = yz + wx;       o[7] = 0;
+    o[8] = xz + wy;       o[9] = yz - wx;       o[10] = 1 - (xx + yy); o[11] = 0;
+    o[12] = 0; o[13] = 0; o[14] = 0; o[15] = 1;
     return o;
   },
 
@@ -4837,6 +4861,18 @@ class OpponentAI {
     this.lastPos = V3.new(0, PH.TABLE_Y + 0.25, -1.45);
     this.vel = V3.new();
 
+    /* Where the opponent stands right now, and which way its bat face
+     * points. The renderer reads BOTH of these every frame (70_game.js
+     * drawDynamic: `this.ai.pos` and `this.ai.faceNormal`). They used to
+     * be assigned only deep inside the "the AI is moving right now"
+     * branch, so at the start of a match — when the AI is idle and has
+     * not moved yet — they were `undefined`, and the very first frame of
+     * the first rally threw a TypeError that killed the render loop and
+     * left the player with a black screen. They are owned by the AI from
+     * now on, and they exist from the constructor onwards. */
+    this.pos = V3.new(0, PH.TABLE_Y + 0.25, -1.45);
+    this.faceNormal = V3.new(0, -0.12, 1);
+
     // Swing state
     this.anim = { windup: 0, swing: 0, lean: 0 };
     this.swingAt = 0;
@@ -4873,6 +4909,8 @@ class OpponentAI {
     V3.copy(this.lastPos, this.home);
     V3.zero(this.vel);
     V3.copy(this._moveSmooth, this.home);
+    V3.copy(this.pos, this.home);
+    V3.set(this.faceNormal, 0, -0.12, 1);
     this.anim = { windup: 0, swing: 0, lean: 0 };
     this.strokeHistory = [];
     this.backswingPose = null;
@@ -5115,6 +5153,9 @@ class OpponentAI {
     // Store for rendering
     this.lastBioParams = racket.bioParams;
     this.lastStrokeId = archId;
+    /* The face of the bat at the moment of contact is what the renderer
+     * needs to tilt the opponent's racket during the follow-through. */
+    V3.copy(this.faceNormal, racket.normal);
 
     // Resolve the impact
     const contact = V3.clone(ball.p);
@@ -5285,17 +5326,20 @@ class OpponentAI {
       this._moveSmooth.y = expSmooth(this._moveSmooth.y, this.target.y, moveRate, dt);
       this._moveSmooth.z = expSmooth(this._moveSmooth.z, this.target.z, moveRate * 0.9, dt);
 
-      // Store position for rendering
-      game.ai.pos = V3.new(
-        this._moveSmooth.x,
-        this._moveSmooth.y,
-        this._moveSmooth.z
-      );
+      // Store position for rendering. Written IN PLACE: the old code
+      // allocated a fresh V3 every frame, and only while the AI happened
+      // to be moving.
+      V3.set(this.pos, this._moveSmooth.x, this._moveSmooth.y, this._moveSmooth.z);
 
       // Compute velocity for visual purposes
-      V3.sub(this.vel, game.ai.pos, this.lastPos);
+      V3.sub(this.vel, this.pos, this.lastPos);
       V3.mul(this.vel, this.vel, 1 / Math.max(dt, 1e-4));
-      V3.copy(this.lastPos, game.ai.pos);
+      V3.copy(this.lastPos, this.pos);
+    } else {
+      /* Idle: the opponent still has a position, and the renderer still
+       * draws its bat there. Without this the bat would jump from wherever
+       * it last stopped to the home position every time the AI went quiet. */
+      V3.set(this.pos, this._moveSmooth.x, this._moveSmooth.y, this._moveSmooth.z);
     }
 
     // Swing timing
@@ -5327,6 +5371,8 @@ class OpponentAI {
     this.anim.swing = Math.max(0, this.anim.swing - dt * 3);
     this.anim.windup = Math.max(0, this.anim.windup - dt * 2);
     this.anim.lean = Math.max(0, this.anim.lean - dt * 4);
+    /* Between shots the bat face relaxes back to the ready angle. */
+    this.faceNormal.y = lerp(-0.12, this.faceNormal.y, 1 - Math.min(1, dt * 4));
 
     // Phase transition
     if (this.phase === 'SWING' && this.anim.swing < 0.1) {
@@ -5539,14 +5585,14 @@ class PaddleRig {
     // ---- WRIST VISUALIZATION ----
     // Wrist deviation bends the forearm slightly at the wrist
     // This affects the fist position slightly
-    let fistOffset = V3.zero();
+    let fistOffset = V3.zero(V3.new());
     if (Math.abs(effectiveWristDev) > 0.01) {
       // Wrist deviation slightly shifts the fist
       const devDir = V3.norm(s.v3, V3.new(-n.x, 0, -n.z));
       fistOffset = V3.scale(V3.new(), devDir, effectiveWristDev * 0.02);
     }
 
-    const fistFinal = V3.add(fist, fistOffset);
+    const fistFinal = V3.add(V3.new(), fist, fistOffset);
 
     // ---- SKIN AND CLOTH COLORS ----
     const skin = o.ghost ? o.ghostCol : RIG.SKIN;
@@ -5695,7 +5741,7 @@ class PaddleRig {
     R.draw(me.rubber, s.m2, activeSide >= 0 ? red : black);
 
     // Inactive side rubber (opposite side)
-    const inactiveOffset = V3.addScaled(V3.new(), o.pos, V3.scale(n, -1), rubberOffset);
+    const inactiveOffset = V3.addScaled(V3.new(), o.pos, V3.scale(V3.new(), n, -1), rubberOffset);
     M4.compose(s.m2, inactiveOffset, finalQ, s.one);
     R.draw(me.rubber, s.m2, activeSide >= 0 ? black : red);
 
@@ -5766,9 +5812,9 @@ class PaddleRig {
 
     // Simple line using a thin box
     const mid = V3.lerp(s.v2, start, end, 0.5);
-    const dir = V3.norm(s.v3, V3.sub(end, start));
+    const dir = V3.norm(s.v3, V3.sub(V3.new(), end, start));
     const q = Q.lookRotation(s.q, dir, s.up);
-    const length = V3.len(V3.sub(end, start));
+    const length = V3.len(V3.sub(V3.new(), end, start));
 
     M4.compose(s.m, mid, q, { x: 0.003, y: 0.003, z: length });
     R.draw(this.mJoint, s.m, {
@@ -5782,7 +5828,7 @@ class PaddleRig {
       const wDir = V3.norm(s.v4, V3.new(1, 0, 0));
       const wEnd = V3.addScaled(V3.new(), wStart, wDir, wristDev * 0.2);
       const wMid = V3.lerp(s.v5, wStart, wEnd, 0.5);
-      const wLen = V3.len(V3.sub(wEnd, wStart));
+      const wLen = V3.len(V3.sub(V3.new(), wEnd, wStart));
       const wQ = Q.lookRotation(s.q, wDir, axisDir);
       M4.compose(s.m2, wMid, wQ, { x: 0.003, y: 0.003, z: wLen });
       R.draw(this.mJoint, s.m2, {
@@ -7800,7 +7846,6 @@ class HitFeedbackSystem {
       }
     }
   }
-}
 
   /**
    * Enable/disable haptic feedback.
@@ -8314,8 +8359,10 @@ class EmotionalSystem {
     // Visual: subtle vignette darkening
     // Could add CSS class to canvas
 
-    // Text message
-    const isPlayerServing = g.server === 1;
+    // Text message. `g` was a bare reference here — this method takes no
+    // state argument, so reaching for it threw a ReferenceError on the
+    // first match point and killed the frame.
+    const isPlayerServing = this.game.server === 1;
     const msg = isPlayerServing
       ? 'МATCH POINT — ВАША ПОДАЧА'
       : 'МATCH POINT — СОПЕРНИК ПОДАЁТ';
@@ -8417,8 +8464,11 @@ class EmotionalSystem {
    * Winner moment.
    */
   _onWinner(g) {
-    // Flash effect
-    g.hitFlash = Math.min(1, g.hitFlash + 0.3);
+    // Flash effect. The flash lives on the GAME, not on the state
+    // snapshot this method was handed — writing to the snapshot threw the
+    // flash away.
+    const game = this.game;
+    game.hitFlash = Math.min(1, game.hitFlash + 0.3);
 
     // Music spike
     if (this.game.music && this.game.music._initialized) {
@@ -8426,10 +8476,10 @@ class EmotionalSystem {
     }
 
     // Message
-    g.msg('ОЧКО!', 1.2, '#6ee7a8', true);
+    game.msg('ОЧКО!', 1.2, '#6ee7a8', true);
 
     // Haptic celebration
-    if (navigator.vibrate && g.settings?.haptics) {
+    if (navigator.vibrate && game.settings && game.settings.haptics) {
       try { navigator.vibrate([15, 30, 15, 30]); } catch (e) {}
     }
   }
@@ -8439,13 +8489,14 @@ class EmotionalSystem {
    */
   _onNetCord(g) {
     // Flash
-    g.hitFlash = Math.min(1, g.hitFlash + 0.2);
+    const game = this.game;
+    game.hitFlash = Math.min(1, game.hitFlash + 0.2);
 
     // Message
-    g.msg('СЕТКА!', 1.0, '#ffd34d', true);
+    game.msg('СЕТКА!', 1.0, '#ffd34d', true);
 
     // Haptic
-    if (navigator.vibrate && g.settings?.haptics) {
+    if (navigator.vibrate && game.settings && game.settings.haptics) {
       try { navigator.vibrate([10, 20, 10]); } catch (e) {}
     }
   }
@@ -8455,11 +8506,12 @@ class EmotionalSystem {
    */
   _onEdge(g) {
     // Flash
-    g.hitFlash = Math.min(1, g.hitFlash + 0.25);
+    const game = this.game;
+    game.hitFlash = Math.min(1, game.hitFlash + 0.25);
 
     // Already has message from physics, but enhance
     // Haptic surprise
-    if (navigator.vibrate && g.settings?.haptics) {
+    if (navigator.vibrate && game.settings && game.settings.haptics) {
       try { navigator.vibrate([8, 30, 8]); } catch (e) {}
     }
   }
@@ -9390,7 +9442,7 @@ class RacketBiomech {
 
     // ---- 5. COMPUTE WORLD-SPACE NORMAL (for active side determination) ----
     // n = Q_world · n₀ where n₀ = (0,0,1) — red/forehand face normal in local space
-    M4.compose(this._m4Tmp, V3.zero(), qWorld, this._one);
+    M4.compose(this._m4Tmp, V3.zero(V3.new()), qWorld, this._one);
     M4.transformDir(this._nWorld, this._m4Tmp, this._nLocal);
     V3.norm(this._nWorld, this._nWorld);
 
@@ -9589,7 +9641,7 @@ function integrateBioRacket(bioResult, paddleState, ctx) {
 }
 
 /* ---- helper: compute bio orientation for player paddle ---- */
-function computePlayerBioRacket(game, ctx) {
+function computePlayerBioRacket(game) {
   if (!game.bioRacket) return null;
 
   // Determine x from current ball position relative to player
@@ -10325,8 +10377,15 @@ class Game {
     this.swipe = new SwipeTracker();
     this.particles = new Particles();
     this.rig = new PaddleRig();
-    this.bioRacket = new (require('./85_bioRacket').RacketBiomech || function(){});
-    // Fallback if module system doesn't work — inline minimal version
+    /* RacketBiomech is declared in 85_bioRacket.js, which the bundler
+     * concatenates into THIS SAME script scope — so the class is already in
+     * scope here. The old `require('./85_bioRacket')` was CommonJS: in the
+     * browser `require` is not defined, and the ReferenceError was thrown
+     * inside the Game constructor, which boot() swallowed into the
+     * "WebGL недоступен" screen. Every player saw that screen instead of
+     * the game. */
+    this.bioRacket = typeof RacketBiomech === 'function' ? new RacketBiomech() : null;
+    // Fallback if the class is missing — the rig then works without it
     if (!this.bioRacket || typeof this.bioRacket.compute !== 'function') {
       this.bioRacket = null;
     }
@@ -11887,7 +11946,7 @@ class Game {
     pad.stepIn = expSmooth(pad.stepIn || 0, shortBall ? 1 : 0, 8, dt);
 
     // During anticipation, pull the paddle back visually
-    let anticipationOffset = V3.zero();
+    let anticipationOffset = V3.zero(V3.new());
     if (this.anticipation.active && this.anticipation.t < this.anticipation.duration) {
       const progress = this.anticipation.t / this.anticipation.duration;
       const pullAmount = Math.sin(progress * Math.PI) * this.anticipation.intensity * 0.12;
@@ -12981,9 +13040,12 @@ function classifyStrokeForBio(m) {
   return 'DRIVE';
 }
 
-/* BIO constants for use in game (imported conceptually from 85_bioRacket.js) */
+/* BIO constants for use in game (imported conceptually from 85_bioRacket.js).
+ * DEG deliberately does NOT live here: it is declared once, at the top level
+ * of 10_math.js, and this file is concatenated into the same script scope by
+ * the bundler — a second `const DEG` was a hard SyntaxError that killed the
+ * whole bundle, not just this file. */
 const BIO_ZONE_HALF_WIDTH = 0.85;
-const DEG = Math.PI / 180;
 
 
 /* ====== 80_ui.js ====== */
@@ -14714,13 +14776,47 @@ const ICON = {
     // main loop
     let last = performance.now();
     let acc = 0;
+
+    /* An exception inside update/render used to kill the rAF chain for
+     * good: requestAnimationFrame(frame) was the LAST statement, so a throw
+     * meant the game stopped updating, silently, with the last frame
+     * frozen on screen. That is how a broken render could look like a
+     * running game with a black table. Now every stage is isolated, the
+     * loop always continues, and a repeated failure is reported instead of
+     * being swallowed. */
+    let loopErrors = 0;
+    let lastError = null;
+    const reportFatal = (err) => {
+      const loading = document.getElementById('loading');
+      if (!loading) return;
+      loading.classList.remove('off');
+      loading.innerHTML =
+        `<div style="max-width:460px;text-align:center;padding:24px">
+           <div style="font-size:19px;font-weight:800;margin-bottom:10px">Что-то пошло не так</div>
+           <div style="font-size:12px;color:#8da3bd;line-height:1.6">
+             Игровой цикл прервался. Это ошибка сборки, а не ваша вина.<br><br>
+             <code style="font-size:10px;color:#ff8a8a">${String((err && err.message) || err)}</code>
+           </div></div>`;
+    };
+    const step = (fn, name) => {
+      try { fn(); loopErrors = 0; return true; }
+      catch (err) {
+        lastError = err;
+        loopErrors++;
+        console.error('[topspin] ' + name + ' failed', err);
+        if (loopErrors > 30) { reportFatal(err); return false; }
+        return true;
+      }
+    };
+
     function frame(now) {
       const dt = Math.min((now - last) / 1000, 0.1);
       last = now;
-      if (!game.paused) game.update(dt);
-      game.render();
-      ui.tick(dt);
+      const alive = step(() => { if (!game.paused) game.update(dt); }, 'update');
+      step(() => game.render(), 'render');
+      step(() => ui.tick(dt), 'ui');
       requestAnimationFrame(frame);
+      if (!alive) { /* the fatal overlay is up; keep the loop alive but idle */ }
     }
     requestAnimationFrame((t) => { last = t; frame(t); });
 

@@ -198,14 +198,14 @@ class PaddleRig {
     // ---- WRIST VISUALIZATION ----
     // Wrist deviation bends the forearm slightly at the wrist
     // This affects the fist position slightly
-    let fistOffset = V3.zero();
+    let fistOffset = V3.zero(V3.new());
     if (Math.abs(effectiveWristDev) > 0.01) {
       // Wrist deviation slightly shifts the fist
       const devDir = V3.norm(s.v3, V3.new(-n.x, 0, -n.z));
       fistOffset = V3.scale(V3.new(), devDir, effectiveWristDev * 0.02);
     }
 
-    const fistFinal = V3.add(fist, fistOffset);
+    const fistFinal = V3.add(V3.new(), fist, fistOffset);
 
     // ---- SKIN AND CLOTH COLORS ----
     const skin = o.ghost ? o.ghostCol : RIG.SKIN;
@@ -354,7 +354,7 @@ class PaddleRig {
     R.draw(me.rubber, s.m2, activeSide >= 0 ? red : black);
 
     // Inactive side rubber (opposite side)
-    const inactiveOffset = V3.addScaled(V3.new(), o.pos, V3.scale(n, -1), rubberOffset);
+    const inactiveOffset = V3.addScaled(V3.new(), o.pos, V3.scale(V3.new(), n, -1), rubberOffset);
     M4.compose(s.m2, inactiveOffset, finalQ, s.one);
     R.draw(me.rubber, s.m2, activeSide >= 0 ? black : red);
 
@@ -425,9 +425,9 @@ class PaddleRig {
 
     // Simple line using a thin box
     const mid = V3.lerp(s.v2, start, end, 0.5);
-    const dir = V3.norm(s.v3, V3.sub(end, start));
+    const dir = V3.norm(s.v3, V3.sub(V3.new(), end, start));
     const q = Q.lookRotation(s.q, dir, s.up);
-    const length = V3.len(V3.sub(end, start));
+    const length = V3.len(V3.sub(V3.new(), end, start));
 
     M4.compose(s.m, mid, q, { x: 0.003, y: 0.003, z: length });
     R.draw(this.mJoint, s.m, {
@@ -441,7 +441,7 @@ class PaddleRig {
       const wDir = V3.norm(s.v4, V3.new(1, 0, 0));
       const wEnd = V3.addScaled(V3.new(), wStart, wDir, wristDev * 0.2);
       const wMid = V3.lerp(s.v5, wStart, wEnd, 0.5);
-      const wLen = V3.len(V3.sub(wEnd, wStart));
+      const wLen = V3.len(V3.sub(V3.new(), wEnd, wStart));
       const wQ = Q.lookRotation(s.q, wDir, axisDir);
       M4.compose(s.m2, wMid, wQ, { x: 0.003, y: 0.003, z: wLen });
       R.draw(this.mJoint, s.m2, {

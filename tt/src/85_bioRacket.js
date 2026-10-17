@@ -253,7 +253,7 @@ class RacketBiomech {
 
     // ---- 5. COMPUTE WORLD-SPACE NORMAL (for active side determination) ----
     // n = Q_world · n₀ where n₀ = (0,0,1) — red/forehand face normal in local space
-    M4.compose(this._m4Tmp, V3.zero(), qWorld, this._one);
+    M4.compose(this._m4Tmp, V3.zero(V3.new()), qWorld, this._one);
     M4.transformDir(this._nWorld, this._m4Tmp, this._nLocal);
     V3.norm(this._nWorld, this._nWorld);
 
@@ -452,7 +452,7 @@ function integrateBioRacket(bioResult, paddleState, ctx) {
 }
 
 /* ---- helper: compute bio orientation for player paddle ---- */
-function computePlayerBioRacket(game, ctx) {
+function computePlayerBioRacket(game) {
   if (!game.bioRacket) return null;
 
   // Determine x from current ball position relative to player

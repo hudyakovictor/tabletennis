@@ -7,19 +7,19 @@ const zlib = require('node:zlib');
 const { execFileSync } = require('node:child_process');
 const { pathToFileURL } = require('node:url');
 const puppeteer = require('puppeteer-core');
-const chromium = require('@sparticuz/chromium');
+const { resolveBrowser } = require('./chrome.cjs');
 const { root } = require('./helpers.cjs');
 (async () => {
-  // Minimal Linux images may lack NSS. The Chromium npm package ships it.
-  const libs = path.join(os.tmpdir(), 'topspin-browser-libs');
-  if (process.platform === 'linux') {
-    fs.mkdirSync(libs, { recursive: true });
-    const archive = path.join(path.dirname(require.resolve('@sparticuz/chromium')), '../../bin/al2023.tar.br');
-    execFileSync('tar', ['xf', '-', '-C', libs], { input: zlib.brotliDecompressSync(fs.readFileSync(archive)) });
-  }
-  const browser = await puppeteer.launch({ executablePath: process.env.CHROME_BIN || await chromium.executablePath(),
-    args: chromium.args, headless: true,
-    env: { ...process.env, LD_LIBRARY_PATH: [path.join(libs, 'lib'), process.env.LD_LIBRARY_PATH].filter(Boolean).join(':') } });
+  /* Chrome per platform: the bundled Lambda build on Linux, a desktop
+   * Chrome everywhere else. The Lambda-only flags are dropped for the
+   * desktop build — they made it crash on startup. */
+  const chosen = await resolveBrowser();
+  const browser = await puppeteer.launch({
+    executablePath: chosen.executablePath,
+    args: chosen.args,
+    headless: true,
+    env: chosen.env,
+  });
   let count = 0;
   try {
     for (const [width, height] of [[1280, 760], [390, 844]]) {
@@ -40,6 +40,35 @@ const { root } = require('./helpers.cjs');
         const near = (a,b) => Math.abs(a-b) < 1e-9;
         g.paused = true; // freeze RAF; tests advance the actual game deterministically
         check('boot and render', () => g.R.drawCalls > 0 && !!g.R.camPos);
+        check('the 3D scene really paints pixels, not just draw calls', () => {
+          /* `drawCalls > 0` is satisfied by a scene that throws halfway
+           * through rendering: the renderer is a black canvas with a live
+           * HUD. That is exactly what the shipped build did — drawDynamic
+           * threw on `this.ai.pos` being undefined, the rAF loop died, and
+           * the game looked like it booted. So read the framebuffer. */
+          const keepDifficulty = g.settings.difficulty, keepPending = g.ui.pendingDiff;
+          g.startMatch(2);
+          g.render();
+          const gl = g.R.gl;
+          const w = gl.drawingBufferWidth, h = gl.drawingBufferHeight;
+          const seen = new Set();
+          let lit = 0, sampled = 0;
+          const buf = new Uint8Array(4);
+          for (let gy = 1; gy <= 7; gy++) {
+            for (let gx = 1; gx <= 7; gx++) {
+              const x = Math.floor(w * gx / 8), y = Math.floor(h * gy / 8);
+              gl.readPixels(x, y, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, buf);
+              sampled++;
+              const lum = buf[0] * 0.3 + buf[1] * 0.6 + buf[2] * 0.1;
+              if (lum > 10) lit++;
+              seen.add(buf[0] + ',' + buf[1] + ',' + buf[2]);
+            }
+          }
+          g.returnToMenu();
+          g.settings.difficulty = keepDifficulty;
+          g.ui.pendingDiff = keepPending;
+          return sampled === 49 && lit >= 8 && seen.size > 2;
+        });
         check('restored menu difficulty', () => g.ui.pendingDiff === g.settings.difficulty);
         check('input instructions use pointer capabilities, not viewport width', () => {
           return g.ui.inputMode===(navigator.maxTouchPoints>0 ? 'touch' : 'mouse');

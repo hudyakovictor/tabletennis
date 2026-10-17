@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Bundle every source file into one standalone, offline-capable HTML."""
-import os, re, sys, datetime, base64
+import os, re, sys, datetime, base64, shutil, subprocess, tempfile
 SRC = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'src')
 OUT = sys.argv[1] if len(sys.argv) > 1 else os.path.join(os.path.dirname(SRC), '..', 'table-tennis-topspin.html')
 
@@ -32,7 +32,36 @@ for f in JS_ORDER:
     js_parts.append(f"/* ====== {f} ====== */\n"+s)
 js="\n\n".join(js_parts)
 
-stamp = datetime.datetime.utcnow().strftime('%Y-%m-%d')
+# ---------------------------------------------------------------------
+# The bundle is ONE script, so ONE file with a syntax error kills every
+# other file too. Three such errors shipped at once (a stray closing brace
+# in 75_feedback.js, a duplicated `const ctx` in 85_bioRacket.js and a
+# second `const DEG` in 70_game.js) and the result was a game that showed
+# the "WebGL недоступен" screen to every single player. Checking that the
+# ORDER matches the disk is not enough — the artifact itself has to be
+# parsed before it is allowed to become a published page.
+# ---------------------------------------------------------------------
+def _check_parses(script, label):
+    node = shutil.which('node')
+    if not node:
+        print('build.py: node not found — skipping the syntax check of the bundle',
+              file=sys.stderr)
+        return
+    with tempfile.NamedTemporaryFile('w', suffix='.js', encoding='utf-8', delete=False) as tmp:
+        tmp.write(script)
+        path = tmp.name
+    try:
+        proc = subprocess.run([node, '--check', path], capture_output=True, text=True)
+        if proc.returncode != 0:
+            sys.stderr.write(proc.stdout + proc.stderr)
+            raise SystemExit('build.py: the bundle does not parse — refusing to write %s\n'
+                             % label)
+    finally:
+        os.unlink(path)
+
+_check_parses(js, OUT)
+
+stamp = datetime.datetime.now(datetime.UTC).strftime('%Y-%m-%d')
 html = f"""<!DOCTYPE html>
 <html lang="ru">
 <head>
