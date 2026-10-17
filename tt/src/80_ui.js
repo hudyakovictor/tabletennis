@@ -66,6 +66,7 @@ class UI {
     const startMatch = () => {
       const d = this.pendingDiff !== undefined ? this.pendingDiff : 2;
       $$('.screen').forEach((s) => s.classList.remove('on'));
+      document.body.classList.add('is-playing');
       this.trainHide();
       this.game.training = null;
       this.game.analytics && this.game.analytics.send('match:start', { diff: d, mode: 'casual', assist: this.game.settings.assist });
@@ -73,6 +74,7 @@ class UI {
     };
     const startTrain = () => {
       $$('.screen').forEach((s) => s.classList.remove('on'));
+      document.body.classList.add('is-playing');
       this.game.analytics && this.game.analytics.send('tutorial:start', {});
       this.game.startTraining();
     };
@@ -83,6 +85,7 @@ class UI {
     $('#trSkip').addEventListener('click', () => { const t = this.game.training; if (t) { t.skip(); this.game.audio.ui('click'); } });
     $('#trExit').addEventListener('click', () => {
       this.game.stopTraining();
+      document.body.classList.remove('is-playing');
       $('#menu').classList.add('on');
     });
     /* --- workshop / shop / daily --- */
@@ -105,12 +108,100 @@ class UI {
     $('#wsBuyCry').addEventListener('click', () => this.buySelectionCrystals());
     $('#adCoins').addEventListener('click', () => this.watchAd());
     $('#btnSettings').addEventListener('click', () => $('#settings').classList.toggle('on'));
+    const btnMenuSet = $('#menuOpenSettings');
+    if (btnMenuSet) btnMenuSet.addEventListener('click', () => { this.syncSettings(); $('#settings').classList.add('on'); });
+    const btnPauseSet = $('#pauseSettings');
+    if (btnPauseSet) btnPauseSet.addEventListener('click', () => { this.syncSettings(); $('#settings').classList.add('on'); });
     $('#setClose').addEventListener('click', () => $('#settings').classList.remove('on'));
     /* the three free-camera sliders are gone: the rig is one of four authored
        presets now, so there is nothing to reset from the settings card */
     const cr = $('#camReset');
     if (cr) cr.addEventListener('click', () => this.game.camReset());
-    $('#btnMenu').addEventListener('click', () => { this.game.stopTraining(); $('#menu').classList.add('on'); });
+    $('#btnMenu').addEventListener('click', () => { this.game.stopTraining(); $('#menu').classList.add('on'); document.body.classList.remove('is-playing'); });
+    const startDemo = () => {
+      $$('.screen').forEach((s) => s.classList.remove('on'));
+      document.body.classList.add('is-playing');
+      this.trainHide();
+      this.game.training = null;
+      this.game.startDemo(2);
+    };
+    const bDemo = $('#demoStart');
+    if (bDemo) bDemo.addEventListener('click', startDemo);
+    const pDemo = $('#pauseDemo');
+    if (pDemo) pDemo.addEventListener('click', (e) => {
+      e.stopPropagation();
+      this.game.setPaused(false);
+      this.game.demoMode = true;
+      this.game.msg('🤖 АВТОИГРА ВКЛЮЧЕНА', 2.0, '#39c6ff', true);
+    });
+    const bDemoExit = $('#btnDemoExit');
+    if (bDemoExit) bDemoExit.addEventListener('click', (e) => {
+      e.stopPropagation();
+      this.game.demoMode = false;
+      this.game.msg('УПРАВЛЕНИЕ ВОЗВРАЩЕНО ИГРОКУ', 2.0, '#7fd4ff');
+    });
+    const bDbgMisses = $('#btnDebugMisses');
+    if (bDbgMisses) bDbgMisses.addEventListener('click', () => this.showDebugMissesList());
+    const pDbgMisses = $('#pauseDebugMisses');
+    if (pDbgMisses) pDbgMisses.addEventListener('click', (e) => {
+      e.stopPropagation();
+      this.showDebugMissesList();
+    });
+    const bDbgClose = $('#debugMissesClose');
+    if (bDbgClose) bDbgClose.addEventListener('click', () => $('#debugMissesModal').classList.remove('on'));
+
+    // Debug replay HUD controls
+    const dbgPrev = $('#dbgPrev');
+    if (dbgPrev) dbgPrev.addEventListener('click', () => {
+      const g = this.game;
+      if (g && g.missedRallies && g.missedRallies.length) {
+        g.watchMiss(Math.max(0, (g.currentMissIndex || 0) - 1));
+      }
+    });
+    const dbgNext = $('#dbgNext');
+    if (dbgNext) dbgNext.addEventListener('click', () => {
+      const g = this.game;
+      if (g && g.missedRallies && g.missedRallies.length) {
+        g.watchMiss(Math.min(g.missedRallies.length - 1, (g.currentMissIndex || 0) + 1));
+      }
+    });
+    const dbgRestart = $('#dbgRestart');
+    if (dbgRestart) dbgRestart.addEventListener('click', () => {
+      const g = this.game;
+      if (g && g.replayer) { g.replayer.i = 0; g.replayer.hold = 0; g.replayer.on = true; }
+    });
+    const dbgPause = $('#dbgPause');
+    let dbgPaused = false;
+    if (dbgPause) dbgPause.addEventListener('click', () => {
+      const g = this.game;
+      if (!g || !g.replayer) return;
+      dbgPaused = !dbgPaused;
+      if (dbgPaused) { g._savedReplaySpeed = g.replayer.speed; g.replayer.speed = 0.0001; dbgPause.textContent = '▶ ПУСК'; }
+      else { g.replayer.speed = g._savedReplaySpeed || 0.20; dbgPause.textContent = '⏸ ПАУЗА'; }
+    });
+    const dbgSpeed = $('#dbgSpeed');
+    const speeds = [0.15, 0.25, 0.40];
+    let spIdx = 0;
+    if (dbgSpeed) dbgSpeed.addEventListener('click', () => {
+      const g = this.game;
+      spIdx = (spIdx + 1) % speeds.length;
+      const sp = speeds[spIdx];
+      if (g && g.replayer) g.replayer.speed = sp;
+      dbgSpeed.textContent = `⚡ ${sp.toFixed(2)}×`;
+    });
+    const dbgExit = $('#dbgExit');
+    if (dbgExit) dbgExit.addEventListener('click', () => {
+      const g = this.game;
+      if (g) g.endReplay();
+      this.showDebugMissesList();
+    });
+    const pResume = $('#pauseResume'), pMenu = $('#pauseToMenu');
+    if (pResume) pResume.addEventListener('click', (e) => { e.stopPropagation(); this.game.setPaused(false); });
+    if (pMenu) pMenu.addEventListener('click', (e) => {
+      e.stopPropagation(); this.game.setPaused(false); this.game.stopTraining();
+      this.game.demoMode = false;
+      $('#menu').classList.add('on'); document.body.classList.remove('is-playing');
+    });
     $('#btnSound').addEventListener('click', () => {
       const g = this.game; g.settings.sound = !g.settings.sound;
       g.audio.setMuted(!g.settings.sound);
@@ -152,7 +243,7 @@ class UI {
     $('#reelSkip').addEventListener('pointerdown', () => this.game && this.game.skipReplay());
     $('#reelsClose').addEventListener('click', () => { $('#reels').classList.remove('on'); this.game && this.game.audio.ui('click'); });
     $('#again').addEventListener('click', () => { $('#over').classList.remove('on'); this.game.restart(); });
-    $('#backMenu').addEventListener('click', () => { $('#over').classList.remove('on'); $('#menu').classList.add('on'); });
+    $('#backMenu').addEventListener('click', () => { $('#over').classList.remove('on'); $('#menu').classList.add('on'); document.body.classList.remove('is-playing'); });
   }
 
   /* -------------------------- best moments ------------------------- */
@@ -212,6 +303,44 @@ class UI {
       g.watchMoment(g.moments.kept[+b.dataset.i], true);
     }));
     $('#reels').classList.add('on');
+  }
+
+  debugReplayShow(on, miss, index, total) {
+    const hud = $('#debugReplayHud');
+    if (!hud) return;
+    hud.style.display = on ? 'block' : 'none';
+    if (!on || !miss) return;
+    const tEl = $('#dbgReplayTitle'), vEl = $('#dbgReplayVerdict'), mEl = $('#dbgReplayMetrics');
+    if (tEl) tEl.textContent = `🔍 ОТЛАДКА ПРОМАХА #${(index || 0) + 1} ИЗ ${total || 1}`;
+    if (vEl) vEl.textContent = miss.verdict || miss.reason;
+    if (mEl) mEl.textContent = `Дистанция: ${(miss.minDist || 0).toFixed(2)} м (радиус: ${(miss.hitRadius || 0.22).toFixed(2)} м) · Свайп: ${miss.strokeName || 'НЕТ'} · Счёт: ${miss.score ? miss.score.join(':') : '0:0'}`;
+  }
+
+  showDebugMissesList() {
+    const g = this.game; if (!g) return;
+    const list = $('#debugMissList');
+    if (!list) return;
+    const misses = g.missedRallies || [];
+    if (!misses.length) {
+      list.innerHTML = `<div style="padding:24px;text-align:center;color:var(--dim);font-size:13px">В этом матче пока нет не отбитых мячей.<br>Сыграйте несколько очков против бота, и здесь появятся все ваши промахи для замедленного разбора.</div>`;
+    } else {
+      list.innerHTML = misses.map((m, i) => {
+        const col = m.isReachIssue ? '#ff4d6d' : '#39c6ff';
+        return `<button class="mrow" data-miss="${i}" style="border-left:3px solid ${col};margin-bottom:8px">
+          <span class="num">${i + 1}</span>
+          <span class="d">
+            <b style="color:#fff">${m.reason} · Счёт ${m.score[0]}:${m.score[1]}</b>
+            <s style="color:${col}">${m.verdict}</s>
+          </span>
+          <span class="go" style="color:#39c6ff;font-weight:800">0.20× SLO-MO \u203a</span>
+        </button>`;
+      }).join('');
+      Array.from(list.querySelectorAll('.mrow')).forEach((b) => b.addEventListener('click', () => {
+        $('#debugMissesModal').classList.remove('on');
+        g.watchMiss(+b.dataset.miss, 0.20);
+      }));
+    }
+    $('#debugMissesModal').classList.add('on');
   }
 
   /* --------------------- workshop · shop · daily ------------------- */
@@ -436,10 +565,19 @@ class UI {
     const g = this.game; if (!g) return;
     const s = g.settings;
     switch (k) {
-      case 'assist': s.assist = v / 100; $('#vAssist').textContent = v + '%'; break;
-      case 'posAssist': s.posAssist = v / 100; $('#vPos').textContent = v + '%'; break;
-      case 'sens': s.sensitivity = v / 100; $('#vSens').textContent = (v / 100).toFixed(2) + '×'; break;
-      case 'vol': s.volume = v / 100; g.audio.setVolume(v / 100); $('#vVol').textContent = v + '%'; break;
+      case 'hitZone':
+        s.hitZone = v / 100;
+        const hzEl = $('#vHitZone'); if (hzEl) hzEl.textContent = v + '%';
+        break;
+      case 'assist':
+        s.assist = v / 100;
+        const astEl = $('#vAssist'); if (astEl) astEl.textContent = v + '%';
+        break;
+      case 'posAssist':
+        s.posAssist = v / 100;
+        break;
+      case 'sens': s.sensitivity = v / 100; break;
+      case 'vol': s.volume = v / 100; g.audio.setVolume(v / 100); break;
       case 'cam': s.camera = v; break;
       case 'quality': s.quality = v; g.R.quality = v; g.resize(); break;
       case 'hand': s.hand = v; break;
@@ -469,35 +607,20 @@ class UI {
   syncSpinBias() {
     const g = this.game; if (!g) return;
     const el = $('#spinBias'), lab = $('#spinBiasVal');
-    const v = g.settings.spinBias || 'norm';
-    if (lab) lab.textContent = v === 'high' ? 'БОЛЬШЕ' : v === 'low' ? 'МЕНЬШЕ' : 'НОРМА';
-    if (el) {
-      el.classList.toggle('high', v === 'high');
-      el.classList.toggle('low', v === 'low');
-      el.title = v === 'high' ? 'Вращение: больше (скользящий контакт, меньше скорости)'
-        : v === 'low' ? 'Вращение: меньше (плоский удар, больше скорости)'
-          : 'Вращение: нейтрально';
-    }
+    if (lab) lab.textContent = 'НОРМА';
   }
 
   syncSettings() {
     const s = this.game.settings;
-    const sel = (k, v) => $$(`.opt[data-set="${k}"]`).forEach((x) => x.classList.toggle('sel', x.dataset.val === String(v)));
-    sel('cam', s.camera); sel('quality', s.quality); sel('hand', s.hand);
-    sel('trail', s.showTrail ? 'on' : 'off'); sel('predict', s.showPredict ? 'on' : 'off');
-    sel('zone', s.showZone ? 'on' : 'off'); sel('tele', s.showTele ? 'on' : 'off');
-    sel('coach', s.coach ? 'on' : 'off'); sel('adaptive', s.adaptive ? 'on' : 'off');
-    sel('slowmoPlayer', s.slowmoPlayer !== false ? 'on' : 'off');
-    $('#slow').classList.toggle('off', s.slowmoPlayer === false);
-    this.syncSpinBias();
-    sel('haptics', s.haptics ? 'on' : 'off');
-    sel('target', s.targetScore);
-    $('#spin').classList.toggle('on', !!s.showTele);
-    $('#toWin').textContent = s.targetScore;
-    $('#rAssist').value = Math.round(s.assist * 100); $('#vAssist').textContent = Math.round(s.assist * 100) + '%';
-    $('#rPos').value = Math.round(s.posAssist * 100); $('#vPos').textContent = Math.round(s.posAssist * 100) + '%';
-    $('#rSens').value = Math.round(s.sensitivity * 100); $('#vSens').textContent = s.sensitivity.toFixed(2) + '×';
-    $('#rVol').value = Math.round(s.volume * 100); $('#vVol').textContent = Math.round(s.volume * 100) + '%';
+    const hzVal = Math.round((s.hitZone !== undefined ? s.hitZone : 0.85) * 100);
+    const rHz = $('#rHitZone'), vHz = $('#vHitZone');
+    if (rHz) rHz.value = hzVal;
+    if (vHz) vHz.textContent = hzVal + '%';
+
+    const astVal = Math.round((s.assist !== undefined ? s.assist : 0.85) * 100);
+    const rAst = $('#rAssist'), vAst = $('#vAssist');
+    if (rAst) rAst.value = astVal;
+    if (vAst) vAst.textContent = astVal + '%';
   }
 
   /* ------------------------------ HUD ----------------------------- */
@@ -597,9 +720,19 @@ class UI {
       b.addEventListener('click', () => this.showMoments());
       row.appendChild(b);
     }
-    if (best && !this.suppressCinema) {
+    // User requested: "сделай просто в конце матча вместо повтора сразу чтобы подряд шли все мои удары, в которых я промахнулся (потом я верну на место повтор лучшего момента)"
+    if (g.missedRallies && g.missedRallies.length && !this.suppressCinema) {
       this.suppressCinema = true;
       setTimeout(() => { this.suppressCinema = false; }, 400);   // one auto-play per match
+      $$('.screen').forEach((s) => s.classList.remove('on'));
+      g.playAllMissesSequential(() => {
+        $('#over').classList.add('on');
+      });
+      return;
+    } else if (best && !this.suppressCinema && (!g.missedRallies || !g.missedRallies.length)) {
+      this.suppressCinema = true;
+      setTimeout(() => { this.suppressCinema = false; }, 400);
+      $$('.screen').forEach((s) => s.classList.remove('on'));
       g.watchMoment(best, true, () => { $('#over').classList.add('on'); });
       return;
     }
@@ -757,37 +890,23 @@ class UI {
     }
     if (!play || !this.hasFinePointer || !g.pointer) return;
 
+    // Only ONE unified, clean reticle directly under the pointer
     const hx = g.pointer.x * W, hy = g.pointer.y * H;
-    const pp = g.project(g.player.pos, this._pv2);
-
-    if (pp.ok) {
-      const bx = pp.x * W, by = pp.y * H;
-      c.save();
-      c.setLineDash([4 * d, 6 * d]);
-      c.strokeStyle = 'rgba(160,210,255,.40)';
-      c.lineWidth = 1.3 * d;
-      c.beginPath(); c.moveTo(hx, hy); c.lineTo(bx, by); c.stroke();
-      c.setLineDash([]);
-      c.globalAlpha = 0.9;
-      c.strokeStyle = 'rgba(255,180,90,.92)';
-      c.lineWidth = 2 * d;
-      c.beginPath(); c.arc(bx, by, 12 * d, 0, TAU); c.stroke();
-      c.beginPath();
-      c.moveTo(bx - 19 * d, by); c.lineTo(bx - 13 * d, by);
-      c.moveTo(bx + 13 * d, by); c.lineTo(bx + 19 * d, by);
-      c.moveTo(bx, by - 19 * d); c.lineTo(bx, by - 13 * d);
-      c.moveTo(bx, by + 13 * d); c.lineTo(bx, by + 19 * d);
-      c.stroke();
-      c.restore();
-    }
 
     c.save();
-    c.globalAlpha = 0.85;
+    c.globalAlpha = 0.90;
     c.strokeStyle = 'rgba(57,198,255,.95)';
     c.lineWidth = 2 * d;
-    c.beginPath(); c.arc(hx, hy, 9 * d, 0, TAU); c.stroke();
-    c.globalAlpha = 0.45;
-    c.beginPath(); c.arc(hx, hy, 16 * d, 0, TAU); c.stroke();
+    c.beginPath(); c.arc(hx, hy, 11 * d, 0, TAU); c.stroke();
+    // Subtle crosshair ticks on the single reticle
+    c.beginPath();
+    c.moveTo(hx - 16 * d, hy); c.lineTo(hx - 12 * d, hy);
+    c.moveTo(hx + 12 * d, hy); c.lineTo(hx + 16 * d, hy);
+    c.moveTo(hx, hy - 16 * d); c.lineTo(hx, hy - 12 * d);
+    c.moveTo(hx, hy + 12 * d); c.lineTo(hx, hy + 16 * d);
+    c.stroke();
+    c.globalAlpha = 0.35;
+    c.beginPath(); c.arc(hx, hy, 18 * d, 0, TAU); c.stroke();
     c.globalAlpha = 1; c.fillStyle = 'rgba(57,198,255,.95)';
     c.beginPath(); c.arc(hx, hy, 2.5 * d, 0, TAU); c.fill();
     c.restore();
@@ -801,6 +920,114 @@ class UI {
 
     this.drawStrikeRing(c, W, H, d);
     this.drawHand(c, W, H, d);
+
+    // Replay analysis: Player Click Point & Swipe Direction
+    if (g.replayer && g.replayer.on) {
+      const mo = g.replayer.moment;
+      const swd = mo ? mo.swipeData : null;
+
+      if (swd) {
+        const cx = swd.sx * W, cy = swd.sy * H;
+        const ex = swd.ex * W, ey = swd.ey * H;
+        const dx = ex - cx, dy = ey - cy;
+        const distPx = Math.hypot(dx, dy);
+
+        c.save();
+
+        // 1. If there was a swipe movement (distPx > 10 * d): draw glowing line and directional arrow
+        if (distPx > 10 * d) {
+          const col = (swd.stroke && swd.stroke.col) || '#39c6ff';
+          const angle = Math.atan2(dy, dx);
+
+          // Glowing trail line
+          c.shadowBlur = 14 * d;
+          c.shadowColor = col;
+          c.strokeStyle = col;
+          c.lineWidth = 5 * d;
+          c.lineCap = 'round';
+          c.beginPath();
+          c.moveTo(cx, cy);
+          c.lineTo(ex, ey);
+          c.stroke();
+
+          // Arrow head at end point
+          const arrowLen = 18 * d;
+          c.fillStyle = col;
+          c.beginPath();
+          c.moveTo(ex, ey);
+          c.lineTo(ex - arrowLen * Math.cos(angle - Math.PI / 6), ey - arrowLen * Math.sin(angle - Math.PI / 6));
+          c.lineTo(ex - (arrowLen * 0.6) * Math.cos(angle), ey - (arrowLen * 0.6) * Math.sin(angle));
+          c.lineTo(ex - arrowLen * Math.cos(angle + Math.PI / 6), ey - arrowLen * Math.sin(angle + Math.PI / 6));
+          c.closePath();
+          c.fill();
+          c.shadowBlur = 0;
+
+          // Direction label at the end of the swipe
+          const lblX = clamp(ex + 22 * d * Math.cos(angle), 90 * d, W - 90 * d);
+          const lblY = clamp(ey + 22 * d * Math.sin(angle), 40 * d, H - 35 * d);
+          c.font = `800 ${12 * d}px ${CSSFONT}`;
+          c.textAlign = 'center';
+          c.textBaseline = 'middle';
+          const text = `${swd.arrow} ${swd.dirName}`;
+          const tw = c.measureText(text).width + 18 * d;
+          c.fillStyle = 'rgba(6, 12, 24, 0.90)';
+          c.fillRect(lblX - tw * 0.5, lblY - 12 * d, tw, 24 * d);
+          c.strokeStyle = col;
+          c.lineWidth = 1.5 * d;
+          c.strokeRect(lblX - tw * 0.5, lblY - 12 * d, tw, 24 * d);
+          c.fillStyle = '#ffffff';
+          c.fillText(text, lblX, lblY);
+        }
+
+        // 2. Point of click: pulsating glowing target ring & label
+        const pulse = 1 + 0.12 * Math.sin(Date.now() * 0.007);
+        c.shadowBlur = 16 * d;
+        c.shadowColor = '#00ffcc';
+        c.strokeStyle = '#00ffcc';
+        c.lineWidth = 3 * d;
+        c.beginPath();
+        c.arc(cx, cy, 14 * d * pulse, 0, TAU);
+        c.stroke();
+        c.fillStyle = '#ffffff';
+        c.beginPath();
+        c.arc(cx, cy, 5 * d, 0, TAU);
+        c.fill();
+        c.shadowBlur = 0;
+
+        // Click label badge
+        const badgeY = cy > 55 * d ? cy - 26 * d : cy + 28 * d;
+        c.font = `800 ${11 * d}px ${CSSFONT}`;
+        c.textAlign = 'center';
+        c.textBaseline = 'middle';
+        const clkText = '🎯 ТОЧКА КЛИКА';
+        const ctw = c.measureText(clkText).width + 16 * d;
+        c.fillStyle = 'rgba(4, 18, 28, 0.92)';
+        c.fillRect(cx - ctw * 0.5, badgeY - 11 * d, ctw, 22 * d);
+        c.strokeStyle = '#00ffcc';
+        c.lineWidth = 1.5 * d;
+        c.strokeRect(cx - ctw * 0.5, badgeY - 11 * d, ctw, 22 * d);
+        c.fillStyle = '#00ffcc';
+        c.fillText(clkText, cx, badgeY);
+
+        c.restore();
+      } else if (mo && (!mo.hadSwipe || !mo.swipeData)) {
+        // No click was made in this point
+        c.save();
+        c.font = `800 ${13 * d}px ${CSSFONT}`;
+        c.textAlign = 'center';
+        c.textBaseline = 'middle';
+        const msg = '⚠️ В ЭТОМ РОЗЫГРЫШЕ НЕ БЫЛО КЛИКА (ПРОПУСК БЕЗ СВАЙПА)';
+        const mw = c.measureText(msg).width + 24 * d;
+        c.fillStyle = 'rgba(25, 10, 15, 0.90)';
+        c.fillRect(W * 0.5 - mw * 0.5, H * 0.82 - 14 * d, mw, 28 * d);
+        c.strokeStyle = '#ff4d6d';
+        c.lineWidth = 1.5 * d;
+        c.strokeRect(W * 0.5 - mw * 0.5, H * 0.82 - 14 * d, mw, 28 * d);
+        c.fillStyle = '#ff758f';
+        c.fillText(msg, W * 0.5, H * 0.82);
+        c.restore();
+      }
+    }
 
     // coach's ghost gesture, only while the drill is waiting for you
     const tr = g.training;
@@ -844,6 +1071,48 @@ class UI {
         c.fillText(st.stroke.short || st.stroke.name, hx, hy - 34 * d);
         c.globalAlpha = 1;
       }
+
+      this._lastRibbon = {
+        pts: sw.samples.map((p) => ({ x: p.x, y: p.y })),
+        col,
+        label: (st && sw.m.dist > 0.045) ? (st.stroke.short || st.stroke.name) : '',
+        fade: 1.0,
+      };
+    } else if (this._lastRibbon) {
+      this._lastRibbon.fade -= dt * 2.2;
+      if (this._lastRibbon.fade <= 0) {
+        this._lastRibbon = null;
+      } else {
+        const rb = this._lastRibbon;
+        const pts = rb.pts, n = pts.length;
+        if (n > 1) {
+          c.save();
+          c.lineCap = 'round'; c.lineJoin = 'round';
+          for (let i = 1; i < n; i++) {
+            const t = i / (n - 1);
+            c.strokeStyle = rb.col;
+            c.globalAlpha = (0.07 + t * 0.5) * rb.fade;
+            c.lineWidth = (1.5 + t * 11) * d;
+            c.beginPath();
+            c.moveTo(pts[i - 1].x * W, pts[i - 1].y * H);
+            c.lineTo(pts[i].x * W, pts[i].y * H);
+            c.stroke();
+          }
+          c.globalAlpha = rb.fade;
+          const hx = pts[n - 1].x * W, hy = pts[n - 1].y * H;
+          const rg = c.createRadialGradient(hx, hy, 0, hx, hy, 34 * d);
+          rg.addColorStop(0, rb.col + 'cc'); rg.addColorStop(1, rb.col + '00');
+          c.fillStyle = rg; c.beginPath(); c.arc(hx, hy, 34 * d, 0, TAU); c.fill();
+          if (rb.label) {
+            c.font = `800 ${12.5 * d}px ${CSSFONT}`;
+            c.textAlign = 'center';
+            c.fillStyle = rb.col;
+            c.globalAlpha = 0.95 * rb.fade;
+            c.fillText(rb.label, hx, hy - 34 * d);
+          }
+          c.restore();
+        }
+      }
     }
 
     // contact ripples
@@ -874,6 +1143,8 @@ class UI {
     this.drawOverlay(dt);
 
     const box = $('#msgs');
+    const bDemo = $('#btnDemoExit');
+    if (bDemo) bDemo.style.display = (g.demoMode && g.state !== 'MENU' && g.state !== 'MATCH_END') ? 'block' : 'none';
     if (g.messages.length !== this._nMsg || (g.messages[0] && g.messages[0].text !== this._m0)) {
       box.innerHTML = g.messages.map((m) =>
         `<div class="msg${m.big ? ' big' : ''}" style="color:${m.col}">${m.text}</div>`).join('');

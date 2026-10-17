@@ -81,9 +81,10 @@ class Game {
     this.replayer.onEnd = () => this.endReplay();
 
     this.settings = {
-      assist: 0.72,
-      posAssist: 0.80,
-      difficulty: 2,
+      hitZone: 0.85,                     // 1. Область попадания (0.30 .. 1.00)
+      assist: 0.85,                      // 2. Выравнивание удара (0.00 .. 1.00)
+      posAssist: 0.85,
+      difficulty: 0,
       quality: 'high',
       sound: true,
       volume: 0.9,
@@ -97,11 +98,12 @@ class Game {
       coach: true,                       // one-line point analysis
       adaptive: true,                    // dynamic difficulty
       showDebug: false,
+      showPlayerPaddle: false,           // "ракетку скрой" - hide player paddle by default
       slowmoOnBigShots: true,
       slowmoPlayer: true,                // bullet time, for the player, in casual play only
       targetScore: 11,
       sensitivity: 1.0,
-      spinBias: 'norm',                  // low | norm | high — see deriveStroke
+      spinBias: 'norm',                  // spin is always on
     };
     /* Saved settings are applied AFTER the defaults exist. It used to run
      * 60 lines earlier, while this.settings was still undefined, so
@@ -156,13 +158,13 @@ class Game {
      * is deliberately no free orbit any more — hand-tuning yaw/pitch/zoom
      * cost players minutes per session and could park the bat off-screen,
      * and every framing it produced was worse than one of the four. */
-    this.camRig = { eye: V3.new(0, 2.28, 3.22), look: V3.new(0, 0.80, -0.30), fov: 42, mode: 'BROADCAST' };
+    this.camRig = { eye: V3.new(0, 1.68, 2.38), look: V3.new(0, 0.74, -0.25), fov: 48, mode: 'BROADCAST' };
     this._rigBuf = { vp: M4.create(), proj: M4.create(), view: M4.create() };
     this.camVP = M4.create();          // view·proj of the authored rig, no shake
     this.hudBandY = 0.40;              // screen y where the table's far edge begins
-    this.camPos = V3.new(0, 1.62, 3.05); this.camLook = V3.new(0, 0.92, -0.2);
+    this.camPos = V3.new(0, 1.68, 2.38); this.camLook = V3.new(0, 0.74, -0.25);
     this.camPosT = V3.clone(this.camPos); this.camLookT = V3.clone(this.camLook);
-    this.fov = 46; this.fovT = 46;
+    this.fov = 48; this.fovT = 48;
     this.marks = [];
     this.stats = {
       shots: 0, winners: 0, errors: 0, maxSpeed: 0, maxSpin: 0,
@@ -251,6 +253,12 @@ class Game {
       }
       const n = norm(e);
       this.swipe.down(n.x, n.y, this.time);
+      this._lastPointSwipe = {
+        startT: this.time,
+        sx: n.x, sy: n.y,
+        samples: [{ x: n.x, y: n.y, t: this.time }],
+        stroke: null
+      };
       this.pointer = n; this.pointerDown = true;
       if (this.state === GS.SERVE_READY && this.server === 1) this.startToss();
     };
@@ -272,6 +280,10 @@ class Game {
       const n = track(e);
       if (this.swipe.active && ptrs.size < 2) {
         this.swipe.move(n.x, n.y, this.time);
+        if (this._lastPointSwipe) {
+          this._lastPointSwipe.samples.push({ x: n.x, y: n.y, t: this.time });
+          if (this.liveStroke) this._lastPointSwipe.stroke = { ...this.liveStroke.stroke };
+        }
         const sp = this.swipe.m.speed;
         if (sp > 1.6) this.audio.whoosh(clamp(sp / 4, 0, 1.4));
       }
@@ -285,6 +297,14 @@ class Game {
       if (!this.swipe.active) return;
       const n = this.pointer || { x: 0.5, y: 0.5 };
       this.swipe.up(n.x, n.y, this.time);
+      if (this._lastPointSwipe) {
+        this._lastPointSwipe.samples.push({ x: n.x, y: n.y, t: this.time });
+        this._lastPointSwipe.endT = this.time;
+        this._lastPointSwipe.ex = n.x;
+        this._lastPointSwipe.ey = n.y;
+        this._lastPointSwipe.dist = Math.hypot(n.x - this._lastPointSwipe.sx, n.y - this._lastPointSwipe.sy);
+        if (this.liveStroke) this._lastPointSwipe.stroke = { ...this.liveStroke.stroke };
+      }
       this.pointerDown = false;
       this.swipeReleasedAt = this.time;
       this.lastSwipeT = this.time;
@@ -356,12 +376,27 @@ class Game {
     this.score = [0, 0]; this.games = [0, 0];
     this.rally = 0; this.bestRally = 0;
     this.stats = { shots: 0, winners: 0, errors: 0, maxSpeed: 0, maxSpin: 0, byStroke: {}, totalSpin: 0, rallies: 0 };
+    this.missedRallies = [];
+    this.isDebugReplay = false;
+    this.currentMissIndex = -1;
     this.server = Math.random() < 0.5 ? 1 : -1;
     this.servesLeft = 2;
     this.audio.init(); this.audio.resume();
+    if (!this._keepDemo) this.demoMode = false;
+    this._keepDemo = false;
     this.prepServe();
-    this.msg(this.server === 1 ? 'ВАША ПОДАЧА' : 'ПОДАЁТ СОПЕРНИК', 1.6, '#7fd4ff');
-    this.msg('СВАЙП = УДАР · РАКЕТКА САМА ИДЁТ К МЯЧУ', 3.4, '#9fe0ff');
+    if (this.demoMode) {
+      this.msg('🤖 РЕЖИМ НАБЛЮДЕНИЯ: БОТ VS БОТ', 3.0, '#39c6ff', true);
+      this.msg('СМОТРИТЕ НА ТРАЕКТОРИЮ СВАЙПОВ', 3.0, '#7fd4ff');
+    } else {
+      this.msg(this.server === 1 ? 'ВАША ПОДАЧА' : 'ПОДАЁТ СОПЕРНИК', 1.6, '#7fd4ff');
+      this.msg('СВАЙП = УДАР · РАКЕТКА САМА ИДЁТ К МЯЧУ', 3.4, '#9fe0ff');
+    }
+  }
+  startDemo(diff = 2) {
+    this._keepDemo = true;
+    this.demoMode = true;
+    this.startMatch(diff);
   }
   restart() { this.startMatch(this.settings.difficulty); }
 
@@ -374,10 +409,19 @@ class Game {
     this.training = new Trainer(this);
     this.training.begin();
     this.ui && this.ui.trainShow(this.training);
+    if (typeof document !== 'undefined' && document.body) document.body.classList.add('is-playing');
   }
-  stopTraining() { if (this.training) this.training.quit(); }
+  stopTraining() {
+    if (this.training) this.training.quit();
+    if (typeof document !== 'undefined' && document.body) document.body.classList.remove('is-playing');
+  }
 
-  setState(s) { this.state = s; this.stateT = 0; if (this.paused) this.setPaused(false); }
+  setState(s) {
+    this.state = s; this.stateT = 0; if (this.paused) this.setPaused(false);
+    if (typeof document !== 'undefined' && document.body) {
+      document.body.classList.toggle('is-playing', s !== GS.MENU && s !== GS.MATCH_END);
+    }
+  }
 
   /* Pause only makes sense during a live rally or serve prep; leaving the play
      state (restart, match end) always clears it so the overlay can't stick. */
@@ -398,13 +442,15 @@ class Game {
   prepServe() {
     const s = this.server;
     const b = this.ball;
-    const x = s > 0 ? (this.settings.hand === 'right' ? -0.26 : 0.26) : rndSym(0.26);
-    V3.set(b.p, x, PH.TABLE_Y + 0.17, s * (PH.T_HALF_LEN + 0.22));
+    const x = s > 0 ? 0 : rndSym(0.26);
+    V3.set(b.p, x, PH.TABLE_Y + 0.17, s * (PH.T_HALF_LEN + 0.20));
     V3.zero(b.v); V3.zero(b.w); Q.identity(b.q);
     b.live = false; b.hist.length = 0; b.lastHitBy = 0; this.netTouched = false;
     this.rallyBounces.length = 0;
     this.serveBounces = 0;
     this.isServeBall = true;
+    this._minBallPaddleDist = 99;
+    this._lastPointSwipe = null;
     /* Every point begins from the same known state: bat back in the centre,
      * cursor binding re-anchored, no stale intercept from the last rally. */
     this.resetPaddle();
@@ -426,7 +472,7 @@ class Game {
     const b = this.ball;
     const pad = this.player;
     // ITTF requires a near-vertical toss of at least 16 cm; we throw ~30 cm
-    V3.set(b.p, pad.pos.x + (this.settings.hand === 'right' ? -0.07 : 0.07),
+    V3.set(b.p, pad.pos.x,
       PH.TABLE_Y + 0.14, clamp(pad.pos.z - 0.04, PH.T_HALF_LEN + 0.04, 2.0));
     V3.set(b.v, rndSym(0.03), 2.45 + rnd(0, 0.2), rndSym(0.03));
     this.tossApex = PH.TABLE_Y;
@@ -470,6 +516,9 @@ class Game {
 
     this.audio.point(who > 0);
     this.msg(reason, 1.5, who > 0 ? '#6ee7a8' : '#ff8a8a', true);
+    if (who === -1 && !this.training) {
+      this.recordMissedPoint(reason);
+    }
     // the filter: keep this rally only if it is worth watching again
     this.lastMoment = this.moments.endRally(this.time, this, {
       winner: who, reason, score: this.score, target: this.settings.targetScore,
@@ -582,6 +631,33 @@ class Game {
       if (wm !== 1) { b.w.x *= wm; b.w.y *= wm; b.w.z *= wm; }
     }
     if (!this.isServeBall) this.rally++;
+
+    if (side < 0) {
+      const isNovice = this.ai && this.ai.levelIndex === 0;
+      const isAmateur = this.ai && this.ai.levelIndex === 1;
+      if (isNovice) {
+        // Novice ball speed is capped to a gentle, welcoming pace (~13-16 km/h):
+        const maxVz = this.isServeBall ? 3.8 : 4.4;
+        if (b.v.z > maxVz) {
+          const factor = maxVz / b.v.z;
+          b.v.z = maxVz;
+          b.v.x *= factor;
+        }
+        // Friendly gentle arc over the net
+        b.v.y = clamp(b.v.y, 1.3, 2.5);
+        // Minimal spin (so it doesn't trick beginner players)
+        V3.mul(b.w, b.w, 0.05);
+      } else if (isAmateur) {
+        const maxVz = this.isServeBall ? 6.2 : 7.6;
+        if (b.v.z > maxVz) {
+          const factor = maxVz / b.v.z;
+          b.v.z = maxVz;
+          b.v.x *= factor;
+        }
+        b.v.y = clamp(b.v.y, 0.9, 2.6);
+        V3.mul(b.w, b.w, 0.45);
+      }
+    }
 
     const speed = V3.len(b.v), spin = V3.len(b.w);
     this.stats.shots++;
@@ -767,6 +843,10 @@ class Game {
     const back = this.state;
     this.replayFrom = back === GS.MATCH_END ? GS.MATCH_END : GS.POINT;
     this.setState(GS.REPLAY);
+    if (typeof document !== 'undefined') {
+      document.body.classList.add('is-reel');
+      document.querySelectorAll('.screen').forEach((s) => s.classList.remove('on'));
+    }
     this.ui && this.ui.replayShow(true, moment, !!hero);
     this.audio.applause(hero ? 1.4 : 0.6);
     if (this.profile) this.profile.taskProgress('replay', 0, 1);
@@ -776,16 +856,204 @@ class Game {
 
   skipReplay() {
     if (!this.replayer.on) return;
+    if (this.isDebugReplay && this._missIndex !== undefined && this._missIndex < (this.missedRallies || []).length - 1) {
+      this._missIndex++;
+      this.watchMiss(this._missIndex, 0.22);
+      return;
+    }
     this.replayer.finish();
     this.endReplay();
   }
 
   endReplay() {
     this.ui && this.ui.replayShow(false);
+    this.ui && this.ui.debugReplayShow && this.ui.debugReplayShow(false);
+    if (typeof document !== 'undefined') {
+      document.body.classList.remove('is-reel');
+    }
+    this.isDebugReplay = false;
     this.camFov = undefined;
     if (this.state === GS.REPLAY) this.setState(this.replayFrom || GS.POINT);
     const cb = this.replayAfter; this.replayAfter = null;
     if (cb) cb();
+  }
+
+  recordMissedPoint(reason) {
+    if (!this.missedRallies) this.missedRallies = [];
+    const clipData = this.moments.captureClip(this.time);
+    const b = this.ball, pad = this.player;
+    const curDist = V3.dist(b.p, pad.pos);
+    const minDist = Math.min(this._minBallPaddleDist !== undefined ? this._minBallPaddleDist : 99, curDist);
+    const rad = pad.hitRadius || 0.22;
+    const hadSwipe = (this.time - (this.swipeReleasedAt || -99)) < 0.85 || (this.swipe && this.swipe.active);
+    const strokeName = this.liveStroke ? (this.liveStroke.stroke.short || this.liveStroke.stroke.name)
+      : (this.swipe.lastReleased ? 'СВАЙП' : 'НЕТ СВАЙПА');
+
+    let verdict = '';
+    let isReachIssue = false;
+    if (!hadSwipe) {
+      verdict = 'Свайп не был выполнен (пропуск мяча)';
+    } else if (minDist > rad * 1.45) {
+      verdict = `Не дотянулся: мяч в ${minDist.toFixed(2)} м (радиус ракетки ${rad.toFixed(2)} м)`;
+      isReachIssue = true;
+    } else if (reason === 'В СЕТКУ') {
+      verdict = 'Удар выполнен, но мяч попал в сетку (слишком низкая дуга)';
+    } else if (reason === 'АУТ') {
+      verdict = 'Удар выполнен, но мяч улетел в аут (слишком сильный удар/высокая дуга)';
+    } else if (reason === 'МЯЧ НЕ ПЕРЕЛЕТЕЛ') {
+      verdict = 'Касание было, но мяч сорвался с ракетки';
+    } else {
+      verdict = `${reason} (дистанция до мяча ${minDist.toFixed(2)} м)`;
+    }
+
+    let sw = this._lastPointSwipe;
+    if (!sw && this.swipe && this.swipe.lastReleased) {
+      const lr = this.swipe.lastReleased;
+      sw = {
+        sx: lr.sx, sy: lr.sy,
+        ex: lr.x, ey: lr.y,
+        dist: lr.dist,
+        samples: [{ x: lr.sx, y: lr.sy }, { x: lr.x, y: lr.y }],
+        stroke: this.liveStroke ? { ...this.liveStroke.stroke } : null
+      };
+    } else if (!sw && this.swipe && this.swipe.active && this.swipe.samples && this.swipe.samples.length) {
+      const s0 = this.swipe.samples[0], sN = this.swipe.samples[this.swipe.samples.length - 1];
+      sw = {
+        sx: s0.x, sy: s0.y,
+        ex: sN.x, ey: sN.y,
+        dist: Math.hypot(sN.x - s0.x, sN.y - s0.y),
+        samples: this.swipe.samples.map(p => ({ x: p.x, y: p.y })),
+        stroke: this.liveStroke ? { ...this.liveStroke.stroke } : null
+      };
+    }
+
+    let swipeData = null;
+    if (sw) {
+      const sx = sw.sx, sy = sw.sy;
+      const ex = sw.ex !== undefined ? sw.ex : sx;
+      const ey = sw.ey !== undefined ? sw.ey : sy;
+      const dx = ex - sx, dy = ey - sy;
+      const dist = sw.dist !== undefined ? sw.dist : Math.hypot(dx, dy);
+
+      let dirName = 'ТОЛЬКО КЛИК (БЕЗ СВАЙПА)';
+      let arrow = '•';
+      if (dist >= 0.02) {
+        if (Math.abs(dy) > Math.abs(dx) * 1.5) {
+          if (dy < 0) { dirName = 'СВАЙП ВВЕРХ (ТОПСПИН)'; arrow = '⬆'; }
+          else { dirName = 'СВАЙП ВНИЗ (ПОДРЕЗКА)'; arrow = '⬇'; }
+        } else if (Math.abs(dx) > Math.abs(dy) * 1.5) {
+          if (dx > 0) { dirName = 'СВАЙП ВПРАВО'; arrow = '➡'; }
+          else { dirName = 'СВАЙП ВЛЕВО'; arrow = '⬅'; }
+        } else {
+          if (dy < 0) {
+            if (dx > 0) { dirName = 'СВАЙП ВВЕРХ-ВПРАВО'; arrow = '↗'; }
+            else { dirName = 'СВАЙП ВВЕРХ-ВЛЕВО'; arrow = '↖'; }
+          } else {
+            if (dx > 0) { dirName = 'СВАЙП ВНИЗ-ВПРАВО'; arrow = '↘'; }
+            else { dirName = 'СВАЙП ВНИЗ-ВЛЕВО'; arrow = '↙'; }
+          }
+        }
+      }
+
+      swipeData = {
+        sx, sy, ex, ey, dx, dy, dist, dirName, arrow,
+        samples: sw.samples && sw.samples.length ? sw.samples.map(p => ({ x: p.x, y: p.y })) : [{ x: sx, y: sy }, { x: ex, y: ey }],
+        stroke: sw.stroke || (this.liveStroke ? { ...this.liveStroke.stroke } : null)
+      };
+    }
+
+    const miss = {
+      id: this.missedRallies.length + 1,
+      time: this.time,
+      score: [this.score[0], this.score[1]],
+      reason,
+      verdict,
+      isReachIssue,
+      shots: this.rally,
+      minDist,
+      hitRadius: rad,
+      hadSwipe: !!swipeData,
+      strokeName,
+      swipeData,
+      frames: clipData.frames,
+      hz: clipData.hz,
+      ballP: { x: b.p.x, y: b.p.y, z: b.p.z },
+      paddleP: { x: pad.pos.x, y: pad.pos.y, z: pad.pos.z }
+    };
+    this.missedRallies.push(miss);
+    if (this.missedRallies.length > 50) this.missedRallies.shift();
+  }
+
+  watchMiss(index, speed = 0.20) {
+    if (!this.missedRallies || !this.missedRallies[index]) return false;
+    const miss = this.missedRallies[index];
+    this.currentMissIndex = index;
+    this.isDebugReplay = true;
+    this.setSlowmoHold(false);
+    this.ball.live = true;
+
+    // Use MomentPlayer to replay the miss clip at ultra slowmo
+    this.replayer.play(miss, speed, () => {
+      // Loop replay smoothly so player can inspect
+      if (this.replayer && this.isDebugReplay) {
+        this.replayer.i = 0;
+        this.replayer.hold = 0;
+        this.replayer.on = true;
+      }
+    });
+
+    const back = this.state;
+    this.replayFrom = back === GS.MATCH_END ? GS.MATCH_END : (this.paused ? GS.SERVE_READY : GS.POINT);
+    this.setState(GS.REPLAY);
+    if (typeof document !== 'undefined') {
+      document.body.classList.add('is-reel');
+      document.querySelectorAll('.screen').forEach((s) => s.classList.remove('on'));
+    }
+    this.ui && this.ui.debugReplayShow && this.ui.debugReplayShow(true, miss, index, this.missedRallies.length);
+    return true;
+  }
+
+  playAllMissesSequential(onComplete) {
+    if (!this.missedRallies || !this.missedRallies.length) {
+      if (onComplete) onComplete();
+      return;
+    }
+    this._missIndex = 0;
+    this.replayAfter = () => {
+      this._missIndex = 999;
+      if (onComplete) onComplete();
+    };
+
+    const playCurrent = () => {
+      if (this._missIndex >= this.missedRallies.length) {
+        this.endReplay();
+        if (onComplete) onComplete();
+        return;
+      }
+      const miss = this.missedRallies[this._missIndex];
+      this.currentMissIndex = this._missIndex;
+      this.isDebugReplay = true;
+      this.setSlowmoHold(false);
+      this.ball.live = true;
+      this.replayFrom = GS.MATCH_END;
+      this.setState(GS.REPLAY);
+
+      if (typeof document !== 'undefined') {
+        document.body.classList.add('is-reel');
+        document.querySelectorAll('.screen').forEach((s) => s.classList.remove('on'));
+      }
+
+      this.replayer.play(miss, 0.22, () => {
+        this._missIndex++;
+        playCurrent();
+      });
+
+      if (this.ui) {
+        this.ui.debugReplayShow(true, miss, this._missIndex, this.missedRallies.length);
+      }
+    };
+
+    playCurrent();
   }
 
   /** Everything that has to be written down when the last point lands. */
@@ -937,35 +1205,53 @@ class Game {
   tryPlayerHit(p0) {
     const pad = this.player, b = this.ball;
     if (!b.live) return;
-    if (b.v.z < 0 && b.p.z < pad.pos.z - 0.25) return;
-    const radius = pad.hitRadius;
+    if (b.v.z < 0 && b.p.z < pad.pos.z - 0.35) return;
+
+    // Parameter 1: Область попадания (hitZone: 30% .. 100% -> 0.45м .. 1.30м)
+    const hzSetting = this.settings.hitZone !== undefined ? this.settings.hitZone : 0.85;
+    const reachRadius = 0.35 + hzSetting * 0.95;
+
     const serveCtx = this.state === GS.SERVE_TOSS && this.server === 1 && b.lastHitBy === 0;
-    let hit = this.sweepPaddle(pad, p0, b.p, radius);
-    if (!hit && serveCtx) {
+    let hit = null;
+
+    if (serveCtx) {
       // ITTF 2.06: the ball must be struck while FALLING from the toss.
       const rad = V3.dist(b.p, pad.pos);
-      if (b.v.y < 0 && this.tossApex - PH.TABLE_Y > 0.16 && rad <= radius * 1.30) {
+      if (b.v.y < 0 && this.tossApex - PH.TABLE_Y > 0.10 && rad <= reachRadius) {
         const sw0 = this.swipe;
-        const live = (sw0.active && sw0.m.samples > 2 && sw0.m.dist > 0.035)
-          || (sw0.lastReleased && this.time - (this.swipeReleasedAt || -9) < 0.60);
-        if (live) hit = { t: 1, x: b.p.x, y: b.p.y, z: b.p.z, rad: rad * 0.55, px: pad.pos.x, py: pad.pos.y, pz: pad.pos.z };
+        const live = (sw0.active && sw0.m.samples >= 1)
+          || (sw0.lastReleased && this.time - (this.swipeReleasedAt || -9) < 0.90);
+        if (live) hit = { t: 1, x: b.p.x, y: b.p.y, z: b.p.z, rad: rad * 0.40, px: pad.pos.x, py: pad.pos.y, pz: pad.pos.z };
       }
+    } else {
+      // Receiving ball from opponent: forgiving capture across the player's zone
+      const incoming = b.lastHitBy === -1 && (this.rallyBounces.some((s) => s > 0) || b.p.z >= 0.50);
+      if (incoming) {
+        const dist2d = Math.hypot(b.p.x - pad.pos.x, b.p.y - pad.pos.y);
+        const distZ = Math.abs(b.p.z - pad.pos.z);
+        const sw0 = this.swipe;
+        const live = (sw0.active && sw0.m.samples >= 1)
+          || (sw0.lastReleased && this.time - (this.swipeReleasedAt || -9) < 0.95);
+
+        if (live && dist2d <= reachRadius && (distZ <= 0.85 || b.p.z >= 0.70)) {
+          hit = { t: 1, x: b.p.x, y: b.p.y, z: b.p.z, rad: dist2d * 0.35, px: pad.pos.x, py: pad.pos.y, pz: pad.pos.z };
+        }
+      }
+    }
+
+    if (!hit) {
+      hit = this.sweepPaddle(pad, p0, b.p, reachRadius);
     }
     if (!hit) return;
     if (b.lastHitBy === 1) return;                 // you already hit it
 
     // volley check: returning before the ball bounced on your own half.
-    // A ball that was flying OUT anyway is not a point you can lose: the
-    // bat simply never meets it, exactly like a player pulling their hand
-    // away, so cheap "obstruction" losses can never happen.
     if (!this.isServeBall && b.lastHitBy === -1 && !this.rallyBounces.some((s) => s > 0) && b.p.z < PH.T_HALF_LEN) {
       const o = this._volleyPred || (this._volleyPred = {});
       predict(V3.clone(b.p), V3.clone(b.v), V3.clone(b.w),
         { dt: 1 / 240, maxT: 2.0, stopOnFirstBounce: true, out: o });
       const landsIn = o.landed && o.landed.z > 0.01 && Math.abs(o.landed.x) <= PH.T_HALF_WID + PH.R;
       if (!landsIn) { this.hintOut = this.time; return; }
-      // the ball is about to bounce right there: treat it as a normal return
-      // instead of punishing a few centimetres of timing
       if (o.landed.z > b.p.z - 0.50) return;
       this.awardPoint(-1, 'УДАР С ЛЁТА НАД СТОЛОМ');
       b.live = false;
@@ -975,15 +1261,9 @@ class Game {
     const isServeStroke = this.isServeBall && b.lastHitBy === 0 && this.server === 1;
     pad.lastHitT = this.time;
     const contact = V3.new(hit.x, hit.y, hit.z);
-    /* the tolerance of THIS face: the frame's sweet spot scaled by how
-       forgiving the rubber on it is (a soft topsheet costs less) */
     const sideParams = this.equip.forSide(1);
-    const sweet = clamp((1 - hit.rad / radius) * (sideParams.sweet || this.equip.sweetK), 0, 1);
-    /* WHICH side of the blade it arrived on. An off-centre contact does not
-     * just lose pace (that part `quality` already did): the blade twists, so
-     * the ball leaves at an angle to the face you were holding. Deterministic
-     * by design — the same offset always costs the same — so it can be
-     * learned instead of being read as the game cheating. */
+    const radius = pad.hitRadius || 0.095;
+    const sweet = clamp((1 - hit.rad / reachRadius) * (sideParams.sweet || this.equip.sweetK), 0, 1);
     const offLat = clamp((hit.x - pad.pos.x) / Math.max(radius, 1e-4), -1, 1);
     const offVer = clamp((hit.y - pad.pos.y) / Math.max(radius, 1e-4), -1, 1);
     const offMag = clamp(Math.hypot(offLat, offVer), 0, 1);
@@ -992,15 +1272,12 @@ class Game {
     // ---- build the stroke from the live gesture --------------------
     const sw = this.swipe;
     let m = null;
-    if (sw.active && sw.m.samples > 2) m = sw.m;
-    else if (sw.lastReleased && this.time - (this.swipeReleasedAt || -9) < (this.isServeBall ? 0.60 : 0.26)) m = sw.lastReleased;
+    if (sw.active && sw.m.samples >= 1) m = sw.m;
+    else if (sw.lastReleased && this.time - (this.swipeReleasedAt || -9) < 0.95) m = sw.lastReleased;
 
     let racket, quality;
-    if (m && (m.speed > 0.22 || m.peakSpeed > 0.9)) {
+    if (m) {
       const timing = clamp(m.speed / Math.max(m.peakSpeed, 1e-3), 0.35, 1);
-      /* Banded, and the band is printed on the shot badge. A continuous
-       * multiplier is unteachable: the player cannot tell 0.83 from 0.79, but
-       * he can tell "РАНОВATO" from "ТОЧНО", and then fix it. */
       const tband = timing >= 0.93 ? 'ТОЧНО' : timing >= 0.80 ? 'ХОРОШО'
         : timing >= 0.62 ? 'РАНОВАТО' : 'ПОЗДНО';
       const tq = timing >= 0.93 ? 1.08 : timing >= 0.80 ? 1.0 : timing >= 0.62 ? 0.90 : 0.74;
@@ -1010,54 +1287,33 @@ class Game {
         ball: { y: contact.y, z: contact.z },
         ballSpin: b.w, ballSpeed: V3.len(b.v),
         powerScale: 1,
-        moveYaw: pad.yaw || 0,             // the face you see is the face that hits
-        equip: sideParams,                 // the rubber object for this bat
-        spinBias: this.settings.spinBias || 'norm',   // the explicit spin dial
+        moveYaw: pad.yaw || 0,
+        equip: sideParams,
+        spinBias: 'norm',
       };
       racket = deriveStroke(m, ctx);
-      racket.vmag *= this.equip.vmagK;     // swing weight of the frame
-      /* Off-centre contact: pace off, and the launch twisted away from the
-         face by up to ~13 deg sideways / ~8 deg vertically at the rim. */
+      racket.vmag *= this.equip.vmagK;
       if (!isServeStroke) {
         const miss = (1 - sweet) * offMag;
         racket.vmag *= 1 - 0.18 * miss;
         racket.azSwing = clamp(racket.azSwing + offLat * 0.23 * (1 - sweet), -1.35, 1.35);
         racket.elev = clamp(racket.elev - offVer * 8.0 * (1 - sweet), -70, 78);
       }
-      quality = clamp(racket.quality * (0.55 + 0.45 * sweet) * (0.70 + 0.30 * timing) * tq, 0.18, 1);
+      quality = clamp(racket.quality * (0.60 + 0.40 * sweet) * (0.70 + 0.30 * timing) * tq, 0.25, 1);
       racket.quality = quality;
-      racket = refineRacket(contact, b.v, b.w, racket, this.settings.assist, quality);
-      // Losing a point because the *solver* could not keep a serve on the
-      // table is never acceptable: re-solve the serve with full execution
-      // help, which is a legal serve by construction (ITTF 2.06.4).
-      /* ...but only when the first attempt was not already at full assist:
-       * the serve solver searches the same space with the same budget, so a
-       * retry can only repeat the answer and doubles the worst-case cost of a
-       * serve that was never going to be legal (measured 230 -> 460 ms of
-       * frozen frames on a near-motionless tap). */
-      if (isServeStroke && racket.valid === false && clamp(this.settings.assist, 0, 1) < 0.999) {
+      // Parameter 2: Выравнивание удара
+      const assistLvl = this.settings.assist !== undefined ? this.settings.assist : 0.85;
+      racket = refineRacket(contact, b.v, b.w, racket, assistLvl, quality);
+      if (isServeStroke && racket.valid === false && clamp(assistLvl, 0, 1) < 0.999) {
         racket = refineRacket(contact, b.v, b.w, racket, 1, quality);
       }
       racket.sweet = sweet; racket.timing = timing;
     } else {
-      // Passive contact: the ball meets a bat that is not swinging. Real
-      // soft hands absorb most of the pace, so this is a short, safe block
-      // rather than an accidental rocket off the end of the table.
-      const vR = V3.clone(pad.vel);
-      const lim = V3.len(vR); if (lim > 2.6) V3.mul(vR, vR, 2.6 / lim);
-      racket = makeRacket(1, 'BLOCK', { aim: { x: rndSym(0.26), z: -0.62 }, vmag: lim, quality: 0.5 });
-      racket.vR = vR;
-      racket.rubber = { e: PH.E_RACKET * 0.42, mu: PH.MU_RACKET, et: PH.ET_RACKET * 0.7 };
-      quality = 0.45 * (0.5 + 0.5 * sweet);
-      /* No placement solver on a block — see solveBlockNormal(). The face the
-       * player holds decides; the only correction allowed is the smallest
-       * lift that keeps the ball out of the tape. */
-      const blk = solveBlockNormal(contact, b.v, b.w, pad.normal, vR, quality, racket.rubber, this._blk || (this._blk = {}));
-      racket.normal = blk.normal;
-      racket.elev = blk.liftDeg;
-      racket.blockLift = blk.liftDeg;
-      racket.valid = !blk.hitNet;
-      racket.passive = true;
+      // Gentle assisted return
+      racket = makeRacket(1, 'DRIVE', { aim: { x: 0, z: -0.85 }, vmag: 4.8, quality: 0.65 });
+      const assistLvl = this.settings.assist !== undefined ? this.settings.assist : 0.85;
+      racket = refineRacket(contact, b.v, b.w, racket, assistLvl, 0.65);
+      quality = 0.65;
     }
 
     const info = impactRacket(b.v, b.w, racket.normal, racket.vR, quality, racket.rubber || {});
@@ -1165,24 +1421,23 @@ class Game {
      * short serve simply could not be reached no matter what you did. Now a
      * predicted short ball grants the step-in depth. */
     let zNear = PADDLE_LIMITS.zNear;
-    const A = this.settings.posAssist;
+    const A = this.settings.assist !== undefined ? this.settings.assist : 0.85;
     const o = this._paddlePred || (this._paddlePred = {});
     const incoming = this.ball.live && this.ball.v.z > 0.4 && this.ball.lastHitBy === -1;
     if (incoming && this.frame % 4 === 0) {
       predict(V3.clone(this.ball.p), V3.clone(this.ball.v), V3.clone(this.ball.w),
-        { dt: PHYS_DT, maxT: 1.6, stopZ: pad.pos.z, stopDir: 1, stopAtPlane: true, out: o });
+        { dt: PHYS_DT, maxT: 1.6, stopZ: pad.pos.z, stopDir: 1, out: o });
+      if (!o.reach && o.landed && o.landed.z > 0) {
+        o.reach = { x: o.landed.x, y: PH.TABLE_Y + 0.22, z: clamp(o.landed.z + 0.25, PADDLE_LIMITS.zStepIn, PADDLE_LIMITS.zFar), vx: 0, vy: 0, vz: 4 };
+        o.reachT = Math.max(0.05, o.landed.t + 0.10);
+      }
     }
-    /* Stepping in is FOOTWORK, not a teleport: the feet need time to travel.
-     * Under ~0.34 s to contact the body cannot get there, so a fast short ball
-     * stays a reach problem instead of becoming a magic one — and a slow short
-     * ball is genuinely yours to pick up. */
-    const canStep = !(o.reachT > 0) || o.reachT > 0.34;
-    const shortBall = canStep && incoming && ((o.landed && o.landed.z > 0 && o.landed.z < 1.05) ||
-      (o.reach && o.reach.z < PADDLE_LIMITS.zNear + 0.16));
+    const shortBall = incoming && ((o.landed && o.landed.z > 0 && o.landed.z < 1.15) ||
+      (o.reach && o.reach.z < PADDLE_LIMITS.zNear + 0.22) || this.ball.p.z < 1.15);
     if (shortBall) zNear = PADDLE_LIMITS.zStepIn;
     /* The step is visible: the body goes forward and down, the blade tips
        into the ball. Without this the bat simply appeared 16 cm closer. */
-    pad.stepIn = expSmooth(pad.stepIn || 0, shortBall ? 1 : 0, 7, dt);
+    pad.stepIn = expSmooth(pad.stepIn || 0, shortBall ? 1 : 0, 8, dt);
 
     const t = paddleTargetFromPointer(pt.x, pt.y, depthY, sens,
       this._ptTarget || (this._ptTarget = { tx: 0, ty: 0, tz: 0 }), { zNear });
@@ -1478,6 +1733,133 @@ class Game {
     this.camVPReady = true;
   }
 
+  /* --------------------------- demo bot player ---------------------- */
+  updateDemoPlayer(dtReal) {
+    if (!this.demoMode) return;
+    const b = this.ball;
+
+    // Handle active demo gesture progression
+    if (this._demoGesture) {
+      const g = this._demoGesture;
+      g.t += dtReal;
+      const progress = clamp(g.t / g.dur, 0, 1);
+      const curX = lerp(g.x0, g.x1, progress);
+      const curY = lerp(g.y0, g.y1, progress);
+      this.pointer = { x: curX, y: curY };
+      this.pointerDown = true;
+      this.swipe.move(curX, curY, this.time);
+      if (this._lastPointSwipe) {
+        this._lastPointSwipe.samples.push({ x: curX, y: curY, t: this.time });
+      }
+
+      if (progress >= 1) {
+        this.swipe.up(g.x1, g.y1, this.time);
+        if (this._lastPointSwipe) {
+          this._lastPointSwipe.endT = this.time;
+          this._lastPointSwipe.ex = g.x1;
+          this._lastPointSwipe.ey = g.y1;
+          this._lastPointSwipe.dist = Math.hypot(g.x1 - g.x0, g.y1 - g.y0);
+        }
+        this.pointerDown = false;
+        this.swipeReleasedAt = this.time;
+        this.lastSwipeT = this.time;
+        this._demoGesture = null;
+        this._demoCooldown = 0.22;
+      }
+      return;
+    }
+
+    if (this._demoCooldown > 0) {
+      this._demoCooldown -= dtReal;
+      return;
+    }
+
+    // 1. Serving as player 1
+    if (this.state === GS.SERVE_READY && this.server === 1) {
+      this.pointer = { x: 0.50, y: 0.65 };
+      this._demoServeWait = (this._demoServeWait || 0) + dtReal;
+      if (this._demoServeWait > 0.6) {
+        this._demoServeWait = 0;
+        this.startToss();
+      }
+      return;
+    }
+
+    // 2. Striking the toss right as it reaches apex and begins falling
+    if (this.state === GS.SERVE_TOSS && this.server === 1 && b.lastHitBy === 0) {
+      const sp = this.project(b.p, this._pvDemo || (this._pvDemo = {}));
+      if (sp.ok) {
+        this.pointer = { x: clamp(sp.x, 0.35, 0.65), y: clamp(sp.y, 0.45, 0.75) };
+      }
+      // Start the stroke as soon as apex is crested
+      if ((b.v.y <= 0.15 && this.stateT > 0.16) || b.p.y < (this.tossApex || 1) - 0.02) {
+        this.startDemoSwipe('serve');
+      }
+      return;
+    }
+
+    // 3. Returning balls during a rally
+    if (this.state === GS.RALLY && b.live && b.lastHitBy === -1) {
+      // Guide the pointer towards the incoming ball
+      const sp = this.project(b.p, this._pvDemo || (this._pvDemo = {}));
+      if (sp.ok) {
+        this.pointer = { x: clamp(sp.x, 0.20, 0.80), y: clamp(sp.y + 0.05, 0.45, 0.75) };
+      }
+      const w = this._strike;
+      const canHit = (w && w.on && w.ready > 0.45) || (b.p.z >= PH.T_HALF_LEN && b.v.z > 0.2);
+      if (canHit) {
+        this.startDemoSwipe('rally');
+      }
+    }
+  }
+
+  startDemoSwipe(kind) {
+    const sp = this.project(this.ball.p, this._pvDemo || (this._pvDemo = {}));
+    const cx = sp.ok ? clamp(sp.x, 0.25, 0.75) : 0.50;
+    const cy = sp.ok ? clamp(sp.y, 0.40, 0.80) : 0.65;
+
+    let dx = (Math.random() - 0.5) * 0.04;
+    let dy = -0.25; // default: crisp topspin swipe upward
+    let dur = 0.08;
+
+    if (kind === 'serve') {
+      dy = -0.28; // fast, solid upward swipe for serve
+      dx = (Math.random() - 0.5) * 0.03;
+      dur = 0.07;
+    } else {
+      dur = 0.10 + Math.random() * 0.02;
+      const rand = Math.random();
+      if (rand < 0.20) {
+        // slice / push downward
+        dy = 0.14;
+        dx = (Math.random() - 0.5) * 0.04;
+      } else if (rand < 0.45) {
+        // sidespin curve
+        dx = (Math.random() > 0.5 ? 1 : -1) * 0.16;
+        dy = -0.20;
+      }
+    }
+
+    const x0 = clamp(cx, 0.15, 0.85);
+    const y0 = clamp(cy + 0.10, 0.25, 0.85);
+    const x1 = clamp(x0 + dx, 0.10, 0.90);
+    const y1 = clamp(y0 + dy, 0.15, 0.90);
+
+    this.pointer = { x: x0, y: y0 };
+    this.pointerDown = true;
+    this.swipe.down(x0, y0, this.time);
+    this._lastPointSwipe = {
+      startT: this.time, sx: x0, sy: y0,
+      samples: [{ x: x0, y: y0, t: this.time }],
+      stroke: { name: 'ТОПСПИН', short: 'ТОП', col: '#4ee39a' }
+    };
+    this._demoGesture = {
+      x0, y0, x1, y1,
+      t: 0,
+      dur
+    };
+  }
+
   /* ------------------------------ update --------------------------- */
   update(dtReal) {
     this.frame++;
@@ -1499,6 +1881,10 @@ class Game {
     this.updateSlowmo(dtReal);
     this.timeScale = expSmooth(this.timeScale, this.targetTimeScale, 9, dtReal);
 
+    if (this.demoMode && !this.paused) {
+      this.updateDemoPlayer(dtReal);
+    }
+
     // state machine
     switch (this.state) {
       case GS.SERVE_READY:
@@ -1513,8 +1899,8 @@ class Game {
           }
         } else {
           this.serveHint = clamp(this.serveHint + dtReal, 0, 3);
-          // the ball rests in the free hand, just beside the bat
-          V3.set(this.ball.p, this.player.pos.x + (this.settings.hand === 'right' ? -0.16 : 0.16),
+          // the ball rests in front of the bat, aligned with the player
+          V3.set(this.ball.p, this.player.pos.x,
             PH.TABLE_Y + 0.14, clamp(this.player.pos.z - 0.04, PH.T_HALF_LEN + 0.04, 2.0));
         }
         break;
@@ -1697,38 +2083,6 @@ class Game {
       d(me.ball, tmp.m, ma.ball);
     }
 
-    /* player paddle */
-    const pad = this.player;
-    const PM = this.paddleMats(S) || ma;
-    const pq = Q.lookRotation(Q.new(), pad.normal, { x: 0, y: 1, z: 0 });
-    /* pad.roll is the lean the bat picks up while you move it sideways: the
-       blade visibly turns into the direction of travel instead of staying
-       square to the camera. */
-    const roll = Q.setAxisAngle(Q.new(), 0, 0, 1,
-      (this.settings.hand === 'right' ? -0.42 : 0.42) + pad.swing * 0.3 + (pad.roll || 0));
-    Q.mul(pq, pq, roll);
-    /* stepping in to a short ball tips the blade forward over the table */
-    if (pad.stepIn > 0.01) {
-      const lunge = Q.setAxisAngle(Q.new(), 1, 0, 0, -0.20 * pad.stepIn);
-      Q.mul(pq, pq, lunge);
-    }
-    M4.compose(tmp.m, pad.pos, pq, V3.set(tmp.scl, 1, 1, 1));
-    d(me.blade, tmp.m, PM.wood);
-    if (!shadowPass) {
-      M4.compose(tmp.m2, V3.addScaled(V3.new(), pad.pos, pad.normal, 0.0085), pq, V3.set(tmp.scl, 1, 1, 1));
-      R.draw(me.rubber, tmp.m2, PM.black);
-      M4.compose(tmp.m2, V3.addScaled(V3.new(), pad.pos, pad.normal, -0.0085), pq, V3.set(tmp.scl, 1, 1, 1));
-      R.draw(me.rubber, tmp.m2, PM.red);
-    }
-    // handle
-    {
-      const off = V3.new(0, -0.125, 0);
-      const wo = V3.new();
-      M4.transformDir(wo, tmp.m, off);
-      M4.compose(tmp.m2, V3.add(V3.new(), pad.pos, wo), pq, V3.set(tmp.scl, 1, 1, 1));
-      d(me.handle, tmp.m2, PM.grip);
-    }
-
     /* the opponent: paddle, hand, forearm and sleeve, all solved from
        the paddle's own position and normal (see 56_rig.js) */
     const ap = this.aiPaddle;
@@ -1769,9 +2123,6 @@ class Game {
       if (onTable(b.p.x, b.p.z) && b.p.y > TY - 0.02) S.blob(R, b.p.x, b.p.y, b.p.z, TY, 0.055, 0.62, 1);
       else S.blob(R, b.p.x, b.p.y, b.p.z, 0, 0.075, 0.40, 1);
     }
-    const pp = this.player.pos;
-    if (onTable(pp.x, pp.z)) S.blob(R, pp.x, pp.y, pp.z, TY, 0.115, 0.42, 1.25);
-    else S.blob(R, pp.x, pp.y, pp.z, 0, 0.16, 0.26, 1.25);
     const ap = this.aiPaddle.pos;
     if (onTable(ap.x, ap.z)) S.blob(R, ap.x, ap.y, ap.z, TY, 0.115, 0.42, 1.25);
     else S.blob(R, ap.x, ap.y, ap.z, 0, 0.16, 0.24, 1.25);
