@@ -631,6 +631,33 @@ class Game {
     }
     if (!this.isServeBall) this.rally++;
 
+    if (side < 0) {
+      const isNovice = this.ai && this.ai.levelIndex === 0;
+      const isAmateur = this.ai && this.ai.levelIndex === 1;
+      if (isNovice) {
+        // Novice ball speed is capped to a gentle, welcoming pace (~15-18 km/h):
+        const maxVz = this.isServeBall ? 4.2 : 5.0;
+        if (b.v.z > maxVz) {
+          const factor = maxVz / b.v.z;
+          b.v.z = maxVz;
+          b.v.x *= factor;
+        }
+        // Friendly gentle arc over the net
+        b.v.y = clamp(b.v.y, 1.2, 2.4);
+        // Minimal spin (so it doesn't trick beginner players)
+        V3.mul(b.w, b.w, 0.15);
+      } else if (isAmateur) {
+        const maxVz = this.isServeBall ? 6.2 : 7.6;
+        if (b.v.z > maxVz) {
+          const factor = maxVz / b.v.z;
+          b.v.z = maxVz;
+          b.v.x *= factor;
+        }
+        b.v.y = clamp(b.v.y, 0.9, 2.6);
+        V3.mul(b.w, b.w, 0.45);
+      }
+    }
+
     const speed = V3.len(b.v), spin = V3.len(b.w);
     this.stats.shots++;
     this.stats.totalSpin += spin / TAU;
