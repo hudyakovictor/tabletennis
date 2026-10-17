@@ -252,6 +252,12 @@ class Game {
       }
       const n = norm(e);
       this.swipe.down(n.x, n.y, this.time);
+      this._lastPointSwipe = {
+        startT: this.time,
+        sx: n.x, sy: n.y,
+        samples: [{ x: n.x, y: n.y, t: this.time }],
+        stroke: null
+      };
       this.pointer = n; this.pointerDown = true;
       if (this.state === GS.SERVE_READY && this.server === 1) this.startToss();
     };
@@ -273,6 +279,10 @@ class Game {
       const n = track(e);
       if (this.swipe.active && ptrs.size < 2) {
         this.swipe.move(n.x, n.y, this.time);
+        if (this._lastPointSwipe) {
+          this._lastPointSwipe.samples.push({ x: n.x, y: n.y, t: this.time });
+          if (this.liveStroke) this._lastPointSwipe.stroke = { ...this.liveStroke.stroke };
+        }
         const sp = this.swipe.m.speed;
         if (sp > 1.6) this.audio.whoosh(clamp(sp / 4, 0, 1.4));
       }
@@ -286,6 +296,14 @@ class Game {
       if (!this.swipe.active) return;
       const n = this.pointer || { x: 0.5, y: 0.5 };
       this.swipe.up(n.x, n.y, this.time);
+      if (this._lastPointSwipe) {
+        this._lastPointSwipe.samples.push({ x: n.x, y: n.y, t: this.time });
+        this._lastPointSwipe.endT = this.time;
+        this._lastPointSwipe.ex = n.x;
+        this._lastPointSwipe.ey = n.y;
+        this._lastPointSwipe.dist = Math.hypot(n.x - this._lastPointSwipe.sx, n.y - this._lastPointSwipe.sy);
+        if (this.liveStroke) this._lastPointSwipe.stroke = { ...this.liveStroke.stroke };
+      }
       this.pointerDown = false;
       this.swipeReleasedAt = this.time;
       this.lastSwipeT = this.time;
@@ -431,6 +449,7 @@ class Game {
     this.serveBounces = 0;
     this.isServeBall = true;
     this._minBallPaddleDist = 99;
+    this._lastPointSwipe = null;
     /* Every point begins from the same known state: bat back in the centre,
      * cursor binding re-anchored, no stale intercept from the last rally. */
     this.resetPaddle();
@@ -859,6 +878,21 @@ class Game {
       verdict = `${reason} (дистанция до мяча ${minDist.toFixed(2)} м)`;
     }
 
+    const swipeData = this._lastPointSwipe ? {
+      sx: this._lastPointSwipe.sx,
+      sy: this._lastPointSwipe.sy,
+      ex: this._lastPointSwipe.ex !== undefined ? this._lastPointSwipe.ex : this._lastPointSwipe.sx,
+      ey: this._lastPointSwipe.ey !== undefined ? this._lastPointSwipe.ey : this._lastPointSwipe.sy,
+      startT: this._lastPointSwipe.startT,
+      endT: this._lastPointSwipe.endT || this.time,
+      dist: this._lastPointSwipe.dist || Math.hypot(
+        (this._lastPointSwipe.ex || this._lastPointSwipe.sx) - this._lastPointSwipe.sx,
+        (this._lastPointSwipe.ey || this._lastPointSwipe.sy) - this._lastPointSwipe.sy
+      ),
+      samples: (this._lastPointSwipe.samples || []).map(p => ({ x: p.x, y: p.y })),
+      stroke: this._lastPointSwipe.stroke || (this.liveStroke ? { ...this.liveStroke.stroke } : null)
+    } : null;
+
     const miss = {
       id: this.missedRallies.length + 1,
       time: this.time,
@@ -871,6 +905,7 @@ class Game {
       hitRadius: rad,
       hadSwipe,
       strokeName,
+      swipeData,
       frames: clipData.frames,
       hz: clipData.hz,
       ballP: { x: b.p.x, y: b.p.y, z: b.p.z },
@@ -1670,9 +1705,18 @@ class Game {
       this.pointer = { x: curX, y: curY };
       this.pointerDown = true;
       this.swipe.move(curX, curY, this.time);
+      if (this._lastPointSwipe) {
+        this._lastPointSwipe.samples.push({ x: curX, y: curY, t: this.time });
+      }
 
       if (progress >= 1) {
         this.swipe.up(g.x1, g.y1, this.time);
+        if (this._lastPointSwipe) {
+          this._lastPointSwipe.endT = this.time;
+          this._lastPointSwipe.ex = g.x1;
+          this._lastPointSwipe.ey = g.y1;
+          this._lastPointSwipe.dist = Math.hypot(g.x1 - g.x0, g.y1 - g.y0);
+        }
         this.pointerDown = false;
         this.swipeReleasedAt = this.time;
         this.lastSwipeT = this.time;
@@ -1761,6 +1805,11 @@ class Game {
     this.pointer = { x: x0, y: y0 };
     this.pointerDown = true;
     this.swipe.down(x0, y0, this.time);
+    this._lastPointSwipe = {
+      startT: this.time, sx: x0, sy: y0,
+      samples: [{ x: x0, y: y0, t: this.time }],
+      stroke: { name: 'ТОПСПИН', short: 'ТОП', col: '#4ee39a' }
+    };
     this._demoGesture = {
       x0, y0, x1, y1,
       t: 0,
