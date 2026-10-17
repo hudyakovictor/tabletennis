@@ -966,6 +966,81 @@ class UI {
         c.fillText(`${dist3d.toFixed(2)} м`, midX, midY + 4 * d);
         c.restore();
       }
+
+      // 4. Click position & swipe ribbon reproduction on replay
+      const mo = g.replayer.moment;
+      if (mo && mo.swipeData && mo.swipeData.samples && mo.swipeData.samples.length > 1) {
+        const swd = mo.swipeData;
+        const cx = swd.sx * W, cy = swd.sy * H;
+        const lastF = g.replayer.lastFrame || 30;
+        const framesFromEnd = Math.max(1, Math.round((mo.time - (swd.startT || mo.time)) * (mo.hz || 30)));
+        const startFrame = Math.max(0, lastF - framesFromEnd);
+        const endFrame = startFrame + Math.max(2, Math.round(((swd.endT || mo.time) - (swd.startT || mo.time)) * (mo.hz || 30)));
+
+        // Appear as the ball comes into the player's zone
+        if (g.replayer.i >= Math.max(0, startFrame - 4)) {
+          const curI = g.replayer.i;
+          const progress = curI >= endFrame ? 1.0 : clamp((curI - startFrame) / Math.max(1, endFrame - startFrame), 0.1, 1.0);
+          const nPts = swd.samples.length;
+          const count = Math.max(2, Math.round(progress * nPts));
+          const pts = swd.samples.slice(0, count);
+          const col = (swd.stroke && swd.stroke.col) || '#39c6ff';
+
+          c.save();
+          // Draw the in-game swipe ribbon
+          c.lineCap = 'round'; c.lineJoin = 'round';
+          for (let k = 1; k < pts.length; k++) {
+            const t = k / (pts.length - 1);
+            c.strokeStyle = col;
+            c.globalAlpha = 0.20 + t * 0.70;
+            c.lineWidth = (2.5 + t * 9.5) * d;
+            c.beginPath();
+            c.moveTo(pts[k - 1].x * W, pts[k - 1].y * H);
+            c.lineTo(pts[k].x * W, pts[k].y * H);
+            c.stroke();
+          }
+
+          // Glow head at swipe lead
+          const head = pts[pts.length - 1];
+          const hx = head.x * W, hy = head.y * H;
+          const rg = c.createRadialGradient(hx, hy, 0, hx, hy, 28 * d);
+          rg.addColorStop(0, col + 'ff'); rg.addColorStop(1, col + '00');
+          c.fillStyle = rg; c.beginPath(); c.arc(hx, hy, 28 * d, 0, TAU); c.fill();
+
+          // Stroke label
+          if (swd.stroke && pts.length > 2) {
+            c.font = `800 ${12 * d}px ${CSSFONT}`;
+            c.textAlign = 'center';
+            c.fillStyle = col;
+            c.fillText(swd.stroke.short || swd.stroke.name, hx, hy - 22 * d);
+          }
+
+          // Point of click: glowing ring & label
+          c.shadowBlur = 14 * d; c.shadowColor = '#39c6ff';
+          c.strokeStyle = '#39c6ff'; c.lineWidth = 2.5 * d;
+          c.beginPath(); c.arc(cx, cy, 13 * d, 0, TAU); c.stroke();
+          c.fillStyle = '#ffffff'; c.beginPath(); c.arc(cx, cy, 4 * d, 0, TAU); c.fill();
+          c.shadowBlur = 0;
+
+          c.font = `800 ${10.5 * d}px ${CSSFONT}`;
+          c.textAlign = 'center';
+          c.fillStyle = '#0a101d';
+          c.fillRect(cx - 44 * d, cy - 28 * d, 88 * d, 17 * d);
+          c.strokeStyle = '#39c6ff'; c.lineWidth = 1.2 * d;
+          c.strokeRect(cx - 44 * d, cy - 28 * d, 88 * d, 17 * d);
+          c.fillStyle = '#39c6ff';
+          c.fillText('👆 ТОЧКА КЛИКА', cx, cy - 16 * d);
+          c.restore();
+        }
+      } else if (mo && (!mo.hadSwipe || !mo.swipeData)) {
+        // No click was made
+        c.save();
+        c.font = `800 ${12 * d}px ${CSSFONT}`;
+        c.textAlign = 'center';
+        c.fillStyle = '#ff9248';
+        c.fillText('⚠️ В ЭТОМ РОЗЫГРЫШЕ КЛИК НЕ БЫЛ СДЕЛАН (ПРОПУСК БЕЗ СВАЙПА)', W * 0.5, H * 0.78);
+        c.restore();
+      }
     }
 
     // coach's ghost gesture, only while the drill is waiting for you
