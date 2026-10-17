@@ -325,6 +325,7 @@ body.is-slow #gl{filter:saturate(1.12) contrast(1.04)}
 
 #reel .skip{pointer-events:auto;cursor:pointer}
 body.is-reel #hud,body.is-reel #slow{opacity:.0}
+body.is-reel .screen,body.is-reel #pauseInd{display:none !important}
 #hud{transition:opacity .25s}
 
 /* ==================== workshop · shop · daily ====================== */
