@@ -69,18 +69,18 @@ function pickThreePerks(career) {
 /*  TOURNAMENT DEFINITIONS                                             */
 /* ------------------------------------------------------------------ */
 const TOURNAMENTS = [
-  { id: 0,  name: 'Подвальный пинг-понг',      place: 'Гараж',             eloMin: 600,  eloMax: 900,  rounds: 3, perkAfter: false, icon: '🏚️' },
-  { id: 1,  name: 'Районный чемпионат',          place: 'Дом культуры',      eloMin: 900,  eloMax: 1100, rounds: 3, perkAfter: true,  icon: '🏫' },
-  { id: 2,  name: 'Городская лига',              place: 'Спорткомплекс',     eloMin: 1100, eloMax: 1350, rounds: 3, perkAfter: true,  icon: '🏟️' },
-  { id: 3,  name: 'Областной турнир',            place: 'Дворец спорта',     eloMin: 1300, eloMax: 1550, rounds: 4, perkAfter: true,  icon: '🏛️' },
-  { id: 4,  name: 'Первенство региона',          place: 'Арена',             eloMin: 1500, eloMax: 1750, rounds: 4, perkAfter: true,  icon: '🏟️' },
-  { id: 5,  name: 'Кубок Федерации',             place: 'Центральный зал',   eloMin: 1700, eloMax: 1950, rounds: 4, perkAfter: true,  icon: '🏆' },
-  { id: 6,  name: 'Международный Гран-При',      place: 'Олимпийский зал',   eloMin: 1900, eloMax: 2150, rounds: 5, perkAfter: true,  icon: '🌍' },
-  { id: 7,  name: 'Чемпионат Европы',            place: 'Европа Арена',      eloMin: 2100, eloMax: 2350, rounds: 5, perkAfter: true,  icon: '🇪🇺' },
-  { id: 8,  name: 'Кубок Мира',                  place: 'Токио',             eloMin: 2300, eloMax: 2550, rounds: 5, perkAfter: true,  icon: '🌏' },
-  { id: 9,  name: 'Суперсерия',                  place: 'Шанхай',            eloMin: 2500, eloMax: 2700, rounds: 5, perkAfter: true,  icon: '⭐' },
-  { id: 10, name: 'Мировой Финал',               place: 'Дюссельдорф',       eloMin: 2700, eloMax: 2900, rounds: 6, perkAfter: true,  icon: '👑' },
-  { id: 11, name: 'Зал Славы',                   place: 'Легендарный зал',   eloMin: 2900, eloMax: 3100, rounds: 1, perkAfter: false, icon: '🔮' },
+  { id: 0,  name: 'Подвальный пинг-понг',      place: 'Гараж',             eloMin: 600,  eloMax: 900,  rounds: 3, perkAfter: false },
+  { id: 1,  name: 'Районный чемпионат',          place: 'Дом культуры',      eloMin: 900,  eloMax: 1100, rounds: 3, perkAfter: true },
+  { id: 2,  name: 'Городская лига',              place: 'Спорткомплекс',     eloMin: 1100, eloMax: 1350, rounds: 3, perkAfter: true },
+  { id: 3,  name: 'Областной турнир',            place: 'Дворец спорта',     eloMin: 1300, eloMax: 1550, rounds: 4, perkAfter: true },
+  { id: 4,  name: 'Первенство региона',          place: 'Арена',             eloMin: 1500, eloMax: 1750, rounds: 4, perkAfter: true },
+  { id: 5,  name: 'Кубок Федерации',             place: 'Центральный зал',   eloMin: 1700, eloMax: 1950, rounds: 4, perkAfter: true },
+  { id: 6,  name: 'Международный Гран-При',      place: 'Олимпийский зал',   eloMin: 1900, eloMax: 2150, rounds: 5, perkAfter: true },
+  { id: 7,  name: 'Чемпионат Европы',            place: 'Европа Арена',      eloMin: 2100, eloMax: 2350, rounds: 5, perkAfter: true },
+  { id: 8,  name: 'Кубок Мира',                  place: 'Токио',             eloMin: 2300, eloMax: 2550, rounds: 5, perkAfter: true },
+  { id: 9,  name: 'Суперсерия',                  place: 'Шанхай',            eloMin: 2500, eloMax: 2700, rounds: 5, perkAfter: true },
+  { id: 10, name: 'Мировой Финал',               place: 'Дюссельдорф',       eloMin: 2700, eloMax: 2900, rounds: 6, perkAfter: true },
+  { id: 11, name: 'Зал Славы',                   place: 'Легендарный зал',   eloMin: 2900, eloMax: 3100, rounds: 1, perkAfter: false },
 ];
 
 /* ------------------------------------------------------------------ */
