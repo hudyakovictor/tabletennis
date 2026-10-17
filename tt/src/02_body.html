@@ -85,52 +85,32 @@
       <div class="logo">TOPSPIN<span style="opacity:.45">·</span>ARENA</div>
       <div class="sub">Настольный теннис · физика ITTF · управление свайпом</div>
 
-      <button class="btn" id="train0">ОБУЧЕНИЕ — 6 ШАГОВ</button>
-      <div class="note">Тренер подаёт мячи и проверяет каждый удар по реальной физике. Пройти стоит один раз — дальше всё понятно.</div>
-
       <h3 class="sec">Соперник</h3>
       <div class="row">
-        <button class="opt" data-diff="0"><b>НОВИЧОК</b><s>ELO 900</s></button>
-        <button class="opt" data-diff="1"><b>ЛЮБИТЕЛЬ</b><s>ELO 1400</s></button>
-        <button class="opt sel" data-diff="2"><b>ПРО</b><s>ELO 1900</s></button>
-        <button class="opt" data-diff="3"><b>МАСТЕР</b><s>ELO 2300</s></button>
-        <button class="opt" data-diff="4"><b>ЛЕГЕНДА</b><s>ELO 2700</s></button>
+        <button class="opt" data-diff="0"><b>НОВИЧОК</b><s>легкий</s></button>
+        <button class="opt" data-diff="1"><b>ЛЮБИТЕЛЬ</b><s>средний</s></button>
+        <button class="opt sel" data-diff="2"><b>ПРО</b><s>опытный</s></button>
+        <button class="opt" data-diff="3"><b>МАСТЕР</b><s>сложный</s></button>
+        <button class="opt" data-diff="4"><b>ЛЕГЕНДА</b><s>максимум</s></button>
       </div>
 
-      <h3 class="sec">Матч до</h3>
-      <div class="row">
-        <button class="opt" data-set="target" data-val="5"><b>5</b><s>блиц</s></button>
-        <button class="opt sel" data-set="target" data-val="11"><b>11</b><s>стандарт ITTF</s></button>
-        <button class="opt" data-set="target" data-val="21"><b>21</b><s>классика</s></button>
-      </div>
+      <button class="btn" id="play" style="margin-top:16px">НАЧАТЬ МАТЧ</button>
 
-      <h3 class="sec">Помощь в игре</h3>
-      <div class="sl">
-        <label>Техника удара<s>авто-доводка дуги и вращения</s></label>
-        <input type="range" id="rAssist" class="rAssist" data-set="assist" min="0" max="100" value="72">
-        <span class="v vAssist" id="vAssist">72%</span>
+      <div class="row" style="margin-top:10px">
+        <button class="btn ghost" id="menuOpenSettings" style="flex:1">⚙️ НАСТРОЙКИ</button>
+        <button class="btn ghost" id="train0" style="flex:1">🎓 ОБУЧЕНИЕ</button>
       </div>
-      <div class="sl">
-        <label>Доводка ракетки<s>притягивание ракетки к мячу</s></label>
-        <input type="range" id="rPos" class="rPos" data-set="posAssist" min="0" max="100" value="80">
-        <span class="v vPos" id="vPos">80%</span>
-      </div>
-
-      <button class="btn ghost" id="play">НАЧАТЬ МАТЧ</button>
-      <div class="row" style="margin-top:9px">
-        <button class="opt" id="wsOpen"><b>МАСТЕРСКАЯ</b><s id="wsCoins">0 монет</s></button>
-        <button class="opt" id="dailyOpen"><b>ЗАДАНИЯ</b><s id="wsStreak">серия 1</s></button>
-      </div>
-
-      <button class="btn ghost" id="menuOpenSettings" style="margin-top:9px">⚙️ ВСЕ НАСТРОЙКИ (КАМЕРА, ЗВУК, УПРАВЛЕНИЕ)</button>
 
       <h3 class="sec">Режимы</h3>
       <div class="row">
-        <button class="btn" id="careerStart" style="flex:1;background:linear-gradient(100deg,#ff7a2f,#ffd34d)">🏆 КАРЬЕРА</button>
-        <button class="btn" id="onlineStart" style="flex:1;background:linear-gradient(100deg,#39c6ff,#7ff0c0)">🌐 ОНЛАЙН</button>
+        <button class="btn ghost" id="careerStart" style="flex:1;border-color:rgba(255,122,47,.5);color:#ffd34d">🏆 КАРЬЕРА</button>
+        <button class="btn ghost" id="onlineStart" style="flex:1;border-color:rgba(57,198,255,.5);color:#7ff0c0">🌐 ОНЛАЙН</button>
+        <button class="btn ghost" id="demoStart" style="flex:1;border-color:rgba(155,81,224,.5);color:#c77dff">🤖 ДЕМО</button>
       </div>
-      <div class="row" style="margin-top:8px">
-        <button class="btn" id="demoStart" style="flex:1;background:linear-gradient(100deg,#9b51e0,#39c6ff)">🤖 НАБЛЮДЕНИЕ (БОТ VS БОТ)</button>
+
+      <div class="row" style="margin-top:9px">
+        <button class="opt" id="wsOpen"><b>МАСТЕРСКАЯ</b><s id="wsCoins">0 монет</s></button>
+        <button class="opt" id="dailyOpen"><b>ЗАДАНИЯ</b><s id="wsStreak">серия 1</s></button>
       </div>
     </div>
   </div>
@@ -206,6 +186,12 @@
         <label>Доводка ракетки<s>притягивание ракетки к мячу</s></label>
         <input type="range" class="rPos" data-set="posAssist" min="0" max="100" value="80">
         <span class="v vPos">80%</span>
+      </div>
+      <h3 class="sec">Длина матча</h3>
+      <div class="row">
+        <button class="opt" data-set="target" data-val="5"><b>5 ОЧКОВ</b><s>быстрый блиц</s></button>
+        <button class="opt sel" data-set="target" data-val="11"><b>11 ОЧКОВ</b><s>стандарт ITTF</s></button>
+        <button class="opt" data-set="target" data-val="21"><b>21 ОЧКО</b><s>классика</s></button>
       </div>
       <h3 class="sec">Подсказки</h3>
       <div class="cols">

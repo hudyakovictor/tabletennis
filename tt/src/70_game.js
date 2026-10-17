@@ -878,20 +878,61 @@ class Game {
       verdict = `${reason} (дистанция до мяча ${minDist.toFixed(2)} м)`;
     }
 
-    const swipeData = this._lastPointSwipe ? {
-      sx: this._lastPointSwipe.sx,
-      sy: this._lastPointSwipe.sy,
-      ex: this._lastPointSwipe.ex !== undefined ? this._lastPointSwipe.ex : this._lastPointSwipe.sx,
-      ey: this._lastPointSwipe.ey !== undefined ? this._lastPointSwipe.ey : this._lastPointSwipe.sy,
-      startT: this._lastPointSwipe.startT,
-      endT: this._lastPointSwipe.endT || this.time,
-      dist: this._lastPointSwipe.dist || Math.hypot(
-        (this._lastPointSwipe.ex || this._lastPointSwipe.sx) - this._lastPointSwipe.sx,
-        (this._lastPointSwipe.ey || this._lastPointSwipe.sy) - this._lastPointSwipe.sy
-      ),
-      samples: (this._lastPointSwipe.samples || []).map(p => ({ x: p.x, y: p.y })),
-      stroke: this._lastPointSwipe.stroke || (this.liveStroke ? { ...this.liveStroke.stroke } : null)
-    } : null;
+    let sw = this._lastPointSwipe;
+    if (!sw && this.swipe && this.swipe.lastReleased) {
+      const lr = this.swipe.lastReleased;
+      sw = {
+        sx: lr.sx, sy: lr.sy,
+        ex: lr.x, ey: lr.y,
+        dist: lr.dist,
+        samples: [{ x: lr.sx, y: lr.sy }, { x: lr.x, y: lr.y }],
+        stroke: this.liveStroke ? { ...this.liveStroke.stroke } : null
+      };
+    } else if (!sw && this.swipe && this.swipe.active && this.swipe.samples && this.swipe.samples.length) {
+      const s0 = this.swipe.samples[0], sN = this.swipe.samples[this.swipe.samples.length - 1];
+      sw = {
+        sx: s0.x, sy: s0.y,
+        ex: sN.x, ey: sN.y,
+        dist: Math.hypot(sN.x - s0.x, sN.y - s0.y),
+        samples: this.swipe.samples.map(p => ({ x: p.x, y: p.y })),
+        stroke: this.liveStroke ? { ...this.liveStroke.stroke } : null
+      };
+    }
+
+    let swipeData = null;
+    if (sw) {
+      const sx = sw.sx, sy = sw.sy;
+      const ex = sw.ex !== undefined ? sw.ex : sx;
+      const ey = sw.ey !== undefined ? sw.ey : sy;
+      const dx = ex - sx, dy = ey - sy;
+      const dist = sw.dist !== undefined ? sw.dist : Math.hypot(dx, dy);
+
+      let dirName = 'ТОЛЬКО КЛИК (БЕЗ СВАЙПА)';
+      let arrow = '•';
+      if (dist >= 0.02) {
+        if (Math.abs(dy) > Math.abs(dx) * 1.5) {
+          if (dy < 0) { dirName = 'СВАЙП ВВЕРХ (ТОПСПИН)'; arrow = '⬆'; }
+          else { dirName = 'СВАЙП ВНИЗ (ПОДРЕЗКА)'; arrow = '⬇'; }
+        } else if (Math.abs(dx) > Math.abs(dy) * 1.5) {
+          if (dx > 0) { dirName = 'СВАЙП ВПРАВО'; arrow = '➡'; }
+          else { dirName = 'СВАЙП ВЛЕВО'; arrow = '⬅'; }
+        } else {
+          if (dy < 0) {
+            if (dx > 0) { dirName = 'СВАЙП ВВЕРХ-ВПРАВО'; arrow = '↗'; }
+            else { dirName = 'СВАЙП ВВЕРХ-ВЛЕВО'; arrow = '↖'; }
+          } else {
+            if (dx > 0) { dirName = 'СВАЙП ВНИЗ-ВПРАВО'; arrow = '↘'; }
+            else { dirName = 'СВАЙП ВНИЗ-ВЛЕВО'; arrow = '↙'; }
+          }
+        }
+      }
+
+      swipeData = {
+        sx, sy, ex, ey, dx, dy, dist, dirName, arrow,
+        samples: sw.samples && sw.samples.length ? sw.samples.map(p => ({ x: p.x, y: p.y })) : [{ x: sx, y: sy }, { x: ex, y: ey }],
+        stroke: sw.stroke || (this.liveStroke ? { ...this.liveStroke.stroke } : null)
+      };
+    }
 
     const miss = {
       id: this.missedRallies.length + 1,
@@ -903,7 +944,7 @@ class Game {
       shots: this.rally,
       minDist,
       hitRadius: rad,
-      hadSwipe,
+      hadSwipe: !!swipeData,
       strokeName,
       swipeData,
       frames: clipData.frames,
@@ -1151,16 +1192,18 @@ class Game {
       }
     }
     if (!hit) {
-      // Forgiving return reach for balls from opponent: after bouncing on player half,
-      // a deliberate swipe when close to the ball connects reliably!
-      const receiveCtx = b.lastHitBy === -1 && (this.rallyBounces.some((s) => s > 0) || b.p.z >= PH.T_HALF_LEN);
+      // Forgiving return reach for balls from opponent: after bouncing on player half or crossing deep,
+      // a deliberate swipe when near the ball connects reliably!
+      const receiveCtx = b.lastHitBy === -1 && (this.rallyBounces.some((s) => s > 0) || b.p.z >= 0.70);
       if (receiveCtx) {
         const rad = V3.dist(b.p, pad.pos);
         const sw0 = this.swipe;
-        const live = (sw0.active && sw0.m.samples > 2 && sw0.m.dist > 0.025)
-          || (sw0.lastReleased && this.time - (this.swipeReleasedAt || -9) < 0.42);
-        if (live && rad <= radius * 1.50) {
-          hit = { t: 1, x: b.p.x, y: b.p.y, z: b.p.z, rad: rad * 0.60, px: pad.pos.x, py: pad.pos.y, pz: pad.pos.z };
+        const live = (sw0.active && sw0.m.samples >= 1)
+          || (sw0.lastReleased && this.time - (this.swipeReleasedAt || -9) < 0.90);
+        const isNovice = this.ai && this.ai.levelIndex === 0;
+        const hitTol = radius * (isNovice ? 2.6 : 1.85);
+        if (live && rad <= hitTol) {
+          hit = { t: 1, x: b.p.x, y: b.p.y, z: b.p.z, rad: rad * 0.45, px: pad.pos.x, py: pad.pos.y, pz: pad.pos.z };
         }
       }
     }
@@ -2040,8 +2083,8 @@ class Game {
       d(me.ball, tmp.m, ma.ball);
     }
 
-    /* player paddle (hidden per user request: "ракетку скрой", but visible in debug replay!) */
-    if (this.settings.showPlayerPaddle || this.isDebugReplay) {
+    /* player paddle (hidden per user request: "ракетку скрой") */
+    if (this.settings.showPlayerPaddle) {
       const pad = this.player;
       const PM = this.paddleMats(S) || ma;
       const pq = Q.lookRotation(Q.new(), pad.normal, { x: 0, y: 1, z: 0 });
@@ -2114,7 +2157,7 @@ class Game {
       if (onTable(b.p.x, b.p.z) && b.p.y > TY - 0.02) S.blob(R, b.p.x, b.p.y, b.p.z, TY, 0.055, 0.62, 1);
       else S.blob(R, b.p.x, b.p.y, b.p.z, 0, 0.075, 0.40, 1);
     }
-    if (this.settings.showPlayerPaddle || this.isDebugReplay) {
+    if (this.settings.showPlayerPaddle) {
       const pp = this.player.pos;
       if (onTable(pp.x, pp.z)) S.blob(R, pp.x, pp.y, pp.z, TY, 0.115, 0.42, 1.25);
       else S.blob(R, pp.x, pp.y, pp.z, 0, 0.16, 0.26, 1.25);

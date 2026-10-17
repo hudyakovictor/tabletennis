@@ -939,122 +939,110 @@ class UI {
     this.drawStrikeRing(c, W, H, d);
     this.drawHand(c, W, H, d);
 
-    // Debug replay analysis: reach indicator & distance between paddle and ball
-    if (g.isDebugReplay && g.replayer && g.replayer.on) {
-      const pBall = g.project(g.ball.p, this._pvDbgB || (this._pvDbgB = {}));
-      const pPad = g.project(g.player.pos, this._pvDbgP || (this._pvDbgP = {}));
-      if (pPad.ok && pBall.ok) {
-        const bx = pBall.x * W, by = pBall.y * H;
-        const px = pPad.x * W, py = pPad.y * H;
-        const dist3d = V3.dist(g.ball.p, g.player.pos);
-        const hitRad = (g.player.hitRadius || 0.22) * 1.45;
-        const inReach = dist3d <= hitRad;
-        const col = inReach ? '#4ee39a' : '#ff4d6d';
+    // Replay analysis: Player Click Point & Swipe Direction
+    if (g.replayer && g.replayer.on) {
+      const mo = g.replayer.moment;
+      const swd = mo ? mo.swipeData : null;
+
+      if (swd) {
+        const cx = swd.sx * W, cy = swd.sy * H;
+        const ex = swd.ex * W, ey = swd.ey * H;
+        const dx = ex - cx, dy = ey - cy;
+        const distPx = Math.hypot(dx, dy);
 
         c.save();
-        // 1. Paddle reach ring
-        c.strokeStyle = col;
-        c.lineWidth = 2 * d;
-        c.setLineDash([5 * d, 5 * d]);
-        c.beginPath();
-        c.arc(px, py, 32 * d, 0, TAU);
-        c.stroke();
-        c.setLineDash([]);
 
-        // 2. Connecting line
-        c.strokeStyle = col;
-        c.lineWidth = 1.8 * d;
-        c.beginPath();
-        c.moveTo(bx, by);
-        c.lineTo(px, py);
-        c.stroke();
-
-        // 3. Floating distance badge
-        const midX = (bx + px) * 0.5, midY = (by + py) * 0.5 - 14 * d;
-        c.font = `800 ${11.5 * d}px ${CSSFONT}`;
-        c.textAlign = 'center';
-        c.fillStyle = '#0a101d';
-        c.fillRect(midX - 36 * d, midY - 10 * d, 72 * d, 18 * d);
-        c.strokeStyle = col;
-        c.lineWidth = 1.5 * d;
-        c.strokeRect(midX - 36 * d, midY - 10 * d, 72 * d, 18 * d);
-        c.fillStyle = col;
-        c.fillText(`${dist3d.toFixed(2)} м`, midX, midY + 4 * d);
-        c.restore();
-      }
-
-      // 4. Click position & swipe ribbon reproduction on replay
-      const mo = g.replayer.moment;
-      if (mo && mo.swipeData && mo.swipeData.samples && mo.swipeData.samples.length > 1) {
-        const swd = mo.swipeData;
-        const cx = swd.sx * W, cy = swd.sy * H;
-        const lastF = g.replayer.lastFrame || 30;
-        const framesFromEnd = Math.max(1, Math.round((mo.time - (swd.startT || mo.time)) * (mo.hz || 30)));
-        const startFrame = Math.max(0, lastF - framesFromEnd);
-        const endFrame = startFrame + Math.max(2, Math.round(((swd.endT || mo.time) - (swd.startT || mo.time)) * (mo.hz || 30)));
-
-        // Appear as the ball comes into the player's zone
-        if (g.replayer.i >= Math.max(0, startFrame - 4)) {
-          const curI = g.replayer.i;
-          const progress = curI >= endFrame ? 1.0 : clamp((curI - startFrame) / Math.max(1, endFrame - startFrame), 0.1, 1.0);
-          const nPts = swd.samples.length;
-          const count = Math.max(2, Math.round(progress * nPts));
-          const pts = swd.samples.slice(0, count);
+        // 1. If there was a swipe movement (distPx > 10 * d): draw glowing line and directional arrow
+        if (distPx > 10 * d) {
           const col = (swd.stroke && swd.stroke.col) || '#39c6ff';
+          const angle = Math.atan2(dy, dx);
 
-          c.save();
-          // Draw the in-game swipe ribbon
-          c.lineCap = 'round'; c.lineJoin = 'round';
-          for (let k = 1; k < pts.length; k++) {
-            const t = k / (pts.length - 1);
-            c.strokeStyle = col;
-            c.globalAlpha = 0.20 + t * 0.70;
-            c.lineWidth = (2.5 + t * 9.5) * d;
-            c.beginPath();
-            c.moveTo(pts[k - 1].x * W, pts[k - 1].y * H);
-            c.lineTo(pts[k].x * W, pts[k].y * H);
-            c.stroke();
-          }
+          // Glowing trail line
+          c.shadowBlur = 14 * d;
+          c.shadowColor = col;
+          c.strokeStyle = col;
+          c.lineWidth = 5 * d;
+          c.lineCap = 'round';
+          c.beginPath();
+          c.moveTo(cx, cy);
+          c.lineTo(ex, ey);
+          c.stroke();
 
-          // Glow head at swipe lead
-          const head = pts[pts.length - 1];
-          const hx = head.x * W, hy = head.y * H;
-          const rg = c.createRadialGradient(hx, hy, 0, hx, hy, 28 * d);
-          rg.addColorStop(0, col + 'ff'); rg.addColorStop(1, col + '00');
-          c.fillStyle = rg; c.beginPath(); c.arc(hx, hy, 28 * d, 0, TAU); c.fill();
-
-          // Stroke label
-          if (swd.stroke && pts.length > 2) {
-            c.font = `800 ${12 * d}px ${CSSFONT}`;
-            c.textAlign = 'center';
-            c.fillStyle = col;
-            c.fillText(swd.stroke.short || swd.stroke.name, hx, hy - 22 * d);
-          }
-
-          // Point of click: glowing ring & label
-          c.shadowBlur = 14 * d; c.shadowColor = '#39c6ff';
-          c.strokeStyle = '#39c6ff'; c.lineWidth = 2.5 * d;
-          c.beginPath(); c.arc(cx, cy, 13 * d, 0, TAU); c.stroke();
-          c.fillStyle = '#ffffff'; c.beginPath(); c.arc(cx, cy, 4 * d, 0, TAU); c.fill();
+          // Arrow head at end point
+          const arrowLen = 18 * d;
+          c.fillStyle = col;
+          c.beginPath();
+          c.moveTo(ex, ey);
+          c.lineTo(ex - arrowLen * Math.cos(angle - Math.PI / 6), ey - arrowLen * Math.sin(angle - Math.PI / 6));
+          c.lineTo(ex - (arrowLen * 0.6) * Math.cos(angle), ey - (arrowLen * 0.6) * Math.sin(angle));
+          c.lineTo(ex - arrowLen * Math.cos(angle + Math.PI / 6), ey - arrowLen * Math.sin(angle + Math.PI / 6));
+          c.closePath();
+          c.fill();
           c.shadowBlur = 0;
 
-          c.font = `800 ${10.5 * d}px ${CSSFONT}`;
+          // Direction label at the end of the swipe
+          const lblX = clamp(ex + 22 * d * Math.cos(angle), 90 * d, W - 90 * d);
+          const lblY = clamp(ey + 22 * d * Math.sin(angle), 40 * d, H - 35 * d);
+          c.font = `800 ${12 * d}px ${CSSFONT}`;
           c.textAlign = 'center';
-          c.fillStyle = '#0a101d';
-          c.fillRect(cx - 44 * d, cy - 28 * d, 88 * d, 17 * d);
-          c.strokeStyle = '#39c6ff'; c.lineWidth = 1.2 * d;
-          c.strokeRect(cx - 44 * d, cy - 28 * d, 88 * d, 17 * d);
-          c.fillStyle = '#39c6ff';
-          c.fillText('👆 ТОЧКА КЛИКА', cx, cy - 16 * d);
-          c.restore();
+          c.textBaseline = 'middle';
+          const text = `${swd.arrow} ${swd.dirName}`;
+          const tw = c.measureText(text).width + 18 * d;
+          c.fillStyle = 'rgba(6, 12, 24, 0.90)';
+          c.fillRect(lblX - tw * 0.5, lblY - 12 * d, tw, 24 * d);
+          c.strokeStyle = col;
+          c.lineWidth = 1.5 * d;
+          c.strokeRect(lblX - tw * 0.5, lblY - 12 * d, tw, 24 * d);
+          c.fillStyle = '#ffffff';
+          c.fillText(text, lblX, lblY);
         }
-      } else if (mo && (!mo.hadSwipe || !mo.swipeData)) {
-        // No click was made
-        c.save();
-        c.font = `800 ${12 * d}px ${CSSFONT}`;
+
+        // 2. Point of click: pulsating glowing target ring & label
+        const pulse = 1 + 0.12 * Math.sin(Date.now() * 0.007);
+        c.shadowBlur = 16 * d;
+        c.shadowColor = '#00ffcc';
+        c.strokeStyle = '#00ffcc';
+        c.lineWidth = 3 * d;
+        c.beginPath();
+        c.arc(cx, cy, 14 * d * pulse, 0, TAU);
+        c.stroke();
+        c.fillStyle = '#ffffff';
+        c.beginPath();
+        c.arc(cx, cy, 5 * d, 0, TAU);
+        c.fill();
+        c.shadowBlur = 0;
+
+        // Click label badge
+        const badgeY = cy > 55 * d ? cy - 26 * d : cy + 28 * d;
+        c.font = `800 ${11 * d}px ${CSSFONT}`;
         c.textAlign = 'center';
-        c.fillStyle = '#ff9248';
-        c.fillText('⚠️ В ЭТОМ РОЗЫГРЫШЕ КЛИК НЕ БЫЛ СДЕЛАН (ПРОПУСК БЕЗ СВАЙПА)', W * 0.5, H * 0.78);
+        c.textBaseline = 'middle';
+        const clkText = '🎯 ТОЧКА КЛИКА';
+        const ctw = c.measureText(clkText).width + 16 * d;
+        c.fillStyle = 'rgba(4, 18, 28, 0.92)';
+        c.fillRect(cx - ctw * 0.5, badgeY - 11 * d, ctw, 22 * d);
+        c.strokeStyle = '#00ffcc';
+        c.lineWidth = 1.5 * d;
+        c.strokeRect(cx - ctw * 0.5, badgeY - 11 * d, ctw, 22 * d);
+        c.fillStyle = '#00ffcc';
+        c.fillText(clkText, cx, badgeY);
+
+        c.restore();
+      } else if (mo && (!mo.hadSwipe || !mo.swipeData)) {
+        // No click was made in this point
+        c.save();
+        c.font = `800 ${13 * d}px ${CSSFONT}`;
+        c.textAlign = 'center';
+        c.textBaseline = 'middle';
+        const msg = '⚠️ В ЭТОМ РОЗЫГРЫШЕ НЕ БЫЛО КЛИКА (ПРОПУСК БЕЗ СВАЙПА)';
+        const mw = c.measureText(msg).width + 24 * d;
+        c.fillStyle = 'rgba(25, 10, 15, 0.90)';
+        c.fillRect(W * 0.5 - mw * 0.5, H * 0.82 - 14 * d, mw, 28 * d);
+        c.strokeStyle = '#ff4d6d';
+        c.lineWidth = 1.5 * d;
+        c.strokeRect(W * 0.5 - mw * 0.5, H * 0.82 - 14 * d, mw, 28 * d);
+        c.fillStyle = '#ff758f';
+        c.fillText(msg, W * 0.5, H * 0.82);
         c.restore();
       }
     }
