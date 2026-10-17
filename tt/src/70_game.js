@@ -153,15 +153,13 @@ class Game {
     this.lastPoint = null;
     this.timeScale = 1; this.targetTimeScale = 1;
     this.shake = 0; this.shakeDir = V3.new();
-    /* The camera is a choice between four AUTHORED rigs (57_camera.js):
-     * fixed distance, fixed angle, table always square to the frame. There
-     * is deliberately no free orbit any more — hand-tuning yaw/pitch/zoom
-     * cost players minutes per session and could park the bat off-screen,
-     * and every framing it produced was worse than one of the four. */
+    // Presets are the baseline; mouse controls are session-local and resettable.
+    this.cameraControls = { zoom: 1, height: 0 };
+    this.camShiftY = 0;
     this.camRig = { eye: V3.new(0, 1.68, 2.38), look: V3.new(0, 0.74, -0.25), fov: 48, mode: 'BROADCAST' };
     this._rigBuf = { vp: M4.create(), proj: M4.create(), view: M4.create() };
     this.camVP = M4.create();          // view·proj of the authored rig, no shake
-    this.hudBandY = 0.40;              // screen y where the table's far edge begins
+    this.hudBandY = 0.72;              // screen y below the full table's feet
     this.camPos = V3.new(0, 1.68, 2.38); this.camLook = V3.new(0, 0.74, -0.25);
     this.camPosT = V3.clone(this.camPos); this.camLookT = V3.clone(this.camLook);
     this.fov = 48; this.fovT = 48;
@@ -196,6 +194,7 @@ class Game {
     this.network = new NetworkManager(this);
 
     this.resize();
+    this.updateCamera(0);
     window.addEventListener('resize', () => this.resize());
   }
 
@@ -223,30 +222,30 @@ class Game {
       return { x, y };
     };
 
-    /* One input language: the pointer drives the bat and the swipe.
-     *   one finger / left button  → the stroke, and where the bat stands
-     *   a second finger           → throws the half-made stroke away
-     * The camera is NOT on the pointer any more (four authored rigs, keys
-     * 1..4 / C), so there is no orbit, no pinch-zoom and no wheel-zoom: a
-     * framing that has to be rebuilt by hand every session is a framing
-     * that is wrong most of the time. */
+    // Left pointer = stroke. Right vertical drag = height; wheel = dolly.
+    let cameraDrag = null;
     const ptrs = new Map();
     const dropStroke = () => {
       this.swipe.cancel();
       this.pointerDown = false;
     };
 
+    this.cancelInput = () => { ptrs.clear(); cameraDrag = null; dropStroke(); };
     const down = (e) => {
-      if (this.state === GS.MENU || this.state === GS.MATCH_END) return;
+      if (this.paused || this.state === GS.MENU || this.state === GS.MATCH_END) return;
+      if (e.button === 2) {
+        if (e.pointerType && e.pointerType !== 'mouse') return;
+        this.cancelInput();
+        cameraDrag = { id: e.pointerId, y: e.clientY };
+        e.preventDefault(); return;
+      }
+      if (e.button === 1) { e.preventDefault(); return; }
+      if (this.demoMode) this.stopDemo(); // a real stroke always takes control
       this.audio.init(); this.audio.resume();
       ptrs.set(e.pointerId, { x: e.clientX, y: e.clientY });
       e.preventDefault();
 
       if (this.replayer.on) { this.skipReplay(); return; }   // tap = skip the reel
-      if (e.button === 2 || e.button === 1) {        // right / middle: not a stroke
-        dropStroke();
-        return;
-      }
       if (ptrs.size >= 2) {                          // a second finger cancels
         dropStroke();
         return;
@@ -275,6 +274,13 @@ class Game {
     };
 
     const move = (e) => {
+      if (cameraDrag && cameraDrag.id === e.pointerId) {
+        if (!(e.buttons & 2)) { cameraDrag = null; return; }
+        const dy = e.clientY - cameraDrag.y;
+        cameraDrag.y = e.clientY;
+        if (Number.isFinite(dy)) this.cameraControls.height = clamp(this.cameraControls.height - dy * 0.012, -1, 2.5);
+        e.preventDefault(); return;
+      }
       const p = ptrs.get(e.pointerId);
       if (p) { p.x = e.clientX; p.y = e.clientY; }
       const n = track(e);
@@ -291,10 +297,11 @@ class Game {
     };
 
     const up = (e) => {
+      if (cameraDrag && cameraDrag.id === e.pointerId) { cameraDrag = null; e.preventDefault(); return; }
       ptrs.delete(e.pointerId);
       if (e.button === 2 || e.button === 1) { e.preventDefault(); return; }
       if (ptrs.size >= 1) { e.preventDefault(); return; }   // still another finger down
-      if (!this.swipe.active) return;
+      if (!this.swipe.active) { this.pointerDown = false; return; }
       const n = this.pointer || { x: 0.5, y: 0.5 };
       this.swipe.up(n.x, n.y, this.time);
       if (this._lastPointSwipe) {
@@ -314,29 +321,35 @@ class Game {
     c.addEventListener('pointerdown', (e) => { c.setPointerCapture(e.pointerId); down(e); });
     c.addEventListener('pointermove', move);
     c.addEventListener('pointerup', up);
-    c.addEventListener('pointercancel', up);
+    c.addEventListener('pointercancel', () => this.cancelInput());
+    c.addEventListener('lostpointercapture', (e) => { if (ptrs.has(e.pointerId) || (cameraDrag && cameraDrag.id === e.pointerId)) this.cancelInput(); });
     c.addEventListener('contextmenu', (e) => e.preventDefault());
-    /* the bat follows the cursor across the whole window, so leaving the
-       canvas can never strand it; the wheel no longer zooms (fixed rigs) */
-    window.addEventListener('pointermove', (e) => { if (!ptrs.size) track(e); }, { passive: true });
-    window.addEventListener('blur', () => { this.pointerDown = false; this.swipe.cancel(); });
+    // Hover movement follows the bat, except while the right button owns the camera.
+    window.addEventListener('pointermove', (e) => { if (!ptrs.size && !cameraDrag && !(e.buttons & 2)) track(e); }, { passive: true });
+    window.addEventListener('blur', () => { this.cancelInput(); this.setPaused(true); });
+    document.addEventListener('visibilitychange', () => {
+      if (document.hidden) { this.cancelInput(); this.setPaused(true); this.profile.save(true); }
+    });
+    window.addEventListener('pagehide', () => { this.saveSettings(); this.profile.save(true); this.career.save(); });
     c.addEventListener('wheel', (e) => {
       e.preventDefault();
+      if (this.state === GS.MENU || this.state === GS.MATCH_END || this.replayer.on) return;
+      const units = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? this.vh : 1;
+      const delta = clamp(e.deltaY * units, -200, 200);
+      if (Number.isFinite(delta)) this.cameraControls.zoom = clamp(this.cameraControls.zoom * Math.exp(delta * 0.0015), 0.72, 1.6);
     }, { passive: false });
     c.style.touchAction = 'none';
 
     window.addEventListener('keydown', (e) => {
+      if (document.getElementById('settings').classList.contains('on')) return;
+      if (e.repeat || e.ctrlKey || e.metaKey || e.altKey ||
+          (e.target && (e.target.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName)))) return;
       if (e.key === 'r' || e.key === 'R' || e.key === 'к' || e.key === 'К') this.restart();
       if (e.key === 'p' || e.key === 'P' || e.key === 'з' || e.key === 'З') this.setPaused(!this.paused);
       if (e.key === 'F3') { this.settings.showDebug = !this.settings.showDebug; e.preventDefault(); }
-      if (e.key === 'c' || e.key === 'C' || e.key === 'с' || e.key === 'С') {
-        const i = CAMERA_ORDER.indexOf(this.settings.camera);
-        this.setCameraPreset(CAMERA_ORDER[(i + 1) % CAMERA_ORDER.length]);
-      }
-      /* --- the four authored rigs, straight off the keyboard --- */
-      if (e.key >= '1' && e.key <= '4') {
-        this.setCameraPreset(CAMERA_ORDER[+e.key - 1]);
-        e.preventDefault();
+      if (e.key === 'c' || e.key === 'C' || e.key === 'с' || e.key === 'С') { this.camReset(); e.preventDefault(); }
+      if (e.key >= '1' && e.key <= '3') {
+        this.setCameraPreset(CAMERA_ORDER[+e.key - 1]); e.preventDefault();
       }
       if (e.key === '0' || e.key === ')') { this.setCameraPreset(CAMERA_ORDER[0]); e.preventDefault(); }
     });
@@ -352,6 +365,8 @@ class Game {
 
   /* --------------------------- match flow -------------------------- */
   startMatch(diff) {
+    if (this.replayer.on) { this.replayer.on = false; this.ui && this.ui.replayShow(false); }
+    this._demoGesture = null;
     this.matchTasks = { topspin: 0, smash: 0, serves: 0, moments: 0 };
     this.training = null;
     this.matchWinner = 0;
@@ -390,18 +405,54 @@ class Game {
       this.msg('СМОТРИТЕ НА ТРАЕКТОРИЮ СВАЙПОВ', 3.0, '#7fd4ff');
     } else {
       this.msg(this.server === 1 ? 'ВАША ПОДАЧА' : 'ПОДАЁТ СОПЕРНИК', 1.6, '#7fd4ff');
-      this.msg('СВАЙП = УДАР · РАКЕТКА САМА ИДЁТ К МЯЧУ', 3.4, '#9fe0ff');
+      this.msg('СВАЙП = УДАР', 3.4, '#9fe0ff');
     }
   }
   startDemo(diff = 2) {
+    this.career.stop();
+    this.network.disconnect();
     this._keepDemo = true;
     this.demoMode = true;
     this.startMatch(diff);
   }
-  restart() { this.startMatch(this.settings.difficulty); }
+  stopDemo() {
+    this.demoMode = false;
+    this._demoGesture = null;
+    this.cancelInput && this.cancelInput();
+    this.swipeReleasedAt = -Infinity;
+  }
+  restart() {
+    if (this.state === GS.MENU || this.network.isInMatch ||
+        (this.career.active && this.career.state !== 'MATCH')) return;
+    this.startMatch(this.settings.difficulty);
+  }
+
+  returnToMenu() {
+    if (this.replayer.on) this.endReplay();
+    this.stopTraining();
+    this.career.save();
+    this.career.stop();
+    this.network.disconnect();
+    this.stopDemo();
+    this.audio.stopAudience();
+    this.ball.live = false;
+    this._acc = 0;
+    this.cancelInput && this.cancelInput();
+    this.setState(GS.MENU);
+    this.setSlowmoAllowed(true);
+    this.slowmo.on = false; this.slowmo.active = false;
+    this.timeScale = this.targetTimeScale = 1; this.slowmoUntil = 0;
+    this.saveSettings(); this.profile.save(true);
+  }
 
   /* --------------------------- training ---------------------------- */
   startTraining() {
+    this.career.stop();
+    this.network.disconnect();
+    this.demoMode = false;
+    this.setSlowmoAllowed(true);
+    this.timeScale = this.targetTimeScale = 1; this.slowmoUntil = 0;
+    this.resetPaddle(true);
     this.score = [0, 0]; this.rally = 0; this.bestRally = 0;
     this.matchWinner = 0;
     this.messages.length = 0;
@@ -429,6 +480,7 @@ class Game {
     const play = this.state === GS.RALLY || this.state === GS.SERVE_READY ||
                  this.state === GS.SERVE_TOSS || this.state === GS.POINT;
     this.paused = !!v && play;
+    if (this.paused && this.cancelInput) this.cancelInput();
     if (typeof document !== 'undefined' && document.body)
       document.body.classList.toggle('is-paused', this.paused);
   }
@@ -455,6 +507,7 @@ class Game {
      * cursor binding re-anchored, no stale intercept from the last rally. */
     this.resetPaddle();
     this.setState(GS.SERVE_READY);
+    this.audio.resetRally();
     this.recorder.begin(this.time, s);
     this.moments.beginRally(this.time, this.score);
     this.ai.setPressure(this.score[1], this.score[0], this.settings.targetScore);
@@ -564,6 +617,7 @@ class Game {
         if (side !== lh) { this.awardPoint(-lh, 'ОШИБКА ПОДАЧИ'); return; }
       } else if (this.serveBounces === 2) {
         if (side !== -lh) { this.awardPoint(-lh, 'ОШИБКА ПОДАЧИ'); return; }
+        if (this.netTouched) { this.letServe(); return; }
         this.isServeBall = false;      // serve is good, normal rally from here
         this.rallyBounces.length = 0;
         this.rallyBounces.push(side);  // ...and the receiver's half HAS been touched
@@ -630,34 +684,13 @@ class Game {
       if (vm !== 1) { b.v.x *= vm; b.v.y *= vm; b.v.z *= vm; }
       if (wm !== 1) { b.w.x *= wm; b.w.y *= wm; b.w.z *= wm; }
     }
-    if (!this.isServeBall) this.rally++;
-
-    if (side < 0) {
-      const isNovice = this.ai && this.ai.levelIndex === 0;
-      const isAmateur = this.ai && this.ai.levelIndex === 1;
-      if (isNovice) {
-        // Novice ball speed is capped to a gentle, welcoming pace (~13-16 km/h):
-        const maxVz = this.isServeBall ? 3.8 : 4.4;
-        if (b.v.z > maxVz) {
-          const factor = maxVz / b.v.z;
-          b.v.z = maxVz;
-          b.v.x *= factor;
-        }
-        // Friendly gentle arc over the net
-        b.v.y = clamp(b.v.y, 1.3, 2.5);
-        // Minimal spin (so it doesn't trick beginner players)
-        V3.mul(b.w, b.w, 0.05);
-      } else if (isAmateur) {
-        const maxVz = this.isServeBall ? 6.2 : 7.6;
-        if (b.v.z > maxVz) {
-          const factor = maxVz / b.v.z;
-          b.v.z = maxVz;
-          b.v.x *= factor;
-        }
-        b.v.y = clamp(b.v.y, 0.9, 2.6);
-        V3.mul(b.w, b.w, 0.45);
-      }
+    if (!this.isServeBall) {
+      this.rally++;
+      if (!this.training && !this.demoMode) this.audio.onRallyHit(this.rally, side);
     }
+
+    // Difficulty belongs to OpponentAI's launch solver. Clamping velocity
+    // here invalidated its legal serves after they had already been solved.
 
     const speed = V3.len(b.v), spin = V3.len(b.w);
     this.stats.shots++;
@@ -776,19 +809,35 @@ class Game {
     if (!this.profile) return;
     const s = this.settings;
     this.profile.data.settings = {
-      assist: s.assist, posAssist: s.posAssist, difficulty: s.difficulty, quality: s.quality,
+      hitZone: s.hitZone, assist: s.assist, posAssist: s.posAssist, difficulty: s.difficulty, quality: s.quality,
       sound: s.sound, volume: s.volume, camera: s.camera, hand: s.hand,
       showTrail: s.showTrail, showPredict: s.showPredict, showZone: s.showZone,
       showTele: s.showTele, haptics: s.haptics, coach: s.coach, adaptive: s.adaptive,
       slowmoPlayer: s.slowmoPlayer, targetScore: s.targetScore, sensitivity: s.sensitivity,
       spinBias: s.spinBias,
     };
+    if (this.career && this.career.active && this.career._baseSettings)
+      Object.assign(this.profile.data.settings, this.career._baseSettings);
     this.profile.touch();
   }
 
   loadSettings() {
     if (!this.settings || !this.profile || !this.profile.data.settings) return false;
-    Object.assign(this.settings, this.profile.data.settings);
+    const raw = this.profile.data.settings, s = this.settings;
+    // Only known keys cross the save boundary. Never merge arbitrary keys/prototypes.
+    for (const k of Object.keys(s)) {
+      if (typeof s[k] === 'boolean' && typeof raw[k] === 'boolean') s[k] = raw[k];
+    }
+    const ranges = { assist: [0, 1], posAssist: [0, 1], hitZone: [0.3, 1],
+      difficulty: [0, 4], volume: [0, 1], sensitivity: [0.5, 1.8] };
+    for (const [k, [lo, hi]] of Object.entries(ranges)) {
+      if (Number.isFinite(raw[k])) s[k] = clamp(raw[k], lo, hi);
+    }
+    s.difficulty = Math.round(s.difficulty);
+    for (const [k, values] of Object.entries({ quality: ['low', 'medium', 'high'],
+      camera: CAMERA_ORDER, hand: ['left', 'right'], spinBias: ['low', 'norm', 'high'], targetScore: [5, 11, 21] })) {
+      if (values.includes(raw[k])) s[k] = raw[k];
+    }
     if (this.settings.volume !== undefined) this.audio.setVolume(this.settings.volume);
     if (this.settings.sound === false) this.audio.setMuted(true);
     if (this.settings.difficulty !== undefined) this.ai.setLevel(this.settings.difficulty);
@@ -1058,6 +1107,7 @@ class Game {
 
   /** Everything that has to be written down when the last point lands. */
   settleMatch() {
+    if (this.demoMode) { this.lastReward = null; return; }
     const won = this.matchWinner > 0;
     const p = this.profile;
     if (!p) return;
@@ -1152,12 +1202,11 @@ class Game {
           this.audio.hitNet();
           this.msg('СЕТКА — ЭДЖ!', 1.1, '#ffd34d');
           this.particles.burst(xAt, PH.NET_TOP, 0, 8, 1.1, 0.3, 0.014, 1, 0.9, 0.5);
-          if (this.isServeBall) { this.letServe(); return; }
+          this.netTouched = true;
         } else if (yAt < PH.NET_TOP) {
           bounceNet(b.p, b.v, b.w, Math.sign(p0.z) || 1);
           this.audio.hitNet();
           this.particles.burst(xAt, yAt, 0, 7, 0.7, 0.3, 0.013, 0.8, 0.85, 1);
-          if (this.isServeBall) { this.letServe(); return; }
           this.netTouched = true;
           this.moments.addBounce(true);
         }
@@ -1202,6 +1251,17 @@ class Game {
     this.stateT = 0.35;              // short pause, nothing is scored
   }
 
+  playerStrokeIntent(serving = false) {
+    const sw = this.swipe;
+    const lastSample = sw.samples[sw.samples.length - 1];
+    const releasedAt = Number.isFinite(this.swipeReleasedAt) ? this.swipeReleasedAt : -Infinity;
+    const m = sw.active && lastSample && this.time - lastSample.t >= 0 && this.time - lastSample.t < 0.18 ? sw.m
+      : !sw.active && this.time - releasedAt >= 0 && this.time - releasedAt < (serving ? 0.9 : 0.25) ? sw.lastReleased : null;
+    if (!m || m.samples < 2 || !Number.isFinite(m.pathLen) || m.pathLen < 0.018 ||
+        !Number.isFinite(m.peakSpeed) || m.peakSpeed < 0.10) return null;
+    return m;
+  }
+
   tryPlayerHit(p0) {
     const pad = this.player, b = this.ball;
     if (!b.live) return;
@@ -1212,16 +1272,16 @@ class Game {
     const reachRadius = 0.35 + hzSetting * 0.95;
 
     const serveCtx = this.state === GS.SERVE_TOSS && this.server === 1 && b.lastHitBy === 0;
+    const sw = this.swipe, m = this.playerStrokeIntent(serveCtx);
+    if (!m) return;
+    if (serveCtx && (b.v.y >= 0 || this.tossApex - PH.TABLE_Y <= 0.10)) return;
     let hit = null;
 
     if (serveCtx) {
       // ITTF 2.06: the ball must be struck while FALLING from the toss.
       const rad = V3.dist(b.p, pad.pos);
       if (b.v.y < 0 && this.tossApex - PH.TABLE_Y > 0.10 && rad <= reachRadius) {
-        const sw0 = this.swipe;
-        const live = (sw0.active && sw0.m.samples >= 1)
-          || (sw0.lastReleased && this.time - (this.swipeReleasedAt || -9) < 0.90);
-        if (live) hit = { t: 1, x: b.p.x, y: b.p.y, z: b.p.z, rad: rad * 0.40, px: pad.pos.x, py: pad.pos.y, pz: pad.pos.z };
+        hit = { t: 1, x: b.p.x, y: b.p.y, z: b.p.z, rad: rad * 0.40, px: pad.pos.x, py: pad.pos.y, pz: pad.pos.z };
       }
     } else {
       // Receiving ball from opponent: forgiving capture across the player's zone
@@ -1229,11 +1289,7 @@ class Game {
       if (incoming) {
         const dist2d = Math.hypot(b.p.x - pad.pos.x, b.p.y - pad.pos.y);
         const distZ = Math.abs(b.p.z - pad.pos.z);
-        const sw0 = this.swipe;
-        const live = (sw0.active && sw0.m.samples >= 1)
-          || (sw0.lastReleased && this.time - (this.swipeReleasedAt || -9) < 0.95);
-
-        if (live && dist2d <= reachRadius && (distZ <= 0.85 || b.p.z >= 0.70)) {
+        if (dist2d <= reachRadius && (distZ <= 0.85 || b.p.z >= 0.70)) {
           hit = { t: 1, x: b.p.x, y: b.p.y, z: b.p.z, rad: dist2d * 0.35, px: pad.pos.x, py: pad.pos.y, pz: pad.pos.z };
         }
       }
@@ -1270,11 +1326,6 @@ class Game {
     this.lastSweet = sweet;
 
     // ---- build the stroke from the live gesture --------------------
-    const sw = this.swipe;
-    let m = null;
-    if (sw.active && sw.m.samples >= 1) m = sw.m;
-    else if (sw.lastReleased && this.time - (this.swipeReleasedAt || -9) < 0.95) m = sw.lastReleased;
-
     let racket, quality;
     if (m) {
       const timing = clamp(m.speed / Math.max(m.peakSpeed, 1e-3), 0.35, 1);
@@ -1308,12 +1359,6 @@ class Game {
         racket = refineRacket(contact, b.v, b.w, racket, 1, quality);
       }
       racket.sweet = sweet; racket.timing = timing;
-    } else {
-      // Gentle assisted return
-      racket = makeRacket(1, 'DRIVE', { aim: { x: 0, z: -0.85 }, vmag: 4.8, quality: 0.65 });
-      const assistLvl = this.settings.assist !== undefined ? this.settings.assist : 0.85;
-      racket = refineRacket(contact, b.v, b.w, racket, assistLvl, 0.65);
-      quality = 0.65;
     }
 
     const info = impactRacket(b.v, b.w, racket.normal, racket.vR, quality, racket.rubber || {});
@@ -1323,6 +1368,9 @@ class Game {
     if (isServeStroke) { this.serveBounces = 0; this.rallyBounces.length = 0; }
     else this.isServeBall = false;
     this.applyHit(1, racket, contact, quality, info);
+    sw.cancel();
+    this.pointerDown = false;
+    this.swipeReleasedAt = -Infinity;
     if (this.state === GS.SERVE_TOSS) this.setState(GS.RALLY);
   }
 
@@ -1421,7 +1469,7 @@ class Game {
      * short serve simply could not be reached no matter what you did. Now a
      * predicted short ball grants the step-in depth. */
     let zNear = PADDLE_LIMITS.zNear;
-    const A = this.settings.assist !== undefined ? this.settings.assist : 0.85;
+    const A = this.settings.posAssist !== undefined ? this.settings.posAssist : 0.85;
     const o = this._paddlePred || (this._paddlePred = {});
     const incoming = this.ball.live && this.ball.v.z > 0.4 && this.ball.lastHitBy === -1;
     if (incoming && this.frame % 4 === 0) {
@@ -1481,7 +1529,7 @@ class Game {
       }
     }
     // positional assist: slide towards the predicted intercept
-    if (A > 0.01 && incoming && this.recenterT <= 0) {
+    if (A > 0.01 && incoming && this.recenterT <= 0 && this.playerStrokeIntent()) {
       if (o.reach) {
         // the closer the ball, the more the footwork assist commits
         const k = A * clamp(1.3 - o.reachT * 1.0, 0.30, 1);
@@ -1606,13 +1654,11 @@ class Game {
 
   /* ----------------------------- camera ---------------------------- */
 
-  /** Switch between the four authored rigs. Distance and angle belong to
-   *  the rig (57_camera.js), not to the player: there is nothing left to
-   *  fiddle with, so the table is square to the frame every single time. */
+  /** A preset change resets both camera adjustments. */
   setCameraPreset(mode) {
     const P = CAMERA_PRESETS[mode];
     if (!P) return;
-    if (this.settings.camera === mode) return;
+    this.cameraControls.zoom = 1; this.cameraControls.height = 0;
     this.settings.camera = mode;
     this.ui && this.ui.syncSettings && this.ui.syncSettings();
     this.audio.ui('click');
@@ -1644,15 +1690,14 @@ class Game {
 
   updateCamera(dt) {
     const aspect = this.R.aspect();
-    const rig = cameraRigFor(this.settings.camera, this.ball.p, aspect, this.camRig);
+    const rig = cameraRigFor(this.settings.camera, this.ball.p, aspect, this.camRig, this.cameraControls);
     V3.set(this.camPosT, rig.eye.x, rig.eye.y, rig.eye.z);
     V3.set(this.camLookT, rig.look.x, rig.look.y, rig.look.z);
     this.fovT = rig.fov;
     this.applyCamera(dt);
 
-    /* The same rig, without shake, as matrices: two things need to know
-     * exactly what is on screen — the HUD text band (it must stop above the
-     * table) and the bat clamp (it must never be pushed out of frame). */
+    /* HUD and paddle constraints share the actual shifted projection.
+     * Text begins below the full table, including its feet. */
     /* From the smoothed camera, not from the target rig: camVP is the contract
      * for "what is on screen right now" (the band, the bat clamp, the strike
      * ring), and applyCamera glides toward the rig over ~0.5 s, so building it
@@ -1662,22 +1707,17 @@ class Game {
     V3.copy(lrig.eye, this.camPos);
     V3.copy(lrig.look, this.camLook);
     lrig.fov = this.fov;
+    lrig.shiftY = this.camShiftY;
     this.camVP = rigViewProj(lrig, aspect, this._rigBuf);
     this.camVPReady = true;
-    const farL = projectPoint(this.camVP, this._bandA || (this._bandA = { x: -PH.T_HALF_WID, y: PH.TABLE_Y, z: -PH.T_HALF_LEN }), this._bp1 || (this._bp1 = {}));
-    const farR = projectPoint(this.camVP, this._bandB || (this._bandB = { x: PH.T_HALF_WID, y: PH.TABLE_Y, z: -PH.T_HALF_LEN }), this._bp2 || (this._bp2 = {}));
-    const netT = projectPoint(this.camVP, this._bandC || (this._bandC = { x: 0, y: PH.NET_TOP, z: 0 }), this._bp3 || (this._bp3 = {}));
-    const band = clamp(Math.min(farL.y, farR.y, netT.y) - 0.015, 0.16, 0.55);
-    if (Math.abs(band - this.hudBandY) > 0.002) {
-      this.hudBandY = band;
-      /* Unitless on purpose: the stylesheet computes
-       * calc((1 - var(--band-y)) * 100%), which needs a number, not a length. */
-      const css = band.toFixed(4);
-      if (css !== this._bandCss) {
-        this._bandCss = css;
-        if (typeof document !== 'undefined' && document.documentElement)
-          document.documentElement.style.setProperty('--band-y', css);
-      }
+    const bounds = tableScreenBounds(this.camVP, this._hudTableBounds || (this._hudTableBounds = {}));
+    const band = clamp(bounds.bottom, 0.2, 0.91);
+    this.hudBandY = band;
+    const css = band.toFixed(4);
+    if (css !== this._bandCss) {
+      this._bandCss = css;
+      if (typeof document !== 'undefined' && document.documentElement)
+        document.documentElement.style.setProperty('--table-bottom', css);
     }
   }
 
@@ -1700,7 +1740,8 @@ class Game {
     const ox = (noise1(t) - 0.5) * s, oy = (noise1(t + 17.3) - 0.5) * s, oz = (noise1(t + 41.7) - 0.5) * s;
     const eye = V3.new(this.camPos.x + ox, this.camPos.y + oy, this.camPos.z + oz);
     const look = V3.new(this.camLook.x + ox * 0.5, this.camLook.y + oy * 0.5, this.camLook.z + oz * 0.5);
-    this.R.setCamera(eye, look, { x: 0, y: 1, z: 0 }, this.fov, 0.05, 60);
+    this.camShiftY = this.replayer.on ? 0 : tableFrameShift({ eye: this.camPos, look: this.camLook, fov: this.fov }, this.R.aspect());
+    this.R.setCamera(eye, look, { x: 0, y: 1, z: 0 }, this.fov, 0.05, 60, this.camShiftY);
     this.R.setLightFrustum(V3.new(0, PH.TABLE_Y, 0), 6.0, 2.35, 0.5, 14);
   }
 
@@ -1729,6 +1770,7 @@ class Game {
     V3.copy(rg.eye, this.camPos);
     V3.copy(rg.look, this.camLook);
     rg.fov = this.fov;
+    rg.shiftY = this.camShiftY;
     this.camVP = rigViewProj(rg, this.R.aspect(), this._rigBuf);
     this.camVPReady = true;
   }
@@ -1862,6 +1904,13 @@ class Game {
 
   /* ------------------------------ update --------------------------- */
   update(dtReal) {
+    if (!Number.isFinite(dtReal) || dtReal <= 0) return;
+    dtReal = Math.min(dtReal, 0.1);
+    if (this.state === GS.MENU) {
+      this.updateCamera(dtReal);
+      this.profile.maybeSave(dtReal);
+      return;
+    }
     this.frame++;
     /* ---- a replay owns the whole update: physics is off, the clip is
        the truth, and the camera is a filmmaker rather than a spectator ---- */
@@ -2015,7 +2064,7 @@ class Game {
       else this.network.sendInput();
     }
     // career: net-safe perk lifts the ball over the tape
-    if (this._careerNetSafe && this.ball.live && this.ball.lastHitBy === 1) {
+    if (this.career.active && this._careerNetSafe && this.ball.live && this.ball.lastHitBy === 1) {
       const nearNet = Math.abs(this.ball.p.z) < 0.15;
       if (nearNet && this.ball.p.y < PH.NET_TOP + PH.R * 2 && this.ball.v.z < 0) {
         this.ball.v.y += 0.8;
@@ -2165,7 +2214,7 @@ class Game {
       const k = clamp(mag / 700, 0.12, 1) * 0.9;
       R.draw(me.trail, M4.identity(tmp.m), {
         color: [1, 1, 1], rough: 1, blend: 'add', doubleSided: true,
-        emissive: [col[0] * k, col[1] * k, col[2] * k], opacity: 1,
+        emissive: [col[0] * k, col[1] * k, col[2] * k], opacity: 0.20,
       });
     }
 

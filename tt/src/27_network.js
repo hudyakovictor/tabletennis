@@ -70,22 +70,30 @@ class NetworkManager {
       this._emit('error', 'Не удалось подключиться');
       return;
     }
+    const socket = this.ws;
     this.ws.onopen = () => {
+      if (this.ws !== socket) return;
       this.connected = true;
       this.state = 'LOBBY';
       this._emit('connected', {});
       this._startPing();
     };
     this.ws.onmessage = (ev) => {
+      if (this.ws !== socket) return;
       try { this._handle(JSON.parse(ev.data)); } catch(e) {}
     };
     this.ws.onclose = () => {
+      if (this.ws !== socket) return;
+      this._stopPing();
+      this.ws = null;
+      this._resetSession();
       this.connected = false;
       if (this.state === 'IN_MATCH') this.state = 'DISCONNECTED';
       else this.state = 'OFFLINE';
       this._emit('disconnected', {});
     };
     this.ws.onerror = () => {
+      if (this.ws !== socket) return;
       this.state = 'DISCONNECTED';
       this._emit('error', 'Ошибка соединения');
     };
@@ -93,11 +101,21 @@ class NetworkManager {
 
   disconnect() {
     this._stopPing();
-    if (this.ws) { this.ws.close(); this.ws = null; }
+    const socket = this.ws;
+    this.ws = null;
+    if (socket) socket.close();
+    this._resetSession();
     this.connected = false;
     this.state = 'OFFLINE';
     this.room = null;
     this.side = 0;
+  }
+
+  _resetSession() {
+    this.room = null; this.side = 0; this.peerId = null; this.isHost = false;
+    this._interpBuf.length = 0;
+    this._lastServerBall = null;
+    this._lastStateT = this._lastInputT = 0;
   }
 
   joinRoom(roomId) {
@@ -108,12 +126,13 @@ class NetworkManager {
 
   leaveRoom() {
     this._send({ type: 'leave' });
-    this.room = null;
-    this.state = 'LOBBY';
+    this._resetSession();
+    this.state = this.connected ? 'LOBBY' : 'OFFLINE';
   }
 
   /* ---- message handler ---- */
   _handle(msg) {
+    if (!msg || typeof msg !== 'object' || Array.isArray(msg)) return;
     switch (msg.type) {
       case 'assigned':
         this.room = msg.room;
@@ -138,13 +157,15 @@ class NetworkManager {
         this._emit('point', msg);
         break;
       case 'peer_left':
-        this._emit('peerLeft', {});
+        if (msg.roomClosed) this._resetSession();
         this.state = 'LOBBY';
+        this._emit('peerLeft', {});
         break;
       case 'pong':
         this.latency = Date.now() - this._pingT;
         break;
       case 'error':
+        if (this.state === 'WAITING') this.state = 'LOBBY';
         this._emit('error', msg.message || 'Server error');
         break;
     }
@@ -208,6 +229,7 @@ class NetworkManager {
 
   /* ---- guest: apply host state (interpolated) ---- */
   _applyRemoteState(msg) {
+    if (!this._validState(msg)) return;
     this._interpBuf.push({ ...msg, receivedAt: Date.now() });
     if (this._interpBuf.length > 30) this._interpBuf.shift();
     // apply ball immediately (prediction handles smoothing)
@@ -224,6 +246,9 @@ class NetworkManager {
         V3.set(b.w, bw[0], bw[1], bw[2]);
         b.live = true;
       }
+      V3.set(b.w, bw[0], bw[1], bw[2]);
+    } else {
+      this.game.ball.live = false;
     }
     // apply opponent racket (for rendering)
     if (msg.racket) {
@@ -234,15 +259,29 @@ class NetworkManager {
       op.anim.swing = msg.racket.sw || 0;
     }
     // sync score
-    if (msg.score) this.game.score = msg.score;
+    if (msg.score) this.game.score = msg.score.slice();
   }
 
   /* ---- host: apply guest input ---- */
   _applyRemoteInput(msg) {
+    if ((msg.pos && !this._vector(msg.pos)) || (msg.n && !this._vector(msg.n)) ||
+        (msg.sw !== undefined && (!Number.isFinite(msg.sw) || Math.abs(msg.sw) > 10))) return;
     const op = this._opponentRacket;
     if (msg.pos) V3.set(op.pos, msg.pos[0], msg.pos[1], msg.pos[2]);
     if (msg.n) V3.set(op.normal, msg.n[0], msg.n[1], msg.n[2]);
     if (msg.sw !== undefined) op.anim.swing = msg.sw;
+  }
+
+  _vector(v) {
+    return Array.isArray(v) && v.length === 3 && v.every(n => Number.isFinite(n) && Math.abs(n) <= 10000);
+  }
+  _validState(msg) {
+    if (msg.ball && ![msg.ball.p, msg.ball.v, msg.ball.w].every(v => this._vector(v))) return false;
+    if (msg.racket && (!this._vector(msg.racket.pos) || !this._vector(msg.racket.n) ||
+        (msg.racket.sw !== undefined && !Number.isFinite(msg.racket.sw)))) return false;
+    if (msg.score && (!Array.isArray(msg.score) || msg.score.length !== 2 ||
+        !msg.score.every(n => Number.isInteger(n) && n >= 0 && n < 100000))) return false;
+    return true;
   }
 
   get opponentRacket() { return this._opponentRacket; }
