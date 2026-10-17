@@ -565,18 +565,19 @@ class UI {
     const g = this.game; if (!g) return;
     const s = g.settings;
     switch (k) {
+      case 'hitZone':
+        s.hitZone = v / 100;
+        const hzEl = $('#vHitZone'); if (hzEl) hzEl.textContent = v + '%';
+        break;
       case 'assist':
         s.assist = v / 100;
-        $$('#vAssist, .vAssist').forEach(el => el.textContent = v + '%');
-        $$('#rAssist, .rAssist').forEach(el => el.value = v);
+        const astEl = $('#vAssist'); if (astEl) astEl.textContent = v + '%';
         break;
       case 'posAssist':
         s.posAssist = v / 100;
-        $$('#vPos, .vPos').forEach(el => el.textContent = v + '%');
-        $$('#rPos, .rPos').forEach(el => el.value = v);
         break;
-      case 'sens': s.sensitivity = v / 100; $('#vSens').textContent = (v / 100).toFixed(2) + '×'; break;
-      case 'vol': s.volume = v / 100; g.audio.setVolume(v / 100); $('#vVol').textContent = v + '%'; break;
+      case 'sens': s.sensitivity = v / 100; break;
+      case 'vol': s.volume = v / 100; g.audio.setVolume(v / 100); break;
       case 'cam': s.camera = v; break;
       case 'quality': s.quality = v; g.R.quality = v; g.resize(); break;
       case 'hand': s.hand = v; break;
@@ -606,39 +607,20 @@ class UI {
   syncSpinBias() {
     const g = this.game; if (!g) return;
     const el = $('#spinBias'), lab = $('#spinBiasVal');
-    const v = g.settings.spinBias || 'norm';
-    if (lab) lab.textContent = v === 'high' ? 'БОЛЬШЕ' : v === 'low' ? 'МЕНЬШЕ' : 'НОРМА';
-    if (el) {
-      el.classList.toggle('high', v === 'high');
-      el.classList.toggle('low', v === 'low');
-      el.title = v === 'high' ? 'Вращение: больше (скользящий контакт, меньше скорости)'
-        : v === 'low' ? 'Вращение: меньше (плоский удар, больше скорости)'
-          : 'Вращение: нейтрально';
-    }
+    if (lab) lab.textContent = 'НОРМА';
   }
 
   syncSettings() {
     const s = this.game.settings;
-    const sel = (k, v) => $$(`.opt[data-set="${k}"]`).forEach((x) => x.classList.toggle('sel', x.dataset.val === String(v)));
-    sel('cam', s.camera); sel('quality', s.quality); sel('hand', s.hand);
-    sel('trail', s.showTrail ? 'on' : 'off'); sel('predict', s.showPredict ? 'on' : 'off');
-    sel('zone', s.showZone ? 'on' : 'off'); sel('tele', s.showTele ? 'on' : 'off');
-    sel('coach', s.coach ? 'on' : 'off'); sel('adaptive', s.adaptive ? 'on' : 'off');
-    sel('slowmoPlayer', s.slowmoPlayer !== false ? 'on' : 'off');
-    $('#slow').classList.toggle('off', s.slowmoPlayer === false);
-    this.syncSpinBias();
-    sel('haptics', s.haptics ? 'on' : 'off');
-    sel('target', s.targetScore);
-    $('#spin').classList.toggle('on', !!s.showTele);
-    $('#toWin').textContent = s.targetScore;
-    const aVal = Math.round(s.assist * 100);
-    $$('#rAssist, .rAssist').forEach(el => el.value = aVal);
-    $$('#vAssist, .vAssist').forEach(el => el.textContent = aVal + '%');
-    const pVal = Math.round(s.posAssist * 100);
-    $$('#rPos, .rPos').forEach(el => el.value = pVal);
-    $$('#vPos, .vPos').forEach(el => el.textContent = pVal + '%');
-    $('#rSens').value = Math.round(s.sensitivity * 100); $('#vSens').textContent = s.sensitivity.toFixed(2) + '×';
-    $('#rVol').value = Math.round(s.volume * 100); $('#vVol').textContent = Math.round(s.volume * 100) + '%';
+    const hzVal = Math.round((s.hitZone !== undefined ? s.hitZone : 0.85) * 100);
+    const rHz = $('#rHitZone'), vHz = $('#vHitZone');
+    if (rHz) rHz.value = hzVal;
+    if (vHz) vHz.textContent = hzVal + '%';
+
+    const astVal = Math.round((s.assist !== undefined ? s.assist : 0.85) * 100);
+    const rAst = $('#rAssist'), vAst = $('#vAssist');
+    if (rAst) rAst.value = astVal;
+    if (vAst) vAst.textContent = astVal + '%';
   }
 
   /* ------------------------------ HUD ----------------------------- */

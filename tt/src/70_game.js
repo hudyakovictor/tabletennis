@@ -81,9 +81,10 @@ class Game {
     this.replayer.onEnd = () => this.endReplay();
 
     this.settings = {
-      assist: 0.72,
-      posAssist: 0.80,
-      difficulty: 2,
+      hitZone: 0.85,                     // 1. Область попадания (0.30 .. 1.00)
+      assist: 0.85,                      // 2. Выравнивание удара (0.00 .. 1.00)
+      posAssist: 0.85,
+      difficulty: 0,
       quality: 'high',
       sound: true,
       volume: 0.9,
@@ -102,7 +103,7 @@ class Game {
       slowmoPlayer: true,                // bullet time, for the player, in casual play only
       targetScore: 11,
       sensitivity: 1.0,
-      spinBias: 'norm',                  // low | norm | high — see deriveStroke
+      spinBias: 'norm',                  // spin is always on
     };
     /* Saved settings are applied AFTER the defaults exist. It used to run
      * 60 lines earlier, while this.settings was still undefined, so
@@ -635,17 +636,17 @@ class Game {
       const isNovice = this.ai && this.ai.levelIndex === 0;
       const isAmateur = this.ai && this.ai.levelIndex === 1;
       if (isNovice) {
-        // Novice ball speed is capped to a gentle, welcoming pace (~15-18 km/h):
-        const maxVz = this.isServeBall ? 4.2 : 5.0;
+        // Novice ball speed is capped to a gentle, welcoming pace (~13-16 km/h):
+        const maxVz = this.isServeBall ? 3.8 : 4.4;
         if (b.v.z > maxVz) {
           const factor = maxVz / b.v.z;
           b.v.z = maxVz;
           b.v.x *= factor;
         }
         // Friendly gentle arc over the net
-        b.v.y = clamp(b.v.y, 1.2, 2.4);
+        b.v.y = clamp(b.v.y, 1.3, 2.5);
         // Minimal spin (so it doesn't trick beginner players)
-        V3.mul(b.w, b.w, 0.15);
+        V3.mul(b.w, b.w, 0.05);
       } else if (isAmateur) {
         const maxVz = this.isServeBall ? 6.2 : 7.6;
         if (b.v.z > maxVz) {
@@ -1204,51 +1205,53 @@ class Game {
   tryPlayerHit(p0) {
     const pad = this.player, b = this.ball;
     if (!b.live) return;
-    if (b.v.z < 0 && b.p.z < pad.pos.z - 0.25) return;
-    const radius = pad.hitRadius;
+    if (b.v.z < 0 && b.p.z < pad.pos.z - 0.35) return;
+
+    // Parameter 1: Область попадания (hitZone: 30% .. 100% -> 0.45м .. 1.30м)
+    const hzSetting = this.settings.hitZone !== undefined ? this.settings.hitZone : 0.85;
+    const reachRadius = 0.35 + hzSetting * 0.95;
+
     const serveCtx = this.state === GS.SERVE_TOSS && this.server === 1 && b.lastHitBy === 0;
-    let hit = this.sweepPaddle(pad, p0, b.p, radius);
-    if (!hit && serveCtx) {
+    let hit = null;
+
+    if (serveCtx) {
       // ITTF 2.06: the ball must be struck while FALLING from the toss.
       const rad = V3.dist(b.p, pad.pos);
-      if (b.v.y < 0 && this.tossApex - PH.TABLE_Y > 0.14 && rad <= radius * 1.50) {
-        const sw0 = this.swipe;
-        const live = (sw0.active && sw0.m.samples >= 2)
-          || (sw0.lastReleased && this.time - (this.swipeReleasedAt || -9) < 0.60);
-        if (live) hit = { t: 1, x: b.p.x, y: b.p.y, z: b.p.z, rad: rad * 0.55, px: pad.pos.x, py: pad.pos.y, pz: pad.pos.z };
-      }
-    }
-    if (!hit) {
-      // Forgiving return reach for balls from opponent: after bouncing on player half or crossing deep,
-      // a deliberate swipe when near the ball connects reliably!
-      const receiveCtx = b.lastHitBy === -1 && (this.rallyBounces.some((s) => s > 0) || b.p.z >= 0.70);
-      if (receiveCtx) {
-        const rad = V3.dist(b.p, pad.pos);
+      if (b.v.y < 0 && this.tossApex - PH.TABLE_Y > 0.10 && rad <= reachRadius) {
         const sw0 = this.swipe;
         const live = (sw0.active && sw0.m.samples >= 1)
           || (sw0.lastReleased && this.time - (this.swipeReleasedAt || -9) < 0.90);
-        const isNovice = this.ai && this.ai.levelIndex === 0;
-        const hitTol = radius * (isNovice ? 2.6 : 1.85);
-        if (live && rad <= hitTol) {
-          hit = { t: 1, x: b.p.x, y: b.p.y, z: b.p.z, rad: rad * 0.45, px: pad.pos.x, py: pad.pos.y, pz: pad.pos.z };
+        if (live) hit = { t: 1, x: b.p.x, y: b.p.y, z: b.p.z, rad: rad * 0.40, px: pad.pos.x, py: pad.pos.y, pz: pad.pos.z };
+      }
+    } else {
+      // Receiving ball from opponent: forgiving capture across the player's zone
+      const incoming = b.lastHitBy === -1 && (this.rallyBounces.some((s) => s > 0) || b.p.z >= 0.50);
+      if (incoming) {
+        const dist2d = Math.hypot(b.p.x - pad.pos.x, b.p.y - pad.pos.y);
+        const distZ = Math.abs(b.p.z - pad.pos.z);
+        const sw0 = this.swipe;
+        const live = (sw0.active && sw0.m.samples >= 1)
+          || (sw0.lastReleased && this.time - (this.swipeReleasedAt || -9) < 0.95);
+
+        if (live && dist2d <= reachRadius && (distZ <= 0.85 || b.p.z >= 0.70)) {
+          hit = { t: 1, x: b.p.x, y: b.p.y, z: b.p.z, rad: dist2d * 0.35, px: pad.pos.x, py: pad.pos.y, pz: pad.pos.z };
         }
       }
+    }
+
+    if (!hit) {
+      hit = this.sweepPaddle(pad, p0, b.p, reachRadius);
     }
     if (!hit) return;
     if (b.lastHitBy === 1) return;                 // you already hit it
 
     // volley check: returning before the ball bounced on your own half.
-    // A ball that was flying OUT anyway is not a point you can lose: the
-    // bat simply never meets it, exactly like a player pulling their hand
-    // away, so cheap "obstruction" losses can never happen.
     if (!this.isServeBall && b.lastHitBy === -1 && !this.rallyBounces.some((s) => s > 0) && b.p.z < PH.T_HALF_LEN) {
       const o = this._volleyPred || (this._volleyPred = {});
       predict(V3.clone(b.p), V3.clone(b.v), V3.clone(b.w),
         { dt: 1 / 240, maxT: 2.0, stopOnFirstBounce: true, out: o });
       const landsIn = o.landed && o.landed.z > 0.01 && Math.abs(o.landed.x) <= PH.T_HALF_WID + PH.R;
       if (!landsIn) { this.hintOut = this.time; return; }
-      // the ball is about to bounce right there: treat it as a normal return
-      // instead of punishing a few centimetres of timing
       if (o.landed.z > b.p.z - 0.50) return;
       this.awardPoint(-1, 'УДАР С ЛЁТА НАД СТОЛОМ');
       b.live = false;
@@ -1258,15 +1261,9 @@ class Game {
     const isServeStroke = this.isServeBall && b.lastHitBy === 0 && this.server === 1;
     pad.lastHitT = this.time;
     const contact = V3.new(hit.x, hit.y, hit.z);
-    /* the tolerance of THIS face: the frame's sweet spot scaled by how
-       forgiving the rubber on it is (a soft topsheet costs less) */
     const sideParams = this.equip.forSide(1);
-    const sweet = clamp((1 - hit.rad / radius) * (sideParams.sweet || this.equip.sweetK), 0, 1);
-    /* WHICH side of the blade it arrived on. An off-centre contact does not
-     * just lose pace (that part `quality` already did): the blade twists, so
-     * the ball leaves at an angle to the face you were holding. Deterministic
-     * by design — the same offset always costs the same — so it can be
-     * learned instead of being read as the game cheating. */
+    const radius = pad.hitRadius || 0.095;
+    const sweet = clamp((1 - hit.rad / reachRadius) * (sideParams.sweet || this.equip.sweetK), 0, 1);
     const offLat = clamp((hit.x - pad.pos.x) / Math.max(radius, 1e-4), -1, 1);
     const offVer = clamp((hit.y - pad.pos.y) / Math.max(radius, 1e-4), -1, 1);
     const offMag = clamp(Math.hypot(offLat, offVer), 0, 1);
@@ -1275,15 +1272,12 @@ class Game {
     // ---- build the stroke from the live gesture --------------------
     const sw = this.swipe;
     let m = null;
-    if (sw.active && sw.m.samples > 2) m = sw.m;
-    else if (sw.lastReleased && this.time - (this.swipeReleasedAt || -9) < (this.isServeBall ? 0.60 : 0.26)) m = sw.lastReleased;
+    if (sw.active && sw.m.samples >= 1) m = sw.m;
+    else if (sw.lastReleased && this.time - (this.swipeReleasedAt || -9) < 0.95) m = sw.lastReleased;
 
     let racket, quality;
-    if (m && (m.speed > 0.22 || m.peakSpeed > 0.9)) {
+    if (m) {
       const timing = clamp(m.speed / Math.max(m.peakSpeed, 1e-3), 0.35, 1);
-      /* Banded, and the band is printed on the shot badge. A continuous
-       * multiplier is unteachable: the player cannot tell 0.83 from 0.79, but
-       * he can tell "РАНОВATO" from "ТОЧНО", and then fix it. */
       const tband = timing >= 0.93 ? 'ТОЧНО' : timing >= 0.80 ? 'ХОРОШО'
         : timing >= 0.62 ? 'РАНОВАТО' : 'ПОЗДНО';
       const tq = timing >= 0.93 ? 1.08 : timing >= 0.80 ? 1.0 : timing >= 0.62 ? 0.90 : 0.74;
@@ -1293,54 +1287,33 @@ class Game {
         ball: { y: contact.y, z: contact.z },
         ballSpin: b.w, ballSpeed: V3.len(b.v),
         powerScale: 1,
-        moveYaw: pad.yaw || 0,             // the face you see is the face that hits
-        equip: sideParams,                 // the rubber object for this bat
-        spinBias: this.settings.spinBias || 'norm',   // the explicit spin dial
+        moveYaw: pad.yaw || 0,
+        equip: sideParams,
+        spinBias: 'norm',
       };
       racket = deriveStroke(m, ctx);
-      racket.vmag *= this.equip.vmagK;     // swing weight of the frame
-      /* Off-centre contact: pace off, and the launch twisted away from the
-         face by up to ~13 deg sideways / ~8 deg vertically at the rim. */
+      racket.vmag *= this.equip.vmagK;
       if (!isServeStroke) {
         const miss = (1 - sweet) * offMag;
         racket.vmag *= 1 - 0.18 * miss;
         racket.azSwing = clamp(racket.azSwing + offLat * 0.23 * (1 - sweet), -1.35, 1.35);
         racket.elev = clamp(racket.elev - offVer * 8.0 * (1 - sweet), -70, 78);
       }
-      quality = clamp(racket.quality * (0.55 + 0.45 * sweet) * (0.70 + 0.30 * timing) * tq, 0.18, 1);
+      quality = clamp(racket.quality * (0.60 + 0.40 * sweet) * (0.70 + 0.30 * timing) * tq, 0.25, 1);
       racket.quality = quality;
-      racket = refineRacket(contact, b.v, b.w, racket, this.settings.assist, quality);
-      // Losing a point because the *solver* could not keep a serve on the
-      // table is never acceptable: re-solve the serve with full execution
-      // help, which is a legal serve by construction (ITTF 2.06.4).
-      /* ...but only when the first attempt was not already at full assist:
-       * the serve solver searches the same space with the same budget, so a
-       * retry can only repeat the answer and doubles the worst-case cost of a
-       * serve that was never going to be legal (measured 230 -> 460 ms of
-       * frozen frames on a near-motionless tap). */
-      if (isServeStroke && racket.valid === false && clamp(this.settings.assist, 0, 1) < 0.999) {
+      // Parameter 2: Выравнивание удара
+      const assistLvl = this.settings.assist !== undefined ? this.settings.assist : 0.85;
+      racket = refineRacket(contact, b.v, b.w, racket, assistLvl, quality);
+      if (isServeStroke && racket.valid === false && clamp(assistLvl, 0, 1) < 0.999) {
         racket = refineRacket(contact, b.v, b.w, racket, 1, quality);
       }
       racket.sweet = sweet; racket.timing = timing;
     } else {
-      // Passive contact: the ball meets a bat that is not swinging. Real
-      // soft hands absorb most of the pace, so this is a short, safe block
-      // rather than an accidental rocket off the end of the table.
-      const vR = V3.clone(pad.vel);
-      const lim = V3.len(vR); if (lim > 2.6) V3.mul(vR, vR, 2.6 / lim);
-      racket = makeRacket(1, 'BLOCK', { aim: { x: rndSym(0.26), z: -0.62 }, vmag: lim, quality: 0.5 });
-      racket.vR = vR;
-      racket.rubber = { e: PH.E_RACKET * 0.42, mu: PH.MU_RACKET, et: PH.ET_RACKET * 0.7 };
-      quality = 0.45 * (0.5 + 0.5 * sweet);
-      /* No placement solver on a block — see solveBlockNormal(). The face the
-       * player holds decides; the only correction allowed is the smallest
-       * lift that keeps the ball out of the tape. */
-      const blk = solveBlockNormal(contact, b.v, b.w, pad.normal, vR, quality, racket.rubber, this._blk || (this._blk = {}));
-      racket.normal = blk.normal;
-      racket.elev = blk.liftDeg;
-      racket.blockLift = blk.liftDeg;
-      racket.valid = !blk.hitNet;
-      racket.passive = true;
+      // Gentle assisted return
+      racket = makeRacket(1, 'DRIVE', { aim: { x: 0, z: -0.85 }, vmag: 4.8, quality: 0.65 });
+      const assistLvl = this.settings.assist !== undefined ? this.settings.assist : 0.85;
+      racket = refineRacket(contact, b.v, b.w, racket, assistLvl, 0.65);
+      quality = 0.65;
     }
 
     const info = impactRacket(b.v, b.w, racket.normal, racket.vR, quality, racket.rubber || {});
@@ -1448,7 +1421,7 @@ class Game {
      * short serve simply could not be reached no matter what you did. Now a
      * predicted short ball grants the step-in depth. */
     let zNear = PADDLE_LIMITS.zNear;
-    const A = this.settings.posAssist;
+    const A = this.settings.assist !== undefined ? this.settings.assist : 0.85;
     const o = this._paddlePred || (this._paddlePred = {});
     const incoming = this.ball.live && this.ball.v.z > 0.4 && this.ball.lastHitBy === -1;
     if (incoming && this.frame % 4 === 0) {
@@ -2110,40 +2083,6 @@ class Game {
       d(me.ball, tmp.m, ma.ball);
     }
 
-    /* player paddle (hidden per user request: "ракетку скрой") */
-    if (this.settings.showPlayerPaddle) {
-      const pad = this.player;
-      const PM = this.paddleMats(S) || ma;
-      const pq = Q.lookRotation(Q.new(), pad.normal, { x: 0, y: 1, z: 0 });
-      /* pad.roll is the lean the bat picks up while you move it sideways: the
-         blade visibly turns into the direction of travel instead of staying
-         square to the camera. */
-      const roll = Q.setAxisAngle(Q.new(), 0, 0, 1,
-        (this.settings.hand === 'right' ? -0.42 : 0.42) + pad.swing * 0.3 + (pad.roll || 0));
-      Q.mul(pq, pq, roll);
-      /* stepping in to a short ball tips the blade forward over the table */
-      if (pad.stepIn > 0.01) {
-        const lunge = Q.setAxisAngle(Q.new(), 1, 0, 0, -0.20 * pad.stepIn);
-        Q.mul(pq, pq, lunge);
-      }
-      M4.compose(tmp.m, pad.pos, pq, V3.set(tmp.scl, 1, 1, 1));
-      d(me.blade, tmp.m, PM.wood);
-      if (!shadowPass) {
-        M4.compose(tmp.m2, V3.addScaled(V3.new(), pad.pos, pad.normal, 0.0085), pq, V3.set(tmp.scl, 1, 1, 1));
-        R.draw(me.rubber, tmp.m2, PM.black);
-        M4.compose(tmp.m2, V3.addScaled(V3.new(), pad.pos, pad.normal, -0.0085), pq, V3.set(tmp.scl, 1, 1, 1));
-        R.draw(me.rubber, tmp.m2, PM.red);
-      }
-      // handle
-      {
-        const off = V3.new(0, -0.125, 0);
-        const wo = V3.new();
-        M4.transformDir(wo, tmp.m, off);
-        M4.compose(tmp.m2, V3.add(V3.new(), pad.pos, wo), pq, V3.set(tmp.scl, 1, 1, 1));
-        d(me.handle, tmp.m2, PM.grip);
-      }
-    }
-
     /* the opponent: paddle, hand, forearm and sleeve, all solved from
        the paddle's own position and normal (see 56_rig.js) */
     const ap = this.aiPaddle;
@@ -2183,11 +2122,6 @@ class Game {
     if (b.live || this.state === GS.SERVE_READY) {
       if (onTable(b.p.x, b.p.z) && b.p.y > TY - 0.02) S.blob(R, b.p.x, b.p.y, b.p.z, TY, 0.055, 0.62, 1);
       else S.blob(R, b.p.x, b.p.y, b.p.z, 0, 0.075, 0.40, 1);
-    }
-    if (this.settings.showPlayerPaddle) {
-      const pp = this.player.pos;
-      if (onTable(pp.x, pp.z)) S.blob(R, pp.x, pp.y, pp.z, TY, 0.115, 0.42, 1.25);
-      else S.blob(R, pp.x, pp.y, pp.z, 0, 0.16, 0.26, 1.25);
     }
     const ap = this.aiPaddle.pos;
     if (onTable(ap.x, ap.z)) S.blob(R, ap.x, ap.y, ap.z, TY, 0.115, 0.42, 1.25);
