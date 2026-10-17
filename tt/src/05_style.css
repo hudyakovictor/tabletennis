@@ -147,13 +147,15 @@ h3.sec::after{content:"";flex:1;height:1px;background:var(--line)}
 .opt b{display:block;font-size:12.5px;font-weight:700;letter-spacing:.02em}
 .opt s{display:block;font-size:9.5px;color:var(--dim);text-decoration:none;margin-top:2px}
 .sl{display:flex;align-items:center;gap:11px;margin:9px 0}
-.sl label{font-size:11px;color:var(--dim);width:124px;flex:0 0 auto;letter-spacing:.04em}
+.sl label{font-size:11px;color:var(--dim);width:134px;flex:0 0 auto;letter-spacing:.04em;line-height:1.25}
+.sl label s{display:block;font-size:8.5px;color:var(--dim2);text-decoration:none;margin-top:2px;font-weight:normal}
 .sl input[type=range]{flex:1;-webkit-appearance:none;appearance:none;height:4px;border-radius:3px;
   background:linear-gradient(90deg,var(--acc),var(--acc2));outline:none}
 .sl input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:16px;height:16px;border-radius:50%;
   background:#fff;cursor:pointer;box-shadow:0 2px 9px rgba(0,0,0,.6)}
 .sl input[type=range]::-moz-range-thumb{width:16px;height:16px;border:0;border-radius:50%;background:#fff;cursor:pointer}
 .sl .v{font-family:var(--mono);font-size:11px;color:var(--acc);width:50px;text-align:right}
+#settings.on{z-index:20}
 .btn{display:block;width:100%;margin-top:18px;padding:14px;border:0;border-radius:12px;cursor:pointer;
   font-family:inherit;font-size:14px;font-weight:800;letter-spacing:.14em;color:#04121c;
   background:linear-gradient(100deg,var(--acc),#7ff0c0);transition:.18s;text-transform:uppercase}
