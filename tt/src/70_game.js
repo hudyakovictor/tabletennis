@@ -66,7 +66,21 @@ class Game {
     this.swipe = new SwipeTracker();
     this.particles = new Particles();
     this.rig = new PaddleRig();
+    this.bioRacket = new (require('./85_bioRacket').RacketBiomech || function(){});
+    // Fallback if module system doesn't work — inline minimal version
+    if (!this.bioRacket || typeof this.bioRacket.compute !== 'function') {
+      this.bioRacket = null;
+    }
     this.equip = new Equipment();
+
+    // Hit feedback system (99-level multi-sensory response)
+    this.hitFeedback = new HitFeedbackSystem(this);
+
+    // Music system (99-level emotional audio)
+    this.music = new MusicSystem(this.audio);
+
+    // Emotional design system (99-level dramatic arc)
+    this.emotion = new EmotionalSystem(this);
     this.aiEquip = new Equipment('b_carb', 'r_base', 'r_base');
     /* the commercial layer: profile, shop, analytics, and where we run */
     this.platform = new Platform(typeof navigator !== 'undefined' ? navigator : null);
@@ -81,8 +95,8 @@ class Game {
     this.replayer.onEnd = () => this.endReplay();
 
     this.settings = {
-      hitZone: 0.85,                     // 1. Область попадания (0.30 .. 1.00)
-      assist: 0.85,                      // 2. Выравнивание удара (0.00 .. 1.00)
+      hitZone: 0.85,
+      assist: 0.85,
       posAssist: 0.85,
       difficulty: 0,
       quality: 'high',
@@ -95,15 +109,24 @@ class Game {
       showZone: true,
       showTele: false,
       haptics: true,
-      coach: true,                       // one-line point analysis
-      adaptive: true,                    // dynamic difficulty
+      coach: true,
+      adaptive: true,
       showDebug: false,
-      showPlayerPaddle: false,           // "ракетку скрой" - hide player paddle by default
+      showPlayerPaddle: true,
       slowmoOnBigShots: true,
-      slowmoPlayer: true,                // bullet time, for the player, in casual play only
+      slowmoPlayer: true,
       targetScore: 11,
       sensitivity: 1.0,
-      spinBias: 'norm',                  // spin is always on
+      spinBias: 'norm',
+      // NEW: Enhanced gameplay settings
+      showSpinIndicator: true,
+      showZoneIndicators: true,
+      showQualityRing: true,
+      followThrough: true,
+      anticipationHint: true,
+      shotFeedback: true,
+      momentumBar: true,
+      replaySlowmo: true,
     };
     /* Saved settings are applied AFTER the defaults exist. It used to run
      * 60 lines earlier, while this.settings was still undefined, so
@@ -153,6 +176,53 @@ class Game {
     this.lastPoint = null;
     this.timeScale = 1; this.targetTimeScale = 1;
     this.shake = 0; this.shakeDir = V3.new();
+
+    // Follow-through state
+    this.followThrough = {
+      active: false,
+      t: 0,
+      startPos: V3.new(),
+      startNormal: V3.new(),
+      swingDir: V3.new(),
+      duration: 0.15,
+      visualPos: V3.new(),
+      visualNormal: V3.new(),
+    };
+
+    // Anticipation state
+    this.anticipation = {
+      active: false,
+      t: 0,
+      duration: 0.12,
+      targetDir: V3.new(0, 0, -1),
+      intensity: 0,
+      visualOffset: V3.new(),
+    };
+
+    // Shot feedback state
+    this.shotFeedback = {
+      lastQuality: 1,
+      lastSpeed: 0,
+      lastSpin: 0,
+      lastStroke: 'DRIVE',
+      showTimer: 0,
+    };
+
+    // Momentum tracking
+    this.momentum = {
+      current: 0,
+      target: 0,
+      streak: 0,
+      lastWinner: 0,
+    };
+
+    // Spin indicator state
+    this.spinIndicator = {
+      active: false,
+      w: V3.new(),
+      color: [1, 1, 1],
+    };
+
     this.motionQuery = typeof window !== 'undefined' && window.matchMedia
       ? window.matchMedia('(prefers-reduced-motion: reduce)') : null;
     this.reducedMotion = !!(this.motionQuery && this.motionQuery.matches);
@@ -210,6 +280,16 @@ class Game {
 
     this.resize();
     this.updateCamera(0);
+
+    // Initialize music system
+    if (this.music) {
+      this.music.init().then(() => {
+        // Music ready
+      }).catch(e => {
+        console.warn('Music init failed:', e);
+      });
+    }
+
     window.addEventListener('resize', () => this.resize());
   }
 
@@ -266,6 +346,27 @@ class Game {
         return;
       }
       const n = norm(e);
+
+      // ---- ANTICIPATION TRIGGER ----
+      // Before a swipe, pull the paddle back slightly to telegraph
+      // the upcoming stroke. This is critical for game feel.
+      if (this.settings.anticipationHint && !this.anticipation.active) {
+        const centerX = 0.5;
+        const dx = n.x - centerX;
+        const dy = n.y - 0.55;
+        const mag = Math.hypot(dx, dy) || 0.1;
+        if (mag > 0.1) {
+          const normX = dx / mag;
+          const normY = dy / mag;
+          this.anticipation.active = true;
+          this.anticipation.t = 0;
+          this.anticipation.targetDir = V3.norm(V3.new(),
+            V3.new(normX * 0.3, normY * 0.2, 0.5));
+          this.anticipation.intensity = clamp(mag * 2, 0.3, 1.0);
+          this.anticipation.duration = 0.08 + 0.06 * this.anticipation.intensity;
+        }
+      }
+
       this.swipe.down(n.x, n.y, this.time);
       this._lastPointSwipe = {
         startT: this.time,
@@ -1386,6 +1487,24 @@ class Game {
     V3.copy(b.p, contact);
     V3.addScaled(b.p, b.p, racket.normal, PH.R * 1.05);
     pad.swing = 1;
+
+    // Multi-sensory hit feedback (99-level)
+    if (this.hitFeedback) {
+      this.hitFeedback.execute({
+        quality,
+        speed: V3.len(b.v) || 0,
+        spin: b.w,
+        contactPoint: contact,
+        contactNormal: racket.normal,
+        stroke: racket.stroke ? racket.stroke.id : 'DRIVE',
+        power: racket.power,
+        isServeStroke,
+        isNetCord: this.netTouched,
+        isEdge: info && info.edge > 0.25,
+        side: 1,
+      });
+    }
+
     if (isServeStroke) { this.serveBounces = 0; this.rallyBounces.length = 0; }
     else this.isServeBall = false;
     this.applyHit(1, racket, contact, quality, info);
@@ -1508,9 +1627,21 @@ class Game {
        into the ball. Without this the bat simply appeared 16 cm closer. */
     pad.stepIn = expSmooth(pad.stepIn || 0, shortBall ? 1 : 0, 8, dt);
 
+    // During anticipation, pull the paddle back visually
+    let anticipationOffset = V3.zero();
+    if (this.anticipation.active && this.anticipation.t < this.anticipation.duration) {
+      const progress = this.anticipation.t / this.anticipation.duration;
+      const pullAmount = Math.sin(progress * Math.PI) * this.anticipation.intensity * 0.12;
+      anticipationOffset = V3.scale(V3.new(), this.anticipation.targetDir, -pullAmount);
+      // Advance anticipation timer
+      this.anticipation.t += dt;
+    }
+
     const t = paddleTargetFromPointer(pt.x, pt.y, depthY, sens,
       this._ptTarget || (this._ptTarget = { tx: 0, ty: 0, tz: 0 }), { zNear });
-    let tx = t.tx, ty = t.ty, tz = t.tz;
+    let tx = t.tx + anticipationOffset.x;
+    let ty = t.ty + anticipationOffset.y;
+    let tz = t.tz + anticipationOffset.z;
 
     /* On a new point the bat goes HOME first, and while that window is open
      * the cursor is deliberately not obeyed. Without this the reset is
@@ -1610,6 +1741,71 @@ class Game {
       V3.copy(want, st.normal);
       this.liveStroke = st;
     } else this.liveStroke = null;
+
+    // ---- BIOMECHANICAL RACKET ORIENTATION (99-level) ----
+    // Compute the full 3D biomechanical orientation if bioRacket is available
+    if (this.bioRacket && this.bioRacket.compute) {
+      const ballDir = this.ball.live && this.ball.v
+        ? V3.norm(V3.new(), this.ball.v)
+        : V3.new(0, 0, 1);
+
+      // Determine x (lateral position) from ball or player position
+      let hitX = this.ball.live && this.ball.p ? this.ball.p.x : pad.pos.x;
+
+      // Estimate stroke type and speed
+      let strokeType = 'DRIVE';
+      let swingSpeed = 0.5;
+      let contactQuality = 1;
+      if (this.liveStroke) {
+        strokeType = this.liveStroke.stroke.id;
+        swingSpeed = this.liveStroke.power || 0.5;
+      } else if (m) {
+        strokeType = classifyStrokeForBio(m);
+        swingSpeed = clamp(m.speed / 4, 0, 1);
+      }
+      if (this.lastSweet !== undefined) {
+        contactQuality = this.lastSweet;
+      }
+
+      // Build arm quaternion from current paddle state
+      // This represents shoulder + elbow + wristBase orientation
+      const armQ = Q.lookRotation(Q.new(), pad.normal, { x: 0, y: 1, z: 0 });
+
+      const bioCtx = {
+        x: (hitX - 0) / BIO.ZONE_HALF_WIDTH,  // normalize to [-1,1]
+        armQ,
+        hand: this.settings.hand || 'right',
+        isServe: this.isServeBall,
+        strokeType,
+        swingSpeed,
+        ballDir,
+        contactQuality,
+        swingDirX: pad.vel.x || 0,
+      };
+
+      const bio = this.bioRacket.compute(bioCtx);
+      if (bio) {
+        // Store bio orientation for rendering
+        pad.bioQ = bio.Q_world;
+        pad.bioMeta = {
+          x: bio.x, b: bio.b, activeSide: bio.activeSide,
+          forearmPsi: bio.forearmPsi, wristExt: bio.wristExt,
+          wristDev: bio.wristDev, thetaForward: bio.thetaForward,
+          thetaSide: bio.thetaSide, thetaHandle: bio.thetaHandle,
+          phiFlip: bio.phiFlip, isFlipping: bio.isFlipping,
+          isAtEdge: bio.isAtEdge, zoneLabel: bio.zoneLabel,
+          strokeQuality: bio.strokeQuality, strokeType: bio.strokeType,
+        };
+        pad.forearmPsi = bio.forearmPsi;
+        pad.wristExt = bio.wristExt;
+        pad.wristDev = bio.wristDev;
+        pad.phiFlip = bio.phiFlip;
+
+        // Update the "want" normal from bio computation for smoothing
+        V3.copy(want, bio.n_world);
+      }
+    }
+
     // apply the step yaw to the resting face as well
     const cy = Math.cos(this.padYaw), sy = Math.sin(this.padYaw);
     const wx = want.x * cy + want.z * sy, wz = -want.x * sy + want.z * cy;
@@ -2070,6 +2266,88 @@ class Game {
     for (const m of this.messages) m.t += dtReal;
     while (this.messages.length && this.messages[0].t > this.messages[0].dur) this.messages.shift();
     this.hitFlash = Math.max(0, this.hitFlash - dtReal * 3.2);
+
+    // Update follow-through
+    if (this.settings.followThrough) {
+      if (this.followThrough.active) {
+        this.followThrough.t += dtReal;
+        const progress = this.followThrough.t / this.followThrough.duration;
+        if (progress >= 1) {
+          this.followThrough.active = false;
+        } else {
+          // Smoothstep for natural deceleration
+          const smoothProgress = progress * progress * (3 - 2 * progress);
+          const decay = 1 - smoothProgress;
+
+          // Visual position — continues in swing direction, then decelerates
+          const ftOffset = V3.scale(V3.new(), this.followThrough.swingDir,
+            (1 - decay) * 0.25);
+          V3.copy(this.followThrough.visualPos, this.followThrough.startPos);
+          V3.add(this.followThrough.visualPos, this.followThrough.visualPos, ftOffset);
+
+          // Visual normal — follows face rotation with decay
+          const normalOffset = V3.scale(V3.new(), this.followThrough.startNormal,
+            (1 - decay) * 0.2);
+          V3.copy(this.followThrough.visualNormal, this.followThrough.startNormal);
+          V3.add(this.followThrough.visualNormal, this.followThrough.visualNormal, normalOffset);
+          V3.norm(this.followThrough.visualNormal, this.followThrough.visualNormal);
+
+          // Apply to player for rendering (but physics uses real pos)
+          V3.copy(this.player.pos, this.followThrough.visualPos);
+          V3.copy(this.player.normal, this.followThrough.visualNormal);
+        }
+      }
+    }
+
+    // Update anticipation
+    if (this.settings.anticipationHint) {
+      if (this.anticipation.active) {
+        this.anticipation.t += dtReal;
+        const progress = this.anticipation.t / this.anticipation.duration;
+        if (progress >= 1) {
+          this.anticipation.active = false;
+        } else {
+          // Backswing pull-back — pulls paddle opposite to swipe direction
+          const pullAmount = Math.sin(progress * Math.PI) * this.anticipation.intensity * 0.12;
+          const offset = V3.scale(V3.new(), this.anticipation.targetDir, -pullAmount);
+          V3.copy(this.anticipation.visualOffset, offset);
+        }
+      } else {
+        V3.zero(this.anticipation.visualOffset);
+      }
+    }
+
+    // Update spin indicator
+    if (this.settings.showSpinIndicator && this.ball.live) {
+      this.spinIndicator.active = true;
+      V3.copy(this.spinIndicator.w, this.ball.w);
+      const spinMag = V3.len(this.ball.w);
+      if (spinMag > 50) {
+        // Color based on spin type
+        if (Math.abs(this.ball.w.x) > Math.abs(this.ball.w.y)) {
+          this.spinIndicator.color = this.ball.w.x > 0 ? [1, 0.5, 0.1] : [1, 0.2, 0.2];
+        } else {
+          this.spinIndicator.color = this.ball.w.y > 0 ? [0.1, 0.8, 0.4] : [0.2, 0.4, 1];
+        }
+      } else {
+        this.spinIndicator.color = [0.8, 0.8, 0.8];
+      }
+    } else {
+      this.spinIndicator.active = false;
+    }
+
+    // Update momentum
+    if (this.settings.momentumBar) {
+      if (this.lastPoint && this.lastPoint.who > 0) {
+        this.momentum.streak++;
+        this.momentum.target = Math.min(1, this.momentum.streak / 5);
+      } else if (this.lastPoint && this.lastPoint.who < 0) {
+        this.momentum.streak = 0;
+        this.momentum.target = 0;
+      }
+      this.momentum.current = expSmooth(this.momentum.current, this.momentum.target, 3, dtReal);
+    }
+
     if (this.profile) {
       this.profile.data.stats.minutes += dtReal / 60;
       this.profile.maybeSave(dtReal);
@@ -2106,6 +2384,43 @@ class Game {
     // fps
     this._fpsN++; this._fpsT += dtReal;
     if (this._fpsT > 0.5) { this.fps = this._fpsN / this._fpsT; this._fpsT = 0; this._fpsN = 0; }
+
+    // Update music system — dynamic soundtrack based on game state
+    if (this.music && this.music._initialized) {
+      this.music.update({
+        state: this.state,
+        rally: this.rally,
+        ball: this.ball,
+        settings: this.settings,
+        momentum: this.momentum,
+        lastPoint: this.lastPoint,
+      });
+    }
+
+    // Update emotional system — dramatic moments and arc
+    if (this.emotion) {
+      this.emotion.update({
+        state: this.state,
+        rally: this.rally,
+        ball: this.ball,
+        score: this.score,
+        settings: this.settings,
+        momentum: this.momentum,
+        lastPoint: this.lastPoint,
+        lastShotInfo: this.lastShotInfo,
+        netTouched: this.netTouched,
+        server: this.server,
+        time: this.time,
+      });
+    }
+
+    // Update UI animations
+    if (this.ui && this.ui.uiAnim) {
+      this.ui.uiAnim.update(performance.now());
+    }
+    if (this.ui && this.ui.hudAnim) {
+      this.ui.hudAnim.update(performance.now());
+    }
   }
 
   /* ------------------------------ render --------------------------- */
@@ -2164,6 +2479,59 @@ class Game {
       d(me.ball, tmp.m, ma.ball);
     }
 
+    /* ---- PLAYER PADDLE (with full biomechanical orientation) ---- */
+    // The player paddle is rendered when showPlayerPaddle is enabled
+    // or always in training mode. Uses bioRacket for orientation.
+    if (this.settings.showPlayerPaddle !== false || this.training) {
+      const pp = this.player;
+      const pNorm = V3.norm(V3.new(), pp.normal);
+
+      // Player bio racket orientation
+      let ppBioQ = pp.bioQ || null;
+      let ppActiveSide = 1;
+      let ppForearmPsi = pp.forearmPsi || 0;
+      let ppWristExt = pp.wristExt || 0;
+      let ppWristDev = pp.wristDev || 0;
+      let ppPhiFlip = pp.phiFlip || 0;
+      let ppBioMeta = pp.bioMeta || null;
+
+      // Determine active side geometrically if not from bio
+      const ppBallDir = this.ball.live && this.ball.v
+        ? V3.norm(V3.new(), this.ball.v)
+        : V3.new(0, 0, 1);
+      if (!ppBioMeta) {
+        const dot = V3.dot(pNorm, ppBallDir);
+        ppActiveSide = dot >= 0 ? 1 : -1;
+      } else {
+        ppActiveSide = ppBioMeta.activeSide;
+      }
+
+      // Build arm quaternion for bio
+      const ppArmQ = Q.lookRotation(Q.new(), pNorm, { x: 0, y: 1, z: 0 });
+
+      if (this.settings.showPlayerPaddle !== false) {
+        this.rig.draw(R, S, {
+          pos: pp.pos,
+          normal: pNorm,
+          hand: this.settings.hand === 'right' ? 'right' : 'left',
+          swing: pp.swing,
+          windup: 0.5,  // player always has some windup for visual interest
+          roll: pp.roll || 0,
+          mats: this.paddleMats(S, this.equip),
+          // Bio parameters
+          bioQ: ppBioQ,
+          bioActive: !!ppBioQ,
+          forearmPsi: ppForearmPsi,
+          wristExt: ppWristExt,
+          wristDev: ppWristDev,
+          phiFlip: ppPhiFlip,
+          activeSide: ppActiveSide,
+          ballDir: ppBallDir,
+          bioMeta: ppBioMeta,
+        });
+      }
+    }
+
     /* the opponent: paddle, hand, forearm and sleeve, all solved from
        the paddle's own position and normal (see 56_rig.js) */
     const ap = this.aiPaddle;
@@ -2178,6 +2546,16 @@ class Game {
       1));
     V3.copy(ap.normal, aiNorm);
     V3.copy(ap.pos, this.ai.pos);
+
+    // AI bio racket orientation — simplified for AI (no full bio computation needed)
+    let aiBioQ = null;
+    let aiActiveSide = 1;
+    const aiBallDir = V3.norm(V3.new(), V3.sub(V3.new(), this.ball.p, this.ai.pos));
+    if (this.ball.live) {
+      const dot = V3.dot(aiNorm, aiBallDir);
+      aiActiveSide = dot >= 0 ? 1 : -1;
+    }
+
     if (shadowPass) {
       const aqS = Q.lookRotation(Q.new(), aiNorm, { x: 0, y: 1, z: 0 });
       M4.compose(tmp.m, ap.pos, aqS, V3.set(tmp.scl, 1, 1, 1));
@@ -2187,6 +2565,8 @@ class Game {
         pos: ap.pos, normal: aiNorm, hand: this.settings.hand === 'right' ? 'left' : 'right',
         swing: -this.ai.anim.swing, windup: wd, roll: (this.ai.anim.lean || 0) * 0.22,
         mats: this.paddleMats(S, this.aiEquip),
+        activeSide: aiActiveSide,
+        ballDir: aiBallDir,
       });
     }
 
@@ -2325,3 +2705,23 @@ function hexToRgb(h) {
   const n = parseInt(h.replace('#', ''), 16);
   return [((n >> 16) & 255) / 255, ((n >> 8) & 255) / 255, (n & 255) / 255];
 }
+
+/**
+ * Classify stroke from swipe metrics for biomechanical context.
+ * Lightweight version of classifyStroke — just for bio orientation.
+ */
+function classifyStrokeForBio(m) {
+  if (!m) return 'DRIVE';
+  const u = m.up;
+  const r = m.right;
+  const curl = m.curl || 0;
+  if (u < -0.3) return 'CHOP';
+  if (u > 0.6 && Math.abs(curl) < 0.3) return 'LOOP';
+  if (u > 0.3 && Math.abs(r) > 0.5 && Math.abs(curl) > 0.3) return r > 0 ? 'HOOK' : 'FADE';
+  if (u > 0.3) return 'DRIVE';
+  return 'DRIVE';
+}
+
+/* BIO constants for use in game (imported conceptually from 85_bioRacket.js) */
+const BIO_ZONE_HALF_WIDTH = 0.85;
+const DEG = Math.PI / 180;

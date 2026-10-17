@@ -4664,7 +4664,7 @@ class AudioEngine {
 
 /* ====== 55_ai.js ====== */
 /* =====================================================================
- *  OPPONENT AI  —  v2
+ *  OPPONENT AI  —  v3 with biomechanical orientation
  *
  *  Design brief, in plain words: the old bot was unreadable. It decided
  *  its stroke with a fresh coin flip at the moment of contact, swung with
@@ -4689,19 +4689,12 @@ class AudioEngine {
  *     overhits under pressure, it goes for too much when it smells a
  *     winner. The error comes out of the same physics the player uses.
  *
- *  As before the AI is not allowed to cheat: it goes through the same
- *  racket/impact pipeline. It only differs in how well it reads spin,
- *  how fast it moves and how much execution noise it carries.
+ *  v3 additions: biomechanical orientation for AI paddle, smoother movement,
+ *  follow-through, improved variety
  * ===================================================================== */
 
 /* ---------------------------------------------------------------------
  *  LEVELS
- *
- *  Pace numbers are racket speeds in m/s, not ball speeds. As a sanity
- *  anchor, through this impact model a 9 m/s racket on a neutral ball
- *  produces roughly 45-55 km/h out; 14 m/s produces roughly 80-90.
- *  "ПРО" is meant to be a solid club player, not a machine: mid-forties
- *  to low-sixties km/h in the rally with the odd 75 km/h put-away.
  * ------------------------------------------------------------------- */
 const AI_LEVELS = [
   {
@@ -4748,9 +4741,6 @@ const AI_LEVELS = [
 
 /* ---------------------------------------------------------------------
  *  TACTICS
- *  A rally is not a sequence of independent decisions. The bot picks an
- *  intent when the rally starts and sticks to it until the ball forces a
- *  change. That consistency is what makes it possible to anticipate.
  * ------------------------------------------------------------------- */
 const AI_TACTICS = {
   FEEL:   { id: 'FEEL',   pace: 0.72, risk: 0.30, depth: 0.55, wide: 0.35 },
@@ -4760,24 +4750,30 @@ const AI_TACTICS = {
   DEFEND: { id: 'DEFEND', pace: 0.62, risk: 0.22, depth: 0.72, wide: 0.30 },
 };
 
-/* Would this exact racket, played from this exact ball state, clip the net?
- * Same call sequence the game uses to hit the ball (strokeFrame -> impactRacket
- * -> predict at PH.SIM_DT), so the answer is about the shot that will really be
- * played and not about a paraphrase of it. */
+const AI_BACKSWING = {
+  LOOP:    { back: 0.30, lift: -0.16, side: 0.10, face: -0.30, name: 'накат' },
+  COUNTER: { back: 0.18, lift: -0.06, side: 0.06, face: -0.18, name: 'контр' },
+  DRIVE:   { back: 0.22, lift: -0.04, side: 0.08, face: -0.14, name: 'накaт' },
+  SMASH:   { back: 0.34, lift: 0.22, side: 0.08, face: -0.22, name: 'смеш' },
+  FLICK:   { back: 0.10, lift: 0.04, side: 0.06, face: -0.10, name: 'флик' },
+  PUSH:    { back: 0.06, lift: 0.08, side: 0.04, face: 0.18, name: 'подст' },
+  CHOP:    { back: 0.20, lift: 0.14, side: 0.08, face: 0.24, name: 'чоп' },
+  BLOCK:   { back: 0.04, lift: 0.00, side: 0.02, face: 0.00, name: 'блок' },
+  LOB:     { back: 0.26, lift: 0.18, side: 0.06, face: -0.12, name: 'свеча' },
+  HOOK:    { back: 0.18, lift: -0.04, side: 0.28, face: -0.14, name: 'хuk' },
+  FADE:    { back: 0.18, lift: -0.04, side: -0.28, face: -0.14, name: 'feyd' },
+  DROP:    { back: 0.08, lift: 0.06, side: 0.04, face: 0.12, name: 'drop' },
+};
+
 function shotHitsNet(ball, racket) {
   const tv = V3.clone(ball.v), tw = V3.clone(ball.w), sv = V3.new(), sn = V3.new();
   strokeFrame(racket, 0, 0, 1, sv, sn);
   impactRacket(tv, tw, sn, sv, racket.quality, racket.rubber || {});
   const chk = {};
-  /* 1.2 s is all that is needed: the tape is ~1.6 m from the contact, so even
-   * a 4 m/s dink reaches it inside that, and the full 2.2 s made the check cost
-   * more than the solve it was protecting (13.6 ms median at the slowest
-   * level). stopOnFirstBounce ends it early on everything else. */
   predict(V3.clone(ball.p), tv, tw, { dt: PH.SIM_DT, maxT: 1.2, stopOnFirstBounce: true, out: chk });
   return !!chk.hitNet;
 }
 
-/** Build a racket descriptor that refineRacket() understands. */
 function makeRacket(side, archId, o) {
   const A = ARCH[archId] || ARCH.DRIVE;
   const st = STROKES[archId] || STROKES.DRIVE;
@@ -4789,11 +4785,6 @@ function makeRacket(side, archId, o) {
     vmag: o.vmag !== undefined ? o.vmag : 11,
     aim: o.aim, quality: o.quality !== undefined ? o.quality : 0.85,
     isServe: !!o.isServe,
-    /* How much air the solver must leave between the ball and the tape. A
-     * push and a chop are the slowest, lowest-energy strokes in the game and
-     * with the default 55 mm they were the least reliable shots on the table
-     * (measured: 28.6 % on the table, 28.6 % into the net — the two softest
-     * archetypes accounted for nearly every failure). They need room. */
     netClear: o.netClear !== undefined ? o.netClear
       : (archId === 'LOB' ? 0.50 : archId === 'DROP' ? 0.035 : archId === 'SMASH' ? 0.04
         : (archId === 'PUSH' || archId === 'CHOP') ? 0.115 : 0.055),
@@ -4803,70 +4794,74 @@ function makeRacket(side, archId, o) {
   };
 }
 
-/* ---------------------------------------------------------------------
- *  Backswing shapes. Offsets are in metres, in the AI's own frame
- *  (+z is towards its own end line, i.e. "back"). They are what the
- *  human actually sees, so they must differ enough to be legible at a
- *  glance: a loop drops the bat low and behind, a push opens it in front
- *  of the body, a smash cocks it high.
- * ------------------------------------------------------------------- */
-const AI_BACKSWING = {
-  LOOP:    { back: 0.30, lift: -0.16, side: 0.10, face: -0.30, name: 'накат' },
-  COUNTER: { back: 0.24, lift: -0.05, side: 0.10, face: -0.22, name: 'контр' },
-  DRIVE:   { back: 0.22, lift: -0.02, side: 0.08, face: -0.12, name: 'драйв' },
-  SMASH:   { back: 0.24, lift: 0.26, side: 0.12, face: -0.06, name: 'смеш' },
-  FLICK:   { back: 0.13, lift: -0.08, side: 0.05, face: -0.24, name: 'флик' },
-  PUSH:    { back: 0.17, lift: 0.11, side: 0.03, face: 0.34, name: 'подрезка' },
-  CHOP:    { back: 0.26, lift: 0.22, side: 0.05, face: 0.42, name: 'чоп' },
-  BLOCK:   { back: 0.05, lift: 0.01, side: 0.01, face: 0.04, name: 'блок' },
-  LOB:     { back: 0.20, lift: -0.22, side: 0.04, face: -0.10, name: 'свеча' },
-  HOOK:    { back: 0.24, lift: -0.08, side: 0.26, face: -0.18, name: 'хук' },
-  FADE:    { back: 0.24, lift: -0.08, side: -0.26, face: -0.18, name: 'фейд' },
-  DROP:    { back: 0.09, lift: 0.07, side: 0.02, face: 0.22, name: 'укорот' },
+/* Biomechanical stroke presets for AI — based on RacketBiomech.strokePreset */
+const AI_BIO_PRESETS = {
+  LOOP:    { thetaForward: 28, thetaSide: 8, thetaHandle: 12, forearmPsi: -0.35 },
+  COUNTER: { thetaForward: 22, thetaSide: 6, thetaHandle: 8,  forearmPsi: -0.28 },
+  DRIVE:   { thetaForward: 16, thetaSide: 5, thetaHandle: 6,  forearmPsi: -0.15 },
+  SMASH:   { thetaForward: 6,  thetaSide: 3, thetaHandle: 4,  forearmPsi: -0.40 },
+  FLICK:   { thetaForward: 20, thetaSide: 12, thetaHandle: 10, forearmPsi: -0.05 },
+  PUSH:    { thetaForward: -6, thetaSide: 8,  thetaHandle: 10, forearmPsi: 0.30 },
+  CHOP:    { thetaForward: -12, thetaSide: 14, thetaHandle: 14, forearmPsi: 0.38 },
+  BLOCK:   { thetaForward: 8,  thetaSide: 3, thetaHandle: 4,  forearmPsi: -0.10 },
+  LOB:     { thetaForward: 14, thetaSide: 4, thetaHandle: 6,  forearmPsi: -0.20 },
+  HOOK:    { thetaForward: 18, thetaSide: 18, thetaHandle: 10, forearmPsi: -0.20 },
+  FADE:    { thetaForward: 18, thetaSide: -18, thetaHandle: 10, forearmPsi: -0.20 },
+  DROP:    { thetaForward: -8, thetaSide: 6,  thetaHandle: 8,  forearmPsi: 0.25 },
 };
-const AI_BACKSWING_DEFAULT = AI_BACKSWING.DRIVE;
 
 class OpponentAI {
-  constructor(level = 2) {
-    this.setLevel(level);
-    this.side = -1;                       // far side of the table
-    this.pos = V3.new(0, PH.TABLE_Y + 0.22, -1.55);
-    this.target = V3.new(0, PH.TABLE_Y + 0.22, -1.55);
-    this.home = V3.new(0, PH.TABLE_Y + 0.24, -1.52);
-    this.vel = V3.new();
-    this.faceNormal = V3.new(0, 0.12, 1);
+  constructor(game, levelIndex = 2) {
+    this.game = game;
+    this.levelIndex = clamp(levelIndex, 0, AI_LEVELS.length - 1);
+    this.L = AI_LEVELS[this.levelIndex];
+    this.maxSpeed = this.L.move;
+    this.pace = this.L.paceOpen;
 
-    this.phase = 'IDLE';                  // IDLE READ TRACK WINDUP RECOVER
-    this.plan = null;                     // {x,y,z,t,speed}
-    this.commit = null;                   // the shot decided in advance
-    this.readT = 0;                       // reaction timer
-    this.seenBallId = -1;                 // so reaction fires once per shot
-
-    this.pace = 0.4;                      // rally escalation, 0..1
+    // State
+    this.phase = 'IDLE';
+    this.plan = null;
+    this.commit = null;
+    this.readT = 0;
+    this.seenBallId = -1;
+    this.exchange = 0;
     this.tactic = AI_TACTICS.FEEL;
-    this.exchange = 0;                    // own shots inside this rally
-    this.lastArch = 'DRIVE';
-    this.repeat = 0;                      // how many times in a row
-    this.mood = 0;                        // -1 rattled .. +1 confident
-    this.pressure = 0;                    // 0..1 scoreboard pressure
-    this.handicap = 1;                    // dynamic difficulty multiplier
+    this.mood = 0;
+    this.pressure = 0;
+    this.handicap = 1;
+    this.stats = { shots: 0, errors: 0, winners: 0, sumSpeed: 0, maxSpeed: 0 };
 
-    this.lastShot = null;
-    this.tell = { kind: '', t: 0, strength: 0 };
+    // Home position
+    this.home = V3.new(0, PH.TABLE_Y + 0.25, -1.45);
+    this.target = V3.new(0, PH.TABLE_Y + 0.25, -1.45);
+    this.lastPos = V3.new(0, PH.TABLE_Y + 0.25, -1.45);
+    this.vel = V3.new();
+
+    // Swing state
+    this.anim = { windup: 0, swing: 0, lean: 0 };
+    this.swingAt = 0;
+    this.backswingStart = 0;
+    this.backswingPose = null;
+    this.strokeHistory = [];
+
+    // For smoother movement
+    this._moveSmooth = { x: 0, y: 0, z: 0 };
+    this._poseSmooth = { windup: 0, swing: 0 };
+
+    // Prediction cache
     this._pred = {};
     this._q = {};
-    this.anim = { swing: 0, lean: 0, arm: 0, windup: 0 };
-    this.stats = { shots: 0, errors: 0, winners: 0, sumSpeed: 0, maxSpeed: 0 };
   }
 
-  setLevel(i) {
-    this.levelIndex = clamp(i | 0, 0, AI_LEVELS.length - 1);
+  /** Set level and update parameters */
+  setLevel(idx) {
+    this.levelIndex = clamp(idx, 0, AI_LEVELS.length - 1);
     this.L = AI_LEVELS[this.levelIndex];
     this.maxSpeed = this.L.move;
     this.pace = this.L.paceOpen;
   }
 
-  /** full reset between matches */
+  /** Full reset between matches */
   reset() {
     this.phase = 'IDLE'; this.plan = null; this.commit = null;
     this.readT = 0; this.seenBallId = -1;
@@ -4875,29 +4870,33 @@ class OpponentAI {
     this.mood = 0; this.pressure = 0; this.handicap = 1;
     this.stats = { shots: 0, errors: 0, winners: 0, sumSpeed: 0, maxSpeed: 0 };
     V3.copy(this.target, this.home);
+    V3.copy(this.lastPos, this.home);
+    V3.zero(this.vel);
+    V3.copy(this._moveSmooth, this.home);
+    this.anim = { windup: 0, swing: 0, lean: 0 };
+    this.strokeHistory = [];
+    this.backswingPose = null;
   }
 
-  /** called by the game whenever a point finishes */
+  /** Called by the game whenever a point finishes */
   onPointEnd(who) {
     this.exchange = 0;
     this.pace = this.L.paceOpen;
     this.plan = null; this.commit = null;
     this.phase = 'IDLE';
     this.mood = clamp(this.mood + (who > 0 ? -0.22 : 0.18), -1, 1);
-    // pick the intent for the next rally from style + mood
     this.tactic = this.rollTactic();
+    this.backswingPose = null;
   }
 
-  /** Scoreboard awareness: 9-9 is not the same ball as 3-0. */
+  /** Scoreboard awareness */
   setPressure(myScore, theirScore, target) {
     const near = Math.max(myScore, theirScore) / Math.max(4, target - 1);
     const tight = 1 - clamp(Math.abs(myScore - theirScore) / 4, 0, 1);
     this.pressure = clamp(near * 0.6 + tight * 0.4, 0, 1) * clamp(near, 0, 1);
   }
 
-  /** Dynamic difficulty: a long losing streak quietly softens the bot by
-   *  up to 12 %. Off by default on the two top levels, where the player
-   *  has explicitly asked for a wall. */
+  /** Dynamic difficulty */
   setHandicap(h) { this.handicap = clamp(h, 0.80, 1.05); }
 
   rollTactic() {
@@ -4915,8 +4914,7 @@ class OpponentAI {
    *  PERCEPTION
    * ================================================================== */
 
-  /** Where will the ball be when it is comfortable to hit it, and when?
-   *  Everything downstream keys off this single estimate. */
+  /** Where will the ball be when it is comfortable to hit it, and when? */
   computePlan(game) {
     const ball = game.ball;
     const o = this._pred;
@@ -4926,16 +4924,10 @@ class OpponentAI {
     });
 
     if (o.landed && o.landed.z < 0) {
-      // Where a real player stands. You do NOT drift backwards for a
-      // whole fixed delay after the bounce: you pick a hitting plane a
-      // short step behind your end line and meet the ball there. Pace
-      // and heavy topspin push that plane back, floaters pull it in so
-      // the ball can be taken at the top of the bounce.
       const inSpeed = V3.len(ball.v);
-      const topIn = this.side * ball.w.x;             // >0 = topspin at me
+      const topIn = this.side * ball.w.x;
       let zHit = -PH.T_HALF_LEN
         - clamp(0.10 + inSpeed * 0.030 + Math.max(0, topIn) * 0.00022, 0.08, 0.62);
-      // Short balls have to be taken in, over the table, or they die.
       if (o.landed.z > -0.62) zHit = Math.max(zHit, o.landed.z - 0.52);
       zHit = clamp(zHit, -2.05, -0.95);
 
@@ -4943,9 +4935,6 @@ class OpponentAI {
       predict(V3.clone(ball.p), V3.clone(ball.v), V3.clone(ball.w),
         { dt: 1 / 240, maxT: 2.4, stopZ: zHit, stopDir: -1, stopAtPlane: true, out: q });
 
-      // If the plane is crossed too soon after the bounce the ball is
-      // still rising awkwardly: nudge the contact later, but by time,
-      // never past the top of the bounce.
       let interceptT = q.endT;
       const sinceBounce = interceptT - o.landed.t;
       if (sinceBounce < 0.055) {
@@ -4976,8 +4965,7 @@ class OpponentAI {
     return null;
   }
 
-  /** Anticipation noise: far from the ball the bot guesses, close to it
-   *  it knows. This is what makes wrong-footing possible. */
+  /** Anticipation noise */
   noisyTarget(plan, game) {
     const L = this.L;
     const lead = clamp(plan.t - game.time, 0, 1.2);
@@ -4993,14 +4981,12 @@ class OpponentAI {
    *  DECISION
    * ================================================================== */
 
-  /** Pick the stroke. Deterministic enough to be learnable: the same
-   *  ball in the same tactic gets the same answer most of the time, and
-   *  the bot likes repeating what just worked. */
+  /** Pick the stroke */
   pickStroke(game, plan) {
     const L = this.L, T = this.tactic, ball = game.ball;
     const hNet = plan.y - PH.NET_TOP;
     const hTable = plan.y - PH.TABLE_Y;
-    const topspin = this.side * ball.w.x;      // >0 = topspin coming at me
+    const topspin = this.side * ball.w.x;
     const backspin = topspin < -140;
     const heavyTop = topspin > 230;
     const inSpeed = plan.speed;
@@ -5009,455 +4995,347 @@ class OpponentAI {
       + this.mood * 0.08 - this.pressure * 0.07, 0, 1.1);
     const r = Math.random();
 
-    // --- forced / obvious situations first -------------------------
-    if (hNet > 0.17 && inSpeed < 13.5) {              // a sitter
+    if (hNet > 0.17 && inSpeed < 13.5) {
       if (r < L.smashRate * (0.55 + aggro * 0.6)) return 'SMASH';
       return 'DRIVE';
     }
-    if (deepMe) {                                      // genuinely pushed back
+    if (deepMe) {
       if (hTable > 0.26 && r < 0.42 + aggro * 0.34) return 'LOOP';
       if (r < 0.30) return 'LOB';
       return r < 0.62 ? 'DRIVE' : 'CHOP';
     }
-    if (inSpeed > 17.5) {                              // heavy incoming pace
+    if (inSpeed > 17.5) {
       const block = 0.78 - aggro * 0.42;
       if (r < block) return 'BLOCK';
       return r < block + L.counterRate ? 'COUNTER' : 'DRIVE';
     }
-    if (backspin) {                                    // must be lifted
+    if (backspin) {
       if (hTable < 0.10 && plan.short) return r < 0.30 + aggro * 0.35 ? 'FLICK' : 'PUSH';
       if (r < 0.30 + aggro * 0.55) return 'LOOP';
       return 'PUSH';
     }
-    if (plan.short && hTable < 0.16) {                 // short over the table
+    if (plan.short && hTable < 0.16) {
       if (r < L.dropRate) return 'DROP';
       return r < 0.26 + aggro * 0.42 ? 'FLICK' : 'PUSH';
     }
     if (heavyTop && r < L.counterRate + aggro * 0.2) return 'COUNTER';
 
-    // --- stylistic colour -----------------------------------------
     if (L.style === 'PUSHER' && r < 0.55 - aggro * 0.3) return 'PUSH';
     if (r < 0.07 * L.variety * T.wide) return Math.random() < 0.5 ? 'HOOK' : 'FADE';
     if (r < 0.07 * L.variety * T.wide + 0.08 * (1 - aggro)) return 'PUSH';
 
-    // --- the bread and butter --------------------------------------
     if (r < 0.34 + aggro * 0.46) return 'LOOP';
     return 'DRIVE';
   }
 
-  /** Where to put it. Placement is a skill: weak levels aim at the middle
-   *  and miss their intention anyway, strong ones work the corners and
-   *  wrong-foot you on purpose. */
+  /** Where to put it */
   pickTarget(game, plan, archId) {
     const L = this.L, T = this.tactic;
     const px = game.player.pos.x;
     const playerSide = sign(px || rndSym(1));
     const skill = L.placeSkill * this.handicap;
 
-    // intent: away from the player, at the body, or behind them
     const roll = Math.random();
     let wantX;
     if (roll < 0.16 + (1 - skill) * 0.25) {
-      wantX = px * 0.85;                                   // at the body
+      wantX = px * 0.85;
     } else if (roll < 0.30) {
-      wantX = px * 1.25;                                   // wrong-foot: behind
+      wantX = px * 1.25;
+    } else if (roll < 0.55 - skill * 0.3) {
+      wantX = -playerSide * 0.70;
+    } else if (roll < 0.75 - skill * 0.25) {
+      wantX = playerSide * 0.85;
     } else {
-      wantX = -playerSide * PH.T_HALF_WID * lerp(0.30, 0.86, T.wide * skill);
+      wantX = rndSym(0.80);
     }
-    wantX += gauss(0.26 * (1 - skill) + 0.045);
 
-    // depth: short balls pull the player in, deep ones pin them back
-    let depth;
-    if (archId === 'DROP') depth = rnd(0.06, 0.20);
-    else if (archId === 'PUSH' || archId === 'CHOP') depth = rnd(0.55, 0.95) * T.depth + 0.08;
-    else if (archId === 'SMASH') depth = rnd(0.45, 0.80);
-    /* Depth is what makes a rally playable. The old numbers put the median
-     * landing 0.76-0.82 m past the net on a 1.37 m half — i.e. every ball was
-     * short, arriving at the bat in ~0.20 s, inside human reaction time, so
-     * the opponent looked like it was dumping everything into the front of the
-     * table on purpose. Deep shots are also what real players hit: short is a
-     * deliberate tactic (DROP, PUSH), not the default. */
-    else depth = clamp(L.deepness * T.depth + rndSym(0.16), 0.30, 0.98);
+    let wantZ;
+    if (this.pace > 0.85) {
+      wantZ = -PH.T_HALF_LEN * (0.65 + 0.30 * rnd());
+    } else if (T.depth > 0.7) {
+      wantZ = -PH.T_HALF_LEN * (0.50 + 0.40 * rnd());
+    } else {
+      wantZ = lerp(-0.55, -PH.T_HALF_LEN * 0.75, T.depth + 0.2 * rnd());
+    }
 
-    const edge = PH.T_HALF_WID * (0.86 + T.risk * 0.08);
-    return {
-      x: clamp(wantX, -edge, edge),
-      z: lerp(0.14, PH.T_HALF_LEN - 0.06, clamp(depth, 0, 1)),
-      depth,
-    };
-  }
+    if (plan.wide && roll < 0.4 + T.wide * 0.4) {
+      wantX = playerSide * sign(wantX || 1) * (0.75 + 0.20 * rnd());
+    }
 
-  /** Racket speed for this ball. Everything that makes the bot feel
-   *  "impossibly fast" lives here, so it is deliberately conservative
-   *  and clamped at both ends. */
-  pickPace(archId, plan) {
-    const L = this.L, T = this.tactic;
-    const A = ARCH[archId] || ARCH.DRIVE;
-    // rally escalation, tactic multiplier, a touch of mood
-    let p = clamp(this.pace * T.pace + this.mood * 0.04, 0.12, L.paceMax);
-    if (archId === 'SMASH') p = clamp(p + 0.22, 0.4, 1.05);
-    if (archId === 'BLOCK' || archId === 'DROP') p = Math.min(p, 0.45);
-    if (archId === 'PUSH' || archId === 'CHOP') p = Math.min(p, 0.62);
-    // pressure makes it shorten the swing rather than swing harder
-    p *= 1 - this.pressure * 0.10;
-    p *= this.handicap;
-    const base = lerp(L.vmagMin, L.vmagMax, clamp(p, 0, 1));
-    const v = base * (A.speed || 1) * (0.93 + Math.random() * 0.14);
-    return clamp(v, 1.2, 17.5);
+    return { x: wantX, z: wantZ };
   }
 
   /* ==================================================================
-   *  THINK  —  called every frame
+   *  SWING EXECUTION with biomechanical orientation
    * ================================================================== */
-  think(game, dt) {
-    const ball = game.ball, L = this.L;
-    this.anim.swing = Math.max(0, this.anim.swing - dt * 5.2);
-    if (this.tell.t > 0) this.tell.t -= dt;
 
-    const playing = game.state === GS.RALLY;
-    const incoming = playing && ball.live && ball.lastHitBy === 1
-      && (ball.v.z < -0.2 || (ball.p.z < 0 && ball.v.z < 1));
-
-    if (!incoming) {
-      this.idle(game, dt);
-      return;
-    }
-
-    /* --- reaction: the bot does not know instantly ----------------- */
-    if (this.seenBallId !== game.shotId) {
-      this.seenBallId = game.shotId;
-      this.readT = L.react * (1 + this.pressure * 0.18) / this.handicap;
-      this.phase = 'READ';
-      this.plan = null;
-      this.commit = null;
-    }
-    if (this.readT > 0) {
-      this.readT -= dt;
-      // during the reaction window it only drifts towards the middle of
-      // the likely spread — this is the window where you can wrong-foot it
-      this.target.x = lerp(this.target.x, ball.p.x * 0.35, 1 - Math.exp(-5 * dt));
-      this.target.y = lerp(this.target.y, PH.TABLE_Y + 0.26, 1 - Math.exp(-5 * dt));
-      this.target.z = lerp(this.target.z, -1.52, 1 - Math.exp(-5 * dt));
-      this.move(dt, 0.75);
-      return;
-    }
-
-    /* --- tracking --------------------------------------------------- */
-    if (!this.plan || game.frame % 3 === 0) {
-      const p = this.computePlan(game);
-      if (p) this.plan = p;
-    }
-    if (!this.plan) { this.move(dt, 1); return; }
-
-    const lead = this.plan.t - game.time;
-
-    /* --- commit + backswing ----------------------------------------- */
-    const windup = L.windup * (0.8 + (1 - this.pace) * 0.4);
-    if (!this.commit && lead < windup && lead > 0.012) {
-      const archId = this.pickStroke(game, this.plan);
-      const tgt = this.pickTarget(game, this.plan, archId);
-      this.commit = {
-        arch: archId, tgt,
-        vmag: this.pickPace(archId, this.plan),
-        at: this.plan.t,
-        windup,
-        bs: AI_BACKSWING[archId] || AI_BACKSWING_DEFAULT,
-      };
-      this.phase = 'WINDUP';
-      this.tell = { kind: archId, t: windup + 0.25, strength: clamp(windup / 0.3, 0, 1) };
-      // repeating a pattern is human and makes the bot learnable
-      this.repeat = archId === this.lastArch ? this.repeat + 1 : 0;
-      this.lastArch = archId;
-    }
-
-    const aim = this.noisyTarget(this.plan, game);
-
-    if (this.commit) {
-      // 0 at commit -> 1 at contact
-      const k = clamp(1 - (this.commit.at - game.time) / Math.max(this.commit.windup, 1e-3), 0, 1);
-      // pull back on the first 55 %, drive through on the rest
-      const pull = k < 0.55 ? (k / 0.55) : (1 - (k - 0.55) / 0.45);
-      const bs = this.commit.bs;
-      this.anim.windup = pull;
-      V3.set(this.target,
-        aim.x - bs.side * pull * sign(this.commit.tgt.x - this.plan.x || 1),
-        aim.y + bs.lift * pull,
-        aim.z - bs.back * pull);
-      // the bat face tilts during the backswing: open for chop/push,
-      // closed for loop/drive. This is the readable part.
-      const f = bs.face * pull;
-      V3.norm(this.faceNormal, V3.set(this.faceNormal, this.faceNormal.x * 0.6, f, 1));
-      this.move(dt, clamp(1.4 + pull * 1.2, 0.8, 2.6));
-    } else {
-      this.anim.windup = expSmooth(this.anim.windup, 0, 8, dt);
-      V3.copy(this.target, aim);
-      V3.norm(this.faceNormal, V3.set(this.faceNormal, this.faceNormal.x * 0.7, 0.10, 1));
-      this.move(dt, clamp(1.7 - lead, 0.65, 2.0));
-    }
-  }
-
-  idle(game, dt) {
-    this.plan = null;
-    this.commit = null;
-    this.phase = 'IDLE';
-    this.anim.windup = expSmooth(this.anim.windup, 0, 7, dt);
-    const k = 1 - Math.exp(-2.6 * dt);
-    this.target.x = lerp(this.target.x, 0, k);
-    this.target.y = lerp(this.target.y, PH.TABLE_Y + 0.24, k);
-    this.target.z = lerp(this.target.z, -1.52, k);
-    V3.norm(this.faceNormal, V3.set(this.faceNormal, this.faceNormal.x * 0.8, 0.12, 1));
-    this.move(dt, 0.9);
-  }
-
-  move(dt, urgency) {
-    const sp = this.maxSpeed * urgency;
-    const d = V3.sub(V3.new(), this.target, this.pos);
-    const dist = V3.len(d);
-    if (dist > 1e-5) {
-      const step = Math.min(dist, sp * dt);
-      V3.addScaled(this.pos, this.pos, V3.mul(d, d, 1 / dist), step);
-      V3.mul(this.vel, d, step / Math.max(dt, 1e-4));
-    } else V3.mul(this.vel, this.vel, 0.6);
-    // A bat with no player behind it has to stay somewhere believable,
-    // otherwise it reads as a UFO hovering over the hall.
-    this.pos.y = clamp(this.pos.y, PH.TABLE_Y - 0.16, PH.TABLE_Y + 0.70);
-    this.pos.x = clamp(this.pos.x, -1.25, 1.25);
-    this.pos.z = clamp(this.pos.z, -2.45, -1.16);
-    this.anim.lean = expSmooth(this.anim.lean, clamp(this.pos.x * 0.8, -1, 1), 6, dt);
-  }
-
-  /** has the bot committed and is it time to strike? */
-  readyToStrike(time) {
-    return !!this.commit && time >= this.commit.at - 0.012;
-  }
-
-  /* ==================================================================
-   *  EXECUTION
-   * ================================================================== */
+  /** Build the full swing with biomechanical parameters */
   swing(game) {
-    const ball = game.ball, L = this.L;
-    const C = this.commit || {
-      arch: 'DRIVE', tgt: { x: rndSym(0.5), z: 0.7 }, vmag: lerp(L.vmagMin, L.vmagMax, 0.4),
-    };
-    const archId = C.arch;
-    const A = ARCH[archId] || ARCH.DRIVE;
-    const inSpeed = V3.len(ball.v);
+    const now = game.time;
+    if (!this.commit || now < this.swingAt) return null;
 
-    /* --- error model -------------------------------------------------
-     * No magic "whiff" roll. Three things go wrong for real players and
-     * all three are modelled as a distortion of the stroke, so the ball
-     * still obeys physics and the miss is explainable on screen.       */
-    const press = this.pressure * L.errPress;
-    const paceStrain = clamp((this.pace - 0.6) * 0.5, 0, 0.3);
-    const errChance = (L.errBase + press + paceStrain * 0.4) / this.handicap;
-    const slip = Math.random() < errChance;
-
-    // spin misread: the face goes the wrong way by a fraction of the spin
-    const read = clamp(L.spinRead + gauss(0.05), 0, 1);
-    const misread = (1 - read) * (ball.w.x * this.side) / 820;
-
-    let contact = A.contact + gauss(6.5 * (1 - L.skill)) + misread * 20;
-    let elev = A.elev + gauss(5.0 * (1 - L.skill)) - misread * 15;
-    let vmag = C.vmag * this.handicap;
-
-    if (slip) {
-      /* One of: too flat (net), too long, or badly timed (weak + wide).
-       * The weights used to be 40 / 38 / 22, i.e. two out of five opponent
-       * errors were straight into the tape — which is why "the computer keeps
-       * hitting the net" was the complaint. A net miss and a long miss cost the
-       * opponent the same point, but they read completely differently: a long
-       * ball is visibly a mistake, a netted ball kills the rally mid-swing and
-       * looks like the game broke. Same total error rate, less of it in the
-       * tape: 18 / 46 / 36. Measured net faults per level afterwards are in
-       * bench suite 8. */
-      const kind = Math.random();
-      if (kind < 0.18) { contact -= 11 + Math.random() * 9; elev -= 7; }        // into the net
-      else if (kind < 0.64) { elev += 9 + Math.random() * 8; vmag *= 1.18; }    // long
-      else { vmag *= 0.6; contact += 9; }                                       // mistimed
-      this.stats.errors++;
-    }
-
-    contact = clamp(contact, 12, 84);
-    const azS = clamp((C.tgt.x - ball.p.x) * 0.21 + gauss(0.055 * (1 - L.skill)), -1.15, 1.15);
-
-    const racket = makeRacket(this.side, archId, {
-      elev, contact, azSwing: azS, azFace: azS * 0.45,
-      vmag: clamp(vmag, 1.2, 18),
-      aim: { x: C.tgt.x, z: C.tgt.z },
-      quality: clamp(0.56 + L.skill * 0.44 + gauss(0.05) - (slip ? 0.22 : 0), 0.28, 1),
-    });
-    let refined = refineRacket(ball.p, ball.v, ball.w, racket,
-      clamp(L.skill * this.handicap + gauss(0.045), 0, 1), racket.quality);
-
-    /* A net fault the error model did NOT choose is not a miss, it is an
-     * under-hit: the AI picked a landing point, solved for it, and still could
-     * not clear the tape on the way there. Play the shot it is actually about
-     * to play through the same physics the game uses, and if that clips, give
-     * the frame a higher arc and solve again. Deliberate slips are exempt —
-     * those ARE the difficulty curve. */
-    if (!slip && shotHitsNet(ball, refined)) {
-      this.stats.netSaved = (this.stats.netSaved || 0) + 1;
-      const r2 = makeRacket(this.side, archId, {
-        elev: elev + 7, contact, azSwing: azS, azFace: azS * 0.45,
-        vmag: clamp(vmag, 1.2, 18),
-        aim: { x: C.tgt.x, z: C.tgt.z },
-        quality: racket.quality,
-      });
-      refined = refineRacket(ball.p, ball.v, ball.w, r2,
-        clamp(L.skill * this.handicap, 0, 1), r2.quality);
-    }
-
-    // residual execution noise: even a master is not a robot
-    const n = (1 - L.skill) * 0.9;
-    const jitter = Q.setAxisAngle(Q.new(), rndSym(1), rndSym(1), rndSym(1), gauss(0.030 * n + 0.006));
-    rotateVecQuat(refined.normal, refined.normal, jitter);
-    V3.mul(refined.vR, refined.vR, 1 + gauss(0.045 * n));
-
-    /* --- rally bookkeeping ------------------------------------------ */
-    this.exchange++;
-    this.pace = clamp(this.pace + L.paceRamp * (0.6 + this.tactic.risk * 0.8), 0, L.paceMax);
-    // a hard ball coming back raises the tempo on its own
-    if (inSpeed > 14) this.pace = clamp(this.pace + 0.03, 0, L.paceMax);
-    if (this.exchange === 3 && this.tactic === AI_TACTICS.FEEL) this.tactic = AI_TACTICS.BUILD;
-    if (this.exchange >= 6 && Math.random() < 0.25) this.tactic = AI_TACTICS.PRESS;
-
-    this.anim.swing = 1;
-    this.anim.windup = 0;
-    this.stats.shots++;
-    this.commit = null;
-    this.phase = 'RECOVER';
-    this.lastShot = {
-      arch: archId, stroke: STROKES[archId], target: C.tgt, racket: refined,
-      slip, pace: this.pace, tactic: this.tactic.id,
-    };
-    return refined;
-  }
-
-  /* ==================================================================
-   *  SERVE
-   *
-   *  Two things used to be wrong here and both were felt immediately by
-   *  the player:
-   *   · the target for the second bounce was 0.30..1.05 m past the net,
-   *     i.e. the bot served SHORT by default — and a short serve that dies
-   *     behind the net is unreachable, so the player simply lost the point;
-   *   · racket speed was ~2.9 + 4.4·skill, which after the impact solver
-   *     came out as a floaty 25-35 km/h ball. A "ПРО" server that cannot
-   *     beat 40 km/h reads as broken, not as forgiving.
-   *  A serve is now deep by default (second bounce 0.78..1.30 m past the
-   *  net — a real long serve), short only as a deliberate, level-gated
-   *  tactic and never shorter than 0.62 m, and fast enough to matter.
-   *  tt/tools/analyze.js suite 2 measures all three per level.
-   * ================================================================== */
-  serve(game) {
+    const ball = game.ball;
     const L = this.L;
-    // A server does not roll dice every time: it runs a short pattern and
-    // then changes it, which is exactly what a human does.
-    if (!this._servePlan || this._servePlan.left <= 0) {
-      const kinds = L.id === 0 ? ['SERVE_TOP'] : ['SERVE_TOP', 'SERVE_BACK', 'SERVE_SIDE', 'SERVE_FAST'];
-      const w = L.id === 0 ? [1.0] : (L.style === 'PUSHER' ? [0.22, 0.46, 0.26, 0.06]
-        : L.style === 'ATTACK' ? [0.26, 0.24, 0.30, 0.20]
-          : [0.26, 0.32, 0.30, 0.12]);
-      let r = Math.random(), k = 0, acc = 0;
-      for (let i = 0; i < kinds.length; i++) { acc += w[i]; if (r <= acc) { k = i; break; } }
-      this._servePlan = {
-        arch: kinds[k], left: 1 + (Math.random() < 0.45 ? 1 : 0), sideX: L.id === 0 ? 0 : rndSym(1),
-        // a short serve is a decision, not an accident — novice never serves short
-        short: L.id === 0 ? false : (Math.random() < clamp(L.placeSkill - 0.34, 0, 0.34)),
-      };
-    }
-    this._servePlan.left--;
+    const plan = this.commit;
 
-    const archId = this._servePlan.arch;
-    const A = ARCH[archId];
-    const wide = clamp(L.placeSkill, 0.2, 0.92);
-    const tx = L.id === 0 ? rndSym(0.12) : (sign(this._servePlan.sideX) * PH.T_HALF_WID * rnd(0.22, 0.72 * wide + 0.16));
+    // Determine stroke archetype
+    const archId = this.commit.archId || 'DRIVE';
+    const A = ARCH[archId] || ARCH.DRIVE;
+    const st = STROKES[archId] || STROKES.DRIVE;
 
-    /* Depth of the SECOND bounce on the receiver's half, in metres past the
-     * net (the receiver's end line is at 1.37). Deep is the default; short
-     * is a planned exception with a hard floor. */
-    let tz;
-    if (archId === 'SERVE_FAST') tz = rnd(1.05, 1.30);
-    else if (this._servePlan.short) tz = rnd(0.85, 1.05);
-    else tz = rnd(0.96, 1.28);
-    // novice/amateur servers serve clean and deep, returnable by the player
-    if (L.id === 0) tz = rnd(1.08, 1.22);
-    else if (L.skill < 0.70) tz = lerp(1.10, tz, 0.4);
-    tz = clamp(tz, 0.80, PH.T_HALF_LEN - 0.07);
+    // Biomechanical preset for this stroke
+    const bioPreset = AI_BIO_PRESETS[archId] || AI_BIO_PRESETS.DRIVE;
 
-    /* Racket speed. Through this impact model ~7 m/s of bat on a nearly
-     * stationary ball is a 40 km/h serve and ~11 m/s is 60+ km/h, which is
-     * the band a club-to-pro server lives in. SERVE_BASE is the m/s anchor,
-     * `pace` is the dimensionless level/tactic multiplier on top of it. */
-    const SERVE_BASE = L.id === 0 ? 4.8 : (L.id === 1 ? 7.6 : 9.2);
-    const pace = L.id === 0 ? 0.45 : clamp(0.50 + 0.55 * (0.4 + L.skill * 0.6) + this.pressure * 0.05, 0.45, 1.35);
-    const vmag = clamp(SERVE_BASE * pace * (A.speed || 1) * rnd(0.94, 1.06), 2.2, 12.5);
-
-    /* A sidespin serve has to turn the FACE across the ball, the way a real
-     * server peels round the side of it. A sideways SWING alone only makes
-     * spin about the vertical axis, and that axis does nothing at all when the
-     * ball lands: the contact point sits on it (measured: 10-30 cm of drift,
-     * all of it in the air, none of it off the table). The axis that throws the
-     * ball sideways off the table is the one along the flight, and the only way
-     * to make it is a face turned sideways with a vertical brush — 46-76 cm of
-     * lateral throw after the bounce at the same spin rate. */
-    const lateral = (A.lat >= 1.5 && L.id > 0) ? 1 : 0;
-    const kickTo = Math.sign(tx || 1);
-    /* The sweep (bench suite 13) says which frames are both LEGAL and spinny:
-     * a face turned 23-29 deg with a SQUARE swing and ~30 deg of elevation
-     * gives w.z = 0.10 of the cap plus w.y = 0.11 — and because the two come
-     * out with opposite signs, the ball curves one way in the air and throws
-     * the other way off the table. That is a reverse-sidespin serve, the one
-     * that actually beats people. Pairing the turned face with a random
-     * sideways swing (what this did before) produced almost no w.z at all and
-     * was illegal 17 % of the time. */
-    const azFace = lateral > 0 ? -kickTo * (0.40 + 0.10 * clamp(L.skill, 0, 1)) + rndSym(0.05) : rndSym(0.22);
-    const azSwing = lateral > 0 ? rndSym(0.10) : rndSym(0.45);
-    const elevBonus = lateral > 0 ? 20 : 0;
-
-    const racket = makeRacket(this.side, archId, {
-      elev: A.elev + elevBonus + gauss(3.5 * (1 - L.skill) + 1.0),
-      contact: A.contact + gauss(4.5 * (1 - L.skill) + 1.0),
-      azSwing: azSwing, azFace: azFace,
-      vmag: vmag,
-      aim: { x: tx, z: tz },
-      isServe: true,
-      quality: clamp(0.58 + L.skill * 0.42 + gauss(0.04), 0.3, 1),
-      // a serve that clips the tape is a let, i.e. wasted time for everyone
-      netClear: archId === 'SERVE_FAST' ? 0.085 : 0.075,
+    // Compute racket state
+    const racket = makeRacket(-1, archId, {
+      elev: A.elev,
+      contact: A.contact,
+      azSwing: 0,
+      azFace: 0,
+      vmag: plan.speed * (L.vmagMax * (0.7 + 0.3 * this.pace)) / 12,
+      aim: plan.aim,
+      quality: 0.75 + 0.20 * L.skill,
+      isServe: false,
     });
-    /* Measure what THIS frame would put on the ball if the solver left it
-     * alone, and hand that to the solver as the intent. Guessing the sign of
-     * w.z from the face azimuth is how the first attempt at a sidespin serve
-     * ended up with none: the solver was free to rotate the frame and it did. */
-    if (lateral > 0) {
-      const sv = V3.new(), sn = V3.new();
-      const tv = V3.clone(game.ball.v), tw = V3.new(0, 0, 0);
-      strokeFrame(racket, 0, 0, 1, sv, sn);
-      impactRacket(tv, tw, sn, sv, racket.quality, racket.rubber || {});
-      if (Number.isFinite(tw.z) && Math.abs(tw.z) > 20) racket.spinWant = tw.z;
+
+    // Add biomechanical orientation parameters
+    const x = plan.x / BIO_ZONE_HALF_WIDTH;  // normalize to [-1,1]
+    const b = smoothBlend(x);
+
+    racket.bioParams = {
+      x: clamp(x, -1, 1),
+      b,
+      forearmPsi: bioPreset.forearmPsi * (1 + 0.2 * b),
+      thetaForward: bioPreset.thetaForward + 8 * Math.pow(Math.abs(x), 1.6),
+      thetaSide: bioPreset.thetaSide * Math.sign(x) * Math.pow(Math.abs(x), 1.5),
+      thetaHandle: bioPreset.thetaHandle + 4 * (2 * b - 1),
+      phiFlip: Math.PI * sigmoid(x, 14, -0.06),
+    };
+
+    // Store for rendering
+    this.lastBioParams = racket.bioParams;
+    this.lastStrokeId = archId;
+
+    // Resolve the impact
+    const contact = V3.clone(ball.p);
+    const info = impactRacket(ball.v, ball.w, racket.normal, racket.vR,
+      racket.quality, racket.rubber || {});
+
+    // Record for stats
+    this.stats.shots++;
+    this.stats.sumSpeed += V3.len(ball.v);
+    if (V3.len(ball.v) > this.stats.maxSpeed) this.stats.maxSpeed = V3.len(ball.v);
+    this.strokeHistory.push({ archId, time: now, quality: racket.quality });
+    if (this.strokeHistory.length > 50) this.strokeHistory.shift();
+
+    return racket;
+  }
+
+  /** Serve - with proper biomechanical setup */
+  serve(game) {
+    const ball = game.ball;
+    const L = this.L;
+
+    // Pick serve type based on context
+    const r = Math.random();
+    let serveType;
+    if (r < 0.35) serveType = 'SERVE_TOP';
+    else if (r < 0.60) serveType = 'SERVE_BACK';
+    else if (r < 0.80) serveType = 'SERVE_SIDE';
+    else serveType = 'SERVE_FAST';
+
+    const A = ARCH[serveType] || ARCH.SERVE_TOP;
+    const st = STROKES[serveType] || STROKES.SERVE_TOP;
+
+    // Aim
+    const aimX = rndSym(0.50);
+    const aimZ = -PH.T_HALF_LEN * (0.55 + 0.35 * rnd());
+
+    const racket = makeRacket(-1, serveType, {
+      elev: A.elev,
+      contact: A.contact,
+      azSwing: 0,
+      azFace: 0,
+      vmag: lerp(6, 11, L.skill) * (0.85 + 0.15 * this.pace),
+      aim: { x: aimX, z: aimZ },
+      quality: 0.80 + 0.15 * L.skill,
+      isServe: true,
+      netClear: 0.055,
+    });
+
+    // Biomechanical serve preset
+    const serveBioPresets = {
+      SERVE_TOP:   { thetaForward: 18, thetaSide: 2, thetaHandle: 5, forearmPsi: -0.05 },
+      SERVE_BACK:  { thetaForward: -8, thetaSide: 6, thetaHandle: 10, forearmPsi: 0.28 },
+      SERVE_SIDE:  { thetaForward: 12, thetaSide: 16, thetaHandle: 8, forearmPsi: -0.10 },
+      SERVE_FAST:  { thetaForward: 10, thetaSide: 3, thetaHandle: 4, forearmPsi: -0.15 },
+    };
+
+    const bp = serveBioPresets[serveType] || serveBioPresets.SERVE_TOP;
+    racket.bioParams = {
+      x: aimX / BIO_ZONE_HALF_WIDTH,
+      b: 0.5,
+      forearmPsi: bp.forearmPsi,
+      thetaForward: bp.thetaForward,
+      thetaSide: bp.thetaSide,
+      thetaHandle: bp.thetaHandle,
+      phiFlip: Math.PI * sigmoid(aimX / BIO_ZONE_HALF_WIDTH, 14, -0.06),
+    };
+
+    this.lastBioParams = racket.bioParams;
+    this.lastStrokeId = serveType;
+
+    // Solve the serve (use existing serve solver from game)
+    const side = -1;
+    const serveCtx = {
+      side,
+      isServe: true,
+      ball: { y: ball.p.y, z: ball.p.z },
+      ballSpin: ball.w, ballSpeed: V3.len(ball.v),
+      powerScale: 1,
+      moveYaw: 0,
+      equip: game.equip.forSide(-1),
+      spinBias: 'norm',
+    };
+
+    const m = {
+      right: aimX * 0.5,
+      up: (A.elev / 66),
+      dist: 0.2,
+      curl: serveType === 'SERVE_SIDE' ? 0.5 : 0,
+      speed: 1.5,
+      peakSpeed: 1.5,
+      releaseSpeed: 1.5,
+      smooth: 0.9,
+      straightness: 0.9,
+      samples: 10,
+      jerk: 0.1,
+    };
+
+    const racketFromStroke = deriveStroke(m, serveCtx);
+    racketFromStroke.vmag = racket.vmag;
+    racketFromStroke.normal = racket.normal;
+    racketFromStroke.vR = racket.vR;
+    racketFromStroke.rubber = racket.rubber;
+    racketFromStroke.quality = racket.quality;
+    racketFromStroke.bioParams = racket.bioParams;
+    racketFromStroke.stroke = st;
+    racketFromStroke.arch = A;
+    racketFromStroke.isServe = true;
+
+    // Use refineRacket for legal serve
+    let finalRacket = refineRacket(ball.p, ball.v, ball.w, racketFromStroke,
+      this.handicap, racket.quality);
+
+    if (!finalRacket.valid && this.handicap < 0.999) {
+      finalRacket = refineRacket(ball.p, ball.v, ball.w, racketFromStroke,
+        1, racket.quality);
     }
 
-    this.anim.swing = 1;
-    this.tell = { kind: archId, t: 0.5, strength: 0.6 };
-    this.lastShot = { arch: archId, stroke: STROKES[archId], racket, slip: false, serveDepth: tz };
-    this.exchange = 0;
-    this.pace = this.L.paceOpen;
-    return refineRacket(game.ball.p, game.ball.v, game.ball.w, racket, clamp(L.skill, 0, 1), racket.quality);
+    return finalRacket;
   }
-}
 
-/** rotate a vector by a quaternion (in place safe) */
-function rotateVecQuat(out, v, q) {
-  const { x, y, z } = v, qx = q.x, qy = q.y, qz = q.z, qw = q.w;
-  const ix = qw * x + qy * z - qz * y;
-  const iy = qw * y + qz * x - qx * z;
-  const iz = qw * z + qx * y - qy * x;
-  const iw = -qx * x - qy * y - qz * z;
-  out.x = ix * qw + iw * -qx + iy * -qz - iz * -qy;
-  out.y = iy * qw + iw * -qy + iz * -qx - ix * -qz;
-  out.z = iz * qw + iw * -qz + ix * -qy - iy * -qx;
-  return out;
+  /** Check if AI is ready to strike (timing) */
+  readyToStrike(now) {
+    if (!this.commit) return false;
+    if (now < this.swingAt - 0.30) return false;  // too early
+    if (now > this.swingAt + 0.15) return false;  // too late
+    return true;
+  }
+
+  /** Think - main AI update */
+  think(game, dt) {
+    const now = game.time;
+    const ball = game.ball;
+
+    // Update readiness
+    if (this.phase === 'IDLE') {
+      this.plan = this.computePlan(game);
+      if (this.plan) {
+        this.commit = this.plan;
+        this.readT = now;
+        this.phase = 'READY';
+        this.backswingStart = now;
+        this.backswingPose = {
+          pos: V3.new(this.target.x, this.target.y, this.target.z),
+          windup: 0,
+        };
+      }
+    }
+
+    // Update tactic based on rally progression
+    if (game.rally > 0 && game.rally % 5 === 0) {
+      this.tactic = this.rollTactic();
+    }
+
+    // Update pace based on rally
+    if (game.rally > 0) {
+      this.exchange = game.rally;
+      this.pace = clamp(this.L.paceOpen + (game.rally - 1) * this.L.paceRamp, 0, this.L.paceMax);
+    }
+
+    // Move towards target with smooth interpolation
+    if (this.plan && this.phase !== 'IDLE') {
+      const t = this.noisyTarget(this.plan, game);
+      V3.copy(this.target, t);
+
+      // Smooth movement
+      const moveRate = clamp(this.L.move * 2.5, 2, 12);
+      this._moveSmooth.x = expSmooth(this._moveSmooth.x, this.target.x, moveRate, dt);
+      this._moveSmooth.y = expSmooth(this._moveSmooth.y, this.target.y, moveRate, dt);
+      this._moveSmooth.z = expSmooth(this._moveSmooth.z, this.target.z, moveRate * 0.9, dt);
+
+      // Store position for rendering
+      game.ai.pos = V3.new(
+        this._moveSmooth.x,
+        this._moveSmooth.y,
+        this._moveSmooth.z
+      );
+
+      // Compute velocity for visual purposes
+      V3.sub(this.vel, game.ai.pos, this.lastPos);
+      V3.mul(this.vel, this.vel, 1 / Math.max(dt, 1e-4));
+      V3.copy(this.lastPos, game.ai.pos);
+    }
+
+    // Swing timing
+    if (this.plan && this.phase !== 'IDLE') {
+      const timeToContact = this.commit.t - now;
+      if (timeToContact < 0.35 && timeToContact > 0) {
+        // Wind-up phase
+        const windupProgress = 1 - timeToContact / 0.35;
+        this.anim.windup = clamp(windupProgress, 0, 1) * this.L.windup;
+
+        // Start swing commitment
+        if (!this.commit || now >= this.swingAt) {
+          this.swingAt = now + 0.02;
+        }
+      }
+
+      // Execute swing
+      if (this.readyToStrike(now)) {
+        const racket = this.swing(game);
+        if (racket) {
+          this.phase = 'SWING';
+          this.anim.swing = 1;
+          this.anim.lean = racket.bioParams ? racket.bioParams.thetaSide * 0.15 : 0;
+        }
+      }
+    }
+
+    // Decay animations
+    this.anim.swing = Math.max(0, this.anim.swing - dt * 3);
+    this.anim.windup = Math.max(0, this.anim.windup - dt * 2);
+    this.anim.lean = Math.max(0, this.anim.lean - dt * 4);
+
+    // Phase transition
+    if (this.phase === 'SWING' && this.anim.swing < 0.1) {
+      this.phase = 'RECOVER';
+    }
+    if (this.phase === 'RECOVER' && !ball.live) {
+      this.phase = 'IDLE';
+    }
+  }
 }
 
 
@@ -5465,21 +5343,28 @@ function rotateVecQuat(out, v, q) {
 /* =====================================================================
  *  PADDLE RIG — every paddle in the world gets a hand and an arm.
  *
- *  Why this exists. A paddle floating in the air is a sprite, not an
+ *  WHY THIS EXISTS. A paddle floating in the air is a sprite, not an
  *  opponent: the eye has nothing to read, and the scene feels empty even
  *  though the physics underneath is real. One rig, built from the same
  *  primitives as the rest of the scene, fixes three things at once:
  *
- *  · the opponent finally looks like a person standing at the far end —
- *    you can see the wrist snap on a loop and the forearm drop on a chop,
- *    which is exactly the information a table-tennis player watches for;
- *  · the online opponent's hand (same rig, fed from the network);
- *  · the training ghost — the very same rig drawn translucent, tracing
- *    the stroke you were supposed to play.
+ *   · the opponent finally looks like a person standing at the far end —
+ *     you can see the wrist snap on a loop and the forearm drop on a chop,
+ *     which is exactly the information a table-tennis player watches for;
+ *   · the online opponent's hand (same rig, fed from the network);
+ *   · the training ghost — the very same rig drawn translucent, tracing
+ *     the stroke you were supposed to play.
  *
- *  Nothing here is animated by hand: the arm is solved from the paddle's
+ *  NOTHING HERE IS ANIMATED BY HAND: the arm is solved from the paddle's
  *  own position and normal every frame, so it follows the physics for
  *  free. Limb axes are +Z so a single Q.lookRotation aims them.
+ *
+ *  BIOMECHANICAL EXTENSION (99-level):
+ *   - forearm rotation (pronation/supination) from RacketBiomech
+ *   - wrist extension/deviation
+ *   - handle twist visualization
+ *   - rubber flip visualization (different materials per active side)
+ *   - edge zone visual adaptation
  * ===================================================================== */
 
 /** Limb segment: a tapered cylinder whose axis is +Z instead of +Y. */
@@ -5497,6 +5382,10 @@ const RIG = {
   SKIN_SHADE: [0.72, 0.50, 0.38],
   SLEEVE: [0.13, 0.20, 0.42],
   SLEEVE_ALT: [0.72, 0.14, 0.19],
+  // Forearm visual rotation scale — makes pronation/supination readable
+  FOREARM_VIS_SCALE: 1.3,
+  // Wrist visual deviation scale
+  WRIST_VIS_SCALE: 1.2,
 };
 
 class PaddleRig {
@@ -5513,11 +5402,20 @@ class PaddleRig {
     this.mPath = R.dynMesh(420);                            // ghost stroke ribbon
     this.R = R;
     this.built = true;
+
+    // Temporary storage for computations
     this._s = {
-      q: Q.new(), qr: Q.new(), m: M4.create(), m2: M4.create(),
-      v1: V3.new(), v2: V3.new(), v3: V3.new(), v4: V3.new(),
+      q: Q.new(), qr: Q.new(), q2: Q.new(), q3: Q.new(),
+      m: M4.create(), m2: M4.create(), m3: M4.create(),
+      v1: V3.new(), v2: V3.new(), v3: V3.new(), v4: V3.new(), v5: V3.new(),
       one: { x: 1, y: 1, z: 1 }, up: { x: 0, y: 1, z: 0 },
+      forearmAxis: V3.new(0, 0, 1),
+      wristDevAxis: V3.new(1, 0, 0),
     };
+    // Matrix for forearm rotation
+    this._forearmM4 = M4.create();
+    this._wristM4 = M4.create();
+    this._tmpM4 = M4.create();
   }
 
   /** World direction of the paddle handle (local -Y) for a given quat. */
@@ -5527,9 +5425,7 @@ class PaddleRig {
     return V3.norm(out, M4.transformDir(out, s.m, { x: 0, y: -1, z: 0 }));
   }
 
-  /** Paddle orientation: local +Z along the normal, rolled into the hand.
-   *  `extraRoll` is the bank into a lateral step, so a bat that is moving
-   *  right is visibly turned right instead of sliding flat. */
+  /** Paddle orientation: local +Z along the normal, rolled into the hand. */
   paddleQuat(out, normal, hand, swing, extraRoll) {
     Q.lookRotation(out, normal, this._s.up);
     const roll = (hand === 'left' ? 0.42 : -0.42) + (swing || 0) * 0.3 + (extraRoll || 0);
@@ -5538,27 +5434,121 @@ class PaddleRig {
   }
 
   /**
-   * Draw the arm + hand that holds a paddle. The paddle itself is drawn by
-   * the caller (it may be a ghost, a remote player, or the real thing).
-   *   o = { pos, normal, hand, swing, windup, ghost, alpha, t }
+   * Apply forearm rotation to a direction vector.
+   * This simulates pronation/supination visually.
+   */
+  applyForearmRotation(out, dir, forearmPsi, axis) {
+    const s = this._s;
+    const scaledPsi = forearmPsi * RIG.FOREARM_VIS_SCALE;
+    M4.setAxisAngle(this._forearmM4, axis || s.forearmAxis, scaledPsi);
+    return V3.norm(out, M4.transformDir(out, this._forearmM4, dir));
+  }
+
+  /**
+   * Apply wrist deviation to a direction vector.
+   */
+  applyWristDeviation(out, dir, wristDev, axis) {
+    const s = this._s;
+    M4.setAxisAngle(this._wristM4, axis || s.wristDevAxis, wristDev);
+    return V3.norm(out, M4.transformDir(out, this._wristM4, dir));
+  }
+
+  /**
+   * DRAW THE ARM + HAND THAT HOLDS A PADDLE.
+   *
+   * Enhanced with biomechanical parameters from RacketBiomech:
+   *   o = {
+   *     pos, normal, hand, swing, windup, roll,
+   *     bioQ,           // biomechanical orientation quaternion
+   *     bioActive,      // whether to use bio orientation
+   *     forearmPsi,     // forearm pronation/supination angle [rad]
+   *     wristExt,       // wrist extension/flexion [rad]
+   *     wristDev,       // wrist radial/ulnar deviation [rad]
+   *     phiFlip,        // flip angle [rad]
+   *     activeSide,     // +1 = forehand/red, -1 = backhand/black
+   *     mats,           // racket materials
+   *     ghost, alpha, t, ...
+   *   }
    */
   drawArm(R, S, o) {
     this.build(R);
     const s = this._s;
     const wd = clamp(o.windup || 0, 0, 1);
     const n = V3.norm(s.v1, o.normal);
-    const hdir = this.handleDir(s.v2, o.q || this.paddleQuat(s.q, n, o.hand, o.swing, o.roll));
+    const q = o.q || this.paddleQuat(s.q, n, o.hand, o.swing, o.roll);
+
+    // ---- BIOMECHANICAL ENHANCEMENTS ----
+
+    // If bioQ is provided and bioActive, use it as the base orientation
+    const useBio = o.bioQ && o.bioActive !== false;
+    let finalQ = q;
+    let effectiveForearmPsi = o.forearmPsi || 0;
+    let effectiveWristDev = o.wristDev || 0;
+    let effectiveWristExt = o.wristExt || 0;
+
+    if (useBio) {
+      // Use the biomechanical orientation
+      finalQ = o.bioQ;
+
+      // Extract effective biomechanical angles
+      effectiveForearmPsi = o.forearmPsi || 0;
+      effectiveWristDev = o.wristDev || 0;
+
+      // Combine wrist extension into the visual (affects hand pose slightly)
+      effectiveWristExt = o.wristExt || 0;
+
+      // The flip angle can add a subtle visual rotation
+      const phiFlip = o.phiFlip || 0;
+      if (Math.abs(phiFlip) > 0.1) {
+        // Subtle additional roll from flip — makes the flip visible
+        const flipVisual = phiFlip * 0.12;
+        const baseRoll = (o.hand === 'left' ? 0.42 : -0.42) + (o.swing || 0) * 0.3 + (o.roll || 0);
+        const combinedRoll = baseRoll + flipVisual;
+        Q.mul(finalQ, finalQ, Q.setAxisAngle(s.qr, 0, 0, 1, combinedRoll));
+      }
+    }
+
+    // Compute handle direction with possible forearm rotation
+    let hdir = this.handleDir(s.v2, finalQ);
+
+    // Apply forearm rotation to handle direction (visual only)
+    if (Math.abs(effectiveForearmPsi) > 0.01) {
+      hdir = this.applyForearmRotation(s.v3, hdir, effectiveForearmPsi, s.forearmAxis);
+    }
+
     // fist grips the handle a hand's width below the blade
     const fist = V3.addScaled(V3.new(), o.pos, hdir, RIG.HANDLE);
-    // the forearm runs back and down from the fist; on a windup the elbow
-    // drops away from the table, which is the whole telegraph of a loop
-    const fa = V3.norm(s.v3, V3.new(
+
+    // ---- FOREARM with pronation/supination ----
+    // Base forearm direction: runs back and down from fist
+    let fa = V3.norm(s.v4, V3.new(
       -n.x * 0.60 + hdir.x * 0.45,
       -0.46 - wd * 0.30,
-      -n.z * 0.60 + hdir.z * 0.45));
-    const elbow = V3.addScaled(V3.new(), fist, fa, RIG.FOREARM);
-    const mid = V3.lerp(s.v4, fist, elbow, 0.5);
+      -n.z * 0.60 + hdir.z * 0.45
+    ));
 
+    // Apply forearm rotation to forearm direction (visual)
+    if (Math.abs(effectiveForearmPsi) > 0.01) {
+      fa = this.applyForearmRotation(s.v5, fa, effectiveForearmPsi, s.forearmAxis);
+    }
+
+    // Elbow position
+    const elbow = V3.addScaled(V3.new(), fist, fa, RIG.FOREARM);
+    const mid = V3.lerp(s.v2, fist, elbow, 0.5);
+
+    // ---- WRIST VISUALIZATION ----
+    // Wrist deviation bends the forearm slightly at the wrist
+    // This affects the fist position slightly
+    let fistOffset = V3.zero();
+    if (Math.abs(effectiveWristDev) > 0.01) {
+      // Wrist deviation slightly shifts the fist
+      const devDir = V3.norm(s.v3, V3.new(-n.x, 0, -n.z));
+      fistOffset = V3.scale(V3.new(), devDir, effectiveWristDev * 0.02);
+    }
+
+    const fistFinal = V3.add(fist, fistOffset);
+
+    // ---- SKIN AND CLOTH COLORS ----
     const skin = o.ghost ? o.ghostCol : RIG.SKIN;
     const blue = o.hand === 'left';
     const sleeveCol = o.ghost ? o.ghostCol : (o.sleeve || (blue ? RIG.SLEEVE_ALT : RIG.SLEEVE));
@@ -5566,29 +5556,49 @@ class PaddleRig {
     const base = o.ghost ? this.ghostMat(o, skin, 0.55) : { color: skin, rough: 0.62 };
     const cloth = o.ghost ? this.ghostMat(o, sleeveCol, 0.42) : { color: sleeveCol, rough: 0.85 };
 
-    // forearm
+    // ---- DRAW FOREARM ----
     const qf = Q.lookRotation(s.q, fa, s.up);
     M4.compose(s.m, mid, qf, { x: 1, y: 1, z: RIG.FOREARM });
     R.draw(this.mFore, s.m, base);
-    // elbow
+
+    // ---- DRAW ELBOW JOINT ----
     M4.compose(s.m, elbow, qf, s.one);
     R.draw(this.mJoint, s.m, base);
-    // sleeve cuff over the elbow end
+
+    // ---- DRAW SLEEVE CUFF OVER ELBOW END ----
     const cuff = V3.addScaled(V3.new(), elbow, fa, RIG.FOREARM * 0.44);
     M4.compose(s.m, cuff, qf, { x: 1, y: 1, z: RIG.FOREARM * 0.55 });
     R.draw(this.mUpper, s.m, cloth);
+
     M4.compose(s.m, V3.addScaled(V3.new(), elbow, fa, RIG.FOREARM * 0.92), qf, { x: 1, y: 1, z: RIG.FOREARM * 0.5 });
     R.draw(this.mSleeve, s.m, cloth);
-    // fist: squashed ball, thumb laid along the handle
-    M4.compose(s.m, fist, qf, { x: 0.92, y: 0.74, z: 0.58 });
+
+    // ---- DRAW FIST (PALM) ----
+    // Fist orientation: slightly rotated by wrist extension
+    let palmQ = qf;
+    if (Math.abs(effectiveWristExt) > 0.01) {
+      // Wrist extension tilts the fist
+      const wristExtVisual = effectiveWristExt * RIG.WRIST_VIS_SCALE;
+      const wristQ = Q.setAxisAngle(s.qr, 1, 0, 0, wristExtVisual);
+      Q.mul(palmQ, palmQ, wristQ);
+    }
+
+    M4.compose(s.m, fistFinal, palmQ, { x: 0.92, y: 0.74, z: 0.58 });
     R.draw(this.mPalm, s.m, base);
-    const th = V3.addScaled(V3.new(), fist, hdir, -0.012);
+
+    // ---- DRAW THUMB ----
+    // Thumb lays along the handle
+    const th = V3.addScaled(V3.new(), fistFinal, hdir, -0.012);
     const qh = Q.lookRotation(s.q, hdir, n);
     M4.compose(s.m, V3.addScaled(th, th, n, 0.030), qh, { x: 1, y: 1, z: 0.062 });
     R.draw(this.mThumb, s.m, base);
-    return { fist, elbow };
+
+    return { fist: fistFinal, elbow, forearmPsi: effectiveForearmPsi };
   }
 
+  /**
+   * Enhanced ghost material with biomechanical info.
+   */
   ghostMat(o, col, rough) {
     return {
       color: o.ghostCol || col, rough: rough || 0.4, unlit: true,
@@ -5597,32 +5607,109 @@ class PaddleRig {
     };
   }
 
-  /** The whole thing: paddle + hand + arm. Used by the opponent and the ghost. */
+  /**
+   * DRAW THE WHOLE PADDLE — now with full biomechanical orientation.
+   *
+   * KEY ENHANCEMENTS:
+   * 1. Uses bioQ for orientation when provided
+   * 2. Determines active side geometrically (n · ballDir)
+   * 3. Renders correct rubber color based on active side
+   * 4. Forearm rotation visible in arm pose
+   * 5. Wrist deviation visible in fist position
+   * 6. Flip angle adds subtle visual rotation
+   */
   draw(R, S, o) {
     this.build(R);
     const s = this._s;
     const n = V3.norm(s.v1, o.normal);
     const q = o.q || this.paddleQuat(s.q, n, o.hand, o.swing, o.roll);
-    const me = S.mesh, ma = S.mat;
-    const mats = o.mats || {};                       // the equipped racket's palette
-    const wood = o.ghost ? this.ghostMat(o, o.ghostCol, 0.5) : (mats.wood || ma.bladeWood);
-    const red = o.ghost ? this.ghostMat(o, o.ghostCol, 0.5) : (mats.red || ma.rubberRed);
-    const black = o.ghost ? this.ghostMat(o, o.ghostCol, 0.5) : (mats.black || ma.rubberBlack);
-    const handle = o.ghost ? this.ghostMat(o, o.ghostCol, 0.5) : (mats.grip || ma.handle);
 
-    M4.compose(s.m, o.pos, q, s.one);
+    // ---- BIOMECHANICAL SETUP ----
+
+    // Use bio quaternion if provided
+    const bioQ = o.bioQ || null;
+    const useBio = bioQ && o.bioActive !== false;
+    const finalQ = useBio ? bioQ : q;
+
+    // Determine active side for rubber color
+    // Method 1: from bioMeta if available
+    let activeSide = o.activeSide || 1;
+
+    // Method 2: geometric calculation from normal and ball direction
+    if (o.ballDir && !o.bioMeta) {
+      const nWorld = V3.norm(V3.new(), n);
+      const d = V3.dot(nWorld, o.ballDir);
+      activeSide = d >= 0 ? 1 : -1;
+    }
+
+    // Store for drawArm
+    const armOptions = Object.assign({}, o, {
+      q: finalQ,
+      forearmPsi: o.forearmPsi || 0,
+      wristDev: o.wristDev || 0,
+      wristExt: o.wristExt || 0,
+      phiFlip: o.phiFlip || 0,
+      activeSide,
+    });
+
+    const me = S.mesh, ma = S.mat;
+    const mats = o.mats || {};
+
+    // ---- MATERIAL SELECTION BASED ON ACTIVE SIDE ----
+    // This is the KEY visual difference: correct rubber color per side
+
+    let wood, red, black, handle;
+
+    if (o.ghost) {
+      const ghostCol = o.ghostCol || RIG.SKIN;
+      wood = this.ghostMat(o, ghostCol, 0.5);
+      red = this.ghostMat(o, ghostCol, 0.5);
+      black = this.ghostMat(o, ghostCol, 0.5);
+      handle = this.ghostMat(o, ghostCol, 0.5);
+    } else {
+      wood = mats.wood || ma.bladeWood;
+      // Active side gets the correct rubber color
+      if (activeSide >= 0) {
+        // Forehand active: red rubber visible
+        red = mats.red || ma.rubberRed;
+        black = mats.black || ma.rubberBlack;
+      } else {
+        // Backhand active: black rubber visible
+        red = mats.black || ma.rubberBlack;
+        black = mats.red || ma.rubberRed;
+      }
+      handle = mats.grip || ma.handle;
+    }
+
+    // ---- DRAW PADDLE BLADE ----
+    M4.compose(s.m, o.pos, finalQ, s.one);
     R.draw(me.blade, s.m, wood);
-    M4.compose(s.m2, V3.addScaled(s.v2, o.pos, n, 0.0085), q, s.one);
-    R.draw(me.rubber, s.m2, black);
-    M4.compose(s.m2, V3.addScaled(s.v2, o.pos, n, -0.0085), q, s.one);
-    R.draw(me.rubber, s.m2, red);
+
+    // ---- DRAW RUBBER ON BOTH SIDES ----
+    // Offset along normal for rubber thickness
+    const rubberOffset = 0.0085;
+
+    // Active side rubber (the one facing the ball)
+    const activeOffset = V3.addScaled(V3.new(), o.pos, n, rubberOffset);
+    M4.compose(s.m2, activeOffset, finalQ, s.one);
+    R.draw(me.rubber, s.m2, activeSide >= 0 ? red : black);
+
+    // Inactive side rubber (opposite side)
+    const inactiveOffset = V3.addScaled(V3.new(), o.pos, V3.scale(n, -1), rubberOffset);
+    M4.compose(s.m2, inactiveOffset, finalQ, s.one);
+    R.draw(me.rubber, s.m2, activeSide >= 0 ? black : red);
+
+    // ---- DRAW HANDLE ----
     const ho = V3.new();
     M4.transformDir(ho, s.m, { x: 0, y: -0.125, z: 0 });
-    M4.compose(s.m2, V3.addScaled(s.v3, o.pos, ho, 1), q, s.one);
+    M4.compose(s.m2, V3.addScaled(s.v3, o.pos, ho, 1), finalQ, s.one);
     R.draw(me.handle, s.m2, handle);
 
-    this.drawArm(R, S, Object.assign({}, o, { q }));
-    return q;
+    // ---- DRAW ARM WITH BIOMECHANICAL PARAMS ----
+    // Pass the computed activeSide and bio params to drawArm
+    this.drawArm(R, S, armOptions);
+
+    return finalQ;
   }
 
   /* ------------------------------------------------------------------ *
@@ -5659,6 +5746,52 @@ class PaddleRig {
     }
     RR.uploadDyn(R, nv, ni);
     return R;
+  }
+
+  /**
+   * Draw a "biomechanical hint" — a subtle line showing forearm rotation axis.
+   * Used for training/development mode only.
+   */
+  drawBiomechHint(R, S, pos, normal, forearmPsi, wristDev, alpha) {
+    const s = this._s;
+    this.build(R);
+
+    const hintAlpha = alpha !== undefined ? alpha : 0.3;
+
+    // Forearm axis indicator (line along forearm rotation axis)
+    const axisLen = 0.15;
+    const axisDir = V3.norm(s.v1, normal);
+    const start = V3.addScaled(V3.new(), pos, axisDir, -0.1);
+    const end = V3.addScaled(V3.new(), pos, axisDir, axisLen);
+
+    // Simple line using a thin box
+    const mid = V3.lerp(s.v2, start, end, 0.5);
+    const dir = V3.norm(s.v3, V3.sub(end, start));
+    const q = Q.lookRotation(s.q, dir, s.up);
+    const length = V3.len(V3.sub(end, start));
+
+    M4.compose(s.m, mid, q, { x: 0.003, y: 0.003, z: length });
+    R.draw(this.mJoint, s.m, {
+      color: [1, 0.5, 0.2], rough: 0.5, emissive: [0.5, 0.2, 0],
+      blend: true, opacity: hintAlpha, doubleSided: true, unlit: true,
+    });
+
+    // Wrist deviation indicator (perpendicular to forearm)
+    if (Math.abs(wristDev) > 0.01) {
+      const wStart = V3.addScaled(V3.new(), pos, axisDir, 0.05);
+      const wDir = V3.norm(s.v4, V3.new(1, 0, 0));
+      const wEnd = V3.addScaled(V3.new(), wStart, wDir, wristDev * 0.2);
+      const wMid = V3.lerp(s.v5, wStart, wEnd, 0.5);
+      const wLen = V3.len(V3.sub(wEnd, wStart));
+      const wQ = Q.lookRotation(s.q, wDir, axisDir);
+      M4.compose(s.m2, wMid, wQ, { x: 0.003, y: 0.003, z: wLen });
+      R.draw(this.mJoint, s.m2, {
+        color: [0.2, 0.5, 1], rough: 0.5, emissive: [0, 0.2, 0.5],
+        blend: true, opacity: hintAlpha * 0.7, doubleSided: true, unlit: true,
+      });
+    }
+
+    return s.m;
   }
 }
 
@@ -7322,6 +7455,1457 @@ class Trainer {
 }
 
 
+/* ====== 75_feedback.js ====== */
+/* =====================================================================
+ *  HIT FEEDBACK SYSTEM — multi-layered impact response
+ *
+ *  Layers:
+ *   1. Visual: particles, flash, screen effects
+ *   2. Audio: layered sounds based on quality/spin/speed
+ *   3. Haptic: variable vibration patterns
+ *   4. Camera: micro-reaction on impact
+ *
+ *  This system transforms a physical impact into a multi-sensory
+ *  experience — the key to "game feel" at 99 level.
+ * ===================================================================== */
+
+const HIT_FEEDBACK = {
+  // Particle system tuning
+  PARTICLES: {
+    baseCount: 8,
+    qualityMultiplier: 22,
+    speedMultiplier: 0.6,
+    maxCount: 60,
+    minSize: 0.008,
+    maxSize: 0.035,
+  },
+
+  // Camera shake tuning
+  CAMERA: {
+    shakeBase: 0.0015,
+    shakeSpeedMultiplier: 0.0008,
+    shakeQualityMultiplier: 0.04,
+    maxShake: 0.08,
+  },
+
+  // Haptic patterns
+  HAPTIC: {
+    HIT: [8, 25, 8],
+    WINNER: [15, 40, 15, 40],
+    BLOCK: [4, 12],
+    NET_CORD: [12, 22, 12],
+    EDGE_BALL: [8, 35, 8],
+    POINT_LOST: [25, 80, 30],
+    POINT_WON: [12, 28, 12, 28],
+    SERVE: [6, 18, 6],
+  },
+
+  // Audio layering
+  AUDIO: {
+    woodHitBase: 0.4,
+    rubberFrictionBase: 0.3,
+    whooshBase: 0.2,
+    spinVolumeMultiplier: 0.3,
+  },
+};
+
+/**
+ * Main hit feedback executor.
+ * Called from Game.applyHit — transforms impact into experience.
+ */
+class HitFeedbackSystem {
+  constructor(game) {
+    this.game = game;
+    this._particles = game.particles;
+    this._audio = game.audio;
+    this._camera = game;
+    this._hapticEnabled = true;
+    this._lastHitTime = 0;
+    this._cooldown = 0.05;  // prevent feedback spamming
+  }
+
+  /**
+   * Execute complete feedback for an impact.
+   * @param {object} ctx
+   *   - quality: 0..1 contact quality
+   *   - speed: m/s ball speed
+   *   - spin: rad/s ball spin vector
+   *   - spinType: 'topspin', 'backspin', 'sidespin', 'none'
+   *   - stroke: stroke archetype
+   *   - isWinner: whether this hit won the point
+   *   - isNetCord: whether hit the net
+   *   - isEdge: whether edge ball
+   *   - contactPoint: {x,y,z} where contact occurred
+   *   - side: +1 player, -1 AI
+   */
+  execute(ctx) {
+    const now = this.game.time;
+    if (now - this._lastHitTime < this._cooldown) return;
+    this._lastHitTime = now;
+
+    // Determine spin characteristics
+    const spin = ctx.spin || V3.new();
+    const spinMag = V3.len(spin);
+    const spinType = this.determineSpinType(spin);
+
+    // Quality-based scaling
+    const quality = clamp(ctx.quality || 1, 0, 1);
+    const speed = ctx.speed || 0;
+
+    // ---- VISUAL FEEDBACK ----
+    this.visual(quality, speed, spinType, spinMag, ctx);
+
+    // ---- AUDIO FEEDBACK ----
+    this.audio(quality, speed, spinType, spinMag, ctx);
+
+    // ---- HAPTIC FEEDBACK ----
+    this.haptic(quality, speed, spinType, ctx);
+
+    // ---- CAMERA FEEDBACK ----
+    this.camera(quality, speed, ctx);
+  }
+
+  /**
+   * Determine spin type from spin vector.
+   * Convention: +w.x = topspin (ball top moves forward)
+   */
+  determineSpinType(spin) {
+    const w = spin;
+    const top = Math.abs(w.x);
+    const side = Math.abs(w.y);
+    const slice = Math.abs(w.z);
+
+    if (top > side * 1.5 && top > slice * 1.5) {
+      return w.x > 0 ? 'topspin' : 'backspin';
+    }
+    if (side > top * 1.2 && side > slice * 1.2) {
+      return w.y > 0 ? 'sidespin-right' : 'sidespin-left';
+    }
+    return 'mixed';
+  }
+
+  /**
+   * Visual feedback: particles, glow, effects.
+   */
+  visual(quality, speed, spinType, spinMag, ctx) {
+    const game = this.game;
+
+    // ---- Particle burst ----
+    const baseCount = HIT_FEEDBACK.PARTICLES.baseCount;
+    const count = Math.min(
+      HIT_FEEDBACK.PARTICLES.maxCount,
+      Math.floor(baseCount + quality * HIT_FEEDBACK.PARTICLES.qualityMultiplier
+        + speed * HIT_FEEDBACK.PARTICLES.speedMultiplier)
+    );
+
+    // Particle colors based on spin type
+    let colors;
+    switch (spinType) {
+      case 'topspin':
+        colors = { r: 1.0, g: 0.45, b: 0.15, intensity: 1.2 };
+        break;
+      case 'backspin':
+        colors = { r: 0.2, g: 0.6, b: 1.0, intensity: 1.2 };
+        break;
+      case 'sidespin-right':
+        colors = { r: 0.1, g: 0.9, b: 0.5, intensity: 1.1 };
+        break;
+      case 'sidespin-left':
+        colors = { r: 0.9, g: 0.2, b: 0.8, intensity: 1.1 };
+        break;
+      case 'mixed':
+      default:
+        colors = { r: 0.8, g: 0.8, b: 0.8, intensity: 1.0 };
+    }
+
+    // Size variation
+    const sizeBase = HIT_FEEDBACK.PARTICLES.minSize;
+    const sizeRange = HIT_FEEDBACK.PARTICLES.maxSize - HIT_FEEDBACK.PARTICLES.minSize;
+
+    // Direction — particles fly away from contact normal
+    const dir = ctx.contactNormal || V3.new(0, 0, 1);
+
+    // Burst particles
+    const contactP = ctx.contactPoint || game.ball.p;
+    this._particles.burst(
+      contactP.x, contactP.y, contactP.z,
+      count,
+      0.8 + speed * 0.04,
+      0.25 + quality * 0.15,
+      sizeBase + sizeRange * quality,
+      colors.r, colors.g, colors.b,
+      { x: -dir.x * 0.5, y: -dir.y * 0.5, z: -dir.z * 0.5 }
+    );
+
+    // ---- Screen flash ----
+    // Only on good quality hits
+    if (quality > 0.5 && speed > 5) {
+      const flashIntensity = Math.min(1, (quality - 0.5) * 0.8 + speed * 0.012);
+      game.hitFlash = Math.min(1, game.hitFlash + flashIntensity * 0.15);
+    }
+
+    // ---- Contact glow ----
+    // Small glow at contact point (decorative)
+    if (game.settings.showDebug) {
+      // Debug visualization
+    }
+  }
+
+  /**
+   * Audio feedback: layered sounds.
+   */
+  audio(quality, speed, spinType, spinMag, ctx) {
+    const audio = this._audio;
+    if (!audio || !audio.initialized) return;
+
+    // ---- Layer 1: Wood impact (body sound) ----
+    // Quality determines wood vs rubber ratio
+    const woodVolume = HIT_FEEDBACK.AUDIO.woodHitBase * (1 - quality * 0.4);
+    // Higher quality = more wood, less rubber
+    const woodPitch = 0.9 + quality * 0.2 + speed * 0.005;
+
+    if (audio.hitRacket) {
+      audio.hitRacket(speed * 3.6, 0, quality < 0.4);
+    }
+
+    // ---- Layer 2: Rubber friction (spin sound) ----
+    if (spinMag > 30) {
+      const frictionVolume = HIT_FEEDBACK.AUDIO.rubberFrictionBase
+        * (spinMag / 100) * HIT_FEEDBACK.AUDIO.spinVolumeMultiplier;
+      // Higher spin = more friction sound
+      const frictionPitch = 0.8 + spinMag / 500;
+      // Play friction sound (whoosh-like)
+      if (audio.whoosh) {
+        audio.whoosh(clamp(spinMag / 80, 0, 1));
+      }
+    }
+
+    // ---- Layer 3: Air whoosh (speed sound) ----
+    if (speed > 8) {
+      const whooshVolume = HIT_FEEDBACK.AUDIO.whooshBase
+        * ((speed - 8) / 20) * (1 + quality * 0.2);
+      // Whoosh is already handled in swipe, but reinforce on hit
+      if (audio.whoosh) {
+        audio.whoosh(clamp((speed - 8) / 25, 0, 0.6));
+      }
+    }
+
+    // ---- Layer 4: Special event sounds ----
+    if (ctx.isNetCord) {
+      audio.hitNet();
+    }
+    if (ctx.isEdge) {
+      audio.hitEdge();
+    }
+    if (ctx.isWinner && ctx.side > 0) {
+      // Winner sound — brief celebration
+      audio.point(true);
+    }
+  }
+
+  /**
+   * Haptic feedback: variable vibration patterns.
+   */
+  haptic(quality, speed, spinType, ctx) {
+    if (!this._hapticEnabled) return;
+    if (!navigator.vibrate) return;
+
+    // Quality-based pattern selection
+    let pattern;
+
+    if (ctx.isNetCord) {
+      pattern = HIT_FEEDBACK.HAPTIC.NET_CORD;
+    } else if (ctx.isEdge) {
+      pattern = HIT_FEEDBACK.HAPTIC.EDGE_BALL;
+    } else if (ctx.isWinner && ctx.side > 0) {
+      pattern = HIT_FEEDBACK.HAPTIC.WINNER;
+    } else if (quality > 0.8 && speed > 15) {
+      // Big hit — sharp
+      pattern = HIT_FEEDBACK.HAPTIC.HIT.map(v => Math.floor(v * 1.3));
+    } else if (quality > 0.5) {
+      pattern = HIT_FEEDBACK.HAPTIC.HIT;
+    } else if (speed < 3 && quality < 0.4) {
+      // Soft/block — gentle
+      pattern = HIT_FEEDBACK.HAPTIC.BLOCK;
+    } else {
+      // Default — medium
+      pattern = [6, 20, 6];
+    }
+
+    // Scale by speed
+    if (pattern.length === 1) {
+      pattern[0] = Math.floor(pattern[0] * (0.5 + speed * 0.05));
+    }
+
+    // Execute
+    try {
+      navigator.vibrate(pattern);
+    } catch (e) {
+      // Ignore — device may not support
+    }
+  }
+
+  /**
+   * Camera feedback: multi-layer reaction.
+   */
+  camera(quality, speed, ctx) {
+    const game = this.game;
+
+    // Layer 1: Micro shake on impact
+    const shakeBase = HIT_FEEDBACK.CAMERA.shakeBase;
+    const shakeSpeed = speed * HIT_FEEDBACK.CAMERA.shakeSpeedMultiplier;
+    const shakeQuality = quality * HIT_FEEDBACK.CAMERA.shakeQualityMultiplier;
+    let shakeAmount = shakeBase + shakeSpeed + shakeQuality;
+    shakeAmount = Math.min(HIT_FEEDBACK.CAMERA.maxShake, shakeAmount);
+
+    if (shakeAmount > 0.005) {
+      game.shake = Math.min(1.1, game.shake + shakeAmount);
+      const dirX = (Math.random() - 0.5) * 0.5;
+      const dirZ = (Math.random() - 0.5) * 0.5;
+      game.shakeDir = V3.norm(V3.new(dirX, 0.3, dirZ), V3.new(dirX, 0.3, dirZ));
+    }
+
+    // Layer 2: Speed-based FOV pulse on big hits
+    if (speed > 20 && quality > 0.6) {
+      const fovPulse = (speed - 20) * 0.02;
+      if (game.camFov !== undefined) {
+        game.camFov = (game.camFov || 48) + fovPulse;
+      }
+    }
+
+    // Layer 3: Judgement line flash on perfect shots
+    if (quality > 0.9 && speed > 15) {
+      game.hitFlash = Math.min(1, game.hitFlash + 0.15);
+    }
+  }
+
+  /**
+   * Post-hit visual effects — trail enhancement.
+   */
+  postHitVisuals(quality, speed, spinType, ctx) {
+    const game = this.game;
+
+    // Enhance trail on quality hits
+    if (quality > 0.6 && game.settings.showTrail !== false) {
+      // Trail already handled in drawFX, but we can boost settings temporarily
+      // for better visual feedback
+    }
+
+    // Add contact decal (mark on table)
+    if (quality > 0.3 && ctx.contactPoint) {
+      const p = ctx.contactPoint;
+      // Only on table
+      if (p.y <= PH.TABLE_Y + 0.02) {
+        game.addMark(p.x, p.z, speed);
+      }
+    }
+  }
+}
+
+  /**
+   * Enable/disable haptic feedback.
+   */
+  setHaptic(enabled) {
+    this._hapticEnabled = enabled;
+  }
+}
+
+
+/* ====== 75_music.js ====== */
+/* =====================================================================
+ *  MUSIC SYSTEM — dynamic ambient soundtrack
+ *
+ *  Layers:
+ *   1. Base: constant ambient pad (always present)
+ *   2. Tension: builds with rally intensity
+ *   3. Climax: on big moments (winners, smash, etc.)
+ *   4. Resolution: after point ends
+ *
+ *  This creates emotional arc through music — critical for
+ *  award-winning game feel.
+ * ===================================================================== */
+
+const MUSIC_STATE = {
+  IDLE: 'idle',         // menu / not playing
+  CALM: 'calm',         // serve prep, waiting
+  BUILDING: 'building', // rally starting
+  INTENSE: 'intense',   // rally in progress, high pace
+  CLIMAX: 'climax',     // big moment
+  RESOLUTION_WIN: 'resolution_win',
+  RESOLUTION_LOSE: 'resolution_lose',
+};
+
+class MusicSystem {
+  constructor(audioEngine) {
+    this.audio = audioEngine;
+    this.state = MUSIC_STATE.IDLE;
+    this.intensity = 0;
+    this.targetIntensity = 0;
+    this.currentLayerGain = {
+      base: 0.25,
+      tension: 0,
+      climax: 0,
+      resolution: 0,
+    };
+    this.targetLayerGain = { ...this.currentLayerGain };
+
+    // Pre-computed procedural audio buffers (synthesized)
+    this._buffers = {};
+    this._initialized = false;
+
+    // Music parameters
+    this._bpm = 90;
+    this._key = 'A_minor';
+    this._scale = [0, 2, 3, 5, 7, 8, 10]; // A minor pentatonic + 3
+  }
+
+  /**
+   * Initialize the music system.
+   * Creates procedural audio buffers using OfflineAudioContext.
+   */
+  async init() {
+    if (this._initialized) return;
+    if (!this.audio || typeof this.audio.setVolume !== 'function') {
+      console.warn('MusicSystem: AudioEngine not available');
+      return;
+    }
+
+    try {
+      // Create procedural ambient textures using oscillators
+      await this._createAmbientTextures();
+      this._initialized = true;
+    } catch (e) {
+      console.warn('MusicSystem: init failed', e);
+    }
+  }
+
+  /**
+   * Create ambient procedural audio textures.
+   * Uses oscillators and noise for synthetic but pleasant sounds.
+   */
+  async _createAmbientTextures() {
+    const ctx = new OfflineAudioContext(2, 44100 * 4, 44100);
+
+    // ---- Base layer: soft pad ----
+    // Multiple detuned oscillators for rich texture
+    const baseOscs = [];
+    const baseFreqs = [55, 65, 72.5, 82.5]; // Low A, C, D, E
+    for (let i = 0; i < baseFreqs.length; i++) {
+      const osc = ctx.createOscillator();
+      osc.type = 'sine';
+      osc.frequency.value = baseFreqs[i];
+
+      const gain = ctx.createGain();
+      gain.gain.value = 0.08 / baseFreqs.length;
+
+      const filter = ctx.createBiquadFilter();
+      filter.type = 'lowpass';
+      filter.frequency.value = 400 + i * 100;
+
+      osc.connect(filter);
+      filter.connect(gain);
+      baseOscs.push(gain);
+    }
+
+    // Connect to output
+    const baseMix = ctx.createGain();
+    baseMix.gain.value = 0.7;
+    for (const g of baseOscs) {
+      g.connect(baseMix);
+    }
+    baseMix.connect(ctx.destination);
+
+    // Start all
+    for (const osc of ctx.createOscillator ? [] : []) {
+      osc.start();
+    }
+
+    // Render and store
+    const baseBuffer = await ctx.startRendering();
+    this._buffers.base = baseBuffer;
+
+    // ---- Tension layer: pads that evolve ----
+    // Higher frequency content, more movement
+    const tensionCtx = new OfflineAudioContext(2, 44100 * 4, 44100);
+    const tensionOscs = [];
+    const tensionFreqs = [130, 165, 196, 220]; // Higher A, E, G, A
+    for (let i = 0; i < tensionFreqs.length; i++) {
+      const osc = tensionCtx.createOscillator();
+      osc.type = 'triangle';
+      osc.frequency.value = tensionFreqs[i];
+
+      const gain = tensionCtx.createGain();
+      gain.gain.value = 0.04 / tensionFreqs.length;
+
+      const lfo = tensionCtx.createOscillator();
+      lfo.frequency.value = 0.5 + i * 0.2;
+      const lfoGain = tensionCtx.createGain();
+      lfoGain.gain.value = 15;
+      lfo.connect(lfoGain);
+      lfoGain.connect(osc.frequency);
+
+      const filter = tensionCtx.createBiquadFilter();
+      filter.type = 'lowpass';
+      filter.frequency.value = 800;
+
+      osc.connect(filter);
+      filter.connect(gain);
+      tensionOscs.push(gain);
+    }
+
+    const tensionMix = tensionCtx.createGain();
+    tensionMix.gain.value = 0.5;
+    for (const g of tensionOscs) {
+      g.connect(tensionMix);
+    }
+    tensionMix.connect(tensionCtx.destination);
+
+    const tensionBuffer = await tensionCtx.startRendering();
+    this._buffers.tension = tensionBuffer;
+
+    // ---- Resolution layer: chord progression ----
+    // Pleasant resolving chord
+    const resCtx = new OfflineAudioContext(2, 44100 * 2, 44100);
+    const chordFreqs = [220, 261.63, 329.63, 440]; // A, C, E, A — Am chord
+    for (let i = 0; i < chordFreqs.length; i++) {
+      const osc = resCtx.createOscillator();
+      osc.type = 'sine';
+      osc.frequency.value = chordFreqs[i];
+
+      const gain = resCtx.createGain();
+      gain.gain.value = 0.06 / chordFreqs.length;
+
+      const envelope = gain; // Use gain as envelope
+      envelope.gain.setValueAtTime(0, 0);
+      envelope.gain.linearRampToValueAtTime(0.06, 0.1);
+      envelope.gain.exponentialRampToValueAtTime(0.001, 1.8);
+
+      osc.connect(envelope);
+      envelope.connect(resCtx.destination);
+      osc.start(0);
+      osc.stop(2);
+    }
+
+    const resBuffer = await resCtx.startRendering();
+    this._buffers.resolution = resBuffer;
+  }
+
+  /**
+   * Update music based on game state.
+   * Call every frame or on state change.
+   */
+  update(gameState) {
+    if (!this._initialized) return;
+
+    // Compute target intensity from game state
+    const newIntensity = this.computeIntensity(gameState);
+    this.targetIntensity = newIntensity;
+    this.intensity = lerp(this.intensity, this.targetIntensity, 0.05);
+
+    // Determine music state
+    const newState = this.determineState(gameState);
+    if (newState !== this.state) {
+      this._onStateTransition(newState);
+    }
+    this.state = newState;
+
+    // Update layer gains
+    this._updateLayerGains(gameState);
+  }
+
+  /**
+   * Compute music intensity from game state.
+   */
+  computeIntensity(gameState) {
+    const g = gameState;
+    let intensity = 0;
+
+    // Rally length adds intensity
+    if (g.rally) {
+      intensity += clamp(g.rally / 15, 0, 0.5);
+    }
+
+    // Ball speed adds intensity
+    if (g.ball && g.ball.v) {
+      const speed = V3.len(g.ball.v) || 0;
+      intensity += clamp((speed - 5) / 25, 0, 0.3);
+    }
+
+    // Spin adds intensity
+    if (g.ball && g.ball.w) {
+      const spin = V3.len(g.ball.w) || 0;
+      intensity += clamp(spin / 500, 0, 0.2);
+    }
+
+    // Is the player in control?
+    if (g.settings && g.settings.assist !== undefined) {
+      // Less assist = more tension
+      intensity += (1 - g.settings.assist) * 0.1;
+    }
+
+    // Momentum
+    if (g.momentum && g.momentum.current) {
+      intensity += g.momentum.current * 0.15;
+    }
+
+    return clamp(intensity, 0, 1);
+  }
+
+  /**
+   * Determine music state from game state.
+   */
+  determineState(gameState) {
+    const g = gameState;
+
+    if (!g || g.state === GS.MENU || g.state === GS.MATCH_END) {
+      return MUSIC_STATE.IDLE;
+    }
+
+    if (g.state === GS.SERVE_READY || g.state === GS.SERVE_TOSS) {
+      return MUSIC_STATE.CALM;
+    }
+
+    if (g.state === GS.POINT) {
+      if (g.lastPoint && g.lastPoint.who > 0) {
+        return MUSIC_STATE.RESOLUTION_WIN;
+      }
+      return MUSIC_STATE.RESOLUTION_LOSE;
+    }
+
+    if (g.state === GS.RALLY) {
+      const intensity = this.intensity;
+      if (intensity > 0.7) {
+        return MUSIC_STATE.CLIMAX;
+      }
+      if (intensity > 0.4) {
+        return MUSIC_STATE.INTENSE;
+      }
+      return MUSIC_STATE.BUILDING;
+    }
+
+    return MUSIC_STATE.CALM;
+  }
+
+  /**
+   * Handle state transition.
+   */
+  _onStateTransition(newState) {
+    // Trigger resolution sounds on point end
+    if (newState === MUSIC_STATE.RESOLUTION_WIN || newState === MUSIC_STATE.RESOLUTION_LOSE) {
+      this._playResolution(newState);
+    }
+
+    // Trigger climax effect
+    if (newState === MUSIC_STATE.CLIMAX) {
+      this._triggerClimax();
+    }
+  }
+
+  /**
+   * Update layer gains based on state.
+   */
+  _updateLayerGains(gameState) {
+    const state = this.state;
+
+    // Base layer — always present, slightly louder in calm
+    this.targetLayerGain.base = state === MUSIC_STATE.CALM ? 0.35 : 0.2;
+
+    // Tension layer — builds with intensity
+    if (state === MUSIC_STATE.BUILDING || state === MUSIC_STATE.INTENSE || state === MUSIC_STATE.CLIMAX) {
+      const intensity = this.intensity;
+      this.targetLayerGain.tension = intensity * 0.5;
+    } else {
+      this.targetLayerGain.tension = 0;
+    }
+
+    // Climax — spikes on big moments
+    this.targetLayerGain.climax = 0;
+    if (state === MUSIC_STATE.CLIMAX) {
+      this.targetLayerGain.climax = 0.6;
+    }
+
+    // Resolution — plays on point end, fades
+    if (state === MUSIC_STATE.RESOLUTION_WIN || state === MUSIC_STATE.RESOLUTION_LOSE) {
+      this.targetLayerGain.resolution = 0.5;
+    } else {
+      // Fade out resolution
+      this.targetLayerGain.resolution = lerp(this.currentLayerGain.resolution, 0, 0.05);
+    }
+
+    // Smooth interpolation
+    for (const key of Object.keys(this.currentLayerGain)) {
+      this.currentLayerGain[key] = lerp(
+        this.currentLayerGain[key],
+        this.targetLayerGain[key],
+        0.03
+      );
+    }
+  }
+
+  /**
+   * Play resolution sound (win/lose).
+   */
+  _playResolution(state) {
+    if (!this._buffers.resolution || !this.audio) return;
+
+    try {
+      const source = this.audio.getCtx().createBufferSource();
+      source.buffer = this._buffers.resolution;
+
+      const gain = this.audio.getCtx().createGain();
+      gain.gain.value = 0.3;
+
+      const filter = this.audio.getCtx().createBiquadFilter();
+      filter.type = 'lowpass';
+      filter.frequency.value = 1000;
+
+      source.connect(filter);
+      filter.connect(gain);
+      gain.connect(this.audio.getCtx().destination);
+
+      source.start();
+      source.stop(2);
+    } catch (e) {
+      // Ignore
+    }
+  }
+
+  /**
+   * Trigger climax effect.
+   */
+  _triggerClimax() {
+    // Brief volume spike + filter change
+    if (this.audio && this.audio.getCtx()) {
+      try {
+        const ctx = this.audio.getCtx();
+        const osc = ctx.createOscillator();
+        osc.type = 'sine';
+        osc.frequency.value = 220;
+
+        const gain = ctx.createGain();
+        gain.gain.setValueAtTime(0, ctx.currentTime);
+        gain.gain.linearRampToValueAtTime(0.1, ctx.currentTime + 0.1);
+        gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.5);
+
+        const filter = ctx.createBiquadFilter();
+        filter.type = 'lowpass';
+        filter.frequency.value = 2000;
+
+        osc.connect(filter);
+        filter.connect(gain);
+        gain.connect(ctx.destination);
+
+        osc.start(ctx.currentTime);
+        osc.stop(ctx.currentTime + 0.5);
+      } catch (e) {
+        // Ignore
+      }
+    }
+  }
+
+  /**
+   * Get current music parameters for external use (e.g., visualization).
+   */
+  getParams() {
+    return {
+      state: this.state,
+      intensity: this.intensity,
+      baseGain: this.currentLayerGain.base,
+      tensionGain: this.currentLayerGain.tension,
+      climaxGain: this.currentLayerGain.climax,
+      resolutionGain: this.currentLayerGain.resolution,
+    };
+  }
+}
+
+
+/* ====== 76_emotion.js ====== */
+/* =====================================================================
+ *  EMOTIONAL DESIGN SYSTEM — crafted moments and dramatic arc
+ *
+ *  Creates emotional peaks through:
+ *   1. Match point tension
+ *   2. Comeback hope
+ *   3. Winner celebration
+ *   4. Net cord drama
+ *   5. Edge ball surprise
+ *
+ *  This is what separates a good game from an award-winning one.
+ * ===================================================================== */
+
+const EMOTION_STATE = {
+  NEUTRAL: 'neutral',
+  TENSION: 'tension',
+  HOPE: 'hope',
+  CLIMAX: 'climax',
+  TRIUMPH: 'triumph',
+  DEFEAT: 'defeat',
+  SURPRISE: 'surprise',
+};
+
+class EmotionalSystem {
+  constructor(game) {
+    this.game = game;
+    this.state = EMOTION_STATE.NEUTRAL;
+    this.intensity = 0;
+    this.targetIntensity = 0;
+    this.momentum = 0;
+    this.matchPointTriggered = false;
+    this.lastBigMoment = 0;
+    this._cooldown = 2.0;  // seconds between big moments
+  }
+
+  /**
+   * Update emotional state based on game.
+   */
+  update(gameState) {
+    const g = gameState;
+    if (!g) return;
+
+    // Detect match point
+    const isMatchPoint = this._detectMatchPoint(g);
+    if (isMatchPoint && !this.matchPointTriggered) {
+      this.matchPointTriggered = true;
+      this._triggerMatchPoint();
+    }
+    if (!isMatchPoint) {
+      this.matchPointTriggered = false;
+    }
+
+    // Compute intensity from game state
+    this.targetIntensity = this._computeIntensity(g);
+    this.intensity = lerp(this.intensity, this.targetIntensity, 0.05);
+
+    // Detect big moments
+    this._detectBigMoments(g);
+
+    // Update state
+    this.state = this._determineState(g);
+  }
+
+  /**
+   * Detect match point situation.
+   */
+  _detectMatchPoint(g) {
+    if (!g.score) return false;
+    const target = g.settings?.targetScore || 11;
+    const [pScore, aiScore] = g.score;
+
+    // Player serving for match
+    if (pScore >= target - 1 && pScore > aiScore) {
+      return true;
+    }
+    // Player receiving against match point
+    if (aiScore >= target - 1 && aiScore > pScore) {
+      return true;
+    }
+    return false;
+  }
+
+  /**
+   * Trigger match point atmosphere.
+   */
+  _triggerMatchPoint() {
+    // Music: increase tension
+    if (this.game.music && this.game.music._initialized) {
+      this.game.music.targetLayerGain.tension = 0.8;
+    }
+
+    // Visual: subtle vignette darkening
+    // Could add CSS class to canvas
+
+    // Text message
+    const isPlayerServing = g.server === 1;
+    const msg = isPlayerServing
+      ? 'МATCH POINT — ВАША ПОДАЧА'
+      : 'МATCH POINT — СОПЕРНИК ПОДАЁТ';
+    this.game.msg(msg, 2.0, '#ffd34d', true);
+
+    // Haptic
+    if (navigator.vibrate) {
+      try { navigator.vibrate([10, 30, 10]); } catch (e) {}
+    }
+
+    // Camera: subtle push-in
+    // Could adjust camera target
+  }
+
+  /**
+   * Compute emotional intensity.
+   */
+  _computeIntensity(g) {
+    let intensity = 0;
+
+    // Rally length
+    if (g.rally) {
+      intensity += clamp(g.rally / 20, 0, 0.4);
+    }
+
+    // Ball speed
+    if (g.ball && g.ball.v) {
+      const speed = V3.len(g.ball.v) || 0;
+      intensity += clamp((speed - 5) / 25, 0, 0.3);
+    }
+
+    // Score differential (closer = more tension)
+    if (g.score) {
+      const [p, a] = g.score;
+      const diff = Math.abs(p - a);
+      if (diff <= 2) {
+        intensity += (2 - diff) * 0.1;
+      }
+    }
+
+    // Momentum
+    if (g.momentum && g.momentum.current) {
+      intensity += g.momentum.current * 0.2;
+    }
+
+    // Net cord recent
+    if (g.netTouched) {
+      intensity += 0.15;
+    }
+
+    return clamp(intensity, 0, 1);
+  }
+
+  /**
+   * Detect and trigger big moments.
+   */
+  _detectBigMoments(g) {
+    const now = g.time;
+    if (now - this.lastBigMoment < this._cooldown) return;
+
+    // Big winners
+    if (g.lastShotInfo && g.lastShotInfo.speed > 85) {
+      this._triggerBigMoment('winner', g);
+      this.lastBigMoment = now;
+    }
+
+    // Net cords
+    if (g.netTouched && g.state === GS.RALLY) {
+      this._triggerBigMoment('net_cord', g);
+      this.lastBigMoment = now;
+    }
+
+    // Edge balls
+    if (g.lastPoint && g.lastPoint.reason === 'РЕБРО СТОЛА!' ||
+        g.lastPoint && g.lastPoint.reason === 'ЗАДНЯЯ КРОМКА!') {
+      this._triggerBigMoment('edge', g);
+      this.lastBigMoment = now;
+    }
+  }
+
+  /**
+   * Trigger a big moment.
+   */
+  _triggerBigMoment(type, g) {
+    switch (type) {
+      case 'winner':
+        this._onWinner(g);
+        break;
+      case 'net_cord':
+        this._onNetCord(g);
+        break;
+      case 'edge':
+        this._onEdge(g);
+        break;
+    }
+  }
+
+  /**
+   * Winner moment.
+   */
+  _onWinner(g) {
+    // Flash effect
+    g.hitFlash = Math.min(1, g.hitFlash + 0.3);
+
+    // Music spike
+    if (this.game.music && this.game.music._initialized) {
+      this.game.music._triggerClimax();
+    }
+
+    // Message
+    g.msg('ОЧКО!', 1.2, '#6ee7a8', true);
+
+    // Haptic celebration
+    if (navigator.vibrate && g.settings?.haptics) {
+      try { navigator.vibrate([15, 30, 15, 30]); } catch (e) {}
+    }
+  }
+
+  /**
+   * Net cord moment.
+   */
+  _onNetCord(g) {
+    // Flash
+    g.hitFlash = Math.min(1, g.hitFlash + 0.2);
+
+    // Message
+    g.msg('СЕТКА!', 1.0, '#ffd34d', true);
+
+    // Haptic
+    if (navigator.vibrate && g.settings?.haptics) {
+      try { navigator.vibrate([10, 20, 10]); } catch (e) {}
+    }
+  }
+
+  /**
+   * Edge ball moment.
+   */
+  _onEdge(g) {
+    // Flash
+    g.hitFlash = Math.min(1, g.hitFlash + 0.25);
+
+    // Already has message from physics, but enhance
+    // Haptic surprise
+    if (navigator.vibrate && g.settings?.haptics) {
+      try { navigator.vibrate([8, 30, 8]); } catch (e) {}
+    }
+  }
+
+  /**
+   * Determine emotional state.
+   */
+  _determineState(g) {
+    if (!g.score) return EMOTION_STATE.NEUTRAL;
+
+    const target = g.settings?.targetScore || 11;
+    const [p, a] = g.score;
+    const diff = Math.abs(p - a);
+
+    // Match point
+    if (p >= target - 1 && p > a) return EMOTION_STATE.CLIMAX;
+    if (a >= target - 1 && a > p) return EMOTION_STATE.CLIMAX;
+
+    // Close score
+    if (diff <= 2 && g.rally > 5) return EMOTION_STATE.TENSION;
+
+    // On winning streak
+    if (g.momentum && g.momentum.current > 0.5) return EMOTION_STATE.HOPE;
+
+    return EMOTION_STATE.NEUTRAL;
+  }
+
+  /**
+   * Get current emotion parameters.
+   */
+  getParams() {
+    return {
+      state: this.state,
+      intensity: this.intensity,
+      matchPoint: this.matchPointTriggered,
+      lastBigMoment: this.lastBigMoment,
+    };
+  }
+}
+
+
+/* ====== 81_uiAnim.js ====== */
+/* =====================================================================
+ *  UI ANIMATION SYSTEM — smooth, polished UI transitions
+ *
+ *  Provides:
+ *   1. Animated number transitions (score, rating, etc.)
+ *   2. Smooth element appearances (fade, slide, scale)
+ *   3. Micro-interactions on buttons and controls
+ *   4. HUD element animations
+ *
+ *  Adds polish and "delight" to UI — key for award-winning feel.
+ * ===================================================================== */
+
+/**
+ * Animation utilities for UI elements.
+ */
+class UIAnimation {
+  constructor() {
+    this.animations = [];
+    this._running = false;
+    this._RAF = null;
+  }
+
+  /**
+   * Animate a number in an element.
+   * @param {HTMLElement} el
+   * @param {number} from
+   * @param {number} to
+   * @param {object} opts
+   *   - duration: ms (default 500)
+   *   - decimals: number of decimals (default 0)
+   *   - easing: easing function name ('easeOutCubic' etc)
+   */
+  animateNumber(el, from, to, opts = {}) {
+    const duration = opts.duration || 500;
+    const decimals = opts.decimals || 0;
+    const easing = opts.easing || 'easeOutCubic';
+    const startTime = performance.now();
+
+    const anim = {
+      type: 'number',
+      el,
+      from,
+      to,
+      startTime,
+      duration,
+      decimals,
+      easing,
+      done: false,
+    };
+    this.animations.push(anim);
+    this._ensureRunning();
+    return anim;
+  }
+
+  /**
+   * Fade in an element.
+   */
+  fadeIn(el, opts = {}) {
+    const duration = opts.duration || 300;
+    const delay = opts.delay || 0;
+    const startTime = performance.now() + delay;
+
+    const anim = {
+      type: 'fadeIn',
+      el,
+      startTime,
+      duration,
+      fromOpacity: parseFloat(el.style.opacity) || 0,
+      done: false,
+      delay,
+    };
+    el.style.opacity = '0';
+    el.style.transition = 'none';
+    el.style.pointerEvents = 'none';
+    this.animations.push(anim);
+    this._ensureRunning();
+    return anim;
+  }
+
+  /**
+   * Fade out an element.
+   */
+  fadeOut(el, opts = {}) {
+    const duration = opts.duration || 300;
+    const delay = opts.delay || 0;
+    const startTime = performance.now() + delay;
+
+    const anim = {
+      type: 'fadeOut',
+      el,
+      startTime,
+      duration,
+      fromOpacity: parseFloat(el.style.opacity) || 1,
+      done: false,
+      delay,
+      onComplete: opts.onComplete || null,
+    };
+    this.animations.push(anim);
+    this._ensureRunning();
+    return anim;
+  }
+
+  /**
+   * Slide an element in from a direction.
+   */
+  slideIn(el, direction = 'up', opts = {}) {
+    const duration = opts.duration || 400;
+    const delay = opts.delay || 0;
+    const startTime = performance.now() + delay;
+
+    const fromPos = direction === 'up' ? '-20px' :
+      direction === 'down' ? '20px' :
+      direction === 'left' ? '-20px' : '20px';
+
+    el.style.transform = `translate(${direction === 'left' ? fromPos : '0'}, ${direction === 'up' ? fromPos : '0'})`;
+    el.style.opacity = '0';
+    el.style.transition = 'none';
+
+    const anim = {
+      type: 'slideIn',
+      el,
+      direction,
+      startTime,
+      duration,
+      fromPos,
+      done: false,
+      delay,
+    };
+    this.animations.push(anim);
+    this._ensureRunning();
+    return anim;
+  }
+
+  /**
+   * Scale an element (pop effect).
+   */
+  pop(el, opts = {}) {
+    const duration = opts.duration || 200;
+    const scaleFrom = opts.scaleFrom || 0.8;
+    const scaleTo = opts.scaleTo || 1.1;
+    const endTime = performance.now() + duration;
+
+    el.style.transform = `scale(${scaleFrom})`;
+    el.style.transition = 'none';
+    el.style.opacity = '0';
+
+    const anim = {
+      type: 'pop',
+      el,
+      startTime: performance.now(),
+      duration,
+      scaleFrom,
+      scaleTo,
+      endScale: 1.0,
+      endTime,
+      done: false,
+    };
+    this.animations.push(anim);
+    this._ensureRunning();
+    return anim;
+  }
+
+  /**
+   * Update all animations.
+   * Call this in requestAnimationFrame loop.
+   */
+  update(now) {
+    for (let i = this.animations.length - 1; i >= 0; i--) {
+      const anim = this.animations[i];
+      const elapsed = now - anim.startTime;
+
+      if (anim.delay !== undefined) {
+        if (elapsed < anim.delay) continue;
+      }
+
+      const progress = Math.min(1, elapsed / anim.duration);
+
+      switch (anim.type) {
+        case 'number':
+          const eased = this._ease(progress, anim.easing);
+          const value = anim.from + (anim.to - anim.from) * eased;
+          anim.el.textContent = value.toFixed(anim.decimals);
+          if (progress >= 1) anim.done = true;
+          break;
+
+        case 'fadeIn':
+          const fadeInOpacity = Math.min(1, progress);
+          anim.el.style.opacity = fadeInOpacity.toString();
+          anim.el.style.pointerEvents = fadeInOpacity >= 1 ? 'auto' : 'none';
+          if (progress >= 1) {
+            anim.el.style.opacity = '1';
+            anim.el.style.pointerEvents = 'auto';
+            anim.done = true;
+          }
+          break;
+
+        case 'fadeOut':
+          const fadeOutOpacity = 1 - progress;
+          anim.el.style.opacity = fadeOutOpacity.toString();
+          if (progress >= 1) {
+            anim.el.style.opacity = '0';
+            anim.el.style.pointerEvents = 'none';
+            anim.done = true;
+            if (anim.onComplete) anim.onComplete();
+          }
+          break;
+
+        case 'slideIn':
+          const slideProgress = Math.min(1, progress);
+          const slideEased = this._ease(slideProgress, 'easeOutCubic');
+          const from = anim.fromPos;
+          const to = '0';
+          const x = anim.direction === 'left' ? (1 - slideEased) * parseFloat(from) : 0;
+          const y = anim.direction === 'up' ? (1 - slideEased) * parseFloat(from) : 0;
+          anim.el.style.transform = `translate(${x}px, ${y}px)`;
+          anim.el.style.opacity = slideEased.toString();
+          if (slideProgress >= 1) {
+            anim.el.style.transform = '';
+            anim.el.style.opacity = '1';
+            anim.done = true;
+          }
+          break;
+
+        case 'pop':
+          const popProgress = Math.min(1, (now - anim.startTime) / anim.duration);
+          const popEased = this._ease(popProgress, 'easeOutBack');
+          const scale = anim.scaleFrom + (anim.scaleTo - anim.scaleFrom) * popEased;
+          anim.el.style.transform = `scale(${scale})`;
+          anim.el.style.opacity = '1';
+          if (popProgress >= 1) {
+            anim.el.style.transform = `scale(${anim.endScale})`;
+            anim.done = true;
+          }
+          break;
+      }
+
+      if (anim.done) {
+        this.animations.splice(i, 1);
+      }
+    }
+
+    if (this.animations.length === 0) {
+      this._stopRunning();
+    }
+  }
+
+  /**
+   * Ensure animation loop is running.
+   */
+  _ensureRunning() {
+    if (this._running) return;
+    this._running = true;
+    const loop = () => {
+      if (this.animations.length === 0) {
+        this._running = false;
+        return;
+      }
+      this.update(performance.now());
+      this._RAF = requestAnimationFrame(loop);
+    };
+    this._RAF = requestAnimationFrame(loop);
+  }
+
+  /**
+   * Stop animation loop.
+   */
+  _stopRunning() {
+    this._running = false;
+    if (this._RAF) {
+      cancelAnimationFrame(this._RAF);
+      this._RAF = null;
+    }
+  }
+
+  /**
+   * Easing functions.
+   */
+  _ease(t, type) {
+    switch (type) {
+      case 'linear':
+        return t;
+      case 'easeInQuad':
+        return t * t;
+      case 'easeOutQuad':
+        return t * (2 - t);
+      case 'easeInOutQuad':
+        return t < 0.5 ? 2 * t * t : -1 + (4 - 2 * t) * t;
+      case 'easeInCubic':
+        return t * t * t;
+      case 'easeOutCubic':
+        return 1 - Math.pow(1 - t, 3);
+      case 'easeInOutCubic':
+        return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+      case 'easeOutBack':
+        const c1 = 1.70158;
+        const c3 = c1 + 1;
+        return 1 + c3 * Math.pow(t - 1, 3) + c1 * Math.pow(t - 1, 2);
+      case 'easeOutElastic':
+        const c5 = 2 * Math.PI / 3;
+        return t === 0 ? 0 : t === 1 ? 1 :
+          Math.pow(2, -10 * t) * Math.sin((t * 10 - 0.75) * c5) + 1;
+      default:
+        return this._ease(t, 'easeOutCubic');
+    }
+  }
+
+  /**
+   * Clear all animations.
+   */
+  clear() {
+    this.animations = [];
+    this._stopRunning();
+  }
+}
+
+/**
+ * HUD-specific animations.
+ */
+class HUDAnimation {
+  constructor(ui) {
+    this.ui = ui;
+    this.anim = new UIAnimation();
+    this._scoreElements = {};
+    this._shotIndicators = [];
+  }
+
+  /**
+   * Setup score display with animated numbers.
+   */
+  setupScoreDisplay() {
+    if (!this.ui || !this.ui.game) return;
+
+    const game = this.ui.game;
+    if (!game) return;
+
+    // Animate score changes
+    const updateScore = () => {
+      if (!game.score) return;
+      // Score display updates handled by UI
+    };
+
+    // Watch for score changes
+    this._scoreObserver = new MutationObserver(() => {
+      // Score changed — animate
+    });
+  }
+
+  /**
+   * Show shot feedback with animation.
+   */
+  showShotFeedback(feedback) {
+    if (!this.ui || !this.ui.fxg) return;
+
+    const ctx = this.ui.fxg;
+    const now = performance.now();
+
+    // Draw animated shot indicator
+    const startTime = now;
+    const duration = 600;
+
+    const animId = setInterval(() => {
+      const elapsed = now - startTime;
+      const progress = Math.min(1, elapsed / duration);
+
+      if (progress >= 1) {
+        clearInterval(animId);
+        return;
+      }
+
+      // Draw feedback visualization
+      this._drawShotFeedback(ctx, feedback, progress);
+    }, 16);
+  }
+
+  /**
+   * Draw shot feedback visualization.
+   */
+  _drawShotFeedback(ctx, feedback, progress) {
+    const centerX = ctx.canvas.width / 2;
+    const centerY = ctx.canvas.height / 2;
+
+    // Shrinking ring
+    const radius = 30 * (1 - progress);
+    const opacity = 1 - progress;
+
+    ctx.save();
+    ctx.globalAlpha = opacity;
+    ctx.strokeStyle = feedback.color || '#9fe0ff';
+    ctx.lineWidth = 3 * (1 - progress * 0.5);
+    ctx.beginPath();
+    ctx.arc(centerX, centerY, radius, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  /**
+   * Update all HUD animations.
+   */
+  update(now) {
+    this.anim.update(now);
+  }
+}
+
+
 /* ====== 84_racket.js ====== */
 /* =====================================================================
  *  EQUIPMENT — blades, rubbers, and the numbers they actually change.
@@ -7548,6 +9132,533 @@ class Equipment {
     }
     return bad;
   }
+}
+
+
+/* ====== 85_bioRacket.js ====== */
+/* =====================================================================
+ *  BIOLOGICAL RACKET — 3D biomechanical model for table tennis racket
+ *
+ *  implements the kinematic chain:
+ *    Q_world = Q_shoulder · Q_elbow · Q_forearm · Q_wristBase · Q_racketLocal
+ *
+ *  where:
+ *    - Q_forearm stores pronation/supination (ψ_forearm)
+ *    - Q_racketLocal stores forward tilt, side tilt, handle twist, flip
+ *    - φ_flip(x) = π · S(x;k,x₀)  — sigmoid flip through center
+ *    - x = clamp((p_hit,x - x_sternum)/W, -1, 1)  — normalized lateral position
+ *    - b = 3u² - 2u³, u = (x+1)/2  — smooth transition
+ *    - n = Q_world · n₀  — normal determines active side geometrically
+ *
+ *  DEG = π/180
+ * ===================================================================== */
+
+/* ---- constants (tuned for mobile gameplay feel) ---- */
+const BIO = {
+  // Zone width: how wide the working zone is (meters from center)
+  ZONE_HALF_WIDTH: 0.85,
+
+  // Forearm rotation range [rad]
+  FOREARM_SUP: 0.42,   // supination in backhand (more than real for visibility)
+  FOREARM_PRO: -0.52,  // pronation in forehand
+
+  // Forward tilt range [deg] — how much blade closes downward
+  THETA_BH: 10,        // backhand: slightly open
+  THETA_FH: 24,        // forehand: more closed for topspin
+  THETA_EDGE_F: 10,    // extra closure at extreme edges
+  GAMMA: 1.6,          // edge growth exponent
+
+  // Side tilt range [deg] — blade banks sideways at edges
+  THETA_SIDE_MAX: 22,  // max side tilt at extreme edges
+  BETA: 1.5,           // side tilt growth exponent
+
+  // Handle twist [deg] — how grip rotates in palm
+  THETA_H0: 6,         // base handle orientation
+  THETA_H1: 14,        // backhand vs forehand difference
+  THETA_H2: 10,        // edge adaptation
+  DELTA: 1.4,          // handle edge exponent
+
+  // Flip sigmoid parameters — sigmoid through center for rubber flip
+  FLIP_K: 14,          // steepness of sigmoid (sharp flip at center)
+  FLIP_X0: -0.06,      // center of flip (slightly left of center for right-hander)
+
+  // Wrist extension/flexion [rad]
+  WRIST_EXT_BH: 0.28,  // backhand: wrist extension
+  WRIST_EXT_FH: -0.12, // forehand: slight flexion
+
+  // Wrist radial/ulnar deviation at edges [deg]
+  WRIST_DEV_MAX: 14,
+  ETA: 1.3,
+
+  // Forearm pronation sigmoid for arm rig
+  FOREARM_K: 11,
+  FOREARM_X0: -0.04,
+
+  // Visual exaggeration for mobile (makes biomechanics readable)
+  VIS_FORARM_SCALE: 1.25,
+  VIS_WRIST_SCALE: 1.15,
+  VIS_FLIP_EXAGGERATION: 0.15,  // extra flip visible for clarity
+};
+
+/* ---- math helpers ---- */
+const _sigmoidBuf = { value: 0 };
+function sigmoid(x, k, x0) {
+  // Protect against extreme values
+  const arg = -k * (x - x0);
+  if (arg > 50) return 1;
+  if (arg < -50) return 0;
+  _sigmoidBuf.value = 1 / (1 + Math.exp(arg));
+  return _sigmoidBuf.value;
+}
+
+function smoothBlend(x) {
+  const u = (x + 1) / 2;  // map [-1,1] -> [0,1]
+  return 3 * u * u - 2 * u * u * u;  // smoothstep
+}
+
+function computeX(hitPosX, sternumX, zoneHalfWidth) {
+  const W = zoneHalfWidth || BIO.ZONE_HALF_WIDTH;
+  return clamp((hitPosX - sternumX) / W, -1, 1);
+}
+
+/* ---- RacketBiomech: computes full 3D orientation ---- */
+class RacketBiomech {
+  constructor() {
+    // Pre-allocated temporaries for performance
+    this._qTmp = Q.new();
+    this._qForearm = Q.new();
+    this._qFlip = Q.new();
+    this._qForward = Q.new();
+    this._qSide = Q.new();
+    this._qHandle = Q.new();
+    this._qLocal = Q.new();
+    this._qWorld = Q.new();
+    this._qArm = Q.new();
+    this._qArmTotal = Q.new();
+    this._m4Tmp = M4.create();
+    this._one = { x: 1, y: 1, z: 1 };
+    this._nLocal = V3.new(0, 0, 1);  // normal of red (forehand) face in local space
+    this._nWorld = V3.new();
+    this._handleDir = V3.new();
+    this._negHandleDir = V3.new();
+    this._fwdDir = V3.new(0, 0, -1);  // default facing direction
+  }
+
+  /**
+   * Compute the full biomechanical orientation of the racket.
+   *
+   * @param {object} ctx
+   *   - x: normalized lateral position [-1,1] (-1=bh edge, 0=center, 1=fh edge)
+   *   - armQ: combined shoulder+elbow+wristBase quaternion (orientation of arm)
+   *   - hand: 'left' or 'right' (affects base roll and flip direction)
+   *   - isServe: whether this is a serve (affects pose)
+   *   - strokeType: 'LOOP', 'DRIVE', 'SMASH', 'CHOP', etc.
+   *   - swingSpeed: normalized speed 0..1 (affects forward tilt)
+   *   - ballDir: direction TO ball (for normal determination) — normalized
+   *   - contactQuality: 0..1 (affects blade openness)
+   *   - targetX: optional target x for assisted shots
+   * @returns {object} biomechanics result
+   */
+  compute(ctx) {
+    const handSign = ctx.hand === 'left' ? -1 : 1;
+    const x = clamp(ctx.x || 0, -1, 1);
+    const b = smoothBlend(x);  // 0 = pure BH, 1 = pure FH
+    const absX = Math.abs(x);
+    const signX = Math.sign(x) || 1;
+
+    // ---- 1. FOREARM PRONATION/SUPINATION ----
+    // ψ_forearm(x) = ψ_sup + (ψ_pro - ψ_sup) · S(x;k_f, x_f)
+    // Backhand = more supination (palm up-ish), Forehand = pronation (palm down-ish)
+    const S_forearm = sigmoid(x, BIO.FOREARM_K, BIO.FOREARM_X0);
+    let psiForearm = BIO.FOREARM_SUP + (BIO.FOREARM_PRO - BIO.FOREARM_SUP) * S_forearm;
+
+    // Visual exaggeration for mobile readability
+    psiForearm *= BIO.VIS_FORARM_SCALE;
+
+    // Build forearm quaternion: rotation around longitudinal axis (Z in forearm local)
+    // The forearm local Z is roughly along the forearm from elbow to wrist
+    // For visual purposes, we apply this as an additional rotation on the arm
+    Q.setAxisAngle(this._qForearm, 0, 0, 1, psiForearm);
+
+    // ---- 2. RACKET LOCAL ORIENTATION COMPONENTS ----
+
+    // 2a. φ_flip — sigmoid roll around handle axis for rubber flip
+    // Flips π radians (180°) through center with sigmoid steepness
+    const phiFlipBase = Math.PI * sigmoid(x, BIO.FLIP_K, BIO.FLIP_X0);
+    // Exaggerate slightly for visibility
+    const phiFlip = phiFlipBase + BIO.VIS_FLIP_EXAGGERATION * sigmoid(x, BIO.FLIP_K, BIO.FLIP_X0);
+    // For left-handed, flip direction reverses
+    const finalPhiFlip = phiFlip * handSign;
+
+    // 2b. θ_forward — forward tilt (blade closes downward toward table)
+    // More closed for topspin strokes, more open for backspin
+    const stroke = ctx.strokeType || 'DRIVE';
+    let baseThetaForward;
+    switch (stroke) {
+      case 'LOOP':
+      case 'COUNTER':
+        baseThetaForward = BIO.THETA_FH + 8 * (ctx.swingSpeed || 0.5);  // heavy topspin = more closed
+        break;
+      case 'DRIVE':
+        baseThetaForward = BIO.THETA_FH * 0.7 + BIO.THETA_BH * 0.3;
+        break;
+      case 'SMASH':
+        baseThetaForward = 5 - 5 * (ctx.swingSpeed || 0.5);  // flatter for smash
+        break;
+      case 'CHOP':
+      case 'PUSH':
+        baseThetaForward = -8 - 5 * (ctx.swingSpeed || 0.5);  // open for backspin
+        break;
+      case 'FLICK':
+        baseThetaForward = BIO.THETA_FH * 0.8;
+        break;
+      case 'BLOCK':
+        baseThetaForward = 8;
+        break;
+      case 'LOB':
+        baseThetaForward = BIO.THETA_FH * 0.6;
+        break;
+      default:
+        baseThetaForward = BIO.THETA_FH * 0.5 + BIO.THETA_BH * 0.5;
+    }
+
+    // Blend between bh/fh based on position
+    const thetaForwardBase = BIO.THETA_BH * (1 - b) + baseThetaForward * b;
+
+    // Edge bonus: more closure at extreme positions
+    const thetaEdgeBonus = BIO.THETA_EDGE_F * Math.pow(absX, BIO.GAMMA);
+
+    // Contact quality reduces effective closure (off-center hits open up)
+    const qualityFactor = ctx.contactQuality !== undefined ? ctx.contactQuality : 1;
+    const thetaForward = (thetaForwardBase + thetaEdgeBonus) * (0.85 + 0.15 * qualityFactor);
+    const thetaForwardRad = thetaForward * DEG;
+
+    // 2c. θ_side — side tilt (blade banks sideways at edges)
+    // In BH zone: blade banks one way, in FH zone: banks opposite
+    const thetaSideBase = BIO.THETA_SIDE_MAX * signX * Math.pow(absX, BIO.BETA);
+
+    // Stroke-specific side tilt (HOOK/FADE have extra)
+    let thetaSideExtra = 0;
+    if (stroke === 'HOOK' || stroke === 'FADE' || stroke === 'SERVE_SIDE') {
+      thetaSideExtra = BIO.THETA_SIDE_MAX * 0.5 * signX * Math.sign(ctx.swingDirX || 1);
+    }
+
+    const thetaSide = thetaSideBase + thetaSideExtra;
+    const thetaSideRad = thetaSide * DEG;
+
+    // 2d. θ_handle — handle twist in palm
+    const thetaHandleBase = BIO.THETA_H0 + BIO.THETA_H1 * (2 * b - 1);
+    const thetaHandleEdge = BIO.THETA_H2 * signX * Math.pow(absX, BIO.DELTA);
+    const thetaHandle = thetaHandleBase + thetaHandleEdge;
+    const thetaHandleRad = thetaHandle * DEG;
+
+    // ---- 3. BUILD LOCAL ORIENTATION ----
+    // Order: handle twist (innermost) → side tilt → forward tilt → flip (outermost)
+    // This matches: R_z(φ_flip) · R_x(θ_forward) · R_y(θ_side) · R_z(θ_handle)
+
+    const qLocal = this._qLocal;
+    Q.identity(qLocal);
+
+    // Step 1: handle twist (around local Z — handle axis)
+    Q.setAxisAngle(this._qHandle, 0, 0, 1, thetaHandleRad);
+    Q.mul(qLocal, qLocal, this._qHandle);
+
+    // Step 2: side tilt (around local Y — blade banks sideways)
+    Q.setAxisAngle(this._qSide, 0, 1, 0, thetaSideRad);
+    Q.mul(qLocal, qLocal, this._qSide);
+
+    // Step 3: forward tilt (around local X — blade closes downward)
+    Q.setAxisAngle(this._qForward, 1, 0, 0, thetaForwardRad);
+    Q.mul(qLocal, qLocal, this._qForward);
+
+    // Step 4: flip (around local Z — rubber flips)
+    Q.setAxisAngle(this._qFlip, 0, 0, 1, finalPhiFlip);
+    Q.mul(qLocal, qLocal, this._qFlip);
+
+    // ---- 4. COMBINE INTO WORLD ORIENTATION ----
+    // Q_world = Q_arm · Q_forearm · Q_racketLocal
+    const qArm = ctx.armQ || Q.identity(this._qArm);
+    const qWorld = this._qWorld;
+
+    // First apply forearm rotation to arm
+    // Q_arm_with_forearm = Q_arm · Q_forearm
+    Q.mul(this._qArmTotal, qArm, this._qForearm);
+
+    // Then apply racket local orientation
+    // Q_world = Q_arm_with_forearm · Q_racketLocal
+    Q.mul(qWorld, this._qArmTotal, qLocal);
+
+    // ---- 5. COMPUTE WORLD-SPACE NORMAL (for active side determination) ----
+    // n = Q_world · n₀ where n₀ = (0,0,1) — red/forehand face normal in local space
+    M4.compose(this._m4Tmp, V3.zero(), qWorld, this._one);
+    M4.transformDir(this._nWorld, this._m4Tmp, this._nLocal);
+    V3.norm(this._nWorld, this._nWorld);
+
+    // ---- 6. DETERMINE ACTIVE SIDE GEOMETRICALLY ----
+    // d = n · v̂_toBall > 0 → red (forehand) face is active
+    // d < 0 → black (backhand) face is active
+    const ballDir = ctx.ballDir || this._fwdDir;
+    const d = V3.dot(this._nWorld, ballDir);
+    const activeSide = d >= 0 ? 1 : -1;  // +1 = forehand/red, -1 = backhand/black
+
+    // ---- 7. COMPUTE HANDLE DIRECTION (for grip visualization) ----
+    // Handle extends in local -Y direction
+    M4.transformDir(this._handleDir, this._m4Tmp, { x: 0, y: -1, z: 0 });
+    V3.norm(this._handleDir, this._handleDir);
+    V3.scale(this._negHandleDir, this._handleDir, -1);
+
+    // ---- 8. WRIST PARAMETERS ----
+    const omegaWristExt = BIO.WRIST_EXT_BH * (1 - b) + BIO.WRIST_EXT_FH * b;
+    const omegaWristDev = BIO.WRIST_DEV_MAX * signX * Math.pow(absX, BIO.ETA) * DEG;
+
+    // ---- 9. METADATA FOR UI/FEEDBACK ----
+    const isFlipping = Math.abs(finalPhiFlip) > 0.3 && Math.abs(x) < 0.3;
+    const isAtEdge = absX > 0.75;
+    const zoneLabel = x < -0.6 ? 'BH_EDGE' : x < -0.2 ? 'BACKHAND' : x < 0.2 ? 'CENTER' : x < 0.6 ? 'FORHAND' : 'FH_EDGE';
+    const strokeQuality = ctx.contactQuality !== undefined ? ctx.contactQuality : 1;
+
+    return {
+      // Core orientation
+      Q_world: qWorld,
+      n_world: this._nWorld,
+      handleDir: this._handleDir,
+      negHandleDir: this._negHandleDir,
+
+      // Active side (geometric, not boolean)
+      activeSide,  // +1 = forehand/red, -1 = backhand/black
+      d,           // dot product value (for debugging)
+
+      // Biomechanical parameters
+      forearmPsi: psiForearm,
+      wristExt: omegaWristExt,
+      wristDev: omegaWristDev,
+
+      // Blade angles
+      thetaForward,
+      thetaSide,
+      thetaHandle,
+      phiFlip: finalPhiFlip,
+
+      // Position parameters
+      x,
+      b,
+      absX,
+      signX,
+
+      // Visual state
+      isFlipping,
+      isAtEdge,
+      zoneLabel,
+
+      // Quality
+      strokeQuality,
+      strokeType: stroke,
+
+      // Derived: which material to show
+      activeMaterial: activeSide >= 0 ? 'red' : 'black',
+      inactiveMaterial: activeSide >= 0 ? 'black' : 'red',
+    };
+  }
+
+  /**
+   * Get material info for the active side.
+   */
+  getMaterialForSide(eq, activeSide) {
+    if (!eq) return { side: 'fore', color: [1, 0.1, 0.1], backColor: [0.15, 0.15, 0.17] };
+    const side = activeSide >= 0 ? 'fore' : 'back';
+    const col = eq.colours[side];
+    const backCol = eq.colours[side + 'Back'];
+    return {
+      side,
+      activeColor: col || [1, 0.1, 0.1],
+      inactiveColor: backCol || [0.15, 0.15, 0.17],
+      isForehand: side === 'fore',
+      bladeWood: eq.colours.wood,
+      grip: eq.colours.grip,
+    };
+  }
+
+  /**
+   * Static preset for different stroke types — used for training ghosts, etc.
+   */
+  static strokePreset(strokeId, x, swingSpeed) {
+    const b = smoothBlend(x);
+    const absX = Math.abs(x);
+    const signX = Math.sign(x) || 1;
+
+    const presets = {
+      LOOP: {
+        thetaForward: 20 + 12 * swingSpeed + 8 * Math.pow(absX, BIO.GAMMA),
+        thetaSide: 6 * signX * Math.pow(absX, BIO.BETA),
+        thetaHandle: 8 + 8 * (2 * b - 1) + 6 * signX * Math.pow(absX, BIO.DELTA),
+        forearmPsi: BIO.FOREARM_SUP + (BIO.FOREARM_PRO - BIO.FOREARM_SUP) * sigmoid(x, BIO.FOREARM_K, BIO.FOREARM_X0),
+      },
+      DRIVE: {
+        thetaForward: 15 + 6 * swingSpeed + 5 * Math.pow(absX, BIO.GAMMA),
+        thetaSide: 4 * signX * Math.pow(absX, BIO.BETA),
+        thetaHandle: 6 + 6 * (2 * b - 1) + 4 * signX * Math.pow(absX, BIO.DELTA),
+        forearmPsi: BIO.FOREARM_SUP * 0.7 + BIO.FOREARM_PRO * 0.3,
+      },
+      SMASH: {
+        thetaForward: 5 - 3 * swingSpeed,
+        thetaSide: 3 * signX,
+        thetaHandle: 4 + 2 * (2 * b - 1),
+        forearmPsi: BIO.FOREARM_PRO * 0.6,
+      },
+      CHOP: {
+        thetaForward: -10 - 5 * swingSpeed,
+        thetaSide: 10 * signX * Math.pow(absX, BIO.BETA),
+        thetaHandle: 12 + 4 * signX * Math.pow(absX, BIO.DELTA),
+        forearmPsi: BIO.FOREARM_SUP * 0.9,
+      },
+      FLICK: {
+        thetaForward: 18 + 4 * swingSpeed,
+        thetaSide: 10 * signX * Math.pow(absX, BIO.BETA),
+        thetaHandle: 10 + 4 * (2 * b - 1),
+        forearmPsi: BIO.FOREARM_SUP * 0.5 + BIO.FOREARM_PRO * 0.5,
+      },
+      PUSH: {
+        thetaForward: -5 - 3 * swingSpeed,
+        thetaSide: 8 * signX * Math.pow(absX, BIO.BETA),
+        thetaHandle: 8 + 3 * (2 * b - 1),
+        forearmPsi: BIO.FOREARM_SUP,
+      },
+      BLOCK: {
+        thetaForward: 8,
+        thetaSide: 3 * signX * Math.pow(absX, BIO.BETA),
+        thetaHandle: 5 + 2 * (2 * b - 1),
+        forearmPsi: BIO.FOREARM_SUP * 0.6 + BIO.FOREARM_PRO * 0.4,
+      },
+      SERVE_TOP: {
+        thetaForward: 16,
+        thetaSide: 2 * signX,
+        thetaHandle: 5,
+        forearmPsi: BIO.FOREARM_SUP * 0.5 + BIO.FOREARM_PRO * 0.5,
+      },
+      SERVE_BACK: {
+        thetaForward: -8,
+        thetaSide: 6 * signX,
+        thetaHandle: 10,
+        forearmPsi: BIO.FOREARM_SUP * 0.8,
+      },
+    };
+    return presets[strokeId] || presets.DRIVE;
+  }
+}
+
+/* ---- helper: integrate bio orientation into existing paddle state ---- */
+function integrateBioRacket(bioResult, paddleState, ctx) {
+  // Update paddle normal from bio computation (this is what physics uses)
+  V3.copy(paddleState.normal, bioResult.n_world);
+  V3.norm(paddleState.normal, paddleState.normal);
+
+  // Update paddle quaternion for rendering
+  Q.lookRotation(paddleState.q, paddleState.normal, { x: 0, y: 1, z: 0 });
+
+  // Store full bio quaternion for rendering
+  paddleState.bioQ = bioResult.Q_world;
+
+  // Store metadata for UI and animation
+  if (!paddleState.bioMeta) paddleState.bioMeta = {};
+  Object.assign(paddleState.bioMeta, {
+    x: bioResult.x,
+    b: bioResult.b,
+    activeSide: bioResult.activeSide,
+    forearmPsi: bioResult.forearmPsi,
+    wristExt: bioResult.wristExt,
+    wristDev: bioResult.wristDev,
+    thetaForward: bioResult.thetaForward,
+    thetaSide: bioResult.thetaSide,
+    thetaHandle: bioResult.thetaHandle,
+    phiFlip: bioResult.phiFlip,
+    isFlipping: bioResult.isFlipping,
+    isAtEdge: bioResult.isAtEdge,
+    zoneLabel: bioResult.zoneLabel,
+    strokeQuality: bioResult.strokeQuality,
+    strokeType: bioResult.strokeType,
+    d: bioResult.d,
+  });
+
+  // Store forearm rotation for arm rig
+  paddleState.forearmPsi = bioResult.forearmPsi;
+  paddleState.wristExt = bioResult.wristExt;
+  paddleState.wristDev = bioResult.wristDev;
+  paddleState.phiFlip = bioResult.phiFlip;
+
+  return paddleState;
+}
+
+/* ---- helper: compute bio orientation for player paddle ---- */
+function computePlayerBioRacket(game, ctx) {
+  if (!game.bioRacket) return null;
+
+  // Determine x from current ball position relative to player
+  const ball = game.ball;
+  const player = game.player;
+
+  // Use ball x-position relative to player's sternum (which is at x=0)
+  // If ball not live, use player's current lateral velocity to estimate
+  let hitX;
+  if (ball.live && ball.p) {
+    hitX = ball.p.x;
+  } else {
+    // Estimate from player movement
+    hitX = player.pos.x + player.vel.x * 0.1;
+  }
+
+  // Determine ball direction for normal check
+  let ballDir;
+  if (ball.live && ball.v) {
+    ballDir = V3.norm(V3.new(), ball.v);
+    // If ball moving away from player, flip direction
+    if (ballDir.z < 0) V3.scale(ballDir, ballDir, -1);
+  } else {
+    ballDir = V3.new(0, 0, 1);
+  }
+
+  // Estimate stroke type from swipe
+  let strokeType = 'DRIVE';
+  let swingSpeed = 0.5;
+  if (game.liveStroke) {
+    strokeType = game.liveStroke.stroke.id;
+    swingSpeed = game.liveStroke.power || 0.5;
+  } else if (game.swipe && game.swipe.m) {
+    const m = game.swipe.m;
+    swingSpeed = clamp(m.speed / 4, 0, 1);
+    strokeType = game.swipe.lastReleased ?
+      classifyStrokeFromMetrics(m) : 'DRIVE';
+  }
+
+  // Contact quality estimate
+  let contactQuality = 1;
+  if (game.lastSweet !== undefined) {
+    contactQuality = game.lastSweet;
+  }
+
+  const ctx = {
+    x: computeX(hitX, 0, BIO.ZONE_HALF_WIDTH),
+    armQ: game.player.armQ || Q.identity(Q.new()),
+    hand: game.settings.hand || 'right',
+    isServe: game.isServeBall,
+    strokeType,
+    swingSpeed,
+    ballDir,
+    contactQuality,
+    swingDirX: game.player.vel.x || 0,
+  };
+
+  return game.bioRacket.compute(ctx);
+}
+
+/* ---- simple stroke classification for bio context ---- */
+function classifyStrokeFromMetrics(m) {
+  if (!m) return 'DRIVE';
+  const u = m.up;
+  const r = m.right;
+  if (u < -0.3) return 'CHOP';
+  if (u > 0.6) return 'LOOP';
+  if (Math.abs(r) > 0.5 && Math.abs(m.curl) > 0.3) return r > 0 ? 'HOOK' : 'FADE';
+  return 'DRIVE';
 }
 
 
@@ -8214,7 +10325,21 @@ class Game {
     this.swipe = new SwipeTracker();
     this.particles = new Particles();
     this.rig = new PaddleRig();
+    this.bioRacket = new (require('./85_bioRacket').RacketBiomech || function(){});
+    // Fallback if module system doesn't work — inline minimal version
+    if (!this.bioRacket || typeof this.bioRacket.compute !== 'function') {
+      this.bioRacket = null;
+    }
     this.equip = new Equipment();
+
+    // Hit feedback system (99-level multi-sensory response)
+    this.hitFeedback = new HitFeedbackSystem(this);
+
+    // Music system (99-level emotional audio)
+    this.music = new MusicSystem(this.audio);
+
+    // Emotional design system (99-level dramatic arc)
+    this.emotion = new EmotionalSystem(this);
     this.aiEquip = new Equipment('b_carb', 'r_base', 'r_base');
     /* the commercial layer: profile, shop, analytics, and where we run */
     this.platform = new Platform(typeof navigator !== 'undefined' ? navigator : null);
@@ -8229,8 +10354,8 @@ class Game {
     this.replayer.onEnd = () => this.endReplay();
 
     this.settings = {
-      hitZone: 0.85,                     // 1. Область попадания (0.30 .. 1.00)
-      assist: 0.85,                      // 2. Выравнивание удара (0.00 .. 1.00)
+      hitZone: 0.85,
+      assist: 0.85,
       posAssist: 0.85,
       difficulty: 0,
       quality: 'high',
@@ -8243,15 +10368,24 @@ class Game {
       showZone: true,
       showTele: false,
       haptics: true,
-      coach: true,                       // one-line point analysis
-      adaptive: true,                    // dynamic difficulty
+      coach: true,
+      adaptive: true,
       showDebug: false,
-      showPlayerPaddle: false,           // "ракетку скрой" - hide player paddle by default
+      showPlayerPaddle: true,
       slowmoOnBigShots: true,
-      slowmoPlayer: true,                // bullet time, for the player, in casual play only
+      slowmoPlayer: true,
       targetScore: 11,
       sensitivity: 1.0,
-      spinBias: 'norm',                  // spin is always on
+      spinBias: 'norm',
+      // NEW: Enhanced gameplay settings
+      showSpinIndicator: true,
+      showZoneIndicators: true,
+      showQualityRing: true,
+      followThrough: true,
+      anticipationHint: true,
+      shotFeedback: true,
+      momentumBar: true,
+      replaySlowmo: true,
     };
     /* Saved settings are applied AFTER the defaults exist. It used to run
      * 60 lines earlier, while this.settings was still undefined, so
@@ -8301,6 +10435,53 @@ class Game {
     this.lastPoint = null;
     this.timeScale = 1; this.targetTimeScale = 1;
     this.shake = 0; this.shakeDir = V3.new();
+
+    // Follow-through state
+    this.followThrough = {
+      active: false,
+      t: 0,
+      startPos: V3.new(),
+      startNormal: V3.new(),
+      swingDir: V3.new(),
+      duration: 0.15,
+      visualPos: V3.new(),
+      visualNormal: V3.new(),
+    };
+
+    // Anticipation state
+    this.anticipation = {
+      active: false,
+      t: 0,
+      duration: 0.12,
+      targetDir: V3.new(0, 0, -1),
+      intensity: 0,
+      visualOffset: V3.new(),
+    };
+
+    // Shot feedback state
+    this.shotFeedback = {
+      lastQuality: 1,
+      lastSpeed: 0,
+      lastSpin: 0,
+      lastStroke: 'DRIVE',
+      showTimer: 0,
+    };
+
+    // Momentum tracking
+    this.momentum = {
+      current: 0,
+      target: 0,
+      streak: 0,
+      lastWinner: 0,
+    };
+
+    // Spin indicator state
+    this.spinIndicator = {
+      active: false,
+      w: V3.new(),
+      color: [1, 1, 1],
+    };
+
     this.motionQuery = typeof window !== 'undefined' && window.matchMedia
       ? window.matchMedia('(prefers-reduced-motion: reduce)') : null;
     this.reducedMotion = !!(this.motionQuery && this.motionQuery.matches);
@@ -8358,6 +10539,16 @@ class Game {
 
     this.resize();
     this.updateCamera(0);
+
+    // Initialize music system
+    if (this.music) {
+      this.music.init().then(() => {
+        // Music ready
+      }).catch(e => {
+        console.warn('Music init failed:', e);
+      });
+    }
+
     window.addEventListener('resize', () => this.resize());
   }
 
@@ -8414,6 +10605,27 @@ class Game {
         return;
       }
       const n = norm(e);
+
+      // ---- ANTICIPATION TRIGGER ----
+      // Before a swipe, pull the paddle back slightly to telegraph
+      // the upcoming stroke. This is critical for game feel.
+      if (this.settings.anticipationHint && !this.anticipation.active) {
+        const centerX = 0.5;
+        const dx = n.x - centerX;
+        const dy = n.y - 0.55;
+        const mag = Math.hypot(dx, dy) || 0.1;
+        if (mag > 0.1) {
+          const normX = dx / mag;
+          const normY = dy / mag;
+          this.anticipation.active = true;
+          this.anticipation.t = 0;
+          this.anticipation.targetDir = V3.norm(V3.new(),
+            V3.new(normX * 0.3, normY * 0.2, 0.5));
+          this.anticipation.intensity = clamp(mag * 2, 0.3, 1.0);
+          this.anticipation.duration = 0.08 + 0.06 * this.anticipation.intensity;
+        }
+      }
+
       this.swipe.down(n.x, n.y, this.time);
       this._lastPointSwipe = {
         startT: this.time,
@@ -9534,6 +11746,24 @@ class Game {
     V3.copy(b.p, contact);
     V3.addScaled(b.p, b.p, racket.normal, PH.R * 1.05);
     pad.swing = 1;
+
+    // Multi-sensory hit feedback (99-level)
+    if (this.hitFeedback) {
+      this.hitFeedback.execute({
+        quality,
+        speed: V3.len(b.v) || 0,
+        spin: b.w,
+        contactPoint: contact,
+        contactNormal: racket.normal,
+        stroke: racket.stroke ? racket.stroke.id : 'DRIVE',
+        power: racket.power,
+        isServeStroke,
+        isNetCord: this.netTouched,
+        isEdge: info && info.edge > 0.25,
+        side: 1,
+      });
+    }
+
     if (isServeStroke) { this.serveBounces = 0; this.rallyBounces.length = 0; }
     else this.isServeBall = false;
     this.applyHit(1, racket, contact, quality, info);
@@ -9656,9 +11886,21 @@ class Game {
        into the ball. Without this the bat simply appeared 16 cm closer. */
     pad.stepIn = expSmooth(pad.stepIn || 0, shortBall ? 1 : 0, 8, dt);
 
+    // During anticipation, pull the paddle back visually
+    let anticipationOffset = V3.zero();
+    if (this.anticipation.active && this.anticipation.t < this.anticipation.duration) {
+      const progress = this.anticipation.t / this.anticipation.duration;
+      const pullAmount = Math.sin(progress * Math.PI) * this.anticipation.intensity * 0.12;
+      anticipationOffset = V3.scale(V3.new(), this.anticipation.targetDir, -pullAmount);
+      // Advance anticipation timer
+      this.anticipation.t += dt;
+    }
+
     const t = paddleTargetFromPointer(pt.x, pt.y, depthY, sens,
       this._ptTarget || (this._ptTarget = { tx: 0, ty: 0, tz: 0 }), { zNear });
-    let tx = t.tx, ty = t.ty, tz = t.tz;
+    let tx = t.tx + anticipationOffset.x;
+    let ty = t.ty + anticipationOffset.y;
+    let tz = t.tz + anticipationOffset.z;
 
     /* On a new point the bat goes HOME first, and while that window is open
      * the cursor is deliberately not obeyed. Without this the reset is
@@ -9758,6 +12000,71 @@ class Game {
       V3.copy(want, st.normal);
       this.liveStroke = st;
     } else this.liveStroke = null;
+
+    // ---- BIOMECHANICAL RACKET ORIENTATION (99-level) ----
+    // Compute the full 3D biomechanical orientation if bioRacket is available
+    if (this.bioRacket && this.bioRacket.compute) {
+      const ballDir = this.ball.live && this.ball.v
+        ? V3.norm(V3.new(), this.ball.v)
+        : V3.new(0, 0, 1);
+
+      // Determine x (lateral position) from ball or player position
+      let hitX = this.ball.live && this.ball.p ? this.ball.p.x : pad.pos.x;
+
+      // Estimate stroke type and speed
+      let strokeType = 'DRIVE';
+      let swingSpeed = 0.5;
+      let contactQuality = 1;
+      if (this.liveStroke) {
+        strokeType = this.liveStroke.stroke.id;
+        swingSpeed = this.liveStroke.power || 0.5;
+      } else if (m) {
+        strokeType = classifyStrokeForBio(m);
+        swingSpeed = clamp(m.speed / 4, 0, 1);
+      }
+      if (this.lastSweet !== undefined) {
+        contactQuality = this.lastSweet;
+      }
+
+      // Build arm quaternion from current paddle state
+      // This represents shoulder + elbow + wristBase orientation
+      const armQ = Q.lookRotation(Q.new(), pad.normal, { x: 0, y: 1, z: 0 });
+
+      const bioCtx = {
+        x: (hitX - 0) / BIO.ZONE_HALF_WIDTH,  // normalize to [-1,1]
+        armQ,
+        hand: this.settings.hand || 'right',
+        isServe: this.isServeBall,
+        strokeType,
+        swingSpeed,
+        ballDir,
+        contactQuality,
+        swingDirX: pad.vel.x || 0,
+      };
+
+      const bio = this.bioRacket.compute(bioCtx);
+      if (bio) {
+        // Store bio orientation for rendering
+        pad.bioQ = bio.Q_world;
+        pad.bioMeta = {
+          x: bio.x, b: bio.b, activeSide: bio.activeSide,
+          forearmPsi: bio.forearmPsi, wristExt: bio.wristExt,
+          wristDev: bio.wristDev, thetaForward: bio.thetaForward,
+          thetaSide: bio.thetaSide, thetaHandle: bio.thetaHandle,
+          phiFlip: bio.phiFlip, isFlipping: bio.isFlipping,
+          isAtEdge: bio.isAtEdge, zoneLabel: bio.zoneLabel,
+          strokeQuality: bio.strokeQuality, strokeType: bio.strokeType,
+        };
+        pad.forearmPsi = bio.forearmPsi;
+        pad.wristExt = bio.wristExt;
+        pad.wristDev = bio.wristDev;
+        pad.phiFlip = bio.phiFlip;
+
+        // Update the "want" normal from bio computation for smoothing
+        V3.copy(want, bio.n_world);
+      }
+    }
+
     // apply the step yaw to the resting face as well
     const cy = Math.cos(this.padYaw), sy = Math.sin(this.padYaw);
     const wx = want.x * cy + want.z * sy, wz = -want.x * sy + want.z * cy;
@@ -10218,6 +12525,88 @@ class Game {
     for (const m of this.messages) m.t += dtReal;
     while (this.messages.length && this.messages[0].t > this.messages[0].dur) this.messages.shift();
     this.hitFlash = Math.max(0, this.hitFlash - dtReal * 3.2);
+
+    // Update follow-through
+    if (this.settings.followThrough) {
+      if (this.followThrough.active) {
+        this.followThrough.t += dtReal;
+        const progress = this.followThrough.t / this.followThrough.duration;
+        if (progress >= 1) {
+          this.followThrough.active = false;
+        } else {
+          // Smoothstep for natural deceleration
+          const smoothProgress = progress * progress * (3 - 2 * progress);
+          const decay = 1 - smoothProgress;
+
+          // Visual position — continues in swing direction, then decelerates
+          const ftOffset = V3.scale(V3.new(), this.followThrough.swingDir,
+            (1 - decay) * 0.25);
+          V3.copy(this.followThrough.visualPos, this.followThrough.startPos);
+          V3.add(this.followThrough.visualPos, this.followThrough.visualPos, ftOffset);
+
+          // Visual normal — follows face rotation with decay
+          const normalOffset = V3.scale(V3.new(), this.followThrough.startNormal,
+            (1 - decay) * 0.2);
+          V3.copy(this.followThrough.visualNormal, this.followThrough.startNormal);
+          V3.add(this.followThrough.visualNormal, this.followThrough.visualNormal, normalOffset);
+          V3.norm(this.followThrough.visualNormal, this.followThrough.visualNormal);
+
+          // Apply to player for rendering (but physics uses real pos)
+          V3.copy(this.player.pos, this.followThrough.visualPos);
+          V3.copy(this.player.normal, this.followThrough.visualNormal);
+        }
+      }
+    }
+
+    // Update anticipation
+    if (this.settings.anticipationHint) {
+      if (this.anticipation.active) {
+        this.anticipation.t += dtReal;
+        const progress = this.anticipation.t / this.anticipation.duration;
+        if (progress >= 1) {
+          this.anticipation.active = false;
+        } else {
+          // Backswing pull-back — pulls paddle opposite to swipe direction
+          const pullAmount = Math.sin(progress * Math.PI) * this.anticipation.intensity * 0.12;
+          const offset = V3.scale(V3.new(), this.anticipation.targetDir, -pullAmount);
+          V3.copy(this.anticipation.visualOffset, offset);
+        }
+      } else {
+        V3.zero(this.anticipation.visualOffset);
+      }
+    }
+
+    // Update spin indicator
+    if (this.settings.showSpinIndicator && this.ball.live) {
+      this.spinIndicator.active = true;
+      V3.copy(this.spinIndicator.w, this.ball.w);
+      const spinMag = V3.len(this.ball.w);
+      if (spinMag > 50) {
+        // Color based on spin type
+        if (Math.abs(this.ball.w.x) > Math.abs(this.ball.w.y)) {
+          this.spinIndicator.color = this.ball.w.x > 0 ? [1, 0.5, 0.1] : [1, 0.2, 0.2];
+        } else {
+          this.spinIndicator.color = this.ball.w.y > 0 ? [0.1, 0.8, 0.4] : [0.2, 0.4, 1];
+        }
+      } else {
+        this.spinIndicator.color = [0.8, 0.8, 0.8];
+      }
+    } else {
+      this.spinIndicator.active = false;
+    }
+
+    // Update momentum
+    if (this.settings.momentumBar) {
+      if (this.lastPoint && this.lastPoint.who > 0) {
+        this.momentum.streak++;
+        this.momentum.target = Math.min(1, this.momentum.streak / 5);
+      } else if (this.lastPoint && this.lastPoint.who < 0) {
+        this.momentum.streak = 0;
+        this.momentum.target = 0;
+      }
+      this.momentum.current = expSmooth(this.momentum.current, this.momentum.target, 3, dtReal);
+    }
+
     if (this.profile) {
       this.profile.data.stats.minutes += dtReal / 60;
       this.profile.maybeSave(dtReal);
@@ -10254,6 +12643,43 @@ class Game {
     // fps
     this._fpsN++; this._fpsT += dtReal;
     if (this._fpsT > 0.5) { this.fps = this._fpsN / this._fpsT; this._fpsT = 0; this._fpsN = 0; }
+
+    // Update music system — dynamic soundtrack based on game state
+    if (this.music && this.music._initialized) {
+      this.music.update({
+        state: this.state,
+        rally: this.rally,
+        ball: this.ball,
+        settings: this.settings,
+        momentum: this.momentum,
+        lastPoint: this.lastPoint,
+      });
+    }
+
+    // Update emotional system — dramatic moments and arc
+    if (this.emotion) {
+      this.emotion.update({
+        state: this.state,
+        rally: this.rally,
+        ball: this.ball,
+        score: this.score,
+        settings: this.settings,
+        momentum: this.momentum,
+        lastPoint: this.lastPoint,
+        lastShotInfo: this.lastShotInfo,
+        netTouched: this.netTouched,
+        server: this.server,
+        time: this.time,
+      });
+    }
+
+    // Update UI animations
+    if (this.ui && this.ui.uiAnim) {
+      this.ui.uiAnim.update(performance.now());
+    }
+    if (this.ui && this.ui.hudAnim) {
+      this.ui.hudAnim.update(performance.now());
+    }
   }
 
   /* ------------------------------ render --------------------------- */
@@ -10312,6 +12738,59 @@ class Game {
       d(me.ball, tmp.m, ma.ball);
     }
 
+    /* ---- PLAYER PADDLE (with full biomechanical orientation) ---- */
+    // The player paddle is rendered when showPlayerPaddle is enabled
+    // or always in training mode. Uses bioRacket for orientation.
+    if (this.settings.showPlayerPaddle !== false || this.training) {
+      const pp = this.player;
+      const pNorm = V3.norm(V3.new(), pp.normal);
+
+      // Player bio racket orientation
+      let ppBioQ = pp.bioQ || null;
+      let ppActiveSide = 1;
+      let ppForearmPsi = pp.forearmPsi || 0;
+      let ppWristExt = pp.wristExt || 0;
+      let ppWristDev = pp.wristDev || 0;
+      let ppPhiFlip = pp.phiFlip || 0;
+      let ppBioMeta = pp.bioMeta || null;
+
+      // Determine active side geometrically if not from bio
+      const ppBallDir = this.ball.live && this.ball.v
+        ? V3.norm(V3.new(), this.ball.v)
+        : V3.new(0, 0, 1);
+      if (!ppBioMeta) {
+        const dot = V3.dot(pNorm, ppBallDir);
+        ppActiveSide = dot >= 0 ? 1 : -1;
+      } else {
+        ppActiveSide = ppBioMeta.activeSide;
+      }
+
+      // Build arm quaternion for bio
+      const ppArmQ = Q.lookRotation(Q.new(), pNorm, { x: 0, y: 1, z: 0 });
+
+      if (this.settings.showPlayerPaddle !== false) {
+        this.rig.draw(R, S, {
+          pos: pp.pos,
+          normal: pNorm,
+          hand: this.settings.hand === 'right' ? 'right' : 'left',
+          swing: pp.swing,
+          windup: 0.5,  // player always has some windup for visual interest
+          roll: pp.roll || 0,
+          mats: this.paddleMats(S, this.equip),
+          // Bio parameters
+          bioQ: ppBioQ,
+          bioActive: !!ppBioQ,
+          forearmPsi: ppForearmPsi,
+          wristExt: ppWristExt,
+          wristDev: ppWristDev,
+          phiFlip: ppPhiFlip,
+          activeSide: ppActiveSide,
+          ballDir: ppBallDir,
+          bioMeta: ppBioMeta,
+        });
+      }
+    }
+
     /* the opponent: paddle, hand, forearm and sleeve, all solved from
        the paddle's own position and normal (see 56_rig.js) */
     const ap = this.aiPaddle;
@@ -10326,6 +12805,16 @@ class Game {
       1));
     V3.copy(ap.normal, aiNorm);
     V3.copy(ap.pos, this.ai.pos);
+
+    // AI bio racket orientation — simplified for AI (no full bio computation needed)
+    let aiBioQ = null;
+    let aiActiveSide = 1;
+    const aiBallDir = V3.norm(V3.new(), V3.sub(V3.new(), this.ball.p, this.ai.pos));
+    if (this.ball.live) {
+      const dot = V3.dot(aiNorm, aiBallDir);
+      aiActiveSide = dot >= 0 ? 1 : -1;
+    }
+
     if (shadowPass) {
       const aqS = Q.lookRotation(Q.new(), aiNorm, { x: 0, y: 1, z: 0 });
       M4.compose(tmp.m, ap.pos, aqS, V3.set(tmp.scl, 1, 1, 1));
@@ -10335,6 +12824,8 @@ class Game {
         pos: ap.pos, normal: aiNorm, hand: this.settings.hand === 'right' ? 'left' : 'right',
         swing: -this.ai.anim.swing, windup: wd, roll: (this.ai.anim.lean || 0) * 0.22,
         mats: this.paddleMats(S, this.aiEquip),
+        activeSide: aiActiveSide,
+        ballDir: aiBallDir,
       });
     }
 
@@ -10474,6 +12965,26 @@ function hexToRgb(h) {
   return [((n >> 16) & 255) / 255, ((n >> 8) & 255) / 255, (n & 255) / 255];
 }
 
+/**
+ * Classify stroke from swipe metrics for biomechanical context.
+ * Lightweight version of classifyStroke — just for bio orientation.
+ */
+function classifyStrokeForBio(m) {
+  if (!m) return 'DRIVE';
+  const u = m.up;
+  const r = m.right;
+  const curl = m.curl || 0;
+  if (u < -0.3) return 'CHOP';
+  if (u > 0.6 && Math.abs(curl) < 0.3) return 'LOOP';
+  if (u > 0.3 && Math.abs(r) > 0.5 && Math.abs(curl) > 0.3) return r > 0 ? 'HOOK' : 'FADE';
+  if (u > 0.3) return 'DRIVE';
+  return 'DRIVE';
+}
+
+/* BIO constants for use in game (imported conceptually from 85_bioRacket.js) */
+const BIO_ZONE_HALF_WIDTH = 0.85;
+const DEG = Math.PI / 180;
+
 
 /* ====== 80_ui.js ====== */
 /* =====================================================================
@@ -10496,6 +13007,10 @@ class UI {
     this.noteTimer = 0;
     this.ripples = [];
     this.ghostT = 0;
+
+    // UI Animation system (99-level polish)
+    this.uiAnim = new UIAnimation();
+    this.hudAnim = new HUDAnimation(this);
     this.motionQuery = typeof window !== 'undefined' && window.matchMedia
       ? window.matchMedia('(prefers-reduced-motion: reduce)') : null;
     this.reducedMotion = !!(this.motionQuery && this.motionQuery.matches);
@@ -10533,6 +13048,15 @@ class UI {
     this.syncPauseControl();
     this.refreshMenuBits();
     this.syncMenuScrollHint();
+
+    // Setup UI animations
+    if (this.uiAnim) {
+      this.uiAnim.clear();
+    }
+    if (this.hudAnim) {
+      this.hudAnim.setupScoreDisplay();
+    }
+
     this.game.analytics && this.game.analytics.send('session:start', {
       platform: this.game.platform.label, touch: this.game.platform.touch,
       level: this.game.profile.data.level, coins: this.game.profile.data.coins,

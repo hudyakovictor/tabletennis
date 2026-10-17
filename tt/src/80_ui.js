@@ -19,6 +19,10 @@ class UI {
     this.noteTimer = 0;
     this.ripples = [];
     this.ghostT = 0;
+
+    // UI Animation system (99-level polish)
+    this.uiAnim = new UIAnimation();
+    this.hudAnim = new HUDAnimation(this);
     this.motionQuery = typeof window !== 'undefined' && window.matchMedia
       ? window.matchMedia('(prefers-reduced-motion: reduce)') : null;
     this.reducedMotion = !!(this.motionQuery && this.motionQuery.matches);
@@ -56,6 +60,15 @@ class UI {
     this.syncPauseControl();
     this.refreshMenuBits();
     this.syncMenuScrollHint();
+
+    // Setup UI animations
+    if (this.uiAnim) {
+      this.uiAnim.clear();
+    }
+    if (this.hudAnim) {
+      this.hudAnim.setupScoreDisplay();
+    }
+
     this.game.analytics && this.game.analytics.send('session:start', {
       platform: this.game.platform.label, touch: this.game.platform.touch,
       level: this.game.profile.data.level, coins: this.game.profile.data.coins,
