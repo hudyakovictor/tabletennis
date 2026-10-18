@@ -174,7 +174,21 @@ const ARCH = {
   SERVE_FAST: { elev: -13, contact: 24, speed: 1.12, lat: 0.60, back: false },
 };
 
-/** Pick the archetype. Ordering matters: situational shots win over generic. */
+/** A click, a 2-pixel twitch or hover jitter is not a stroke.
+ *  The bat may only fire if the pointer actually travelled.
+ *  A serve is a shorter, slower flick (often down+up with one move) — the
+ *  rally gate would reject a legal toss strike. */
+function isRealStroke(m, serving) {
+  if (!m || !Number.isFinite(m.samples) || m.samples < (serving ? 2 : 3)) return false;
+  const minPath = serving ? 0.022 : 0.052;
+  const minDist = serving ? 0.016 : 0.040;
+  const minSp = serving ? 0.14 : 0.38;
+  if (!Number.isFinite(m.pathLen) || m.pathLen < minPath) return false;
+  if (!Number.isFinite(m.dist) || m.dist < minDist) return false;
+  if (!Number.isFinite(m.peakSpeed) || m.peakSpeed < minSp) return false;
+  return true;
+}
+
 function classifyStroke(m, ctx, sp01) {
   const r = m.right, u = m.up;
   const latMag = Math.abs(r);
@@ -344,7 +358,13 @@ function deriveStroke(m, ctx) {
   // face normal: rotate away from the swing by the contact angle
   const vertContact = contact * DEG * (1 - 0.58 * latMix);
   const movePitch = Number.isFinite(ctx.movePitch) ? clamp(ctx.movePitch, -0.55, 0.55) : 0;
-  const phi = clamp((A.back ? eR + vertContact : eR - vertContact) + movePitch, -1.35, 1.35);
+  let phi = clamp((A.back ? eR + vertContact : eR - vertContact) + movePitch, -1.35, 1.35);
+  /* Attack lean: a drive/loop/smash tips the blade INTO the ball (closed
+     face, head toward the net). Without this, elev ≈ contact left every
+     loop sitting near vertical — the bat never visibly leaned forward. */
+  if (!A.back && !A.absorb && !ctx.isServe) {
+    phi = clamp(phi - (0.18 + 0.10 * clamp(sp01, 0, 1)), -1.35, 1.35);
+  }
   const normal = V3.new(
     Math.sin(azFace) * Math.cos(phi),
     Math.sin(phi),

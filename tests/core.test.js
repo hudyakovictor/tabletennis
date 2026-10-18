@@ -63,6 +63,28 @@ test('cancelling a swipe never reuses the previous released stroke', () => {
   const s = new SwipeTracker(); s.down(.5, .8, 1); s.up(.5, .4, 1.15); assert.ok(s.lastReleased);
   s.down(.5, .7, 2); s.cancel(); assert.equal(s.active, false); assert.equal(s.lastReleased, null);
 });
+test('a click with no travel cannot pass the stroke gate', () => {
+  const { SwipeTracker, isRealStroke } = load(
+    ['10_math.js', '30_physics.js', '40_swipe.js'], ['SwipeTracker', 'isRealStroke']);
+  const s = new SwipeTracker();
+  s.down(.5, .55, 1);
+  s.move(.5, .55, 1.01);
+  const m = s.up(.501, .549, 1.04);
+  assert.equal(isRealStroke(m, false), false, 'stationary click is not a stroke');
+  s.down(.5, .62, 2);
+  s.move(.51, .61, 2.02); // tiny drag in a random direction
+  const twitch = s.up(.52, .60, 2.04);
+  assert.equal(isRealStroke(twitch, false), false, 'a 2 % twitch in any direction is not a stroke');
+  s.down(.5, .70, 3);
+  s.move(.52, .58, 3.05);
+  s.move(.55, .42, 3.12);
+  const flick = s.up(.56, .38, 3.16);
+  assert.equal(isRealStroke(flick, false), true, 'a real drag still counts as a stroke');
+  s.down(.50, .62, 4);
+  s.move(.50, .50, 4.08);
+  const serveFlick = s.up(.50, .44, 4.14);
+  assert.equal(isRealStroke(serveFlick, true), true, 'a short upward serve flick is a serve stroke');
+});
 test('physical drop rebounds within table-tennis calibration range', () => {
   const { PH, V3, integrateBall, bounceTable } = load(['10_math.js', '30_physics.js'], ['PH', 'V3', 'integrateBall', 'bounceTable']);
   const p = V3.new(0, PH.TABLE_Y + PH.R + .305, .4), v = V3.new(), w = V3.new();
