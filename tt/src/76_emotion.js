@@ -94,7 +94,7 @@ class EmotionalSystem {
     // Could add CSS class to canvas
 
     // Text message
-    const isPlayerServing = g.server === 1;
+    const isPlayerServing = this.game.server === 1;
     const msg = isPlayerServing
       ? 'МATCH POINT — ВАША ПОДАЧА'
       : 'МATCH POINT — СОПЕРНИК ПОДАЁТ';

@@ -233,7 +233,7 @@ class Scene {
       netPost: R.mesh(makeCylinder(0.013, 0.016, T.NET_H + 0.04, 12)),
       ball: R.mesh(makeSphere(T.R, 28, 20)),
       blade: R.mesh(makePaddleBlade(0.077, 0.082, 0.014, 44)),
-      rubber: R.mesh(makePaddleBlade(0.072, 0.077, 0.0165, 44)),
+      rubber: R.mesh(makePaddleBlade(0.072, 0.077, 0.003, 44)),
       handle: R.mesh(makeBox(0.030, 0.100, 0.022)),
       floor: R.mesh(makePlane(26, 26, 13)),
       quad: R.mesh(makeQuad(1, 1)),

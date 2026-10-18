@@ -66,11 +66,6 @@ class Game {
     this.swipe = new SwipeTracker();
     this.particles = new Particles();
     this.rig = new PaddleRig();
-    this.bioRacket = new (require('./85_bioRacket').RacketBiomech || function(){});
-    // Fallback if module system doesn't work — inline minimal version
-    if (!this.bioRacket || typeof this.bioRacket.compute !== 'function') {
-      this.bioRacket = null;
-    }
     this.equip = new Equipment();
 
     // Hit feedback system (99-level multi-sensory response)
@@ -1628,13 +1623,11 @@ class Game {
     pad.stepIn = expSmooth(pad.stepIn || 0, shortBall ? 1 : 0, 8, dt);
 
     // During anticipation, pull the paddle back visually
-    let anticipationOffset = V3.zero();
-    if (this.anticipation.active && this.anticipation.t < this.anticipation.duration) {
+    let anticipationOffset = V3.new();
+    if (this.settings.anticipationHint && this.anticipation.active && this.anticipation.t < this.anticipation.duration) {
       const progress = this.anticipation.t / this.anticipation.duration;
       const pullAmount = Math.sin(progress * Math.PI) * this.anticipation.intensity * 0.12;
-      anticipationOffset = V3.scale(V3.new(), this.anticipation.targetDir, -pullAmount);
-      // Advance anticipation timer
-      this.anticipation.t += dt;
+      anticipationOffset = V3.mul(V3.new(), this.anticipation.targetDir, -pullAmount);
     }
 
     const t = paddleTargetFromPointer(pt.x, pt.y, depthY, sens,
@@ -1742,70 +1735,8 @@ class Game {
       this.liveStroke = st;
     } else this.liveStroke = null;
 
-    // ---- BIOMECHANICAL RACKET ORIENTATION (99-level) ----
-    // Compute the full 3D biomechanical orientation if bioRacket is available
-    if (this.bioRacket && this.bioRacket.compute) {
-      const ballDir = this.ball.live && this.ball.v
-        ? V3.norm(V3.new(), this.ball.v)
-        : V3.new(0, 0, 1);
-
-      // Determine x (lateral position) from ball or player position
-      let hitX = this.ball.live && this.ball.p ? this.ball.p.x : pad.pos.x;
-
-      // Estimate stroke type and speed
-      let strokeType = 'DRIVE';
-      let swingSpeed = 0.5;
-      let contactQuality = 1;
-      if (this.liveStroke) {
-        strokeType = this.liveStroke.stroke.id;
-        swingSpeed = this.liveStroke.power || 0.5;
-      } else if (m) {
-        strokeType = classifyStrokeForBio(m);
-        swingSpeed = clamp(m.speed / 4, 0, 1);
-      }
-      if (this.lastSweet !== undefined) {
-        contactQuality = this.lastSweet;
-      }
-
-      // Build arm quaternion from current paddle state
-      // This represents shoulder + elbow + wristBase orientation
-      const armQ = Q.lookRotation(Q.new(), pad.normal, { x: 0, y: 1, z: 0 });
-
-      const bioCtx = {
-        x: (hitX - 0) / BIO.ZONE_HALF_WIDTH,  // normalize to [-1,1]
-        armQ,
-        hand: this.settings.hand || 'right',
-        isServe: this.isServeBall,
-        strokeType,
-        swingSpeed,
-        ballDir,
-        contactQuality,
-        swingDirX: pad.vel.x || 0,
-      };
-
-      const bio = this.bioRacket.compute(bioCtx);
-      if (bio) {
-        // Store bio orientation for rendering
-        pad.bioQ = bio.Q_world;
-        pad.bioMeta = {
-          x: bio.x, b: bio.b, activeSide: bio.activeSide,
-          forearmPsi: bio.forearmPsi, wristExt: bio.wristExt,
-          wristDev: bio.wristDev, thetaForward: bio.thetaForward,
-          thetaSide: bio.thetaSide, thetaHandle: bio.thetaHandle,
-          phiFlip: bio.phiFlip, isFlipping: bio.isFlipping,
-          isAtEdge: bio.isAtEdge, zoneLabel: bio.zoneLabel,
-          strokeQuality: bio.strokeQuality, strokeType: bio.strokeType,
-        };
-        pad.forearmPsi = bio.forearmPsi;
-        pad.wristExt = bio.wristExt;
-        pad.wristDev = bio.wristDev;
-        pad.phiFlip = bio.phiFlip;
-
-        // Update the "want" normal from bio computation for smoothing
-        V3.copy(want, bio.n_world);
-      }
-    }
-
+    // The target is absolute (gesture + footwork), never a rotation of last
+    // frame's normal. Feeding the output back here accumulates pitch forever.
     // apply the step yaw to the resting face as well
     const cy = Math.cos(this.padYaw), sy = Math.sin(this.padYaw);
     const wx = want.x * cy + want.z * sy, wz = -want.x * sy + want.z * cy;
@@ -2280,13 +2211,13 @@ class Game {
           const decay = 1 - smoothProgress;
 
           // Visual position — continues in swing direction, then decelerates
-          const ftOffset = V3.scale(V3.new(), this.followThrough.swingDir,
+          const ftOffset = V3.mul(V3.new(), this.followThrough.swingDir,
             (1 - decay) * 0.25);
           V3.copy(this.followThrough.visualPos, this.followThrough.startPos);
           V3.add(this.followThrough.visualPos, this.followThrough.visualPos, ftOffset);
 
           // Visual normal — follows face rotation with decay
-          const normalOffset = V3.scale(V3.new(), this.followThrough.startNormal,
+          const normalOffset = V3.mul(V3.new(), this.followThrough.startNormal,
             (1 - decay) * 0.2);
           V3.copy(this.followThrough.visualNormal, this.followThrough.startNormal);
           V3.add(this.followThrough.visualNormal, this.followThrough.visualNormal, normalOffset);
@@ -2309,7 +2240,7 @@ class Game {
         } else {
           // Backswing pull-back — pulls paddle opposite to swipe direction
           const pullAmount = Math.sin(progress * Math.PI) * this.anticipation.intensity * 0.12;
-          const offset = V3.scale(V3.new(), this.anticipation.targetDir, -pullAmount);
+          const offset = V3.mul(V3.new(), this.anticipation.targetDir, -pullAmount);
           V3.copy(this.anticipation.visualOffset, offset);
         }
       } else {
@@ -2399,19 +2330,7 @@ class Game {
 
     // Update emotional system — dramatic moments and arc
     if (this.emotion) {
-      this.emotion.update({
-        state: this.state,
-        rally: this.rally,
-        ball: this.ball,
-        score: this.score,
-        settings: this.settings,
-        momentum: this.momentum,
-        lastPoint: this.lastPoint,
-        lastShotInfo: this.lastShotInfo,
-        netTouched: this.netTouched,
-        server: this.server,
-        time: this.time,
-      });
+      this.emotion.update(this);
     }
 
     // Update UI animations
@@ -2479,61 +2398,18 @@ class Game {
       d(me.ball, tmp.m, ma.ball);
     }
 
-    /* ---- PLAYER PADDLE (with full biomechanical orientation) ---- */
-    // The player paddle is rendered when showPlayerPaddle is enabled
-    // or always in training mode. Uses bioRacket for orientation.
-    if (this.settings.showPlayerPaddle !== false || this.training) {
+    /* Paddle-only rendering. Physics and visuals share the same face normal;
+       rendering must not mutate the simulation's orientation. */
+    if (this.settings.showPlayerPaddle !== false) {
       const pp = this.player;
-      const pNorm = V3.norm(V3.new(), pp.normal);
-
-      // Player bio racket orientation
-      let ppBioQ = pp.bioQ || null;
-      let ppActiveSide = 1;
-      let ppForearmPsi = pp.forearmPsi || 0;
-      let ppWristExt = pp.wristExt || 0;
-      let ppWristDev = pp.wristDev || 0;
-      let ppPhiFlip = pp.phiFlip || 0;
-      let ppBioMeta = pp.bioMeta || null;
-
-      // Determine active side geometrically if not from bio
-      const ppBallDir = this.ball.live && this.ball.v
-        ? V3.norm(V3.new(), this.ball.v)
-        : V3.new(0, 0, 1);
-      if (!ppBioMeta) {
-        const dot = V3.dot(pNorm, ppBallDir);
-        ppActiveSide = dot >= 0 ? 1 : -1;
-      } else {
-        ppActiveSide = ppBioMeta.activeSide;
-      }
-
-      // Build arm quaternion for bio
-      const ppArmQ = Q.lookRotation(Q.new(), pNorm, { x: 0, y: 1, z: 0 });
-
-      if (this.settings.showPlayerPaddle !== false) {
-        this.rig.draw(R, S, {
-          pos: pp.pos,
-          normal: pNorm,
-          hand: this.settings.hand === 'right' ? 'right' : 'left',
-          swing: pp.swing,
-          windup: 0.5,  // player always has some windup for visual interest
-          roll: pp.roll || 0,
-          mats: this.paddleMats(S, this.equip),
-          // Bio parameters
-          bioQ: ppBioQ,
-          bioActive: !!ppBioQ,
-          forearmPsi: ppForearmPsi,
-          wristExt: ppWristExt,
-          wristDev: ppWristDev,
-          phiFlip: ppPhiFlip,
-          activeSide: ppActiveSide,
-          ballDir: ppBallDir,
-          bioMeta: ppBioMeta,
-        });
-      }
+      this.rig.draw(R, S, {
+        pos: pp.pos, normal: pp.normal, hand: this.settings.hand, shadowPass,
+        swing: pp.swing, roll: pp.roll || 0,
+        mats: this.paddleMats(S, this.equip),
+      });
     }
 
-    /* the opponent: paddle, hand, forearm and sleeve, all solved from
-       the paddle's own position and normal (see 56_rig.js) */
+    // Opponent paddle; no hand, forearm or sleeve geometry.
     const ap = this.aiPaddle;
     const an = V3.norm(V3.new(), V3.sub(V3.new(), this.ball.p, this.ai.pos));
     an.z = Math.abs(an.z) * 1 || 1;
@@ -2547,28 +2423,11 @@ class Game {
     V3.copy(ap.normal, aiNorm);
     V3.copy(ap.pos, this.ai.pos);
 
-    // AI bio racket orientation — simplified for AI (no full bio computation needed)
-    let aiBioQ = null;
-    let aiActiveSide = 1;
-    const aiBallDir = V3.norm(V3.new(), V3.sub(V3.new(), this.ball.p, this.ai.pos));
-    if (this.ball.live) {
-      const dot = V3.dot(aiNorm, aiBallDir);
-      aiActiveSide = dot >= 0 ? 1 : -1;
-    }
-
-    if (shadowPass) {
-      const aqS = Q.lookRotation(Q.new(), aiNorm, { x: 0, y: 1, z: 0 });
-      M4.compose(tmp.m, ap.pos, aqS, V3.set(tmp.scl, 1, 1, 1));
-      R.drawShadow(me.blade, tmp.m, null, 0);
-    } else {
-      this.rig.draw(R, S, {
-        pos: ap.pos, normal: aiNorm, hand: this.settings.hand === 'right' ? 'left' : 'right',
-        swing: -this.ai.anim.swing, windup: wd, roll: (this.ai.anim.lean || 0) * 0.22,
-        mats: this.paddleMats(S, this.aiEquip),
-        activeSide: aiActiveSide,
-        ballDir: aiBallDir,
-      });
-    }
+    this.rig.draw(R, S, {
+      pos: ap.pos, normal: aiNorm, hand: this.settings.hand === 'right' ? 'left' : 'right',
+      swing: -this.ai.anim.swing, roll: (this.ai.anim.lean || 0) * 0.22,
+      mats: this.paddleMats(S, this.aiEquip), shadowPass,
+    });
 
   }
 
@@ -2705,23 +2564,3 @@ function hexToRgb(h) {
   const n = parseInt(h.replace('#', ''), 16);
   return [((n >> 16) & 255) / 255, ((n >> 8) & 255) / 255, (n & 255) / 255];
 }
-
-/**
- * Classify stroke from swipe metrics for biomechanical context.
- * Lightweight version of classifyStroke — just for bio orientation.
- */
-function classifyStrokeForBio(m) {
-  if (!m) return 'DRIVE';
-  const u = m.up;
-  const r = m.right;
-  const curl = m.curl || 0;
-  if (u < -0.3) return 'CHOP';
-  if (u > 0.6 && Math.abs(curl) < 0.3) return 'LOOP';
-  if (u > 0.3 && Math.abs(r) > 0.5 && Math.abs(curl) > 0.3) return r > 0 ? 'HOOK' : 'FADE';
-  if (u > 0.3) return 'DRIVE';
-  return 'DRIVE';
-}
-
-/* BIO constants for use in game (imported conceptually from 85_bioRacket.js) */
-const BIO_ZONE_HALF_WIDTH = 0.85;
-const DEG = Math.PI / 180;
