@@ -48,9 +48,22 @@ async function waitForGame(page, errors) {
           catch (e) { results.push({ name, ok: false, error: e.message }); } };
         const near = (a,b) => Math.abs(a-b) < 1e-9;
         g.paused = true; // freeze RAF; tests advance the actual game deterministically
-        check('boot, render, biomechanical racket and AI render state', () =>
-          g.R.drawCalls > 0 && !!g.R.camPos && !!g.bioRacket &&
+        check('boot, render and finite AI render state', () =>
+          g.R.drawCalls > 0 && !!g.R.camPos &&
           [g.ai.pos.x,g.ai.pos.y,g.ai.pos.z,g.aiPaddle.pos.x,g.aiPaddle.pos.y,g.aiPaddle.pos.z].every(Number.isFinite));
+        check('racket-only rig has no hand or arm geometry', () =>
+          g.rig instanceof PaddleRig && !g.rig.mFore && !g.rig.mPalm &&
+          typeof g.rig.drawArm === 'undefined' && typeof g.bioRacket === 'undefined');
+        check('racket orientation follows its normal without free blade roll', () => {
+          const target=V3.norm(V3.new(),V3.new(0.31,0.43,-0.85));
+          const q=g.rig.paddleQuat(Q.new(),target);
+          const matrix=M4.compose(M4.create(),V3.new(),q,V3.new(1,1,1));
+          const face=M4.transformDir(V3.new(),matrix,V3.new(0,0,1));
+          const right=M4.transformDir(V3.new(),matrix,V3.new(1,0,0));
+          const expectedRight=V3.norm(V3.new(),V3.cross(V3.new(),V3.new(0,1,0),target));
+          return [q.x,q.y,q.z,q.w].every(Number.isFinite) &&
+            V3.dot(face,target)>0.99999 && V3.dot(right,expectedRight)>0.99999;
+        });
         check('restored menu difficulty', () => g.ui.pendingDiff === g.settings.difficulty);
         check('input instructions use pointer capabilities, not viewport width', () => {
           return g.ui.inputMode===(navigator.maxTouchPoints>0 ? 'touch' : 'mouse');
