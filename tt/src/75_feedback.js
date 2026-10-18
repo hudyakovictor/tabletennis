@@ -343,7 +343,6 @@ class HitFeedbackSystem {
       }
     }
   }
-}
 
   /**
    * Enable/disable haptic feedback.

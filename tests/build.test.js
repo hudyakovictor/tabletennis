@@ -16,3 +16,13 @@ test('both published HTML files match a fresh source build', () => {
       assert.equal(normalize(fs.readFileSync(path.join(root,file),'utf8')),expected,`${file} is stale; run npm run build`);
   } finally { fs.rmSync(dir,{recursive:true,force:true}); }
 });
+
+test('standalone bundle parses as a browser script (no duplicate declarations or broken class methods)', () => {
+  const vm = require('node:vm');
+  for (const file of ['play/index.html', 'table-tennis-topspin.html']) {
+    const html = fs.readFileSync(path.join(root, file), 'utf8');
+    const scripts = [...html.matchAll(/<script\b[^>]*>([\s\S]*?)<\/script>/g)];
+    assert.ok(scripts.length > 0);
+    for (const [, source] of scripts) assert.doesNotThrow(() => new vm.Script(source, { filename: file }));
+  }
+});
