@@ -815,7 +815,6 @@ class UI {
         break;
       case 'trail': s.showTrail = v === 'on'; break;
       case 'predict': s.showPredict = v === 'on'; break;
-      case 'zone': s.showZone = v === 'on'; break;
       case 'tele': s.showTele = v === 'on'; $('#spin').classList.toggle('on', s.showTele); break;
       case 'coach': s.coach = v === 'on'; if (!s.coach) this.hideNote(); break;
       case 'adaptive':
@@ -1011,36 +1010,6 @@ class UI {
    *  2D coaching layer
    * ================================================================== */
 
-  /** The strike ring: a circle that closes onto the ball and flashes
-   *  white at the exact moment the swipe should leave your finger. */
-  drawStrikeRing(c, W, H, d) {
-    const g = this.game;
-    const w = g._strike;
-    if (!w || !w.on || w.k < 0.02) return;
-    if (!g.settings.showZone) return;
-    const p = g.project({ x: w.x, y: w.y, z: w.z }, this._pv);
-    if (!p.ok) return;
-    const x = p.x * W, y = p.y * H;
-    const r0 = 15 * d;                       // closed radius
-    const tt = clamp(w.t, 0, 0.85);
-    const R = r0 + tt * 150 * d;
-    const hot = w.ready;                     // 0..1 — inside the window
-    const a = w.k * (0.30 + 0.60 * hot);
-    const col = hot > 0.82 ? [255, 236, 140] : hot > 0.4 ? [120, 222, 255] : [110, 150, 190];
-    c.save();
-    c.globalAlpha = a;
-    c.strokeStyle = `rgb(${col[0]},${col[1]},${col[2]})`;
-    c.lineWidth = (1.6 + 2.0 * hot) * d;
-    c.beginPath(); c.arc(x, y, R, 0, TAU); c.stroke();
-    // the fixed target ring you are closing onto
-    c.globalAlpha = a * 0.55;
-    c.lineWidth = 1.2 * d;
-    c.setLineDash([5 * d, 6 * d]);
-    c.beginPath(); c.arc(x, y, r0, 0, TAU); c.stroke();
-    c.setLineDash([]);
-    c.restore();
-  }
-
   /** The ghost gesture: an animated finger path drawn where the player's
    *  hand actually has to move. Worth a thousand words of cheat-sheet.
    *  Everything is stroked twice — dark outline first — so it stays legible
@@ -1133,41 +1102,15 @@ class UI {
     c.restore();
   }
 
-  /** Tie the two things that used to float apart: the OS cursor (which draws
-   *  your SWIPE) and the 3D bat (which auto-steps to the ball). While you are
-   *  playing we hide the stray arrow and draw one clear hand-reticle under the
-   *  pointer, a marker on the real bat, and a dashed tether between them, so it
-   *  is obvious: aim/time by the ball + ring, the bat follows on its own. */
-  drawHand(c, W, H, d) {
+  /** During live play the 3D racket IS the cursor: hide the OS arrow and
+   *  draw nothing in its place, so the bat is the only pointer on screen. */
+  syncCursor() {
     const g = this.game;
+    if (!g || !g.canvas) return;
     const st = g.state;
     const play = st === 'RALLY' || st === 'SERVE_READY' || st === 'SERVE_TOSS';
-    if (g.canvas) {
-      const want = (this.hasFinePointer && play) ? 'none' : '';
-      if (this._cur !== want) { g.canvas.style.cursor = want; this._cur = want; }
-    }
-    if (!play || !this.hasFinePointer || !g.pointer) return;
-
-    // Only ONE unified, clean reticle directly under the pointer
-    const hx = g.pointer.x * W, hy = g.pointer.y * H;
-
-    c.save();
-    c.globalAlpha = 0.90;
-    c.strokeStyle = 'rgba(57,198,255,.95)';
-    c.lineWidth = 2 * d;
-    c.beginPath(); c.arc(hx, hy, 11 * d, 0, TAU); c.stroke();
-    // Subtle crosshair ticks on the single reticle
-    c.beginPath();
-    c.moveTo(hx - 16 * d, hy); c.lineTo(hx - 12 * d, hy);
-    c.moveTo(hx + 12 * d, hy); c.lineTo(hx + 16 * d, hy);
-    c.moveTo(hx, hy - 16 * d); c.lineTo(hx, hy - 12 * d);
-    c.moveTo(hx, hy + 12 * d); c.lineTo(hx, hy + 16 * d);
-    c.stroke();
-    c.globalAlpha = 0.35;
-    c.beginPath(); c.arc(hx, hy, 18 * d, 0, TAU); c.stroke();
-    c.globalAlpha = 1; c.fillStyle = 'rgba(57,198,255,.95)';
-    c.beginPath(); c.arc(hx, hy, 2.5 * d, 0, TAU); c.fill();
-    c.restore();
+    const want = (this.hasFinePointer && play) ? 'none' : '';
+    if (this._cur !== want) { g.canvas.style.cursor = want; this._cur = want; }
   }
 
   drawOverlay(dt) {
@@ -1176,8 +1119,7 @@ class UI {
     if (!g) return;
     this.ghostT += dt;
 
-    this.drawStrikeRing(c, W, H, d);
-    this.drawHand(c, W, H, d);
+    this.syncCursor();
 
     // Replay analysis: Player Click Point & Swipe Direction
     if (g.replayer && g.replayer.on) {

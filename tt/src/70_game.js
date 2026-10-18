@@ -101,7 +101,6 @@ class Game {
       grip: 'shakehand',
       showTrail: true,
       showPredict: true,
-      showZone: true,
       showTele: false,
       haptics: true,
       coach: true,
@@ -948,7 +947,7 @@ class Game {
     this.profile.data.settings = {
       hitZone: s.hitZone, assist: s.assist, posAssist: s.posAssist, difficulty: s.difficulty, quality: s.quality,
       sound: s.sound, volume: s.volume, camera: s.camera, hand: s.hand, grip: s.grip,
-      showTrail: s.showTrail, showPredict: s.showPredict, showZone: s.showZone,
+      showTrail: s.showTrail, showPredict: s.showPredict,
       showTele: s.showTele, haptics: s.haptics, coach: s.coach, adaptive: s.adaptive,
       slowmoPlayer: s.slowmoPlayer, targetScore: s.targetScore, sensitivity: s.sensitivity,
       spinBias: s.spinBias,

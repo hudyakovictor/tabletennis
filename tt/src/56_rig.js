@@ -230,9 +230,18 @@ function playerWristPose(pos, vel, hand, phase = {}, grip = 'shakehand') {
     pitch = lerp(pitch, clamp(phase.strokeTilt, -0.62, 0.66), kStroke * 0.72);
   }
 
-  let roll = h * (lerp(readyRoll, sideRoll, stance)
-      + direction * (preparation * 0.14 - follow * 0.24))
-    - vx * 0.018;
+  /* A penhold hangs its blade BELOW the fist (handle up): every wing lean
+     that reads naturally for shakehand (blade top toward the wing) would
+     cross the racket over the hand on screen, because for a hanging pen
+     the blade must stay OUTBOARD with the handle leaning in toward the
+     body. So all reach-driven roll terms mirror for a handleUp grip. The
+     shakehand numbers stay bit-identical and the left-hand mirror (h)
+     keeps working — it multiplies the whole expression. */
+  const wingSign = G.handleUp ? -1 : 1;
+  let roll = h * (readyRoll
+      + wingSign * (lerp(readyRoll, sideRoll, stance) - readyRoll
+        + direction * (preparation * 0.14 - follow * 0.24)))
+    - vx * 0.018 * wingSign;
 
   /* The stroke's wrist signature: negative turn wraps (hook), positive
      unwraps (fade). h*turn mirrors it for the left hand. */
@@ -243,7 +252,7 @@ function playerWristPose(pos, vel, hand, phase = {}, grip = 'shakehand') {
   /* Closing a wide forehand lays the blade back (shoulder opens). Zero at
      the ready pitch, so the ready grip does not drift. */
   const closeAmt = clamp(-(pitch - G.restPitch) - 0.03, 0, 0.45);
-  roll += h * stance * closeAmt * 0.50;
+  roll += h * stance * closeAmt * 0.50 * wingSign;
 
   /* Fast incoming + no time: compact block, pull a laid-back roll home. */
   const compact = clamp(phase.compact || 0, 0, 1);
