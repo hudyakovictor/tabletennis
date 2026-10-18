@@ -48,7 +48,7 @@ class MomentRecorder {
     this.lastClip = null;
   }
 
-  reset() { this.kept.length = 0; this.beginRally(0, null); this.n = 0; this.head = 0; }
+  reset() { this.lastClip = null; this.kept.length = 0; this.beginRally(0, null); this.n = 0; this.head = 0; }
 
   /** called when a rally starts: we remember the score so the filter can
    *  tell "3-0 up, easy point" from "0-4 down, that one" */
@@ -169,11 +169,11 @@ class MomentPlayer {
     this.i = 0; this.hold = 0; this.camPhase = 0;
     this.speed = speed || 0.35;
     this.on = true;
-    if (typeof onEnd === 'function') this.onEnd = onEnd;
+    this.onEnd = typeof onEnd === 'function' ? onEnd : null;
     return true;
   }
 
-  stop() { this.on = false; this.moment = null; }
+  stop() { this.on = false; this.moment = null; this.onEnd = null; }
 
   get lastFrame() { return this.moment ? this.moment.frames.length / REPLAY_FLOATS - 1 : 0; }
 

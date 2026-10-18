@@ -333,61 +333,12 @@ class MusicSystem {
    * Play resolution sound (win/lose).
    */
   _playResolution(state) {
-    if (!this._buffers.resolution || !this.audio) return;
-
-    try {
-      const source = this.audio.getCtx().createBufferSource();
-      source.buffer = this._buffers.resolution;
-
-      const gain = this.audio.getCtx().createGain();
-      gain.gain.value = 0.3;
-
-      const filter = this.audio.getCtx().createBiquadFilter();
-      filter.type = 'lowpass';
-      filter.frequency.value = 1000;
-
-      source.connect(filter);
-      filter.connect(gain);
-      gain.connect(this.audio.getCtx().destination);
-
-      source.start();
-      source.stop(2);
-    } catch (e) {
-      // Ignore
-    }
+    // No musical point stingers: keep the table/ball audio unobstructed.
   }
 
-  /**
-   * Trigger climax effect.
-   */
+  /** Intensity remains available for visuals, never a synthesized beep. */
   _triggerClimax() {
-    // Brief volume spike + filter change
-    if (this.audio && this.audio.getCtx()) {
-      try {
-        const ctx = this.audio.getCtx();
-        const osc = ctx.createOscillator();
-        osc.type = 'sine';
-        osc.frequency.value = 220;
-
-        const gain = ctx.createGain();
-        gain.gain.setValueAtTime(0, ctx.currentTime);
-        gain.gain.linearRampToValueAtTime(0.1, ctx.currentTime + 0.1);
-        gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.5);
-
-        const filter = ctx.createBiquadFilter();
-        filter.type = 'lowpass';
-        filter.frequency.value = 2000;
-
-        osc.connect(filter);
-        filter.connect(gain);
-        gain.connect(ctx.destination);
-
-        osc.start(ctx.currentTime);
-        osc.stop(ctx.currentTime + 0.5);
-      } catch (e) {
-        // Ignore
-      }
-    }
+    // Deliberately silent, including calls from EmotionalSystem.
   }
 
   /**

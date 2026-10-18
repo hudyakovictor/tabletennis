@@ -5,6 +5,37 @@
  * ===================================================================== */
 'use strict';
 
+/** Shakehand-inspired player pose, in world/player coordinates.
+ * Local +Y points from grip to blade head. All targets are absolute:
+ * lateral reach sets forehand/backhand stance; phase adds wrist motion.
+ * Reflecting x, velocity.x and handedness reflects the entire pose.
+ * These are animation limits, not a claim of biomechanical simulation.
+ */
+function playerWristPose(pos, vel, hand, phase = {}) {
+  const h = hand === 'left' ? -1 : 1;
+  const reach = Math.tanh(pos.x / 0.48);
+  const forehand = pos.x * h >= -0.08;
+  const t = clamp(Math.abs(pos.x) / 0.72, 0, 1);
+  const stance = t * t * (3 - 2 * t);
+  const readyRoll = 0.28; // relaxed ready grip (~16°), never rigid 12 o'clock
+  const cross = clamp((pos.x * h + 0.24) / 0.32, 0, 1);
+  const mix = cross * cross * (3 - 2 * cross);
+  const sideRoll = lerp(-1.05, 1.35, mix);
+  const preparation = clamp(phase.preparation || 0, 0, 1);
+  const follow = clamp(phase.follow || 0, 0, 1);
+  const direction = 2 * mix - 1;
+  return {
+    yaw: clamp(-reach * 0.27 - clamp(vel.x, -7, 7) * 0.035, -0.52, 0.52),
+    pitch: clamp(-0.03 + (pos.z - 1.44) * 0.40 + clamp(vel.z, -5, 5) * 0.10
+      - clamp(vel.y, -4, 4) * 0.025 + (phase.gesturePitch || 0)
+      + preparation * 0.07 - follow * 0.10, -0.55, 0.55),
+    roll: clamp(h * (lerp(readyRoll, sideRoll, stance)
+      + direction * (preparation * 0.14 - follow * 0.24))
+      - clamp(vel.x, -7, 7) * 0.018, -1.55, 1.55),
+    forehand,
+  };
+}
+
 class PaddleRig {
   constructor() {
     this._q = Q.new();
@@ -17,11 +48,12 @@ class PaddleRig {
     this._up = { x: 0, y: 1, z: 0 };
   }
 
-  /** Absolute orientation, with only a small, bounded grip/swing roll. */
-  paddleQuat(out, normal, hand, swing, extraRoll) {
+  /** Player supplies an absolute wrist roll; AI retains its compact grip. */
+  paddleQuat(out, normal, hand, swing, extraRoll, absoluteRoll = false) {
     Q.lookRotation(out, normal, this._up);
-    const roll = (hand === 'left' ? 0.42 : -0.42)
-      + clamp(swing || 0, -1, 1) * 0.3 + clamp(extraRoll || 0, -0.35, 0.35);
+    const roll = absoluteRoll ? clamp(extraRoll || 0, -1.55, 1.55)
+      : (hand === 'left' ? 0.42 : -0.42)
+      + clamp(swing || 0, -1, 1) * 0.3 + clamp(extraRoll || 0, -0.55, 0.55);
     return Q.mul(out, out, Q.setAxisAngle(this._rollQ, 0, 0, 1, roll));
   }
 
@@ -36,7 +68,7 @@ class PaddleRig {
   draw(R, S, o) {
     // Copy a supplied quaternion: callers retain ownership of their pose.
     const q = o.q ? Q.copy(this._q, o.q)
-      : this.paddleQuat(this._q, o.normal, o.hand, o.swing, o.roll);
+      : this.paddleQuat(this._q, o.normal, o.hand, o.swing, o.roll, o.absoluteRoll);
     const me = S.mesh, ma = S.mat, mats = o.mats || {};
     const draw = o.shadowPass
       ? (mesh, matrix, mat) => R.drawShadow(mesh, matrix, null, 0)
