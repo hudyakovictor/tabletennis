@@ -41,6 +41,35 @@ const { root } = require('./helpers.cjs');
         g.paused = true; // freeze RAF; tests advance the actual game deterministically
         check('boot and render', () => g.R.drawCalls > 0 && !!g.R.camPos);
         check('restored menu difficulty', () => g.ui.pendingDiff === g.settings.difficulty);
+        check('idle paddle never accumulates rotation at 30, 60 or 120 FPS', () => {
+          for (const fps of [30, 60, 120]) {
+            g.startMatch(2);g.ball.live=false;g.recenterT=0;g.swipe.cancel();
+            g.pointer={x:.5,y:.55};g.camVPReady=false;
+            for(let i=0;i<fps*12;i++)g.updatePlayerPaddle(1/fps);
+            const n=V3.clone(g.player.normal);
+            if(n.z>-.99 || !Object.values(n).every(Number.isFinite))return false;
+            for(let i=0;i<fps*12;i++)g.updatePlayerPaddle(1/fps);
+            if(V3.dist(n,g.player.normal)>1e-8)return false;
+          }
+          g.returnToMenu();return true;
+        });
+        check('paddles remain forward-facing through lateral sweeps and rendering is read-only', () => {
+          g.startMatch(2);g.ball.live=false;g.recenterT=0;g.swipe.cancel();g.camVPReady=false;
+          for(const hand of ['right','left']) {
+            g.settings.hand=hand;
+            for(const x of [.1,.9,.1,.9,.5]) {
+              g.pointer={x,y:.55};
+              for(let i=0;i<30;i++) {
+                g.updatePlayerPaddle(1/60);
+                if(g.player.normal.z>-.85 || Math.abs(g.player.roll)>.30001)return false;
+              }
+            }
+            const pose=JSON.stringify(g.player);
+            for(let i=0;i<20;i++)g.render();
+            if(JSON.stringify(g.player)!==pose)return false;
+          }
+          g.settings.hand='right';g.returnToMenu();return true;
+        });
         check('input instructions use pointer capabilities, not viewport width', () => {
           return g.ui.inputMode===(navigator.maxTouchPoints>0 ? 'touch' : 'mouse');
         });
