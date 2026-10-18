@@ -62,15 +62,12 @@ class Game {
     this.R = new Renderer(canvas, { quality: 'high' });
     this.scene = new Scene(this.R, 'arena');
     this.audio = new AudioEngine();
-    this.ai = new OpponentAI(2);
+    this.ai = new OpponentAI(this, 2);
     this.swipe = new SwipeTracker();
     this.particles = new Particles();
     this.rig = new PaddleRig();
-    this.bioRacket = new (require('./85_bioRacket').RacketBiomech || function(){});
-    // Fallback if module system doesn't work — inline minimal version
-    if (!this.bioRacket || typeof this.bioRacket.compute !== 'function') {
-      this.bioRacket = null;
-    }
+    // RacketBiomech is part of this standalone bundle (loaded before Game).
+    this.bioRacket = new RacketBiomech();
     this.equip = new Equipment();
 
     // Hit feedback system (99-level multi-sensory response)
@@ -1628,11 +1625,11 @@ class Game {
     pad.stepIn = expSmooth(pad.stepIn || 0, shortBall ? 1 : 0, 8, dt);
 
     // During anticipation, pull the paddle back visually
-    let anticipationOffset = V3.zero();
+    let anticipationOffset = V3.new();
     if (this.anticipation.active && this.anticipation.t < this.anticipation.duration) {
       const progress = this.anticipation.t / this.anticipation.duration;
       const pullAmount = Math.sin(progress * Math.PI) * this.anticipation.intensity * 0.12;
-      anticipationOffset = V3.scale(V3.new(), this.anticipation.targetDir, -pullAmount);
+      anticipationOffset = V3.mul(V3.new(), this.anticipation.targetDir, -pullAmount);
       // Advance anticipation timer
       this.anticipation.t += dt;
     }
@@ -2258,7 +2255,10 @@ class Game {
       V3.copy(this.aiPaddle.pos, op.pos);
       V3.copy(this.aiPaddle.normal, op.normal);
     }
-    else this.ai.think(this, dt);
+    else {
+      this.ai.think(this, dt);
+      V3.copy(this.aiPaddle.pos, this.ai.pos);
+    }
     this.tryAiHit();
     this.particles.update(dt);
     for (const m of this.marks) m.t += dtReal;
@@ -2280,13 +2280,13 @@ class Game {
           const decay = 1 - smoothProgress;
 
           // Visual position — continues in swing direction, then decelerates
-          const ftOffset = V3.scale(V3.new(), this.followThrough.swingDir,
+          const ftOffset = V3.mul(V3.new(), this.followThrough.swingDir,
             (1 - decay) * 0.25);
           V3.copy(this.followThrough.visualPos, this.followThrough.startPos);
           V3.add(this.followThrough.visualPos, this.followThrough.visualPos, ftOffset);
 
           // Visual normal — follows face rotation with decay
-          const normalOffset = V3.scale(V3.new(), this.followThrough.startNormal,
+          const normalOffset = V3.mul(V3.new(), this.followThrough.startNormal,
             (1 - decay) * 0.2);
           V3.copy(this.followThrough.visualNormal, this.followThrough.startNormal);
           V3.add(this.followThrough.visualNormal, this.followThrough.visualNormal, normalOffset);
@@ -2309,7 +2309,7 @@ class Game {
         } else {
           // Backswing pull-back — pulls paddle opposite to swipe direction
           const pullAmount = Math.sin(progress * Math.PI) * this.anticipation.intensity * 0.12;
-          const offset = V3.scale(V3.new(), this.anticipation.targetDir, -pullAmount);
+          const offset = V3.mul(V3.new(), this.anticipation.targetDir, -pullAmount);
           V3.copy(this.anticipation.visualOffset, offset);
         }
       } else {
@@ -2535,22 +2535,21 @@ class Game {
     /* the opponent: paddle, hand, forearm and sleeve, all solved from
        the paddle's own position and normal (see 56_rig.js) */
     const ap = this.aiPaddle;
-    const an = V3.norm(V3.new(), V3.sub(V3.new(), this.ball.p, this.ai.pos));
+    const an = V3.norm(V3.new(), V3.sub(V3.new(), this.ball.p, ap.pos));
     an.z = Math.abs(an.z) * 1 || 1;
-    // Blend "look at the ball" with the stroke's own face angle, so the
+    // Blend "look at the ball" with the last solved face angle, so the
     // backswing visibly opens for a chop and closes for a loop.
-    const fn = this.ai.faceNormal, wd = clamp(this.ai.anim.windup, 0, 1);
+    const fn = ap.normal, wd = clamp(this.ai.anim.windup, 0, 1);
     const aiNorm = V3.norm(V3.new(), V3.new(
       an.x * 0.4 * (1 - wd * 0.5),
       lerp(-0.1 + an.y * 0.3, fn.y * 1.5, wd),
       1));
     V3.copy(ap.normal, aiNorm);
-    V3.copy(ap.pos, this.ai.pos);
 
     // AI bio racket orientation — simplified for AI (no full bio computation needed)
     let aiBioQ = null;
     let aiActiveSide = 1;
-    const aiBallDir = V3.norm(V3.new(), V3.sub(V3.new(), this.ball.p, this.ai.pos));
+    const aiBallDir = V3.norm(V3.new(), V3.sub(V3.new(), this.ball.p, ap.pos));
     if (this.ball.live) {
       const dot = V3.dot(aiNorm, aiBallDir);
       aiActiveSide = dot >= 0 ? 1 : -1;
@@ -2721,7 +2720,3 @@ function classifyStrokeForBio(m) {
   if (u > 0.3) return 'DRIVE';
   return 'DRIVE';
 }
-
-/* BIO constants for use in game (imported conceptually from 85_bioRacket.js) */
-const BIO_ZONE_HALF_WIDTH = 0.85;
-const DEG = Math.PI / 180;

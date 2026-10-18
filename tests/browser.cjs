@@ -9,6 +9,15 @@ const { pathToFileURL } = require('node:url');
 const puppeteer = require('puppeteer-core');
 const chromium = require('@sparticuz/chromium');
 const { root } = require('./helpers.cjs');
+async function waitForGame(page, errors) {
+  try {
+    await page.waitForFunction(() => window.__game && window.__game.R.drawCalls > 0, { timeout: 12000 });
+  } catch (cause) {
+    const loading = await page.$eval('#loading', el => el.innerText).catch(() => '');
+    const detail = [loading.trim(), ...errors].filter(Boolean).join('\n');
+    throw new Error(`Game failed to boot${detail ? `:\n${detail}` : `: ${cause.message}`}`, { cause });
+  }
+}
 (async () => {
   // Minimal Linux images may lack NSS. The Chromium npm package ships it.
   const libs = path.join(os.tmpdir(), 'topspin-browser-libs');
@@ -32,14 +41,16 @@ const { root } = require('./helpers.cjs');
       const errors = [];
       page.on('pageerror', e => errors.push(e.message));
       await page.goto(pathToFileURL(path.join(root, 'play/index.html')).href);
-      await page.waitForFunction(() => window.__game && window.__game.R.drawCalls > 0);
+      await waitForGame(page, errors);
       const results = await page.evaluate(() => {
         const g = window.__game, results = [];
         const check = (name, fn) => { try { if (!fn()) throw Error('assertion failed'); results.push({ name, ok: true }); }
           catch (e) { results.push({ name, ok: false, error: e.message }); } };
         const near = (a,b) => Math.abs(a-b) < 1e-9;
         g.paused = true; // freeze RAF; tests advance the actual game deterministically
-        check('boot and render', () => g.R.drawCalls > 0 && !!g.R.camPos);
+        check('boot, render, biomechanical racket and AI render state', () =>
+          g.R.drawCalls > 0 && !!g.R.camPos && !!g.bioRacket &&
+          [g.ai.pos.x,g.ai.pos.y,g.ai.pos.z,g.aiPaddle.pos.x,g.aiPaddle.pos.y,g.aiPaddle.pos.z].every(Number.isFinite));
         check('restored menu difficulty', () => g.ui.pendingDiff === g.settings.difficulty);
         check('input instructions use pointer capabilities, not viewport width', () => {
           return g.ui.inputMode===(navigator.maxTouchPoints>0 ? 'touch' : 'mouse');
@@ -344,7 +355,7 @@ const { root } = require('./helpers.cjs');
         g.saveSettings(); g.profile.save(true);
       });
       await page.reload();
-      await page.waitForFunction(() => window.__game && window.__game.R.drawCalls > 0);
+      await waitForGame(page, errors);
       assert.equal(await page.evaluate(() => {
         const g = window.__game;
         return g.settings.hitZone === .42 && g.settings.volume === .13 && !g.settings.sound &&

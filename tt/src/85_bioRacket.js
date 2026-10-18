@@ -19,7 +19,7 @@
 /* ---- constants (tuned for mobile gameplay feel) ---- */
 const BIO = {
   // Zone width: how wide the working zone is (meters from center)
-  ZONE_HALF_WIDTH: 0.85,
+  ZONE_HALF_WIDTH: BIO_ZONE_HALF_WIDTH,
 
   // Forearm rotation range [rad]
   FOREARM_SUP: 0.42,   // supination in backhand (more than real for visibility)
@@ -253,7 +253,7 @@ class RacketBiomech {
 
     // ---- 5. COMPUTE WORLD-SPACE NORMAL (for active side determination) ----
     // n = Q_world · n₀ where n₀ = (0,0,1) — red/forehand face normal in local space
-    M4.compose(this._m4Tmp, V3.zero(), qWorld, this._one);
+    M4.compose(this._m4Tmp, V3.new(), qWorld, this._one);
     M4.transformDir(this._nWorld, this._m4Tmp, this._nLocal);
     V3.norm(this._nWorld, this._nWorld);
 
@@ -268,7 +268,7 @@ class RacketBiomech {
     // Handle extends in local -Y direction
     M4.transformDir(this._handleDir, this._m4Tmp, { x: 0, y: -1, z: 0 });
     V3.norm(this._handleDir, this._handleDir);
-    V3.scale(this._negHandleDir, this._handleDir, -1);
+    V3.mul(this._negHandleDir, this._handleDir, -1);
 
     // ---- 8. WRIST PARAMETERS ----
     const omegaWristExt = BIO.WRIST_EXT_BH * (1 - b) + BIO.WRIST_EXT_FH * b;
@@ -474,7 +474,7 @@ function computePlayerBioRacket(game, ctx) {
   if (ball.live && ball.v) {
     ballDir = V3.norm(V3.new(), ball.v);
     // If ball moving away from player, flip direction
-    if (ballDir.z < 0) V3.scale(ballDir, ballDir, -1);
+    if (ballDir.z < 0) V3.mul(ballDir, ballDir, -1);
   } else {
     ballDir = V3.new(0, 0, 1);
   }
@@ -498,7 +498,7 @@ function computePlayerBioRacket(game, ctx) {
     contactQuality = game.lastSweet;
   }
 
-  const ctx = {
+  const bioCtx = {
     x: computeX(hitX, 0, BIO.ZONE_HALF_WIDTH),
     armQ: game.player.armQ || Q.identity(Q.new()),
     hand: game.settings.hand || 'right',
@@ -510,7 +510,7 @@ function computePlayerBioRacket(game, ctx) {
     swingDirX: game.player.vel.x || 0,
   };
 
-  return game.bioRacket.compute(ctx);
+  return game.bioRacket.compute(bioCtx);
 }
 
 /* ---- simple stroke classification for bio context ---- */

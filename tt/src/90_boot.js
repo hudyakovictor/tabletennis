@@ -16,13 +16,25 @@
     } catch (err) {
       console.error(err);
       const loading = document.getElementById('loading');
-      if (loading) loading.innerHTML =
-        `<div style="max-width:420px;text-align:center;padding:24px">
-           <div style="font-size:19px;font-weight:800;margin-bottom:10px">WebGL недоступен</div>
-           <div style="font-size:12px;color:#8da3bd;line-height:1.6">
-             Этой демке нужен WebGL. Включите аппаратное ускорение в браузере и перезагрузите страницу.<br><br>
-             <code style="font-size:10px;color:#ff8a8a">${(err && err.message) || err}</code>
-           </div></div>`;
+      if (loading) {
+        const detail = String((err && err.message) || err || 'Unknown startup error');
+        const isWebGLFailure = /webgl|graphics context/i.test(detail);
+        const panel = document.createElement('div');
+        panel.style.cssText = 'max-width:420px;text-align:center;padding:24px';
+        const title = document.createElement('div');
+        title.style.cssText = 'font-size:19px;font-weight:800;margin-bottom:10px';
+        title.textContent = isWebGLFailure ? 'WebGL недоступен' : 'Не удалось запустить игру';
+        const copy = document.createElement('div');
+        copy.style.cssText = 'font-size:12px;color:#8da3bd;line-height:1.6';
+        copy.textContent = isWebGLFailure
+          ? 'Этой демке нужен WebGL. Включите аппаратное ускорение в браузере и перезагрузите страницу.'
+          : 'Произошла ошибка во время запуска. Обновите страницу или сообщите этот код ошибки.';
+        const code = document.createElement('code');
+        code.style.cssText = 'display:block;margin-top:16px;font-size:10px;color:#ff8a8a';
+        code.textContent = detail;
+        panel.append(title, copy, code);
+        loading.replaceChildren(panel);
+      }
       return;
     }
     window.__game = game;

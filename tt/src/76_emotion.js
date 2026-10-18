@@ -94,14 +94,14 @@ class EmotionalSystem {
     // Could add CSS class to canvas
 
     // Text message
-    const isPlayerServing = g.server === 1;
+    const isPlayerServing = this.game.server === 1;
     const msg = isPlayerServing
       ? 'МATCH POINT — ВАША ПОДАЧА'
       : 'МATCH POINT — СОПЕРНИК ПОДАЁТ';
     this.game.msg(msg, 2.0, '#ffd34d', true);
 
     // Haptic
-    if (navigator.vibrate) {
+    if (typeof navigator !== 'undefined' && navigator.vibrate) {
       try { navigator.vibrate([10, 30, 10]); } catch (e) {}
     }
 
@@ -195,20 +195,21 @@ class EmotionalSystem {
   /**
    * Winner moment.
    */
-  _onWinner(g) {
+  _onWinner() {
+    const game = this.game;
     // Flash effect
-    g.hitFlash = Math.min(1, g.hitFlash + 0.3);
+    game.hitFlash = Math.min(1, game.hitFlash + 0.3);
 
     // Music spike
-    if (this.game.music && this.game.music._initialized) {
-      this.game.music._triggerClimax();
+    if (game.music && game.music._initialized) {
+      game.music._triggerClimax();
     }
 
     // Message
-    g.msg('ОЧКО!', 1.2, '#6ee7a8', true);
+    game.msg('ОЧКО!', 1.2, '#6ee7a8', true);
 
     // Haptic celebration
-    if (navigator.vibrate && g.settings?.haptics) {
+    if (typeof navigator !== 'undefined' && navigator.vibrate && game.settings?.haptics) {
       try { navigator.vibrate([15, 30, 15, 30]); } catch (e) {}
     }
   }
@@ -216,15 +217,16 @@ class EmotionalSystem {
   /**
    * Net cord moment.
    */
-  _onNetCord(g) {
+  _onNetCord() {
+    const game = this.game;
     // Flash
-    g.hitFlash = Math.min(1, g.hitFlash + 0.2);
+    game.hitFlash = Math.min(1, game.hitFlash + 0.2);
 
     // Message
-    g.msg('СЕТКА!', 1.0, '#ffd34d', true);
+    game.msg('СЕТКА!', 1.0, '#ffd34d', true);
 
     // Haptic
-    if (navigator.vibrate && g.settings?.haptics) {
+    if (typeof navigator !== 'undefined' && navigator.vibrate && game.settings?.haptics) {
       try { navigator.vibrate([10, 20, 10]); } catch (e) {}
     }
   }
@@ -232,13 +234,10 @@ class EmotionalSystem {
   /**
    * Edge ball moment.
    */
-  _onEdge(g) {
-    // Flash
-    g.hitFlash = Math.min(1, g.hitFlash + 0.25);
-
-    // Already has message from physics, but enhance
-    // Haptic surprise
-    if (navigator.vibrate && g.settings?.haptics) {
+  _onEdge() {
+    // The physics path already reports the edge visually; add haptic surprise.
+    const game = this.game;
+    if (typeof navigator !== 'undefined' && navigator.vibrate && game.settings?.haptics) {
       try { navigator.vibrate([8, 30, 8]); } catch (e) {}
     }
   }

@@ -16,3 +16,17 @@ test('both published HTML files match a fresh source build', () => {
       assert.equal(normalize(fs.readFileSync(path.join(root,file),'utf8')),expected,`${file} is stale; run npm run build`);
   } finally { fs.rmSync(dir,{recursive:true,force:true}); }
 });
+test('fresh standalone JavaScript parses as one browser script and has no CommonJS imports', () => {
+  const dir=fs.mkdtempSync(path.join(os.tmpdir(),'topspin-parse-'));
+  try {
+    const htmlPath=path.join(dir,'game.html');
+    execFileSync('python3',[path.join(root,'tt/build.py'),htmlPath]);
+    const html=fs.readFileSync(htmlPath,'utf8');
+    const match=html.match(/<script>\s*([\s\S]*?)\s*<\/script>/);
+    assert.ok(match,'expected one inline game script');
+    assert.doesNotMatch(match[1],/\brequire\s*\(/,'standalone browser bundle must not use CommonJS require()');
+    const jsPath=path.join(dir,'game.js');
+    fs.writeFileSync(jsPath,match[1]);
+    execFileSync('node',['--check',jsPath]);
+  } finally { fs.rmSync(dir,{recursive:true,force:true}); }
+});

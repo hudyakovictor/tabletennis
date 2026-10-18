@@ -1004,6 +1004,7 @@ body:not(.is-playing) #topright{visibility:hidden;pointer-events:none}
 
 const TAU = Math.PI * 2;
 const DEG = Math.PI / 180;
+const BIO_ZONE_HALF_WIDTH = 0.85;
 const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
 const lerp = (a, b, t) => a + (b - a) * t;
 const smoothstep = (e0, e1, x) => { const t = clamp((x - e0) / (e1 - e0), 0, 1); return t * t * (3 - 2 * t); };
@@ -4831,10 +4832,11 @@ class OpponentAI {
     this.handicap = 1;
     this.stats = { shots: 0, errors: 0, winners: 0, sumSpeed: 0, maxSpeed: 0 };
 
-    // Home position
+    // Home position and stable render/physics position.
     this.home = V3.new(0, PH.TABLE_Y + 0.25, -1.45);
-    this.target = V3.new(0, PH.TABLE_Y + 0.25, -1.45);
-    this.lastPos = V3.new(0, PH.TABLE_Y + 0.25, -1.45);
+    this.pos = V3.clone(this.home);
+    this.target = V3.clone(this.home);
+    this.lastPos = V3.clone(this.home);
     this.vel = V3.new();
 
     // Swing state
@@ -4869,6 +4871,7 @@ class OpponentAI {
     this.tactic = AI_TACTICS.FEEL;
     this.mood = 0; this.pressure = 0; this.handicap = 1;
     this.stats = { shots: 0, errors: 0, winners: 0, sumSpeed: 0, maxSpeed: 0 };
+    V3.copy(this.pos, this.home);
     V3.copy(this.target, this.home);
     V3.copy(this.lastPos, this.home);
     V3.zero(this.vel);
@@ -5285,17 +5288,13 @@ class OpponentAI {
       this._moveSmooth.y = expSmooth(this._moveSmooth.y, this.target.y, moveRate, dt);
       this._moveSmooth.z = expSmooth(this._moveSmooth.z, this.target.z, moveRate * 0.9, dt);
 
-      // Store position for rendering
-      game.ai.pos = V3.new(
-        this._moveSmooth.x,
-        this._moveSmooth.y,
-        this._moveSmooth.z
-      );
+      // Store position for rendering without allocating a new vector each frame.
+      V3.set(this.pos, this._moveSmooth.x, this._moveSmooth.y, this._moveSmooth.z);
 
       // Compute velocity for visual purposes
-      V3.sub(this.vel, game.ai.pos, this.lastPos);
+      V3.sub(this.vel, this.pos, this.lastPos);
       V3.mul(this.vel, this.vel, 1 / Math.max(dt, 1e-4));
-      V3.copy(this.lastPos, game.ai.pos);
+      V3.copy(this.lastPos, this.pos);
     }
 
     // Swing timing
@@ -5440,7 +5439,9 @@ class PaddleRig {
   applyForearmRotation(out, dir, forearmPsi, axis) {
     const s = this._s;
     const scaledPsi = forearmPsi * RIG.FOREARM_VIS_SCALE;
-    M4.setAxisAngle(this._forearmM4, axis || s.forearmAxis, scaledPsi);
+    const rotationAxis = axis || s.forearmAxis;
+    Q.setAxisAngle(s.q2, rotationAxis.x, rotationAxis.y, rotationAxis.z, scaledPsi);
+    M4.compose(this._forearmM4, { x: 0, y: 0, z: 0 }, s.q2, s.one);
     return V3.norm(out, M4.transformDir(out, this._forearmM4, dir));
   }
 
@@ -5449,7 +5450,9 @@ class PaddleRig {
    */
   applyWristDeviation(out, dir, wristDev, axis) {
     const s = this._s;
-    M4.setAxisAngle(this._wristM4, axis || s.wristDevAxis, wristDev);
+    const rotationAxis = axis || s.wristDevAxis;
+    Q.setAxisAngle(s.q2, rotationAxis.x, rotationAxis.y, rotationAxis.z, wristDev);
+    M4.compose(this._wristM4, { x: 0, y: 0, z: 0 }, s.q2, s.one);
     return V3.norm(out, M4.transformDir(out, this._wristM4, dir));
   }
 
@@ -5539,14 +5542,14 @@ class PaddleRig {
     // ---- WRIST VISUALIZATION ----
     // Wrist deviation bends the forearm slightly at the wrist
     // This affects the fist position slightly
-    let fistOffset = V3.zero();
+    let fistOffset = V3.new();
     if (Math.abs(effectiveWristDev) > 0.01) {
       // Wrist deviation slightly shifts the fist
       const devDir = V3.norm(s.v3, V3.new(-n.x, 0, -n.z));
-      fistOffset = V3.scale(V3.new(), devDir, effectiveWristDev * 0.02);
+      fistOffset = V3.mul(V3.new(), devDir, effectiveWristDev * 0.02);
     }
 
-    const fistFinal = V3.add(fist, fistOffset);
+    const fistFinal = V3.add(V3.new(), fist, fistOffset);
 
     // ---- SKIN AND CLOTH COLORS ----
     const skin = o.ghost ? o.ghostCol : RIG.SKIN;
@@ -5629,7 +5632,8 @@ class PaddleRig {
     // Use bio quaternion if provided
     const bioQ = o.bioQ || null;
     const useBio = bioQ && o.bioActive !== false;
-    const finalQ = useBio ? bioQ : q;
+    // Work on a local copy: never mutate the reusable game quaternion while rendering.
+    const finalQ = useBio ? Q.copy(s.q3, bioQ) : q;
 
     // Determine active side for rubber color
     // Method 1: from bioMeta if available
@@ -5695,7 +5699,7 @@ class PaddleRig {
     R.draw(me.rubber, s.m2, activeSide >= 0 ? red : black);
 
     // Inactive side rubber (opposite side)
-    const inactiveOffset = V3.addScaled(V3.new(), o.pos, V3.scale(n, -1), rubberOffset);
+    const inactiveOffset = V3.addScaled(V3.new(), o.pos, V3.mul(n, -1), rubberOffset);
     M4.compose(s.m2, inactiveOffset, finalQ, s.one);
     R.draw(me.rubber, s.m2, activeSide >= 0 ? black : red);
 
@@ -5766,9 +5770,9 @@ class PaddleRig {
 
     // Simple line using a thin box
     const mid = V3.lerp(s.v2, start, end, 0.5);
-    const dir = V3.norm(s.v3, V3.sub(end, start));
+    const dir = V3.norm(s.v3, V3.sub(s.v3, end, start));
     const q = Q.lookRotation(s.q, dir, s.up);
-    const length = V3.len(V3.sub(end, start));
+    const length = V3.len(V3.sub(s.v3, end, start));
 
     M4.compose(s.m, mid, q, { x: 0.003, y: 0.003, z: length });
     R.draw(this.mJoint, s.m, {
@@ -5782,7 +5786,7 @@ class PaddleRig {
       const wDir = V3.norm(s.v4, V3.new(1, 0, 0));
       const wEnd = V3.addScaled(V3.new(), wStart, wDir, wristDev * 0.2);
       const wMid = V3.lerp(s.v5, wStart, wEnd, 0.5);
-      const wLen = V3.len(V3.sub(wEnd, wStart));
+      const wLen = V3.len(V3.sub(s.v3, wEnd, wStart));
       const wQ = Q.lookRotation(s.q, wDir, axisDir);
       M4.compose(s.m2, wMid, wQ, { x: 0.003, y: 0.003, z: wLen });
       R.draw(this.mJoint, s.m2, {
@@ -7800,7 +7804,6 @@ class HitFeedbackSystem {
       }
     }
   }
-}
 
   /**
    * Enable/disable haptic feedback.
@@ -8315,14 +8318,14 @@ class EmotionalSystem {
     // Could add CSS class to canvas
 
     // Text message
-    const isPlayerServing = g.server === 1;
+    const isPlayerServing = this.game.server === 1;
     const msg = isPlayerServing
       ? 'МATCH POINT — ВАША ПОДАЧА'
       : 'МATCH POINT — СОПЕРНИК ПОДАЁТ';
     this.game.msg(msg, 2.0, '#ffd34d', true);
 
     // Haptic
-    if (navigator.vibrate) {
+    if (typeof navigator !== 'undefined' && navigator.vibrate) {
       try { navigator.vibrate([10, 30, 10]); } catch (e) {}
     }
 
@@ -8416,20 +8419,21 @@ class EmotionalSystem {
   /**
    * Winner moment.
    */
-  _onWinner(g) {
+  _onWinner() {
+    const game = this.game;
     // Flash effect
-    g.hitFlash = Math.min(1, g.hitFlash + 0.3);
+    game.hitFlash = Math.min(1, game.hitFlash + 0.3);
 
     // Music spike
-    if (this.game.music && this.game.music._initialized) {
-      this.game.music._triggerClimax();
+    if (game.music && game.music._initialized) {
+      game.music._triggerClimax();
     }
 
     // Message
-    g.msg('ОЧКО!', 1.2, '#6ee7a8', true);
+    game.msg('ОЧКО!', 1.2, '#6ee7a8', true);
 
     // Haptic celebration
-    if (navigator.vibrate && g.settings?.haptics) {
+    if (typeof navigator !== 'undefined' && navigator.vibrate && game.settings?.haptics) {
       try { navigator.vibrate([15, 30, 15, 30]); } catch (e) {}
     }
   }
@@ -8437,15 +8441,16 @@ class EmotionalSystem {
   /**
    * Net cord moment.
    */
-  _onNetCord(g) {
+  _onNetCord() {
+    const game = this.game;
     // Flash
-    g.hitFlash = Math.min(1, g.hitFlash + 0.2);
+    game.hitFlash = Math.min(1, game.hitFlash + 0.2);
 
     // Message
-    g.msg('СЕТКА!', 1.0, '#ffd34d', true);
+    game.msg('СЕТКА!', 1.0, '#ffd34d', true);
 
     // Haptic
-    if (navigator.vibrate && g.settings?.haptics) {
+    if (typeof navigator !== 'undefined' && navigator.vibrate && game.settings?.haptics) {
       try { navigator.vibrate([10, 20, 10]); } catch (e) {}
     }
   }
@@ -8453,13 +8458,10 @@ class EmotionalSystem {
   /**
    * Edge ball moment.
    */
-  _onEdge(g) {
-    // Flash
-    g.hitFlash = Math.min(1, g.hitFlash + 0.25);
-
-    // Already has message from physics, but enhance
-    // Haptic surprise
-    if (navigator.vibrate && g.settings?.haptics) {
+  _onEdge() {
+    // The physics path already reports the edge visually; add haptic surprise.
+    const game = this.game;
+    if (typeof navigator !== 'undefined' && navigator.vibrate && game.settings?.haptics) {
       try { navigator.vibrate([8, 30, 8]); } catch (e) {}
     }
   }
@@ -9156,7 +9158,7 @@ class Equipment {
 /* ---- constants (tuned for mobile gameplay feel) ---- */
 const BIO = {
   // Zone width: how wide the working zone is (meters from center)
-  ZONE_HALF_WIDTH: 0.85,
+  ZONE_HALF_WIDTH: BIO_ZONE_HALF_WIDTH,
 
   // Forearm rotation range [rad]
   FOREARM_SUP: 0.42,   // supination in backhand (more than real for visibility)
@@ -9390,7 +9392,7 @@ class RacketBiomech {
 
     // ---- 5. COMPUTE WORLD-SPACE NORMAL (for active side determination) ----
     // n = Q_world · n₀ where n₀ = (0,0,1) — red/forehand face normal in local space
-    M4.compose(this._m4Tmp, V3.zero(), qWorld, this._one);
+    M4.compose(this._m4Tmp, V3.new(), qWorld, this._one);
     M4.transformDir(this._nWorld, this._m4Tmp, this._nLocal);
     V3.norm(this._nWorld, this._nWorld);
 
@@ -9405,7 +9407,7 @@ class RacketBiomech {
     // Handle extends in local -Y direction
     M4.transformDir(this._handleDir, this._m4Tmp, { x: 0, y: -1, z: 0 });
     V3.norm(this._handleDir, this._handleDir);
-    V3.scale(this._negHandleDir, this._handleDir, -1);
+    V3.mul(this._negHandleDir, this._handleDir, -1);
 
     // ---- 8. WRIST PARAMETERS ----
     const omegaWristExt = BIO.WRIST_EXT_BH * (1 - b) + BIO.WRIST_EXT_FH * b;
@@ -9611,7 +9613,7 @@ function computePlayerBioRacket(game, ctx) {
   if (ball.live && ball.v) {
     ballDir = V3.norm(V3.new(), ball.v);
     // If ball moving away from player, flip direction
-    if (ballDir.z < 0) V3.scale(ballDir, ballDir, -1);
+    if (ballDir.z < 0) V3.mul(ballDir, ballDir, -1);
   } else {
     ballDir = V3.new(0, 0, 1);
   }
@@ -9635,7 +9637,7 @@ function computePlayerBioRacket(game, ctx) {
     contactQuality = game.lastSweet;
   }
 
-  const ctx = {
+  const bioCtx = {
     x: computeX(hitX, 0, BIO.ZONE_HALF_WIDTH),
     armQ: game.player.armQ || Q.identity(Q.new()),
     hand: game.settings.hand || 'right',
@@ -9647,7 +9649,7 @@ function computePlayerBioRacket(game, ctx) {
     swingDirX: game.player.vel.x || 0,
   };
 
-  return game.bioRacket.compute(ctx);
+  return game.bioRacket.compute(bioCtx);
 }
 
 /* ---- simple stroke classification for bio context ---- */
@@ -10321,15 +10323,12 @@ class Game {
     this.R = new Renderer(canvas, { quality: 'high' });
     this.scene = new Scene(this.R, 'arena');
     this.audio = new AudioEngine();
-    this.ai = new OpponentAI(2);
+    this.ai = new OpponentAI(this, 2);
     this.swipe = new SwipeTracker();
     this.particles = new Particles();
     this.rig = new PaddleRig();
-    this.bioRacket = new (require('./85_bioRacket').RacketBiomech || function(){});
-    // Fallback if module system doesn't work — inline minimal version
-    if (!this.bioRacket || typeof this.bioRacket.compute !== 'function') {
-      this.bioRacket = null;
-    }
+    // RacketBiomech is part of this standalone bundle (loaded before Game).
+    this.bioRacket = new RacketBiomech();
     this.equip = new Equipment();
 
     // Hit feedback system (99-level multi-sensory response)
@@ -11887,11 +11886,11 @@ class Game {
     pad.stepIn = expSmooth(pad.stepIn || 0, shortBall ? 1 : 0, 8, dt);
 
     // During anticipation, pull the paddle back visually
-    let anticipationOffset = V3.zero();
+    let anticipationOffset = V3.new();
     if (this.anticipation.active && this.anticipation.t < this.anticipation.duration) {
       const progress = this.anticipation.t / this.anticipation.duration;
       const pullAmount = Math.sin(progress * Math.PI) * this.anticipation.intensity * 0.12;
-      anticipationOffset = V3.scale(V3.new(), this.anticipation.targetDir, -pullAmount);
+      anticipationOffset = V3.mul(V3.new(), this.anticipation.targetDir, -pullAmount);
       // Advance anticipation timer
       this.anticipation.t += dt;
     }
@@ -12517,7 +12516,10 @@ class Game {
       V3.copy(this.aiPaddle.pos, op.pos);
       V3.copy(this.aiPaddle.normal, op.normal);
     }
-    else this.ai.think(this, dt);
+    else {
+      this.ai.think(this, dt);
+      V3.copy(this.aiPaddle.pos, this.ai.pos);
+    }
     this.tryAiHit();
     this.particles.update(dt);
     for (const m of this.marks) m.t += dtReal;
@@ -12539,13 +12541,13 @@ class Game {
           const decay = 1 - smoothProgress;
 
           // Visual position — continues in swing direction, then decelerates
-          const ftOffset = V3.scale(V3.new(), this.followThrough.swingDir,
+          const ftOffset = V3.mul(V3.new(), this.followThrough.swingDir,
             (1 - decay) * 0.25);
           V3.copy(this.followThrough.visualPos, this.followThrough.startPos);
           V3.add(this.followThrough.visualPos, this.followThrough.visualPos, ftOffset);
 
           // Visual normal — follows face rotation with decay
-          const normalOffset = V3.scale(V3.new(), this.followThrough.startNormal,
+          const normalOffset = V3.mul(V3.new(), this.followThrough.startNormal,
             (1 - decay) * 0.2);
           V3.copy(this.followThrough.visualNormal, this.followThrough.startNormal);
           V3.add(this.followThrough.visualNormal, this.followThrough.visualNormal, normalOffset);
@@ -12568,7 +12570,7 @@ class Game {
         } else {
           // Backswing pull-back — pulls paddle opposite to swipe direction
           const pullAmount = Math.sin(progress * Math.PI) * this.anticipation.intensity * 0.12;
-          const offset = V3.scale(V3.new(), this.anticipation.targetDir, -pullAmount);
+          const offset = V3.mul(V3.new(), this.anticipation.targetDir, -pullAmount);
           V3.copy(this.anticipation.visualOffset, offset);
         }
       } else {
@@ -12794,22 +12796,21 @@ class Game {
     /* the opponent: paddle, hand, forearm and sleeve, all solved from
        the paddle's own position and normal (see 56_rig.js) */
     const ap = this.aiPaddle;
-    const an = V3.norm(V3.new(), V3.sub(V3.new(), this.ball.p, this.ai.pos));
+    const an = V3.norm(V3.new(), V3.sub(V3.new(), this.ball.p, ap.pos));
     an.z = Math.abs(an.z) * 1 || 1;
-    // Blend "look at the ball" with the stroke's own face angle, so the
+    // Blend "look at the ball" with the last solved face angle, so the
     // backswing visibly opens for a chop and closes for a loop.
-    const fn = this.ai.faceNormal, wd = clamp(this.ai.anim.windup, 0, 1);
+    const fn = ap.normal, wd = clamp(this.ai.anim.windup, 0, 1);
     const aiNorm = V3.norm(V3.new(), V3.new(
       an.x * 0.4 * (1 - wd * 0.5),
       lerp(-0.1 + an.y * 0.3, fn.y * 1.5, wd),
       1));
     V3.copy(ap.normal, aiNorm);
-    V3.copy(ap.pos, this.ai.pos);
 
     // AI bio racket orientation — simplified for AI (no full bio computation needed)
     let aiBioQ = null;
     let aiActiveSide = 1;
-    const aiBallDir = V3.norm(V3.new(), V3.sub(V3.new(), this.ball.p, this.ai.pos));
+    const aiBallDir = V3.norm(V3.new(), V3.sub(V3.new(), this.ball.p, ap.pos));
     if (this.ball.live) {
       const dot = V3.dot(aiNorm, aiBallDir);
       aiActiveSide = dot >= 0 ? 1 : -1;
@@ -12980,10 +12981,6 @@ function classifyStrokeForBio(m) {
   if (u > 0.3) return 'DRIVE';
   return 'DRIVE';
 }
-
-/* BIO constants for use in game (imported conceptually from 85_bioRacket.js) */
-const BIO_ZONE_HALF_WIDTH = 0.85;
-const DEG = Math.PI / 180;
 
 
 /* ====== 80_ui.js ====== */
@@ -14689,13 +14686,25 @@ const ICON = {
     } catch (err) {
       console.error(err);
       const loading = document.getElementById('loading');
-      if (loading) loading.innerHTML =
-        `<div style="max-width:420px;text-align:center;padding:24px">
-           <div style="font-size:19px;font-weight:800;margin-bottom:10px">WebGL недоступен</div>
-           <div style="font-size:12px;color:#8da3bd;line-height:1.6">
-             Этой демке нужен WebGL. Включите аппаратное ускорение в браузере и перезагрузите страницу.<br><br>
-             <code style="font-size:10px;color:#ff8a8a">${(err && err.message) || err}</code>
-           </div></div>`;
+      if (loading) {
+        const detail = String((err && err.message) || err || 'Unknown startup error');
+        const isWebGLFailure = /webgl|graphics context/i.test(detail);
+        const panel = document.createElement('div');
+        panel.style.cssText = 'max-width:420px;text-align:center;padding:24px';
+        const title = document.createElement('div');
+        title.style.cssText = 'font-size:19px;font-weight:800;margin-bottom:10px';
+        title.textContent = isWebGLFailure ? 'WebGL недоступен' : 'Не удалось запустить игру';
+        const copy = document.createElement('div');
+        copy.style.cssText = 'font-size:12px;color:#8da3bd;line-height:1.6';
+        copy.textContent = isWebGLFailure
+          ? 'Этой демке нужен WebGL. Включите аппаратное ускорение в браузере и перезагрузите страницу.'
+          : 'Произошла ошибка во время запуска. Обновите страницу или сообщите этот код ошибки.';
+        const code = document.createElement('code');
+        code.style.cssText = 'display:block;margin-top:16px;font-size:10px;color:#ff8a8a';
+        code.textContent = detail;
+        panel.append(title, copy, code);
+        loading.replaceChildren(panel);
+      }
       return;
     }
     window.__game = game;
@@ -14741,6 +14750,6 @@ const ICON = {
 })();
 
 </script>
-<!-- TOPSPIN ARENA · self-contained build 2026-10-17 · no external assets, no network required -->
+<!-- TOPSPIN ARENA · self-contained build 2026-10-18 · no external assets, no network required -->
 </body>
 </html>

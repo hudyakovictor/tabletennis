@@ -167,10 +167,11 @@ class OpponentAI {
     this.handicap = 1;
     this.stats = { shots: 0, errors: 0, winners: 0, sumSpeed: 0, maxSpeed: 0 };
 
-    // Home position
+    // Home position and stable render/physics position.
     this.home = V3.new(0, PH.TABLE_Y + 0.25, -1.45);
-    this.target = V3.new(0, PH.TABLE_Y + 0.25, -1.45);
-    this.lastPos = V3.new(0, PH.TABLE_Y + 0.25, -1.45);
+    this.pos = V3.clone(this.home);
+    this.target = V3.clone(this.home);
+    this.lastPos = V3.clone(this.home);
     this.vel = V3.new();
 
     // Swing state
@@ -205,6 +206,7 @@ class OpponentAI {
     this.tactic = AI_TACTICS.FEEL;
     this.mood = 0; this.pressure = 0; this.handicap = 1;
     this.stats = { shots: 0, errors: 0, winners: 0, sumSpeed: 0, maxSpeed: 0 };
+    V3.copy(this.pos, this.home);
     V3.copy(this.target, this.home);
     V3.copy(this.lastPos, this.home);
     V3.zero(this.vel);
@@ -621,17 +623,13 @@ class OpponentAI {
       this._moveSmooth.y = expSmooth(this._moveSmooth.y, this.target.y, moveRate, dt);
       this._moveSmooth.z = expSmooth(this._moveSmooth.z, this.target.z, moveRate * 0.9, dt);
 
-      // Store position for rendering
-      game.ai.pos = V3.new(
-        this._moveSmooth.x,
-        this._moveSmooth.y,
-        this._moveSmooth.z
-      );
+      // Store position for rendering without allocating a new vector each frame.
+      V3.set(this.pos, this._moveSmooth.x, this._moveSmooth.y, this._moveSmooth.z);
 
       // Compute velocity for visual purposes
-      V3.sub(this.vel, game.ai.pos, this.lastPos);
+      V3.sub(this.vel, this.pos, this.lastPos);
       V3.mul(this.vel, this.vel, 1 / Math.max(dt, 1e-4));
-      V3.copy(this.lastPos, game.ai.pos);
+      V3.copy(this.lastPos, this.pos);
     }
 
     // Swing timing
