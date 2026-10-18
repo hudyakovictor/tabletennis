@@ -137,6 +137,69 @@ test('preparation, forward wrist flexion and follow-through have separate bounde
   }
 });
 
+test('sidespin, predicted contact, compact block and wrist face stay physically consistent', () => {
+  const { playerWristPose: pose, faceFromWrist, V3 } = load(
+    ['10_math.js', '56_rig.js'], ['playerWristPose', 'faceFromWrist', 'V3']);
+  const still = { x: 0, y: 0, z: 0 };
+  const ready = pose({ x: 0, z: 1.44 }, still, 'right');
+  const sideR = pose({ x: 0, z: 1.44 }, still, 'right', { incomingSide: 90, eta: 0.15 });
+  const sideL = pose({ x: 0, z: 1.44 }, still, 'right', { incomingSide: -90, eta: 0.15 });
+  assert.ok(sideR.yaw < ready.yaw - 0.04, 'sidespin kick to +x yaws the face right');
+  assert.ok(sideL.yaw > ready.yaw + 0.04, 'opposite sidespin yaws the other way');
+  const highHit = pose({ x: 0, y: 1.01, z: 1.44 }, still, 'right', { contactY: 1.62 });
+  const lowHit = pose({ x: 0, y: 1.01, z: 1.44 }, still, 'right', { contactY: 0.70 });
+  assert.ok(highHit.pitch < lowHit.pitch - 0.16, 'angle is set for the intercept, not the current bat height');
+  const wide = pose({ x: 0.72, z: 1.44 }, still, 'right');
+  const blocked = pose({ x: 0.72, z: 1.44 }, still, 'right', { compact: 1, ballSpeed: 14, eta: 0.1 });
+  assert.ok(Math.abs(blocked.roll) < Math.abs(wide.roll) - 0.15, 'a late block pulls a laid-back roll home');
+  const n = faceFromWrist(V3.new(), 0.3, -0.2, 1);
+  const nR = faceFromWrist(V3.new(), -0.3, -0.2, 1);
+  assert.ok(Math.abs(Math.hypot(n.x, n.y, n.z) - 1) < 1e-9);
+  assert.ok(n.y < 0, 'negative pitch is a closed face');
+  assert.ok(n.x < 0 && nR.x > 0, 'negative yaw turns the face to +x');
+  const nL = faceFromWrist(V3.new(), 0.3, -0.2, -1);
+  assert.ok(nL.z > 0 && n.z < 0, 'far side looks the other way down the table');
+});
+
+test('attack lean closes the face forward; a loop face points into the ball', () => {
+  const { playerWristPose: pose, deriveStroke, SwipeTracker, V3 } = load(
+    ['10_math.js', '30_physics.js', '40_swipe.js', '56_rig.js'],
+    ['playerWristPose', 'deriveStroke', 'SwipeTracker', 'V3']);
+  const still = { x: 0, y: 0, z: 0 };
+  const ready = pose({ x: 0, z: 1.44 }, still, 'right');
+  const lean = pose({ x: 0, z: 1.44 }, still, 'right', { attackLean: 1 });
+  assert.ok(lean.pitch < ready.pitch - 0.18, 'drive lean tips the blade toward the net');
+  const sw = new SwipeTracker();
+  sw.down(.5, .72, 0); sw.move(.52, .55, .06); sw.up(.54, .38, .12);
+  const loop = deriveStroke(sw.lastReleased, { side: 1 });
+  assert.ok(loop.normal.y < -0.12, 'a topspin face is closed, not standing vertical');
+});
+
+test('height, incoming spin, serve and step-in tilt the face like a real shakehand', () => {
+  const { playerWristPose: pose } = load(['10_math.js', '56_rig.js'], ['playerWristPose']);
+  const still = { x: 0, y: 0, z: 0 };
+  const ready = pose({ x: 0, z: 1.44 }, still, 'right');
+  const high = pose({ x: 0, y: 1.62, z: 1.44 }, still, 'right');
+  const low = pose({ x: 0, y: 0.62, z: 1.44 }, still, 'right');
+  const overTable = pose({ x: 0, z: 0.70 }, still, 'right');
+  const offTable = pose({ x: 0, z: 1.90 }, still, 'right');
+  const top = pose({ x: 0, y: 1.01, z: 1.44 }, still, 'right', { incomingTop: 360, ballY: 1.25, ballSpeed: 11, eta: 0.18 });
+  const back = pose({ x: 0, y: 1.01, z: 1.44 }, still, 'right', { incomingTop: -280, ballY: 0.88, eta: 0.18 });
+  const serve = pose({ x: 0, z: 1.44 }, still, 'right', { serving: true });
+  const step = pose({ x: 0, z: 1.44 }, still, 'right', { stepIn: 1 });
+  assert.ok(high.pitch < ready.pitch - 0.08, 'high contact closes the face');
+  assert.ok(low.pitch > ready.pitch + 0.08, 'low contact opens the face');
+  assert.ok(overTable.pitch > offTable.pitch + 0.12, 'over the table is more open than a loop stance');
+  assert.ok(top.pitch < ready.pitch - 0.10, 'incoming topspin closes');
+  assert.ok(back.pitch > ready.pitch + 0.06, 'incoming backspin opens');
+  assert.ok(serve.pitch > ready.pitch, 'toss starts under the ball');
+  assert.ok(step.pitch > ready.pitch, 'step-in gets under a short ball');
+  const trackR = pose({ x: 0, z: 1.44 }, still, 'right', { ballX: 0.40, eta: 0.2 });
+  const trackL = pose({ x: 0, z: 1.44 }, still, 'left', { ballX: -0.40, eta: 0.2 });
+  assert.ok(trackR.yaw < -0.04, 'face yaws toward a ball on the forehand');
+  assert.ok(Math.abs(trackR.yaw + trackL.yaw) < 1e-12, 'ball tracking mirrors with the hand');
+});
+
 test('stroke refinement frame preserves wrist pitch at zero correction', () => {
   const { SwipeTracker, deriveStroke, strokeFrame, V3 } = load(
     ['10_math.js', '30_physics.js', '40_swipe.js'], ['SwipeTracker', 'deriveStroke', 'strokeFrame', 'V3']);
