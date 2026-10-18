@@ -50,7 +50,11 @@ const { root } = require('./helpers.cjs');
             g.pointer={x:.5,y:.55};g.camVPReady=false;
             for(let i=0;i<fps*12;i++)g.updatePlayerPaddle(1/fps);
             const n=V3.clone(g.player.normal);
-            if(n.z>-.99 || !Object.values(n).every(Number.isFinite))return false;
+            /* The authored ready grip nods 10-20° forward off vertical, so a
+               square z≈-1 face is wrong now. What must hold: the face still
+               points clearly down-table (z<-0.9), shows the nod (y<-0.1),
+               and the pose is rock-steady across another 12 seconds. */
+            if(n.z>-.9 || n.y>-.1 || !Object.values(n).every(Number.isFinite))return false;
             for(let i=0;i<fps*12;i++)g.updatePlayerPaddle(1/fps);
             if(V3.dist(n,g.player.normal)>1e-8)return false;
           }
@@ -83,7 +87,10 @@ const { root } = require('./helpers.cjs');
             if(Math.abs(ready)<.2 || Math.abs(ready)>.4)return false;
             if((hand==='right'?1:-1)*ready<=0)return false;
             const pitch=g.player.pitch;
-            g.swipe.down(.5,.55,g.time-.08);
+            /* A driving topspin swipe. THREE samples: two points are a click,
+               not a stroke, and a click must never bend the wrist. */
+            g.swipe.down(.5,.55,g.time-.10);
+            g.swipe.move(.5,.45,g.time-.05);
             g.swipe.move(.5,.35,g.time);
             g.pointer={x:.5,y:.35};g.pointerDown=true;settle();
             if(g.player.pitch>=pitch-.12)return false;
@@ -91,6 +98,26 @@ const { root } = require('./helpers.cjs');
             if(Math.abs(g.player.roll-ready)>.01 || Math.abs(g.player.pitch-pitch)>.01)return false;
           }
           g.settings.hand='right';g.returnToMenu();return true;
+        });
+        check('grip selector re-rigs the paddle: penhold lifts the handle, shakehand brings it back', () => {
+          const grips=document.querySelectorAll('#gripViews [data-set="grip"]');
+          const hands=document.querySelectorAll('#handViews [data-set="hand"]');
+          if(grips.length!==2 || hands.length!==2)return false;
+          g.startMatch(2);g.ball.live=false;g.recenterT=0;g.swipe.cancel();g.camVPReady=false;
+          g.pointer={x:.5,y:.55};
+          document.querySelector('#gripViews [data-val="penhold"]').click();
+          if(g.settings.grip!=='penhold')return false;
+          for(let i=0;i<180;i++)g.updatePlayerPaddle(1/60);
+          if(Math.abs(g.player.roll-Math.PI)>.25)return false;
+          if(g.player.pitch<=gripRestPitch('shakehand'))return false; // stands more vertical
+          document.querySelector('#handViews [data-val="left"]').click();
+          for(let i=0;i<180;i++)g.updatePlayerPaddle(1/60);
+          if(Math.abs((g.player.roll-Math.PI)+.10)>.08)return false; // lefty mirrors: PI-0.10
+          document.querySelector('#gripViews [data-val="shakehand"]').click();
+          document.querySelector('#handViews [data-val="right"]').click();
+          for(let i=0;i<180;i++)g.updatePlayerPaddle(1/60);
+          const back=Math.abs(g.player.roll-.28)<.05 && g.settings.grip==='shakehand' && g.settings.hand==='right';
+          g.returnToMenu();return back;
         });
         check('input instructions use pointer capabilities, not viewport width', () => {
           return g.ui.inputMode===(navigator.maxTouchPoints>0 ? 'touch' : 'mouse');

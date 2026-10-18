@@ -212,3 +212,91 @@ test('stroke refinement frame preserves wrist pitch at zero correction', () => {
     assert.ok(V3.dist(n, racket.normal) < 1e-9);
   }
 });
+
+test('grip profiles: shakehand rests tilted 10-20° forward, penhold 0-10° with handle up', () => {
+  const { playerWristPose: pose, readyRollFor, gripRestPitch, DEG } = load(
+    ['10_math.js', '56_rig.js'], ['playerWristPose', 'readyRollFor', 'gripRestPitch', 'DEG']);
+  const still = { x: 0, y: 0, z: 0 };
+  for (const hand of ['right', 'left']) {
+    const h = hand === 'right' ? 1 : -1;
+    const sh = pose({ x: 0, z: 1.44 }, still, hand, {}, 'shakehand');
+    const tiltSh = -sh.pitch / DEG;
+    assert.ok(tiltSh >= 10 && tiltSh <= 20, `shakehand ready nod is 10-20° fwd, got ${tiltSh}`);
+    assert.ok(Math.abs(sh.roll - h * .28) < 1e-10);
+    const pen = pose({ x: 0, z: 1.44 }, still, hand, {}, 'penhold');
+    const tiltPen = -pen.pitch / DEG;
+    assert.ok(tiltPen >= 0 && tiltPen <= 10, `penhold ready is 0-10° from vertical, got ${tiltPen}`);
+    assert.ok(Math.abs(pen.roll - (Math.PI + h * .10)) < 1e-10, 'penhold ready wraps the handle up');
+    assert.equal(sh.forehand, pen.forehand, 'wing boundary does not depend on the grip');
+  }
+  assert.ok(Math.abs(readyRollFor('right', 'shakehand') + readyRollFor('left', 'shakehand')) < 1e-12);
+  assert.ok(Math.abs((readyRollFor('right', 'penhold') - Math.PI) + (readyRollFor('left', 'penhold') - Math.PI)) < 1e-12,
+    'a left-handed penhold mirrors the right-handed one around the handle-up pose');
+  assert.ok(gripRestPitch('penhold') > gripRestPitch('shakehand'), 'penhold stands more vertical');
+  assert.equal(gripRestPitch('nonsense'), gripRestPitch('shakehand'), 'unknown grip degrades to shakehand');
+});
+
+test('penhold ready quaternion points the handle up without moving the face', () => {
+  const { rig, Q, V3, M4, readyRollFor } = { ...rigFixture(), ...load(['10_math.js', '56_rig.js'], ['readyRollFor']) };
+  const n = V3.norm(V3.new(), V3.new(0, -.1, -1));      // near-horizontal face, slightly closed
+  for (const [grip, wantUp] of [['penhold', 1], ['shakehand', -1]]) {
+    const q = rig.paddleQuat(Q.new(), n, 'right', 0, readyRollFor('right', grip), true);
+    assert.ok(Math.abs(Math.hypot(q.x, q.y, q.z, q.w) - 1) < 1e-9);
+    const m = M4.compose(M4.create(), V3.new(), q, V3.new(1, 1, 1));
+    const handleDir = M4.transformDir(V3.new(), m, V3.new(0, -1, 0));
+    assert.ok(Math.sign(handleDir.y) === wantUp && Math.abs(handleDir.y) > .85,
+      `${grip} handle must point ${wantUp > 0 ? 'up' : 'down'}, got y=${handleDir.y}`);
+    assert.ok(V3.dist(M4.transformDir(V3.new(), m, V3.new(0, 0, 1)), n) < 1e-6,
+      'roll around the face normal never rotates the face itself');
+  }
+});
+
+test('every stroke has an authored contact pose inside the real angle bands', () => {
+  const { STROKES, STROKE_POSE, strokePose, DEG } = load(
+    ['10_math.js', '30_physics.js', '40_swipe.js', '56_rig.js'],
+    ['STROKES', 'STROKE_POSE', 'strokePose', 'DEG']);
+  for (const id of Object.keys(STROKES)) {
+    const p = STROKE_POSE[id];
+    assert.ok(p, `STROKE_POSE is missing ${id}`);
+    assert.ok(Math.abs(p.tilt) <= .72 && Math.abs(p.turn) <= .25, `${id} pose stays printable`);
+  }
+  const deg = (rad) => -rad / DEG;      // + = closed (leaning forward), − = open
+  assert.ok(deg(STROKE_POSE.DRIVE.tilt) >= 10 && deg(STROKE_POSE.DRIVE.tilt) <= 20, 'накат 10-20° вперёд');
+  assert.ok(deg(STROKE_POSE.LOOP.tilt) >= 30 && deg(STROKE_POSE.LOOP.tilt) <= 50, 'топ-спин 30-50° вперёд');
+  assert.ok(deg(STROKE_POSE.COUNTER.tilt) >= 30 && deg(STROKE_POSE.COUNTER.tilt) <= 50, 'контрнакат — та же семья');
+  assert.ok(-deg(STROKE_POSE.CHOP.tilt) >= 20 && -deg(STROKE_POSE.CHOP.tilt) <= 40, 'подрезка 20-40° назад');
+  assert.ok(-deg(STROKE_POSE.PUSH.tilt) >= 20 && -deg(STROKE_POSE.PUSH.tilt) <= 40, 'подставка открыта');
+  assert.ok(deg(STROKE_POSE.BLOCK.tilt) >= 0 && deg(STROKE_POSE.BLOCK.tilt) <= 15, 'блок 0-15°');
+  for (const id of ['PUSH', 'CHOP', 'DROP', 'SERVE_BACK'])
+    assert.ok(STROKE_POSE[id].tilt > 0, `${id}: нижнее вращение бьётся открытой ракеткой`);
+  for (const id of ['LOOP', 'COUNTER', 'DRIVE', 'SMASH'])
+    assert.ok(STROKE_POSE[id].tilt < 0, `${id}: верхнее вращение бьётся закрытой ракеткой`);
+  /* Penhold compresses the closed angles into the classic 10-30° wrist band
+     and keeps the open ones nearly full (same face works both wings). */
+  const loopPen = deg(strokePose('LOOP', 'penhold').tilt);
+  assert.ok(loopPen >= 10 && loopPen <= 30, `penhold loop lives in the 10-30° wrist band, got ${loopPen}`);
+  assert.ok(-deg(strokePose('CHOP', 'penhold').tilt) >= 20, 'penhold chop stays a real chop');
+  assert.equal(strokePose('LOOP', 'shakehand'), STROKE_POSE.LOOP, 'shakehand is the authored table');
+  assert.equal(strokePose('MISSING_ID', 'penhold'), null);
+});
+
+test('stroke pose blends in with the gesture and mirrors for the left hand', () => {
+  const { playerWristPose: pose, STROKE_POSE } = load(['10_math.js', '56_rig.js'], ['playerWristPose', 'STROKE_POSE']);
+  const still = { x: 0, y: 0, z: 0 }, pos = { x: 0, z: 1.44 };
+  for (const grip of ['shakehand', 'penhold']) {
+    const base = grip === 'penhold' ? Math.PI : 0;
+    const readyR = pose(pos, still, 'right', {}, grip);
+    const loop = STROKE_POSE.LOOP;
+    const liveR = pose(pos, still, 'right', { strokeTilt: loop.tilt, strokeTurn: loop.turn, strokeK: 1 }, grip);
+    assert.ok(liveR.pitch < readyR.pitch - .25, `${grip}: a loop visibly closes the face`);
+    assert.ok(liveR.roll > readyR.roll, `${grip}: the loop turn wraps a right wrist`);
+    const liveL = pose(pos, still, 'left', { strokeTilt: loop.tilt, strokeTurn: loop.turn, strokeK: 1 }, grip);
+    assert.equal(liveL.pitch, liveR.pitch, 'contact angle is identical for both hands');
+    assert.ok(Math.abs((liveR.roll - base) + (liveL.roll - base)) < 1e-9, `${grip}: lefty mirrors the wrist signature`);
+    const idle = pose(pos, still, 'right', { strokeTilt: loop.tilt, strokeTurn: loop.turn, strokeK: 0 }, grip);
+    assert.deepEqual(idle, readyR, 'stroke pose at zero blend IS the ready pose');
+    const chop = STROKE_POSE.CHOP;
+    const liveChop = pose(pos, still, 'right', { strokeTilt: chop.tilt, strokeTurn: chop.turn, strokeK: 1 }, grip);
+    assert.ok(liveChop.pitch > liveR.pitch + .5, `${grip}: chop opens as much as loop closes`);
+  }
+});

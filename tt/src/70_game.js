@@ -98,6 +98,7 @@ class Game {
       volume: 0.9,
       camera: 'BROADCAST',
       hand: 'right',
+      grip: 'shakehand',
       showTrail: true,
       showPredict: true,
       showZone: true,
@@ -946,7 +947,7 @@ class Game {
     const s = this.settings;
     this.profile.data.settings = {
       hitZone: s.hitZone, assist: s.assist, posAssist: s.posAssist, difficulty: s.difficulty, quality: s.quality,
-      sound: s.sound, volume: s.volume, camera: s.camera, hand: s.hand,
+      sound: s.sound, volume: s.volume, camera: s.camera, hand: s.hand, grip: s.grip,
       showTrail: s.showTrail, showPredict: s.showPredict, showZone: s.showZone,
       showTele: s.showTele, haptics: s.haptics, coach: s.coach, adaptive: s.adaptive,
       slowmoPlayer: s.slowmoPlayer, targetScore: s.targetScore, sensitivity: s.sensitivity,
@@ -971,7 +972,8 @@ class Game {
     }
     s.difficulty = Math.round(s.difficulty);
     for (const [k, values] of Object.entries({ quality: ['low', 'medium', 'high'],
-      camera: CAMERA_ORDER, hand: ['left', 'right'], spinBias: ['low', 'norm', 'high'], targetScore: [5, 11, 21] })) {
+      camera: CAMERA_ORDER, hand: ['left', 'right'], grip: ['shakehand', 'penhold'],
+      spinBias: ['low', 'norm', 'high'], targetScore: [5, 11, 21] })) {
       if (values.includes(raw[k])) s[k] = raw[k];
     }
     if (this.settings.volume !== undefined) this.audio.setVolume(this.settings.volume);
@@ -1480,7 +1482,8 @@ class Game {
         ball: { y: contact.y, z: contact.z },
         ballSpin: b.w, ballSpeed: V3.len(b.v),
         powerScale: 1,
-        moveYaw: pad.yaw || 0, movePitch: pad.pitch || 0,
+        moveYaw: pad.yaw || 0,
+        movePitch: clamp((pad.pitch || 0) - gripRestPitch(this.settings.grip) - 0.03, -0.55, 0.55),
         equip: sideParams,
         spinBias: 'norm',
       };
@@ -1501,6 +1504,9 @@ class Game {
         racket = refineRacket(contact, b.v, b.w, racket, 1, quality);
       }
       racket.sweet = sweet; racket.timing = timing;
+      /* The follow-through keeps THIS stroke's wrist pose until the swing
+         decays (ready -> backswing -> contact -> follow-through). */
+      this.lastStrokePose = racket.stroke ? racket.stroke.id : this.lastStrokePose;
     }
 
     const info = impactRacket(b.v, b.w, racket.normal, racket.vR, quality, racket.rubber || {});
@@ -1585,10 +1591,11 @@ class Game {
     this.pointerDown = false;
     this.stanceY = undefined;
     this.padYaw = 0;
-    this.padRoll = this.settings.hand === 'left' ? -0.28 : 0.28;
-    this.padPitch = -0.03;
+    this.padRoll = readyRollFor(this.settings.hand, this.settings.grip);
+    this.padPitch = gripRestPitch(this.settings.grip);
     this._prep = 0;
     this.mouseTrail = [];
+    this.lastStrokePose = null;
     pad.yaw = 0; pad.pitch = this.padPitch; pad.roll = this.padRoll;
     if (this.followThrough) this.followThrough.active = false;
     /* 0.40 s, not 0.55: the window has to be over before a serve can possibly
@@ -1776,6 +1783,32 @@ class Game {
       }
     }
 
+    /* The live stroke is resolved ONCE here: the wrist pose borrows its
+       authored contact angle (ready -> backswing -> contact -> follow-through
+       keyframes of a real swing) and the face normal blends onto it below.
+       The grip-level rest pitch is subtracted before the pose feeds back
+       into the physics, so a neutral ready grip costs the physics exactly
+       the same face angle it always did — the tilt the player ADDS on top
+       is what reaches the ball. */
+    const grip = this.settings.grip || 'shakehand';
+    const movePitchRel = clamp((this.padPitch || 0) - gripRestPitch(grip) - 0.03, -0.55, 0.55);
+    const m = intent;
+    let liveSt = null;
+    if (m) {
+      const ctx = {
+        side: 1, isServe: this.isServeBall, ball: { y: pad.pos.y, z: pad.pos.z },
+        ballSpin: this.ball.w, ballSpeed: V3.len(this.ball.v),
+        moveYaw: this.padYaw, movePitch: movePitchRel,
+      };
+      liveSt = deriveStroke(m, ctx);
+    }
+    const livePose = liveSt ? strokePose(liveSt.stroke.id, grip) : null;
+    /* Follow-through: no gesture any more, but the wrist keeps the last
+       stroke's contact pose and lets it dissolve with pad.swing — the
+       +20 deg "проводка" of a drive instead of an instant snap home. */
+    const ftId = (!livePose && this.settings.followThrough && pad.swing > 0) ? this.lastStrokePose : null;
+    const ftPose = ftId ? strokePose(ftId, grip) : null;
+
     const wrist = playerWristPose(pad.pos, pad.vel, this.settings.hand, {
       preparation: this._prep,
       follow: this.settings.followThrough ? pad.swing : 0,
@@ -1796,7 +1829,13 @@ class Game {
       aimYaw, aimPitch,
       stepIn: pad.stepIn || 0,
       serving: servingNow,
-    });
+      /* Contact pose of the stroke, ramping in over the first ~80 ms of the
+         gesture (a hair slower than the face normal so the wrist leads the
+         eye into the shot the way a real backswing announces it). */
+      strokeTilt: livePose ? livePose.tilt : (ftPose ? ftPose.tilt * 1.08 : undefined),
+      strokeTurn: livePose ? livePose.turn : (ftPose ? ftPose.turn * 1.15 : undefined),
+      strokeK: livePose ? clamp((m.dur || 0) / 0.08, 0, 1) : (ftPose ? clamp(pad.swing, 0, 1) : 0),
+    }, grip);
     /* Mouse is a precise 2-D pointer: catch up fast on a big read.
        A finger is a noisy 60 Hz sample — slower follow hides jitter
        without changing the pose the physics will actually strike. */
@@ -1813,23 +1852,17 @@ class Game {
     pad.yaw = this.padYaw; pad.pitch = this.padPitch; pad.roll = this.padRoll;
 
     // orientation follows the live gesture so you SEE the face angle
-    const m = intent;
     let want = this._wantN || (this._wantN = V3.new(0, -0.05, -1));
     const rest = this._restN || (this._restN = V3.new());
     faceFromWrist(rest, this.padYaw, this.padPitch, 1);
-    if (m) {
-      const ctx = {
-        side: 1, isServe: this.isServeBall, ball: { y: pad.pos.y, z: pad.pos.z },
-        ballSpin: this.ball.w, ballSpeed: V3.len(this.ball.v), moveYaw: this.padYaw, movePitch: this.padPitch,
-      };
-      const st = deriveStroke(m, ctx);
+    if (liveSt) {
       /* First ~45 ms keep the ready face so the bat does not pop onto
          the archetype the frame a finger twitches. */
       const k = clamp((m.dur || 0) / 0.045, 0, 1);
-      want.x = lerp(rest.x, st.normal.x, k);
-      want.y = lerp(rest.y, st.normal.y, k);
-      want.z = lerp(rest.z, st.normal.z, k);
-      this.liveStroke = st;
+      want.x = lerp(rest.x, liveSt.normal.x, k);
+      want.y = lerp(rest.y, liveSt.normal.y, k);
+      want.z = lerp(rest.z, liveSt.normal.z, k);
+      this.liveStroke = liveSt;
     } else {
       V3.copy(want, rest);
       this.liveStroke = null;
@@ -2499,6 +2532,7 @@ class Game {
       this.rig.draw(R, S, {
         pos: pp.pos, normal: pp.normal, hand: this.settings.hand, shadowPass,
         swing: pp.swing, roll: pp.roll || 0, absoluteRoll: true,
+        grip: this.settings.grip,
         mats: this.paddleMats(S, this.equip),
       });
     }

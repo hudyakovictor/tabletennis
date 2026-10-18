@@ -797,7 +797,22 @@ class UI {
       case 'vol': s.volume = v / 100; g.audio.setVolume(v / 100); break;
       case 'cam': s.camera = v; break;
       case 'quality': s.quality = v; g.R.quality = v; g.resize(); break;
-      case 'hand': s.hand = v; break;
+      case 'hand':
+        s.hand = v;
+        /* The whole rig mirrors — re-anchor the wrist so the roll never
+           blends from + to - straight through the blade edge. */
+        if (g.resetPaddle) g.resetPaddle(false);
+        this.syncGripHand();
+        this.toast(v === 'left' ? 'ЛЕВША · зеркальная стойка' : 'ПРАВША · стойка обновлена');
+        break;
+      case 'grip':
+        s.grip = v;
+        /* Re-anchor the wrist at once: the ready roll differs by half a
+           turn between grips, and it should never blend through the blade. */
+        if (g.resetPaddle) g.resetPaddle(false);
+        this.syncGripHand();
+        this.toast(v === 'penhold' ? 'ПЕРО · ручка вверх, игра от кисти' : 'ЕВРОПЕЙСКИЙ · классическая стойка');
+        break;
       case 'trail': s.showTrail = v === 'on'; break;
       case 'predict': s.showPredict = v === 'on'; break;
       case 'zone': s.showZone = v === 'on'; break;
@@ -839,11 +854,24 @@ class UI {
     if (rAst) { rAst.value = astVal; rAst.setAttribute('aria-valuetext', astVal + ' процентов'); }
     if (vAst) vAst.textContent = astVal + '%';
     this.syncCameraControls();
+    this.syncGripHand();
   }
   syncCameraControls() {
     const g = this.game;
     $$('#cameraViews [data-camera]').forEach(b => {
       const selected = b.dataset.camera === g.settings.camera;
+      b.classList.toggle('sel', selected); b.setAttribute('aria-pressed', String(selected));
+    });
+  }
+  /** Grip and playing hand: the two choices that re-rig the paddle. */
+  syncGripHand() {
+    const g = this.game; if (!g) return;
+    $$('#gripViews [data-set="grip"]').forEach(b => {
+      const selected = b.dataset.val === (g.settings.grip || 'shakehand');
+      b.classList.toggle('sel', selected); b.setAttribute('aria-pressed', String(selected));
+    });
+    $$('#handViews [data-set="hand"]').forEach(b => {
+      const selected = b.dataset.val === (g.settings.hand || 'right');
       b.classList.toggle('sel', selected); b.setAttribute('aria-pressed', String(selected));
     });
   }
