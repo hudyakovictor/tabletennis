@@ -81,3 +81,71 @@ test('AI initializes a finite pose at every difficulty and does not strike insid
     assert.equal(ai.swing(g), null, 'one committed stroke is consumed once');
   }
 });
+
+test('wrist stance persists at rest, mirrors for left hand and reacts to depth', () => {
+  const { playerWristPose: pose } = load(['10_math.js', '56_rig.js'], ['playerWristPose']);
+  const still = { x: 0, y: 0, z: 0 };
+  for (const x of [-.7, -.2, 0, .2, .7]) {
+    const r = pose({ x, y: 1, z: 1.44 }, { x: 2, y: 1, z: -2 }, 'right');
+    const l = pose({ x: -x, y: 1, z: 1.44 }, { x: -2, y: 1, z: -2 }, 'left');
+    assert.ok(Math.abs(r.yaw + l.yaw) < 1e-12);
+    assert.ok(Math.abs(r.roll + l.roll) < 1e-12);
+    assert.equal(r.pitch, l.pitch);
+    assert.equal(r.forehand, l.forehand);
+  }
+  assert.ok(Math.abs(pose({ x: .7, z: 1.44 }, still, 'right').yaw) > .2);
+  assert.ok(pose({ x: 0, z: 1.44 }, { ...still, z: -3 }, 'right').pitch < 0);
+  assert.ok(pose({ x: 0, z: 1.44 }, { ...still, z: 3 }, 'right').pitch > 0);
+});
+
+test('ready grip is relaxed, forehand/backhand are distinct and roll preserves contact normal', () => {
+  const { rig, Q, V3, M4 } = rigFixture();
+  const { playerWristPose: pose } = load(['10_math.js', '56_rig.js'], ['playerWristPose']);
+  for (const hand of ['right', 'left']) {
+    const h = hand === 'right' ? 1 : -1;
+    const centre = pose({ x: 0, z: 1.44 }, V3.new(), hand);
+    assert.ok(Math.abs(centre.roll - h * .28) < 1e-10);
+    const fh = pose({ x: .72 * h, z: 1.44 }, V3.new(), hand);
+    const bh = pose({ x: -.72 * h, z: 1.44 }, V3.new(), hand);
+    assert.equal(fh.forehand, true);
+    assert.equal(bh.forehand, false);
+    assert.ok(Math.abs(fh.roll) > Math.abs(bh.roll));
+    for (const p of [centre, fh, bh]) {
+      assert.ok(Math.abs(p.roll) < Math.PI / 2);
+      const n = V3.norm(V3.new(), V3.new(.1, -.3, -1));
+      const q = rig.paddleQuat(Q.new(), n, hand, 1, p.roll, true);
+      const m = M4.compose(M4.create(), V3.new(), q, V3.new(1, 1, 1));
+      assert.ok(V3.dist(M4.transformDir(V3.new(), m, V3.new(0, 0, 1)), n) < 1e-6);
+    }
+  }
+});
+
+test('preparation, forward wrist flexion and follow-through have separate bounded targets', () => {
+  const { playerWristPose: pose } = load(['10_math.js', '56_rig.js'], ['playerWristPose']);
+  const pos = { x: .6, z: 1.44 }, vel = { x: 0, y: 0, z: 0 };
+  const ready = pose(pos, vel, 'right');
+  const prepare = pose(pos, vel, 'right', { preparation: 1 });
+  const forward = pose(pos, vel, 'right', { gesturePitch: -.3 });
+  const recover = pose(pos, vel, 'right', { follow: 1 });
+  assert.ok(prepare.roll > ready.roll);
+  assert.ok(forward.pitch < ready.pitch - .25);
+  assert.ok(recover.roll < ready.roll);
+  for (let x = -.8; x <= .8; x += .01) {
+    const a = pose({ x, z: 1.44 }, vel, 'right');
+    const b = pose({ x: x + .001, z: 1.44 }, vel, 'right');
+    assert.ok(Math.abs(a.roll - b.roll) < .02, 'no snap at crossover');
+  }
+});
+
+test('stroke refinement frame preserves wrist pitch at zero correction', () => {
+  const { SwipeTracker, deriveStroke, strokeFrame, V3 } = load(
+    ['10_math.js', '30_physics.js', '40_swipe.js'], ['SwipeTracker', 'deriveStroke', 'strokeFrame', 'V3']);
+  const sw = new SwipeTracker();
+  sw.down(.5, .7, 0); sw.move(.56, .55, .07); sw.up(.6, .45, .12);
+  for (const movePitch of [-.4, 0, .4]) {
+    const racket = deriveStroke(sw.lastReleased, { side: 1, movePitch });
+    const n = V3.new(), v = V3.new();
+    strokeFrame(racket, 0, 0, 1, v, n);
+    assert.ok(V3.dist(n, racket.normal) < 1e-9);
+  }
+});
