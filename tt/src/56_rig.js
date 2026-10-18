@@ -5,6 +5,22 @@
  * ===================================================================== */
 'use strict';
 
+/* The wrist's own range around the handle.
+ *  · GRIP_ROLL is the resting angle of the hand that holds it: a right-
+ *    hander's handle sits out toward the right hip, a left-hander's toward
+ *    the left. It is a property of the GRIP, not of a world direction, so
+ *    it is the one part of the blade's roll that does not mirror away when
+ *    the lateral pose is expressed in body space (see 57_pose.js).
+ *  · RIG_EXTRA_ROLL is the safety clamp on everything the pose adds on top
+ *    (stance bank, mouse lead, cock, contact snap). It is wider than the
+ *    pose's own authored limit so the renderer can never truncate a pose.
+ *  · RIG_TOTAL_ROLL is the anatomical ceiling: grip + swing + pose, so no
+ *    combination of inputs can ever wind the blade into a corkscrew. */
+const GRIP_ROLL = 0.42;
+const RIG_EXTRA_ROLL = 0.44;
+const RIG_SWING_ROLL = 0.14;
+const RIG_TOTAL_ROLL = 1.05;
+
 class PaddleRig {
   constructor() {
     this._q = Q.new();
@@ -17,11 +33,26 @@ class PaddleRig {
     this._up = { x: 0, y: 1, z: 0 };
   }
 
-  /** Absolute orientation, with only a small, bounded grip/swing roll. */
+  /** Absolute orientation, with only a small, bounded grip/swing roll.
+   *
+   *  The roll is composed in the order the arm composes it: the grip the
+   *  hand holds (a constant of WHICH hand, mirrored by hand), the rotation
+   *  through the ball that the same grip produces (so it turns the way the
+   *  wrist actually turns, not the same way for both hands), and finally
+   *  whatever posture the pose module asks for (stance bank, mouse lead,
+   *  cock, snap). The total is clamped, so no combination of inputs can
+   *  wind the blade past the wrist's range.
+   *
+   *  Roll is about local +Z, which IS the face normal, so none of this can
+   *  change the direction the blade hits in — only the angle the handle
+   *  stands at. That invariant is what tests/paddle.test.js pins. */
   paddleQuat(out, normal, hand, swing, extraRoll) {
     Q.lookRotation(out, normal, this._up);
-    const roll = (hand === 'left' ? 0.42 : -0.42)
-      + clamp(swing || 0, -1, 1) * 0.3 + clamp(extraRoll || 0, -0.35, 0.35);
+    const gripSign = hand === 'left' ? 1 : -1;
+    const roll = clamp(
+      gripSign * (GRIP_ROLL + clamp(swing || 0, -1, 1) * RIG_SWING_ROLL)
+      + clamp(extraRoll || 0, -RIG_EXTRA_ROLL, RIG_EXTRA_ROLL),
+      -RIG_TOTAL_ROLL, RIG_TOTAL_ROLL);
     return Q.mul(out, out, Q.setAxisAngle(this._rollQ, 0, 0, 1, roll));
   }
 

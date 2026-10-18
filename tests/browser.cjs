@@ -55,13 +55,18 @@ const { root } = require('./helpers.cjs');
         });
         check('paddles remain forward-facing through lateral sweeps and rendering is read-only', () => {
           g.startMatch(2);g.ball.live=false;g.recenterT=0;g.swipe.cancel();g.camVPReady=false;
+          /* The roll bound is the authored wrist range, not a magic number:
+             it used to be 0.30001, which was the old velocity twitch's own
+             clamp, and a pose test that hard-codes a limit silently stops
+             testing anything the moment the limit is re-authored. */
+          const rollLimit=RACKET_POSE.roll;
           for(const hand of ['right','left']) {
             g.settings.hand=hand;
             for(const x of [.1,.9,.1,.9,.5]) {
               g.pointer={x,y:.55};
               for(let i=0;i<30;i++) {
                 g.updatePlayerPaddle(1/60);
-                if(g.player.normal.z>-.85 || Math.abs(g.player.roll)>.30001)return false;
+                if(g.player.normal.z>-.85 || Math.abs(g.player.roll)>rollLimit+1e-9)return false;
               }
             }
             const pose=JSON.stringify(g.player);
@@ -69,6 +74,129 @@ const { root } = require('./helpers.cjs');
             if(JSON.stringify(g.player)!==pose)return false;
           }
           g.settings.hand='right';g.returnToMenu();return true;
+        });
+        /* The authored limits and the bound above are one invariant, stated
+           once: however the pose is re-tuned, the worst deflection it can
+           reach must still leave the blade facing down the table. */
+        check('blade pose limits are anatomical and keep the face pointing down the table', () => {
+          const P=RACKET_POSE;
+          return P.pitch>0 && P.yaw>0 && P.roll>0 &&
+            P.roll<=RIG_EXTRA_ROLL && P.roll+GRIP_ROLL<=RIG_TOTAL_ROLL &&
+            Math.cos(P.pitch)*Math.cos(P.yaw)>=0.85 &&
+            P.snapForehand>P.snapBackhand && P.rateSnap>P.rateRoll;
+        });
+        /* The regression this whole module exists for. Measured before the
+           fix, in this exact harness: parking the bat at the far right moved
+           the face 0.1 deg of yaw and 0.1 deg of roll, forward/back mouse
+           travel changed nothing at all, the left button did nothing until it
+           was released, and switching hands only flipped the sign of that
+           0.1 deg. Every number below is a floor that the old code missed by
+           two orders of magnitude. */
+        check('the blade really tilts from mouse travel in all four directions', () => {
+          const D=180/Math.PI;
+          const sweep=(from,to)=>{
+            g.settings.hand='right';
+            g.startMatch(2);g.ball.live=false;g.recenterT=0;g.swipe.cancel();g.camVPReady=false;
+            g.pointer={x:.5,y:.55};g.pointerDown=false;
+            for(let i=0;i<90;i++)g.updatePlayerPaddle(1/60);
+            const peak={pitch:0,yaw:0,roll:0};
+            for(let i=1;i<=10;i++) {
+              g.pointer={x:from[0]+(to[0]-from[0])*i/10,y:from[1]+(to[1]-from[1])*i/10};
+              g.updatePlayerPaddle(1/60);
+              const d={pitch:g.pose.pitch*D,yaw:g.pose.yaw*D,roll:g.pose.roll*D};
+              for(const k in peak)if(Math.abs(d[k])>Math.abs(peak[k]))peak[k]=d[k];
+            }
+            for(let i=0;i<90;i++)g.updatePlayerPaddle(1/60);
+            return {peak,held:{pitch:g.pose.pitch*D,yaw:g.pose.yaw*D,roll:g.pose.roll*D}};
+          };
+          const right=sweep([.5,.55],[1,.55]), left=sweep([.5,.55],[0,.55]);
+          if(!(right.held.yaw>8 && right.held.roll<-8))return false;
+          if(!(left.held.yaw<-8 && left.held.roll>8))return false;
+          if(Math.abs(right.held.yaw+left.held.yaw)>1e-6)return false;
+          const fwd=sweep([.5,.60],[.5,.02]), back=sweep([.5,.40],[.5,.98]);
+          if(!(fwd.held.pitch>-2.9+5))return false;   // leaning in CLOSES the face
+          if(!(back.held.pitch<-2.9-5))return false;  // sitting back OPENS it
+          // and the motion itself, not only where it ends up, is visible
+          if(!(Math.abs(right.peak.roll)>5 && Math.abs(fwd.peak.pitch)>5))return false;
+          g.settings.hand='right';g.returnToMenu();return true;
+        });
+        check('the left button cocks the wrist before any travel and releases cleanly', () => {
+          g.settings.hand='right';
+          g.startMatch(2);g.ball.live=false;g.recenterT=0;g.swipe.cancel();g.camVPReady=false;
+          g.pointer={x:.62,y:.55};g.pointerDown=false;
+          for(let i=0;i<90;i++)g.updatePlayerPaddle(1/60);
+          const rest={pitch:g.pose.pitch,yaw:g.pose.yaw,roll:g.pose.roll};
+          g.pointerDown=true;g.swipe.down(.62,.55,g.time);
+          for(let i=0;i<8;i++)g.updatePlayerPaddle(1/60);
+          if(!(g.pose.press>0.7))return false;
+          if(!(g.pose.pitch<rest.pitch-0.01))return false;        // the face opens
+          if(!(Math.abs(g.pose.roll-rest.roll)>0.02))return false;  // the wrist winds (rad)
+          g.pointerDown=false;g.swipe.cancel();
+          for(let i=0;i<180;i++)g.updatePlayerPaddle(1/60);
+          if(g.pose.press!==0)return false;
+          if(Math.abs(g.pose.pitch-rest.pitch)>1e-9)return false;  // and it comes home
+          if(Math.abs(g.pose.roll-rest.roll)>1e-9)return false;
+          g.returnToMenu();return true;
+        });
+        check('the leading-hand control is in the settings, applies at once and survives a save', () => {
+          const btns=[...document.querySelectorAll('#handViews .opt[data-set="hand"]')];
+          if(btns.length!==2)return false;
+          g.ui.openSettings();
+          const left=btns.find(b=>b.dataset.val==='left'), right=btns.find(b=>b.dataset.val==='right');
+          left.click();
+          if(g.settings.hand!=='left')return false;
+          if(!left.classList.contains('sel')||left.getAttribute('aria-pressed')!=='true')return false;
+          if(right.classList.contains('sel')||right.getAttribute('aria-pressed')!=='false')return false;
+          if(g.pose.hand!=='left'||g.aiPose.hand!=='right')return false;   // both blades swap at once
+          /* opening the settings again must show the saved choice lit, not
+             whichever button was clicked last in a previous session */
+          g.saveSettings();
+          g.ui.syncSettings();
+          if(!left.classList.contains('sel'))return false;
+          right.click();
+          if(g.settings.hand!=='right'||g.pose.hand!=='right')return false;
+          g.saveSettings();
+          g.ui.closeSettings();
+          return true;
+        });
+        check('a right-hander and a left-hander hold visibly different blades at the same spot', () => {
+          const rig=g.rig,total=(hand,x)=>{
+            g.settings.hand=hand;
+            g.startMatch(2);g.ball.live=false;g.recenterT=0;g.swipe.cancel();g.camVPReady=false;
+            g.pointer={x,y:.55};
+            for(let i=0;i<90;i++)g.updatePlayerPaddle(1/60);
+            const q=rig.paddleQuat(Q.new(),g.player.normal,hand,g.player.swing,g.player.roll||0);
+            const m=M4.compose(M4.create(),V3.new(),q,V3.new(1,1,1));
+            const h=M4.transformDir(V3.new(),m,V3.new(0,-1,0));   // the handle
+            return {handleX:h.x,tilt:Math.atan2(-h.x,-h.y)*180/Math.PI};
+          };
+          let ok=true;
+          for(const x of [.08,.5,.92]) {
+            const r=total('right',x),l=total('left',x);
+            /* The posture angles agree by design (they are body-space and the
+               mirror is carried by the coordinate), so what has to differ is
+               the DRAWN blade: the grip, and which side is the forehand. */
+            if(Math.abs(r.tilt-l.tilt)<25)ok=false;
+            if(Math.abs(r.handleX)>1e-6 && Math.sign(r.handleX)===Math.sign(l.handleX))ok=false;
+          }
+          g.settings.hand='right';g.returnToMenu();return ok;
+        });
+        check('contact snaps the blade through the ball and the follow-through recovers', () => {
+          g.settings.hand='right';
+          g.startMatch(2);g.ball.live=false;g.recenterT=0;g.swipe.cancel();g.camVPReady=false;
+          g.pointer={x:.62,y:.55};
+          for(let i=0;i<90;i++)g.updatePlayerPaddle(1/60);
+          const before={pitch:g.pose.pitch,yaw:g.pose.yaw};
+          g.pose.strike(1);
+          for(let i=0;i<4;i++)g.updatePlayerPaddle(1/60);          // ~65 ms after contact
+          if(!(g.pose.snap>0.3))return false;
+          if(!(g.pose.pitch>before.pitch+0.03))return false;       // the face closes
+          if(!(g.pose.yaw<before.yaw))return false;                // and carries across
+          for(let i=0;i<600;i++)g.updatePlayerPaddle(1/60);        // 10 s later
+          if(g.pose.snap!==0)return false;
+          if(Math.abs(g.pose.pitch-before.pitch)>1e-9)return false;
+          if(Math.abs(g.pose.yaw-before.yaw)>1e-9)return false;
+          g.returnToMenu();return true;
         });
         check('input instructions use pointer capabilities, not viewport width', () => {
           return g.ui.inputMode===(navigator.maxTouchPoints>0 ? 'touch' : 'mouse');

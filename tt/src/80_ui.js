@@ -259,8 +259,11 @@ class UI {
     }));
     $$('.opt[data-set]').forEach((b) => b.addEventListener('click', () => {
       const k = b.dataset.set, v = b.dataset.val;
-      $$(`.opt[data-set="${k}"]`).forEach((x) => x.classList.remove('sel'));
-      b.classList.add('sel');
+      $$(`.opt[data-set="${k}"]`).forEach((x) => {
+        const selected = x === b;
+        x.classList.toggle('sel', selected);
+        x.setAttribute('aria-pressed', String(selected));
+      });
       this.applySetting(k, v);
     }));
     $$('input[type=range][data-set]').forEach((r) => r.addEventListener('input', () => {
@@ -797,7 +800,16 @@ class UI {
       case 'vol': s.volume = v / 100; g.audio.setVolume(v / 100); break;
       case 'cam': s.camera = v; break;
       case 'quality': s.quality = v; g.R.quality = v; g.resize(); break;
-      case 'hand': s.hand = v; break;
+      case 'hand':
+        s.hand = v === 'left' ? 'left' : 'right';
+        /* The blade changes hands the instant the player says so, not on the
+         * next point: both the grip angle the rig adds and WHICH side of the
+         * body counts as the forehand hang off it. update() re-reads the
+         * setting every frame anyway, so this only makes the switch visible
+         * while the game is paused behind the settings screen. */
+        if (g.pose) g.pose.setHand(s.hand);
+        if (g.aiPose) g.aiPose.setHand(s.hand === 'right' ? 'left' : 'right');
+        break;
       case 'trail': s.showTrail = v === 'on'; break;
       case 'predict': s.showPredict = v === 'on'; break;
       case 'zone': s.showZone = v === 'on'; break;
@@ -838,7 +850,26 @@ class UI {
     const rAst = $('#rAssist'), vAst = $('#vAssist');
     if (rAst) { rAst.value = astVal; rAst.setAttribute('aria-valuetext', astVal + ' процентов'); }
     if (vAst) vAst.textContent = astVal + '%';
+    this.syncOptGroups();
     this.syncCameraControls();
+  }
+
+  /** Segmented buttons that write a setting through data-set/data-val. The
+   *  selected one has to be marked from the SAVED value, not from whichever
+   *  button was clicked last — a returning player who is left-handed must
+   *  open the settings and see "ЛЕВАЯ" already lit. */
+  syncOptGroups() {
+    const s = this.game.settings;
+    const keys = [];
+    $$('.opt[data-set]').forEach((b) => { if (keys.indexOf(b.dataset.set) < 0) keys.push(b.dataset.set); });
+    for (const k of keys) {
+      const want = s[k];
+      $$('.opt[data-set="' + k + '"]').forEach((b) => {
+        const selected = b.dataset.val === String(want);
+        b.classList.toggle('sel', selected);
+        b.setAttribute('aria-pressed', String(selected));
+      });
+    }
   }
   syncCameraControls() {
     const g = this.game;
@@ -1462,7 +1493,9 @@ class UI {
         `      v ${sp.toFixed(2)} m/s = ${(sp * 3.6).toFixed(0)} km/h\n` +
         `      w (${b.w.x.toFixed(0)},${b.w.y.toFixed(0)},${b.w.z.toFixed(0)}) = ${(wl / TAU).toFixed(0)} rev/s\n` +
         `<b>Re</b> ${(Re / 1000).toFixed(1)}k  <b>S</b> ${S.toFixed(2)}  <b>Magnus</b> ${magn.toFixed(2)} g\n` +
-        `<b>paddle</b> v ${V3.len(g.player.vel).toFixed(2)} m/s\n` +
+        `<b>paddle</b> v ${V3.len(g.player.vel).toFixed(2)} m/s  <b>x</b> ${g.player.pos.x.toFixed(2)}  <b>z</b> ${g.player.pos.z.toFixed(2)}\n` +
+        `<b>blade</b> ${g.pose ? g.pose.readout() : '-'}\n` +
+        `      <b>hand</b> ${g.settings.hand === 'left' ? 'ЛЕВАЯ' : 'ПРАВАЯ'}  <b>forehand side</b> ${g.pose ? (g.pose.H > 0 ? 'СПРАВА' : 'СЛЕВА') : '-'}\n` +
         `<b>swipe</b> sp ${g.swipe.m.speed.toFixed(2)} curl ${g.swipe.m.curl.toFixed(2)}\n` +
         `<b>assist</b> ${(g.settings.assist * 100) | 0}%  <b>pos</b> ${(g.settings.posAssist * 100) | 0}%`;
     }

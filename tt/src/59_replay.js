@@ -19,7 +19,8 @@
 
 const REPLAY_HZ = 30;             // 30 Hz is smooth at 0.35× and halves memory
 const REPLAY_RING_S = 45;         // seconds of rolling history
-const REPLAY_FLOATS = 16;         // ball(3) + myPos(3) + myNrm(3) + aiPos(3) + aiNrm(3) + pad
+const REPLAY_FLOATS = 21;         // ball(3) + myPos(3) + myNrm(3) + aiPos(3) + aiNrm(3) + live
+                                  //   + myRoll + mySwing + aiRoll + aiSwing + aiLean
 const REPLAY_KEEP = 5;            // how many moments survive a whole match
 
 /* --------------------------- scoring ------------------------------- */
@@ -70,6 +71,16 @@ class MomentRecorder {
     f[i + 9] = ap.x; f[i + 10] = ap.y; f[i + 11] = ap.z;
     f[i + 12] = g.aiPaddle.normal.x; f[i + 13] = g.aiPaddle.normal.y; f[i + 14] = g.aiPaddle.normal.z;
     f[i + 15] = g.ball.live ? 1 : 0;
+    /* The wrist is part of the shot now. A reel that restores only the face
+       normal would replay every rally with a flat, lifeless blade, because
+       the bank and the contact snap live in the roll and the swing. The
+       scalars are recorded raw (not pre-composed) so playback feeds them
+       through exactly the same drawing path live play does. */
+    f[i + 16] = g.player.roll || 0;
+    f[i + 17] = g.player.swing || 0;
+    f[i + 18] = g.aiPose ? g.aiPose.rollWorld : 0;
+    f[i + 19] = g.ai.anim.swing || 0;
+    f[i + 20] = g.ai.anim.lean || 0;
     this.head = (this.head + 1) % this.cap;
     if (this.n < this.cap) this.n++;
     this.t = t;
@@ -197,6 +208,13 @@ class MomentPlayer {
     V3.set(g.player.normal, L(6), L(7), L(8));
     V3.set(g.aiPaddle.pos, L(9), L(10), L(11));
     V3.set(g.aiPaddle.normal, L(12), L(13), L(14));
+    g.player.roll = L(16);
+    g.player.swing = L(17);
+    /* During playback updateAiPose() never runs (a replay owns the whole
+       update), so the pose it would have advanced is simply the clip's. */
+    if (g.aiPose) g.aiPose.rollWorld = L(18);
+    g.ai.anim.swing = L(19);
+    g.ai.anim.lean = L(20);
     V3.copy(g.ai.pos, g.aiPaddle.pos);
     g.ball.live = true;
     // trail: rebuild the last few frames of history so the ball draws a streak

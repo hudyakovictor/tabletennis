@@ -817,6 +817,17 @@ body:not(.is-playing) #topright{visibility:hidden;pointer-events:none}
         Помогает направить мяч на стол.
       </div>
 
+      <h3 class="sec">3. ВЕДУЩАЯ РУКА</h3>
+      <div class="row" id="handViews" role="group" aria-label="Ведущая рука">
+        <button class="opt" data-set="hand" data-val="right" aria-pressed="true"><b>ПРАВАЯ</b><small>хват и наклон правши</small></button>
+        <button class="opt" data-set="hand" data-val="left" aria-pressed="false"><b>ЛЕВАЯ</b><small>зеркально: хват, кисть, разворот</small></button>
+      </div>
+      <div style="font-size:11px;color:var(--dim);line-height:1.5;margin:4px 0 16px">
+        Ракетка наклоняется по-настоящему: справа от стола — как при форхенде,
+        слева — как при бэкхенде. Левша получает зеркальную позу, а не ту же самую.
+        Соперник играет другой рукой.
+      </div>
+
       <h3 class="sec">КАМЕРА</h3>
       <div class="row" id="cameraViews" role="group" aria-label="Вид камеры">
         <button class="opt" data-camera="BROADCAST"><b>ИГРА</b></button>
@@ -5294,6 +5305,22 @@ class OpponentAI {
  *  No hand/arm geometry. Drawing is a pure consumer of the gameplay pose.
  * ===================================================================== */
 
+/* The wrist's own range around the handle.
+ *  · GRIP_ROLL is the resting angle of the hand that holds it: a right-
+ *    hander's handle sits out toward the right hip, a left-hander's toward
+ *    the left. It is a property of the GRIP, not of a world direction, so
+ *    it is the one part of the blade's roll that does not mirror away when
+ *    the lateral pose is expressed in body space (see 57_pose.js).
+ *  · RIG_EXTRA_ROLL is the safety clamp on everything the pose adds on top
+ *    (stance bank, mouse lead, cock, contact snap). It is wider than the
+ *    pose's own authored limit so the renderer can never truncate a pose.
+ *  · RIG_TOTAL_ROLL is the anatomical ceiling: grip + swing + pose, so no
+ *    combination of inputs can ever wind the blade into a corkscrew. */
+const GRIP_ROLL = 0.42;
+const RIG_EXTRA_ROLL = 0.44;
+const RIG_SWING_ROLL = 0.14;
+const RIG_TOTAL_ROLL = 1.05;
+
 class PaddleRig {
   constructor() {
     this._q = Q.new();
@@ -5306,11 +5333,26 @@ class PaddleRig {
     this._up = { x: 0, y: 1, z: 0 };
   }
 
-  /** Absolute orientation, with only a small, bounded grip/swing roll. */
+  /** Absolute orientation, with only a small, bounded grip/swing roll.
+   *
+   *  The roll is composed in the order the arm composes it: the grip the
+   *  hand holds (a constant of WHICH hand, mirrored by hand), the rotation
+   *  through the ball that the same grip produces (so it turns the way the
+   *  wrist actually turns, not the same way for both hands), and finally
+   *  whatever posture the pose module asks for (stance bank, mouse lead,
+   *  cock, snap). The total is clamped, so no combination of inputs can
+   *  wind the blade past the wrist's range.
+   *
+   *  Roll is about local +Z, which IS the face normal, so none of this can
+   *  change the direction the blade hits in — only the angle the handle
+   *  stands at. That invariant is what tests/paddle.test.js pins. */
   paddleQuat(out, normal, hand, swing, extraRoll) {
     Q.lookRotation(out, normal, this._up);
-    const roll = (hand === 'left' ? 0.42 : -0.42)
-      + clamp(swing || 0, -1, 1) * 0.3 + clamp(extraRoll || 0, -0.35, 0.35);
+    const gripSign = hand === 'left' ? 1 : -1;
+    const roll = clamp(
+      gripSign * (GRIP_ROLL + clamp(swing || 0, -1, 1) * RIG_SWING_ROLL)
+      + clamp(extraRoll || 0, -RIG_EXTRA_ROLL, RIG_EXTRA_ROLL),
+      -RIG_TOTAL_ROLL, RIG_TOTAL_ROLL);
     return Q.mul(out, out, Q.setAxisAngle(this._rollQ, 0, 0, 1, roll));
   }
 
@@ -5771,6 +5813,408 @@ function paddleVisibleOk(vp, t, margin) {
 }
 
 
+/* ====== 57_pose.js ====== */
+/* =====================================================================
+ *  RACKET POSE — how the blade is actually held, from the body outward.
+ *
+ *  Before this module the bat had a face normal that came from the stroke
+ *  and a "bank" that came from nowhere in particular. The whole postural
+ *  model of the game was two lines:
+ *
+ *      padYaw = smooth(clamp(vel.x *  0.062, ±0.46))
+ *      padRoll = smooth(clamp(vel.x * -0.040, ±0.30)) * handed
+ *
+ *  i.e. a transient twitch off the bat's lateral SPEED, and nothing else.
+ *  Measured in Chromium (tt/tools/_pose.js) that produced:
+ *
+ *      park the bat at the far right of the table  -> yaw 0.1 deg, roll 0.1 deg
+ *      move the mouse forward / back               -> 0.0 deg, exactly nothing
+ *      switch the player to left-handed            -> the sign of that 0.1 deg
+ *      hold the left mouse button                  -> nothing until release
+ *
+ *  which is the "there is code for it but nothing works" state. Velocity is
+ *  also the wrong input: a hand that has finished moving still holds a
+ *  posture, and that posture is what the eye reads.
+ *
+ *  This module replaces it with one model, and every term is a posture the
+ *  body KEEPS, with the hand's motion layered on top of it:
+ *
+ *   1. STANCE  — where the bat is, left or right of the body. Reach to your
+ *      right and the face opens right while the wrist banks so the handle
+ *      stays out and the blade head comes in across the body. This is the
+ *      loudest cue in real table tennis: it is what makes a forehand look
+ *      like a forehand and a wide backhand look like a wide backhand, and
+ *      it holds while you stand there, not only while you travel.
+ *   2. DEPTH   — leaning in over the table CLOSES the face; sitting back
+ *      OPENS it. Forward/back mouse travel finally does something.
+ *   3. HEIGHT  — a high bat closes (you hit down through the ball), a low
+ *      bat opens (you have to lift it). Players do this without thinking.
+ *   4. MOTION  — the hand leads the blade. Bat velocity AND raw pointer
+ *      velocity add a bounded wrist lead on all three axes. The pointer
+ *      term matters on desktop: the mouse keeps moving after the bat has
+ *      run out of reach at the edge of the box, and a real wrist keeps
+ *      cocking when the arm can no longer travel.
+ *   5. PRESS   — the click (or the finger landing) cocks the wrist: the
+ *      face opens a touch, the yaw winds back toward the hip and the roll
+ *      winds opposite the snap. It reaches full cock in ~60 ms, so a button
+ *      press has an immediate physical answer before any travel happens.
+ *   6. SNAP    — contact. The wrist whips through the ball: the face
+ *      closes, the yaw carries across the body and the roll reverses, then
+ *      all three decay over ~0.3 s. That decay IS the follow-through, and
+ *      it is the reason a hit reads as a hit instead of a teleport.
+ *
+ *  ---------------------------------------------------------------------
+ *  HANDEDNESS — why there is no `* handed` anywhere below.
+ *
+ *  A left-hander is a right-hander reflected in the sagittal plane, and
+ *  that reflection is x -> -x. A reflection conjugates a rotation into its
+ *  inverse: M·Ry(t)·M = Ry(-t) and M·Rz(t)·M = Rz(-t). So reflecting
+ *  "righty reaching RIGHT, face open right, handle out right" gives "lefty
+ *  reaching LEFT, face open left, handle out left" — the same posture, the
+ *  same side of the body, mirrored in the world.
+ *
+ *  The consequence is the part the old code got wrong: once the lateral
+ *  coordinate is expressed in BODY space (xnBody = worldX * side), the
+ *  stance, depth, height, motion, press and snap terms are ALREADY mirror
+ *  correct and must not be multiplied by a handedness sign. The old
+ *  `* handed` on the roll did exactly that, which made a lefty bank the
+ *  same way as a righty at the same WORLD x — the one thing a reflection
+ *  can never do, and the reason switching hands looked like nothing.
+ *
+ *  Handedness genuinely enters in two places only, both of them real:
+ *    · the GRIP angle the rig adds (±0.42 rad): the resting angle of that
+ *      particular wrist around the handle, which is not a world direction
+ *      and therefore does not mirror away;
+ *    · WHICH side of the body counts as the FOREHAND (fhFlag below), used
+ *      to scale the contact snap, because a forehand wrist snap is much
+ *      stronger than a backhand one and those two sides swap between hands.
+ *
+ *  Everything is authored in BODY space (pitch/yaw/roll positive = closed /
+ *  toward the player's right / handle toward the player's left) and only
+ *  converted to world at the end, so the same class drives the player
+ *  (side +1, facing -Z) and the opponent (side -1, facing +Z) with no
+ *  special cases.
+ * ===================================================================== */
+
+const RACKET_POSE = {
+  /* ---- authored limits, radians. These ARE the anatomy: the wrist has
+   * no more range than this, so a pathological input (a teleported cursor,
+   * a 4000 dpi flick) can never wind the blade into a corkscrew. Together
+   * they bound the drawn face normal at cos(pitch)·cos(yaw) >= 0.89 of
+   * straight ahead, which is what the browser regression suite checks. */
+  pitch: 0.34,             // ±19 deg  open / closed
+  yaw: 0.32,               // ±18 deg  face turned left / right
+  roll: 0.42,              // ±24 deg  wrist bank on top of the grip angle
+                           //          (the rig clamps its own extra roll to
+                           //          RIG_EXTRA_ROLL = 0.44 and the total to
+                           //          RIG_TOTAL_ROLL = 1.05)
+
+  /* ---- the ready position. Slightly open, square to the table: the same
+   * resting face the game has always had, so a bat at home looks at home. */
+  restPitch: -0.05,        // -2.9 deg, normal.y = -0.05
+
+  /* ---- 1. stance: where the bat is, left/right of the body.
+   * Sign convention, stated once: the blade HEAD LAGS THE HAND. Reach (or
+   * travel) to your right and the heavy head stays behind, so the handle
+   * stands out toward the right and the head leans in across the body —
+   * the same reason the bat banks when you step wide to cover a ball. Both
+   * the stance and the velocity terms below use that one sign, so a bat
+   * held at the right edge looks like the bat that just arrived there. */
+  stanceYaw: 0.26,         // reach right -> the face opens right
+  stanceRoll: 0.34,        // handle OUT toward the reach, head IN across
+
+  /* ---- 2/3. depth and height posture */
+  depthPitch: 0.22,        // leaning in over the table closes the face
+  heightPitch: 0.17,       // a high bat closes, a low bat opens
+
+  /* ---- 4. motion. Two sources, deliberately: the bat's own velocity is
+   * what the body did, the pointer's velocity is what the hand is still
+   * asking for after the bat hit the edge of its box. Measured: with only
+   * the bat term, a mouse pushed past the reach limit produced nothing at
+   * all, because the bat had stopped. */
+  velYaw: 0.055, velYawMax: 0.16,      // per m/s of lateral bat travel
+  velRoll: 0.040, velRollMax: 0.15,
+  velPitch: 0.050, velPitchMax: 0.15,  // per m/s of forward bat travel
+  ptrYaw: 0.045, ptrYawMax: 0.13,      // per normalised screen unit / s
+  ptrPitch: 0.055, ptrPitchMax: 0.15,
+  ptrRoll: 0.030, ptrRollMax: 0.11,
+  ptrSpeedMax: 8,          // clamp on the raw pointer speed, units/s
+
+  /* ---- 5. press: the click cocks the wrist */
+  pressPitch: -0.11,       // taking it back opens the face a touch
+  pressYaw: 0.11,          // and winds the face toward the reaching side
+  pressRoll: 0.17,         // roll winds OPPOSITE the snap it is about to make
+  pressIn: 26,             // 1/s -> two thirds cocked in ~40 ms, full in ~0.1 s
+  pressOut: 10,            // the cock is spent, not released, at contact
+
+  /* ---- 6. snap: contact, and the follow-through it decays into */
+  snapPitch: 0.24,         // the wrist flexes: the face closes through the ball
+  snapYaw: 0.15,           // and carries ACROSS the body
+  snapRoll: 0.30,
+  snapForehand: 1.50,      // a forehand snap is a real wrist whip ...
+  snapBackhand: 0.55,      // ... a backhand one is mostly forearm
+  snapDecay: 13.0,         // 1/s -> 96 % gone in 0.25 s: a readable follow-
+                           //        through that is still back before the
+                           //        next ball arrives
+  snapDecayNoFollow: 30,   // settings.followThrough off: stop at the ball
+
+  /* ---- smoothing, 1/s. The postural rates are slow enough that the blade
+   * has mass; rateSnap takes over while the contact impulse is live, because
+   * a wrist whip happens in ~50 ms and must not be smeared across a third of
+   * a second by a filter tuned for standing still. */
+  ratePitch: 15, rateYaw: 15, rateRoll: 13, rateSnap: 44,
+};
+
+/* The rig adds its own clamped extra roll (RIG_EXTRA_ROLL in 56_rig.js,
+ * 0.40 rad). It is deliberately a little wider than RACKET_POSE.roll above
+ * so an authored pose can never be silently truncated by the renderer. */
+
+class RacketPose {
+  /**
+   * @param {object} [o]
+   * @param {'right'|'left'} [o.hand]  which hand holds it
+   * @param {number} [o.side]          +1 near side (faces -Z), -1 far side
+   * @param {{x:number,y:number,z:number}} [o.home] ready position, world metres
+   */
+  constructor(o) {
+    const opts = o || {};
+    this.side = opts.side < 0 ? -1 : 1;
+    this.hand = opts.hand === 'left' ? 'left' : 'right';
+    this.home = opts.home ? { x: opts.home.x, y: opts.home.y, z: opts.home.z } : null;
+    /* The near side's ready pose comes from the control mapping itself, so
+     * "the neutral pose" can never drift away from "where the cursor parks
+     * the bat". The far side is the same box reflected in the net. */
+    if (!this.home) {
+      const h = paddleTargetFromPointer(0.5, 0.55, 0.55, 1,
+        { tx: 0, ty: 0, tz: 0 }, { zNear: PADDLE_LIMITS.zNear });
+      this.home = { x: h.tx, y: h.ty, z: this.side > 0 ? h.tz : -h.tz };
+    }
+    this.pitch = RACKET_POSE.restPitch;
+    this.yaw = 0;
+    this.roll = 0;                 // BODY space: + = handle toward the left hand side
+    this.rollWorld = 0;            // what the rig consumes
+    this.normal = V3.new(0, Math.sin(this.pitch), -this.side * Math.cos(this.pitch));
+    this.press = 0;                // 0..1 wrist cock, from the button/finger being down
+    this.snap = 0;                 // 0..1 contact impulse, decays into the follow-through
+    this.snapSide = 0;             // which side of the body that contact was on
+    this.snapForehand = 1;         // 0 backhand .. 1 forehand, latched at contact
+    this.xnBody = 0;               // cached lateral stance, body space
+    this.ptrVel = { x: 0, y: 0 };  // smoothed raw pointer speed, screen units/s
+    this._ptr = null;
+    this._lastHand = this.hand;
+  }
+
+  /** +1 right-handed, -1 left-handed. */
+  get H() { return this.hand === 'left' ? -1 : 1; }
+
+  /** Switching hands must not teleport the blade: only the grip and the
+   *  forehand/backhand flag change, and both are read fresh every frame. */
+  setHand(h) {
+    const next = h === 'left' ? 'left' : 'right';
+    if (next === this.hand) return false;
+    this.hand = next; this._lastHand = next;
+    return true;
+  }
+
+  /** Back to the ready position, instantly. Called on every new point. */
+  reset() {
+    this.pitch = RACKET_POSE.restPitch;
+    this.yaw = 0; this.roll = 0; this.rollWorld = 0;
+    this.press = 0; this.snap = 0; this.snapSide = 0;
+    this.ptrVel.x = 0; this.ptrVel.y = 0;
+    this._ptr = null;
+    this.xnBody = 0;
+    return this._buildNormal();
+  }
+
+  /**
+   * Contact. Fires the wrist snap; the decay afterwards is the
+   * follow-through. Power scales it so a block barely flicks and a loop
+   * whips right round.
+   * @param {number} [power] 0..1
+   */
+  strike(power) {
+    const P = RACKET_POSE;
+    const p = clamp(Number.isFinite(power) ? power : 1, 0, 1.4);
+    this.snapSide = clamp(this.xnBody * 2, -1, 1);
+    this.snapForehand = this.forehandFlag(this.xnBody);
+    this.snap = clamp(0.45 + 0.55 * p, 0, 1);
+    this.press = 0;                 // the cock has been spent on the ball
+    return this.snap;
+  }
+
+  /**
+   * 0 on the backhand side of the body, 1 on the forehand side. THIS is
+   * where handedness actually bites: for a right-hander the forehand is at
+   * xnBody > 0, for a left-hander at xnBody < 0, and the reflection is
+   * carried by the sign of H rather than by a sign on the whole model.
+   */
+  forehandFlag(xnBody) {
+    return (clamp((xnBody || 0) * this.H * 3, -1, 1) + 1) * 0.5;
+  }
+
+  /** Reach box -> body-space normalised coordinates, all in [-1, 1]. */
+  coords(inp) {
+    const side = this.side, home = this.home;
+    const L = Math.max(1e-3, Number.isFinite(inp.xLimit) ? inp.xLimit : PADDLE_LIMITS.x);
+    /* zIn is the closest the bat may get to the net, zOut the furthest back.
+     * Both are world z; the ranges are asymmetric on purpose, because
+     * leaning in over the table covers nearly a metre while standing back
+     * covers sixty centimetres, and each should still read as "full". */
+    const zIn = Number.isFinite(inp.zIn) ? inp.zIn : (side > 0 ? PADDLE_LIMITS.zNear : -PADDLE_LIMITS.zFar);
+    const zOut = Number.isFinite(inp.zOut) ? inp.zOut : (side > 0 ? PADDLE_LIMITS.zFar : -PADDLE_LIMITS.zNear);
+    const yLo = Number.isFinite(inp.yLo) ? inp.yLo : PH.TABLE_Y + PADDLE_LIMITS.yLo;
+    const yHi = Number.isFinite(inp.yHi) ? inp.yHi : PH.TABLE_Y + PADDLE_LIMITS.yHi;
+
+    const x = Number.isFinite(inp.x) ? inp.x : home.x;
+    const y = Number.isFinite(inp.y) ? inp.y : home.y;
+    const z = Number.isFinite(inp.z) ? inp.z : home.z;
+
+    const xn = clamp((x - home.x) / L, -1, 1) * side;      // + = the player's right
+    const fwd = (home.z - z) * side;                       // + = toward the table
+    const fwdRange = Math.max(0.05, (home.z - zIn) * side);
+    const backRange = Math.max(0.05, (zOut - home.z) * side);
+    const zn = clamp(fwd > 0 ? -fwd / fwdRange : -fwd / backRange, -1, 1);
+    const dy = y - home.y;
+    const yn = clamp(dy > 0 ? dy / Math.max(0.05, yHi - home.y)
+      : dy / Math.max(0.05, home.y - yLo), -1, 1);
+    return { xn, zn, yn };
+  }
+
+  /**
+   * Advance one frame.
+   *
+   * @param {number} dt seconds
+   * @param {object} inp
+   *   hand {'right'|'left'}   · x,y,z bat position (world m)
+   *   vx,vz bat velocity (world m/s) · ptrX,ptrY raw pointer (0..1 screen)
+   *   zIn,zOut,yLo,yHi reach box (world) · pressing {boolean}
+   *   followThrough {boolean} · isServe {boolean}
+   * @returns {RacketPose} this
+   */
+  update(dt, inp) {
+    const P = RACKET_POSE, o = inp || {};
+    const step = clamp(Number.isFinite(dt) ? dt : 1 / 60, 1 / 480, 1 / 12);
+    if (o.hand) this.setHand(o.hand);
+    const side = this.side;
+
+    /* ---- raw pointer speed, in screen units per second ------------- *
+     * Tracked here rather than in the input layer because the pointer is
+     * the one signal that survives the bat reaching the edge of its box,
+     * and because it has to be smoothed to survive a 1000 Hz mouse. */
+    if (Number.isFinite(o.ptrX) && Number.isFinite(o.ptrY)) {
+      if (this._ptr) {
+        const iv = 1 / Math.max(step, 1e-3);
+        this.ptrVel.x = expSmooth(this.ptrVel.x, clamp((o.ptrX - this._ptr.x) * iv, -P.ptrSpeedMax, P.ptrSpeedMax), 22, step);
+        this.ptrVel.y = expSmooth(this.ptrVel.y, clamp((o.ptrY - this._ptr.y) * iv, -P.ptrSpeedMax, P.ptrSpeedMax), 22, step);
+      }
+      this._ptr = this._ptr || { x: 0, y: 0 };
+      this._ptr.x = o.ptrX; this._ptr.y = o.ptrY;
+    } else { this.ptrVel.x = 0; this.ptrVel.y = 0; this._ptr = null; }
+
+    const c = this.coords(o);
+    this.xnBody = c.xn;
+
+    /* bat and pointer velocity, both in body space */
+    const vxBody = (Number.isFinite(o.vx) ? clamp(o.vx, -9, 9) : 0) * side;
+    const vFwd = -(Number.isFinite(o.vz) ? clamp(o.vz, -9, 9) : 0) * side;
+    const pxBody = this.ptrVel.x * side;
+    const pFwd = -this.ptrVel.y;                  // screen up = toward the table
+
+    /* ---- press / snap envelopes ----------------------------------- */
+    const wantPress = o.pressing ? 1 : 0;
+    this.press = expSmooth(this.press, wantPress, wantPress ? P.pressIn : P.pressOut, step);
+    /* Both ends snap shut. A button held down is a posture the player is
+     * keeping, so it has to arrive and then stop moving; the same goes for
+     * letting go. Without the snaps the envelope asymptotes forever. */
+    if (this.press < 1e-4) this.press = 0;
+    else if (this.press > 1 - 1e-4) this.press = 1;
+    const decay = o.followThrough === false ? P.snapDecayNoFollow : P.snapDecay;
+    this.snap = expSmooth(this.snap, 0, decay, step);
+    if (this.snap < 1e-4) this.snap = 0;
+
+    const fh = this.forehandFlag(c.xn);
+    const reach = clamp(c.xn * 2, -1, 1);         // full at half the box width
+    const cock = this.press, snap = this.snap;
+    const snapK = lerp(P.snapBackhand, P.snapForehand, this.snapForehand);
+    const serveK = o.isServe ? 0.7 : 1;           // a serve toss is a smaller wrist
+
+    /* ---- 1..4. the posture the body holds -------------------------- */
+    let pitchT = P.restPitch
+      + c.yn * P.heightPitch                       // high -> close, low -> open
+      - c.zn * P.depthPitch                        // in -> close, back -> open
+      + clamp(vFwd * P.velPitch, -P.velPitchMax, P.velPitchMax)
+      + clamp(pFwd * P.ptrPitch, -P.ptrPitchMax, P.ptrPitchMax);
+
+    let yawT = c.xn * P.stanceYaw
+      + clamp(vxBody * P.velYaw, -P.velYawMax, P.velYawMax)
+      + clamp(pxBody * P.ptrYaw, -P.ptrYawMax, P.ptrYawMax);
+
+    let rollT = -c.xn * P.stanceRoll
+      + clamp(-vxBody * P.velRoll, -P.velRollMax, P.velRollMax)
+      + clamp(-pxBody * P.ptrRoll, -P.ptrRollMax, P.ptrRollMax);
+
+    /* ---- 5. the cock: wind back, opposite everything the snap does -- */
+    pitchT += cock * P.pressPitch;
+    yawT += cock * c.xn * P.pressYaw;
+    rollT += cock * reach * P.pressRoll;
+
+    /* ---- 6. the snap: whip through the ball, then follow through ---- */
+    pitchT += snap * P.snapPitch * snapK * serveK;
+    yawT -= snap * this.snapSide * P.snapYaw * snapK;
+    rollT -= snap * this.snapSide * P.snapRoll * snapK;
+
+    /* ---- clamp to the anatomy, then give the blade some mass -------- *
+     * Two time scales, not one. Posture drifts (15/s: the blade has mass
+     * and a body under it), contact snaps (44/s while the impulse is live:
+     * a wrist whip is over in ~50 ms and must not be smeared by a filter
+     * tuned for standing still). The blend is the snap envelope itself, so
+     * the fast rate fades out exactly as the follow-through does.
+     *
+     * `approach` snaps onto the target once it is within 1e-9 of it, which
+     * makes ANY steady input an exact fixed point rather than an asymptote.
+     * That is not cosmetic: the regression suite runs twelve idle seconds at
+     * 30/60/120 FPS and requires the normal not to move by 1e-8, and a pose
+     * that forever chases its own target by 1e-12 per frame also forever
+     * re-normalises, re-clamps and re-reads as "still moving". */
+    const boost = this.snap;
+    const approach = (cur, target, base, lo, hi) => {
+      const t = clamp(target, lo, hi);
+      return clamp(Math.abs(t - cur) < 1e-9 ? t : expSmooth(cur, t, lerp(base, P.rateSnap, boost), step), lo, hi);
+    };
+    this.pitch = approach(this.pitch, pitchT, P.ratePitch, -P.pitch, P.pitch);
+    this.yaw = approach(this.yaw, yawT, P.rateYaw, -P.yaw, P.yaw);
+    this.roll = approach(this.roll, rollT, P.rateRoll, -P.roll, P.roll);
+    /* -0 would survive a deepEqual against 0 as a difference, and a blade
+     * that is not banked is not banked either way round. */
+    this.rollWorld = this.roll === 0 ? 0 : this.roll * side;
+
+    return this._buildNormal();
+  }
+
+  /** Body-space angles -> the world face normal. */
+  _buildNormal() {
+    const cp = Math.cos(this.pitch), cy = Math.cos(this.yaw), n = this.normal;
+    n.x = Math.sin(this.yaw) * cp * this.side;
+    n.y = Math.sin(this.pitch);
+    n.z = -this.side * cy * cp;
+    return V3.norm(n, n);
+  }
+
+  /** Yaw expressed in WORLD x, which is what deriveStroke's azFace expects:
+   *  it builds the normal with plain sin(azFace) on x and -side on z, so a
+   *  positive azFace always opens toward world +x regardless of side. */
+  get yawWorld() { return this.yaw * this.side; }
+
+  /** Degrees, for the debug overlay. */
+  readout() {
+    return 'pitch ' + (this.pitch / DEG).toFixed(1) + '\u00b0  yaw ' + (this.yaw / DEG).toFixed(1)
+      + '\u00b0  roll ' + (this.roll / DEG).toFixed(1) + '\u00b0'
+      + '  cock ' + (this.press * 100).toFixed(0) + '%  snap ' + (this.snap * 100).toFixed(0) + '%';
+  }
+}
+
+
 /* ====== 58_coach.js ====== */
 /* =====================================================================
  *  RALLY RECORDER · POINT ANALYST · MATCH DIRECTOR
@@ -6093,7 +6537,8 @@ class MatchDirector {
 
 const REPLAY_HZ = 30;             // 30 Hz is smooth at 0.35× and halves memory
 const REPLAY_RING_S = 45;         // seconds of rolling history
-const REPLAY_FLOATS = 16;         // ball(3) + myPos(3) + myNrm(3) + aiPos(3) + aiNrm(3) + pad
+const REPLAY_FLOATS = 21;         // ball(3) + myPos(3) + myNrm(3) + aiPos(3) + aiNrm(3) + live
+                                  //   + myRoll + mySwing + aiRoll + aiSwing + aiLean
 const REPLAY_KEEP = 5;            // how many moments survive a whole match
 
 /* --------------------------- scoring ------------------------------- */
@@ -6144,6 +6589,16 @@ class MomentRecorder {
     f[i + 9] = ap.x; f[i + 10] = ap.y; f[i + 11] = ap.z;
     f[i + 12] = g.aiPaddle.normal.x; f[i + 13] = g.aiPaddle.normal.y; f[i + 14] = g.aiPaddle.normal.z;
     f[i + 15] = g.ball.live ? 1 : 0;
+    /* The wrist is part of the shot now. A reel that restores only the face
+       normal would replay every rally with a flat, lifeless blade, because
+       the bank and the contact snap live in the roll and the swing. The
+       scalars are recorded raw (not pre-composed) so playback feeds them
+       through exactly the same drawing path live play does. */
+    f[i + 16] = g.player.roll || 0;
+    f[i + 17] = g.player.swing || 0;
+    f[i + 18] = g.aiPose ? g.aiPose.rollWorld : 0;
+    f[i + 19] = g.ai.anim.swing || 0;
+    f[i + 20] = g.ai.anim.lean || 0;
     this.head = (this.head + 1) % this.cap;
     if (this.n < this.cap) this.n++;
     this.t = t;
@@ -6271,6 +6726,13 @@ class MomentPlayer {
     V3.set(g.player.normal, L(6), L(7), L(8));
     V3.set(g.aiPaddle.pos, L(9), L(10), L(11));
     V3.set(g.aiPaddle.normal, L(12), L(13), L(14));
+    g.player.roll = L(16);
+    g.player.swing = L(17);
+    /* During playback updateAiPose() never runs (a replay owns the whole
+       update), so the pose it would have advanced is simply the clip's. */
+    if (g.aiPose) g.aiPose.rollWorld = L(18);
+    g.ai.anim.swing = L(19);
+    g.ai.anim.lean = L(20);
     V3.copy(g.ai.pos, g.aiPaddle.pos);
     g.ball.live = true;
     // trail: rebuild the last few frames of history so the ball draws a streak
@@ -9437,6 +9899,17 @@ class Game {
       q: Q.new(), side: -1,
     };
 
+    /* One blade-pose model, two bodies. The player stands on the near side
+     * facing -Z, the opponent on the far side facing +Z; `side` is the only
+     * difference, and it is what makes the two mirror each other correctly
+     * instead of both leaning the same way in world space. The opponent's
+     * hand is the other one, which is what you see at a real table. */
+    this.pose = new RacketPose({ hand: this.settings.hand, side: 1 });
+    this.aiPose = new RacketPose({
+      hand: this.settings.hand === 'right' ? 'left' : 'right', side: -1,
+      home: { x: this.ai.home.x, y: this.ai.home.y, z: this.ai.home.z },
+    });
+
     this.recorder = new RallyRecorder();
     this.analyst = new PointAnalyst();
     this.director = new MatchDirector();
@@ -9461,17 +9934,8 @@ class Game {
     this.timeScale = 1; this.targetTimeScale = 1;
     this.shake = 0; this.shakeDir = V3.new();
 
-    // Follow-through state
-    this.followThrough = {
-      active: false,
-      t: 0,
-      startPos: V3.new(),
-      startNormal: V3.new(),
-      swingDir: V3.new(),
-      duration: 0.15,
-      visualPos: V3.new(),
-      visualNormal: V3.new(),
-    };
+    /* Follow-through has no state of its own any more: it is the decay of
+     * RacketPose.snap, which is per-blade and lives in this.pose / this.aiPose. */
 
     // Anticipation state
     this.anticipation = {
@@ -10668,6 +11132,23 @@ class Game {
     return m;
   }
 
+  /** The gesture that still describes the hand RIGHT NOW: an active swipe,
+   *  or one released inside the window in which the blade is visibly still
+   *  finishing it. `swipe.lastReleased` on its own never expires, so reading
+   *  it directly (which the pose used to do) froze the blade at the angle of
+   *  the last swipe forever. Note this is the *visual* window; whether a
+   *  gesture is allowed to HIT is playerStrokeIntent's business, and the two
+   *  deliberately do not share a number. */
+  freshGesture(window) {
+    const sw = this.swipe;
+    if (sw.active) return (sw.m && sw.m.samples > 1) ? sw.m : null;
+    if (!sw.lastReleased) return null;
+    const rel = Number.isFinite(this.swipeReleasedAt) ? this.swipeReleasedAt : -Infinity;
+    const age = this.time - rel;
+    const w = window !== undefined ? window : 0.30;
+    return age >= 0 && age < w ? sw.lastReleased : null;
+  }
+
   tryPlayerHit(p0) {
     const pad = this.player, b = this.ball;
     if (!b.live) return;
@@ -10771,6 +11252,11 @@ class Game {
     V3.copy(b.p, contact);
     V3.addScaled(b.p, b.p, racket.normal, PH.R * 1.05);
     pad.swing = 1;
+    /* The wrist snap. Fires on the contact frame — not on the button press,
+     * not on the release — and its decay over the next ~0.3 s IS the
+     * follow-through. Scaled by how hard the gesture actually was, so a
+     * block barely flicks and a loop whips right round the body. */
+    if (this.pose) this.pose.strike(clamp(Math.max(racket.power || 0, quality * 0.8), 0, 1));
 
     // Multi-sensory hit feedback (99-level)
     if (this.hitFeedback) {
@@ -10819,6 +11305,9 @@ class Game {
     const info = impactRacket(b.v, b.w, racket.normal, racket.vR, racket.quality, racket.rubber || {});
     V3.copy(pad.normal, racket.normal);
     V3.copy(pad.pos, b.p);
+    /* The opponent's wrist snaps through the ball by the same model, so the
+     * far blade reads as held by a body rather than sliding on a rail. */
+    if (this.aiPose) this.aiPose.strike(clamp(racket.power || racket.quality || 0, 0, 1));
     if (this.isServeBall) { this.serveBounces = 0; this.rallyBounces.length = 0; this.isServeBall = false; }
     this.applyHit(-1, racket, contact, racket.quality, info);
   }
@@ -10838,6 +11327,11 @@ class Game {
     this.pointerDown = false;
     this.stanceY = undefined;
     this.padYaw = 0; this.padRoll = 0;
+    /* The wrist goes back to the ready position with the bat: no leftover
+     * cock from the button that ended the point, no leftover snap from the
+     * last contact. */
+    if (this.pose) this.pose.reset();
+    if (this.aiPose) this.aiPose.reset();
     /* 0.40 s, not 0.55: the window has to be over before a serve can possibly
      * be struck, or the bat is still travelling when the ball is hit. Measured
      * in the headless matches at 0.55 s: the closest the bat got to the centre
@@ -10855,7 +11349,10 @@ class Game {
       V3.copy(pad.prev, pad.pos);
       V3.zero(pad.vel);
     }
-    V3.set(pad.normal, 0, -0.05, -1); V3.norm(pad.normal, pad.normal);
+    /* Ready position, read from the pose model instead of restated here, so
+     * the bat's resting face can never drift away from the resting wrist. */
+    if (this.pose) { V3.copy(pad.normal, this.pose.normal); pad.pitch = this.pose.pitch; }
+    else { V3.set(pad.normal, 0, -0.05, -1); V3.norm(pad.normal, pad.normal); }
     pad.swing = 0;
     this._ptTarget = { tx: 0, ty: PH.TABLE_Y + 0.25, tz: 1.44 };
   }
@@ -10997,40 +11494,57 @@ class Game {
     V3.sub(pad.vel, pad.pos, pad.prevPos);
     V3.mul(pad.vel, pad.vel, 1 / Math.max(dt, 1e-4));
 
-    /* ---- the bat turns into the step ------------------------------- *
-     * Move right and the face opens to the right; move left and it opens
-     * to the left, with the wrist banking the way it does when you actually
-     * cover ground. This is what makes the bat read as held by a body
-     * instead of sliding around on a rail — and because the same yaw is fed
-     * into the stroke at contact, the face you SEE is the face that hits. */
-    const lat = clamp(pad.vel.x, -7, 7);
-    this.padYaw = expSmooth(this.padYaw || 0, clamp(lat * 0.062, -0.46, 0.46), 11, dt);
-    const handed = this.settings.hand === 'right' ? 1 : -1;
-    this.padRoll = expSmooth(this.padRoll || 0, clamp(-lat * 0.040, -0.30, 0.30) * handed, 9, dt);
-    pad.yaw = this.padYaw; pad.roll = this.padRoll;
+    /* ---- the blade is held by a body, not slid along a rail --------- *
+     * Everything postural now lives in RacketPose (57_pose.js): which side
+     * of the table the bat is on, how far in over the table the hand is
+     * leaning, how high it is, where the mouse/finger is still travelling,
+     * whether the button is down, and the wrist snap of the last contact.
+     * What comes back is a real face angle plus a real wrist bank, and the
+     * same yaw is handed to deriveStroke at contact below — so the face you
+     * SEE is the face that HITS. Both are bounded by the authored anatomy
+     * in RACKET_POSE, never by how fast the cursor happened to move. */
+    this.pose.update(dt, {
+      hand: this.settings.hand,
+      x: pad.pos.x, y: pad.pos.y, z: pad.pos.z,
+      vx: pad.vel.x, vz: pad.vel.z,
+      ptrX: pt.x, ptrY: pt.y,
+      zIn: zNear, zOut: PADDLE_LIMITS.zFar,
+      pressing: !!this.pointerDown,
+      followThrough: this.settings.followThrough !== false,
+      isServe: this.state === GS.SERVE_TOSS || this.state === GS.SERVE_READY,
+    });
+    this.padYaw = this.pose.yawWorld;
+    this.padRoll = this.pose.rollWorld;
+    pad.yaw = this.padYaw; pad.roll = this.padRoll; pad.pitch = this.pose.pitch;
 
-    // orientation follows the live gesture so you SEE the face angle
-    const sw = this.swipe;
-    const m = sw.active && sw.m.samples > 1 ? sw.m : sw.lastReleased;
-    let want = this._wantN || (this._wantN = V3.new(0, -0.05, -1));
-    V3.set(want, 0, -0.05, -1);
+    /* The target is absolute (posture + gesture), never a rotation of last
+     * frame's normal. Feeding the output back here accumulates pitch forever,
+     * which is why the old code rotated the gesture normal by padYaw a second
+     * time AFTER deriveStroke had already folded that same yaw into azFace. */
+    const want = this._wantN || (this._wantN = V3.new());
+    V3.copy(want, this.pose.normal);
+
+    // orientation follows the live gesture so you SEE the face angle — but
+    // only a FRESH one. `swipe.lastReleased` never expires on its own, so
+    // reading it without a window is how the blade used to freeze at the
+    // angle of the last swipe you ever made and never come back to ready.
+    const m = this.freshGesture();
     if (m) {
       const ctx = {
         side: 1, isServe: this.isServeBall, ball: { y: pad.pos.y, z: pad.pos.z },
         ballSpin: this.ball.w, ballSpeed: V3.len(this.ball.v), moveYaw: this.padYaw,
       };
       const st = deriveStroke(m, ctx);
-      V3.copy(want, st.normal);
       this.liveStroke = st;
-    } else this.liveStroke = null;
-
-    // The target is absolute (gesture + footwork), never a rotation of last
-    // frame's normal. Feeding the output back here accumulates pitch forever.
-    // apply the step yaw to the resting face as well
-    const cy = Math.cos(this.padYaw), sy = Math.sin(this.padYaw);
-    const wx = want.x * cy + want.z * sy, wz = -want.x * sy + want.z * cy;
-    want.x = wx; want.z = wz;
-    V3.norm(want, want);
+      /* How much of the face belongs to the stroke and how much to the
+       * posture. A committed swipe owns it completely — at contact the
+       * blended normal IS the stroke normal, so the drawing cannot lie about
+       * the physics. A five-pixel tremor of the mouse does not get to
+       * redraw your ready position. */
+      const k = clamp(m.dist * 4 + m.speed * 0.25, 0, 1);
+      V3.lerp(want, want, st.normal, k);
+      V3.norm(want, want);
+    }
     pad.normal.x = expSmooth(pad.normal.x, want.x, 18, dt);
     pad.normal.y = expSmooth(pad.normal.y, want.y, 18, dt);
     pad.normal.z = expSmooth(pad.normal.z, want.z, 18, dt);
@@ -11038,6 +11552,33 @@ class Game {
     pad.swing = Math.max(0, pad.swing - dt * 4.5);
     pad.hitRadius = lerp(0.080, 0.165, A) * (this.state === GS.SERVE_TOSS ? 1.5 : 1)
       * (zNear < PADDLE_LIMITS.zNear ? 1.12 : 1);
+  }
+
+  /** The opponent's blade is held by a body too: same model, far side of the
+   *  table, the other hand, and the reach box the AI actually moves inside
+   *  (55_ai.js noisyTarget: x ±1.12, z -2.50 .. -1.05). Called from update(),
+   *  never from draw — rendering is read-only, and the browser suite pins
+   *  that by comparing the whole paddle state across 20 render calls. */
+  updateAiPose(dtReal) {
+    const pose = this.aiPose;
+    if (!pose) return pose;
+    const ai = this.ai;
+    /* In an online match the far paddle belongs to the peer, so the pose has
+     * to follow the paddle that is actually drawn, not the local AI. */
+    const p = (this.network && this.network.isInMatch) ? this.aiPaddle.pos : ai.pos;
+    const prev = this._aiPosePrev || (this._aiPosePrev = V3.clone(p));
+    const iv = 1 / Math.max(dtReal, 1e-4);
+    const vx = clamp((p.x - prev.x) * iv, -9, 9), vz = clamp((p.z - prev.z) * iv, -9, 9);
+    V3.copy(prev, p);
+    pose.update(dtReal, {
+      hand: this.settings.hand === 'right' ? 'left' : 'right',
+      x: p.x, y: p.y, z: p.z, vx, vz,
+      xLimit: 1.12, zIn: -1.05, zOut: -2.5,
+      yLo: PH.TABLE_Y - 0.05, yHi: PH.TABLE_Y + 0.96,
+      pressing: false,
+      followThrough: this.settings.followThrough !== false,
+    });
+    return pose;
   }
 
   /**
@@ -11479,6 +12020,7 @@ class Game {
       V3.copy(this.aiPaddle.normal, op.normal);
     }
     else this.ai.think(this, dt);
+    this.updateAiPose(dtReal);
     this.tryAiHit();
     this.particles.update(dt);
     for (const m of this.marks) m.t += dtReal;
@@ -11487,37 +12029,15 @@ class Game {
     while (this.messages.length && this.messages[0].t > this.messages[0].dur) this.messages.shift();
     this.hitFlash = Math.max(0, this.hitFlash - dtReal * 3.2);
 
-    // Update follow-through
-    if (this.settings.followThrough) {
-      if (this.followThrough.active) {
-        this.followThrough.t += dtReal;
-        const progress = this.followThrough.t / this.followThrough.duration;
-        if (progress >= 1) {
-          this.followThrough.active = false;
-        } else {
-          // Smoothstep for natural deceleration
-          const smoothProgress = progress * progress * (3 - 2 * progress);
-          const decay = 1 - smoothProgress;
-
-          // Visual position — continues in swing direction, then decelerates
-          const ftOffset = V3.mul(V3.new(), this.followThrough.swingDir,
-            (1 - decay) * 0.25);
-          V3.copy(this.followThrough.visualPos, this.followThrough.startPos);
-          V3.add(this.followThrough.visualPos, this.followThrough.visualPos, ftOffset);
-
-          // Visual normal — follows face rotation with decay
-          const normalOffset = V3.mul(V3.new(), this.followThrough.startNormal,
-            (1 - decay) * 0.2);
-          V3.copy(this.followThrough.visualNormal, this.followThrough.startNormal);
-          V3.add(this.followThrough.visualNormal, this.followThrough.visualNormal, normalOffset);
-          V3.norm(this.followThrough.visualNormal, this.followThrough.visualNormal);
-
-          // Apply to player for rendering (but physics uses real pos)
-          V3.copy(this.player.pos, this.followThrough.visualPos);
-          V3.copy(this.player.normal, this.followThrough.visualNormal);
-        }
-      }
-    }
+    /* Follow-through. This block used to be a `this.followThrough` state
+     * machine that (a) was never activated by anything in the game, (b) built
+     * its "face rotation" by adding a vector PARALLEL to the normal and then
+     * normalising, which is exactly the identity, and (c) wrote the result
+     * into this.player.pos, i.e. into the position the physics and the sweep
+     * collision read, under a comment claiming the physics used the real one.
+     * The follow-through is now where it belongs: the decay of the contact
+     * snap inside RacketPose, driven by settings.followThrough, which rotates
+     * the blade only and can never move the bat the ball is caught against. */
 
     // Update anticipation
     if (this.settings.anticipationHint) {
@@ -11700,7 +12220,10 @@ class Game {
 
     // Opponent paddle; no hand, forearm or sleeve geometry.
     const ap = this.aiPaddle;
-    const an = V3.norm(V3.new(), V3.sub(V3.new(), this.ball.p, this.ai.pos));
+    /* In an online match the far paddle belongs to the peer, so nothing here
+     * may pull it back onto the local AI's position. */
+    const farPos = (this.network && this.network.isInMatch) ? ap.pos : this.ai.pos;
+    const an = V3.norm(V3.new(), V3.sub(V3.new(), this.ball.p, farPos));
     an.z = Math.abs(an.z) * 1 || 1;
     // Blend "look at the ball" with the stroke's own face angle, so the
     // backswing visibly opens for a chop and closes for a loop.
@@ -11709,12 +12232,29 @@ class Game {
       an.x * 0.4 * (1 - wd * 0.5),
       lerp(-0.1 + an.y * 0.3, fn.y * 1.5, wd),
       1));
+    /* The far blade is held by a body too. RacketPose gives it the same
+     * stance bank, the same lean in over the table and the same contact snap
+     * as the player's, reflected in the net and in the other hand. This is a
+     * READ: the pose is advanced in update(), because draw runs twice per
+     * frame (shadow + colour) and rendering must never move anything. */
+    const aiP = this.aiPose;
+    if (aiP) {
+      V3.lerp(aiNorm, aiNorm, aiP.normal, 0.34);      // posture, always visible
+      const sw = clamp(this.ai.anim.swing, 0, 1);
+      /* ...and on the contact frames the drawn face converges onto the face
+       * that actually struck the ball, so the far side obeys the same rule as
+       * the near one: what you see is what hits. */
+      if (sw > 0.01 && V3.len(fn) > 0.5) V3.lerp(aiNorm, aiNorm, fn, sw * 0.85);
+      V3.norm(aiNorm, aiNorm);
+    }
     V3.copy(ap.normal, aiNorm);
-    V3.copy(ap.pos, this.ai.pos);
+    V3.copy(ap.pos, farPos);
 
     this.rig.draw(R, S, {
-      pos: ap.pos, normal: aiNorm, hand: this.settings.hand === 'right' ? 'left' : 'right',
-      swing: -this.ai.anim.swing, roll: (this.ai.anim.lean || 0) * 0.22,
+      pos: ap.pos, normal: aiNorm,
+      hand: aiP ? aiP.hand : (this.settings.hand === 'right' ? 'left' : 'right'),
+      swing: -this.ai.anim.swing,
+      roll: (aiP ? aiP.rollWorld : 0) + (this.ai.anim.lean || 0) * 0.22,
       mats: this.paddleMats(S, this.aiEquip), shadowPass,
     });
 
@@ -12116,8 +12656,11 @@ class UI {
     }));
     $$('.opt[data-set]').forEach((b) => b.addEventListener('click', () => {
       const k = b.dataset.set, v = b.dataset.val;
-      $$(`.opt[data-set="${k}"]`).forEach((x) => x.classList.remove('sel'));
-      b.classList.add('sel');
+      $$(`.opt[data-set="${k}"]`).forEach((x) => {
+        const selected = x === b;
+        x.classList.toggle('sel', selected);
+        x.setAttribute('aria-pressed', String(selected));
+      });
       this.applySetting(k, v);
     }));
     $$('input[type=range][data-set]').forEach((r) => r.addEventListener('input', () => {
@@ -12654,7 +13197,16 @@ class UI {
       case 'vol': s.volume = v / 100; g.audio.setVolume(v / 100); break;
       case 'cam': s.camera = v; break;
       case 'quality': s.quality = v; g.R.quality = v; g.resize(); break;
-      case 'hand': s.hand = v; break;
+      case 'hand':
+        s.hand = v === 'left' ? 'left' : 'right';
+        /* The blade changes hands the instant the player says so, not on the
+         * next point: both the grip angle the rig adds and WHICH side of the
+         * body counts as the forehand hang off it. update() re-reads the
+         * setting every frame anyway, so this only makes the switch visible
+         * while the game is paused behind the settings screen. */
+        if (g.pose) g.pose.setHand(s.hand);
+        if (g.aiPose) g.aiPose.setHand(s.hand === 'right' ? 'left' : 'right');
+        break;
       case 'trail': s.showTrail = v === 'on'; break;
       case 'predict': s.showPredict = v === 'on'; break;
       case 'zone': s.showZone = v === 'on'; break;
@@ -12695,7 +13247,26 @@ class UI {
     const rAst = $('#rAssist'), vAst = $('#vAssist');
     if (rAst) { rAst.value = astVal; rAst.setAttribute('aria-valuetext', astVal + ' процентов'); }
     if (vAst) vAst.textContent = astVal + '%';
+    this.syncOptGroups();
     this.syncCameraControls();
+  }
+
+  /** Segmented buttons that write a setting through data-set/data-val. The
+   *  selected one has to be marked from the SAVED value, not from whichever
+   *  button was clicked last — a returning player who is left-handed must
+   *  open the settings and see "ЛЕВАЯ" already lit. */
+  syncOptGroups() {
+    const s = this.game.settings;
+    const keys = [];
+    $$('.opt[data-set]').forEach((b) => { if (keys.indexOf(b.dataset.set) < 0) keys.push(b.dataset.set); });
+    for (const k of keys) {
+      const want = s[k];
+      $$('.opt[data-set="' + k + '"]').forEach((b) => {
+        const selected = b.dataset.val === String(want);
+        b.classList.toggle('sel', selected);
+        b.setAttribute('aria-pressed', String(selected));
+      });
+    }
   }
   syncCameraControls() {
     const g = this.game;
@@ -13319,7 +13890,9 @@ class UI {
         `      v ${sp.toFixed(2)} m/s = ${(sp * 3.6).toFixed(0)} km/h\n` +
         `      w (${b.w.x.toFixed(0)},${b.w.y.toFixed(0)},${b.w.z.toFixed(0)}) = ${(wl / TAU).toFixed(0)} rev/s\n` +
         `<b>Re</b> ${(Re / 1000).toFixed(1)}k  <b>S</b> ${S.toFixed(2)}  <b>Magnus</b> ${magn.toFixed(2)} g\n` +
-        `<b>paddle</b> v ${V3.len(g.player.vel).toFixed(2)} m/s\n` +
+        `<b>paddle</b> v ${V3.len(g.player.vel).toFixed(2)} m/s  <b>x</b> ${g.player.pos.x.toFixed(2)}  <b>z</b> ${g.player.pos.z.toFixed(2)}\n` +
+        `<b>blade</b> ${g.pose ? g.pose.readout() : '-'}\n` +
+        `      <b>hand</b> ${g.settings.hand === 'left' ? 'ЛЕВАЯ' : 'ПРАВАЯ'}  <b>forehand side</b> ${g.pose ? (g.pose.H > 0 ? 'СПРАВА' : 'СЛЕВА') : '-'}\n` +
         `<b>swipe</b> sp ${g.swipe.m.speed.toFixed(2)} curl ${g.swipe.m.curl.toFixed(2)}\n` +
         `<b>assist</b> ${(g.settings.assist * 100) | 0}%  <b>pos</b> ${(g.settings.posAssist * 100) | 0}%`;
     }

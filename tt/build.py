@@ -5,7 +5,7 @@ SRC = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'src')
 OUT = sys.argv[1] if len(sys.argv) > 1 else os.path.join(os.path.dirname(SRC), '..', 'table-tennis-topspin.html')
 
 JS_ORDER = ['10_math.js','20_gl.js','25_career.js','27_network.js','30_physics.js','40_swipe.js','50_audio.js',
-            '55_ai.js','56_rig.js','57_camera.js','58_coach.js','59_replay.js','60_scene.js',
+            '55_ai.js','56_rig.js','57_camera.js','57_pose.js','58_coach.js','59_replay.js','60_scene.js',
             '65_train.js','75_feedback.js','75_music.js','76_emotion.js','81_uiAnim.js','84_racket.js',
             '86_meta.js','70_game.js','80_ui.js','90_boot.js']
 
