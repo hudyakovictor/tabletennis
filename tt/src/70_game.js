@@ -154,6 +154,7 @@ class Game {
     this.lastSwipeT = -9;
     this.lastSwipeLate = false;
     this.pointNote = null;               // one-line diagnosis of the last point
+    this.pointerFine = true;             // mouse/pen vs finger: wrist follow rate
 
     this.state = GS.MENU;
     this.paused = false;
@@ -362,17 +363,11 @@ class Game {
       }
 
       this.swipe.down(n.x, n.y, this.time);
-      // Desktop click commits the recent hover direction. Touch must still
-      // travel: never manufacture a swipe from a finger landing.
-      if (e.pointerType === 'mouse') {
-        const recent = (this.mouseTrail || []).filter(p => this.time - p.t < 0.12);
-        const a = recent[0];
-        const dx = a ? n.x - a.x : 0, dy = a ? n.y - a.y : 0;
-        const moving = Math.hypot(dx, dy) >= 0.018;
-        this.swipe.samples[0] = { x: moving ? a.x : n.x,
-          y: moving ? a.y : n.y + 0.035, t: this.time - 0.06 };
-        this.swipe.move(n.x, n.y, this.time);
-      }
+      /* Mouse hover already drives the BAT. Committing that trail (or worse,
+         inventing a 3.5 % upward flick) on button-down made a motionless
+         click look like a stroke — the ball came off the rubber with no
+         swing. Desktop now matches touch: the stroke is the drag while the
+         button is down. Hover still aims; it does not hit. */
       this._lastPointSwipe = {
         startT: this.time,
         sx: n.x, sy: n.y,
@@ -380,6 +375,7 @@ class Game {
         stroke: null
       };
       this.pointer = n; this.pointerDown = true;
+      this.pointerFine = e.pointerType !== 'touch' && e.pointerType !== 'pen';
       if (this.state === GS.SERVE_READY && this.server === 1) this.startToss();
     };
 
@@ -390,6 +386,7 @@ class Game {
     const track = (e) => {
       const n = norm(e);
       this.pointer = n;
+      if (e.pointerType) this.pointerFine = e.pointerType !== 'touch' && e.pointerType !== 'pen';
       if (e.pointerType === 'mouse') {
         this.mouseTrail = (this.mouseTrail || []).filter(p => this.time - p.t < 0.14);
         this.mouseTrail.push({ x: n.x, y: n.y, t: this.time });
@@ -1388,10 +1385,14 @@ class Game {
     const sw = this.swipe;
     const lastSample = sw.samples[sw.samples.length - 1];
     const releasedAt = Number.isFinite(this.swipeReleasedAt) ? this.swipeReleasedAt : -Infinity;
-    const m = sw.active && lastSample && this.time - lastSample.t >= 0 && this.time - lastSample.t < 0.18 ? sw.m
-      : !sw.active && this.time - releasedAt >= 0 && this.time - releasedAt < (serving ? 0.9 : 0.25) ? sw.lastReleased : null;
-    if (!m || m.samples < 2 || !Number.isFinite(m.pathLen) || m.pathLen < 0.018 ||
-        !Number.isFinite(m.peakSpeed) || m.peakSpeed < 0.10) return null;
+    /* A serve is struck on the way down, often after the swipe has already
+       finished or the hand is waiting at the end of the flick. 0.18 s of
+       freshness (correct for a rally) dropped a legal toss strike. */
+    const liveWin = serving ? 1.15 : 0.18;
+    const deadWin = serving ? 1.15 : 0.25;
+    const m = sw.active && lastSample && this.time - lastSample.t >= 0 && this.time - lastSample.t < liveWin ? sw.m
+      : !sw.active && this.time - releasedAt >= 0 && this.time - releasedAt < deadWin ? sw.lastReleased : null;
+    if (!isRealStroke(m, serving)) return null;
     return m;
   }
 
@@ -1400,9 +1401,16 @@ class Game {
     if (!b.live) return;
     if (b.v.z < 0 && b.p.z < pad.pos.z - 0.35) return;
 
-    // Parameter 1: Область попадания (hitZone: 30% .. 100% -> 0.45м .. 1.30м)
+    // Parameter 1: hit zone. The blade is ~15 cm; the slider adds forgiveness,
+    // it does not magnet the whole court (the old 0.35+0.95·hz ≈ 1.16 m let
+    // any click on the half return the ball).
     const hzSetting = this.settings.hitZone !== undefined ? this.settings.hitZone : 0.85;
-    const reachRadius = 0.35 + hzSetting * 0.95;
+    const reachRadius = 0.14 + hzSetting * 0.26;
+    const zReach = 0.16 + hzSetting * 0.22;
+    /* Serve: the toss is a 40 mm sphere you swipe through, not a pixel hunt.
+       Rally reach is tight; the toss needs the bat to still meet a dropping
+       ball after an upward flick lifted the pointer. */
+    const serveReach = Math.max(reachRadius, 0.38 + hzSetting * 0.28);
 
     const serveCtx = this.state === GS.SERVE_TOSS && this.server === 1 && b.lastHitBy === 0;
     const sw = this.swipe, m = this.playerStrokeIntent(serveCtx);
@@ -1413,7 +1421,7 @@ class Game {
     if (serveCtx) {
       // ITTF 2.06: the ball must be struck while FALLING from the toss.
       const rad = V3.dist(b.p, pad.pos);
-      if (b.v.y < 0 && this.tossApex - PH.TABLE_Y > 0.10 && rad <= reachRadius) {
+      if (b.v.y < 0 && this.tossApex - PH.TABLE_Y > 0.10 && rad <= serveReach) {
         hit = { t: 1, x: b.p.x, y: b.p.y, z: b.p.z, rad: rad * 0.40, px: pad.pos.x, py: pad.pos.y, pz: pad.pos.z };
       }
     } else {
@@ -1422,14 +1430,14 @@ class Game {
       if (incoming) {
         const dist2d = Math.hypot(b.p.x - pad.pos.x, b.p.y - pad.pos.y);
         const distZ = Math.abs(b.p.z - pad.pos.z);
-        if (dist2d <= reachRadius && (distZ <= 0.85 || b.p.z >= 0.70)) {
+        if (dist2d <= reachRadius && distZ <= zReach) {
           hit = { t: 1, x: b.p.x, y: b.p.y, z: b.p.z, rad: dist2d * 0.35, px: pad.pos.x, py: pad.pos.y, pz: pad.pos.z };
         }
       }
     }
 
     if (!hit) {
-      hit = this.sweepPaddle(pad, p0, b.p, reachRadius);
+      hit = this.sweepPaddle(pad, p0, b.p, serveCtx ? serveReach : reachRadius);
     }
     if (!hit) return;
     if (b.lastHitBy === 1) return;                 // you already hit it
@@ -1500,6 +1508,16 @@ class Game {
     V3.addScaled(b.p, b.p, racket.normal, PH.R * 1.05);
     V3.copy(pad.normal, racket.normal); // show the assisted contact face too
     pad.swing = 1;
+    if (this.settings.followThrough && racket.vR) {
+      const ft = this.followThrough;
+      ft.active = true;
+      ft.t = 0;
+      ft.duration = 0.16 + 0.12 * clamp(racket.power || 0.5, 0, 1.2);
+      V3.copy(ft.startPos, pad.pos);
+      V3.copy(ft.startNormal, racket.normal);
+      const spd = V3.len(racket.vR) || 1;
+      V3.set(ft.swingDir, racket.vR.x / spd, racket.vR.y / spd, racket.vR.z / spd);
+    }
 
     // Multi-sensory hit feedback (99-level)
     if (this.hitFeedback) {
@@ -1569,8 +1587,10 @@ class Game {
     this.padYaw = 0;
     this.padRoll = this.settings.hand === 'left' ? -0.28 : 0.28;
     this.padPitch = -0.03;
+    this._prep = 0;
     this.mouseTrail = [];
     pad.yaw = 0; pad.pitch = this.padPitch; pad.roll = this.padRoll;
+    if (this.followThrough) this.followThrough.active = false;
     /* 0.40 s, not 0.55: the window has to be over before a serve can possibly
      * be struck, or the bat is still travelling when the ball is hit. Measured
      * in the headless matches at 0.55 s: the closest the bat got to the centre
@@ -1691,18 +1711,24 @@ class Game {
       const k = 0.55 + 0.45 * A;
       tx = lerp(tx, this.ball.p.x, k);
       tz = lerp(tz, this.ball.p.z + 0.02, k);
-      if (this.ball.v.y < 0) {          // meet the dropping ball
-        ty = lerp(ty, this.ball.p.y, 0.30 * A);
-      }
+      /* Stay under the toss even while the serve swipe goes up the screen —
+         that flick is the STROKE, not a command to lift the bat off the ball. */
+      const under = this.ball.p.y - 0.04;
+      ty = lerp(ty, under, this.ball.v.y < 0 ? k : 0.45 * A);
     }
     // positional assist: slide towards the predicted intercept
     if (A > 0.01 && incoming && this.recenterT <= 0 && this.playerStrokeIntent()) {
       if (o.reach) {
-        // the closer the ball, the more the footwork assist commits
-        const k = A * clamp(1.3 - o.reachT * 1.0, 0.30, 1);
-        tx = lerp(tx, clamp(o.reach.x, -PADDLE_LIMITS.x, PADDLE_LIMITS.x), k);
-        ty = lerp(ty, clamp(o.reach.y, PH.TABLE_Y + PADDLE_LIMITS.yLo, PH.TABLE_Y + PADDLE_LIMITS.yHi), k * 0.95);
-        if (o.reach.z < tz) tz = Math.max(zNear, o.reach.z - 0.02);
+        // Footwork assist, not a magnet: a swipe on the far wing must not
+        // teleport the bat onto a ball it was never near.
+        const near = Math.hypot(pad.pos.x - o.reach.x, pad.pos.y - o.reach.y)
+          < 0.42 + 0.28 * A;
+        if (near) {
+          const k = A * clamp(1.3 - o.reachT * 1.0, 0.30, 1);
+          tx = lerp(tx, clamp(o.reach.x, -PADDLE_LIMITS.x, PADDLE_LIMITS.x), k);
+          ty = lerp(ty, clamp(o.reach.y, PH.TABLE_Y + PADDLE_LIMITS.yLo, PH.TABLE_Y + PADDLE_LIMITS.yHi), k * 0.95);
+          if (o.reach.z < tz) tz = Math.max(zNear, o.reach.z - 0.02);
+        }
       }
     }
     /* Neither the cursor nor the assist may ever park the bat outside the
@@ -1733,40 +1759,86 @@ class Game {
     // Ready -> preparation -> contact -> recovery. Position chooses the
     // stance, not a literal clock angle; left hand mirrors the same model.
     const intent = this.playerStrokeIntent(this.state === GS.SERVE_TOSS);
+    const servingNow = this.state === GS.SERVE_TOSS && this.server === 1;
+    const fine = this.pointerFine !== false;
+    const eta = incoming && o.reachT ? o.reachT : undefined;
+    const spdIn = incoming ? V3.len(this.ball.v) : 0;
+    this._prep = expSmooth(this._prep || 0, (this.pointerDown && !intent) ? 1 : 0, 14, dt);
+
+    let aimYaw = 0, aimPitch = 0;
+    if (fine && !intent) {
+      const trail = this.mouseTrail;
+      if (trail && trail.length >= 2) {
+        const a = trail[Math.max(0, trail.length - 6)], b = trail[trail.length - 1];
+        const tdt = Math.max(1e-3, b.t - a.t);
+        aimYaw = clamp((b.x - a.x) / tdt * 0.12, -0.10, 0.10);
+        aimPitch = clamp(-(b.y - a.y) / tdt * 0.14, -0.12, 0.12);
+      }
+    }
+
     const wrist = playerWristPose(pad.pos, pad.vel, this.settings.hand, {
-      preparation: this.pointerDown && !intent ? 1 : 0,
+      preparation: this._prep,
       follow: this.settings.followThrough ? pad.swing : 0,
       // Stance depth freezes during a swipe; wrist flexion must not freeze.
       gesturePitch: intent ? clamp(intent.dy * 1.6, -0.35, 0.35) : 0,
+      gestureYaw: intent ? clamp((intent.right || 0) * 0.22 + (intent.curl || 0) * 0.07, -0.32, 0.32) : 0,
+      ballX: incoming ? ((o.reach && Number.isFinite(o.reach.x)) ? o.reach.x : this.ball.p.x) : undefined,
+      ballY: incoming ? this.ball.p.y : undefined,
+      contactY: incoming && o.reach && Number.isFinite(o.reach.y) ? o.reach.y : undefined,
+      incomingTop: incoming ? this.ball.w.x : undefined,
+      incomingSide: incoming ? this.ball.w.y : undefined,
+      ballSpeed: incoming ? spdIn : undefined,
+      eta,
+      compact: incoming ? clamp((spdIn - 8) / 10, 0, 1) * clamp(1 - (Number.isFinite(eta) ? eta : 0.5) / 0.28, 0, 1) : 0,
+      snap: intent ? clamp((intent.releaseSpeed || 0) / 5.5, 0, 1) * clamp(intent.up || 0, -1, 1) : 0,
+      attackLean: intent ? clamp(0.30 + (intent.up || 0) * 0.55, 0, 1)
+        : (this.settings.followThrough ? (pad.swing || 0) * 0.55 : 0),
+      aimYaw, aimPitch,
+      stepIn: pad.stepIn || 0,
+      serving: servingNow,
     });
-    this.padYaw = expSmooth(this.padYaw || 0, wrist.yaw, 12, dt);
-    this.padPitch = expSmooth(this.padPitch || 0, wrist.pitch, 12, dt);
-    this.padRoll = expSmooth(this.padRoll || 0, wrist.roll, 14, dt);
+    /* Mouse is a precise 2-D pointer: catch up fast on a big read.
+       A finger is a noisy 60 Hz sample — slower follow hides jitter
+       without changing the pose the physics will actually strike. */
+    const catchUp = (cur, target, base) => {
+      const err = Math.abs(target - cur);
+      return expSmooth(cur, target, base + err * 24, dt);
+    };
+    const yawRate = fine ? 17 : 10;
+    const pitchRate = fine ? 16 : 9;
+    const rollRate = fine ? 17 : 11;
+    this.padYaw = catchUp(this.padYaw || 0, wrist.yaw, yawRate);
+    this.padPitch = catchUp(this.padPitch || 0, wrist.pitch, pitchRate);
+    this.padRoll = catchUp(this.padRoll || 0, wrist.roll, rollRate);
     pad.yaw = this.padYaw; pad.pitch = this.padPitch; pad.roll = this.padRoll;
 
     // orientation follows the live gesture so you SEE the face angle
     const m = intent;
     let want = this._wantN || (this._wantN = V3.new(0, -0.05, -1));
-    V3.set(want, 0, -0.05, -1);
+    const rest = this._restN || (this._restN = V3.new());
+    faceFromWrist(rest, this.padYaw, this.padPitch, 1);
     if (m) {
       const ctx = {
         side: 1, isServe: this.isServeBall, ball: { y: pad.pos.y, z: pad.pos.z },
         ballSpin: this.ball.w, ballSpeed: V3.len(this.ball.v), moveYaw: this.padYaw, movePitch: this.padPitch,
       };
       const st = deriveStroke(m, ctx);
-      V3.copy(want, st.normal);
+      /* First ~45 ms keep the ready face so the bat does not pop onto
+         the archetype the frame a finger twitches. */
+      const k = clamp((m.dur || 0) / 0.045, 0, 1);
+      want.x = lerp(rest.x, st.normal.x, k);
+      want.y = lerp(rest.y, st.normal.y, k);
+      want.z = lerp(rest.z, st.normal.z, k);
       this.liveStroke = st;
-    } else this.liveStroke = null;
-
-    // deriveStroke already includes wrist yaw/pitch: never apply it twice.
-    if (!m) {
-      V3.set(want, Math.sin(-this.padYaw * 0.85) * Math.cos(this.padPitch - 0.05),
-        Math.sin(this.padPitch - 0.05), -Math.cos(this.padYaw * 0.85) * Math.cos(this.padPitch - 0.05));
+    } else {
+      V3.copy(want, rest);
+      this.liveStroke = null;
     }
     V3.norm(want, want);
-    pad.normal.x = expSmooth(pad.normal.x, want.x, 18, dt);
-    pad.normal.y = expSmooth(pad.normal.y, want.y, 18, dt);
-    pad.normal.z = expSmooth(pad.normal.z, want.z, 18, dt);
+    const nRate = fine ? 24 : 15;
+    pad.normal.x = catchUp(pad.normal.x, want.x, nRate);
+    pad.normal.y = catchUp(pad.normal.y, want.y, nRate);
+    pad.normal.z = catchUp(pad.normal.z, want.z, nRate);
     V3.norm(pad.normal, pad.normal);
     pad.swing = Math.max(0, pad.swing - dt * 4.5);
     pad.hitRadius = lerp(0.080, 0.165, A) * (this.state === GS.SERVE_TOSS ? 1.5 : 1)
@@ -2234,21 +2306,20 @@ class Game {
 
           // Visual position — continues in swing direction, then decelerates
           const ftOffset = V3.mul(V3.new(), this.followThrough.swingDir,
-            (1 - decay) * 0.25);
+            (1 - decay) * 0.22);
           V3.copy(this.followThrough.visualPos, this.followThrough.startPos);
           V3.add(this.followThrough.visualPos, this.followThrough.visualPos, ftOffset);
 
-          // Visual normal — follows face rotation with decay
-          const normalOffset = V3.mul(V3.new(), this.followThrough.startNormal,
-            (1 - decay) * 0.2);
+          // Keep closing the face (lean the head into the table). Adding the
+          // swing vector used to OPEN a loop after contact — the opposite.
           V3.copy(this.followThrough.visualNormal, this.followThrough.startNormal);
-          V3.add(this.followThrough.visualNormal, this.followThrough.visualNormal, normalOffset);
+          this.followThrough.visualNormal.y -= (1 - decay) * 0.28;
           V3.norm(this.followThrough.visualNormal, this.followThrough.visualNormal);
 
-          // Apply to player for rendering (but physics uses real pos)
+          // Apply to player for rendering (physics already used the contact face)
           V3.copy(this.player.pos, this.followThrough.visualPos);
-          // Orientation is owned by updatePlayerPaddle: overwriting it here
-          // would freeze pitch until this effect ended.
+          V3.lerp(this.player.normal, this.player.normal, this.followThrough.visualNormal, (1 - decay) * 0.70);
+          V3.norm(this.player.normal, this.player.normal);
         }
       }
     }
