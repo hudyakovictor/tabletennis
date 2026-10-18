@@ -343,7 +343,8 @@ function deriveStroke(m, ctx) {
 
   // face normal: rotate away from the swing by the contact angle
   const vertContact = contact * DEG * (1 - 0.58 * latMix);
-  const phi = (A.back ? eR + vertContact : eR - vertContact);
+  const movePitch = Number.isFinite(ctx.movePitch) ? clamp(ctx.movePitch, -0.55, 0.55) : 0;
+  const phi = clamp((A.back ? eR + vertContact : eR - vertContact) + movePitch, -1.35, 1.35);
   const normal = V3.new(
     Math.sin(azFace) * Math.cos(phi),
     Math.sin(phi),
@@ -387,7 +388,7 @@ function deriveStroke(m, ctx) {
 
   return {
     stroke: st, arch: A, vR, normal, vmag, aim: { x: aimX, z: aimZ },
-    power: sp01, quality, elev, contact, azSwing, azFace, spinIntent, rubber,
+    power: sp01, quality, elev, contact, azSwing, azFace, faceElev: phi, spinIntent, rubber,
     swipe: m, side, isServe: !!ctx.isServe,
     /* Air left over the tape. A push and a chop carry the least energy of any
        stroke, and at the default 55 mm they were the least reliable shots in
@@ -423,7 +424,11 @@ function strokeFrame(racket, dElev, dAz, scale, outSwing, outNormal) {
   const e = clamp(racket.elev * DEG + dElev, -1.30, 1.40);
   const a = clamp(racket.azSwing + dAz, -1.40, 1.40);
   const contact = racket.contact * DEG;
-  const phi = clamp(racket.arch.back ? e + contact : e - contact, -1.25, 1.35);
+  // Preserve the actual contact face, including wrist pitch and lateral
+  // brushing. Rebuilding only from contact degrees silently discarded both.
+  const phi = clamp(Number.isFinite(racket.faceElev)
+    ? racket.faceElev + (e - racket.elev * DEG)
+    : (racket.arch.back ? e + contact : e - contact), -1.35, 1.35);
   const af = clamp(racket.azFace + dAz, -1.10, 1.10);
   dirFromAngles(outSwing, e, a, fwd);
   dirFromAngles(outNormal, phi, af, fwd);

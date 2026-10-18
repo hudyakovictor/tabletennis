@@ -33,6 +33,9 @@ const { root } = require('./helpers.cjs');
       page.on('pageerror', e => errors.push(e.message));
       await page.goto(pathToFileURL(path.join(root, 'play/index.html')).href);
       await page.waitForFunction(() => window.__game && window.__game.R.drawCalls > 0);
+      // The long synchronous suite used to run before offline music init
+      // resolved, hiding exceptions that only happen later in real play.
+      await page.waitForFunction(() => window.__game.music._initialized);
       const results = await page.evaluate(() => {
         const g = window.__game, results = [];
         const check = (name, fn) => { try { if (!fn()) throw Error('assertion failed'); results.push({ name, ok: true }); }
@@ -61,12 +64,31 @@ const { root } = require('./helpers.cjs');
               g.pointer={x,y:.55};
               for(let i=0;i<30;i++) {
                 g.updatePlayerPaddle(1/60);
-                if(g.player.normal.z>-.85 || Math.abs(g.player.roll)>.30001)return false;
+                if(g.player.normal.z>-.85 || Math.abs(g.player.roll)>1.55001)return false;
               }
             }
             const pose=JSON.stringify(g.player);
             for(let i=0;i<20;i++)g.render();
             if(JSON.stringify(g.player)!==pose)return false;
+          }
+          g.settings.hand='right';g.returnToMenu();return true;
+        });
+        check('player has relaxed ready grip, asymmetric strokes and swipe-driven forward pitch', () => {
+          g.startMatch(2);g.ball.live=false;g.recenterT=0;g.camVPReady=false;
+          const settle = () => { for(let i=0;i<120;i++)g.updatePlayerPaddle(1/60); };
+          for(const hand of ['right','left']) {
+            g.settings.hand=hand;g.swipe.cancel();g.pointerDown=false;
+            g.pointer={x:.5,y:.55};settle();
+            const ready=g.player.roll;
+            if(Math.abs(ready)<.2 || Math.abs(ready)>.4)return false;
+            if((hand==='right'?1:-1)*ready<=0)return false;
+            const pitch=g.player.pitch;
+            g.swipe.down(.5,.55,g.time-.08);
+            g.swipe.move(.5,.35,g.time);
+            g.pointer={x:.5,y:.35};g.pointerDown=true;settle();
+            if(g.player.pitch>=pitch-.12)return false;
+            g.swipe.cancel();g.pointerDown=false;g.pointer={x:.5,y:.55};settle();
+            if(Math.abs(g.player.roll-ready)>.01 || Math.abs(g.player.pitch-pitch)>.01)return false;
           }
           g.settings.hand='right';g.returnToMenu();return true;
         });
@@ -322,6 +344,41 @@ const { root } = require('./helpers.cjs');
             if (before!==[g.ball.v.x,g.ball.v.y,g.ball.v.z,g.ball.w.x,g.ball.w.y,g.ball.w.z].join()) return false;
           } return true;
         });
+        check('initialized music climax and emotional winner effects cannot interrupt updates', () => {
+          g.startDemo(2);g.audio.init();g.audio.setMuted(false);
+          g.music._triggerClimax();
+          g.emotion._onWinner(g);
+          g.music._playResolution(MUSIC_STATE.RESOLUTION_WIN);
+          g.audio.setMuted(true);g.returnToMenu();return true;
+        });
+        check('five consecutive match/replay/restart cycles release old clips and callbacks', () => {
+          for(let match=0;match<5;match++) {
+            g.startDemo(2);
+            if(g.moments.kept.length || g.moments.lastClip || g.replayer.onEnd || g.replayer.moment)return false;
+            for(let i=0;i<4;i++)g.moments.push(g.time+i/30,g);
+            const clip=g.moments.captureClip(g.time+.1);
+            const moment={...clip,shots:3,speed:30,spin:4,finish:'DRIVE',winner:1};
+            g.setState(GS.MATCH_END);
+            for(let view=0;view<3;view++) {
+              let completed=0;
+              g.watchMoment(moment,true,()=>completed++);
+              for(let i=0;i<200 && g.replayer.on;i++)g.replayer.update(.1,g);
+              if(g.state!==GS.MATCH_END || completed!==1 || g.replayer.moment)return false;
+            }
+            g.missedRallies=[moment,moment];
+            let completed=0;
+            g.playAllMissesSequential(()=>completed++);g.skipReplay();
+            if(g.currentMissIndex!==1 || !g.replayer.on)return false;
+            for(let i=0;i<200 && g.replayer.on;i++)g.replayer.update(.1,g);
+            if(completed!==1 || g.state!==GS.MATCH_END)return false;
+            g.watchMiss(0);
+            for(let i=0;i<200;i++)g.replayer.update(.1,g);
+            if(!g.replayer.on || !g.replayer.moment)return false;
+            g.returnToMenu();
+            if(g.replayer.on || g.replayer.onEnd || g.replayer.moment || g.state!==GS.MENU)return false;
+          }
+          return true;
+        });
         check('demo cannot farm currency and match statistics', () => {
           g.startDemo(2); g.matchWinner=1; const coins=g.profile.data.coins, matches=g.profile.data.stats.matches;
           g.settleMatch(); return g.profile.data.coins===coins && g.profile.data.stats.matches===matches;
@@ -337,6 +394,17 @@ const { root } = require('./helpers.cjs');
       });
       for (const r of results) { console.log(`${r.ok ? 'PASS' : 'FAIL'} ${width}x${height}: ${r.name}${r.error ? ' — '+r.error : ''}`); count++; }
       assert.deepEqual(results.filter(r => !r.ok), []);
+      const frameBefore = await page.evaluate(() => {
+        const g=window.__game;
+        g.startDemo(2);g.ball.live=false;g.setState(GS.RALLY);
+        g.lastShotInfo={speed:100};g.emotion.lastBigMoment=g.time-3;
+        return g.frame;
+      });
+      // Exercise the real RAF after asynchronous music init, not just a
+      // synchronous direct update. Before the fix this lost its next frame.
+      await page.waitForFunction(before => window.__game.frame > before+4, {}, frameBefore);
+      await page.evaluate(() => { window.__game.returnToMenu();window.__game.paused=true; });
+      console.log(`PASS ${width}x${height}: real animation loop survives winner effect after music initialization`);count++;
       await page.emulateMediaFeatures([{ name: 'prefers-reduced-motion', value: 'reduce' }]);
       await page.waitForFunction(() => window.__game && window.__game.reducedMotion);
       const reducedMotionWorks = await page.evaluate(() => {

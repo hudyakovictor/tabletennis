@@ -87,7 +87,6 @@ class Game {
     this.iap = null;                     // the mobile wrapper sets this
     this.moments = new MomentRecorder();
     this.replayer = new MomentPlayer();
-    this.replayer.onEnd = () => this.endReplay();
 
     this.settings = {
       hitZone: 0.85,
@@ -363,6 +362,17 @@ class Game {
       }
 
       this.swipe.down(n.x, n.y, this.time);
+      // Desktop click commits the recent hover direction. Touch must still
+      // travel: never manufacture a swipe from a finger landing.
+      if (e.pointerType === 'mouse') {
+        const recent = (this.mouseTrail || []).filter(p => this.time - p.t < 0.12);
+        const a = recent[0];
+        const dx = a ? n.x - a.x : 0, dy = a ? n.y - a.y : 0;
+        const moving = Math.hypot(dx, dy) >= 0.018;
+        this.swipe.samples[0] = { x: moving ? a.x : n.x,
+          y: moving ? a.y : n.y + 0.035, t: this.time - 0.06 };
+        this.swipe.move(n.x, n.y, this.time);
+      }
       this._lastPointSwipe = {
         startT: this.time,
         sx: n.x, sy: n.y,
@@ -380,6 +390,11 @@ class Game {
     const track = (e) => {
       const n = norm(e);
       this.pointer = n;
+      if (e.pointerType === 'mouse') {
+        this.mouseTrail = (this.mouseTrail || []).filter(p => this.time - p.t < 0.14);
+        this.mouseTrail.push({ x: n.x, y: n.y, t: this.time });
+        if (this.mouseTrail.length > 64) this.mouseTrail.shift();
+      }
       this.pointerInside = n.x > 0.001 && n.x < 0.999 && n.y > 0.001 && n.y < 0.999;
       return n;
     };
@@ -413,7 +428,8 @@ class Game {
       if (e.button === 2 || e.button === 1) { e.preventDefault(); return; }
       if (ptrs.size >= 1) { e.preventDefault(); return; }   // still another finger down
       if (!this.swipe.active) { this.pointerDown = false; return; }
-      const n = this.pointer || { x: 0.5, y: 0.5 };
+      const n = norm(e);
+      this.pointer = n;
       this.swipe.up(n.x, n.y, this.time);
       if (this._lastPointSwipe) {
         this._lastPointSwipe.samples.push({ x: n.x, y: n.y, t: this.time });
@@ -476,7 +492,13 @@ class Game {
 
   /* --------------------------- match flow -------------------------- */
   startMatch(diff) {
-    if (this.replayer.on) { this.replayer.on = false; this.ui && this.ui.replayShow(false); }
+    this.endReplay(false); // cancel old callbacks; never complete an old match here
+    this.moments.reset();
+    this.lastMoment = null;
+    this._acc = 0;
+    this.followThrough.active = false;
+    this.anticipation.active = false;
+    this.audio.stopAudience();
     this._demoGesture = null;
     this.matchTasks = { topspin: 0, smash: 0, serves: 0, moments: 0 };
     this.training = null;
@@ -539,7 +561,7 @@ class Game {
   }
 
   returnToMenu() {
-    if (this.replayer.on) this.endReplay();
+    this.endReplay(false);
     this.stopTraining();
     this.career.save();
     this.career.stop();
@@ -1004,7 +1026,7 @@ class Game {
     if (!moment) return false;
     this.setSlowmoHold(false);
     this.ball.live = true;
-    if (!this.replayer.play(moment, hero ? 0.35 : 0.5)) return false;
+    if (!this.replayer.play(moment, hero ? 0.35 : 0.5, () => this.endReplay())) return false;
     this.replayAfter = after || null;
     const back = this.state;
     this.replayFrom = back === GS.MATCH_END ? GS.MATCH_END : GS.POINT;
@@ -1022,26 +1044,26 @@ class Game {
 
   skipReplay() {
     if (!this.replayer.on) return;
-    if (this.isDebugReplay && this._missIndex !== undefined && this._missIndex < (this.missedRallies || []).length - 1) {
-      this._missIndex++;
-      this.watchMiss(this._missIndex, 0.22);
-      return;
-    }
-    this.replayer.finish();
-    this.endReplay();
+    // Each playback owns its completion: sequence advances, inspection exits.
+    if (this.isDebugReplay && !this._missSequence) this.endReplay();
+    else this.replayer.finish();
   }
 
-  endReplay() {
+  endReplay(complete = true) {
+    this.replayer.stop();
+    this._missSequence = false;
     this.ui && this.ui.replayShow(false);
     this.ui && this.ui.debugReplayShow && this.ui.debugReplayShow(false);
-    if (typeof document !== 'undefined') {
-      document.body.classList.remove('is-reel');
-    }
+    if (typeof document !== 'undefined') document.body.classList.remove('is-reel');
     this.isDebugReplay = false;
     this.camFov = undefined;
-    if (this.state === GS.REPLAY) this.setState(this.replayFrom || GS.POINT);
-    const cb = this.replayAfter; this.replayAfter = null;
-    if (cb) cb();
+    if (this.state === GS.REPLAY) {
+      this.ball.live = false;
+      this.setState(this.replayFrom || GS.POINT);
+    }
+    const cb = this.replayAfter;
+    this.replayAfter = null;
+    if (complete && cb) cb();
   }
 
   recordMissedPoint(reason) {
@@ -1159,14 +1181,11 @@ class Game {
     this.ball.live = true;
 
     // Use MomentPlayer to replay the miss clip at ultra slowmo
-    this.replayer.play(miss, speed, () => {
-      // Loop replay smoothly so player can inspect
-      if (this.replayer && this.isDebugReplay) {
-        this.replayer.i = 0;
-        this.replayer.hold = 0;
-        this.replayer.on = true;
-      }
-    });
+    this._missSequence = false;
+    const loop = () => {
+      if (this.isDebugReplay) this.replayer.play(miss, speed, loop);
+    };
+    this.replayer.play(miss, speed, loop);
 
     const back = this.state;
     this.replayFrom = back === GS.MATCH_END ? GS.MATCH_END : (this.paused ? GS.SERVE_READY : GS.POINT);
@@ -1185,15 +1204,12 @@ class Game {
       return;
     }
     this._missIndex = 0;
-    this.replayAfter = () => {
-      this._missIndex = 999;
-      if (onComplete) onComplete();
-    };
+    this._missSequence = true;
+    this.replayAfter = onComplete || null;
 
     const playCurrent = () => {
       if (this._missIndex >= this.missedRallies.length) {
         this.endReplay();
-        if (onComplete) onComplete();
         return;
       }
       const miss = this.missedRallies[this._missIndex];
@@ -1434,7 +1450,8 @@ class Game {
     const isServeStroke = this.isServeBall && b.lastHitBy === 0 && this.server === 1;
     pad.lastHitT = this.time;
     const contact = V3.new(hit.x, hit.y, hit.z);
-    const sideParams = this.equip.forSide(1);
+    const grip = playerWristPose(pad.pos, pad.vel, this.settings.hand);
+    const sideParams = this.equip.forSide(grip.forehand ? 1 : -1);
     const radius = pad.hitRadius || 0.095;
     const sweet = clamp((1 - hit.rad / reachRadius) * (sideParams.sweet || this.equip.sweetK), 0, 1);
     const offLat = clamp((hit.x - pad.pos.x) / Math.max(radius, 1e-4), -1, 1);
@@ -1455,7 +1472,7 @@ class Game {
         ball: { y: contact.y, z: contact.z },
         ballSpin: b.w, ballSpeed: V3.len(b.v),
         powerScale: 1,
-        moveYaw: pad.yaw || 0,
+        moveYaw: pad.yaw || 0, movePitch: pad.pitch || 0,
         equip: sideParams,
         spinBias: 'norm',
       };
@@ -1481,6 +1498,7 @@ class Game {
     const info = impactRacket(b.v, b.w, racket.normal, racket.vR, quality, racket.rubber || {});
     V3.copy(b.p, contact);
     V3.addScaled(b.p, b.p, racket.normal, PH.R * 1.05);
+    V3.copy(pad.normal, racket.normal); // show the assisted contact face too
     pad.swing = 1;
 
     // Multi-sensory hit feedback (99-level)
@@ -1548,7 +1566,11 @@ class Game {
     this.pointerInside = true;
     this.pointerDown = false;
     this.stanceY = undefined;
-    this.padYaw = 0; this.padRoll = 0;
+    this.padYaw = 0;
+    this.padRoll = this.settings.hand === 'left' ? -0.28 : 0.28;
+    this.padPitch = -0.03;
+    this.mouseTrail = [];
+    pad.yaw = 0; pad.pitch = this.padPitch; pad.roll = this.padRoll;
     /* 0.40 s, not 0.55: the window has to be over before a serve can possibly
      * be struck, or the bat is still travelling when the ball is hit. Measured
      * in the headless matches at 0.55 s: the closest the bat got to the centre
@@ -1708,39 +1730,39 @@ class Game {
     V3.sub(pad.vel, pad.pos, pad.prevPos);
     V3.mul(pad.vel, pad.vel, 1 / Math.max(dt, 1e-4));
 
-    /* ---- the bat turns into the step ------------------------------- *
-     * Move right and the face opens to the right; move left and it opens
-     * to the left, with the wrist banking the way it does when you actually
-     * cover ground. This is what makes the bat read as held by a body
-     * instead of sliding around on a rail — and because the same yaw is fed
-     * into the stroke at contact, the face you SEE is the face that hits. */
-    const lat = clamp(pad.vel.x, -7, 7);
-    this.padYaw = expSmooth(this.padYaw || 0, clamp(lat * 0.062, -0.46, 0.46), 11, dt);
-    const handed = this.settings.hand === 'right' ? 1 : -1;
-    this.padRoll = expSmooth(this.padRoll || 0, clamp(-lat * 0.040, -0.30, 0.30) * handed, 9, dt);
-    pad.yaw = this.padYaw; pad.roll = this.padRoll;
+    // Ready -> preparation -> contact -> recovery. Position chooses the
+    // stance, not a literal clock angle; left hand mirrors the same model.
+    const intent = this.playerStrokeIntent(this.state === GS.SERVE_TOSS);
+    const wrist = playerWristPose(pad.pos, pad.vel, this.settings.hand, {
+      preparation: this.pointerDown && !intent ? 1 : 0,
+      follow: this.settings.followThrough ? pad.swing : 0,
+      // Stance depth freezes during a swipe; wrist flexion must not freeze.
+      gesturePitch: intent ? clamp(intent.dy * 1.6, -0.35, 0.35) : 0,
+    });
+    this.padYaw = expSmooth(this.padYaw || 0, wrist.yaw, 12, dt);
+    this.padPitch = expSmooth(this.padPitch || 0, wrist.pitch, 12, dt);
+    this.padRoll = expSmooth(this.padRoll || 0, wrist.roll, 14, dt);
+    pad.yaw = this.padYaw; pad.pitch = this.padPitch; pad.roll = this.padRoll;
 
     // orientation follows the live gesture so you SEE the face angle
-    const sw = this.swipe;
-    const m = sw.active && sw.m.samples > 1 ? sw.m : sw.lastReleased;
+    const m = intent;
     let want = this._wantN || (this._wantN = V3.new(0, -0.05, -1));
     V3.set(want, 0, -0.05, -1);
     if (m) {
       const ctx = {
         side: 1, isServe: this.isServeBall, ball: { y: pad.pos.y, z: pad.pos.z },
-        ballSpin: this.ball.w, ballSpeed: V3.len(this.ball.v), moveYaw: this.padYaw,
+        ballSpin: this.ball.w, ballSpeed: V3.len(this.ball.v), moveYaw: this.padYaw, movePitch: this.padPitch,
       };
       const st = deriveStroke(m, ctx);
       V3.copy(want, st.normal);
       this.liveStroke = st;
     } else this.liveStroke = null;
 
-    // The target is absolute (gesture + footwork), never a rotation of last
-    // frame's normal. Feeding the output back here accumulates pitch forever.
-    // apply the step yaw to the resting face as well
-    const cy = Math.cos(this.padYaw), sy = Math.sin(this.padYaw);
-    const wx = want.x * cy + want.z * sy, wz = -want.x * sy + want.z * cy;
-    want.x = wx; want.z = wz;
+    // deriveStroke already includes wrist yaw/pitch: never apply it twice.
+    if (!m) {
+      V3.set(want, Math.sin(-this.padYaw * 0.85) * Math.cos(this.padPitch - 0.05),
+        Math.sin(this.padPitch - 0.05), -Math.cos(this.padYaw * 0.85) * Math.cos(this.padPitch - 0.05));
+    }
     V3.norm(want, want);
     pad.normal.x = expSmooth(pad.normal.x, want.x, 18, dt);
     pad.normal.y = expSmooth(pad.normal.y, want.y, 18, dt);
@@ -2225,7 +2247,8 @@ class Game {
 
           // Apply to player for rendering (but physics uses real pos)
           V3.copy(this.player.pos, this.followThrough.visualPos);
-          V3.copy(this.player.normal, this.followThrough.visualNormal);
+          // Orientation is owned by updatePlayerPaddle: overwriting it here
+          // would freeze pitch until this effect ended.
         }
       }
     }
@@ -2404,7 +2427,7 @@ class Game {
       const pp = this.player;
       this.rig.draw(R, S, {
         pos: pp.pos, normal: pp.normal, hand: this.settings.hand, shadowPass,
-        swing: pp.swing, roll: pp.roll || 0,
+        swing: pp.swing, roll: pp.roll || 0, absoluteRoll: true,
         mats: this.paddleMats(S, this.equip),
       });
     }
