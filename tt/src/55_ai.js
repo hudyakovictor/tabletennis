@@ -1,5 +1,5 @@
 /* =====================================================================
- *  OPPONENT AI  —  v3 with biomechanical orientation
+ *  OPPONENT AI  —  paddle-only stroke animation
  *
  *  Design brief, in plain words: the old bot was unreadable. It decided
  *  its stroke with a fresh coin flip at the moment of contact, swung with
@@ -24,7 +24,7 @@
  *     overhits under pressure, it goes for too much when it smells a
  *     winner. The error comes out of the same physics the player uses.
  *
- *  v3 additions: biomechanical orientation for AI paddle, smoother movement,
+ *  Paddle-only animation with smoother movement,
  *  follow-through, improved variety
  * ===================================================================== */
 'use strict';
@@ -130,25 +130,10 @@ function makeRacket(side, archId, o) {
   };
 }
 
-/* Biomechanical stroke presets for AI — based on RacketBiomech.strokePreset */
-const AI_BIO_PRESETS = {
-  LOOP:    { thetaForward: 28, thetaSide: 8, thetaHandle: 12, forearmPsi: -0.35 },
-  COUNTER: { thetaForward: 22, thetaSide: 6, thetaHandle: 8,  forearmPsi: -0.28 },
-  DRIVE:   { thetaForward: 16, thetaSide: 5, thetaHandle: 6,  forearmPsi: -0.15 },
-  SMASH:   { thetaForward: 6,  thetaSide: 3, thetaHandle: 4,  forearmPsi: -0.40 },
-  FLICK:   { thetaForward: 20, thetaSide: 12, thetaHandle: 10, forearmPsi: -0.05 },
-  PUSH:    { thetaForward: -6, thetaSide: 8,  thetaHandle: 10, forearmPsi: 0.30 },
-  CHOP:    { thetaForward: -12, thetaSide: 14, thetaHandle: 14, forearmPsi: 0.38 },
-  BLOCK:   { thetaForward: 8,  thetaSide: 3, thetaHandle: 4,  forearmPsi: -0.10 },
-  LOB:     { thetaForward: 14, thetaSide: 4, thetaHandle: 6,  forearmPsi: -0.20 },
-  HOOK:    { thetaForward: 18, thetaSide: 18, thetaHandle: 10, forearmPsi: -0.20 },
-  FADE:    { thetaForward: 18, thetaSide: -18, thetaHandle: 10, forearmPsi: -0.20 },
-  DROP:    { thetaForward: -8, thetaSide: 6,  thetaHandle: 8,  forearmPsi: 0.25 },
-};
-
 class OpponentAI {
-  constructor(game, levelIndex = 2) {
-    this.game = game;
+  constructor(levelIndex = 2) {
+    this.side = -1;
+    this.faceNormal = V3.new(0, 0, 1);
     this.levelIndex = clamp(levelIndex, 0, AI_LEVELS.length - 1);
     this.L = AI_LEVELS[this.levelIndex];
     this.maxSpeed = this.L.move;
@@ -170,6 +155,7 @@ class OpponentAI {
     // Home position
     this.home = V3.new(0, PH.TABLE_Y + 0.25, -1.45);
     this.target = V3.new(0, PH.TABLE_Y + 0.25, -1.45);
+    this.pos = V3.clone(this.home);
     this.lastPos = V3.new(0, PH.TABLE_Y + 0.25, -1.45);
     this.vel = V3.new();
 
@@ -181,7 +167,7 @@ class OpponentAI {
     this.strokeHistory = [];
 
     // For smoother movement
-    this._moveSmooth = { x: 0, y: 0, z: 0 };
+    this._moveSmooth = V3.clone(this.home);
     this._poseSmooth = { windup: 0, swing: 0 };
 
     // Prediction cache
@@ -206,6 +192,8 @@ class OpponentAI {
     this.mood = 0; this.pressure = 0; this.handicap = 1;
     this.stats = { shots: 0, errors: 0, winners: 0, sumSpeed: 0, maxSpeed: 0 };
     V3.copy(this.target, this.home);
+    V3.copy(this.pos, this.home);
+    V3.set(this.faceNormal, 0, 0, 1);
     V3.copy(this.lastPos, this.home);
     V3.zero(this.vel);
     V3.copy(this._moveSmooth, this.home);
@@ -398,14 +386,14 @@ class OpponentAI {
       wantX = playerSide * sign(wantX || 1) * (0.75 + 0.20 * rnd());
     }
 
-    return { x: wantX, z: wantZ };
+    return { x: wantX, z: Math.abs(wantZ) };
   }
 
   /* ==================================================================
-   *  SWING EXECUTION with biomechanical orientation
+   *  SWING EXECUTION — gameplay owns the impact
    * ================================================================== */
 
-  /** Build the full swing with biomechanical parameters */
+  /** Build a solved stroke without mutating the live ball */
   swing(game) {
     const now = game.time;
     if (!this.commit || now < this.swingAt) return null;
@@ -417,45 +405,28 @@ class OpponentAI {
     // Determine stroke archetype
     const archId = this.commit.archId || 'DRIVE';
     const A = ARCH[archId] || ARCH.DRIVE;
-    const st = STROKES[archId] || STROKES.DRIVE;
-
-    // Biomechanical preset for this stroke
-    const bioPreset = AI_BIO_PRESETS[archId] || AI_BIO_PRESETS.DRIVE;
 
     // Compute racket state
-    const racket = makeRacket(-1, archId, {
+    let racket = makeRacket(-1, archId, {
       elev: A.elev,
       contact: A.contact,
       azSwing: 0,
       azFace: 0,
-      vmag: plan.speed * (L.vmagMax * (0.7 + 0.3 * this.pace)) / 12,
+      vmag: clamp(plan.speed * (0.7 + 0.3 * this.pace), L.vmagMin, L.vmagMax),
       aim: plan.aim,
       quality: 0.75 + 0.20 * L.skill,
       isServe: false,
     });
 
-    // Add biomechanical orientation parameters
-    const x = plan.x / BIO_ZONE_HALF_WIDTH;  // normalize to [-1,1]
-    const b = smoothBlend(x);
-
-    racket.bioParams = {
-      x: clamp(x, -1, 1),
-      b,
-      forearmPsi: bioPreset.forearmPsi * (1 + 0.2 * b),
-      thetaForward: bioPreset.thetaForward + 8 * Math.pow(Math.abs(x), 1.6),
-      thetaSide: bioPreset.thetaSide * Math.sign(x) * Math.pow(Math.abs(x), 1.5),
-      thetaHandle: bioPreset.thetaHandle + 4 * (2 * b - 1),
-      phiFlip: Math.PI * sigmoid(x, 14, -0.06),
-    };
-
-    // Store for rendering
-    this.lastBioParams = racket.bioParams;
+    // Solve on copies. The game applies the returned impact exactly once.
+    strokeFrame(racket, 0, 0, 1, racket.vR, racket.normal);
+    racket = refineRacket(ball.p, ball.v, ball.w, racket, L.skill, racket.quality);
+    V3.copy(this.faceNormal, racket.normal);
     this.lastStrokeId = archId;
-
-    // Resolve the impact
-    const contact = V3.clone(ball.p);
-    const info = impactRacket(ball.v, ball.w, racket.normal, racket.vR,
-      racket.quality, racket.rubber || {});
+    this.phase = 'SWING';
+    this.anim.swing = 1;
+    this.plan = null;
+    this.commit = null;
 
     // Record for stats
     this.stats.shots++;
@@ -467,7 +438,7 @@ class OpponentAI {
     return racket;
   }
 
-  /** Serve - with proper biomechanical setup */
+  /** Serve — solved against both required bounces */
   serve(game) {
     const ball = game.ball;
     const L = this.L;
@@ -485,7 +456,7 @@ class OpponentAI {
 
     // Aim
     const aimX = rndSym(0.50);
-    const aimZ = -PH.T_HALF_LEN * (0.55 + 0.35 * rnd());
+    const aimZ = PH.T_HALF_LEN * (0.55 + 0.35 * rnd());
 
     const racket = makeRacket(-1, serveType, {
       elev: A.elev,
@@ -499,26 +470,6 @@ class OpponentAI {
       netClear: 0.055,
     });
 
-    // Biomechanical serve preset
-    const serveBioPresets = {
-      SERVE_TOP:   { thetaForward: 18, thetaSide: 2, thetaHandle: 5, forearmPsi: -0.05 },
-      SERVE_BACK:  { thetaForward: -8, thetaSide: 6, thetaHandle: 10, forearmPsi: 0.28 },
-      SERVE_SIDE:  { thetaForward: 12, thetaSide: 16, thetaHandle: 8, forearmPsi: -0.10 },
-      SERVE_FAST:  { thetaForward: 10, thetaSide: 3, thetaHandle: 4, forearmPsi: -0.15 },
-    };
-
-    const bp = serveBioPresets[serveType] || serveBioPresets.SERVE_TOP;
-    racket.bioParams = {
-      x: aimX / BIO_ZONE_HALF_WIDTH,
-      b: 0.5,
-      forearmPsi: bp.forearmPsi,
-      thetaForward: bp.thetaForward,
-      thetaSide: bp.thetaSide,
-      thetaHandle: bp.thetaHandle,
-      phiFlip: Math.PI * sigmoid(aimX / BIO_ZONE_HALF_WIDTH, 14, -0.06),
-    };
-
-    this.lastBioParams = racket.bioParams;
     this.lastStrokeId = serveType;
 
     // Solve the serve (use existing serve solver from game)
@@ -554,7 +505,6 @@ class OpponentAI {
     racketFromStroke.vR = racket.vR;
     racketFromStroke.rubber = racket.rubber;
     racketFromStroke.quality = racket.quality;
-    racketFromStroke.bioParams = racket.bioParams;
     racketFromStroke.stroke = st;
     racketFromStroke.arch = A;
     racketFromStroke.isServe = true;
@@ -585,10 +535,21 @@ class OpponentAI {
     const ball = game.ball;
 
     // Update readiness
-    if (this.phase === 'IDLE') {
+    const incoming = ball.live && ball.lastHitBy === 1 && ball.v.z < 0;
+    if (!incoming) {
+      this.plan = null; this.commit = null; this.phase = 'IDLE';
+    }
+    if (incoming && this.seenBallId !== game.shotId) {
+      this.seenBallId = game.shotId;
+      this.plan = null; this.commit = null; this.phase = 'IDLE';
+    }
+    if (incoming && this.phase === 'IDLE') {
       this.plan = this.computePlan(game);
       if (this.plan) {
+        this.plan.archId = this.pickStroke(game, this.plan);
+        this.plan.aim = this.pickTarget(game, this.plan, this.plan.archId);
         this.commit = this.plan;
+        this.swingAt = this.plan.t;
         this.readT = now;
         this.phase = 'READY';
         this.backswingStart = now;
@@ -642,22 +603,9 @@ class OpponentAI {
         const windupProgress = 1 - timeToContact / 0.35;
         this.anim.windup = clamp(windupProgress, 0, 1) * this.L.windup;
 
-        // Start swing commitment
-        if (!this.commit || now >= this.swingAt) {
-          this.swingAt = now + 0.02;
-        }
-      }
-
-      // Execute swing
-      if (this.readyToStrike(now)) {
-        const racket = this.swing(game);
-        if (racket) {
-          this.phase = 'SWING';
-          this.anim.swing = 1;
-          this.anim.lean = racket.bioParams ? racket.bioParams.thetaSide * 0.15 : 0;
-        }
       }
     }
+    // The game owns contact timing/legality and calls swing in tryAiHit.
 
     // Decay animations
     this.anim.swing = Math.max(0, this.anim.swing - dt * 3);

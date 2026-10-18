@@ -4664,7 +4664,7 @@ class AudioEngine {
 
 /* ====== 55_ai.js ====== */
 /* =====================================================================
- *  OPPONENT AI  —  v3 with biomechanical orientation
+ *  OPPONENT AI  —  paddle-only stroke animation
  *
  *  Design brief, in plain words: the old bot was unreadable. It decided
  *  its stroke with a fresh coin flip at the moment of contact, swung with
@@ -4689,7 +4689,7 @@ class AudioEngine {
  *     overhits under pressure, it goes for too much when it smells a
  *     winner. The error comes out of the same physics the player uses.
  *
- *  v3 additions: biomechanical orientation for AI paddle, smoother movement,
+ *  Paddle-only animation with smoother movement,
  *  follow-through, improved variety
  * ===================================================================== */
 
@@ -4794,25 +4794,10 @@ function makeRacket(side, archId, o) {
   };
 }
 
-/* Biomechanical stroke presets for AI — based on RacketBiomech.strokePreset */
-const AI_BIO_PRESETS = {
-  LOOP:    { thetaForward: 28, thetaSide: 8, thetaHandle: 12, forearmPsi: -0.35 },
-  COUNTER: { thetaForward: 22, thetaSide: 6, thetaHandle: 8,  forearmPsi: -0.28 },
-  DRIVE:   { thetaForward: 16, thetaSide: 5, thetaHandle: 6,  forearmPsi: -0.15 },
-  SMASH:   { thetaForward: 6,  thetaSide: 3, thetaHandle: 4,  forearmPsi: -0.40 },
-  FLICK:   { thetaForward: 20, thetaSide: 12, thetaHandle: 10, forearmPsi: -0.05 },
-  PUSH:    { thetaForward: -6, thetaSide: 8,  thetaHandle: 10, forearmPsi: 0.30 },
-  CHOP:    { thetaForward: -12, thetaSide: 14, thetaHandle: 14, forearmPsi: 0.38 },
-  BLOCK:   { thetaForward: 8,  thetaSide: 3, thetaHandle: 4,  forearmPsi: -0.10 },
-  LOB:     { thetaForward: 14, thetaSide: 4, thetaHandle: 6,  forearmPsi: -0.20 },
-  HOOK:    { thetaForward: 18, thetaSide: 18, thetaHandle: 10, forearmPsi: -0.20 },
-  FADE:    { thetaForward: 18, thetaSide: -18, thetaHandle: 10, forearmPsi: -0.20 },
-  DROP:    { thetaForward: -8, thetaSide: 6,  thetaHandle: 8,  forearmPsi: 0.25 },
-};
-
 class OpponentAI {
-  constructor(game, levelIndex = 2) {
-    this.game = game;
+  constructor(levelIndex = 2) {
+    this.side = -1;
+    this.faceNormal = V3.new(0, 0, 1);
     this.levelIndex = clamp(levelIndex, 0, AI_LEVELS.length - 1);
     this.L = AI_LEVELS[this.levelIndex];
     this.maxSpeed = this.L.move;
@@ -4834,6 +4819,7 @@ class OpponentAI {
     // Home position
     this.home = V3.new(0, PH.TABLE_Y + 0.25, -1.45);
     this.target = V3.new(0, PH.TABLE_Y + 0.25, -1.45);
+    this.pos = V3.clone(this.home);
     this.lastPos = V3.new(0, PH.TABLE_Y + 0.25, -1.45);
     this.vel = V3.new();
 
@@ -4845,7 +4831,7 @@ class OpponentAI {
     this.strokeHistory = [];
 
     // For smoother movement
-    this._moveSmooth = { x: 0, y: 0, z: 0 };
+    this._moveSmooth = V3.clone(this.home);
     this._poseSmooth = { windup: 0, swing: 0 };
 
     // Prediction cache
@@ -4870,6 +4856,8 @@ class OpponentAI {
     this.mood = 0; this.pressure = 0; this.handicap = 1;
     this.stats = { shots: 0, errors: 0, winners: 0, sumSpeed: 0, maxSpeed: 0 };
     V3.copy(this.target, this.home);
+    V3.copy(this.pos, this.home);
+    V3.set(this.faceNormal, 0, 0, 1);
     V3.copy(this.lastPos, this.home);
     V3.zero(this.vel);
     V3.copy(this._moveSmooth, this.home);
@@ -5062,14 +5050,14 @@ class OpponentAI {
       wantX = playerSide * sign(wantX || 1) * (0.75 + 0.20 * rnd());
     }
 
-    return { x: wantX, z: wantZ };
+    return { x: wantX, z: Math.abs(wantZ) };
   }
 
   /* ==================================================================
-   *  SWING EXECUTION with biomechanical orientation
+   *  SWING EXECUTION — gameplay owns the impact
    * ================================================================== */
 
-  /** Build the full swing with biomechanical parameters */
+  /** Build a solved stroke without mutating the live ball */
   swing(game) {
     const now = game.time;
     if (!this.commit || now < this.swingAt) return null;
@@ -5081,45 +5069,28 @@ class OpponentAI {
     // Determine stroke archetype
     const archId = this.commit.archId || 'DRIVE';
     const A = ARCH[archId] || ARCH.DRIVE;
-    const st = STROKES[archId] || STROKES.DRIVE;
-
-    // Biomechanical preset for this stroke
-    const bioPreset = AI_BIO_PRESETS[archId] || AI_BIO_PRESETS.DRIVE;
 
     // Compute racket state
-    const racket = makeRacket(-1, archId, {
+    let racket = makeRacket(-1, archId, {
       elev: A.elev,
       contact: A.contact,
       azSwing: 0,
       azFace: 0,
-      vmag: plan.speed * (L.vmagMax * (0.7 + 0.3 * this.pace)) / 12,
+      vmag: clamp(plan.speed * (0.7 + 0.3 * this.pace), L.vmagMin, L.vmagMax),
       aim: plan.aim,
       quality: 0.75 + 0.20 * L.skill,
       isServe: false,
     });
 
-    // Add biomechanical orientation parameters
-    const x = plan.x / BIO_ZONE_HALF_WIDTH;  // normalize to [-1,1]
-    const b = smoothBlend(x);
-
-    racket.bioParams = {
-      x: clamp(x, -1, 1),
-      b,
-      forearmPsi: bioPreset.forearmPsi * (1 + 0.2 * b),
-      thetaForward: bioPreset.thetaForward + 8 * Math.pow(Math.abs(x), 1.6),
-      thetaSide: bioPreset.thetaSide * Math.sign(x) * Math.pow(Math.abs(x), 1.5),
-      thetaHandle: bioPreset.thetaHandle + 4 * (2 * b - 1),
-      phiFlip: Math.PI * sigmoid(x, 14, -0.06),
-    };
-
-    // Store for rendering
-    this.lastBioParams = racket.bioParams;
+    // Solve on copies. The game applies the returned impact exactly once.
+    strokeFrame(racket, 0, 0, 1, racket.vR, racket.normal);
+    racket = refineRacket(ball.p, ball.v, ball.w, racket, L.skill, racket.quality);
+    V3.copy(this.faceNormal, racket.normal);
     this.lastStrokeId = archId;
-
-    // Resolve the impact
-    const contact = V3.clone(ball.p);
-    const info = impactRacket(ball.v, ball.w, racket.normal, racket.vR,
-      racket.quality, racket.rubber || {});
+    this.phase = 'SWING';
+    this.anim.swing = 1;
+    this.plan = null;
+    this.commit = null;
 
     // Record for stats
     this.stats.shots++;
@@ -5131,7 +5102,7 @@ class OpponentAI {
     return racket;
   }
 
-  /** Serve - with proper biomechanical setup */
+  /** Serve — solved against both required bounces */
   serve(game) {
     const ball = game.ball;
     const L = this.L;
@@ -5149,7 +5120,7 @@ class OpponentAI {
 
     // Aim
     const aimX = rndSym(0.50);
-    const aimZ = -PH.T_HALF_LEN * (0.55 + 0.35 * rnd());
+    const aimZ = PH.T_HALF_LEN * (0.55 + 0.35 * rnd());
 
     const racket = makeRacket(-1, serveType, {
       elev: A.elev,
@@ -5163,26 +5134,6 @@ class OpponentAI {
       netClear: 0.055,
     });
 
-    // Biomechanical serve preset
-    const serveBioPresets = {
-      SERVE_TOP:   { thetaForward: 18, thetaSide: 2, thetaHandle: 5, forearmPsi: -0.05 },
-      SERVE_BACK:  { thetaForward: -8, thetaSide: 6, thetaHandle: 10, forearmPsi: 0.28 },
-      SERVE_SIDE:  { thetaForward: 12, thetaSide: 16, thetaHandle: 8, forearmPsi: -0.10 },
-      SERVE_FAST:  { thetaForward: 10, thetaSide: 3, thetaHandle: 4, forearmPsi: -0.15 },
-    };
-
-    const bp = serveBioPresets[serveType] || serveBioPresets.SERVE_TOP;
-    racket.bioParams = {
-      x: aimX / BIO_ZONE_HALF_WIDTH,
-      b: 0.5,
-      forearmPsi: bp.forearmPsi,
-      thetaForward: bp.thetaForward,
-      thetaSide: bp.thetaSide,
-      thetaHandle: bp.thetaHandle,
-      phiFlip: Math.PI * sigmoid(aimX / BIO_ZONE_HALF_WIDTH, 14, -0.06),
-    };
-
-    this.lastBioParams = racket.bioParams;
     this.lastStrokeId = serveType;
 
     // Solve the serve (use existing serve solver from game)
@@ -5218,7 +5169,6 @@ class OpponentAI {
     racketFromStroke.vR = racket.vR;
     racketFromStroke.rubber = racket.rubber;
     racketFromStroke.quality = racket.quality;
-    racketFromStroke.bioParams = racket.bioParams;
     racketFromStroke.stroke = st;
     racketFromStroke.arch = A;
     racketFromStroke.isServe = true;
@@ -5249,10 +5199,21 @@ class OpponentAI {
     const ball = game.ball;
 
     // Update readiness
-    if (this.phase === 'IDLE') {
+    const incoming = ball.live && ball.lastHitBy === 1 && ball.v.z < 0;
+    if (!incoming) {
+      this.plan = null; this.commit = null; this.phase = 'IDLE';
+    }
+    if (incoming && this.seenBallId !== game.shotId) {
+      this.seenBallId = game.shotId;
+      this.plan = null; this.commit = null; this.phase = 'IDLE';
+    }
+    if (incoming && this.phase === 'IDLE') {
       this.plan = this.computePlan(game);
       if (this.plan) {
+        this.plan.archId = this.pickStroke(game, this.plan);
+        this.plan.aim = this.pickTarget(game, this.plan, this.plan.archId);
         this.commit = this.plan;
+        this.swingAt = this.plan.t;
         this.readT = now;
         this.phase = 'READY';
         this.backswingStart = now;
@@ -5306,22 +5267,9 @@ class OpponentAI {
         const windupProgress = 1 - timeToContact / 0.35;
         this.anim.windup = clamp(windupProgress, 0, 1) * this.L.windup;
 
-        // Start swing commitment
-        if (!this.commit || now >= this.swingAt) {
-          this.swingAt = now + 0.02;
-        }
-      }
-
-      // Execute swing
-      if (this.readyToStrike(now)) {
-        const racket = this.swing(game);
-        if (racket) {
-          this.phase = 'SWING';
-          this.anim.swing = 1;
-          this.anim.lean = racket.bioParams ? racket.bioParams.thetaSide * 0.15 : 0;
-        }
       }
     }
+    // The game owns contact timing/legality and calls swing in tryAiHit.
 
     // Decay animations
     this.anim.swing = Math.max(0, this.anim.swing - dt * 3);
@@ -5341,457 +5289,67 @@ class OpponentAI {
 
 /* ====== 56_rig.js ====== */
 /* =====================================================================
- *  PADDLE RIG — every paddle in the world gets a hand and an arm.
- *
- *  WHY THIS EXISTS. A paddle floating in the air is a sprite, not an
- *  opponent: the eye has nothing to read, and the scene feels empty even
- *  though the physics underneath is real. One rig, built from the same
- *  primitives as the rest of the scene, fixes three things at once:
- *
- *   · the opponent finally looks like a person standing at the far end —
- *     you can see the wrist snap on a loop and the forearm drop on a chop,
- *     which is exactly the information a table-tennis player watches for;
- *   · the online opponent's hand (same rig, fed from the network);
- *   · the training ghost — the very same rig drawn translucent, tracing
- *     the stroke you were supposed to play.
- *
- *  NOTHING HERE IS ANIMATED BY HAND: the arm is solved from the paddle's
- *  own position and normal every frame, so it follows the physics for
- *  free. Limb axes are +Z so a single Q.lookRotation aims them.
- *
- *  BIOMECHANICAL EXTENSION (99-level):
- *   - forearm rotation (pronation/supination) from RacketBiomech
- *   - wrist extension/deviation
- *   - handle twist visualization
- *   - rubber flip visualization (different materials per active side)
- *   - edge zone visual adaptation
+ *  PADDLE-ONLY RIG
+ *  Local +Z is the red face normal; the handle extends along local -Y.
+ *  No hand/arm geometry. Drawing is a pure consumer of the gameplay pose.
  * ===================================================================== */
 
-/** Limb segment: a tapered cylinder whose axis is +Z instead of +Y. */
-function limbGeo(rTop, rBot, seg = 16) {
-  return transformGeo(makeCylinder(rTop, rBot, 1, seg, true), (p, n) => {
-    const y = p.y, z = p.z; p.y = -z; p.z = y;
-    const ny = n.y, nz = n.z; n.y = -nz; n.z = ny;
-  });
-}
-
-const RIG = {
-  HANDLE: 0.122,        // how far the fist sits down the handle
-  FOREARM: 0.285,       // wrist to elbow
-  SKIN: [0.855, 0.635, 0.495],
-  SKIN_SHADE: [0.72, 0.50, 0.38],
-  SLEEVE: [0.13, 0.20, 0.42],
-  SLEEVE_ALT: [0.72, 0.14, 0.19],
-  // Forearm visual rotation scale — makes pronation/supination readable
-  FOREARM_VIS_SCALE: 1.3,
-  // Wrist visual deviation scale
-  WRIST_VIS_SCALE: 1.2,
-};
-
 class PaddleRig {
-  constructor() { this.built = false; }
-
-  build(R) {
-    if (this.built) return;
-    this.mFore = R.mesh(limbGeo(0.0265, 0.0405, 16));       // forearm
-    this.mUpper = R.mesh(limbGeo(0.0405, 0.047, 14));       // elbow end of the sleeve
-    this.mSleeve = R.mesh(limbGeo(0.049, 0.056, 16));       // short sleeve cuff
-    this.mPalm = R.mesh(makeSphere(0.047, 18, 12));         // fist
-    this.mThumb = R.mesh(limbGeo(0.0145, 0.018, 10));       // thumb over the handle
-    this.mJoint = R.mesh(makeSphere(0.041, 14, 10));        // elbow
-    this.mPath = R.dynMesh(420);                            // ghost stroke ribbon
-    this.R = R;
-    this.built = true;
-
-    // Temporary storage for computations
-    this._s = {
-      q: Q.new(), qr: Q.new(), q2: Q.new(), q3: Q.new(),
-      m: M4.create(), m2: M4.create(), m3: M4.create(),
-      v1: V3.new(), v2: V3.new(), v3: V3.new(), v4: V3.new(), v5: V3.new(),
-      one: { x: 1, y: 1, z: 1 }, up: { x: 0, y: 1, z: 0 },
-      forearmAxis: V3.new(0, 0, 1),
-      wristDevAxis: V3.new(1, 0, 0),
-    };
-    // Matrix for forearm rotation
-    this._forearmM4 = M4.create();
-    this._wristM4 = M4.create();
-    this._tmpM4 = M4.create();
+  constructor() {
+    this._q = Q.new();
+    this._rollQ = Q.new();
+    this._m = M4.create();
+    this._partM = M4.create();
+    this._normal = V3.new();
+    this._pos = V3.new();
+    this._one = { x: 1, y: 1, z: 1 };
+    this._up = { x: 0, y: 1, z: 0 };
   }
 
-  /** World direction of the paddle handle (local -Y) for a given quat. */
-  handleDir(out, quat) {
-    const s = this._s;
-    M4.compose(s.m, { x: 0, y: 0, z: 0 }, quat, s.one);
-    return V3.norm(out, M4.transformDir(out, s.m, { x: 0, y: -1, z: 0 }));
-  }
-
-  /** Paddle orientation: local +Z along the normal, rolled into the hand. */
+  /** Absolute orientation, with only a small, bounded grip/swing roll. */
   paddleQuat(out, normal, hand, swing, extraRoll) {
-    Q.lookRotation(out, normal, this._s.up);
-    const roll = (hand === 'left' ? 0.42 : -0.42) + (swing || 0) * 0.3 + (extraRoll || 0);
-    Q.mul(out, out, Q.setAxisAngle(this._s.qr, 0, 0, 1, roll));
-    return out;
+    Q.lookRotation(out, normal, this._up);
+    const roll = (hand === 'left' ? 0.42 : -0.42)
+      + clamp(swing || 0, -1, 1) * 0.3 + clamp(extraRoll || 0, -0.35, 0.35);
+    return Q.mul(out, out, Q.setAxisAngle(this._rollQ, 0, 0, 1, roll));
   }
 
-  /**
-   * Apply forearm rotation to a direction vector.
-   * This simulates pronation/supination visually.
-   */
-  applyForearmRotation(out, dir, forearmPsi, axis) {
-    const s = this._s;
-    const scaledPsi = forearmPsi * RIG.FOREARM_VIS_SCALE;
-    M4.setAxisAngle(this._forearmM4, axis || s.forearmAxis, scaledPsi);
-    return V3.norm(out, M4.transformDir(out, this._forearmM4, dir));
-  }
-
-  /**
-   * Apply wrist deviation to a direction vector.
-   */
-  applyWristDeviation(out, dir, wristDev, axis) {
-    const s = this._s;
-    M4.setAxisAngle(this._wristM4, axis || s.wristDevAxis, wristDev);
-    return V3.norm(out, M4.transformDir(out, this._wristM4, dir));
-  }
-
-  /**
-   * DRAW THE ARM + HAND THAT HOLDS A PADDLE.
-   *
-   * Enhanced with biomechanical parameters from RacketBiomech:
-   *   o = {
-   *     pos, normal, hand, swing, windup, roll,
-   *     bioQ,           // biomechanical orientation quaternion
-   *     bioActive,      // whether to use bio orientation
-   *     forearmPsi,     // forearm pronation/supination angle [rad]
-   *     wristExt,       // wrist extension/flexion [rad]
-   *     wristDev,       // wrist radial/ulnar deviation [rad]
-   *     phiFlip,        // flip angle [rad]
-   *     activeSide,     // +1 = forehand/red, -1 = backhand/black
-   *     mats,           // racket materials
-   *     ghost, alpha, t, ...
-   *   }
-   */
-  drawArm(R, S, o) {
-    this.build(R);
-    const s = this._s;
-    const wd = clamp(o.windup || 0, 0, 1);
-    const n = V3.norm(s.v1, o.normal);
-    const q = o.q || this.paddleQuat(s.q, n, o.hand, o.swing, o.roll);
-
-    // ---- BIOMECHANICAL ENHANCEMENTS ----
-
-    // If bioQ is provided and bioActive, use it as the base orientation
-    const useBio = o.bioQ && o.bioActive !== false;
-    let finalQ = q;
-    let effectiveForearmPsi = o.forearmPsi || 0;
-    let effectiveWristDev = o.wristDev || 0;
-    let effectiveWristExt = o.wristExt || 0;
-
-    if (useBio) {
-      // Use the biomechanical orientation
-      finalQ = o.bioQ;
-
-      // Extract effective biomechanical angles
-      effectiveForearmPsi = o.forearmPsi || 0;
-      effectiveWristDev = o.wristDev || 0;
-
-      // Combine wrist extension into the visual (affects hand pose slightly)
-      effectiveWristExt = o.wristExt || 0;
-
-      // The flip angle can add a subtle visual rotation
-      const phiFlip = o.phiFlip || 0;
-      if (Math.abs(phiFlip) > 0.1) {
-        // Subtle additional roll from flip — makes the flip visible
-        const flipVisual = phiFlip * 0.12;
-        const baseRoll = (o.hand === 'left' ? 0.42 : -0.42) + (o.swing || 0) * 0.3 + (o.roll || 0);
-        const combinedRoll = baseRoll + flipVisual;
-        Q.mul(finalQ, finalQ, Q.setAxisAngle(s.qr, 0, 0, 1, combinedRoll));
-      }
-    }
-
-    // Compute handle direction with possible forearm rotation
-    let hdir = this.handleDir(s.v2, finalQ);
-
-    // Apply forearm rotation to handle direction (visual only)
-    if (Math.abs(effectiveForearmPsi) > 0.01) {
-      hdir = this.applyForearmRotation(s.v3, hdir, effectiveForearmPsi, s.forearmAxis);
-    }
-
-    // fist grips the handle a hand's width below the blade
-    const fist = V3.addScaled(V3.new(), o.pos, hdir, RIG.HANDLE);
-
-    // ---- FOREARM with pronation/supination ----
-    // Base forearm direction: runs back and down from fist
-    let fa = V3.norm(s.v4, V3.new(
-      -n.x * 0.60 + hdir.x * 0.45,
-      -0.46 - wd * 0.30,
-      -n.z * 0.60 + hdir.z * 0.45
-    ));
-
-    // Apply forearm rotation to forearm direction (visual)
-    if (Math.abs(effectiveForearmPsi) > 0.01) {
-      fa = this.applyForearmRotation(s.v5, fa, effectiveForearmPsi, s.forearmAxis);
-    }
-
-    // Elbow position
-    const elbow = V3.addScaled(V3.new(), fist, fa, RIG.FOREARM);
-    const mid = V3.lerp(s.v2, fist, elbow, 0.5);
-
-    // ---- WRIST VISUALIZATION ----
-    // Wrist deviation bends the forearm slightly at the wrist
-    // This affects the fist position slightly
-    let fistOffset = V3.zero();
-    if (Math.abs(effectiveWristDev) > 0.01) {
-      // Wrist deviation slightly shifts the fist
-      const devDir = V3.norm(s.v3, V3.new(-n.x, 0, -n.z));
-      fistOffset = V3.scale(V3.new(), devDir, effectiveWristDev * 0.02);
-    }
-
-    const fistFinal = V3.add(fist, fistOffset);
-
-    // ---- SKIN AND CLOTH COLORS ----
-    const skin = o.ghost ? o.ghostCol : RIG.SKIN;
-    const blue = o.hand === 'left';
-    const sleeveCol = o.ghost ? o.ghostCol : (o.sleeve || (blue ? RIG.SLEEVE_ALT : RIG.SLEEVE));
-
-    const base = o.ghost ? this.ghostMat(o, skin, 0.55) : { color: skin, rough: 0.62 };
-    const cloth = o.ghost ? this.ghostMat(o, sleeveCol, 0.42) : { color: sleeveCol, rough: 0.85 };
-
-    // ---- DRAW FOREARM ----
-    const qf = Q.lookRotation(s.q, fa, s.up);
-    M4.compose(s.m, mid, qf, { x: 1, y: 1, z: RIG.FOREARM });
-    R.draw(this.mFore, s.m, base);
-
-    // ---- DRAW ELBOW JOINT ----
-    M4.compose(s.m, elbow, qf, s.one);
-    R.draw(this.mJoint, s.m, base);
-
-    // ---- DRAW SLEEVE CUFF OVER ELBOW END ----
-    const cuff = V3.addScaled(V3.new(), elbow, fa, RIG.FOREARM * 0.44);
-    M4.compose(s.m, cuff, qf, { x: 1, y: 1, z: RIG.FOREARM * 0.55 });
-    R.draw(this.mUpper, s.m, cloth);
-
-    M4.compose(s.m, V3.addScaled(V3.new(), elbow, fa, RIG.FOREARM * 0.92), qf, { x: 1, y: 1, z: RIG.FOREARM * 0.5 });
-    R.draw(this.mSleeve, s.m, cloth);
-
-    // ---- DRAW FIST (PALM) ----
-    // Fist orientation: slightly rotated by wrist extension
-    let palmQ = qf;
-    if (Math.abs(effectiveWristExt) > 0.01) {
-      // Wrist extension tilts the fist
-      const wristExtVisual = effectiveWristExt * RIG.WRIST_VIS_SCALE;
-      const wristQ = Q.setAxisAngle(s.qr, 1, 0, 0, wristExtVisual);
-      Q.mul(palmQ, palmQ, wristQ);
-    }
-
-    M4.compose(s.m, fistFinal, palmQ, { x: 0.92, y: 0.74, z: 0.58 });
-    R.draw(this.mPalm, s.m, base);
-
-    // ---- DRAW THUMB ----
-    // Thumb lays along the handle
-    const th = V3.addScaled(V3.new(), fistFinal, hdir, -0.012);
-    const qh = Q.lookRotation(s.q, hdir, n);
-    M4.compose(s.m, V3.addScaled(th, th, n, 0.030), qh, { x: 1, y: 1, z: 0.062 });
-    R.draw(this.mThumb, s.m, base);
-
-    return { fist: fistFinal, elbow, forearmPsi: effectiveForearmPsi };
-  }
-
-  /**
-   * Enhanced ghost material with biomechanical info.
-   */
-  ghostMat(o, col, rough) {
+  ghostMat(o) {
     return {
-      color: o.ghostCol || col, rough: rough || 0.4, unlit: true,
+      color: o.ghostCol || [0.25, 0.8, 1], rough: 0.5, unlit: true,
       blend: 'add', opacity: o.alpha !== undefined ? o.alpha : 0.42,
       emissive: [0.06, 0.10, 0.14], doubleSided: false,
     };
   }
 
-  /**
-   * DRAW THE WHOLE PADDLE — now with full biomechanical orientation.
-   *
-   * KEY ENHANCEMENTS:
-   * 1. Uses bioQ for orientation when provided
-   * 2. Determines active side geometrically (n · ballDir)
-   * 3. Renders correct rubber color based on active side
-   * 4. Forearm rotation visible in arm pose
-   * 5. Wrist deviation visible in fist position
-   * 6. Flip angle adds subtle visual rotation
-   */
   draw(R, S, o) {
-    this.build(R);
-    const s = this._s;
-    const n = V3.norm(s.v1, o.normal);
-    const q = o.q || this.paddleQuat(s.q, n, o.hand, o.swing, o.roll);
+    // Copy a supplied quaternion: callers retain ownership of their pose.
+    const q = o.q ? Q.copy(this._q, o.q)
+      : this.paddleQuat(this._q, o.normal, o.hand, o.swing, o.roll);
+    const me = S.mesh, ma = S.mat, mats = o.mats || {};
+    const draw = o.shadowPass
+      ? (mesh, matrix, mat) => R.drawShadow(mesh, matrix, null, 0)
+      : (mesh, matrix, mat) => R.draw(mesh, matrix, mat);
+    const ghost = o.ghost ? this.ghostMat(o) : null;
+    M4.compose(this._m, o.pos, q, this._one);
+    draw(me.blade, this._m, ghost || mats.wood || ma.bladeWood);
 
-    // ---- BIOMECHANICAL SETUP ----
+    // Offsets must use the very same quaternion as the blade, not a stale
+    // physics normal. Red/black are fixed surfaces, never swapped by ball
+    // velocity (which used to make the colours pop at every bounce).
+    M4.transformDir(this._normal, this._m, { x: 0, y: 0, z: 1 });
+    V3.addScaled(this._pos, o.pos, this._normal, 0.0085);
+    M4.compose(this._partM, this._pos, q, this._one);
+    draw(me.rubber, this._partM, ghost || mats.red || ma.rubberRed);
+    V3.addScaled(this._pos, o.pos, this._normal, -0.0085);
+    M4.compose(this._partM, this._pos, q, this._one);
+    draw(me.rubber, this._partM, ghost || mats.black || ma.rubberBlack);
 
-    // Use bio quaternion if provided
-    const bioQ = o.bioQ || null;
-    const useBio = bioQ && o.bioActive !== false;
-    const finalQ = useBio ? bioQ : q;
-
-    // Determine active side for rubber color
-    // Method 1: from bioMeta if available
-    let activeSide = o.activeSide || 1;
-
-    // Method 2: geometric calculation from normal and ball direction
-    if (o.ballDir && !o.bioMeta) {
-      const nWorld = V3.norm(V3.new(), n);
-      const d = V3.dot(nWorld, o.ballDir);
-      activeSide = d >= 0 ? 1 : -1;
-    }
-
-    // Store for drawArm
-    const armOptions = Object.assign({}, o, {
-      q: finalQ,
-      forearmPsi: o.forearmPsi || 0,
-      wristDev: o.wristDev || 0,
-      wristExt: o.wristExt || 0,
-      phiFlip: o.phiFlip || 0,
-      activeSide,
-    });
-
-    const me = S.mesh, ma = S.mat;
-    const mats = o.mats || {};
-
-    // ---- MATERIAL SELECTION BASED ON ACTIVE SIDE ----
-    // This is the KEY visual difference: correct rubber color per side
-
-    let wood, red, black, handle;
-
-    if (o.ghost) {
-      const ghostCol = o.ghostCol || RIG.SKIN;
-      wood = this.ghostMat(o, ghostCol, 0.5);
-      red = this.ghostMat(o, ghostCol, 0.5);
-      black = this.ghostMat(o, ghostCol, 0.5);
-      handle = this.ghostMat(o, ghostCol, 0.5);
-    } else {
-      wood = mats.wood || ma.bladeWood;
-      // Active side gets the correct rubber color
-      if (activeSide >= 0) {
-        // Forehand active: red rubber visible
-        red = mats.red || ma.rubberRed;
-        black = mats.black || ma.rubberBlack;
-      } else {
-        // Backhand active: black rubber visible
-        red = mats.black || ma.rubberBlack;
-        black = mats.red || ma.rubberRed;
-      }
-      handle = mats.grip || ma.handle;
-    }
-
-    // ---- DRAW PADDLE BLADE ----
-    M4.compose(s.m, o.pos, finalQ, s.one);
-    R.draw(me.blade, s.m, wood);
-
-    // ---- DRAW RUBBER ON BOTH SIDES ----
-    // Offset along normal for rubber thickness
-    const rubberOffset = 0.0085;
-
-    // Active side rubber (the one facing the ball)
-    const activeOffset = V3.addScaled(V3.new(), o.pos, n, rubberOffset);
-    M4.compose(s.m2, activeOffset, finalQ, s.one);
-    R.draw(me.rubber, s.m2, activeSide >= 0 ? red : black);
-
-    // Inactive side rubber (opposite side)
-    const inactiveOffset = V3.addScaled(V3.new(), o.pos, V3.scale(n, -1), rubberOffset);
-    M4.compose(s.m2, inactiveOffset, finalQ, s.one);
-    R.draw(me.rubber, s.m2, activeSide >= 0 ? black : red);
-
-    // ---- DRAW HANDLE ----
-    const ho = V3.new();
-    M4.transformDir(ho, s.m, { x: 0, y: -0.125, z: 0 });
-    M4.compose(s.m2, V3.addScaled(s.v3, o.pos, ho, 1), finalQ, s.one);
-    R.draw(me.handle, s.m2, handle);
-
-    // ---- DRAW ARM WITH BIOMECHANICAL PARAMS ----
-    // Pass the computed activeSide and bio params to drawArm
-    this.drawArm(R, S, armOptions);
-
-    return finalQ;
-  }
-
-  /* ------------------------------------------------------------------ *
-   *  Ghost stroke ribbon — the path of the hand through the stroke,     *
-   *  drawn as a camera-facing ribbon with a travelling highlight.       *
-   * ------------------------------------------------------------------ */
-  pathMesh(pts, camPos, width, headI) {
-    const R = this.mPath, RR = this.R;
-    const n = pts.length / 3;
-    if (n < 3) { R.count = 0; return R; }
-    let nv = 0, ni = 0;
-    for (let i = 0; i < n; i++) {
-      const x = pts[i * 3], y = pts[i * 3 + 1], z = pts[i * 3 + 2];
-      const j = i < n - 1 ? i + 1 : i - 1, sgn = i < n - 1 ? 1 : -1;
-      let dx = (pts[j * 3] - x) * sgn, dy = (pts[j * 3 + 1] - y) * sgn, dz = (pts[j * 3 + 2] - z) * sgn;
-      let vx = camPos.x - x, vy = camPos.y - y, vz = camPos.z - z;
-      let sx = dy * vz - dz * vy, sy = dz * vx - dx * vz, sz = dx * vy - dy * vx;
-      const sl = Math.hypot(sx, sy, sz) || 1;
-      const t = i / (n - 1);
-      const w = width * (0.35 + 0.65 * t);
-      sx = sx / sl * w; sy = sy / sl * w; sz = sz / sl * w;
-      const up = (headI !== undefined) ? clamp(1 - Math.abs(i - headI) / 5, 0.18, 1) : 1;
-      R.pos[nv * 3] = x - sx; R.pos[nv * 3 + 1] = y - sy; R.pos[nv * 3 + 2] = z - sz;
-      R.nrm[nv * 3] = 0; R.nrm[nv * 3 + 1] = 1; R.nrm[nv * 3 + 2] = 0;
-      R.uv[nv * 2] = t; R.uv[nv * 2 + 1] = 0; nv++;
-      R.pos[nv * 3] = x + sx; R.pos[nv * 3 + 1] = y + sy; R.pos[nv * 3 + 2] = z + sz;
-      R.nrm[nv * 3] = 0; R.nrm[nv * 3 + 1] = 1; R.nrm[nv * 3 + 2] = 0;
-      R.uv[nv * 2] = t; R.uv[nv * 2 + 1] = up; nv++;
-      if (i > 0) {
-        const a = (i - 1) * 2;
-        R.idx[ni++] = a; R.idx[ni++] = a + 1; R.idx[ni++] = a + 2;
-        R.idx[ni++] = a + 1; R.idx[ni++] = a + 3; R.idx[ni++] = a + 2;
-      }
-    }
-    RR.uploadDyn(R, nv, ni);
-    return R;
-  }
-
-  /**
-   * Draw a "biomechanical hint" — a subtle line showing forearm rotation axis.
-   * Used for training/development mode only.
-   */
-  drawBiomechHint(R, S, pos, normal, forearmPsi, wristDev, alpha) {
-    const s = this._s;
-    this.build(R);
-
-    const hintAlpha = alpha !== undefined ? alpha : 0.3;
-
-    // Forearm axis indicator (line along forearm rotation axis)
-    const axisLen = 0.15;
-    const axisDir = V3.norm(s.v1, normal);
-    const start = V3.addScaled(V3.new(), pos, axisDir, -0.1);
-    const end = V3.addScaled(V3.new(), pos, axisDir, axisLen);
-
-    // Simple line using a thin box
-    const mid = V3.lerp(s.v2, start, end, 0.5);
-    const dir = V3.norm(s.v3, V3.sub(end, start));
-    const q = Q.lookRotation(s.q, dir, s.up);
-    const length = V3.len(V3.sub(end, start));
-
-    M4.compose(s.m, mid, q, { x: 0.003, y: 0.003, z: length });
-    R.draw(this.mJoint, s.m, {
-      color: [1, 0.5, 0.2], rough: 0.5, emissive: [0.5, 0.2, 0],
-      blend: true, opacity: hintAlpha, doubleSided: true, unlit: true,
-    });
-
-    // Wrist deviation indicator (perpendicular to forearm)
-    if (Math.abs(wristDev) > 0.01) {
-      const wStart = V3.addScaled(V3.new(), pos, axisDir, 0.05);
-      const wDir = V3.norm(s.v4, V3.new(1, 0, 0));
-      const wEnd = V3.addScaled(V3.new(), wStart, wDir, wristDev * 0.2);
-      const wMid = V3.lerp(s.v5, wStart, wEnd, 0.5);
-      const wLen = V3.len(V3.sub(wEnd, wStart));
-      const wQ = Q.lookRotation(s.q, wDir, axisDir);
-      M4.compose(s.m2, wMid, wQ, { x: 0.003, y: 0.003, z: wLen });
-      R.draw(this.mJoint, s.m2, {
-        color: [0.2, 0.5, 1], rough: 0.5, emissive: [0, 0.2, 0.5],
-        blend: true, opacity: hintAlpha * 0.7, doubleSided: true, unlit: true,
-      });
-    }
-
-    return s.m;
+    M4.transformDir(this._pos, this._m, { x: 0, y: -0.125, z: 0 });
+    V3.add(this._pos, o.pos, this._pos);
+    M4.compose(this._partM, this._pos, q, this._one);
+    draw(me.handle, this._partM, ghost || mats.grip || ma.handle);
+    return q;
   }
 }
 
@@ -6971,7 +6529,7 @@ class Scene {
       netPost: R.mesh(makeCylinder(0.013, 0.016, T.NET_H + 0.04, 12)),
       ball: R.mesh(makeSphere(T.R, 28, 20)),
       blade: R.mesh(makePaddleBlade(0.077, 0.082, 0.014, 44)),
-      rubber: R.mesh(makePaddleBlade(0.072, 0.077, 0.0165, 44)),
+      rubber: R.mesh(makePaddleBlade(0.072, 0.077, 0.003, 44)),
       handle: R.mesh(makeBox(0.030, 0.100, 0.022)),
       floor: R.mesh(makePlane(26, 26, 13)),
       quad: R.mesh(makeQuad(1, 1)),
@@ -7800,7 +7358,6 @@ class HitFeedbackSystem {
       }
     }
   }
-}
 
   /**
    * Enable/disable haptic feedback.
@@ -8315,7 +7872,7 @@ class EmotionalSystem {
     // Could add CSS class to canvas
 
     // Text message
-    const isPlayerServing = g.server === 1;
+    const isPlayerServing = this.game.server === 1;
     const msg = isPlayerServing
       ? 'МATCH POINT — ВАША ПОДАЧА'
       : 'МATCH POINT — СОПЕРНИК ПОДАЁТ';
@@ -9135,533 +8692,6 @@ class Equipment {
 }
 
 
-/* ====== 85_bioRacket.js ====== */
-/* =====================================================================
- *  BIOLOGICAL RACKET — 3D biomechanical model for table tennis racket
- *
- *  implements the kinematic chain:
- *    Q_world = Q_shoulder · Q_elbow · Q_forearm · Q_wristBase · Q_racketLocal
- *
- *  where:
- *    - Q_forearm stores pronation/supination (ψ_forearm)
- *    - Q_racketLocal stores forward tilt, side tilt, handle twist, flip
- *    - φ_flip(x) = π · S(x;k,x₀)  — sigmoid flip through center
- *    - x = clamp((p_hit,x - x_sternum)/W, -1, 1)  — normalized lateral position
- *    - b = 3u² - 2u³, u = (x+1)/2  — smooth transition
- *    - n = Q_world · n₀  — normal determines active side geometrically
- *
- *  DEG = π/180
- * ===================================================================== */
-
-/* ---- constants (tuned for mobile gameplay feel) ---- */
-const BIO = {
-  // Zone width: how wide the working zone is (meters from center)
-  ZONE_HALF_WIDTH: 0.85,
-
-  // Forearm rotation range [rad]
-  FOREARM_SUP: 0.42,   // supination in backhand (more than real for visibility)
-  FOREARM_PRO: -0.52,  // pronation in forehand
-
-  // Forward tilt range [deg] — how much blade closes downward
-  THETA_BH: 10,        // backhand: slightly open
-  THETA_FH: 24,        // forehand: more closed for topspin
-  THETA_EDGE_F: 10,    // extra closure at extreme edges
-  GAMMA: 1.6,          // edge growth exponent
-
-  // Side tilt range [deg] — blade banks sideways at edges
-  THETA_SIDE_MAX: 22,  // max side tilt at extreme edges
-  BETA: 1.5,           // side tilt growth exponent
-
-  // Handle twist [deg] — how grip rotates in palm
-  THETA_H0: 6,         // base handle orientation
-  THETA_H1: 14,        // backhand vs forehand difference
-  THETA_H2: 10,        // edge adaptation
-  DELTA: 1.4,          // handle edge exponent
-
-  // Flip sigmoid parameters — sigmoid through center for rubber flip
-  FLIP_K: 14,          // steepness of sigmoid (sharp flip at center)
-  FLIP_X0: -0.06,      // center of flip (slightly left of center for right-hander)
-
-  // Wrist extension/flexion [rad]
-  WRIST_EXT_BH: 0.28,  // backhand: wrist extension
-  WRIST_EXT_FH: -0.12, // forehand: slight flexion
-
-  // Wrist radial/ulnar deviation at edges [deg]
-  WRIST_DEV_MAX: 14,
-  ETA: 1.3,
-
-  // Forearm pronation sigmoid for arm rig
-  FOREARM_K: 11,
-  FOREARM_X0: -0.04,
-
-  // Visual exaggeration for mobile (makes biomechanics readable)
-  VIS_FORARM_SCALE: 1.25,
-  VIS_WRIST_SCALE: 1.15,
-  VIS_FLIP_EXAGGERATION: 0.15,  // extra flip visible for clarity
-};
-
-/* ---- math helpers ---- */
-const _sigmoidBuf = { value: 0 };
-function sigmoid(x, k, x0) {
-  // Protect against extreme values
-  const arg = -k * (x - x0);
-  if (arg > 50) return 1;
-  if (arg < -50) return 0;
-  _sigmoidBuf.value = 1 / (1 + Math.exp(arg));
-  return _sigmoidBuf.value;
-}
-
-function smoothBlend(x) {
-  const u = (x + 1) / 2;  // map [-1,1] -> [0,1]
-  return 3 * u * u - 2 * u * u * u;  // smoothstep
-}
-
-function computeX(hitPosX, sternumX, zoneHalfWidth) {
-  const W = zoneHalfWidth || BIO.ZONE_HALF_WIDTH;
-  return clamp((hitPosX - sternumX) / W, -1, 1);
-}
-
-/* ---- RacketBiomech: computes full 3D orientation ---- */
-class RacketBiomech {
-  constructor() {
-    // Pre-allocated temporaries for performance
-    this._qTmp = Q.new();
-    this._qForearm = Q.new();
-    this._qFlip = Q.new();
-    this._qForward = Q.new();
-    this._qSide = Q.new();
-    this._qHandle = Q.new();
-    this._qLocal = Q.new();
-    this._qWorld = Q.new();
-    this._qArm = Q.new();
-    this._qArmTotal = Q.new();
-    this._m4Tmp = M4.create();
-    this._one = { x: 1, y: 1, z: 1 };
-    this._nLocal = V3.new(0, 0, 1);  // normal of red (forehand) face in local space
-    this._nWorld = V3.new();
-    this._handleDir = V3.new();
-    this._negHandleDir = V3.new();
-    this._fwdDir = V3.new(0, 0, -1);  // default facing direction
-  }
-
-  /**
-   * Compute the full biomechanical orientation of the racket.
-   *
-   * @param {object} ctx
-   *   - x: normalized lateral position [-1,1] (-1=bh edge, 0=center, 1=fh edge)
-   *   - armQ: combined shoulder+elbow+wristBase quaternion (orientation of arm)
-   *   - hand: 'left' or 'right' (affects base roll and flip direction)
-   *   - isServe: whether this is a serve (affects pose)
-   *   - strokeType: 'LOOP', 'DRIVE', 'SMASH', 'CHOP', etc.
-   *   - swingSpeed: normalized speed 0..1 (affects forward tilt)
-   *   - ballDir: direction TO ball (for normal determination) — normalized
-   *   - contactQuality: 0..1 (affects blade openness)
-   *   - targetX: optional target x for assisted shots
-   * @returns {object} biomechanics result
-   */
-  compute(ctx) {
-    const handSign = ctx.hand === 'left' ? -1 : 1;
-    const x = clamp(ctx.x || 0, -1, 1);
-    const b = smoothBlend(x);  // 0 = pure BH, 1 = pure FH
-    const absX = Math.abs(x);
-    const signX = Math.sign(x) || 1;
-
-    // ---- 1. FOREARM PRONATION/SUPINATION ----
-    // ψ_forearm(x) = ψ_sup + (ψ_pro - ψ_sup) · S(x;k_f, x_f)
-    // Backhand = more supination (palm up-ish), Forehand = pronation (palm down-ish)
-    const S_forearm = sigmoid(x, BIO.FOREARM_K, BIO.FOREARM_X0);
-    let psiForearm = BIO.FOREARM_SUP + (BIO.FOREARM_PRO - BIO.FOREARM_SUP) * S_forearm;
-
-    // Visual exaggeration for mobile readability
-    psiForearm *= BIO.VIS_FORARM_SCALE;
-
-    // Build forearm quaternion: rotation around longitudinal axis (Z in forearm local)
-    // The forearm local Z is roughly along the forearm from elbow to wrist
-    // For visual purposes, we apply this as an additional rotation on the arm
-    Q.setAxisAngle(this._qForearm, 0, 0, 1, psiForearm);
-
-    // ---- 2. RACKET LOCAL ORIENTATION COMPONENTS ----
-
-    // 2a. φ_flip — sigmoid roll around handle axis for rubber flip
-    // Flips π radians (180°) through center with sigmoid steepness
-    const phiFlipBase = Math.PI * sigmoid(x, BIO.FLIP_K, BIO.FLIP_X0);
-    // Exaggerate slightly for visibility
-    const phiFlip = phiFlipBase + BIO.VIS_FLIP_EXAGGERATION * sigmoid(x, BIO.FLIP_K, BIO.FLIP_X0);
-    // For left-handed, flip direction reverses
-    const finalPhiFlip = phiFlip * handSign;
-
-    // 2b. θ_forward — forward tilt (blade closes downward toward table)
-    // More closed for topspin strokes, more open for backspin
-    const stroke = ctx.strokeType || 'DRIVE';
-    let baseThetaForward;
-    switch (stroke) {
-      case 'LOOP':
-      case 'COUNTER':
-        baseThetaForward = BIO.THETA_FH + 8 * (ctx.swingSpeed || 0.5);  // heavy topspin = more closed
-        break;
-      case 'DRIVE':
-        baseThetaForward = BIO.THETA_FH * 0.7 + BIO.THETA_BH * 0.3;
-        break;
-      case 'SMASH':
-        baseThetaForward = 5 - 5 * (ctx.swingSpeed || 0.5);  // flatter for smash
-        break;
-      case 'CHOP':
-      case 'PUSH':
-        baseThetaForward = -8 - 5 * (ctx.swingSpeed || 0.5);  // open for backspin
-        break;
-      case 'FLICK':
-        baseThetaForward = BIO.THETA_FH * 0.8;
-        break;
-      case 'BLOCK':
-        baseThetaForward = 8;
-        break;
-      case 'LOB':
-        baseThetaForward = BIO.THETA_FH * 0.6;
-        break;
-      default:
-        baseThetaForward = BIO.THETA_FH * 0.5 + BIO.THETA_BH * 0.5;
-    }
-
-    // Blend between bh/fh based on position
-    const thetaForwardBase = BIO.THETA_BH * (1 - b) + baseThetaForward * b;
-
-    // Edge bonus: more closure at extreme positions
-    const thetaEdgeBonus = BIO.THETA_EDGE_F * Math.pow(absX, BIO.GAMMA);
-
-    // Contact quality reduces effective closure (off-center hits open up)
-    const qualityFactor = ctx.contactQuality !== undefined ? ctx.contactQuality : 1;
-    const thetaForward = (thetaForwardBase + thetaEdgeBonus) * (0.85 + 0.15 * qualityFactor);
-    const thetaForwardRad = thetaForward * DEG;
-
-    // 2c. θ_side — side tilt (blade banks sideways at edges)
-    // In BH zone: blade banks one way, in FH zone: banks opposite
-    const thetaSideBase = BIO.THETA_SIDE_MAX * signX * Math.pow(absX, BIO.BETA);
-
-    // Stroke-specific side tilt (HOOK/FADE have extra)
-    let thetaSideExtra = 0;
-    if (stroke === 'HOOK' || stroke === 'FADE' || stroke === 'SERVE_SIDE') {
-      thetaSideExtra = BIO.THETA_SIDE_MAX * 0.5 * signX * Math.sign(ctx.swingDirX || 1);
-    }
-
-    const thetaSide = thetaSideBase + thetaSideExtra;
-    const thetaSideRad = thetaSide * DEG;
-
-    // 2d. θ_handle — handle twist in palm
-    const thetaHandleBase = BIO.THETA_H0 + BIO.THETA_H1 * (2 * b - 1);
-    const thetaHandleEdge = BIO.THETA_H2 * signX * Math.pow(absX, BIO.DELTA);
-    const thetaHandle = thetaHandleBase + thetaHandleEdge;
-    const thetaHandleRad = thetaHandle * DEG;
-
-    // ---- 3. BUILD LOCAL ORIENTATION ----
-    // Order: handle twist (innermost) → side tilt → forward tilt → flip (outermost)
-    // This matches: R_z(φ_flip) · R_x(θ_forward) · R_y(θ_side) · R_z(θ_handle)
-
-    const qLocal = this._qLocal;
-    Q.identity(qLocal);
-
-    // Step 1: handle twist (around local Z — handle axis)
-    Q.setAxisAngle(this._qHandle, 0, 0, 1, thetaHandleRad);
-    Q.mul(qLocal, qLocal, this._qHandle);
-
-    // Step 2: side tilt (around local Y — blade banks sideways)
-    Q.setAxisAngle(this._qSide, 0, 1, 0, thetaSideRad);
-    Q.mul(qLocal, qLocal, this._qSide);
-
-    // Step 3: forward tilt (around local X — blade closes downward)
-    Q.setAxisAngle(this._qForward, 1, 0, 0, thetaForwardRad);
-    Q.mul(qLocal, qLocal, this._qForward);
-
-    // Step 4: flip (around local Z — rubber flips)
-    Q.setAxisAngle(this._qFlip, 0, 0, 1, finalPhiFlip);
-    Q.mul(qLocal, qLocal, this._qFlip);
-
-    // ---- 4. COMBINE INTO WORLD ORIENTATION ----
-    // Q_world = Q_arm · Q_forearm · Q_racketLocal
-    const qArm = ctx.armQ || Q.identity(this._qArm);
-    const qWorld = this._qWorld;
-
-    // First apply forearm rotation to arm
-    // Q_arm_with_forearm = Q_arm · Q_forearm
-    Q.mul(this._qArmTotal, qArm, this._qForearm);
-
-    // Then apply racket local orientation
-    // Q_world = Q_arm_with_forearm · Q_racketLocal
-    Q.mul(qWorld, this._qArmTotal, qLocal);
-
-    // ---- 5. COMPUTE WORLD-SPACE NORMAL (for active side determination) ----
-    // n = Q_world · n₀ where n₀ = (0,0,1) — red/forehand face normal in local space
-    M4.compose(this._m4Tmp, V3.zero(), qWorld, this._one);
-    M4.transformDir(this._nWorld, this._m4Tmp, this._nLocal);
-    V3.norm(this._nWorld, this._nWorld);
-
-    // ---- 6. DETERMINE ACTIVE SIDE GEOMETRICALLY ----
-    // d = n · v̂_toBall > 0 → red (forehand) face is active
-    // d < 0 → black (backhand) face is active
-    const ballDir = ctx.ballDir || this._fwdDir;
-    const d = V3.dot(this._nWorld, ballDir);
-    const activeSide = d >= 0 ? 1 : -1;  // +1 = forehand/red, -1 = backhand/black
-
-    // ---- 7. COMPUTE HANDLE DIRECTION (for grip visualization) ----
-    // Handle extends in local -Y direction
-    M4.transformDir(this._handleDir, this._m4Tmp, { x: 0, y: -1, z: 0 });
-    V3.norm(this._handleDir, this._handleDir);
-    V3.scale(this._negHandleDir, this._handleDir, -1);
-
-    // ---- 8. WRIST PARAMETERS ----
-    const omegaWristExt = BIO.WRIST_EXT_BH * (1 - b) + BIO.WRIST_EXT_FH * b;
-    const omegaWristDev = BIO.WRIST_DEV_MAX * signX * Math.pow(absX, BIO.ETA) * DEG;
-
-    // ---- 9. METADATA FOR UI/FEEDBACK ----
-    const isFlipping = Math.abs(finalPhiFlip) > 0.3 && Math.abs(x) < 0.3;
-    const isAtEdge = absX > 0.75;
-    const zoneLabel = x < -0.6 ? 'BH_EDGE' : x < -0.2 ? 'BACKHAND' : x < 0.2 ? 'CENTER' : x < 0.6 ? 'FORHAND' : 'FH_EDGE';
-    const strokeQuality = ctx.contactQuality !== undefined ? ctx.contactQuality : 1;
-
-    return {
-      // Core orientation
-      Q_world: qWorld,
-      n_world: this._nWorld,
-      handleDir: this._handleDir,
-      negHandleDir: this._negHandleDir,
-
-      // Active side (geometric, not boolean)
-      activeSide,  // +1 = forehand/red, -1 = backhand/black
-      d,           // dot product value (for debugging)
-
-      // Biomechanical parameters
-      forearmPsi: psiForearm,
-      wristExt: omegaWristExt,
-      wristDev: omegaWristDev,
-
-      // Blade angles
-      thetaForward,
-      thetaSide,
-      thetaHandle,
-      phiFlip: finalPhiFlip,
-
-      // Position parameters
-      x,
-      b,
-      absX,
-      signX,
-
-      // Visual state
-      isFlipping,
-      isAtEdge,
-      zoneLabel,
-
-      // Quality
-      strokeQuality,
-      strokeType: stroke,
-
-      // Derived: which material to show
-      activeMaterial: activeSide >= 0 ? 'red' : 'black',
-      inactiveMaterial: activeSide >= 0 ? 'black' : 'red',
-    };
-  }
-
-  /**
-   * Get material info for the active side.
-   */
-  getMaterialForSide(eq, activeSide) {
-    if (!eq) return { side: 'fore', color: [1, 0.1, 0.1], backColor: [0.15, 0.15, 0.17] };
-    const side = activeSide >= 0 ? 'fore' : 'back';
-    const col = eq.colours[side];
-    const backCol = eq.colours[side + 'Back'];
-    return {
-      side,
-      activeColor: col || [1, 0.1, 0.1],
-      inactiveColor: backCol || [0.15, 0.15, 0.17],
-      isForehand: side === 'fore',
-      bladeWood: eq.colours.wood,
-      grip: eq.colours.grip,
-    };
-  }
-
-  /**
-   * Static preset for different stroke types — used for training ghosts, etc.
-   */
-  static strokePreset(strokeId, x, swingSpeed) {
-    const b = smoothBlend(x);
-    const absX = Math.abs(x);
-    const signX = Math.sign(x) || 1;
-
-    const presets = {
-      LOOP: {
-        thetaForward: 20 + 12 * swingSpeed + 8 * Math.pow(absX, BIO.GAMMA),
-        thetaSide: 6 * signX * Math.pow(absX, BIO.BETA),
-        thetaHandle: 8 + 8 * (2 * b - 1) + 6 * signX * Math.pow(absX, BIO.DELTA),
-        forearmPsi: BIO.FOREARM_SUP + (BIO.FOREARM_PRO - BIO.FOREARM_SUP) * sigmoid(x, BIO.FOREARM_K, BIO.FOREARM_X0),
-      },
-      DRIVE: {
-        thetaForward: 15 + 6 * swingSpeed + 5 * Math.pow(absX, BIO.GAMMA),
-        thetaSide: 4 * signX * Math.pow(absX, BIO.BETA),
-        thetaHandle: 6 + 6 * (2 * b - 1) + 4 * signX * Math.pow(absX, BIO.DELTA),
-        forearmPsi: BIO.FOREARM_SUP * 0.7 + BIO.FOREARM_PRO * 0.3,
-      },
-      SMASH: {
-        thetaForward: 5 - 3 * swingSpeed,
-        thetaSide: 3 * signX,
-        thetaHandle: 4 + 2 * (2 * b - 1),
-        forearmPsi: BIO.FOREARM_PRO * 0.6,
-      },
-      CHOP: {
-        thetaForward: -10 - 5 * swingSpeed,
-        thetaSide: 10 * signX * Math.pow(absX, BIO.BETA),
-        thetaHandle: 12 + 4 * signX * Math.pow(absX, BIO.DELTA),
-        forearmPsi: BIO.FOREARM_SUP * 0.9,
-      },
-      FLICK: {
-        thetaForward: 18 + 4 * swingSpeed,
-        thetaSide: 10 * signX * Math.pow(absX, BIO.BETA),
-        thetaHandle: 10 + 4 * (2 * b - 1),
-        forearmPsi: BIO.FOREARM_SUP * 0.5 + BIO.FOREARM_PRO * 0.5,
-      },
-      PUSH: {
-        thetaForward: -5 - 3 * swingSpeed,
-        thetaSide: 8 * signX * Math.pow(absX, BIO.BETA),
-        thetaHandle: 8 + 3 * (2 * b - 1),
-        forearmPsi: BIO.FOREARM_SUP,
-      },
-      BLOCK: {
-        thetaForward: 8,
-        thetaSide: 3 * signX * Math.pow(absX, BIO.BETA),
-        thetaHandle: 5 + 2 * (2 * b - 1),
-        forearmPsi: BIO.FOREARM_SUP * 0.6 + BIO.FOREARM_PRO * 0.4,
-      },
-      SERVE_TOP: {
-        thetaForward: 16,
-        thetaSide: 2 * signX,
-        thetaHandle: 5,
-        forearmPsi: BIO.FOREARM_SUP * 0.5 + BIO.FOREARM_PRO * 0.5,
-      },
-      SERVE_BACK: {
-        thetaForward: -8,
-        thetaSide: 6 * signX,
-        thetaHandle: 10,
-        forearmPsi: BIO.FOREARM_SUP * 0.8,
-      },
-    };
-    return presets[strokeId] || presets.DRIVE;
-  }
-}
-
-/* ---- helper: integrate bio orientation into existing paddle state ---- */
-function integrateBioRacket(bioResult, paddleState, ctx) {
-  // Update paddle normal from bio computation (this is what physics uses)
-  V3.copy(paddleState.normal, bioResult.n_world);
-  V3.norm(paddleState.normal, paddleState.normal);
-
-  // Update paddle quaternion for rendering
-  Q.lookRotation(paddleState.q, paddleState.normal, { x: 0, y: 1, z: 0 });
-
-  // Store full bio quaternion for rendering
-  paddleState.bioQ = bioResult.Q_world;
-
-  // Store metadata for UI and animation
-  if (!paddleState.bioMeta) paddleState.bioMeta = {};
-  Object.assign(paddleState.bioMeta, {
-    x: bioResult.x,
-    b: bioResult.b,
-    activeSide: bioResult.activeSide,
-    forearmPsi: bioResult.forearmPsi,
-    wristExt: bioResult.wristExt,
-    wristDev: bioResult.wristDev,
-    thetaForward: bioResult.thetaForward,
-    thetaSide: bioResult.thetaSide,
-    thetaHandle: bioResult.thetaHandle,
-    phiFlip: bioResult.phiFlip,
-    isFlipping: bioResult.isFlipping,
-    isAtEdge: bioResult.isAtEdge,
-    zoneLabel: bioResult.zoneLabel,
-    strokeQuality: bioResult.strokeQuality,
-    strokeType: bioResult.strokeType,
-    d: bioResult.d,
-  });
-
-  // Store forearm rotation for arm rig
-  paddleState.forearmPsi = bioResult.forearmPsi;
-  paddleState.wristExt = bioResult.wristExt;
-  paddleState.wristDev = bioResult.wristDev;
-  paddleState.phiFlip = bioResult.phiFlip;
-
-  return paddleState;
-}
-
-/* ---- helper: compute bio orientation for player paddle ---- */
-function computePlayerBioRacket(game, ctx) {
-  if (!game.bioRacket) return null;
-
-  // Determine x from current ball position relative to player
-  const ball = game.ball;
-  const player = game.player;
-
-  // Use ball x-position relative to player's sternum (which is at x=0)
-  // If ball not live, use player's current lateral velocity to estimate
-  let hitX;
-  if (ball.live && ball.p) {
-    hitX = ball.p.x;
-  } else {
-    // Estimate from player movement
-    hitX = player.pos.x + player.vel.x * 0.1;
-  }
-
-  // Determine ball direction for normal check
-  let ballDir;
-  if (ball.live && ball.v) {
-    ballDir = V3.norm(V3.new(), ball.v);
-    // If ball moving away from player, flip direction
-    if (ballDir.z < 0) V3.scale(ballDir, ballDir, -1);
-  } else {
-    ballDir = V3.new(0, 0, 1);
-  }
-
-  // Estimate stroke type from swipe
-  let strokeType = 'DRIVE';
-  let swingSpeed = 0.5;
-  if (game.liveStroke) {
-    strokeType = game.liveStroke.stroke.id;
-    swingSpeed = game.liveStroke.power || 0.5;
-  } else if (game.swipe && game.swipe.m) {
-    const m = game.swipe.m;
-    swingSpeed = clamp(m.speed / 4, 0, 1);
-    strokeType = game.swipe.lastReleased ?
-      classifyStrokeFromMetrics(m) : 'DRIVE';
-  }
-
-  // Contact quality estimate
-  let contactQuality = 1;
-  if (game.lastSweet !== undefined) {
-    contactQuality = game.lastSweet;
-  }
-
-  const ctx = {
-    x: computeX(hitX, 0, BIO.ZONE_HALF_WIDTH),
-    armQ: game.player.armQ || Q.identity(Q.new()),
-    hand: game.settings.hand || 'right',
-    isServe: game.isServeBall,
-    strokeType,
-    swingSpeed,
-    ballDir,
-    contactQuality,
-    swingDirX: game.player.vel.x || 0,
-  };
-
-  return game.bioRacket.compute(ctx);
-}
-
-/* ---- simple stroke classification for bio context ---- */
-function classifyStrokeFromMetrics(m) {
-  if (!m) return 'DRIVE';
-  const u = m.up;
-  const r = m.right;
-  if (u < -0.3) return 'CHOP';
-  if (u > 0.6) return 'LOOP';
-  if (Math.abs(r) > 0.5 && Math.abs(m.curl) > 0.3) return r > 0 ? 'HOOK' : 'FADE';
-  return 'DRIVE';
-}
-
-
 /* ====== 86_meta.js ====== */
 /* =====================================================================
  *  META — profile, money, shop, platform. The commercial layer.
@@ -10325,11 +9355,6 @@ class Game {
     this.swipe = new SwipeTracker();
     this.particles = new Particles();
     this.rig = new PaddleRig();
-    this.bioRacket = new (require('./85_bioRacket').RacketBiomech || function(){});
-    // Fallback if module system doesn't work — inline minimal version
-    if (!this.bioRacket || typeof this.bioRacket.compute !== 'function') {
-      this.bioRacket = null;
-    }
     this.equip = new Equipment();
 
     // Hit feedback system (99-level multi-sensory response)
@@ -11887,13 +10912,11 @@ class Game {
     pad.stepIn = expSmooth(pad.stepIn || 0, shortBall ? 1 : 0, 8, dt);
 
     // During anticipation, pull the paddle back visually
-    let anticipationOffset = V3.zero();
-    if (this.anticipation.active && this.anticipation.t < this.anticipation.duration) {
+    let anticipationOffset = V3.new();
+    if (this.settings.anticipationHint && this.anticipation.active && this.anticipation.t < this.anticipation.duration) {
       const progress = this.anticipation.t / this.anticipation.duration;
       const pullAmount = Math.sin(progress * Math.PI) * this.anticipation.intensity * 0.12;
-      anticipationOffset = V3.scale(V3.new(), this.anticipation.targetDir, -pullAmount);
-      // Advance anticipation timer
-      this.anticipation.t += dt;
+      anticipationOffset = V3.mul(V3.new(), this.anticipation.targetDir, -pullAmount);
     }
 
     const t = paddleTargetFromPointer(pt.x, pt.y, depthY, sens,
@@ -12001,70 +11024,8 @@ class Game {
       this.liveStroke = st;
     } else this.liveStroke = null;
 
-    // ---- BIOMECHANICAL RACKET ORIENTATION (99-level) ----
-    // Compute the full 3D biomechanical orientation if bioRacket is available
-    if (this.bioRacket && this.bioRacket.compute) {
-      const ballDir = this.ball.live && this.ball.v
-        ? V3.norm(V3.new(), this.ball.v)
-        : V3.new(0, 0, 1);
-
-      // Determine x (lateral position) from ball or player position
-      let hitX = this.ball.live && this.ball.p ? this.ball.p.x : pad.pos.x;
-
-      // Estimate stroke type and speed
-      let strokeType = 'DRIVE';
-      let swingSpeed = 0.5;
-      let contactQuality = 1;
-      if (this.liveStroke) {
-        strokeType = this.liveStroke.stroke.id;
-        swingSpeed = this.liveStroke.power || 0.5;
-      } else if (m) {
-        strokeType = classifyStrokeForBio(m);
-        swingSpeed = clamp(m.speed / 4, 0, 1);
-      }
-      if (this.lastSweet !== undefined) {
-        contactQuality = this.lastSweet;
-      }
-
-      // Build arm quaternion from current paddle state
-      // This represents shoulder + elbow + wristBase orientation
-      const armQ = Q.lookRotation(Q.new(), pad.normal, { x: 0, y: 1, z: 0 });
-
-      const bioCtx = {
-        x: (hitX - 0) / BIO.ZONE_HALF_WIDTH,  // normalize to [-1,1]
-        armQ,
-        hand: this.settings.hand || 'right',
-        isServe: this.isServeBall,
-        strokeType,
-        swingSpeed,
-        ballDir,
-        contactQuality,
-        swingDirX: pad.vel.x || 0,
-      };
-
-      const bio = this.bioRacket.compute(bioCtx);
-      if (bio) {
-        // Store bio orientation for rendering
-        pad.bioQ = bio.Q_world;
-        pad.bioMeta = {
-          x: bio.x, b: bio.b, activeSide: bio.activeSide,
-          forearmPsi: bio.forearmPsi, wristExt: bio.wristExt,
-          wristDev: bio.wristDev, thetaForward: bio.thetaForward,
-          thetaSide: bio.thetaSide, thetaHandle: bio.thetaHandle,
-          phiFlip: bio.phiFlip, isFlipping: bio.isFlipping,
-          isAtEdge: bio.isAtEdge, zoneLabel: bio.zoneLabel,
-          strokeQuality: bio.strokeQuality, strokeType: bio.strokeType,
-        };
-        pad.forearmPsi = bio.forearmPsi;
-        pad.wristExt = bio.wristExt;
-        pad.wristDev = bio.wristDev;
-        pad.phiFlip = bio.phiFlip;
-
-        // Update the "want" normal from bio computation for smoothing
-        V3.copy(want, bio.n_world);
-      }
-    }
-
+    // The target is absolute (gesture + footwork), never a rotation of last
+    // frame's normal. Feeding the output back here accumulates pitch forever.
     // apply the step yaw to the resting face as well
     const cy = Math.cos(this.padYaw), sy = Math.sin(this.padYaw);
     const wx = want.x * cy + want.z * sy, wz = -want.x * sy + want.z * cy;
@@ -12539,13 +11500,13 @@ class Game {
           const decay = 1 - smoothProgress;
 
           // Visual position — continues in swing direction, then decelerates
-          const ftOffset = V3.scale(V3.new(), this.followThrough.swingDir,
+          const ftOffset = V3.mul(V3.new(), this.followThrough.swingDir,
             (1 - decay) * 0.25);
           V3.copy(this.followThrough.visualPos, this.followThrough.startPos);
           V3.add(this.followThrough.visualPos, this.followThrough.visualPos, ftOffset);
 
           // Visual normal — follows face rotation with decay
-          const normalOffset = V3.scale(V3.new(), this.followThrough.startNormal,
+          const normalOffset = V3.mul(V3.new(), this.followThrough.startNormal,
             (1 - decay) * 0.2);
           V3.copy(this.followThrough.visualNormal, this.followThrough.startNormal);
           V3.add(this.followThrough.visualNormal, this.followThrough.visualNormal, normalOffset);
@@ -12568,7 +11529,7 @@ class Game {
         } else {
           // Backswing pull-back — pulls paddle opposite to swipe direction
           const pullAmount = Math.sin(progress * Math.PI) * this.anticipation.intensity * 0.12;
-          const offset = V3.scale(V3.new(), this.anticipation.targetDir, -pullAmount);
+          const offset = V3.mul(V3.new(), this.anticipation.targetDir, -pullAmount);
           V3.copy(this.anticipation.visualOffset, offset);
         }
       } else {
@@ -12658,19 +11619,7 @@ class Game {
 
     // Update emotional system — dramatic moments and arc
     if (this.emotion) {
-      this.emotion.update({
-        state: this.state,
-        rally: this.rally,
-        ball: this.ball,
-        score: this.score,
-        settings: this.settings,
-        momentum: this.momentum,
-        lastPoint: this.lastPoint,
-        lastShotInfo: this.lastShotInfo,
-        netTouched: this.netTouched,
-        server: this.server,
-        time: this.time,
-      });
+      this.emotion.update(this);
     }
 
     // Update UI animations
@@ -12738,61 +11687,18 @@ class Game {
       d(me.ball, tmp.m, ma.ball);
     }
 
-    /* ---- PLAYER PADDLE (with full biomechanical orientation) ---- */
-    // The player paddle is rendered when showPlayerPaddle is enabled
-    // or always in training mode. Uses bioRacket for orientation.
-    if (this.settings.showPlayerPaddle !== false || this.training) {
+    /* Paddle-only rendering. Physics and visuals share the same face normal;
+       rendering must not mutate the simulation's orientation. */
+    if (this.settings.showPlayerPaddle !== false) {
       const pp = this.player;
-      const pNorm = V3.norm(V3.new(), pp.normal);
-
-      // Player bio racket orientation
-      let ppBioQ = pp.bioQ || null;
-      let ppActiveSide = 1;
-      let ppForearmPsi = pp.forearmPsi || 0;
-      let ppWristExt = pp.wristExt || 0;
-      let ppWristDev = pp.wristDev || 0;
-      let ppPhiFlip = pp.phiFlip || 0;
-      let ppBioMeta = pp.bioMeta || null;
-
-      // Determine active side geometrically if not from bio
-      const ppBallDir = this.ball.live && this.ball.v
-        ? V3.norm(V3.new(), this.ball.v)
-        : V3.new(0, 0, 1);
-      if (!ppBioMeta) {
-        const dot = V3.dot(pNorm, ppBallDir);
-        ppActiveSide = dot >= 0 ? 1 : -1;
-      } else {
-        ppActiveSide = ppBioMeta.activeSide;
-      }
-
-      // Build arm quaternion for bio
-      const ppArmQ = Q.lookRotation(Q.new(), pNorm, { x: 0, y: 1, z: 0 });
-
-      if (this.settings.showPlayerPaddle !== false) {
-        this.rig.draw(R, S, {
-          pos: pp.pos,
-          normal: pNorm,
-          hand: this.settings.hand === 'right' ? 'right' : 'left',
-          swing: pp.swing,
-          windup: 0.5,  // player always has some windup for visual interest
-          roll: pp.roll || 0,
-          mats: this.paddleMats(S, this.equip),
-          // Bio parameters
-          bioQ: ppBioQ,
-          bioActive: !!ppBioQ,
-          forearmPsi: ppForearmPsi,
-          wristExt: ppWristExt,
-          wristDev: ppWristDev,
-          phiFlip: ppPhiFlip,
-          activeSide: ppActiveSide,
-          ballDir: ppBallDir,
-          bioMeta: ppBioMeta,
-        });
-      }
+      this.rig.draw(R, S, {
+        pos: pp.pos, normal: pp.normal, hand: this.settings.hand, shadowPass,
+        swing: pp.swing, roll: pp.roll || 0,
+        mats: this.paddleMats(S, this.equip),
+      });
     }
 
-    /* the opponent: paddle, hand, forearm and sleeve, all solved from
-       the paddle's own position and normal (see 56_rig.js) */
+    // Opponent paddle; no hand, forearm or sleeve geometry.
     const ap = this.aiPaddle;
     const an = V3.norm(V3.new(), V3.sub(V3.new(), this.ball.p, this.ai.pos));
     an.z = Math.abs(an.z) * 1 || 1;
@@ -12806,28 +11712,11 @@ class Game {
     V3.copy(ap.normal, aiNorm);
     V3.copy(ap.pos, this.ai.pos);
 
-    // AI bio racket orientation — simplified for AI (no full bio computation needed)
-    let aiBioQ = null;
-    let aiActiveSide = 1;
-    const aiBallDir = V3.norm(V3.new(), V3.sub(V3.new(), this.ball.p, this.ai.pos));
-    if (this.ball.live) {
-      const dot = V3.dot(aiNorm, aiBallDir);
-      aiActiveSide = dot >= 0 ? 1 : -1;
-    }
-
-    if (shadowPass) {
-      const aqS = Q.lookRotation(Q.new(), aiNorm, { x: 0, y: 1, z: 0 });
-      M4.compose(tmp.m, ap.pos, aqS, V3.set(tmp.scl, 1, 1, 1));
-      R.drawShadow(me.blade, tmp.m, null, 0);
-    } else {
-      this.rig.draw(R, S, {
-        pos: ap.pos, normal: aiNorm, hand: this.settings.hand === 'right' ? 'left' : 'right',
-        swing: -this.ai.anim.swing, windup: wd, roll: (this.ai.anim.lean || 0) * 0.22,
-        mats: this.paddleMats(S, this.aiEquip),
-        activeSide: aiActiveSide,
-        ballDir: aiBallDir,
-      });
-    }
+    this.rig.draw(R, S, {
+      pos: ap.pos, normal: aiNorm, hand: this.settings.hand === 'right' ? 'left' : 'right',
+      swing: -this.ai.anim.swing, roll: (this.ai.anim.lean || 0) * 0.22,
+      mats: this.paddleMats(S, this.aiEquip), shadowPass,
+    });
 
   }
 
@@ -12964,26 +11853,6 @@ function hexToRgb(h) {
   const n = parseInt(h.replace('#', ''), 16);
   return [((n >> 16) & 255) / 255, ((n >> 8) & 255) / 255, (n & 255) / 255];
 }
-
-/**
- * Classify stroke from swipe metrics for biomechanical context.
- * Lightweight version of classifyStroke — just for bio orientation.
- */
-function classifyStrokeForBio(m) {
-  if (!m) return 'DRIVE';
-  const u = m.up;
-  const r = m.right;
-  const curl = m.curl || 0;
-  if (u < -0.3) return 'CHOP';
-  if (u > 0.6 && Math.abs(curl) < 0.3) return 'LOOP';
-  if (u > 0.3 && Math.abs(r) > 0.5 && Math.abs(curl) > 0.3) return r > 0 ? 'HOOK' : 'FADE';
-  if (u > 0.3) return 'DRIVE';
-  return 'DRIVE';
-}
-
-/* BIO constants for use in game (imported conceptually from 85_bioRacket.js) */
-const BIO_ZONE_HALF_WIDTH = 0.85;
-const DEG = Math.PI / 180;
 
 
 /* ====== 80_ui.js ====== */
@@ -14741,6 +13610,6 @@ const ICON = {
 })();
 
 </script>
-<!-- TOPSPIN ARENA · self-contained build 2026-10-17 · no external assets, no network required -->
+<!-- TOPSPIN ARENA · self-contained build 2026-10-18 · no external assets, no network required -->
 </body>
 </html>
