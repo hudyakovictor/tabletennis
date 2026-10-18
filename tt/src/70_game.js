@@ -891,7 +891,6 @@ class Game {
     const S = this.slowmo;
     if (v && !this.slowmoAvailable()) return;
     S.on = !!v;
-    if (S.on && !S.active) this.audio.slowIn && this.audio.slowIn();
   }
 
   slowmoAvailable() {
@@ -909,6 +908,12 @@ class Game {
     } else {
       S.energy = Math.min(1, S.energy + dtReal * 0.09);     // ~11 s to refill
       S.on = S.on && S.energy > 0.015;                      // ran dry → release
+    }
+    /* The filter must follow the state, not the keypress: driving it from
+     * setSlowmoHold() latched the low-pass on for the rest of the match. */
+    if (want !== S.active) {
+      if (want) this.audio.slowIn && this.audio.slowIn();
+      else this.audio.slowOut && this.audio.slowOut();
     }
     S.active = want;
     if (want) { this.targetTimeScale = 0.34; this.slowmoUntil = 0; }

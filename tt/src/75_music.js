@@ -348,7 +348,7 @@ class MusicSystem {
 
       source.connect(filter);
       filter.connect(gain);
-      gain.connect(this.audio.getCtx().destination);
+      gain.connect(this.audio.getBus ? (this.audio.getBus() || this.audio.getCtx().destination) : this.audio.getCtx().destination);
 
       source.start();
       source.stop(2);
@@ -380,7 +380,7 @@ class MusicSystem {
 
         osc.connect(filter);
         filter.connect(gain);
-        gain.connect(ctx.destination);
+        gain.connect(this.audio.getBus ? (this.audio.getBus() || ctx.destination) : ctx.destination);
 
         osc.start(ctx.currentTime);
         osc.stop(ctx.currentTime + 0.5);

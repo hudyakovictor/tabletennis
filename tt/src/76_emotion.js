@@ -96,8 +96,8 @@ class EmotionalSystem {
     // Text message
     const isPlayerServing = this.game.server === 1;
     const msg = isPlayerServing
-      ? 'МATCH POINT — ВАША ПОДАЧА'
-      : 'МATCH POINT — СОПЕРНИК ПОДАЁТ';
+      ? 'МАТЧ-ПОЙНТ — ВАША ПОДАЧА'
+      : 'МАТЧ-ПОЙНТ — СОПЕРНИК ПОДАЁТ';
     this.game.msg(msg, 2.0, '#ffd34d', true);
 
     // Haptic
@@ -196,8 +196,9 @@ class EmotionalSystem {
    * Winner moment.
    */
   _onWinner(g) {
+    const game = this.game;
     // Flash effect
-    g.hitFlash = Math.min(1, g.hitFlash + 0.3);
+    game.hitFlash = Math.min(1, (game.hitFlash || 0) + 0.3);
 
     // Music spike
     if (this.game.music && this.game.music._initialized) {
@@ -205,10 +206,10 @@ class EmotionalSystem {
     }
 
     // Message
-    g.msg('ОЧКО!', 1.2, '#6ee7a8', true);
+    game.msg('ОЧКО!', 1.2, '#6ee7a8', true);
 
     // Haptic celebration
-    if (navigator.vibrate && g.settings?.haptics) {
+    if (navigator.vibrate && game.settings?.haptics) {
       try { navigator.vibrate([15, 30, 15, 30]); } catch (e) {}
     }
   }
@@ -217,14 +218,15 @@ class EmotionalSystem {
    * Net cord moment.
    */
   _onNetCord(g) {
+    const game = this.game;
     // Flash
-    g.hitFlash = Math.min(1, g.hitFlash + 0.2);
+    game.hitFlash = Math.min(1, (game.hitFlash || 0) + 0.2);
 
     // Message
-    g.msg('СЕТКА!', 1.0, '#ffd34d', true);
+    game.msg('СЕТКА!', 1.0, '#ffd34d', true);
 
     // Haptic
-    if (navigator.vibrate && g.settings?.haptics) {
+    if (navigator.vibrate && game.settings?.haptics) {
       try { navigator.vibrate([10, 20, 10]); } catch (e) {}
     }
   }
@@ -233,12 +235,13 @@ class EmotionalSystem {
    * Edge ball moment.
    */
   _onEdge(g) {
+    const game = this.game;
     // Flash
-    g.hitFlash = Math.min(1, g.hitFlash + 0.25);
+    game.hitFlash = Math.min(1, (game.hitFlash || 0) + 0.25);
 
     // Already has message from physics, but enhance
     // Haptic surprise
-    if (navigator.vibrate && g.settings?.haptics) {
+    if (navigator.vibrate && game.settings?.haptics) {
       try { navigator.vibrate([8, 30, 8]); } catch (e) {}
     }
   }

@@ -199,7 +199,9 @@ class HitFeedbackSystem {
    */
   audio(quality, speed, spinType, spinMag, ctx) {
     const audio = this._audio;
-    if (!audio || !audio.initialized) return;
+    /* AudioEngine signals readiness with .ok (see 50_audio.js); .initialized
+     * never existed, so every layered hit sound silently returned here. */
+    if (!audio || !audio.ok || !audio.ctx) return;
 
     // ---- Layer 1: Wood impact (body sound) ----
     // Quality determines wood vs rubber ratio

@@ -418,7 +418,7 @@ button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-vis
   outline:3px solid var(--warn);outline-offset:3px;z-index:2
 }
 button[hidden],.ic[hidden]{display:none!important}
-.ui-icon{display:inline-flex;align-items:center;justify-content:center;flex:0 0 auto;width:17px;height:17px;vertical-align:middle}
+.ui-icon{display:inline-flex;align-items:center;justify-content:center;flex:0 0 auto;width:17px;height:17px;vertical-align:middle;margin-right:7px}
 .ui-icon svg{display:block;width:100%;height:100%;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
 
 /* Touch-friendly, stateful pause/exit control replaces the hidden mobile menu. */
@@ -4437,6 +4437,43 @@ class AudioEngine {
     return true;
   }
   resume() { if (this.ctx && this.ctx.state === 'suspended') this.ctx.resume(); }
+  /* The rest of the game (music, feedback) asks for the live AudioContext
+   * through this accessor. It was referenced as audio.getCtx() before the
+   * method existed, so the music climax and resolution layers threw. */
+  getCtx() { return this.ok ? this.ctx : null; }
+  /* Bullet-time deserves to be heard: a short low-pass + detune sweep on the
+   * master bus. Game called audio.slowIn() behind an existence check, so the
+   * whole effect was silently missing. */
+  slowIn() {
+    if (!this.ok || !this.master || !this.ctx) return;
+    const c = this.ctx, t = c.currentTime;
+    const f = this._slowFilter || (this._slowFilter = c.createBiquadFilter());
+    if (!this._slowWired) {
+      this._slowFilter.type = 'lowpass';
+      this.bus.disconnect();
+      this.bus.connect(this._slowFilter);
+      this._slowFilter.connect(this.dry);
+      this._slowFilter.connect(this.conv);
+      this._slowWired = true;
+    }
+    f.frequency.cancelScheduledValues(t);
+    f.frequency.setTargetAtTime(1150, t, 0.08);
+    this.master.gain.cancelScheduledValues(t);
+    this.master.gain.setTargetAtTime((this.muted ? 0 : this.volume) * 0.82, t, 0.06);
+  }
+  slowOut() {
+    if (!this.ok || !this._slowFilter || !this.ctx) return;
+    const c = this.ctx, t = c.currentTime;
+    this._slowFilter.frequency.cancelScheduledValues(t);
+    this._slowFilter.frequency.setTargetAtTime(12000, t, 0.18);
+    if (this.master) {
+      this.master.gain.cancelScheduledValues(t);
+      this.master.gain.setTargetAtTime(this.muted ? 0 : this.volume, t, 0.12);
+    }
+  }
+  /* Where an effect should connect: through the master bus so mute and the
+   * volume slider apply, falling back to the destination before init(). */
+  getBus() { return (this.ok && (this.bus || this.master)) || (this.ctx ? this.ctx.destination : null); }
   setMuted(m) { this.muted = !!m; if (this.muted) this.stopAudience(); if (this.master) this.master.gain.value = this.muted ? 0 : this.volume; }
   setVolume(v) {
     if (!Number.isFinite(v)) return;
@@ -7214,7 +7251,9 @@ class HitFeedbackSystem {
    */
   audio(quality, speed, spinType, spinMag, ctx) {
     const audio = this._audio;
-    if (!audio || !audio.initialized) return;
+    /* AudioEngine signals readiness with .ok (see 50_audio.js); .initialized
+     * never existed, so every layered hit sound silently returned here. */
+    if (!audio || !audio.ok || !audio.ctx) return;
 
     // ---- Layer 1: Wood impact (body sound) ----
     // Quality determines wood vs rubber ratio
@@ -7718,7 +7757,7 @@ class MusicSystem {
 
       source.connect(filter);
       filter.connect(gain);
-      gain.connect(this.audio.getCtx().destination);
+      gain.connect(this.audio.getBus ? (this.audio.getBus() || this.audio.getCtx().destination) : this.audio.getCtx().destination);
 
       source.start();
       source.stop(2);
@@ -7750,7 +7789,7 @@ class MusicSystem {
 
         osc.connect(filter);
         filter.connect(gain);
-        gain.connect(ctx.destination);
+        gain.connect(this.audio.getBus ? (this.audio.getBus() || ctx.destination) : ctx.destination);
 
         osc.start(ctx.currentTime);
         osc.stop(ctx.currentTime + 0.5);
@@ -7874,8 +7913,8 @@ class EmotionalSystem {
     // Text message
     const isPlayerServing = this.game.server === 1;
     const msg = isPlayerServing
-      ? 'МATCH POINT — ВАША ПОДАЧА'
-      : 'МATCH POINT — СОПЕРНИК ПОДАЁТ';
+      ? 'МАТЧ-ПОЙНТ — ВАША ПОДАЧА'
+      : 'МАТЧ-ПОЙНТ — СОПЕРНИК ПОДАЁТ';
     this.game.msg(msg, 2.0, '#ffd34d', true);
 
     // Haptic
@@ -7974,8 +8013,9 @@ class EmotionalSystem {
    * Winner moment.
    */
   _onWinner(g) {
+    const game = this.game;
     // Flash effect
-    g.hitFlash = Math.min(1, g.hitFlash + 0.3);
+    game.hitFlash = Math.min(1, (game.hitFlash || 0) + 0.3);
 
     // Music spike
     if (this.game.music && this.game.music._initialized) {
@@ -7983,10 +8023,10 @@ class EmotionalSystem {
     }
 
     // Message
-    g.msg('ОЧКО!', 1.2, '#6ee7a8', true);
+    game.msg('ОЧКО!', 1.2, '#6ee7a8', true);
 
     // Haptic celebration
-    if (navigator.vibrate && g.settings?.haptics) {
+    if (navigator.vibrate && game.settings?.haptics) {
       try { navigator.vibrate([15, 30, 15, 30]); } catch (e) {}
     }
   }
@@ -7995,14 +8035,15 @@ class EmotionalSystem {
    * Net cord moment.
    */
   _onNetCord(g) {
+    const game = this.game;
     // Flash
-    g.hitFlash = Math.min(1, g.hitFlash + 0.2);
+    game.hitFlash = Math.min(1, (game.hitFlash || 0) + 0.2);
 
     // Message
-    g.msg('СЕТКА!', 1.0, '#ffd34d', true);
+    game.msg('СЕТКА!', 1.0, '#ffd34d', true);
 
     // Haptic
-    if (navigator.vibrate && g.settings?.haptics) {
+    if (navigator.vibrate && game.settings?.haptics) {
       try { navigator.vibrate([10, 20, 10]); } catch (e) {}
     }
   }
@@ -8011,12 +8052,13 @@ class EmotionalSystem {
    * Edge ball moment.
    */
   _onEdge(g) {
+    const game = this.game;
     // Flash
-    g.hitFlash = Math.min(1, g.hitFlash + 0.25);
+    game.hitFlash = Math.min(1, (game.hitFlash || 0) + 0.25);
 
     // Already has message from physics, but enhance
     // Haptic surprise
-    if (navigator.vibrate && g.settings?.haptics) {
+    if (navigator.vibrate && game.settings?.haptics) {
       try { navigator.vibrate([8, 30, 8]); } catch (e) {}
     }
   }
@@ -10180,7 +10222,6 @@ class Game {
     const S = this.slowmo;
     if (v && !this.slowmoAvailable()) return;
     S.on = !!v;
-    if (S.on && !S.active) this.audio.slowIn && this.audio.slowIn();
   }
 
   slowmoAvailable() {
@@ -10198,6 +10239,12 @@ class Game {
     } else {
       S.energy = Math.min(1, S.energy + dtReal * 0.09);     // ~11 s to refill
       S.on = S.on && S.energy > 0.015;                      // ran dry → release
+    }
+    /* The filter must follow the state, not the keypress: driving it from
+     * setSlowmoHold() latched the low-pass on for the rest of the match. */
+    if (want !== S.active) {
+      if (want) this.audio.slowIn && this.audio.slowIn();
+      else this.audio.slowOut && this.audio.slowOut();
     }
     S.active = want;
     if (want) { this.targetTimeScale = 0.34; this.slowmoUntil = 0; }
@@ -12318,7 +12365,9 @@ class UI {
     t.classList.add('on');
     clearTimeout(this._mnT);
     this._mnT = setTimeout(() => t.classList.remove('on'), 1700);
-    if (idx === 0) this.game.audio.crowd && this.game.audio.crowd(0.5);
+    // AudioEngine calls this setCrowd(); the old name was a silent no-op, so the
+    // crowd never swelled on the best moment of the match.
+    if (idx === 0) this.game.audio.setCrowd && this.game.audio.setCrowd(0.5);
   }
 
   /** Cinematic chrome: letterbox, title card, "skip". */

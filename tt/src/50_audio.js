@@ -57,6 +57,43 @@ class AudioEngine {
     return true;
   }
   resume() { if (this.ctx && this.ctx.state === 'suspended') this.ctx.resume(); }
+  /* The rest of the game (music, feedback) asks for the live AudioContext
+   * through this accessor. It was referenced as audio.getCtx() before the
+   * method existed, so the music climax and resolution layers threw. */
+  getCtx() { return this.ok ? this.ctx : null; }
+  /* Bullet-time deserves to be heard: a short low-pass + detune sweep on the
+   * master bus. Game called audio.slowIn() behind an existence check, so the
+   * whole effect was silently missing. */
+  slowIn() {
+    if (!this.ok || !this.master || !this.ctx) return;
+    const c = this.ctx, t = c.currentTime;
+    const f = this._slowFilter || (this._slowFilter = c.createBiquadFilter());
+    if (!this._slowWired) {
+      this._slowFilter.type = 'lowpass';
+      this.bus.disconnect();
+      this.bus.connect(this._slowFilter);
+      this._slowFilter.connect(this.dry);
+      this._slowFilter.connect(this.conv);
+      this._slowWired = true;
+    }
+    f.frequency.cancelScheduledValues(t);
+    f.frequency.setTargetAtTime(1150, t, 0.08);
+    this.master.gain.cancelScheduledValues(t);
+    this.master.gain.setTargetAtTime((this.muted ? 0 : this.volume) * 0.82, t, 0.06);
+  }
+  slowOut() {
+    if (!this.ok || !this._slowFilter || !this.ctx) return;
+    const c = this.ctx, t = c.currentTime;
+    this._slowFilter.frequency.cancelScheduledValues(t);
+    this._slowFilter.frequency.setTargetAtTime(12000, t, 0.18);
+    if (this.master) {
+      this.master.gain.cancelScheduledValues(t);
+      this.master.gain.setTargetAtTime(this.muted ? 0 : this.volume, t, 0.12);
+    }
+  }
+  /* Where an effect should connect: through the master bus so mute and the
+   * volume slider apply, falling back to the destination before init(). */
+  getBus() { return (this.ok && (this.bus || this.master)) || (this.ctx ? this.ctx.destination : null); }
   setMuted(m) { this.muted = !!m; if (this.muted) this.stopAudience(); if (this.master) this.master.gain.value = this.muted ? 0 : this.volume; }
   setVolume(v) {
     if (!Number.isFinite(v)) return;

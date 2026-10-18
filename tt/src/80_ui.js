@@ -461,7 +461,9 @@ class UI {
     t.classList.add('on');
     clearTimeout(this._mnT);
     this._mnT = setTimeout(() => t.classList.remove('on'), 1700);
-    if (idx === 0) this.game.audio.crowd && this.game.audio.crowd(0.5);
+    // AudioEngine calls this setCrowd(); the old name was a silent no-op, so the
+    // crowd never swelled on the best moment of the match.
+    if (idx === 0) this.game.audio.setCrowd && this.game.audio.setCrowd(0.5);
   }
 
   /** Cinematic chrome: letterbox, title card, "skip". */

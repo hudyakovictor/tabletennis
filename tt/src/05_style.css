@@ -406,7 +406,7 @@ button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-vis
   outline:3px solid var(--warn);outline-offset:3px;z-index:2
 }
 button[hidden],.ic[hidden]{display:none!important}
-.ui-icon{display:inline-flex;align-items:center;justify-content:center;flex:0 0 auto;width:17px;height:17px;vertical-align:middle}
+.ui-icon{display:inline-flex;align-items:center;justify-content:center;flex:0 0 auto;width:17px;height:17px;vertical-align:middle;margin-right:7px}
 .ui-icon svg{display:block;width:100%;height:100%;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
 
 /* Touch-friendly, stateful pause/exit control replaces the hidden mobile menu. */

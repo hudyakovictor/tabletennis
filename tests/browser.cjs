@@ -332,6 +332,22 @@ const { root } = require('./helpers.cjs');
           return g.state===GS.MATCH_END && Math.max(...g.score)>=5 &&
             [g.ball.p.x,g.ball.p.y,g.ball.p.z,g.time].every(Number.isFinite);
         });
+        check('music climax and bullet-time audio do not throw', () => {
+          try {
+            g.audio.init();
+            g.music.init();
+            g.music._triggerClimax();
+            g.audio.slowIn(); g.audio.slowOut();
+            return !!g.audio.getCtx() && !!g.audio.getBus();
+          } catch (e) { return false; }
+        });
+        check('emotion events reach the game, not the state snapshot', () => {
+          try {
+            g.hitFlash = 0;
+            g.emotion._onWinner({}); g.emotion._onNetCord({}); g.emotion._onEdge({});
+            return g.hitFlash > 0.5;
+          } catch (e) { return false; }
+        });
         g.ui.showMainMenu(); g.paused = true;
         return results;
       });
