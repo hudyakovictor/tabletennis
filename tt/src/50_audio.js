@@ -137,8 +137,10 @@ class AudioEngine {
   hitEdge() {
     if (!this.ok) return;
     const t = this.ctx.currentTime;
-    this._noise(0.05, 0.3, 'highpass', 3600, 0.7, t);
-    this._tone(1500, 0.06, 0.22, 'square', t, 0.3);
+    if (t - (this._lastEdge || -Infinity) < 0.18) return;
+    this._lastEdge = t;
+    this._noise(0.035, 0.12, 'highpass', 3000, 0.7, t);
+    this._tone(1050, 0.045, 0.055, 'triangle', t, 0.42);
   }
   hitFloor(speed) {
     if (!this.ok) return;
