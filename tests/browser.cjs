@@ -74,9 +74,9 @@ const { root } = require('./helpers.cjs');
           const ok=!g.ui.captureDebug && !document.querySelector('#captureDebugLab').checked && getComputedStyle(g.canvas).cursor==='none';
           g.returnToMenu();document.querySelector('#menu').classList.add('on');return ok;
         });
-        check('gameplay sliders are removed rather than merely hidden', () => {
+        check('gameplay sliders are removed; only the serve-toss height preference remains', () => {
           return !document.querySelector('#rHitZone,#rAssist,#vHitZone,#vAssist') &&
-            !document.querySelector('#settings input[type=range]') &&
+            ![...document.querySelectorAll('#settings input[type=range]')].some(r=>r.dataset.set!=='serveToss') &&
             !document.querySelector('#settings [data-set=assist],#settings [data-set=hitZone]');
         });
         check('shared controls survive old writes and are absent from new saves', () => {

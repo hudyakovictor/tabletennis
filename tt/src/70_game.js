@@ -119,6 +119,7 @@ class Game {
       adaptive: true,
       showDebug: false,
       showPlayerPaddle: true,
+      serveToss: 1.2,                // multiplier on the ~0.31 m ITTF toss rise
       slowmoOnBigShots: true,
       targetScore: 11,
       spinBias: 'norm',
@@ -671,6 +672,15 @@ class Game {
     this.ai.setPressure(this.score[1], this.score[0], this.settings.targetScore);
     if (s < 0) this.aiServeTimer = rnd(0.7, 1.3);
   }
+  /** Keep the opponent's bat glued under the ball it is about to toss and
+   *  strike, so its serve reads as one motion instead of a racket standing
+   *  at home while the ball climbs away from it. */
+  aiServeHold() {
+    const b = this.ball;
+    V3.set(this.ai.pos, b.p.x, b.p.y - 0.07, b.p.z);
+    V3.copy(this.ai.target, this.ai.pos);
+    V3.copy(this.ai._moveSmooth, this.ai.pos);
+  }
   startToss() {
     /* Not while the bat is still gliding home. The requirement is that every
      * new point starts from the centre, and a toss struck mid-glide is struck
@@ -683,9 +693,19 @@ class Game {
     const b = this.ball;
     const pad = this.player;
     // ITTF requires a near-vertical toss of at least 16 cm; we throw ~30 cm
+    /* The toss sits exactly where the player stands: only the legal serve
+     * floor (just behind the end line) is enforced, while a deep stance is
+     * honoured up to the full stance depth. Serving closer to or farther from
+     * the table is therefore about footwork, not a fixed launch band — and it
+     * does not touch the capture radius, which was never the real limiter. */
     V3.set(b.p, pad.pos.x,
-      PH.TABLE_Y + 0.14, clamp(pad.pos.z - 0.04, PH.T_HALF_LEN + 0.04, 2.0));
-    V3.set(b.v, rndSym(0.03), 2.45 + rnd(0, 0.2), rndSym(0.03));
+      PH.TABLE_Y + 0.14, clamp(pad.pos.z - 0.04, PH.T_HALF_LEN + 0.04, PADDLE_LIMITS.zFar));
+    /* The toss height is a player preference (settings.serveToss). The base
+     * ~2.45 m/s launch rises the ITTF-minimum-legal ~0.31 m; since apex rise
+     * scales with vy², the multiplier is applied under a sqrt so the slider
+     * reads as a height ratio, not a speed ratio. */
+    const tossMul = clamp(this.settings.serveToss || 1, 0.8, 2.2);
+    V3.set(b.v, rndSym(0.03), 2.45 * Math.sqrt(tossMul) + rnd(0, 0.2), rndSym(0.03));
     this.tossStartY = b.p.y;
     this.tossApex = b.p.y;
     V3.zero(b.w);
@@ -1022,6 +1042,7 @@ class Game {
       sound: s.sound, volume: s.volume, camera: s.camera, hand: s.hand, grip: s.grip,
       showTrail: s.showTrail, showPredict: s.showPredict,
       showTele: s.showTele, haptics: s.haptics, coach: s.coach, adaptive: s.adaptive,
+      showPlayerPaddle: s.showPlayerPaddle, serveToss: s.serveToss,
       slowmoPlayer: s.slowmoPlayer, targetScore: s.targetScore,
       spinBias: s.spinBias, gestureProfile: s.gestureProfile,
     };
@@ -1037,7 +1058,7 @@ class Game {
     for (const k of Object.keys(s)) {
       if (typeof s[k] === 'boolean' && typeof raw[k] === 'boolean') s[k] = raw[k];
     }
-    const ranges = { difficulty: [0, 4], volume: [0, 1] };
+    const ranges = { difficulty: [0, 4], volume: [0, 1], serveToss: [0.8, 2.2] };
     for (const [k, [lo, hi]] of Object.entries(ranges)) {
       if (Number.isFinite(raw[k])) s[k] = clamp(raw[k], lo, hi);
     }
@@ -1991,6 +2012,28 @@ class Game {
         tz = clamp(lerp(tz, wantZ, k * 0.8), zNear, PADDLE_LIMITS.zFar);
       }
     }
+    /* ---- game feel: raise = reach FORWARD, not straight up --------------
+     * paddleTargetFromPointer is an exact inverse of the projection and the
+     * camera suite depends on that, so the "the bat climbs to the ceiling and
+     * pistons up and down" feel is authored here, on top of the geometry.
+     * A table-tennis stroke is played FORWARD: lifting the hand now drives the
+     * bat toward the net and only a little higher. The climb eases out (it
+     * decelerates instead of slamming into an invisible ceiling) and tapers at
+     * the very top, so the extreme of the gesture reaches OVER the table — the
+     * height even dips slightly — rather than straight into the air. Downward
+     * moves (chops, low balls, the serve toss slide) are left untouched. */
+    const HOME_Y = PADDLE_HOME.y;                        // TABLE_Y + 0.62, the rest height
+    if (ty > HOME_Y) {
+      const UP_MAX = 0.22;                               // the bat climbs only this far above rest
+      const up01 = clamp((ty - HOME_Y) / (PADDLE_LIMITS.yHi - 0.62), 0, 1);
+      const eased = 1 - Math.exp(-up01 * 2.0);           // off the mark, then decelerating
+      const taper = 1 - 0.18 * smoothstep(0.75, 1, up01);// the very top dips slightly forward
+      ty = HOME_Y + UP_MAX * eased * taper;
+      tz = clamp(tz - 0.40 * eased, PADDLE_LIMITS.zStepIn, PADDLE_LIMITS.zFar);
+      this._reachF = eased;
+    } else {
+      this._reachF = 0;
+    }
     /* Neither the cursor nor the assist may ever park the bat outside the
      * frame — that is the bug that used to leave it stranded off-screen. */
     if (this.camVPReady) {
@@ -2086,6 +2129,12 @@ class Game {
     let want = this._wantN || (this._wantN = V3.new(0, -0.05, -1));
     const rest = this._restN || (this._restN = V3.new());
     faceFromWrist(rest, this.padYaw, this.padPitch, 1);
+    /* A raised bat plays the stroke FORWARD: tip the blade over the table so
+     * it leans into the net instead of standing vertical in the air. */
+    if (this._reachF > 0.001) {
+      rest.y = lerp(rest.y, -0.6, this._reachF * 0.5);
+      V3.norm(rest, rest);
+    }
     if (m) {
       const ctx = {
         side: 1, grip: this.settings.grip, forehand: pad.forehand, isServe: servingNow, ball: { y: pad.pos.y, z: pad.pos.z },
@@ -2474,6 +2523,7 @@ class Game {
     switch (this.state) {
       case GS.SERVE_READY:
         if (this.server === -1) {
+          this.aiServeHold();
           this.aiServeTimer -= dtReal;
           if (this.aiServeTimer <= 0) {
             V3.set(this.ball.v, rndSym(0.05), 3.1, rndSym(0.05));
@@ -2486,10 +2536,16 @@ class Game {
           this.serveHint = clamp(this.serveHint + dtReal, 0, 3);
           // the ball rests in front of the bat, aligned with the player
           V3.set(this.ball.p, this.player.pos.x,
-            PH.TABLE_Y + 0.14, clamp(this.player.pos.z - 0.04, PH.T_HALF_LEN + 0.04, 2.0));
+            PH.TABLE_Y + 0.14, clamp(this.player.pos.z - 0.04, PH.T_HALF_LEN + 0.04, PADDLE_LIMITS.zFar));
         }
         break;
       case GS.SERVE_TOSS:
+        /* The opponent tosses from its own stance: until it strikes, the bat
+         * must rise WITH the ball, not stand frozen at home while the ball
+         * climbs away from it (the "racket stands separately on the serve"
+         * glitch). ai.think only drives the bat for an incoming ball, so this
+         * hold is the bat's only position through the opponent's own toss. */
+        if (this.server === -1 && this.ball.live && this.ball.lastHitBy === 0) this.aiServeHold();
         /* The opponent strikes at a HEIGHT, not at a deadline. `aiSwingAt`
          * is real seconds while the ball integrates scaled seconds, so under
          * slow-mo a fixed deadline met the ball 10-20 cm lower than intended
@@ -2831,7 +2887,8 @@ class Game {
       S.gloss(R, b.p.x, b.p.y, b.p.z, cx, cz, 0.055, 1.70, [1.0, 0.96, 0.86]);
     }
     const pp = this.player.pos;
-    S.gloss(R, pp.x, pp.y, pp.z, cx, cz, 0.095, 0.95, [0.95, 0.26, 0.22]);
+    if (this.settings.showPlayerPaddle !== false)
+      S.gloss(R, pp.x, pp.y, pp.z, cx, cz, 0.095, 0.95, [0.95, 0.26, 0.22]);
     const ap = this.aiPaddle.pos;
     S.gloss(R, ap.x, ap.y, ap.z, cx, cz, 0.095, 0.40, [0.40, 0.50, 0.68]);
   }

@@ -186,8 +186,13 @@ function fitRig(P, aspect) {
   const rig = { eye: { x: 0, y: eyeY, z: eyeZ },
     look: { x: 0, y: PH.TABLE_Y, z: -0.12 }, fov, mode: P.id };
   // No automatic lift or ball-following: the chosen view stays predictable.
+  /* maxPlayHeight caps the on-screen span from the opponent's raised bat down
+   * to the near table edge. Pulling it in makes the rig dolly back a little, so
+   * the whole play volume shrinks and tableFrameShift can lift the table off
+   * the bottom edge — the "more room at the bottom" the player asked for.
+   * Uniform scaling of eye↔look, so the viewing tilt is unchanged. */
   fitTablePresentation(rig, aspect, lerp(P.height, 0.80, phone),
-    frameMargin(aspect), lerp(0.76, 0.90, phone));
+    frameMargin(aspect), lerp(0.66, 0.82, phone));
   _fitCache.set(key, rig);
   return rig;
 }
@@ -257,9 +262,12 @@ function tableScreenBounds(vp, out = {}) {
 // AI think() allows bat centres up to TABLE_Y + .70 and z -2.45..-1.16.
 // Include the whole blade/handle, plus a small margin for the serve toss.
 // This is a fixed volume: no camera bobbing as the ball or racket moves.
+// The padding is deliberately snug (blade top ~+0.82, wings ~±1.25, deep
+// reach ~-2.5): every centimetre trimmed here is a centimetre of headroom
+// that tableFrameShift can then hand to the player's side at the bottom.
 const OPPONENT_FRAME_POINTS = [];
-for (const x of [-1.4, 0, 1.4]) for (const z of [-2.65, -1.0])
-  OPPONENT_FRAME_POINTS.push({ x, y: PH.TABLE_Y + 0.90, z });
+for (const x of [-1.25, 0, 1.25]) for (const z of [-2.5, -1.0])
+  OPPONENT_FRAME_POINTS.push({ x, y: PH.TABLE_Y + 0.82, z });
 const CAMERA_HEADROOM = 0.10;
 function opponentScreenTop(vp) {
   let top = 1;
@@ -288,9 +296,11 @@ function fitTablePresentation(rig, aspect, maxHeight = 0.60, margin = 0.05, maxP
 function tableFrameShift(rig, aspect) {
   const vp = rigViewProj({ ...rig, shiftY: 0 }, aspect, _frameBuffer);
   const b = tableScreenBounds(vp, _frameBounds);
-  // Prefer the old lower reading room, but never crop the opponent to keep
-  // an exact 1:3 ratio. Move the complete play volume down into the frame.
-  const preferred = (1 - b.bottom - 3 * b.top) / 4;
+  // Bias the framing toward the player's side: reserve roughly 4× more empty
+  // room below the table than above it, so the bat and the incoming ball have
+  // somewhere to live. The opponent-headroom guard below still caps how far up
+  // the table may slide, so this never crops the opponent's serve toss.
+  const preferred = (1 - b.bottom - 4 * b.top) / 5;
   return Math.max(preferred, cameraHeadroom(aspect) - opponentScreenTop(vp));
 }
 

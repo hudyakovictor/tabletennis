@@ -19,19 +19,19 @@ function trainingTip(step, mode, safe) {
 
 const TRAIN_STEPS = [
   {
-    id: 'SERVE', goal: 'Подайте на стол', title: 'ПОДАЧА', need: 2,
+    id: 'SERVE', goal: 'Подайте на стол', title: 'ПОДАЧА', need: 2, guide: 'up',
     tip: 'Проведите пальцем вверх.', mouseTip: 'Зажмите ЛКМ, ведите вверх.',
     feed: null,
   },
   {
-    id: 'TOPSPIN', goal: 'Верхнее вращение на стол', title: 'ТОПСПИН', need: 3,
+    id: 'TOPSPIN', goal: 'Верхнее вращение на стол', title: 'ТОПСПИН', need: 3, guide: 'up',
     tip: 'Свайп вверх по мячу.', mouseTip: 'ЛКМ + вверх по мячу.',
     feed: { kind: 'normal', spin: -95, speed: 6.0 },
     check: (g, s) => s.topspin > 45,
     failHint: 'Длиннее вверх.',
   },
   {
-    id: 'PUSH', goal: 'Нижнее вращение на стол', title: 'ПОДРЕЗКА', need: 2,
+    id: 'PUSH', goal: 'Нижнее вращение на стол', title: 'ПОДРЕЗКА', need: 2, guide: 'down',
     tip: 'Мягкий свайп вниз.', mouseTip: 'ЛКМ + мягкое движение вниз.',
     safeTip: 'Зажмите палец и мягко ведите вверх.',
     safeMouseTip: 'Зажмите ЛКМ и мягко ведите вверх.',
@@ -40,21 +40,21 @@ const TRAIN_STEPS = [
     failHint: 'Ведите вниз.',
   },
   {
-    id: 'SIDE', goal: 'Боковое вращение на стол', title: 'БОКОВОЕ', need: 2,
+    id: 'SIDE', goal: 'Боковое вращение на стол', title: 'БОКОВОЕ', need: 2, guide: 'arc',
     tip: 'Нарисуйте пальцем дугу вбок.', mouseTip: 'ЛКМ + дуга вбок.',
     feed: { kind: 'normal', spin: -40, speed: 5.6 },
     check: (g, s) => Math.abs(s.sidespin) > 32,
     failHint: 'Дугой, не по прямой.',
   },
   {
-    id: 'TIMING', goal: 'Верните быстрый мяч', title: 'ТАЙМИНГ', need: 2,
+    id: 'TIMING', goal: 'Верните быстрый мяч', title: 'ТАЙМИНГ', need: 2, guide: 'up',
     tip: 'Свайп вверх после отскока.', mouseTip: 'После отскока — ЛКМ + вверх.',
     feed: { kind: 'fast', spin: -110, speed: 10.2 },
     check: () => true,
     failHint: 'Нет возврата на стол.',
   },
   {
-    id: 'SMASH', goal: 'Удар на стол быстрее 55 км/ч', title: 'СМЕШ', need: 2,
+    id: 'SMASH', goal: 'Удар на стол быстрее 55 км/ч', title: 'СМЕШ', need: 2, guide: 'side',
     tip: 'Резкий короткий свайп вбок.', mouseTip: 'ЛКМ + резкое движение вбок.',
     feed: { kind: 'high', spin: -15, v: [0, 3.6, 3.2], y0: 1.02 },
     check: (g, s) => s.speed > 55,
