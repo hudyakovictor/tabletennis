@@ -342,6 +342,73 @@ function clipTape(p, v, w) {
 }
 
 /* ---------------------------------------------------------------- *
+ *  ONE contact model for the net and the table.
+ *
+ *  These two functions are the single source of truth for "did the
+ *  ball touch the net" and "did it land on the table". The live
+ *  simulation (70_game.js stepPhysics) and every solver (predict,
+ *  solveLaunch, the serve search, the AI) go through them, because
+ *  they used to disagree:
+ *    · predict() called the 0.8925-0.9225 m band clean while the game
+ *      called it the white tape, so a solver-certified shot clipped the
+ *      cord in the live frame;
+ *    · neither side let a ball that had dropped below the table pass
+ *      under the net — the net plane acted as an infinite wall down to
+ *      the floor;
+ *    · predict() had no "from above" guard on the table, so a ball
+ *      below the table bounced on the playing surface (measured: 15
+ *      bounces in 2.5 s, teleporting upward every time);
+ *    · both recorded the contact at the END of the integration step.
+ *      At 30 m/s a 1/600 s step is 5 cm: a ball that landed 3 cm inside
+ *      the line was recorded 2 cm outside it.
+ * ---------------------------------------------------------------- */
+const TABLE_REACH_X = PH.T_HALF_WID + PH.R;
+const TABLE_REACH_Z = PH.T_HALF_LEN + PH.R;
+/* Where the net assembly is: 0 = nothing, 1 = mesh, 2 = white tape.
+ * `y` and `x` are the ball CENTRE at the plane. */
+function netContactKind(y, x) {
+  if (!Number.isFinite(y) || !Number.isFinite(x)) return 0;
+  if (Math.abs(x) >= PH.NET_HALF_WID) return 0;            // around the post
+  if (y - PH.R >= PH.NET_TOP) return 0;                    // clean over the tape
+  if (y + PH.R <= PH.TABLE_Y) return 0;                    // under the table, under the net
+  if (y + PH.R > PH.NET_TOP && y - PH.R < PH.NET_TOP) return 2;   // straddles the tape
+  return 1;                                                // the mesh
+}
+/* Interpolated crossing of the net plane inside one step, or a touch of it
+ * without crossing (|z| < R). Writes the contact point into `out`. */
+const _netHit = { x: 0, y: 0, z: 0 };
+function netContactStep(x0, y0, z0, x1, y1, z1, out) {
+  let cx, cy, cz;
+  if ((z0 > 0) !== (z1 > 0)) {
+    const a = Math.abs(z0) / (Math.abs(z0) + Math.abs(z1) + 1e-9);
+    cx = lerp(x0, x1, a); cy = lerp(y0, y1, a); cz = 0;
+  } else if (Math.abs(z1) <= PH.R + 0.004 && Math.abs(z1) <= Math.abs(z0) + 1e-9) {
+    /* Inside the net's own thickness and not retreating from it: the ball is
+     * against the mesh even though it never reached the plane. The retreat
+     * test matters — without it a ball spawned or rebounding a centimetre off
+     * the plane is dragged back into the net every step. */
+    cx = x1; cy = y1; cz = z1;
+  } else return 0;
+  const kind = netContactKind(cy, cx);
+  if (kind && out) { out.x = cx; out.y = cy; out.z = cz; }
+  return kind;
+}
+/* Interpolated first contact of a DESCENDING ball with the playing surface.
+ * Returns the point in `out`, or null when the step does not reach the table
+ * from above or the contact point misses the table. */
+const _tabHit = { x: 0, y: 0, z: 0 };
+function tableContact(x0, y0, z0, x1, y1, z1, out) {
+  if (!(y1 - PH.R <= PH.TABLE_Y) || !(y0 - PH.R > PH.TABLE_Y - 0.02)) return null;
+  const dy = y0 - y1;
+  const a = dy > 1e-9 ? (y0 - (PH.TABLE_Y + PH.R)) / dy : 0;
+  const k = a < 0 ? 0 : a > 1 ? 1 : a;
+  const x = lerp(x0, x1, k), z = lerp(z0, z1, k);
+  if (Math.abs(x) > TABLE_REACH_X || Math.abs(z) > TABLE_REACH_Z) return null;
+  out.x = x; out.y = PH.TABLE_Y + PH.R; out.z = z;
+  return out;
+}
+
+/* ---------------------------------------------------------------- *
  *  Fast forward simulation (no racket) used by the AI and by the
  *  trajectory predictor. Does NOT allocate.
  * ---------------------------------------------------------------- */
@@ -372,25 +439,35 @@ function predict(p0, v0, w0, opts = {}) {
     if (out.path && (out.path.length < 400)) out.path.push(_pp.x, _pp.y, _pp.z);
     if (_pp.y > out.apex) out.apex = _pp.y;
 
-    // net plane
-    if ((prevZ > 0) !== (_pp.z > 0)) {
+    /* The plane crossing is recorded even when the ball clears the net —
+     * solveLaunch() measures the clearance from it, and a missing netCross
+     * silently scored every shot as if it had cleared by 99 m. */
+    if (!out.netCross && (prevZ > 0) !== (_pp.z > 0)) {
       const a = Math.abs(prevZ) / (Math.abs(prevZ) + Math.abs(_pp.z) + 1e-9);
-      const yAt = lerp(prevY, _pp.y, a);
-      const xAt = lerp(prevX, _pp.x, a);
-      out.netCross = { y: yAt, x: xAt, t };
-      if (yAt < PH.NET_TOP + PH.R * 0.5 && Math.abs(xAt) < PH.NET_HALF_WID) { out.hitNet = true; break; }
+      out.netCross = { y: lerp(prevY, _pp.y, a), x: lerp(prevX, _pp.x, a), t };
     }
-    // crossing of the table's horizontal plane anywhere (used to measure
-    // how far a ball that misses actually overshoots)
+    // net: the same model the live simulation runs (mesh / tape / clean)
+    const netKind = netContactStep(prevX, prevY, prevZ, _pp.x, _pp.y, _pp.z, _netHit);
+    if (netKind > 0) {
+      out.netKind = netKind;
+      out.hitNet = true;
+      break;
+    }
+    /* Where the ball crosses the table's horizontal plane, interpolated
+     * inside the step. Also the point where a miss overshoots. */
     if (!out.planeCross && _pv.y < 0 && _pp.y - PH.R <= PH.TABLE_Y && prevY - PH.R > PH.TABLE_Y) {
-      out.planeCross = { x: _pp.x, z: _pp.z, t };
+      const a = (prevY - (PH.TABLE_Y + PH.R)) / Math.max(prevY - _pp.y, 1e-9);
+      const k = a < 0 ? 0 : a > 1 ? 1 : a;
+      out.planeCross = { x: lerp(prevX, _pp.x, k), z: lerp(prevZ, _pp.z, k), t };
     }
-    // table
-    if (_pp.y - PH.R <= PH.TABLE_Y && _pv.y < 0 &&
-      Math.abs(_pp.x) <= PH.T_HALF_WID + PH.R && Math.abs(_pp.z) <= PH.T_HALF_LEN + PH.R) {
+    // table: only from above, and at the interpolated contact point
+    if (_pv.y < 0) {
+      const hit = tableContact(prevX, prevY, prevZ, _pp.x, _pp.y, _pp.z, _tabHit);
+      if (hit) {
+      _pp.x = hit.x; _pp.z = hit.z; _pp.y = hit.y + 1e-5;
       out.bounces++;
-      if (out.bounces === 1) { out.landed = { x: _pp.x, z: _pp.z, t, vy: _pv.y, speed: V3.len(_pv) }; bounceSide = Math.sign(_pp.z); }
-      else if (out.bounces === 2) out.b2 = { x: _pp.x, z: _pp.z, t, speed: V3.len(_pv) };
+      if (out.bounces === 1) { out.landed = { x: hit.x, z: hit.z, t, vy: _pv.y, speed: V3.len(_pv) }; bounceSide = Math.sign(hit.z); }
+      else if (out.bounces === 2) out.b2 = { x: hit.x, z: hit.z, t, speed: V3.len(_pv) };
       if (opts.stopOnFirstBounce) break;
       /* The serve solver asks for exactly two bounces and nothing else: the
        * rest of the flight (up to 1.5 s of RK4 at 300 Hz) was integrated and
@@ -401,6 +478,7 @@ function predict(p0, v0, w0, opts = {}) {
       if (bi && bi.edge > out.edge) {
         out.edge = bi.edge;
         out.edgeBounce = { x: _pp.x, z: _pp.z, k: bi.edge, axis: bi.edgeAxis, t };
+      }
       }
     }
     // requested crossing plane (racket plane of a player)
@@ -413,6 +491,7 @@ function predict(p0, v0, w0, opts = {}) {
     if (_pp.y < 0.02) { out.floor = { x: _pp.x, z: _pp.z, t }; break; }
   }
   out.endT = t;
+  out.clear = (out.netCross ? out.netCross.y : 99) - PH.NET_TOP - PH.R;
   out.end = { x: _pp.x, y: _pp.y, z: _pp.z };
   out.endV = { x: _pv.x, y: _pv.y, z: _pv.z };
   return out;
