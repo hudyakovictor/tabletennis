@@ -1,0 +1,15 @@
+{
+  "command": "node tt/tools/benchmark_input_log.cjs --iterations 20000",
+  "budgetMsPerEvent": 0.3,
+  "iterations": 20000,
+  "totalMs": 148,
+  "msPerEvent": 0.0074,
+  "events": 4096,
+  "projectionCalls": 40000,
+  "projectionsPerEvent": 2,
+  "projection": "cameraRigFor(BROADCAST)+rigViewProj + Game.prototype.project",
+  "viewport": [
+    1280,
+    760
+  ]
+}

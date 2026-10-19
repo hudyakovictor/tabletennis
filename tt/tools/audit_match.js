@@ -47,7 +47,7 @@ const root = path.resolve(__dirname, '../..');
 
   const result = await page.evaluate(() => {
     const g = window.__game;
-    const CAPTURE = MATCH_RULES.capture;
+    const CAPTURE = MATCH_RULES.captureRadius;
     const out = { matches: [], contacts: 0, violations: {}, examples: [], perLevel: {} };
     const bump = (k, ex) => {
       out.violations[k] = (out.violations[k] || 0) + 1;
@@ -83,8 +83,8 @@ const root = path.resolve(__dirname, '../..');
             ball: [+b.p.x.toFixed(2), +b.p.y.toFixed(2), +b.p.z.toFixed(2)],
             v: [+b.v.x.toFixed(2), +b.v.y.toFixed(2), +b.v.z.toFixed(2)],
             state: this.state, rb: this.rallyBounces.slice(), stroke: racket && racket.stroke && racket.stroke.id });
-          /* |x| <= paddle limit 1.02 + capture 0.361 = 1.381 for the model.
-           * 1.40 leaves 2 cm of numerical slack, not a second reach model. */
+          /* |x| <= PADDLE_LIMITS.x + MATCH_RULES.captureRadius for the model;
+           * the check below adds only its explicit 1 cm numerical slack. */
           if (side > 0 && Math.abs(contact.x) > PADDLE_LIMITS.x + CAPTURE + 0.01) bump('playerLateral', { side,
             contact: [+contact.x.toFixed(3), +contact.y.toFixed(3), +contact.z.toFixed(3)],
             pad: pre ? [+pre.pad.x.toFixed(3), +pre.pad.y.toFixed(3), +pre.pad.z.toFixed(3)] : null });

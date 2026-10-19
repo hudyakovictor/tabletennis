@@ -120,7 +120,6 @@ class Game {
       showDebug: false,
       showPlayerPaddle: true,
       slowmoOnBigShots: true,
-      slowmoPlayer: true,
       targetScore: 11,
       spinBias: 'norm',
       gestureProfile: defaultGestureProfile(),   // 'classic' | 'safe'
@@ -147,11 +146,11 @@ class Game {
       q: Q.new(), live: false, hist: [], lastHitBy: 0, speed: 0,
     };
     this.player = {
-      pos: V3.new(0, PH.TABLE_Y + 0.25, 1.45),
-      prev: V3.new(0, PH.TABLE_Y + 0.25, 1.45),
+      pos: V3.new(0, PH.TABLE_Y + 0.25, 1.78),
+      prev: V3.new(0, PH.TABLE_Y + 0.25, 1.78),
       vel: V3.new(), normal: V3.new(0, 0, -1),
       q: Q.new(), swing: 0, side: 1, hitRadius: MATCH_RULES.sweetRadius, lastHitT: -9,
-      prevPos: V3.new(0, PH.TABLE_Y + 0.25, 1.45),
+      prevPos: V3.new(0, PH.TABLE_Y + 0.25, 1.78),
     };
     this.paddleMotion = new PaddleStrokeMotion();
     this.aiPaddle = {
@@ -203,6 +202,7 @@ class Game {
     };
 
     this.shotJournal = new ShotJournal();
+    this.inputLog = typeof InputTelemetryLog !== 'undefined' ? new InputTelemetryLog() : null;
 
     // Momentum tracking
     this.momentum = {
@@ -365,19 +365,25 @@ class Game {
 
       this.swipe.down(n.x, n.y, this.time);
       const rect = c.getBoundingClientRect();
-      const ballZone = pressHitZone(this.project(this.ball.p), n, rect.width, rect.height);
-      const padZone = pressHitZone(this.project(this.player.pos), n, rect.width, rect.height);
-      this.swipe.pressZone = ballZone || { accepted: false, radius: MATCH_RULES.pressRadiusPx, distancePx: null };
-      /* The press is remembered in screen terms so the gate can be re-evaluated
-       * as the ball travels (see pressAdmitsBall). The bat itself counts as the
-       * action too: a finger that lands on the blade is aiming a stroke. */
+      const pointerType = e.pointerType || (this.pointerFine === false ? 'touch' : 'mouse');
+      const servePress = this.state === GS.SERVE_TOSS && this.server === 1;
+      const ballZone = pressZoneForBall(this.ball, n, rect.width, rect.height, {
+        project: point => this.project(point, {}), pointerType,
+        referenceWorld: this.player && this.player.pos,
+        kind: servePress ? 'serve' : 'rally',
+        tossApex: this.tossApex, tossStartY: this.tossStartY, tableY: PH.TABLE_Y,
+      });
+      this.swipe.pressZone = ballZone || { accepted: false, shape: MATCH_RULES.zoneShape,
+        radius: MATCH_RULES.pressRadiusPx, distancePx: null, score: null, along: null,
+        across: null, reason: 'OUTSIDE_ZONE', pointerType };
+      /* Admission is stamped once, here, from the ball at pointerdown.
+       * Moving into the zone later, landing on the bat, position assist and
+       * CCD are all downstream of this stamp and cannot rewrite it. */
       this.swipe.pressZone.pressX = n.x; this.swipe.pressZone.pressY = n.y;
       this.swipe.pressZone.vw = rect.width; this.swipe.pressZone.vh = rect.height;
-      if (padZone && padZone.accepted && !this.swipe.pressZone.accepted) {
-        this.swipe.pressZone.accepted = true;
-        this.swipe.pressZone.via = 'paddle';
-        this.swipe.pressZone.paddleDistancePx = padZone.distancePx;
-      }
+      this.swipe.pressZone.pointerId = e.pointerId;
+      this.swipe.pressZone.pointerType = pointerType;
+      this.swipe.pressZone.pressT = this.time;
       this.swipe.pressZone.serving = this.state === GS.SERVE_READY || this.state === GS.SERVE_TOSS;
       if (this.shotJournal) {
         const attempt = this.shotJournal.create(this.swipe.gestureId, this.time);
@@ -392,6 +398,7 @@ class Game {
          button is down. Hover still aims; it does not hit. */
       this.pointer = n; this.pointerDown = true;
       this.pointerFine = e.pointerType !== 'touch' && e.pointerType !== 'pen';
+      this.logInput('pointerdown', { pointer: n, pointerId: e.pointerId, buttons: e.buttons, inputType: pointerType });
       if (this.state === GS.SERVE_READY && this.server === 1) this.startToss();
     };
 
@@ -427,6 +434,8 @@ class Game {
         this.swipe.move(n.x, n.y, this.time);
         const sp = this.swipe.m.speed;
         if (sp > 1.6) this.audio.whoosh(clamp(sp / 4, 0, 1.4));
+        this.logInput('pointermove', { pointer: n, pointerId: e.pointerId, buttons: e.buttons,
+          inputType: e.pointerType || (this.pointerFine === false ? 'touch' : 'mouse') });
       }
       if (e.cancelable) e.preventDefault();
     };
@@ -443,6 +452,8 @@ class Game {
       this.pointerDown = false;
       this.swipeReleasedAt = this.time;
       this.updateShotDiagnostics();
+      this.logSwipeRelease({ pointer: n, pointerId: e.pointerId, buttons: e.buttons,
+        inputType: e.pointerType || (this.pointerFine === false ? 'touch' : 'mouse') });
       this.lastSwipeT = this.time;
       e.preventDefault();
     };
@@ -468,6 +479,21 @@ class Game {
       if (Number.isFinite(delta)) this.cameraControls.zoom = clamp(this.cameraControls.zoom * Math.exp(delta * 0.0015), 0.72, 1.6);
     }, { passive: false });
     c.style.touchAction = 'none';
+
+    /* Keep vertical gestures in the mini app when Telegram supports the API;
+     * retain the DOM fallback for older Telegram clients and embedded webviews. */
+    try {
+      const tg = window.Telegram && window.Telegram.WebApp;
+      if (tg && typeof tg.setupSwipeBehavior === 'function') {
+        tg.setupSwipeBehavior({ allow_vertical_swipe: false });
+      }
+    } catch (e) { console.debug('Telegram swipe behavior unavailable', e); }
+    document.addEventListener('touchmove', (e) => {
+      if (e.cancelable) e.preventDefault();
+    }, { passive: false });
+    /* Prevent iOS rubber-banding / pull-to-refresh on the body. */
+    document.body.style.overscrollBehavior = 'none';
+    document.documentElement.style.overscrollBehavior = 'none';
 
     window.addEventListener('keydown', (e) => {
       if (document.getElementById('settings').classList.contains('on') || document.getElementById('shotLab').classList.contains('on')) return;
@@ -496,6 +522,7 @@ class Game {
   startMatch(diff) {
     this.endReplay(false); // cancel old callbacks; never complete an old match here
     this.moments.reset();
+    if (this.inputLog && typeof this.inputLog.resetClock === 'function') this.inputLog.resetClock(this.time);
     this.shotJournal && this.shotJournal.reset();
     this.lastMoment = null;
     this._acc = 0;
@@ -659,7 +686,8 @@ class Game {
     V3.set(b.p, pad.pos.x,
       PH.TABLE_Y + 0.14, clamp(pad.pos.z - 0.04, PH.T_HALF_LEN + 0.04, 2.0));
     V3.set(b.v, rndSym(0.03), 2.45 + rnd(0, 0.2), rndSym(0.03));
-    this.tossApex = PH.TABLE_Y;
+    this.tossStartY = b.p.y;
+    this.tossApex = b.p.y;
     V3.zero(b.w);
     b.live = true;
     this.isServeBall = true;
@@ -1287,6 +1315,111 @@ class Game {
       strokeId: r && r.stroke.id });
   }
 
+  logInput(type, extra = {}) {
+    if (!this.inputLog || typeof makeInputLogEvent !== 'function') return null;
+    const event = makeInputLogEvent(this, type, extra);
+    if (!event) return null;
+    this.inputLog.record(event);
+    if ((type === 'pointerdown' || type === 'contact') && this.moments &&
+        typeof this.moments.addInputDecision === 'function')
+      this.moments.addInputDecision(event.t, event.decision, event.outcome, event.inputType);
+    return event;
+  }
+
+  logSwipeRelease(extra = {}) {
+    const serving = !!(this.swipe && this.swipe.pressZone && this.swipe.pressZone.serving);
+    return this.logInput('pointerup', { ...extra, outcome: { released: true, contact: false,
+      reason: isRealStroke(this.swipe && this.swipe.lastReleased, serving) ? null : 'STATIC_CLICK' } });
+  }
+
+  pressConsumed() {
+    const sw = this.swipe;
+    return !!(sw && !sw.pressZone && Number.isFinite(sw.consumedGestureId) &&
+      sw.consumedGestureId === sw.gestureId);
+  }
+
+  /** One diagnostic decision per shot/gesture/reason. tryPlayerHit runs on
+   * physics substeps, so unguarded logging would drown the 30 s ring. */
+  logPressRejection(reason, detail = {}) {
+    if (typeof PRESS_REJECTION_REASONS === 'undefined' || !PRESS_REJECTION_REASONS.includes(reason)) return null;
+    const sw = this.swipe || {}, b = this.ball || {};
+    const seen = this._pressRejectionLogKeys || (this._pressRejectionLogKeys = new Set());
+    if (seen.size > 512) seen.clear();
+    const key = [this.shotId || 0, Number.isFinite(sw.gestureId) ? sw.gestureId : 0,
+      Number.isFinite(b.lastHitBy) ? b.lastHitBy : 0,
+      Array.isArray(this.rallyBounces) ? this.rallyBounces.join(',') : '', reason].join('|');
+    if (seen.has(key)) return null;
+    seen.add(key);
+    return this.logInput('decision', { outcome: { contact: false, ...detail, reason } });
+  }
+
+  logNoStrokeIntent(serving = false) {
+    const sw = this.swipe, b = this.ball, pad = this.player;
+    if (!sw || !b || !pad || !b.p || !pad.pos) return null;
+    const ownBounce = Array.isArray(this.rallyBounces) && this.rallyBounces.some(side => side > 0);
+    if (!serving && !ownBounce) return null;
+    if (serving && b.v && b.v.y >= 0) return null; // no legal serve contact opportunity yet
+    const inRange = typeof playerInCaptureRange === 'function' && playerInCaptureRange(b.p, pad.pos, serving);
+    const passed = Number.isFinite(b.p.z) && Number.isFinite(pad.pos.z) &&
+      b.p.z > pad.pos.z + MATCH_RULES.depthTolerance;
+    if (!inRange && !passed) return null;
+    const releasedAt = Number.isFinite(this.swipeReleasedAt) ? this.swipeReleasedAt : -Infinity;
+    const deadWin = serving ? 1.15 : .25;
+    if (!sw.active && isRealStroke(sw.lastReleased, serving) && this.time - releasedAt >= deadWin)
+      return this.logPressRejection('TIMING_EARLY', { releasedAgeMs: (this.time - releasedAt) * 1000 });
+    const heldWin = serving ? 1.15 : 2.5;
+    const staleHeld = sw.active && sw.gestureId === sw.realGestureId &&
+      this.time - (sw.realAt || 0) >= heldWin;
+    const noGesture = !sw.active && !sw.lastReleased && !(sw.samples && sw.samples.length);
+    if (staleHeld || noGesture) return this.logPressRejection('NO_FRESH_SWIPE');
+    return null;
+  }
+
+  logNoContactReason(captureSample, serving = false) {
+    if (serving || !this.ball || !this.player || !this.ball.p || !this.ball.v || !this.player.pos) return null;
+    const b = this.ball, pad = this.player;
+    const dz = b.p.z - pad.pos.z;
+    const separating = (b.p.x - pad.pos.x) * b.v.x + (b.p.y - pad.pos.y) * b.v.y + dz * b.v.z;
+    if (!(dz > MATCH_RULES.depthTolerance) || !(separating > 0)) return null;
+    const lateral = captureSample && Number.isFinite(captureSample.lateral)
+      ? captureSample.lateral : Math.hypot(b.p.x - pad.pos.x, b.p.y - pad.pos.y);
+    const depthGap = captureSample && Number.isFinite(captureSample.depthGap)
+      ? captureSample.depthGap : Math.abs(dz);
+    return lateral <= MATCH_RULES.captureRadius
+      ? this.logPressRejection('DEPTH_FAIL', { depthGap, lateral })
+      : this.logPressRejection('TIMING_LATE', { depthGap, lateral });
+  }
+
+  tossRiseNow() {
+    return typeof serveTossRise === 'function'
+      ? serveTossRise(this.tossApex, this.tossStartY, PH.TABLE_Y) : NaN;
+  }
+
+  /** Direction is judged at the contact candidate, from the whole gesture:
+   * an early backswing segment may still be moving away from the ball. This
+   * can only reject an admitted press; it can never admit an outside one. */
+  validatePressDirection(m) {
+    const pz = this.swipe && this.swipe.pressZone;
+    if (!pz || !pz.accepted || !m) return this.pressAdmitsBall();
+    if (pz.directionOk === true) return true;
+    if (pz.directionOk === false) return false;
+    if (![pz.x, pz.y, pz.pointerX, pz.pointerY, m.dx, m.dy].every(Number.isFinite)) return true;
+    const toBallX = pz.x - pz.pointerX, toBallY = pz.y - pz.pointerY;
+    const swipeX = m.dx * (pz.vw > 0 ? pz.vw : 1), swipeY = m.dy * (pz.vh > 0 ? pz.vh : 1);
+    const dist = Math.hypot(toBallX, toBallY), len = Math.hypot(swipeX, swipeY);
+    if (dist < 4) { pz.directionDot = 1; pz.directionOk = true; return true; }
+    if (!(len > 1e-9)) return false;
+    const dot = (swipeX * toBallX + swipeY * toBallY) / (len * dist);
+    pz.directionDot = dot; pz.directionOk = dot > 0;
+    if (!pz.directionOk) {
+      pz.accepted = false; pz.reason = 'WRONG_DIRECTION';
+      if (this.shotJournal && typeof this.shotJournal.rejectPress === 'function')
+        this.shotJournal.rejectPress(this.swipe.gestureId, 'WRONG_DIRECTION', pz);
+      this.logInput('decision', { outcome: { contact: false, reason: 'WRONG_DIRECTION' } });
+    }
+    return pz.directionOk;
+  }
+
   playerStrokeIntent(serving = false) {
     const sw = this.swipe;
     const lastSample = sw.samples[sw.samples.length - 1];
@@ -1315,33 +1448,19 @@ class Game {
     return m;
   }
 
-  /** The press gate asks "did this gesture start near the action", not
-   *  "was the finger exactly on the ball at the instant of pointerdown".
-   *  A ball moving at 10 m/s travels 1.5 m in the time the bat needs to
-   *  arrive, and on a touch screen the thumb naturally lands where the ball
-   *  is GOING. Measured with the old instantaneous test: pressing the ball's
-   *  own landing spot 0.2-0.3 s early was rejected in 9 of 9 attempts, and a
-   *  press on the bat while it covered the ball was rejected as well. The
-   *  gesture is admitted when it starts within the 48 CSS px radius of the
-   *  ball, of the bat, or when the ball later enters that radius while the
-   *  gesture is still alive. A tap in an empty corner still never hits. */
+  /** The press gate is the oval/circle stamped at pointerdown (see
+   *  pressZoneForBall). The oval already reaches ahead of the ball along its
+   *  screen trajectory, which is where a backswing starts; anything later
+   *  may only reject (wrong swipe direction), never admit. */
   pressAdmitsBall() {
-    const pz = this.swipe.pressZone;
-    if (!pz || pz.accepted) return true;
-    /* A zone we cannot verify is not admitted. Every real pointerdown stores
-     * the screen geometry; only synthetic callers omit it. */
-    if (!Number.isFinite(pz.pressX) || !Number.isFinite(pz.pressY) ||
-        !(pz.vw > 0) || !(pz.vh > 0)) return false;
-    if (!this.R || !this.R.viewProj) return false;
-    const bs = this.project(this.ball.p, this._pressBallScreen || (this._pressBallScreen = {}));
-    if (!bs || !bs.ok) return false;
-    const d = Math.hypot((bs.x - pz.pressX) * pz.vw, (bs.y - pz.pressY) * pz.vh);
-    if (d <= pz.radius) {
-      pz.accepted = true; pz.via = 'path'; pz.distancePx = d;
-      if (this.shotJournal) this.shotJournal.acceptPress(this.swipe.gestureId, 'path');
-      return true;
-    }
-    return false;
+    const pz = this.swipe && this.swipe.pressZone;
+    /* A missing zone means a synthetic/internal swipe (demo stamps its own,
+     * tools call SwipeTracker directly). Every real pointerdown stamps one
+     * before any physics runs, and that stamp is final: no path, paddle,
+     * assist or CCD re-evaluation may turn an outside press into a hit. */
+    if (this.pressConsumed()) return false;
+    if (!pz) return true;
+    return pz.accepted === true;
   }
 
   /** The pose the blade is drawn with this frame. The continuous test must use
@@ -1387,7 +1506,11 @@ class Game {
     /* A serve has to bounce on the receiver's side before it can be returned.
      * `isServeBall` alone did not stop the near side from volleying the
      * opponent's serve straight out of the toss. */
-    if (this.isServeBall && b.lastHitBy === -1) return;
+    if (this.pressConsumed()) { this.logPressRejection('CONSUMED'); return; }
+    if (this.isServeBall && b.lastHitBy === -1) {
+      if (this.pressAdmitsBall() && this.playerStrokeIntent(false)) this.logPressRejection('BOUNCE_ILLEGAL');
+      return;
+    }
     if (!this.pressAdmitsBall()) return;
 
     // The fixed envelope belongs to the racket, NOT the pointer marker.
@@ -1396,7 +1519,7 @@ class Game {
 
     const serveCtx = this.state === GS.SERVE_TOSS && this.server === 1 && b.lastHitBy === 0;
     const sw = this.swipe, m = this.playerStrokeIntent(serveCtx);
-    if (!m) return;
+    if (!m) { this.logNoStrokeIntent(serveCtx); return; }
     /* ITTF 2.07: a return must follow a bounce on the receiver's court.
      * Without this gate the generous endpoint envelope returned
      *   · a ball still on its way to the player (a volley, a fault), and
@@ -1406,6 +1529,7 @@ class Game {
      * consumed, so it is still there for the real chance. */
     const ownBounce = this.rallyBounces.some((s) => s > 0);
     if (!serveCtx && !ownBounce) {
+      this.logPressRejection('BOUNCE_ILLEGAL');
       if (b.p.z >= PH.T_HALF_LEN) this.hintOut = this.time;
       return;
     }
@@ -1414,19 +1538,22 @@ class Game {
     const captureSample = measureCaptureAllowance(spad, p0, b.p, serveCtx, endpointEligible);
     if (captureSample && this.shotJournal) this.shotJournal.observeCapture(sw.gestureId, captureSample, this.time);
     if (b.v.z < 0 && b.p.z < pad.pos.z - .35) return;
-    if (serveCtx && (b.v.y >= 0 || this.tossApex - PH.TABLE_Y <= 0.10)) return;
+    if (serveCtx && (b.v.y >= 0 || !(this.tossRiseNow() > MATCH_RULES.serveTossMinRise))) {
+      if (b.v.y < 0) this.logPressRejection('SERVE_TOSS_LOW', { tossRise: this.tossRiseNow() });
+      return;
+    }
     let hit = null;
 
     if (serveCtx) {
       // ITTF 2.06: the ball must be struck while FALLING from the toss.
       const rad = V3.dist(b.p, pad.pos);
-      if (b.v.y < 0 && this.tossApex - PH.TABLE_Y > 0.10 && playerInCaptureRange(b.p, pad.pos, true)) {
+      if (b.v.y < 0 && this.tossRiseNow() > MATCH_RULES.serveTossMinRise && playerInCaptureRange(b.p, pad.pos, true)) {
         hit = { t: 1, x: b.p.x, y: b.p.y, z: b.p.z, captureKind: 'serve', rad: rad * 0.40, px: pad.pos.x, py: pad.pos.y, pz: pad.pos.z };
       }
     } else if (ownBounce) {
       /* The endpoint route fires at the CLOSEST APPROACH of the ball to the
-       * blade, not the instant it enters the assist box. The box is 0.36 m
-       * wide and 0.35 m deep, so firing on entry put the contact up to 35 cm
+       * blade, not the instant it enters the assist box. The box is 0.62 m
+       * wide and 0.62 m deep, so firing on entry put the contact up to 62 cm
        * in front of the racket — the ball left a place the blade visibly
        * never reached. While the ball is still closing, this substep simply
        * does not hit; the gesture stays alive and the next substep (or the
@@ -1457,8 +1584,9 @@ class Game {
     if (!hit) {
       hit = this.sweepPaddle(spad, p0, b.p, serveCtx ? serveReach : reachRadius);
     }
-    if (!hit) return;
-    if (b.lastHitBy === 1) return;                 // you already hit it
+    if (!hit) { this.logNoContactReason(captureSample, serveCtx); return; }
+    if (!this.validatePressDirection(m)) return;
+    if (b.lastHitBy === 1) { this.logPressRejection('CONSUMED'); return; } // you already hit it
 
     const isServeStroke = this.isServeBall && b.lastHitBy === 0 && this.server === 1;
     const contact = V3.new(hit.x, hit.y, hit.z);
@@ -1524,6 +1652,16 @@ class Game {
      * null impact is how a ball that never touched the rubber still counted as
      * returned — and why the next, real attempt was ignored. */
     if (!info) return;
+    {
+      const bp = this.R && this.R.viewProj ? this.project(b.p, {}) : null;
+      const pp = this.R && this.R.viewProj ? this.project(pad.pos, {}) : null;
+      const distancePx = bp && pp && bp.ok && pp.ok && this.vw > 0 && this.vh > 0
+        ? Math.hypot((bp.x - pp.x) * this.vw, (bp.y - pp.y) * this.vh) : null;
+      this.logInput('contact', { outcome: { contact: true, route: hit.captureKind || 'ccd',
+        distancePx, distanceM: captureSample ? captureSample.distance : V3.dist(b.p, pad.pos),
+        pressToContactMs: this.swipe.pressZone && Number.isFinite(this.swipe.pressZone.pressT)
+          ? (this.time - this.swipe.pressZone.pressT) * 1000 : null } });
+    }
     pad.lastHitT = this.time;
     /* The blade is where the contact is. The old code left the bat up to one
      * full capture radius away and launched the ball from a point it visibly
@@ -1572,6 +1710,7 @@ class Game {
     if (isServeStroke) { this.serveBounces = 0; this.rallyBounces.length = 0; }
     else this.isServeBall = false;
     this.applyHit(1, racket, contact, quality, info);
+    sw.consumedGestureId = sw.gestureId; sw.consumedAt = this.time;
     sw.cancel();
     this.pointerDown = false;
     this.swipeReleasedAt = -Infinity;
@@ -1660,14 +1799,14 @@ class Game {
     if (this._volleyPred) this._volleyPred.reach = null;
     const broken = ![pad.pos.x, pad.pos.y, pad.pos.z].every(Number.isFinite);
     if (hard || broken) {
-      V3.set(pad.pos, 0, PH.TABLE_Y + 0.25, 1.44);
+      V3.set(pad.pos, 0, PH.TABLE_Y + 0.25, 1.78);
       V3.copy(pad.prevPos, pad.pos);
       V3.copy(pad.prev, pad.pos);
       V3.zero(pad.vel);
     }
     V3.set(pad.normal, 0, Math.sin(this.padPitch), -Math.cos(this.padPitch));
     pad.swing = 0;
-    this._ptTarget = { tx: 0, ty: PH.TABLE_Y + 0.25, tz: 1.44 };
+    this._ptTarget = { tx: 0, ty: PH.TABLE_Y + 0.25, tz: 1.78 };
   }
 
   updatePlayerPaddle(dt) {
@@ -1785,7 +1924,7 @@ class Game {
       const kHome = clamp((this.recenterT / RECENTER_S - 0.25) / 0.75, 0, 1);
       tx = lerp(tx, 0, kHome);
       ty = lerp(ty, PH.TABLE_Y + 0.25, kHome);
-      tz = lerp(tz, 1.44, kHome);
+      tz = lerp(tz, 1.78, kHome);
     }
 
     // during your own toss the bat slides under the ball: serving is about
@@ -1810,7 +1949,7 @@ class Game {
      * ball — the only sane way to play one — got no step-in at all and the
      * bat stayed 0.45 m behind the ball until the point was awarded against
      * them. A live press in the admitted zone is intent. */
-    if (A > 0.01 && canReachShort && this.recenterT <= 0 && (this.swipe.active || this.playerStrokeIntent())) {
+    if (A > 0.01 && canReachShort && this.recenterT <= 0 && this.pressAdmitsBall() && (this.swipe.active || this.playerStrokeIntent())) {
       if (o.reach) {
         // Footwork assist, not a magnet: a swipe on the far wing must not
         // teleport the bat onto a ball it was never near. The gate widened
@@ -2006,7 +2145,7 @@ class Game {
     if (this.paused || (this.replayer && this.replayer.on)) { w.k = 0; return; }
     if (this.state === GS.SERVE_TOSS && this.server === 1 && b.live && b.lastHitBy === 0) {
       // No ready circle on the paddle and no "hit now" while the toss rises.
-      if (b.v.y < 0 && this.tossApex - PH.TABLE_Y > .10) {
+      if (b.v.y < 0 && this.tossRiseNow() > MATCH_RULES.serveTossMinRise) {
         w.on = true; w.kind = 'serve'; w.t = 0;
         w.contactable = playerInCaptureRange(b.p, pad.pos, true);
         w.ready = w.contactable ? 1 : .4;
@@ -2286,7 +2425,9 @@ class Game {
     /* The attract-mode bot does not go through pointerdown, so it must not
      * inherit a rejected press zone from the last human gesture. */
     const rectD = this.canvas && this.canvas.getBoundingClientRect ? this.canvas.getBoundingClientRect() : null;
-    this.swipe.pressZone = { accepted: true, via: 'demo', radius: MATCH_RULES.pressRadiusPx,
+    this.swipe.pressZone = { accepted: true, via: 'demo', shape: MATCH_RULES.zoneShape,
+      score: 0, along: 0, across: 0, reason: null, pointerType: 'demo',
+      radius: MATCH_RULES.pressRadiusPx,
       pressX: x0, pressY: y0, vw: rectD ? rectD.width : 1, vh: rectD ? rectD.height : 1 };
     this._demoGesture = {
       x0, y0, x1, y1,
@@ -2434,6 +2575,7 @@ class Game {
     } else this._acc = 0;
 
     this.updateStrikeWindow(dtReal);
+    this.logInput('frame', { dt: dtReal });
     if (this.state === GS.RALLY || this.state === GS.SERVE_TOSS) this.moments.push(this.time, this);
     if (this.training) this.training.update(dtReal);
     else if (this.network.isInMatch) {

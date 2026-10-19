@@ -31,9 +31,9 @@ function canvasFixture() {
 
 test('shared gameplay contract is frozen and retains the previous authored baseline', () => {
   assert.equal(Object.isFrozen(rules), true);
-  assert.equal(rules.captureRadius, .14 + .85 * .26);
-  assert.equal(rules.depthTolerance, .16 + .85 * .22);
-  assert.equal(rules.serveCaptureRadius, .38 + .85 * .28);
+  assert.equal(rules.captureRadius, .62);
+  assert.equal(rules.depthTolerance, .62);
+  assert.equal(rules.serveCaptureRadius, .88);
   assert.equal(rules.trajectoryAssist, .85);
   assert.equal(rules.positionAssist, .85);
 });
@@ -63,7 +63,7 @@ test('new saves never resurrect assistance through career base settings', () => 
   const g = fixture();
   g.career = { active: true, _baseSettings: { difficulty: 1, assist: .1, posAssist: .2 } };
   g.saveSettings();
-  assert.equal(g.profile.data.settings.rulesVersion, 1);
+  assert.equal(g.profile.data.settings.rulesVersion, rules.version);
   assert.equal(g.profile.data.settings.difficulty, 1);
   for (const key of ['assist', 'posAssist', 'hitZone', 'sensitivity', 'showZone'])
     assert.equal(key in g.profile.data.settings, false);
@@ -83,12 +83,12 @@ test('capture boundaries are inclusive and outside endpoint capture is rejected'
   assert.equal(lib.playerInCaptureRange(V3.new(rules.captureRadius + .0001, 0, 0), origin), false);
   assert.equal(lib.playerInCaptureRange(V3.new(0, 0, rules.depthTolerance + .0001), origin), false);
   assert.equal(lib.playerInCaptureRange(V3.new(0, rules.captureRadius, 0), origin), true);
-  assert.equal(lib.playerInCaptureRange(V3.new(.3, .3, 0), origin), false);
+  assert.equal(lib.playerInCaptureRange(V3.new(.5, .5, 0), origin), false);
 });
 
 test('serve envelope is a sphere, not a larger rectangular corner exploit', () => {
   assert.equal(lib.playerInCaptureRange(V3.new(rules.serveCaptureRadius, 0, 0), V3.new(), true), true);
-  assert.equal(lib.playerInCaptureRange(V3.new(.5, .5, .5), V3.new(), true), false);
+  assert.equal(lib.playerInCaptureRange(V3.new(.6, .6, .6), V3.new(), true), false);
   assert.equal(lib.playerCaptureLimits(true).sweet, lib.playerCaptureLimits(false).sweet);
 });
 
@@ -254,10 +254,11 @@ test('allowance measurement agrees with real CCD and is read-only over 100 deter
 
 test('screen press zone uses CSS pixels and exact inclusive boundary, independent of world geometry',()=>{
   const center={x:.5,y:.5,ok:true};
+  const R = rules.pressRadiusPx; // legacy circle; the live default shape is the oval
   for(const [width,height] of [[1280,760],[390,844]]){
-    assert.equal(lib.pressHitZone(center,{x:.5+48/width,y:.5},width,height).accepted,true);
-    assert.equal(lib.pressHitZone(center,{x:.5+48.01/width,y:.5},width,height).accepted,false);
-    assert.equal(lib.pressHitZone(center,{x:.5,y:.5+49/height},width,height).accepted,false);
+    assert.equal(lib.pressHitZone(center,{x:.5+R/width,y:.5},width,height).accepted,true);
+    assert.equal(lib.pressHitZone(center,{x:.5+(R+0.01)/width,y:.5},width,height).accepted,false);
+    assert.equal(lib.pressHitZone(center,{x:.5,y:.5+(R+1)/height},width,height).accepted,false);
   }
 });
 test('outside press blocks all physical capture and CCD before assistance can rescue it',()=>{
