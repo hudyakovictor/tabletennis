@@ -212,7 +212,7 @@ body.is-paused #pauseInd{display:flex}
   #spin{width:min(132px,36vw);padding:8px 9px}
   .sb-side{min-width:64px;padding:7px 6px;gap:5px}.sb-pts{font-size:22px;min-width:24px}
   .sb-nm{font-size:9px;letter-spacing:.06em}.serve-dot{width:6px;height:6px}.sb-mid{padding:4px 8px}
-  #topright{gap:5px}.ic{width:30px;height:32px}#slow{height:32px;min-width:44px}
+  #topright{gap:5px}.ic{width:30px;height:32px}
   .logo{font-size:30px}.card{padding:20px 18px 18px}
   .recap{grid-template-columns:1fr}
 }
@@ -221,7 +221,7 @@ body.is-paused #pauseInd{display:flex}
 
 /* The same corner control pauses during play and becomes a safe exit only after pause. */
 body.is-playing #btnMenu { display: grid !important; }
-body.is-paused #slow { display:none !important; }
+
 
 /* ============================ slow-mo =============================== */
 /* The spin dial: a chip in the same family as slow-mo, top-right, out of the
@@ -237,37 +237,6 @@ body.is-paused #slow { display:none !important; }
 #spinBias s{font-family:var(--mono);font-size:8.5px;opacity:.8;text-decoration:none;line-height:1.15}
 #spinBias.high{color:#ffe9c9;border-color:rgba(255,170,80,.75);box-shadow:0 0 20px rgba(255,150,60,.22)}
 #spinBias.low{color:#dff2ff;border-color:rgba(120,200,255,.6)}
-
-/* Slow-mo used to be a 64 px circle floating in the bottom-right corner —
- * exactly where a right-handed thumb plays. It is now a compact chip in the
- * top-right button row, next to sound/settings/menu. */
-#slow{position:relative;height:34px;min-width:54px;border-radius:10px;display:flex;flex-direction:column;
-  align-items:center;justify-content:center;gap:0;pointer-events:auto;cursor:pointer;padding:0 9px;
-  background:radial-gradient(circle at 50% 35%,rgba(30,48,74,.85),rgba(9,14,24,.85));
-  border:1px solid var(--line2);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);
-  color:var(--dim);overflow:hidden;transition:color .2s,border-color .2s,transform .12s;
-  padding:0;appearance:none;-webkit-appearance:none;font:inherit}
-#slow:active{transform:scale(.94)}
-#slow b{font-size:9.5px;font-weight:900;letter-spacing:.07em;z-index:2;line-height:1.15}
-#slow small{font-family:var(--mono);font-size:8.5px;opacity:.78;text-decoration:none;z-index:2;line-height:1.15}
-#slow i{position:absolute;left:0;right:0;bottom:0;height:100%;
-  background:linear-gradient(180deg,rgba(57,198,255,.26),rgba(57,198,255,.05));transition:height .08s linear}
-#slow.on{color:#eaf6ff;border-color:rgba(57,198,255,.75);box-shadow:0 0 26px rgba(57,198,255,.35)}
-#slow.ready{color:var(--txt)}
-#slow.off{opacity:.32;pointer-events:none}
-body.is-slow #gl{filter:saturate(1.12) contrast(1.04)}
-
-/* ======================== defend button ============================= */
-.defend-btn{height:34px;min-width:58px;border-radius:10px;display:flex;flex-direction:column;
-  align-items:center;justify-content:center;pointer-events:auto;cursor:pointer;padding:0 10px;
-  background:radial-gradient(circle at 50% 35%,rgba(34,58,44,.85),rgba(9,18,14,.85));
-  border:1px solid var(--line2);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);
-  color:var(--dim);transition:color .18s,border-color .18s,transform .1s;
-  appearance:none;-webkit-appearance:none;font:inherit}
-.defend-btn:active,.defend-btn.on{color:#e0ffe8;border-color:rgba(78,227,154,.75);
-  box-shadow:0 0 20px rgba(78,227,154,.30);transform:scale(.94)}
-.defend-btn b{font-size:9px;font-weight:900;letter-spacing:.06em;line-height:1.15}
-body:not(.is-playing) .defend-btn{display:none !important}
 
 /* ======================== replay cinema ============================= */
 #reel{position:absolute;inset:0;z-index:6;pointer-events:none;opacity:0;transition:opacity .28s;
@@ -314,7 +283,7 @@ body:not(.is-playing) .defend-btn{display:none !important}
 
 
 #reel .skip{pointer-events:auto;cursor:pointer}
-body.is-reel #hud,body.is-reel #slow{opacity:.0}
+body.is-reel #hud{opacity:.0}
 body.is-reel .screen,body.is-reel #pauseInd{display:none !important}
 #hud{transition:opacity .25s}
 
@@ -423,7 +392,7 @@ button[hidden],.ic[hidden]{display:none!important}
 #btnMenu[aria-pressed="true"]{color:var(--warn);border-color:rgba(255,211,77,.55)}
 #btnFullscreen[aria-pressed="true"]{color:var(--good);border-color:rgba(78,227,154,.55)}
 #btnSound[aria-pressed="false"],#menuSound[aria-pressed="false"]{color:var(--bad)}
-#slow{min-height:34px}
+
 #pauseInd{cursor:default}
 #pauseInd small{font-size:13px;letter-spacing:.08em;text-align:center;line-height:1.45}
 .pause-actions{display:flex;flex-wrap:wrap;justify-content:center;gap:8px;margin-top:8px;max-width:min(560px,92vw)}
@@ -523,7 +492,6 @@ button[hidden],.ic[hidden]{display:none!important}
 /* Touch targets: phone and tablet controls get room; very narrow phones reflow. */
 @media (pointer:coarse){
   .ic{width:40px;height:42px;border-radius:12px}
-  #slow{min-width:44px;height:42px;border-radius:12px}
   .tbt,.tab,.opt,.btn{min-height:44px}
   .menu-utility .ic{width:44px;height:44px}
   .sitem button,.trow button{min-height:44px;min-width:68px}
@@ -550,14 +518,12 @@ button[hidden],.ic[hidden]{display:none!important}
   .sb-mid span{font-size:12px}
   #topright{display:grid;grid-template-columns:repeat(2,40px);grid-auto-rows:40px;gap:4px;width:84px}
   #topright .ic{width:40px;height:40px}
-  #topright #slow{width:40px;min-width:40px;height:40px}
   #menu .menu-actions .btn,#menu .menu-mode-actions .btn{letter-spacing:.06em;font-size:12px}
   #cameraViews .opt{min-width:0;padding-inline:4px}
 }
 @media(max-width:340px){
   #topright{grid-template-columns:repeat(2,36px);grid-auto-rows:36px;width:76px}
   #topright .ic{width:36px;height:36px}
-  #topright #slow{width:36px;min-width:36px;height:36px}
 }
 @media(prefers-reduced-motion:reduce){
   .screen.on .card,#over.won .card,#over.won #overTitle,#score .sb-side.scored::after{animation:none!important}
@@ -585,7 +551,6 @@ body:not(.is-playing) #topright{visibility:hidden;pointer-events:none}
 @media(max-width:480px){
   #topright{display:grid;grid-template-columns:repeat(3,44px);grid-auto-rows:44px;gap:4px;width:140px}
   #topright .ic{width:44px;height:44px}
-  #topright #slow{width:44px;min-width:44px;height:44px}
 }
 @media(max-width:620px) and (max-height:650px){
   #menu .card.scroll-needed{scrollbar-width:thin;scrollbar-color:rgba(180,205,235,.45) transparent}
@@ -694,16 +659,6 @@ body:not(.is-playing) #topright{visibility:hidden;pointer-events:none}
     <div id="dbg"></div>
 
     <div id="topright">
-      <!-- slow-mo: hold to slow the world down (never in tournaments/PvP) -->
-      <button id="slow" class="pe" title="Замедление" aria-label="Замедление времени, удерживайте">
-        <i id="slowFill"></i>
-        <b>SLOW</b>
-        <small id="slowKey">SHIFT</small>
-      </button>
-      <!-- defend: mobile alternative to swipe-down (conflicts with Telegram/iOS) -->
-      <button id="defend" class="pe defend-btn" title="Защита (подрезка/блок)" aria-label="Защитный удар, удерживайте">
-        <b>🛡 ЗАЩИТА</b>
-      </button>
       <button class="ic pe" id="btnFullscreen" title="Полный экран (F)" aria-label="Полный экран" aria-pressed="false"></button>
       <button class="ic pe" id="btnSound" title="Выключить звук" aria-label="Выключить звук" aria-pressed="true"></button>
       <button class="ic pe" id="btnSettings" title="Настройки" aria-label="Настройки"></button>
@@ -1260,13 +1215,13 @@ function noise1(x) {
 
 const MATCH_RULES = Object.freeze({
   version: 1,
-  pressRadiusPx: 72,          // screen-space admission for real pointer-down events
+  pressRadiusPx: 96,          // screen-space admission for real pointer-down events
   trajectoryAssist: .85,
   positionAssist: .85,
   sensitivity: 1,
-  captureRadius: .50,        // realistic stance distance requires larger capture
-  depthTolerance: .48,      // realistic stance distance
-  serveCaptureRadius: .72,  // falling toss only; larger for realistic stance
+  captureRadius: .62,        // realistic stance distance requires larger capture
+  depthTolerance: .62,      // realistic stance distance
+  serveCaptureRadius: .88,  // falling toss only; larger for realistic stance
   sweetRadius: .15225,       // contact-quality reference, NOT capture radius
   timingMinPx: 8,
   timingMaxPx: 20,
@@ -5365,8 +5320,10 @@ class AudioEngine {
   hitEdge() {
     if (!this.ok) return;
     const t = this.ctx.currentTime;
-    this._noise(0.05, 0.3, 'highpass', 3600, 0.7, t);
-    this._tone(1500, 0.06, 0.22, 'square', t, 0.3);
+    if (t - (this._lastEdge || -Infinity) < 0.18) return;
+    this._lastEdge = t;
+    this._noise(0.035, 0.12, 'highpass', 3000, 0.7, t);
+    this._tone(1050, 0.045, 0.055, 'triangle', t, 0.42);
   }
   hitFloor(speed) {
     if (!this.ok) return;
@@ -10372,7 +10329,6 @@ class Game {
       showDebug: false,
       showPlayerPaddle: true,
       slowmoOnBigShots: true,
-      slowmoPlayer: true,
       targetScore: 11,
       spinBias: 'norm',
       // NEW: Enhanced gameplay settings
@@ -10720,9 +10676,14 @@ class Game {
     }, { passive: false });
     c.style.touchAction = 'none';
 
-    /* Prevent Telegram / embedded WebView "swipe down to close" gesture.
-     * A passive touchmove listener on the document tells the browser the
-     * page will handle every gesture, so the host app never sees a drag. */
+    /* Keep vertical gestures in the mini app when Telegram supports the API;
+     * retain the DOM fallback for older Telegram clients and embedded webviews. */
+    try {
+      const tg = window.Telegram && window.Telegram.WebApp;
+      if (tg && typeof tg.setupSwipeBehavior === 'function') {
+        tg.setupSwipeBehavior({ allow_vertical_swipe: false });
+      }
+    } catch (e) { console.debug('Telegram swipe behavior unavailable', e); }
     document.addEventListener('touchmove', (e) => {
       if (e.cancelable) e.preventDefault();
     }, { passive: false });
@@ -11255,7 +11216,7 @@ class Game {
       sound: s.sound, volume: s.volume, camera: s.camera, hand: s.hand, grip: s.grip,
       showTrail: s.showTrail, showPredict: s.showPredict,
       showTele: s.showTele, haptics: s.haptics, coach: s.coach, adaptive: s.adaptive,
-      slowmoPlayer: s.slowmoPlayer, targetScore: s.targetScore,
+      targetScore: s.targetScore,
       spinBias: s.spinBias,
     };
     if (this.career && this.career.active && this.career._baseSettings)
@@ -11656,15 +11617,6 @@ class Game {
     const serveCtx = this.state === GS.SERVE_TOSS && this.server === 1 && b.lastHitBy === 0;
     const sw = this.swipe, m = this.playerStrokeIntent(serveCtx);
     if (!m) {
-      /* Defend button: when held on mobile, auto-generate a BLOCK gesture
-       * if the ball is incoming and there's no active swipe. This lets
-       * Telegram/iOS users play defensive shots without swiping down. */
-      if (this.defendHeld && b.lastHitBy === -1 && b.v.z > 0) {
-        m = { releaseSpeed: 0.3, peakSpeed: 0.4, speed: 0.3, up: 0.05,
-          right: 0, dist: 0.04, pathLen: 0.04, straightness: 0.9,
-          curl: 0, dur: 0.15, samples: 4, jerk: 0, smooth: 0.9,
-          angle: 0, angleDeg: 0, sx: 0.5, sy: 0.6, x: 0.5, y: 0.58, dx: 0, dy: -0.02 };
-      }
       if (!m) return;
     }
     /* ITTF 2.07: a return must follow a bounce on the receiver's court.
@@ -13179,7 +13131,6 @@ class UI {
   updateInputCopy() {
     const touch = this.inputMode === 'touch';
     $('#cameraHelp').textContent = touch ? 'Виды настроены. Выберите удобный.' : 'Колесо — масштаб. ПКМ ↕ — высота.';
-    $('#slowKey').textContent = touch ? 'ДЕРЖАТЬ' : 'SHIFT';
     $('#gl').setAttribute('aria-label', touch ? 'Игровое поле. Удар — свайп. Камера — в настройках.'
       : 'Игровое поле. Удар — ЛКМ и движение. Колесо — масштаб, ПКМ вверх/вниз — высота камеры, C — сброс.');
     if (this.game && this.game.training) this.trainSync(this.game.training);
@@ -13415,45 +13366,11 @@ class UI {
       g.audio.init(); g.audio.ui('click');
       this.syncSpinBias();
     });
-    /* slow-mo: press and hold, on a phone or on the keyboard */
-    const slow = $('#slow');
-    const hold = (v) => (e) => {
-      if (e && e.cancelable) e.preventDefault();
-      this.game && this.game.setSlowmoHold(v);
-      if (v) this.game && this.game.audio.init();
-    };
-    slow.addEventListener('pointerdown', hold(true));
-    slow.addEventListener('pointerup', hold(false));
-    slow.addEventListener('pointerleave', hold(false));
-    slow.addEventListener('pointercancel', hold(false));
-    /* Defend button: mobile alternative to swipe-down (push/chop/block).
-     * When held, simulates a short downward gesture near the ball so the
-     * stroke classifier produces a BLOCK or PUSH. This lets Telegram/iOS
-     * users play defensive shots without swiping down (which Telegram
-     * intercepts as "close webapp"). */
-    const defendBtn = $('#defend');
-    if (defendBtn) {
-      const defendOn = (v) => (e) => {
-        if (e && e.cancelable) e.preventDefault();
-        if (!this.game) return;
-        this.game.defendHeld = v;
-        defendBtn.classList.toggle('on', v);
-        if (v) this.game.audio.init();
-      };
-      defendBtn.addEventListener('pointerdown', defendOn(true));
-      defendBtn.addEventListener('pointerup', defendOn(false));
-      defendBtn.addEventListener('pointerleave', defendOn(false));
-      defendBtn.addEventListener('pointercancel', defendOn(false));
-    }
-    window.addEventListener('keyup', (e) => {
-      if (e.key === 'Shift' || e.key === ' ') this.game && this.game.setSlowmoHold(false);
-    });
     window.addEventListener('keydown', (e) => {
       if ($('#shotLab').classList.contains('on')) return;
       if ((e.key === 'Shift' || e.key === ' ') && !e.repeat && this.game && this.game.replayer.on) {
         this.game.skipReplay(); e.preventDefault(); return;
       }
-      if ((e.key === 'Shift' || e.key === ' ') && !e.repeat) this.game && this.game.setSlowmoHold(true);
       if ((e.key === 'm' || e.key === 'M' || e.key === 'ь' || e.key === 'Ь')) this.showMoments();
     });
     $('#reelSkip').addEventListener('click', () => this.game && this.game.skipReplay());
@@ -13768,10 +13685,6 @@ class UI {
         if (g.director) { g.director.enabled = s.adaptive; if (!s.adaptive) { g.director.reset(); g.ai.setHandicap(1); } }
         break;
       case 'haptics': s.haptics = v === 'on'; if (s.haptics) g.buzz(12); break;
-      case 'slowmoPlayer':
-        s.slowmoPlayer = v === 'on';
-        if (!s.slowmoPlayer) g.setSlowmoHold(false);
-        $('#slow').classList.toggle('off', !s.slowmoPlayer);
         break;
       case 'target': s.targetScore = +v; $('#toWin').textContent = v; break;
       default: break;
@@ -14171,17 +14084,6 @@ class UI {
     rb.classList.toggle('on', showRally);
     if (showRally) rb.innerHTML = `РАЛЛИ <b>${g.rally}</b> · РЕКОРД <b>${Math.max(g.bestRally, g.rally)}</b>`;
 
-    /* slow-mo meter: the ring fills back up while you wait, and drops
-       while you hold — the one piece of state the player must feel */
-    const sl = g.slowmo, slEl = $('#slow');
-    if (slEl) {
-      const avail = g.slowmoAvailable();
-      slEl.classList.toggle('on', sl.active);
-      slEl.classList.toggle('ready', !sl.active && sl.energy > 0.995);
-      slEl.classList.toggle('off', g.settings.slowmoPlayer === false || !sl.allowed);
-      $('#slowFill').style.height = (sl.energy * 100).toFixed(0) + '%';
-      document.body.classList.toggle('is-slow', sl.active);
-    }
     this.syncShotFeedback();
     if (this.shotTimer > 0) { this.shotTimer -= dt; if (this.shotTimer <= 0) $('#shot').classList.remove('on'); }
     if (this.noteTimer > 0) { this.noteTimer -= dt; if (this.noteTimer <= 0) this.hideNote(); }
