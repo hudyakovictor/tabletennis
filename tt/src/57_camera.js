@@ -23,20 +23,13 @@ const CAMERA_ORDER = ['BROADCAST', 'DYNAMIC', 'LOW'];
    clamps to it, the camera fits around it, the bench measures it. */
 const PADDLE_LIMITS = {
   x: 1.02,                 // |x| of the bat, metres from the centre line
-  yLo: -0.24, yHi: 0.94,   // bat height relative to the playing surface
-  zNear: 1.02, zFar: 2.06, // bat depth: from just inside the table to well back
-  /* Extra reach, granted ONLY for a ball that dies short AND leaves time to
-   * get there (the game gates it on time-to-contact). 0.86 -> 0.66 because the
-   * opponent's shots used to land at a median 0.76-0.82 m past the net — every
-   * ball was a short ball, and a short ball arrives at the bat plane in
-   * ~0.20 s, which is inside human reaction time. Measured with the old value:
-   * 0-14 % of the opponent's returns were returnable at all. Leaning over the
-   * table to pick a ball out of the front half is a real thing players do.
-   * 0.46 is what a net-cord needs: a ball that clips the tape dribbles over and
-   * dies 0.15-0.35 m in, so the bat has to be able to get almost to the net.
-   * Checked against the frame rather than guessed: at 0.46 the step-in plane is
-   * on screen for all 4 rigs x 8 aspects (0/128 corners outside). */
-  zStepIn: 0.46,
+  yLo: -0.28, yHi: 1.00,   // bat height relative to the playing surface (expanded for mobile)
+  /* Realistic stance: the player stands 40-110 cm behind the end line,
+   * not hovering right over the table edge. zNear = just behind end line,
+   * zFar = a full metre back. zStepIn allows leaning over the table for
+   * very short balls (net-cord dribblers). */
+  zNear: 1.45, zFar: 2.50, // bat depth: from end line to well behind it
+  zStepIn: 0.80,           // lean over the table for a short ball
 };
 
 const _cp = { eye: { x: 0, y: 0, z: 0 }, look: { x: 0, y: 0, z: 0 }, fov: 42, mode: 'BROADCAST' };
@@ -109,10 +102,10 @@ for (const sx of [-1, 1]) {
 
 /* Fairness set: contact poses kept in frame */
 const REACH_POSES = [
-  [0.85, 0.10, 0.46],       // reaching over the table for a net-cord dribbler
-  [0.85, 0.25, 1.02],
+  [0.85, 0.10, 0.80],       // reaching over the table for a net-cord dribbler
+  [0.85, 0.25, 1.45],       // at the end line
   [0.85, 0.28, 1.37],       // wide, at the end line
-  [0.85, 0.15, 1.48],       // wide and low
+  [0.85, 0.15, 1.78],       // wide and low, normal stance
 ];
 const REACH_POINTS = [];
 for (const sx of [-1, 1]) {
@@ -158,10 +151,20 @@ function fitRig(P, aspect) {
   if (hit) return hit;
   const phone = 1 - smoothstep(0.85, 1.3, aspect);
   const pitch = P.pitch * DEG; // Identical angle on phone and desktop.
-  const rig = { eye: { x: 0, y: PH.TABLE_Y + Math.tan(pitch) * 3.32, z: 3.2 },
-    look: { x: 0, y: PH.TABLE_Y, z: -0.12 }, fov: lerp(P.fov, 34, phone), mode: P.id };
+  /* Mobile (portrait) fix: start much closer so the table fills the screen.
+   * The old eye.z=3.2 + fitTablePresentation pushed the camera back until
+   * the whole hall was visible on a narrow phone — the table became a stamp.
+   * Now: bring the eye ~30% closer on phones and allow tighter margins so
+   * the fit solver doesn't undo the closeness. */
+  const eyeZ = lerp(3.2, 2.1, phone);
+  const eyeY = PH.TABLE_Y + Math.tan(pitch) * eyeZ;
+  const fov = lerp(P.fov, 30, phone);
+  const rig = { eye: { x: 0, y: eyeY, z: eyeZ },
+    look: { x: 0, y: PH.TABLE_Y, z: -0.12 }, fov, mode: P.id };
   // No automatic lift or ball-following: the chosen view stays predictable.
-  fitTablePresentation(rig, aspect, P.height, phone > 0.5 ? 0.045 : 0.055);
+  // On phones use much tighter margins so the table is big.
+  fitTablePresentation(rig, aspect, P.height, phone > 0.5 ? 0.015 : 0.055,
+    phone > 0.5 ? 0.82 : 0.76);
   _fitCache.set(key, rig);
   return rig;
 }
@@ -296,9 +299,11 @@ function paddleTargetFromPointer(px, py, stanceY, sens, out, opts) {
   // 0.5 on screen is the centre line; the reachable half-width is the
   // authored limit, so the mapping is exact and independent of sensitivity
   // at the centre and only the *gain* changes with the slider.
+  // Mobile: expand vertical range so the paddle can reach both high lobs
+  // and low chops from a portrait screen where the swipe is shorter.
   o.tx = (x - 0.5) * 2 * PADDLE_LIMITS.x * s;
-  o.ty = PH.TABLE_Y + 0.62 - (y - 0.18) * 0.95 * s;
-  o.tz = 1.44 + clamp(sy - 0.55, -0.34, 0.45) * 0.86 * (0.6 + 0.4 * s);
+  o.ty = PH.TABLE_Y + 0.62 - (y - 0.18) * 1.10 * s;
+  o.tz = 1.78 + clamp(sy - 0.55, -0.34, 0.45) * 0.96 * (0.6 + 0.4 * s);
   o.tx = clamp(o.tx, -PADDLE_LIMITS.x, PADDLE_LIMITS.x);
   o.ty = clamp(o.ty, PH.TABLE_Y + PADDLE_LIMITS.yLo, PH.TABLE_Y + PADDLE_LIMITS.yHi);
   o.tz = clamp(o.tz, zNear, PADDLE_LIMITS.zFar);
@@ -314,7 +319,7 @@ const _clampS = {}, _clampA = {}, _clampP = { x: 0, y: 0, z: 0 };
  * by resetPaddle() and the home blend in updatePlayerPaddle(). */
 const RECENTER_S = 0.34;
 
-const PADDLE_HOME = { x: 0, y: PH.TABLE_Y + 0.62, z: 1.44 };
+const PADDLE_HOME = { x: 0, y: PH.TABLE_Y + 0.62, z: 1.78 };
 
 function insideFrame(s, m) {
   return s.ok && s.x > m && s.x < 1 - m && s.y > m && s.y < 1 - m;
