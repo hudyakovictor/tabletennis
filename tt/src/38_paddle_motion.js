@@ -41,6 +41,19 @@ function paddleContactRange(grip, stroke, forehand = true, isServe = false, cont
   // Lob, smash and sidespin keep their unconstrained physical archetypes.
   if (!isServe && !['DRIVE', 'LOOP', 'COUNTER', 'FLICK', 'CHOP', 'PUSH', 'DROP', 'BLOCK'].includes(stroke)) return null;
   const range = paddleGripProfile(grip, isServe ? 'SERVE' : stroke, forehand).range;
+  if (!isServe && ['BLOCK', 'PUSH', 'DROP'].includes(stroke)) {
+    /* A block is not always a closed face. Closed is right against topspin
+     * — the incoming spin itself lifts the ball — but a flat or chopped ball
+     * has no such help, and a face pinned at or below vertical cannot lift
+     * it over the net from behind the baseline. Measured: a passive block of
+     * an 18 m/s drive died on the hitter's own half every time, although
+     * the same contact with an open face is a routine return. Open the
+     * envelope by the amount the incoming spin does NOT supply. */
+    const back = Number.isFinite(context.incomingTop) ? clamp(-context.incomingTop / 220, 0, 1) : 0;
+    const flat = Number.isFinite(context.incomingTop) && context.incomingTop <= 60 ? 1 : 0;
+    const opening = Math.min(26, Math.max(back * 22, flat * 20));
+    return [range[0], range[1] + opening];
+  }
   if (grip === 'shakehand' && !isServe && ['LOOP', 'COUNTER'].includes(stroke)) {
     // 30–50 degrees is a strong loop, not a universal joint limit. A weak
     // or below-net opening needs a more open face, especially off backspin.

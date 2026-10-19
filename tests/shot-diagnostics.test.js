@@ -103,10 +103,13 @@ test('miss collectors, playback UI and automatic miss cinema are absent from sou
 test('144 deterministic calibration fixtures cover both grips/hands/faces without changing the rules', async () => {
   const first = await lib.runShotCalibration(), second = await lib.runShotCalibration();
   assert.equal(JSON.stringify(first), JSON.stringify(second)); assert.equal(first.total, 144); assert.equal(first.invariantFailures, 0);
-  // Explicit baseline, not a claim of perfect tuning: low, deep penhold BH still hits the net.
-  assert.equal(first.legal, 142);
+  // Every fixture is a stroke a human can make with the assist on. The two
+  // low, deep penhold backhand loops used to hit the net because the solver
+  // simulated the flight from the contact point instead of from the ball's
+  // one-radius separation off the face; with that fixed they land.
+  assert.equal(first.legal, 144);
   const failures = first.results.filter(r => !r.legal);
-  assert.ok(failures.every(r => r.grip === 'penhold' && !r.forehand && r.y === .88 && r.z === 1.65 && r.dy === -.35 && r.hitNet));
+  assert.equal(failures.length, 0);
   assert.equal(new Set(first.results.map(r => `${r.grip}/${r.hand}/${r.forehand}`)).size, 8);
 });
 test('calibration cancellation returns partial data without reporting a completed success', async () => {
