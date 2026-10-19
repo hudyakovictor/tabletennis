@@ -118,6 +118,9 @@ h3.sec::after{content:"";flex:1;height:1px;background:var(--line)}
   background:#fff;cursor:pointer;box-shadow:0 2px 9px rgba(0,0,0,.6)}
 .sl input[type=range]::-moz-range-thumb{width:22px;height:22px;border:0;border-radius:50%;background:#fff;cursor:pointer}
 .sl .v{font-family:var(--mono);font-size:12px;color:var(--acc);width:50px;text-align:right}
+.zp{display:flex;flex-direction:column;align-items:center;gap:7px;margin:12px 0 4px;padding:10px;border:1px solid var(--line);border-radius:12px;background:rgba(57,198,255,.05)}
+.zp canvas{width:100%;max-width:240px;height:160px;display:block;border-radius:8px}
+.zp small{font-size:10.5px;line-height:1.45;color:var(--dim);text-align:center;max-width:340px}
 #settings.on{z-index:20}
 .btn{display:block;width:100%;margin-top:18px;padding:14px;border:0;border-radius:12px;cursor:pointer;
   font-family:inherit;font-size:14px;font-weight:800;letter-spacing:.14em;color:#04121c;
@@ -819,6 +822,39 @@ body:not(.is-playing) #topright{visibility:hidden;pointer-events:none}
       </div>
       <p class="note">Выше подброс — больше времени на замах и более пологий, длинный удар; ниже — быстрее, короче. Подброс всегда остаётся законным (не ниже минимума). Влияет только на вашу подачу.</p>
 
+      <h3 class="sec">УПРАВЛЕНИЕ · ПОМОЩЬ</h3>
+      <div class="sl">
+        <label for="capScale">ОКНО ЗАХВАТА<small>насколько близко нужно подвести ракетку к мячу</small></label>
+        <input type="range" id="capScale" data-set="capScale" min="0.8" max="2.5" step="0.05" value="1" aria-label="Размер окна захвата мяча">
+        <span class="v" id="capScaleVal">100%</span>
+      </div>
+      <div class="sl">
+        <label for="zoneScale">ЗОНА НАЖАТИЯ<small>как далеко от мяча засчитывается свайп</small></label>
+        <input type="range" id="zoneScale" data-set="zoneScale" min="0.8" max="2.5" step="0.05" value="1" aria-label="Размер зоны нажатия">
+        <span class="v" id="zoneScaleVal">100%</span>
+      </div>
+      <div class="sl">
+        <label for="aimAssist">ПОМОЩЬ ПРИЦЕЛА<small>авто-коррекция полёта, чтобы мяч шёл на стол</small></label>
+        <input type="range" id="aimAssist" data-set="aimAssist" min="0.5" max="1" step="0.05" value="0.85" aria-label="Помощь прицела">
+        <span class="v" id="aimAssistVal">85%</span>
+      </div>
+      <div class="sl">
+        <label for="footAssist">ПОДХОД ЗА МЯЧОМ<small>ракетка сама тянется к предсказанной точке</small></label>
+        <input type="range" id="footAssist" data-set="footAssist" min="0" max="1" step="0.05" value="0.85" aria-label="Ассист подвода ракетки">
+        <span class="v" id="footAssistVal">85%</span>
+      </div>
+      <div class="sl">
+        <label for="batSens">ЧУВСТВИТЕЛЬНОСТЬ<small>усиление движения курсора или пальца</small></label>
+        <input type="range" id="batSens" data-set="batSens" min="0.4" max="2.2" step="0.05" value="1" aria-label="Чувствительность ракетки">
+        <span class="v" id="batSensVal">1.00×</span>
+      </div>
+      <div class="zp">
+        <canvas id="zonePreview" width="240" height="160" aria-hidden="true"></canvas>
+        <small>Живой предпросмотр: <b style="color:#39c6ff">синее</b> — окно захвата (ракетка), <b style="color:#6ee7a8">зелёное</b> — зона нажатия (мяч). Двигайте ползунки — круги меняются сразу. При подаче зона нажатия автоматически ×2.</small>
+      </div>
+      <p class="note">Работает только на вашу ракетку — на соперника не влияет. «Окно захвата» и «зона нажатия» выше — прощают неточность, легче попасть по мячу. «Подход за мячом» и «помощь прицела» авто-доводят ракетку и полёт. По умолчанию стоят авторские значения (100% / 85%).</p>
+
+
       <button class="btn" id="setClose">СОХРАНИТЬ И ЗАКРЫТЬ</button>
     </div>
   </div>
@@ -1282,19 +1318,21 @@ function installUnifiedControls(settings) {
   }
   return settings;
 }
-function playerCaptureLimits(isServe) {
-  return { radius: isServe ? MATCH_RULES.serveCaptureRadius : MATCH_RULES.captureRadius,
-    depth: MATCH_RULES.depthTolerance, sweet: MATCH_RULES.sweetRadius };
+function playerCaptureLimits(isServe, scale = 1) {
+  const sc = Number.isFinite(scale) && scale > 0 ? scale : 1;
+  return { radius: (isServe ? MATCH_RULES.serveCaptureRadius : MATCH_RULES.captureRadius) * sc,
+    depth: MATCH_RULES.depthTolerance * sc, sweet: MATCH_RULES.sweetRadius };
 }
 /** Endpoint capture used by impact AND the timing cue. CCD remains the
  * additional continuous path for a fast crossing between physical substeps.
  * This does not manufacture a stroke: callers still enforce fresh gestures,
  * bounce legality, toss height and the consumed-once rule. */
-function playerInCaptureRange(ball, paddle, isServe = false) {
+function playerInCaptureRange(ball, paddle, isServe = false, scale = 1) {
   if (!ball || !paddle || ![ball.x, ball.y, ball.z, paddle.x, paddle.y, paddle.z].every(Number.isFinite)) return false;
+  const sc = Number.isFinite(scale) && scale > 0 ? scale : 1;
   const dx = ball.x - paddle.x, dy = ball.y - paddle.y, dz = ball.z - paddle.z;
-  return isServe ? Math.hypot(dx, dy, dz) <= MATCH_RULES.serveCaptureRadius
-    : Math.hypot(dx, dy) <= MATCH_RULES.captureRadius && Math.abs(dz) <= MATCH_RULES.depthTolerance;
+  return isServe ? Math.hypot(dx, dy, dz) <= MATCH_RULES.serveCaptureRadius * sc
+    : Math.hypot(dx, dy) <= MATCH_RULES.captureRadius * sc && Math.abs(dz) <= MATCH_RULES.depthTolerance * sc;
 }
 /** Pure overlay model: cue follows the ball; no fake area-of-effect circle.
  * A warm solid bracket means an available time/position window, never an
@@ -4325,6 +4363,19 @@ function deriveStroke(m, ctx) {
     case 'CHOP': depth01 = 0.58; break;
     default: depth01 = clamp(0.34 + sp01 * 0.44 + m.dist * 0.26, 0.2, 0.96);
   }
+
+  /* A serve's DEPTH is driven by the swing, not silently averaged away. Before
+   * this, every archetype fell through the default branch above and the serve
+   * solver then pulled it to a safe mid-length, so a tap and a hard whip felt
+   * identical. Here the player's effort maps straight onto how deep the ball is
+   * asked to land: a soft flick sits short, a strong drive reaches the far
+   * line. solveServeStroke keeps the requested landing legal (on the table),
+   * so this changes WHERE a good serve goes without turning power into a
+   * coin-flip fault. The wider the power, the deeper and faster the serve. */
+  if (ctx.isServe) {
+    depth01 = clamp(0.18 + sp01 * 0.60 + Math.max(0, m.dist) * 0.16, 0.12, 0.98);
+  }
+
   const aimZ = -side * lerp(0.16, PH.T_HALF_LEN - 0.07, depth01);
 
   /* ---- 7. execution quality --------------------------------------- */
@@ -11128,6 +11179,14 @@ class Game {
       showDebug: false,
       showPlayerPaddle: true,
       serveToss: 1.2,                // multiplier on the ~0.31 m ITTF toss rise
+      /* Optional human-side help. Defaults keep the authored contract intact
+       * (1 / .85 / 1 == MATCH_RULES); these only widen the PLAYER's own
+       * capture window, press zone, assists and cursor gain — never the AI. */
+      capScale: 1,           // physical reach window multiplier
+      zoneScale: 1,          // press-zone admission multiplier
+      aimAssist: 0.85,       // trajectory correction (authored .85)
+      footAssist: 0.85,      // footwork auto-approach (authored .85)
+      batSens: 1,            // cursor gain (authored 1)
       slowmoOnBigShots: true,
       targetScore: 11,
       spinBias: 'norm',
@@ -11376,11 +11435,21 @@ class Game {
       const rect = c.getBoundingClientRect();
       const pointerType = e.pointerType || (this.pointerFine === false ? 'touch' : 'mouse');
       const servePress = this.state === GS.SERVE_TOSS && this.server === 1;
+      /* Optional admission help: widen the press oval so a press a little
+       * further from the ball still counts (default 1 = authored shape). */
+      const zs = clamp(Number.isFinite(this.settings.zoneScale) ? this.settings.zoneScale : 1, 0.8, 2.5);
+      /* The serve press-zone doubles on top of the accessibility slider so a
+       * press anywhere near the tossed ball always registers. */
+      const serveMul = servePress ? 2 : 1;
+      const zoneSide = (pointerType === 'mouse' ? MATCH_RULES.ovalSideMousePx : MATCH_RULES.ovalSideTouchPx) * zs * serveMul;
       const ballZone = pressZoneForBall(this.ball, n, rect.width, rect.height, {
         project: point => this.project(point, {}), pointerType,
         referenceWorld: this.player && this.player.pos,
         kind: servePress ? 'serve' : 'rally',
         tossApex: this.tossApex, tossStartY: this.tossStartY, tableY: PH.TABLE_Y,
+        sidePx: zoneSide, fwdPx: MATCH_RULES.ovalForwardPx * zs * serveMul,
+        backPx: MATCH_RULES.ovalBackPx * zs * serveMul, forwardMaxPx: MATCH_RULES.ovalForwardMaxPx * zs * serveMul,
+        radius: MATCH_RULES.pressRadiusPx * zs * serveMul,
       });
       this.swipe.pressZone = ballZone || { accepted: false, shape: MATCH_RULES.zoneShape,
         radius: MATCH_RULES.pressRadiusPx, distancePx: null, score: null, along: null,
@@ -12051,6 +12120,8 @@ class Game {
       showTrail: s.showTrail, showPredict: s.showPredict,
       showTele: s.showTele, haptics: s.haptics, coach: s.coach, adaptive: s.adaptive,
       showPlayerPaddle: s.showPlayerPaddle, serveToss: s.serveToss,
+      capScale: s.capScale, zoneScale: s.zoneScale, aimAssist: s.aimAssist,
+      footAssist: s.footAssist, batSens: s.batSens,
       slowmoPlayer: s.slowmoPlayer, targetScore: s.targetScore,
       spinBias: s.spinBias, gestureProfile: s.gestureProfile,
     };
@@ -12066,7 +12137,9 @@ class Game {
     for (const k of Object.keys(s)) {
       if (typeof s[k] === 'boolean' && typeof raw[k] === 'boolean') s[k] = raw[k];
     }
-    const ranges = { difficulty: [0, 4], volume: [0, 1], serveToss: [0.8, 2.2] };
+    const ranges = { difficulty: [0, 4], volume: [0, 1], serveToss: [0.8, 2.2],
+      capScale: [0.8, 2.5], zoneScale: [0.8, 2.5], aimAssist: [0.5, 1],
+      footAssist: [0, 1], batSens: [0.4, 2.2] };
     for (const [k, [lo, hi]] of Object.entries(ranges)) {
       if (Number.isFinite(raw[k])) s[k] = clamp(raw[k], lo, hi);
     }
@@ -12525,6 +12598,15 @@ class Game {
     return s;
   }
 
+  /* The human-side capture multiplier (accessibility). Default 1 keeps the
+   * authored envelope exactly; the AI never reads this. */
+  capScale() { return clamp(Number.isFinite(this.settings.capScale) ? this.settings.capScale : 1, 0.8, 2.5); }
+  /* Serve gets at least a 2x window on top of the player's capScale so the
+   * tossed ball is essentially always in reach — the toss is the one moment
+   * that should never be a coin-flip. The MATCH_RULES constant itself is
+   * left untouched; only the game's own capture calls widen. */
+  serveCapScale() { return Math.max(this.capScale(), 2); }
+
   tryPlayerHit(p0) {
     const pad = this.player, b = this.ball;
     if (!b.live) return;
@@ -12543,8 +12625,11 @@ class Game {
     if (!this.pressAdmitsBall()) return;
 
     // The fixed envelope belongs to the racket, NOT the pointer marker.
-    const reachRadius = MATCH_RULES.captureRadius;
-    const serveReach = MATCH_RULES.serveCaptureRadius;
+    const cs = this.capScale();
+    const serveCs = this.serveCapScale();
+    const reachRadius = MATCH_RULES.captureRadius * cs;
+    const serveReach = MATCH_RULES.serveCaptureRadius * serveCs;
+    const depthTol = MATCH_RULES.depthTolerance * cs;
 
     const serveCtx = this.state === GS.SERVE_TOSS && this.server === 1 && b.lastHitBy === 0;
     const sw = this.swipe, m = this.playerStrokeIntent(serveCtx);
@@ -12576,7 +12661,7 @@ class Game {
     if (serveCtx) {
       // ITTF 2.06: the ball must be struck while FALLING from the toss.
       const rad = V3.dist(b.p, pad.pos);
-      if (b.v.y < 0 && this.tossRiseNow() > MATCH_RULES.serveTossMinRise && playerInCaptureRange(b.p, pad.pos, true)) {
+      if (b.v.y < 0 && this.tossRiseNow() > MATCH_RULES.serveTossMinRise && playerInCaptureRange(b.p, pad.pos, true, serveCs)) {
         hit = { t: 1, x: b.p.x, y: b.p.y, z: b.p.z, captureKind: 'serve', rad: rad * 0.40, px: pad.pos.x, py: pad.pos.y, pz: pad.pos.z };
       }
     } else if (ownBounce) {
@@ -12589,7 +12674,7 @@ class Game {
        * bat's own sweep) takes it at the blade. */
       const closing = (b.p.x - pad.pos.x) * b.v.x + (b.p.y - pad.pos.y) * b.v.y +
         (b.p.z - pad.pos.z) * b.v.z;
-      const inside = playerInCaptureRange(b.p, pad.pos);
+      const inside = playerInCaptureRange(b.p, pad.pos, false, cs);
       const still = b.v.x * b.v.x + b.v.y * b.v.y + b.v.z * b.v.z < 0.04;
       if (inside && (closing <= 0.02 || still)) {
         const dx = b.p.x - p0.x, dy = b.p.y - p0.y, dz = b.p.z - p0.z;
@@ -12604,7 +12689,7 @@ class Game {
          * spot. */
         const lat = Math.hypot(cx - pad.pos.x, cy - pad.pos.y);
         const frac = Math.max(lat / reachRadius,
-          Math.abs(cz - pad.pos.z) / MATCH_RULES.depthTolerance);
+          Math.abs(cz - pad.pos.z) / depthTol);
         hit = { t: u, x: cx, y: cy, z: cz, captureKind: 'endpoint',
           rad: clamp(frac, 0, 1) * reachRadius, px: pad.pos.x, py: pad.pos.y, pz: pad.pos.z };
       }
@@ -12657,8 +12742,8 @@ class Game {
       }
       quality = clamp(racket.quality * (0.60 + 0.40 * sweet) * (0.70 + 0.30 * timing) * tq, 0.25, 1);
       racket.quality = quality;
-      // One authored trajectory assist level, shared by every player.
-      const assistLvl = MATCH_RULES.trajectoryAssist;
+      // Trajectory assist: authored level, optionally raised by the player.
+      const assistLvl = clamp(Number.isFinite(this.settings.aimAssist) ? this.settings.aimAssist : MATCH_RULES.trajectoryAssist, 0, 1);
       const rawSwing = V3.new(), rawNormal = V3.new();
       strokeFrame(racket, 0, 0, 1, rawSwing, rawNormal);
       const rawShotFrame = { normal: shotVec(rawNormal), vR: shotVec(rawSwing),
@@ -12862,7 +12947,7 @@ class Game {
       this.pointer = pt;                 // self-heal: never stay broken
     }
     if (!Number.isFinite(this.stanceY)) this.stanceY = undefined;
-    const sens = MATCH_RULES.sensitivity;
+    const sens = clamp(Number.isFinite(this.settings.batSens) ? this.settings.batSens : MATCH_RULES.sensitivity, 0.4, 2.2);
     // the depth of the stance is set when the hand lands, not by the swipe:
     // flicking the wrist upward must not lunge you over the table
     if (this.swipe.active && this.swipe.m.samples > 0) {
@@ -12875,7 +12960,7 @@ class Game {
      * short serve simply could not be reached no matter what you did. Now a
      * predicted short ball grants the step-in depth. */
     let zNear = PADDLE_LIMITS.zNear;
-    const A = MATCH_RULES.positionAssist;
+    const A = clamp(Number.isFinite(this.settings.footAssist) ? this.settings.footAssist : MATCH_RULES.positionAssist, 0, 1);
     const o = this._paddlePred || (this._paddlePred = {});
     const incoming = this.ball.live && this.ball.v.z > 0.4 && this.ball.lastHitBy === -1;
     /* A ball that has already bounced and died short is not "not incoming":
@@ -13204,14 +13289,14 @@ class Game {
       // No ready circle on the paddle and no "hit now" while the toss rises.
       if (b.v.y < 0 && this.tossRiseNow() > MATCH_RULES.serveTossMinRise) {
         w.on = true; w.kind = 'serve'; w.t = 0;
-        w.contactable = playerInCaptureRange(b.p, pad.pos, true);
+        w.contactable = playerInCaptureRange(b.p, pad.pos, true, this.serveCapScale());
         w.ready = w.contactable ? 1 : .4;
       }
     } else if (incoming && this.rallyBounces.some(side => side > 0)) {
       const o = this._strikePred || (this._strikePred = {});
       if (read) predict(V3.clone(b.p), V3.clone(b.v), V3.clone(b.w),
         { dt: 1 / 200, maxT: 1.8, stopZ: pad.pos.z, stopDir: 1, stopAtPlane: true, out: o });
-      w.contactable = playerInCaptureRange(b.p, pad.pos);
+      w.contactable = playerInCaptureRange(b.p, pad.pos, false, this.capScale());
       const eta = o.reach && Number.isFinite(o.reachT) ? Math.max(0, o.reachT - clock.age) : Infinity;
       if (w.contactable || eta <= MATCH_RULES.timingHorizon) {
         w.on = true; w.kind = 'rally'; w.t = w.contactable ? 0 : eta;
@@ -14150,6 +14235,7 @@ class UI {
     this._settingsWasPaused = this.game.paused;
     this.game.setPaused(true);
     $('#settings').classList.add('on');
+    this.renderZonePreview();   // draw now that the panel has a real size
   }
   closeSettings() {
     $('#settings').classList.remove('on');
@@ -14712,6 +14798,11 @@ class UI {
         break;
       case 'paddle': s.showPlayerPaddle = v !== 'hide'; break;
       case 'serveToss': s.serveToss = clamp(+v, 0.8, 2.2); this.syncServeToss(); break;
+      case 'capScale': s.capScale = clamp(+v, 0.8, 2.5); this.syncGameplaySliders(); break;
+      case 'zoneScale': s.zoneScale = clamp(+v, 0.8, 2.5); this.syncGameplaySliders(); break;
+      case 'aimAssist': s.aimAssist = clamp(+v, 0.5, 1); this.syncGameplaySliders(); break;
+      case 'footAssist': s.footAssist = clamp(+v, 0, 1); this.syncGameplaySliders(); break;
+      case 'batSens': s.batSens = clamp(+v, 0.4, 2.2); this.syncGameplaySliders(); break;
       case 'target': s.targetScore = +v; $('#toWin').textContent = v; break;
       default: break;
     }
@@ -14744,6 +14835,7 @@ class UI {
       b.setAttribute('aria-pressed', String(selected));
     });
     this.syncServeToss();
+    this.syncGameplaySliders();
   }
   /** The serve-toss height slider reflects settings.serveToss as a cm rise. */
   syncServeToss() {
@@ -14754,6 +14846,26 @@ class UI {
     const riseCm = Math.round(30.6 * mul);
     const lab = $('#serveTossVal'); if (lab) lab.textContent = riseCm + ' см';
   }
+  /** Reflect the optional human-help sliders (capture, zone, assists, gain). */
+  syncGameplaySliders() {
+    const s = this.game.settings;
+    const set = (id, val, labId, text) => {
+      const el = $('#' + id); if (el) el.value = String(val);
+      const lab = $('#' + labId); if (lab) lab.textContent = text;
+    };
+    const cap = clamp(Number.isFinite(s.capScale) ? s.capScale : 1, 0.8, 2.5);
+    set('capScale', cap, 'capScaleVal', Math.round(cap * 100) + '%');
+    const zone = clamp(Number.isFinite(s.zoneScale) ? s.zoneScale : 1, 0.8, 2.5);
+    set('zoneScale', zone, 'zoneScaleVal', Math.round(zone * 100) + '%');
+    const aim = clamp(Number.isFinite(s.aimAssist) ? s.aimAssist : 0.85, 0.5, 1);
+    set('aimAssist', aim, 'aimAssistVal', Math.round(aim * 100) + '%');
+    const foot = clamp(Number.isFinite(s.footAssist) ? s.footAssist : 0.85, 0, 1);
+    set('footAssist', foot, 'footAssistVal', Math.round(foot * 100) + '%');
+    const sens = clamp(Number.isFinite(s.batSens) ? s.batSens : 1, 0.4, 2.2);
+    set('batSens', sens, 'batSensVal', sens.toFixed(2) + '\u00d7');
+    this.renderZonePreview();
+  }
+
   syncCameraControls() {
     const g = this.game;
     $$('#cameraViews [data-camera]').forEach(b => {
@@ -15063,6 +15175,61 @@ class UI {
     c.restore();
   }
 
+  /** The bat is clamped to a reachable band (PADDLE_LIMITS.yLo..yHi around the
+   *  table). The native cursor can wander outside it, which reads as "the click
+   *  is on the cursor, not on the racket". Drawing the lane the bat actually
+   *  lives in — with the top and bottom limits marked — makes the racket, not
+   *  the phantom cursor, the visual focus. Purely a guide, no physics. */
+  drawRacketLane(c, W, H, d) {
+    const g = this.game;
+    if (g.paused || (g.replayer && g.replayer.on) || this.captureDebug) return;
+    if (![GS.SERVE_READY, GS.SERVE_TOSS, GS.RALLY].includes(g.state)) return;
+    const pad = g.player; if (!pad || !pad.pos) return;
+    const ty = PH.TABLE_Y, bx = pad.pos.x, bz = pad.pos.z;
+    const top = g.project({ x: bx, y: ty + PADDLE_LIMITS.yHi, z: bz }, this._laneT || (this._laneT = {}));
+    const bot = g.project({ x: bx, y: ty + PADDLE_LIMITS.yLo, z: bz }, this._laneB || (this._laneB = {}));
+    if (!top || !top.ok || !bot || !bot.ok || !Number.isFinite(top.x) || !Number.isFinite(bot.x)) return;
+    const x = top.x * W, yT = top.y * H, yB = bot.y * H;
+    c.save(); c.setLineDash([]); c.lineCap = 'round';
+    c.strokeStyle = '#39c6ff'; c.globalAlpha = 0.13; c.lineWidth = 30 * d;
+    c.beginPath(); c.moveTo(x, yT); c.lineTo(x, yB); c.stroke();
+    c.globalAlpha = 0.55; c.lineWidth = 1.6 * d;
+    for (const y of [yT, yB]) { c.beginPath(); c.moveTo(x - 20 * d, y); c.lineTo(x + 20 * d, y); c.stroke(); }
+    c.restore();
+  }
+
+  /** A small live diagram inside the settings panel. It draws the reach window
+   *  (capScale) and the admission press-circle (zoneScale, doubled on serve)
+   *  as concentric rings so dragging a slider instantly shows the shape change
+   *  instead of an abstract percentage. Rendered into its own canvas element so
+   *  it is never hidden behind the modal backdrop. Purely illustrative. */
+  renderZonePreview() {
+    const cv = (typeof document !== 'undefined') ? document.querySelector('#zonePreview') : null;
+    if (!cv || !cv.getContext) return;
+    const g = this.game; if (!g) return;
+    const cs = clamp(Number.isFinite(g.settings.capScale) ? g.settings.capScale : 1, 0.8, 2.5);
+    const zs = clamp(Number.isFinite(g.settings.zoneScale) ? g.settings.zoneScale : 1, 0.8, 2.5);
+    const serving = g.server === 1 && [GS.SERVE_READY, GS.SERVE_TOSS].includes(g.state);
+    const dpr = Math.min(2, (typeof devicePixelRatio === 'number' && devicePixelRatio) || 1);
+    const w = cv.clientWidth || cv.width || 240, h = cv.clientHeight || cv.height || 160;
+    if (cv.width !== Math.round(w * dpr) || cv.height !== Math.round(h * dpr)) {
+      cv.width = Math.round(w * dpr); cv.height = Math.round(h * dpr);
+    }
+    const c = cv.getContext('2d'); if (!c) return;
+    c.setTransform(dpr, 0, 0, dpr, 0, 0); c.clearRect(0, 0, w, h);
+    const cx = w * 0.5, cy = h * 0.56, unit = Math.min(w, h) * 0.24;
+    const zoneR = unit * zs * (serving ? 2 : 1);   // green admission press-circle
+    const reachR = unit * 0.62 * cs;               // blue physical reach ring
+    c.save(); c.lineWidth = 2; c.setLineDash([]);
+    c.fillStyle = 'rgba(57,198,255,0.10)'; c.beginPath(); c.arc(cx, cy, reachR, 0, TAU); c.fill();
+    c.strokeStyle = '#6ee7a8'; c.globalAlpha = 0.9; c.beginPath(); c.arc(cx, cy, zoneR, 0, TAU); c.stroke();
+    c.strokeStyle = '#39c6ff'; c.globalAlpha = 0.95; c.beginPath(); c.arc(cx, cy, reachR, 0, TAU); c.stroke();
+    c.fillStyle = '#39c6ff'; c.beginPath(); c.arc(cx, cy, 3, 0, TAU); c.fill();
+    c.fillStyle = '#9fb4c6'; c.globalAlpha = 0.95; c.font = '11px system-ui, sans-serif'; c.textAlign = 'center';
+    c.fillText('reach \u00d7' + cs.toFixed(2) + '   \u00b7   zone \u00d7' + (zs * (serving ? 2 : 1)).toFixed(2) + (serving ? ' \u2192 \u043f\u043e\u0434\u0430\u0447\u0430' : ''), cx, h - 8);
+    c.restore();
+  }
+
   /** Training: paint how to make the stroke. Each drill carries a `guide`
    *  gesture shape; we trace it as a groove with a travelling highlight and an
    *  arrowhead, anchored on the live ball (or the bat) so the pupil sees where
@@ -15122,6 +15289,10 @@ class UI {
     const dialog = typeof document !== 'undefined' && document.querySelector('.screen.on');
     const cursor = playing && !this.captureDebug && !g.paused && !(g.replayer && g.replayer.on) && !dialog ? 'none' : 'default';
     if (canvas.style.cursor !== cursor) canvas.style.cursor = cursor;
+    /* The fx canvas sits above the play surface; force its cursor too so the
+     * native arrow can never flash over the table mid-rally, and keep the
+     * whole stage pointer-free while the ball is live. */
+    if (this.fx && this.fx.style && this.fx.style.cursor !== cursor) this.fx.style.cursor = cursor;
   }
 
   drawCaptureDebug(c, W, H, d) {
@@ -15166,6 +15337,7 @@ class UI {
     if (!g) return;
 
     if (!this.captureDebug) this.drawStrikeRing(c, W, H, d);
+    this.drawRacketLane(c, W, H, d);
     this.drawAimReticle(c, W, H, d);
     this.drawTrainGuide(c, W, H, d);
     this.drawCaptureDebug(c, W, H, d);

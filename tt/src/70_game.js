@@ -120,6 +120,14 @@ class Game {
       showDebug: false,
       showPlayerPaddle: true,
       serveToss: 1.2,                // multiplier on the ~0.31 m ITTF toss rise
+      /* Optional human-side help. Defaults keep the authored contract intact
+       * (1 / .85 / 1 == MATCH_RULES); these only widen the PLAYER's own
+       * capture window, press zone, assists and cursor gain — never the AI. */
+      capScale: 1,           // physical reach window multiplier
+      zoneScale: 1,          // press-zone admission multiplier
+      aimAssist: 0.85,       // trajectory correction (authored .85)
+      footAssist: 0.85,      // footwork auto-approach (authored .85)
+      batSens: 1,            // cursor gain (authored 1)
       slowmoOnBigShots: true,
       targetScore: 11,
       spinBias: 'norm',
@@ -368,11 +376,21 @@ class Game {
       const rect = c.getBoundingClientRect();
       const pointerType = e.pointerType || (this.pointerFine === false ? 'touch' : 'mouse');
       const servePress = this.state === GS.SERVE_TOSS && this.server === 1;
+      /* Optional admission help: widen the press oval so a press a little
+       * further from the ball still counts (default 1 = authored shape). */
+      const zs = clamp(Number.isFinite(this.settings.zoneScale) ? this.settings.zoneScale : 1, 0.8, 2.5);
+      /* The serve press-zone doubles on top of the accessibility slider so a
+       * press anywhere near the tossed ball always registers. */
+      const serveMul = servePress ? 2 : 1;
+      const zoneSide = (pointerType === 'mouse' ? MATCH_RULES.ovalSideMousePx : MATCH_RULES.ovalSideTouchPx) * zs * serveMul;
       const ballZone = pressZoneForBall(this.ball, n, rect.width, rect.height, {
         project: point => this.project(point, {}), pointerType,
         referenceWorld: this.player && this.player.pos,
         kind: servePress ? 'serve' : 'rally',
         tossApex: this.tossApex, tossStartY: this.tossStartY, tableY: PH.TABLE_Y,
+        sidePx: zoneSide, fwdPx: MATCH_RULES.ovalForwardPx * zs * serveMul,
+        backPx: MATCH_RULES.ovalBackPx * zs * serveMul, forwardMaxPx: MATCH_RULES.ovalForwardMaxPx * zs * serveMul,
+        radius: MATCH_RULES.pressRadiusPx * zs * serveMul,
       });
       this.swipe.pressZone = ballZone || { accepted: false, shape: MATCH_RULES.zoneShape,
         radius: MATCH_RULES.pressRadiusPx, distancePx: null, score: null, along: null,
@@ -1043,6 +1061,8 @@ class Game {
       showTrail: s.showTrail, showPredict: s.showPredict,
       showTele: s.showTele, haptics: s.haptics, coach: s.coach, adaptive: s.adaptive,
       showPlayerPaddle: s.showPlayerPaddle, serveToss: s.serveToss,
+      capScale: s.capScale, zoneScale: s.zoneScale, aimAssist: s.aimAssist,
+      footAssist: s.footAssist, batSens: s.batSens,
       slowmoPlayer: s.slowmoPlayer, targetScore: s.targetScore,
       spinBias: s.spinBias, gestureProfile: s.gestureProfile,
     };
@@ -1058,7 +1078,9 @@ class Game {
     for (const k of Object.keys(s)) {
       if (typeof s[k] === 'boolean' && typeof raw[k] === 'boolean') s[k] = raw[k];
     }
-    const ranges = { difficulty: [0, 4], volume: [0, 1], serveToss: [0.8, 2.2] };
+    const ranges = { difficulty: [0, 4], volume: [0, 1], serveToss: [0.8, 2.2],
+      capScale: [0.8, 2.5], zoneScale: [0.8, 2.5], aimAssist: [0.5, 1],
+      footAssist: [0, 1], batSens: [0.4, 2.2] };
     for (const [k, [lo, hi]] of Object.entries(ranges)) {
       if (Number.isFinite(raw[k])) s[k] = clamp(raw[k], lo, hi);
     }
@@ -1517,6 +1539,15 @@ class Game {
     return s;
   }
 
+  /* The human-side capture multiplier (accessibility). Default 1 keeps the
+   * authored envelope exactly; the AI never reads this. */
+  capScale() { return clamp(Number.isFinite(this.settings.capScale) ? this.settings.capScale : 1, 0.8, 2.5); }
+  /* Serve gets at least a 2x window on top of the player's capScale so the
+   * tossed ball is essentially always in reach — the toss is the one moment
+   * that should never be a coin-flip. The MATCH_RULES constant itself is
+   * left untouched; only the game's own capture calls widen. */
+  serveCapScale() { return Math.max(this.capScale(), 2); }
+
   tryPlayerHit(p0) {
     const pad = this.player, b = this.ball;
     if (!b.live) return;
@@ -1535,8 +1566,11 @@ class Game {
     if (!this.pressAdmitsBall()) return;
 
     // The fixed envelope belongs to the racket, NOT the pointer marker.
-    const reachRadius = MATCH_RULES.captureRadius;
-    const serveReach = MATCH_RULES.serveCaptureRadius;
+    const cs = this.capScale();
+    const serveCs = this.serveCapScale();
+    const reachRadius = MATCH_RULES.captureRadius * cs;
+    const serveReach = MATCH_RULES.serveCaptureRadius * serveCs;
+    const depthTol = MATCH_RULES.depthTolerance * cs;
 
     const serveCtx = this.state === GS.SERVE_TOSS && this.server === 1 && b.lastHitBy === 0;
     const sw = this.swipe, m = this.playerStrokeIntent(serveCtx);
@@ -1568,7 +1602,7 @@ class Game {
     if (serveCtx) {
       // ITTF 2.06: the ball must be struck while FALLING from the toss.
       const rad = V3.dist(b.p, pad.pos);
-      if (b.v.y < 0 && this.tossRiseNow() > MATCH_RULES.serveTossMinRise && playerInCaptureRange(b.p, pad.pos, true)) {
+      if (b.v.y < 0 && this.tossRiseNow() > MATCH_RULES.serveTossMinRise && playerInCaptureRange(b.p, pad.pos, true, serveCs)) {
         hit = { t: 1, x: b.p.x, y: b.p.y, z: b.p.z, captureKind: 'serve', rad: rad * 0.40, px: pad.pos.x, py: pad.pos.y, pz: pad.pos.z };
       }
     } else if (ownBounce) {
@@ -1581,7 +1615,7 @@ class Game {
        * bat's own sweep) takes it at the blade. */
       const closing = (b.p.x - pad.pos.x) * b.v.x + (b.p.y - pad.pos.y) * b.v.y +
         (b.p.z - pad.pos.z) * b.v.z;
-      const inside = playerInCaptureRange(b.p, pad.pos);
+      const inside = playerInCaptureRange(b.p, pad.pos, false, cs);
       const still = b.v.x * b.v.x + b.v.y * b.v.y + b.v.z * b.v.z < 0.04;
       if (inside && (closing <= 0.02 || still)) {
         const dx = b.p.x - p0.x, dy = b.p.y - p0.y, dz = b.p.z - p0.z;
@@ -1596,7 +1630,7 @@ class Game {
          * spot. */
         const lat = Math.hypot(cx - pad.pos.x, cy - pad.pos.y);
         const frac = Math.max(lat / reachRadius,
-          Math.abs(cz - pad.pos.z) / MATCH_RULES.depthTolerance);
+          Math.abs(cz - pad.pos.z) / depthTol);
         hit = { t: u, x: cx, y: cy, z: cz, captureKind: 'endpoint',
           rad: clamp(frac, 0, 1) * reachRadius, px: pad.pos.x, py: pad.pos.y, pz: pad.pos.z };
       }
@@ -1649,8 +1683,8 @@ class Game {
       }
       quality = clamp(racket.quality * (0.60 + 0.40 * sweet) * (0.70 + 0.30 * timing) * tq, 0.25, 1);
       racket.quality = quality;
-      // One authored trajectory assist level, shared by every player.
-      const assistLvl = MATCH_RULES.trajectoryAssist;
+      // Trajectory assist: authored level, optionally raised by the player.
+      const assistLvl = clamp(Number.isFinite(this.settings.aimAssist) ? this.settings.aimAssist : MATCH_RULES.trajectoryAssist, 0, 1);
       const rawSwing = V3.new(), rawNormal = V3.new();
       strokeFrame(racket, 0, 0, 1, rawSwing, rawNormal);
       const rawShotFrame = { normal: shotVec(rawNormal), vR: shotVec(rawSwing),
@@ -1854,7 +1888,7 @@ class Game {
       this.pointer = pt;                 // self-heal: never stay broken
     }
     if (!Number.isFinite(this.stanceY)) this.stanceY = undefined;
-    const sens = MATCH_RULES.sensitivity;
+    const sens = clamp(Number.isFinite(this.settings.batSens) ? this.settings.batSens : MATCH_RULES.sensitivity, 0.4, 2.2);
     // the depth of the stance is set when the hand lands, not by the swipe:
     // flicking the wrist upward must not lunge you over the table
     if (this.swipe.active && this.swipe.m.samples > 0) {
@@ -1867,7 +1901,7 @@ class Game {
      * short serve simply could not be reached no matter what you did. Now a
      * predicted short ball grants the step-in depth. */
     let zNear = PADDLE_LIMITS.zNear;
-    const A = MATCH_RULES.positionAssist;
+    const A = clamp(Number.isFinite(this.settings.footAssist) ? this.settings.footAssist : MATCH_RULES.positionAssist, 0, 1);
     const o = this._paddlePred || (this._paddlePred = {});
     const incoming = this.ball.live && this.ball.v.z > 0.4 && this.ball.lastHitBy === -1;
     /* A ball that has already bounced and died short is not "not incoming":
@@ -2196,14 +2230,14 @@ class Game {
       // No ready circle on the paddle and no "hit now" while the toss rises.
       if (b.v.y < 0 && this.tossRiseNow() > MATCH_RULES.serveTossMinRise) {
         w.on = true; w.kind = 'serve'; w.t = 0;
-        w.contactable = playerInCaptureRange(b.p, pad.pos, true);
+        w.contactable = playerInCaptureRange(b.p, pad.pos, true, this.serveCapScale());
         w.ready = w.contactable ? 1 : .4;
       }
     } else if (incoming && this.rallyBounces.some(side => side > 0)) {
       const o = this._strikePred || (this._strikePred = {});
       if (read) predict(V3.clone(b.p), V3.clone(b.v), V3.clone(b.w),
         { dt: 1 / 200, maxT: 1.8, stopZ: pad.pos.z, stopDir: 1, stopAtPlane: true, out: o });
-      w.contactable = playerInCaptureRange(b.p, pad.pos);
+      w.contactable = playerInCaptureRange(b.p, pad.pos, false, this.capScale());
       const eta = o.reach && Number.isFinite(o.reachT) ? Math.max(0, o.reachT - clock.age) : Infinity;
       if (w.contactable || eta <= MATCH_RULES.timingHorizon) {
         w.on = true; w.kind = 'rally'; w.t = w.contactable ? 0 : eta;
