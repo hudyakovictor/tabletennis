@@ -32,6 +32,29 @@ for f in JS_ORDER:
     js_parts.append(f"/* ====== {f} ====== */\n"+s)
 js="\n\n".join(js_parts)
 
+# Recorded audio: embed the sample files as base64 data-URIs and expose them
+# through a global the AudioEngine decodes on unlock. Injected as a SEPARATE
+# <script> (not a literal inside 50_audio.js) so the node test suite can still
+# load that file directly. If the sounds folder is absent (a fresh clone without
+# assets) the game still builds and every sound falls back to the runtime synth.
+import json
+_snd_dir = os.path.join(os.path.dirname(SRC), '..', 'sounds')
+_mime = {'.wav': 'audio/wav', '.mp3': 'audio/mpeg', '.ogg': 'audio/ogg'}
+_want = {'tileA': 'tile_hard_a.wav', 'tileB': 'tile_hard_b.wav',
+         'applause': 'apl.wav', 'menu': 'short.mp3'}
+_sounds = {}
+if os.path.isdir(_snd_dir):
+    for _key, _fn in _want.items():
+        _fp = os.path.join(_snd_dir, _fn)
+        if not os.path.isfile(_fp):
+            continue
+        with open(_fp, 'rb') as _asset:
+            _ext = os.path.splitext(_fn)[1].lower()
+            _sounds[_key] = 'data:%s;base64,%s' % (_mime.get(_ext, 'application/octet-stream'),
+                                                   base64.b64encode(_asset.read()).decode('ascii'))
+samples_script = ('<script>window.__AUDIO_SAMPLES__ = %s;</script>' % json.dumps(_sounds)) if _sounds else ''
+print('audio samples:', ', '.join(_sounds) or 'none (synth fallback)')
+
 stamp = datetime.datetime.utcnow().strftime('%Y-%m-%d')
 html = f"""<!DOCTYPE html>
 <html lang="ru">
@@ -50,6 +73,7 @@ html = f"""<!DOCTYPE html>
 </head>
 <body>
 {body}
+{samples_script}
 <script>
 const BUILD_VERSION = 'self-contained build {stamp}';
 {js}

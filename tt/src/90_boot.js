@@ -73,6 +73,12 @@ function initTelegramHost() {
     }
     window.__game = game;
 
+    /* The menu is the landing screen, so ask for its soundtrack now. The
+     * request is remembered by the engine and only actually starts once a
+     * gesture has unlocked WebAudio (see dismissSplash) and the sample has
+     * decoded — autoplay before a user gesture is blocked by every browser. */
+    if (document.querySelector('#menu.on')) game.audio.menuMusic(true);
+
     // tap/click the pause overlay to resume
     const pauseInd = document.getElementById('pauseInd');
     if (pauseInd) pauseInd.addEventListener('click', () => game.setPaused(false));
@@ -102,6 +108,10 @@ function initTelegramHost() {
     const dismissSplash = () => {
       splash.classList.add('off');
       window.removeEventListener('keydown', splashKey);
+      // The splash tap is the first user gesture: unlock audio and let the
+      // pending menu soundtrack begin.
+      game.audio.init(); game.audio.resume();
+      if (document.querySelector('#menu.on')) game.audio.menuMusic(true);
     };
     const splashKey = (e) => { if (e.key === 'Enter' || e.key === ' ') dismissSplash(); };
     splash.addEventListener('pointerdown', dismissSplash, { once: true });

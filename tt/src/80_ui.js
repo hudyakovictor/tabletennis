@@ -217,6 +217,7 @@ class UI {
     this.game.returnToMenu();
     $$('.screen').forEach(s => s.classList.remove('on'));
     $('#menu').classList.add('on');
+    this.game.audio.menuMusic(true);
     this.refreshMenuBits();
     this.syncMenuScrollHint();
   }
@@ -271,6 +272,7 @@ class UI {
     const startMatch = () => {
       const d = this.pendingDiff !== undefined ? this.pendingDiff : 2;
       $$('.screen').forEach((s) => s.classList.remove('on'));
+      this.game.audio.menuMusic(false);
       document.body.classList.add('is-playing');
       this.trainHide();
       this.game.training = null;
@@ -281,6 +283,7 @@ class UI {
     };
     const startTrain = () => {
       $$('.screen').forEach((s) => s.classList.remove('on'));
+      this.game.audio.menuMusic(false);
       document.body.classList.add('is-playing');
       this.game.analytics && this.game.analytics.send('tutorial:start', {});
       this.game.startTraining();
@@ -294,6 +297,7 @@ class UI {
     /* --- workshop / shop / daily --- */
     const wsOpen = (tab) => {
       this.game.audio.ui('click');
+      this.game.audio.menuMusic(false);
       this.game.analytics && this.game.analytics.send('ui:workshop', { tab: tab || 'racket' });
       $$('.screen').forEach((x) => x.classList.remove('on'));
       this.pick = null;                       // a fresh visit starts from what is fitted
@@ -705,6 +709,8 @@ class UI {
         break;
       case 'haptics': s.haptics = v === 'on'; if (s.haptics) g.buzz(12); break;
         break;
+      case 'paddle': s.showPlayerPaddle = v !== 'hide'; break;
+      case 'serveToss': s.serveToss = clamp(+v, 0.8, 2.2); this.syncServeToss(); break;
       case 'target': s.targetScore = +v; $('#toWin').textContent = v; break;
       default: break;
     }
@@ -729,6 +735,23 @@ class UI {
       });
     }
     this.syncCameraControls();
+    // showPlayerPaddle is a boolean, the generic string-valued loop above
+    // cannot match it — sync the visibility row explicitly.
+    $$('.opt[data-set="paddle"]').forEach(b => {
+      const selected = (b.dataset.val === 'show') === (s.showPlayerPaddle !== false);
+      b.classList.toggle('sel', selected);
+      b.setAttribute('aria-pressed', String(selected));
+    });
+    this.syncServeToss();
+  }
+  /** The serve-toss height slider reflects settings.serveToss as a cm rise. */
+  syncServeToss() {
+    const s = this.game.settings;
+    const el = $('#serveToss'); if (!el) return;
+    const mul = clamp(Number.isFinite(s.serveToss) ? s.serveToss : 1, 0.8, 2.2);
+    el.value = String(mul);
+    const riseCm = Math.round(30.6 * mul);
+    const lab = $('#serveTossVal'); if (lab) lab.textContent = riseCm + ' см';
   }
   syncCameraControls() {
     const g = this.game;
@@ -1010,6 +1033,86 @@ class UI {
     c.stroke(); c.restore();
   }
 
+  /** Where the bat lives when the player chose to hide it. The paddle still
+   *  strikes and still follows the cursor — only its mesh is off — so without
+   *  this marker there would be no visual reference for the aim point. A quiet
+   *  crosshair on the bat's own world position, never a physics object. */
+  drawAimReticle(c, W, H, d) {
+    const g = this.game;
+    if (g.settings.showPlayerPaddle !== false) return;      // only in hide-racket mode
+    if (g.paused || (g.replayer && g.replayer.on)) return;
+    if (![GS.SERVE_READY, GS.SERVE_TOSS, GS.RALLY, GS.POINT].includes(g.state)) return;
+    const pad = g.player; if (!pad || !pad.pos) return;
+    const p = g.project(pad.pos, this._rp || (this._rp = {}));
+    if (!p.ok || !Number.isFinite(p.x) || !Number.isFinite(p.y) || p.x < 0 || p.x > 1 || p.y < 0 || p.y > 1) return;
+    const x = p.x * W, y = p.y * H, R = 16 * d, gap = 6 * d;
+    c.save();
+    c.strokeStyle = '#39c6ff'; c.lineWidth = 2 * d; c.lineCap = 'round';
+    c.globalAlpha = 0.85;
+    c.beginPath();
+    c.moveTo(x - R, y); c.lineTo(x - gap, y);
+    c.moveTo(x + gap, y); c.lineTo(x + R, y);
+    c.moveTo(x, y - R); c.lineTo(x, y - gap);
+    c.moveTo(x, y + gap); c.lineTo(x, y + R);
+    c.stroke();
+    c.globalAlpha = 0.4;
+    c.beginPath(); c.arc(x, y, R * 0.6, 0, TAU); c.stroke();
+    c.globalAlpha = 0.95; c.fillStyle = '#39c6ff';
+    c.beginPath(); c.arc(x, y, 2 * d, 0, TAU); c.fill();
+    c.restore();
+  }
+
+  /** Training: paint how to make the stroke. Each drill carries a `guide`
+   *  gesture shape; we trace it as a groove with a travelling highlight and an
+   *  arrowhead, anchored on the live ball (or the bat) so the pupil sees where
+   *  and which way to swipe. Purely instructional — never a physics object. */
+  drawTrainGuide(c, W, H, d) {
+    const g = this.game;
+    const tr = g.training;
+    if (!tr || !tr.S || g.paused || (g.replayer && g.replayer.on)) return;
+    if (['ok', 'fail', 'done'].includes(tr.phase)) return;
+    let shape = tr.S.guide;
+    if (!shape) return;
+    if (shape === 'down' && g.settings.gestureProfile === 'safe') shape = 'up';
+    // anchor on the live ball, else the bat, else a lower-centre default
+    let ax = 0.5, ay = 0.7;
+    const src = (g.ball && g.ball.live) ? g.ball.p : (g.player && g.player.pos);
+    if (src) {
+      const p = g.project(src, this._tg || (this._tg = {}));
+      if (p && p.ok && Number.isFinite(p.x) && Number.isFinite(p.y)) { ax = clamp(p.x, 0.16, 0.84); ay = clamp(p.y, 0.28, 0.9); }
+    }
+    const x = ax * W, y = ay * H, L = 96 * d;
+    const pts = [];
+    if (shape === 'up') pts.push([x, y + L * 0.55], [x, y - L * 0.55]);
+    else if (shape === 'down') pts.push([x, y - L * 0.55], [x, y + L * 0.55]);
+    else if (shape === 'side') pts.push([x - L * 0.62, y], [x + L * 0.62, y]);
+    else { const a0 = [-L * 0.6, L * 0.12], ctrl = [0, -L * 0.42], a1 = [L * 0.6, L * 0.12];
+      for (let i = 0; i <= 20; i++) { const t = i / 20, mt = 1 - t;
+        pts.push([x + (mt * mt * a0[0] + 2 * mt * t * ctrl[0] + t * t * a1[0]), y + (mt * mt * a0[1] + 2 * mt * t * ctrl[1] + t * t * a1[1])]); } }
+    const seg = []; let total = 0;
+    for (let i = 1; i < pts.length; i++) { const l = Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]); seg.push(l); total += l; }
+    const col = '#39c6ff';
+    c.save(); c.lineCap = 'round'; c.lineJoin = 'round';
+    c.strokeStyle = col; c.globalAlpha = 0.22; c.lineWidth = 11 * d;
+    c.beginPath(); c.moveTo(pts[0][0], pts[0][1]); for (let i = 1; i < pts.length; i++) c.lineTo(pts[i][0], pts[i][1]); c.stroke();
+    const e = pts[pts.length - 1], pv = pts[pts.length - 2], ang = Math.atan2(e[1] - pv[1], e[0] - pv[0]);
+    c.globalAlpha = 0.6; c.fillStyle = col; c.beginPath();
+    c.moveTo(e[0], e[1]);
+    c.lineTo(e[0] - Math.cos(ang - 0.5) * 16 * d, e[1] - Math.sin(ang - 0.5) * 16 * d);
+    c.lineTo(e[0] - Math.cos(ang + 0.5) * 16 * d, e[1] - Math.sin(ang + 0.5) * 16 * d);
+    c.closePath(); c.fill();
+    let dotT = this.reducedMotion ? 1 : ((g.time % 1.15) / 1.15);
+    let dist = dotT * total, di = 0;
+    while (di < seg.length - 1 && dist > seg[di]) { dist -= seg[di]; di++; }
+    const s0 = pts[di], s1 = pts[di + 1], f = seg[di] > 0 ? clamp(dist / seg[di], 0, 1) : 0;
+    const dxp = s0[0] + (s1[0] - s0[0]) * f, dyp = s0[1] + (s1[1] - s0[1]) * f;
+    const rg = c.createRadialGradient(dxp, dyp, 0, dxp, dyp, 20 * d);
+    rg.addColorStop(0, col + 'ee'); rg.addColorStop(1, col + '00');
+    c.globalAlpha = 1; c.fillStyle = rg; c.beginPath(); c.arc(dxp, dyp, 20 * d, 0, TAU); c.fill();
+    c.fillStyle = '#eaf7ff'; c.beginPath(); c.arc(dxp, dyp, 5 * d, 0, TAU); c.fill();
+    c.restore();
+  }
+
   /** Only the racket is visible over live play; dialogs retain their cursor. */
   syncNativeCursor() {
     const g = this.game, canvas = g && g.canvas;
@@ -1062,6 +1165,8 @@ class UI {
     if (!g) return;
 
     if (!this.captureDebug) this.drawStrikeRing(c, W, H, d);
+    this.drawAimReticle(c, W, H, d);
+    this.drawTrainGuide(c, W, H, d);
     this.drawCaptureDebug(c, W, H, d);
     this.syncNativeCursor();
 

@@ -31,6 +31,13 @@ class AudioEngine {
     this._audienceSources = new Set(); this._audienceBus = null;
     this._lastApplause = -Infinity; this._lastReaction = -Infinity; this._rallyMilestone = 0;
     this._noiseBuf = null; this._crowdGain = null; this._lastWhoosh = 0;
+    /* Real recorded samples, embedded by build.py as window.__AUDIO_SAMPLES__
+     * (a map of data-URIs). Read through a global rather than a literal in this
+     * file so the node test suite can still load 50_audio.js directly — there
+     * the object is simply absent and every playback path falls back to the
+     * runtime synth. Decoded lazily into AudioBuffers once the context exists. */
+    this._samples = {}; this._sampleDecoded = false;
+    this._menuSrc = null; this._menuWanted = false; this._tileFlip = 0;
   }
   init() {
     if (this.ok) return true;
@@ -54,10 +61,73 @@ class AudioEngine {
     this._noiseBuf = this._makeNoise(2.0);
     this._startCrowd();
     this.ok = true;
+    this._decodeSamples();
+    if (this._menuWanted) this.menuMusic(true);
     return true;
   }
+
+  /* ---------------- recorded samples (ball / applause / menu) ---------------- */
+  _b64ToBuf(b64) {
+    const bin = atob(b64), n = bin.length, u = new Uint8Array(n);
+    for (let i = 0; i < n; i++) u[i] = bin.charCodeAt(i);
+    return u.buffer;
+  }
+  _decodeSamples() {
+    if (this._sampleDecoded) return;
+    const src = (typeof window !== 'undefined' && window.__AUDIO_SAMPLES__) || null;
+    const c = this.ctx;
+    if (!src || !c) return;
+    this._sampleDecoded = true;
+    for (const key of Object.keys(src)) {
+      const uri = src[key];
+      if (typeof uri !== 'string' || uri.indexOf('base64,') < 0) continue;
+      let ab; try { ab = this._b64ToBuf(uri.slice(uri.indexOf('base64,') + 7)); } catch (_) { continue; }
+      const done = (buf) => {
+        if (!buf) return;
+        this._samples[key] = buf;
+        if (key === 'menu' && this._menuWanted && !this._menuSrc) this.menuMusic(true);
+      };
+      try {
+        const p = c.decodeAudioData(ab, done);   // modern engines also return a Promise
+        if (p && p.then) p.then(done).catch(() => {});
+      } catch (_) { /* unsupported codec: the synth fallback stays */ }
+    }
+  }
+  /** Play an embedded sample once (or looped). Returns the source so a
+   *  long-lived one (menu music) can be stopped later. Silent no-op until the
+   *  buffer has decoded, so callers never have to wait for it. */
+  _playSample(key, opt) {
+    const buf = this._samples[key];
+    if (!buf || !this.ok || this.muted) return null;
+    const c = this.ctx, t = (opt && opt.when) || c.currentTime;
+    const s = c.createBufferSource(); s.buffer = buf; s.loop = !!(opt && opt.loop);
+    if (opt && opt.rate) s.playbackRate.value = opt.rate;
+    const g = c.createGain(); g.gain.value = (opt && opt.gain != null) ? opt.gain : 1;
+    let tail = g;
+    if (opt && opt.pan && c.createStereoPanner) {
+      const p = c.createStereoPanner(); p.pan.value = opt.pan; g.connect(p); tail = p;
+    }
+    s.connect(g); tail.connect(this.bus);
+    try { s.start(t, (opt && opt.offset) || 0); } catch (_) { return null; }
+    if (!s.loop) s.stop(t + buf.duration / (s.playbackRate.value || 1) + 0.05);
+    return s;
+  }
+  /** Loop the menu soundtrack. Safe to call before audio is unlocked or before
+   *  the sample has decoded: the intent is remembered and picked up later. */
+  menuMusic(on) {
+    this._menuWanted = !!on;
+    if (!this.ok) return;
+    if (on) {
+      if (this._menuSrc || this.muted || !this._samples.menu) return;
+      this._menuSrc = this._playSample('menu', { gain: 0.5, loop: true });
+    } else if (this._menuSrc) {
+      try { this._menuSrc.stop(); } catch (_) {}
+      try { this._menuSrc.disconnect(); } catch (_) {}
+      this._menuSrc = null;
+    }
+  }
   resume() { if (this.ctx && this.ctx.state === 'suspended') this.ctx.resume(); }
-  setMuted(m) { this.muted = !!m; if (this.muted) this.stopAudience(); if (this.master) this.master.gain.value = this.muted ? 0 : this.volume; }
+  setMuted(m) { this.muted = !!m; if (this.muted) { this.stopAudience(); this.menuMusic(false); } if (this.master) this.master.gain.value = this.muted ? 0 : this.volume; if (!this.muted && this._menuWanted) this.menuMusic(true); }
   setVolume(v) {
     if (!Number.isFinite(v)) return;
     this.volume = Math.max(0, Math.min(1, v));
@@ -114,6 +184,17 @@ class AudioEngine {
     if (!this.ok) return;
     const v = clamp(speed / 7, 0.08, 1.4);
     const t = this.ctx.currentTime;
+    /* The recorded tile click IS the ball-on-table transient; alternate the
+     * two takes so repeats do not phase into a machine-gun. A quiet synth sine
+     * is kept underneath for the plywood body and low weight. Before the
+     * sample decodes (or with no sample baked in) the full synth plays. */
+    const key = (this._tileFlip ^= 1) ? 'tileA' : 'tileB';
+    if (this._samples[key]) {
+      this._playSample(key, { when: t, gain: clamp(0.4 + v * 0.55, 0, 1.1),
+        rate: clamp(0.94 + v * 0.10, 0.85, 1.18), pan: clamp((x || 0) / 1.0, -1, 1) * 0.35 });
+      this._tone(214 + rndSym(12), 0.15, 0.07 * v, 'sine', t, 0.6);
+      return;
+    }
     this._noise(0.055 + v * 0.02, 0.26 * v, 'bandpass', 2400 + v * 2600, 2.2, t);
     this._tone(820 + v * 340 + rndSym(40), 0.075, 0.30 * v, 'triangle', t, 0.55);
     this._tone(214 + rndSym(12), 0.15, 0.12 * v, 'sine', t, 0.6);
@@ -168,8 +249,12 @@ class AudioEngine {
     if (!this.ok) return;
     const t = this.ctx.currentTime;
     this._tone(won ? 660 : 392, 0.22, 0.035, 'sine', t);
-    if (won) {
-      this._tone(880, 0.3, 0.025, 'sine', t + 0.16);
+    if (won) this._tone(880, 0.3, 0.025, 'sine', t + 0.16);
+    /* The recorded crowd applause closes the match; the synthesised claps stay
+     * as the fallback for a build without the sample baked in. */
+    if (this._samples.applause) {
+      this._playSample('applause', { when: t + (won ? 0.12 : 0.05), gain: won ? 1.0 : 0.45 });
+    } else if (won) {
       this.applause(1.6); // six people, short and imperfectly synchronised
     } else this.applause(0.3);
   }
