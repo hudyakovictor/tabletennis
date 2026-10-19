@@ -92,6 +92,27 @@ PH.AREA = Math.PI * PH.R * PH.R;
 PH.TABLE_Y = PH.T_H;                 // playing surface height
 PH.NET_TOP = PH.T_H + PH.NET_H;
 PH.NET_HALF_WID = PH.T_HALF_WID + PH.NET_OVERHANG;
+/* A ball is ON the table when its SURFACE can touch the playing area, which
+ * is one radius past the white line — that contact is the legal edge ball.
+ * The game used to test half a radius while `predict` used a full one, so a
+ * band 5-20 mm outside each line bounced in every solver and in the AI's
+ * head, then flew off the real table. One pair of constants, used by both. */
+PH.TABLE_REACH_X = PH.T_HALF_WID + PH.R;
+PH.TABLE_REACH_Z = PH.T_HALF_LEN + PH.R;
+/* The net is a physical object between the playing surface and the tape: a
+ * ball entirely below the tabletop passes UNDER it (it used to bounce off an
+ * invisible wall down to the floor), and a ball whose surface overlaps the
+ * tape can clip it. Returns 0 = clear, 1 = mesh, 2 = tape. */
+function netContactKind(centreY) {
+  if (!Number.isFinite(centreY)) return 0;
+  if (centreY - PH.R >= PH.NET_TOP) return 0;       // clears the tape
+  if (centreY + PH.R <= PH.TABLE_Y) return 0;       // passes under the table
+  return centreY + PH.R > PH.NET_TOP - PH.TAPE_R * 2 ? 2 : 1;
+}
+/** The net's horizontal extent, including the ball's own radius. */
+function netAtX(x) {
+  return Math.abs(x) < PH.NET_HALF_WID + PH.R;
+}
 
 /* ---------------------------------------------------------------- *
  *  Aerodynamic acceleration (drag + Magnus) for state (v, w).
@@ -378,30 +399,58 @@ function predict(p0, v0, w0, opts = {}) {
       const yAt = lerp(prevY, _pp.y, a);
       const xAt = lerp(prevX, _pp.x, a);
       out.netCross = { y: yAt, x: xAt, t };
-      if (yAt < PH.NET_TOP + PH.R * 0.5 && Math.abs(xAt) < PH.NET_HALF_WID) { out.hitNet = true; break; }
+      /* Same rule the live game applies (netContactKind), including the ball's
+       * radius and the space UNDER the table. The half-radius threshold used
+       * here let the solvers pass shots that clipped the tape by up to 10 mm. */
+      if (netContactKind(yAt) && netAtX(xAt)) { out.hitNet = true; break; }
     }
     // crossing of the table's horizontal plane anywhere (used to measure
     // how far a ball that misses actually overshoots)
     if (!out.planeCross && _pv.y < 0 && _pp.y - PH.R <= PH.TABLE_Y && prevY - PH.R > PH.TABLE_Y) {
       out.planeCross = { x: _pp.x, z: _pp.z, t };
     }
-    // table
-    if (_pp.y - PH.R <= PH.TABLE_Y && _pv.y < 0 &&
-      Math.abs(_pp.x) <= PH.T_HALF_WID + PH.R && Math.abs(_pp.z) <= PH.T_HALF_LEN + PH.R) {
-      out.bounces++;
-      if (out.bounces === 1) { out.landed = { x: _pp.x, z: _pp.z, t, vy: _pv.y, speed: V3.len(_pv) }; bounceSide = Math.sign(_pp.z); }
-      else if (out.bounces === 2) out.b2 = { x: _pp.x, z: _pp.z, t, speed: V3.len(_pv) };
-      if (opts.stopOnFirstBounce) break;
-      /* The serve solver asks for exactly two bounces and nothing else: the
-       * rest of the flight (up to 1.5 s of RK4 at 300 Hz) was integrated and
-       * thrown away on every one of the ~150 candidates per serve, which is
-       * most of the 50-90 ms the search used to block the frame for. */
-      if (opts.stopAfterBounces && out.bounces >= opts.stopAfterBounces) break;
-      const bi = bounceTable(_pp, _pv, _pw);
-      if (bi && bi.edge > out.edge) {
-        out.edge = bi.edge;
-        out.edgeBounce = { x: _pp.x, z: _pp.z, k: bi.edge, axis: bi.edgeAxis, t };
+    /* Table. The ball must come from ABOVE the playing surface: without this
+     * guard a ball below the tabletop inside the footprint (a ball that fell
+     * off the edge, a ball rolling on the floor under the net) was "bounced"
+     * upward by `predict` while the live handler ignored it — the solvers then
+     * thought an under-the-table ball was a legal bounce. The live handler has
+     * always had the same `p0.y - R > TABLE_Y - 0.02` precondition. */
+    if (_pp.y - PH.R <= PH.TABLE_Y && _pv.y < 0 && prevY - PH.R > PH.TABLE_Y - 0.02) {
+      /* Attribute the bounce to the point where the ball's SURFACE met the
+       * table, not to the end of the integration step. At 30 m/s one step
+       * moves the ball 5 cm, which is more than the edge band: a ball landing
+       * 2 cm inside the line was being recorded (and scored) 3 cm outside.
+       * The REACH test must use that same contact point: testing the step end
+       * made an end-line ball (contact z 1.390, step end 1.398) count as "off
+       * the table" here while the live handler bounced it. */
+      const _f = clamp(((prevY - PH.R) - PH.TABLE_Y) / Math.max(1e-9, (prevY - PH.R) - (_pp.y - PH.R)), 0, 1);
+      const lx = lerp(prevX, _pp.x, _f), lz = lerp(prevZ, _pp.z, _f);
+      if (Math.abs(lx) <= PH.TABLE_REACH_X && Math.abs(lz) <= PH.TABLE_REACH_Z) {
+        out.bounces++;
+        if (out.bounces === 1) { out.landed = { x: lx, z: lz, t, vy: _pv.y, speed: V3.len(_pv) }; bounceSide = Math.sign(lz); }
+        else if (out.bounces === 2) out.b2 = { x: lx, z: lz, t, speed: V3.len(_pv) };
+        _pp.x = lx; _pp.z = lz;
+        if (opts.stopOnFirstBounce) break;
+        /* The serve solver asks for exactly two bounces and nothing else: the
+         * rest of the flight (up to 1.5 s of RK4 at 300 Hz) was integrated and
+         * thrown away on every one of the ~150 candidates per serve, which is
+         * most of the 50-90 ms the search used to block the frame for. */
+        if (opts.stopAfterBounces && out.bounces >= opts.stopAfterBounces) break;
+        const bi = bounceTable(_pp, _pv, _pw);
+        if (bi && bi.edge > out.edge) {
+          out.edge = bi.edge;
+          out.edgeBounce = { x: _pp.x, z: _pp.z, k: bi.edge, axis: bi.edgeAxis, t };
+        }
       }
+    }
+    /* Net contact WITHOUT crossing the plane: a ball whose centre is within
+     * its own radius of the net still touches it. The live handler has always
+     * tested this (|z| < R), so `predict` used to call a ball clear that the
+     * game bounced off the net right after it clipped the table edge. */
+    if (Math.abs(_pp.z) < PH.R + 0.004 && _pv.z * Math.sign(_pp.z || prevZ || 1) < 0 &&
+      netContactKind(_pp.y) && netAtX(_pp.x)) {
+      out.netCross = out.netCross || { y: _pp.y, x: _pp.x, t };
+      out.hitNet = true; break;
     }
     // requested crossing plane (racket plane of a player)
     if (stopZ !== undefined && out.reachT < 0) {

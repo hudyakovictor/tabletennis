@@ -103,10 +103,13 @@ test('miss collectors, playback UI and automatic miss cinema are absent from sou
 test('144 deterministic calibration fixtures cover both grips/hands/faces without changing the rules', async () => {
   const first = await lib.runShotCalibration(), second = await lib.runShotCalibration();
   assert.equal(JSON.stringify(first), JSON.stringify(second)); assert.equal(first.total, 144); assert.equal(first.invariantFailures, 0);
-  // Explicit baseline, not a claim of perfect tuning: low, deep penhold BH still hits the net.
-  assert.equal(first.legal, 142);
+  // Explicit baseline, not a claim of perfect tuning. It moved from 142 to
+  // 144 when `predict` started reporting the SURFACE contact point instead of
+  // the end of the 1/150 s integration step: the two low, deep penhold BH
+  // fixtures (y .88, z 1.65, dy -.35) used to be scored as net-killers and are
+  // now solved into legal, deep shots.
+  assert.equal(first.legal, 144);
   const failures = first.results.filter(r => !r.legal);
-  assert.ok(failures.every(r => r.grip === 'penhold' && !r.forehand && r.y === .88 && r.z === 1.65 && r.dy === -.35 && r.hitNet));
   assert.equal(new Set(first.results.map(r => `${r.grip}/${r.hand}/${r.forehand}`)).size, 8);
 });
 test('calibration cancellation returns partial data without reporting a completed success', async () => {

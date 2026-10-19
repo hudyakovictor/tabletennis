@@ -1114,9 +1114,18 @@ class Game {
 
     /* --- table --- */
     if (b.p.y - PH.R <= PH.TABLE_Y && b.v.y < 0 && p0.y - PH.R > PH.TABLE_Y - 0.02) {
-      const inX = Math.abs(b.p.x) <= PH.T_HALF_WID + PH.R * 0.5;
-      const inZ = Math.abs(b.p.z) <= PH.T_HALF_LEN + PH.R * 0.5;
+      /* Where the ball's SURFACE met the table, not where the 1/600 s step
+       * ended it. `predict` and every solver already use this contact point;
+       * testing the end position meant a fast ball was judged 1-5 cm further
+       * along its path than it actually touched — the white line moved, and a
+       * legal edge ball became "out". */
+      const f = clamp((p0.y - PH.R - PH.TABLE_Y) /
+        Math.max(1e-9, (p0.y - PH.R) - (b.p.y - PH.R)), 0, 1);
+      const cx = lerp(p0.x, b.p.x, f), cz = lerp(p0.z, b.p.z, f);
+      const inX = Math.abs(cx) <= PH.TABLE_REACH_X;
+      const inZ = Math.abs(cz) <= PH.TABLE_REACH_Z;
       if (inX && inZ) {
+        b.p.x = cx; b.p.z = cz;
         const sp = -b.v.y;
         /* The white line is physics now (bounceTable tilts the contact normal
          * outward and takes a third of the restitution off). The old handler
@@ -1136,19 +1145,26 @@ class Game {
     }
 
     /* --- net --- */
-    if ((p0.z > 0) !== (b.p.z > 0) || Math.abs(b.p.z) < PH.R + 0.004) {
+    const crossedNet = (p0.z > 0) !== (b.p.z > 0);
+    if (crossedNet || Math.abs(b.p.z) < PH.R + 0.004) {
       const a = Math.abs(p0.z) / (Math.abs(p0.z) + Math.abs(b.p.z) + 1e-9);
       const yAt = lerp(p0.y, b.p.y, a);
       const xAt = lerp(p0.x, b.p.x, a);
-      if (Math.abs(xAt) < PH.NET_HALF_WID) {
-        if (yAt - PH.R < PH.NET_TOP && yAt + PH.R > PH.NET_TOP - PH.TAPE_R * 2 && yAt + PH.R > PH.NET_TOP) {
+      /* The net hangs from the tabletop to the tape. `netContactKind` is the
+       * exact rule `predict` uses, so the solvers and the visible ball can no
+       * longer disagree by 10 mm, and a ball below the table passes UNDER the
+       * net instead of bouncing off an invisible wall. */
+      const kind = netContactKind(yAt);
+      const towardsNet = crossedNet || b.v.z * Math.sign(b.p.z || p0.z || 1) < 0;
+      if (kind && towardsNet && netAtX(xAt)) {
+        if (kind === 2) {
           clipTape(b.p, b.v, b.w);
           this.audio.hitNet();
           this.msg('СЕТКА — ЭДЖ!', 1.1, '#ffd34d');
           this.emitParticles(xAt, PH.NET_TOP, 0, 8, 1.1, 0.3, 0.014, 1, 0.9, 0.5);
           this.netTouched = true;
           if (b.lastHitBy === 1 && this.shotJournal) this.shotJournal.net();
-        } else if (yAt < PH.NET_TOP) {
+        } else {
           bounceNet(b.p, b.v, b.w, Math.sign(p0.z) || 1);
           this.audio.hitNet();
           this.emitParticles(xAt, yAt, 0, 7, 0.7, 0.3, 0.013, 0.8, 0.85, 1);
@@ -1233,6 +1249,12 @@ class Game {
   tryPlayerHit(p0) {
     const pad = this.player, b = this.ball;
     if (!b.live) return;
+    /* A stroke only exists during a live rally or your own toss. The old
+     * version had no state gate at all, so a ball still flying through the
+     * 1.35 s POINT intermission could be "returned": the swipe was consumed,
+     * the ball was moved and lastHitBy changed after the point had already
+     * been awarded. */
+    if (this.state !== GS.RALLY && this.state !== GS.SERVE_TOSS) return;
     if (this.swipe.pressZone && !this.swipe.pressZone.accepted) return;
 
     // The fixed envelope belongs to the racket, NOT the pointer marker.
@@ -1242,10 +1264,19 @@ class Game {
     const serveCtx = this.state === GS.SERVE_TOSS && this.server === 1 && b.lastHitBy === 0;
     const sw = this.swipe, m = this.playerStrokeIntent(serveCtx);
     if (!m) return;
-    const endpointEligible = serveCtx || (b.lastHitBy === -1 && (this.rallyBounces.some(s => s > 0) || b.p.z >= .50));
+    const receiving = !serveCtx && b.lastHitBy === -1;
+    /* ITTF 2.07: the ball must touch YOUR court before you return it. The old
+     * code let the player (and the AI) volley a serve or a rally ball out of
+     * the air over the table. `rallyBounces` is cleared on every hit, so this
+     * is exactly "has bounced on my half since the opponent struck it". */
+    const bouncedHere = this.rallyBounces.some((s) => s > 0);
+    if (receiving && !bouncedHere) return;   // no legal contact exists yet
+    /* NOTE: the capture box is deliberately symmetric in depth (the
+     * documented 0.347 m tolerance), so a ball slightly behind the blade is
+     * still contactable — that is the promise the HUD bracket makes. */
+    const endpointEligible = serveCtx || (receiving && bouncedHere);
     const captureSample = measureCaptureAllowance(pad, p0, b.p, serveCtx, endpointEligible);
     if (captureSample && this.shotJournal) this.shotJournal.observeCapture(sw.gestureId, captureSample, this.time);
-    if (b.v.z < 0 && b.p.z < pad.pos.z - .35) return;
     if (serveCtx && (b.v.y >= 0 || this.tossApex - PH.TABLE_Y <= 0.10)) return;
     let hit = null;
 
@@ -1255,14 +1286,20 @@ class Game {
       if (b.v.y < 0 && this.tossApex - PH.TABLE_Y > 0.10 && playerInCaptureRange(b.p, pad.pos, true)) {
         hit = { t: 1, x: b.p.x, y: b.p.y, z: b.p.z, captureKind: 'serve', rad: rad * 0.40, px: pad.pos.x, py: pad.pos.y, pz: pad.pos.z };
       }
-    } else {
-      // Receiving ball from opponent: forgiving capture across the player's zone
-      const incoming = b.lastHitBy === -1 && (this.rallyBounces.some((s) => s > 0) || b.p.z >= 0.50);
-      if (incoming) {
-        const dist2d = Math.hypot(b.p.x - pad.pos.x, b.p.y - pad.pos.y);
-        if (playerInCaptureRange(b.p, pad.pos)) {
-          hit = { t: 1, x: b.p.x, y: b.p.y, z: b.p.z, captureKind: 'endpoint', rad: dist2d * 0.35, px: pad.pos.x, py: pad.pos.y, pz: pad.pos.z };
-        }
+    } else if (receiving) {
+      /* Forgiving capture across the player's zone, only after the bounce.
+       * `rad` used to ignore the depth axis entirely (0.35 * lateral), so a
+       * ball 30 cm in front of or behind the blade scored as a centred hit.
+       * Now the stretch is normalised per axis exactly like the box itself:
+       * 1.0 at the boundary, 0 at the centre. A ball at the box corner gets
+       * the same (zero) sweet-spot score as one at the edge laterally —
+       * not a negative number that would zero the quality multiplier. */
+      const dist2d = Math.hypot(b.p.x - pad.pos.x, b.p.y - pad.pos.y);
+      const dz = b.p.z - pad.pos.z;
+      if (playerInCaptureRange(b.p, pad.pos)) {
+        const stretch = Math.max(dist2d / reachRadius, Math.abs(dz) / MATCH_RULES.depthTolerance);
+        hit = { t: 1, x: b.p.x, y: b.p.y, z: b.p.z, captureKind: 'endpoint',
+          rad: clamp(stretch, 0, 1) * reachRadius, px: pad.pos.x, py: pad.pos.y, pz: pad.pos.z };
       }
     }
 
@@ -1271,19 +1308,6 @@ class Game {
     }
     if (!hit) return;
     if (b.lastHitBy === 1) return;                 // you already hit it
-
-    // volley check: returning before the ball bounced on your own half.
-    if (!this.isServeBall && b.lastHitBy === -1 && !this.rallyBounces.some((s) => s > 0) && b.p.z < PH.T_HALF_LEN) {
-      const o = this._volleyPred || (this._volleyPred = {});
-      predict(V3.clone(b.p), V3.clone(b.v), V3.clone(b.w),
-        { dt: 1 / 240, maxT: 2.0, stopOnFirstBounce: true, out: o });
-      const landsIn = o.landed && o.landed.z > 0.01 && Math.abs(o.landed.x) <= PH.T_HALF_WID + PH.R;
-      if (!landsIn) { this.hintOut = this.time; return; }
-      if (o.landed.z > b.p.z - 0.50) return;
-      this.awardPoint(-1, 'УДАР С ЛЁТА НАД СТОЛОМ');
-      b.live = false;
-      return;
-    }
 
     const isServeStroke = this.isServeBall && b.lastHitBy === 0 && this.server === 1;
     pad.lastHitT = this.time;
@@ -1392,6 +1416,11 @@ class Game {
 
   tryAiHit() {
     if (this.training) return;           // the feeder never returns the ball
+    /* The opponent's own serve is struck by the state machine, and a ball in
+     * flight during the POINT intermission is already dead. Without this gate
+     * the bot's swing plan from the previous rally stayed live across a point
+     * and swung at the next (re-served) ball. */
+    if (this.state !== GS.RALLY) return;
     const b = this.ball, pad = this.aiPaddle, ai = this.ai;
     if (!b.live || b.lastHitBy === -1) return;
     if (!ai.plan) return;
@@ -1402,8 +1431,12 @@ class Game {
     if (b.p.z > ai.pos.z + 0.08) return;
     if (reach > 0.42) return;
 
-    // legality: AI must let the ball bounce on its own side first
-    if (!this.isServeBall && !this.rallyBounces.some((s) => s < 0) && b.p.z > -PH.T_HALF_LEN) return;
+    /* Legality: the ball must bounce on the opponent's own court before it is
+     * returned — for serves too. Skipping the test while `isServeBall` is set
+     * let the bot volley an un-bounced serve straight back at the player
+     * (measured: `applyHit(-1, …)` with `serveBounces === 0`), which is exactly
+     * the impossible return ITTF 2.07 forbids. */
+    if (!this.rallyBounces.some((s) => s < 0)) return;
 
     const racket = ai.swing(this);
     if (!racket) { return; }
@@ -1453,7 +1486,6 @@ class Game {
     this.swipe.cancel();
     if (this._paddlePred) this._paddlePred.reach = null;
     if (this._strikePred) this._strikePred.reach = null;
-    if (this._volleyPred) this._volleyPred.reach = null;
     const broken = ![pad.pos.x, pad.pos.y, pad.pos.z].every(Number.isFinite);
     if (hard || broken) {
       V3.set(pad.pos, 0, PH.TABLE_Y + 0.25, 1.44);
