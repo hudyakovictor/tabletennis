@@ -34,34 +34,10 @@ test('repeated highlight playback always returns to results', () => {
   }
 });
 
-test('miss inspection loops with a valid clip and stops completely on exit', () => {
-  const { g, clip, GS } = fixture();
-  g.missedRallies = [clip];
-  g.watchMiss(0);
-  for (let i = 0; i < 200; i++) g.replayer.update(.1, g);
-  assert.equal(g.replayer.on, true);
-  assert.equal(g.replayer.moment, clip);
-  g.endReplay();
-  assert.equal(g.replayer.on, false);
-  assert.equal(g.state, GS.MATCH_END);
-  assert.equal(g.replayer.moment, null);
-});
-
-test('sequential miss skip advances once, completes once and allows highlights afterwards', () => {
-  const { g, clip, GS, advance } = fixture();
-  g.missedRallies = [clip, clip, clip];
-  let done = 0;
-  g.playAllMissesSequential(() => done++);
-  g.skipReplay();
-  assert.equal(g.currentMissIndex, 1);
-  assert.equal(done, 0);
-  advance();
-  assert.equal(done, 1);
-  assert.equal(g.state, GS.MATCH_END);
-  assert.equal(g.replayer.on, false);
-  g.watchMoment(clip, true);
-  advance();
-  assert.equal(g.state, GS.MATCH_END);
+test('miss replay APIs and collectors are removed, not hidden', () => {
+  const { g } = fixture();
+  for (const name of ['watchMiss', 'recordMissedPoint', 'playAllMissesSequential'])
+    assert.equal(typeof g[name], 'undefined');
 });
 
 test('music climax tolerates an uninitialized real AudioEngine', () => {
@@ -103,4 +79,34 @@ test('music point and climax effects stay silent even with active unmuted audio'
   music._playResolution('resolution_win');
   music._playResolution('resolution_lose');
   assert.equal(nodes, 0);
+});
+
+test('replay v2 records penhold roll without increasing frame stride and normalizes faces', () => {
+  const { g, MomentRecorder, MomentPlayer, V3 } = fixture();
+  const recorder = new MomentRecorder();
+  recorder.beginRally(0, null);
+  V3.set(g.player.normal, 0, -.2, -1);
+  V3.set(g.aiPaddle.normal, 0, .3, 1);
+  for (let i = 0; i < 30; i++) {
+    g.player.roll = 3.1 + i * .003;
+    recorder.push(i / 30, g);
+  }
+  const clip = recorder.captureClip(1);
+  assert.equal(clip.poseVersion, 2);
+  assert.equal(clip.frames.length, clip.len * 16);
+  const player = new MomentPlayer();
+  player.play(clip, 1);
+  player.update(.2, g);
+  assert.ok(g.player.roll > 3 && g.player.roll < 3.3);
+  assert.ok(Math.abs(V3.len(g.player.normal) - 1) < 1e-8);
+  assert.ok(Math.abs(V3.len(g.aiPaddle.normal) - 1) < 1e-8);
+});
+
+test('legacy replay live-ball flag is never interpreted as a wrist angle', () => {
+  const { g, clip, MomentPlayer } = fixture();
+  g.settings = { grip: 'penhold', hand: 'left' };
+  for (let i = 15; i < clip.frames.length; i += 16) clip.frames[i] = 1;
+  const player = new MomentPlayer();
+  player.play(clip, 1); player.update(.01, g);
+  assert.ok(Math.abs(g.player.roll + Math.PI - .052) < 1e-8);
 });

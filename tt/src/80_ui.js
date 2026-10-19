@@ -1,9 +1,8 @@
 /* =====================================================================
  *  UI — HUD, menus, the 2D coaching layer.
  *
- *  Design rule for this file: the screen must never explain with text what
- *  it can show with a shape. One transient badge, one score, and the
- *  strike ring drawn straight onto the ball.
+ *  One evidence-based shot badge in the reading band, one score, and
+ *  timing brackets on the actual ball. No competing input marker.
  * ===================================================================== */
 'use strict';
 
@@ -18,7 +17,7 @@ class UI {
     this.shotTimer = 0;
     this.noteTimer = 0;
     this.ripples = [];
-    this.ghostT = 0;
+    this.captureDebug = false;
 
     // UI Animation system (99-level polish)
     this.uiAnim = new UIAnimation();
@@ -36,7 +35,6 @@ class UI {
     }
     this._pv = {};
     this._pv2 = {};
-    this._cur = '';
     this.inputMode = detectInputMode();
     this.hasFinePointer = this.inputMode === 'mouse';
     document.addEventListener('pointerdown', e => this.setInputMode(e.pointerType), { capture: true, passive: true });
@@ -47,6 +45,7 @@ class UI {
     if (this.dialogObserver) this.dialogObserver.observe(document.body, { subtree: true, attributes: true, attributeFilter: ['class'] });
     document.addEventListener('keydown', (event) => {
       if (event.key === 'Tab') this.trapDialogFocus(event);
+      if (event.key === 'Escape' && $('#shotLab').classList.contains('on')) { event.preventDefault(); this.closeShotLab(); }
     }, true);
   }
   attach(game) {
@@ -259,7 +258,10 @@ class UI {
     }));
     $$('.opt[data-set]').forEach((b) => b.addEventListener('click', () => {
       const k = b.dataset.set, v = b.dataset.val;
-      $$(`.opt[data-set="${k}"]`).forEach((x) => x.classList.remove('sel'));
+      $$(`.opt[data-set="${k}"]`).forEach((x) => {
+        x.classList.remove('sel'); x.setAttribute('aria-pressed', 'false');
+      });
+      b.setAttribute('aria-pressed', 'true');
       b.classList.add('sel');
       this.applySetting(k, v);
     }));
@@ -287,12 +289,8 @@ class UI {
     $('#tdPlay').addEventListener('click', startMatch);
     $('#train0').addEventListener('click', startTrain);
     $('#tdAgain').addEventListener('click', startTrain);
-    $('#trSkip').addEventListener('click', () => { const t = this.game.training; if (t) { t.skip(); this.game.audio.ui('click'); } });
-    $('#trExit').addEventListener('click', () => {
-      this.game.stopTraining();
-      document.body.classList.remove('is-playing');
-      $('#menu').classList.add('on');
-    });
+    $('#trSkip').addEventListener('click', () => { const t = this.game.training; if (t && this.game.paused) { t.skip(); this.game.setPaused(false); this.game.audio.ui('click'); } });
+    $('#trExit').addEventListener('click', () => { if (this.game.paused) this.showMainMenu(); });
     /* --- workshop / shop / daily --- */
     const wsOpen = (tab) => {
       this.game.audio.ui('click');
@@ -343,61 +341,15 @@ class UI {
       e.stopPropagation();
       this.game.stopDemo();
     });
-    const bDbgMisses = $('#btnDebugMisses');
-    if (bDbgMisses) bDbgMisses.addEventListener('click', () => this.showDebugMissesList());
-    const pDbgMisses = $('#pauseDebugMisses');
-    if (pDbgMisses) pDbgMisses.addEventListener('click', (e) => {
-      e.stopPropagation();
-      this.showDebugMissesList();
+    for (const id of ['#shotLabPause', '#shotLabResults']) $(id).addEventListener('click', e => { e.stopPropagation(); this.openShotLab(); });
+    $('#shotLabClose').addEventListener('click', () => this.closeShotLab());
+    $('#shotLabExport').addEventListener('click', () => this.exportShotLab());
+    for (const id of ['#captureDebugPause', '#captureDebugLab']) $(id).addEventListener('change', event => {
+      this.captureDebug = event.target.checked;
+      for (const selector of ['#captureDebugPause', '#captureDebugLab']) $(selector).checked = this.captureDebug;
+      this.syncNativeCursor();
     });
-    const bDbgClose = $('#debugMissesClose');
-    if (bDbgClose) bDbgClose.addEventListener('click', () => $('#debugMissesModal').classList.remove('on'));
 
-    // Debug replay HUD controls
-    const dbgPrev = $('#dbgPrev');
-    if (dbgPrev) dbgPrev.addEventListener('click', () => {
-      const g = this.game;
-      if (g && g.missedRallies && g.missedRallies.length) {
-        g.watchMiss(Math.max(0, (g.currentMissIndex || 0) - 1));
-      }
-    });
-    const dbgNext = $('#dbgNext');
-    if (dbgNext) dbgNext.addEventListener('click', () => {
-      const g = this.game;
-      if (g && g.missedRallies && g.missedRallies.length) {
-        g.watchMiss(Math.min(g.missedRallies.length - 1, (g.currentMissIndex || 0) + 1));
-      }
-    });
-    const dbgRestart = $('#dbgRestart');
-    if (dbgRestart) dbgRestart.addEventListener('click', () => {
-      const g = this.game;
-      if (g && g.replayer) { g.replayer.i = 0; g.replayer.hold = 0; g.replayer.on = true; }
-    });
-    const dbgPause = $('#dbgPause');
-    let dbgPaused = false;
-    if (dbgPause) dbgPause.addEventListener('click', () => {
-      const g = this.game;
-      if (!g || !g.replayer) return;
-      dbgPaused = !dbgPaused;
-      if (dbgPaused) { g._savedReplaySpeed = g.replayer.speed; g.replayer.speed = 0.0001; dbgPause.textContent = 'ВОСПРОИЗВЕСТИ'; }
-      else { g.replayer.speed = g._savedReplaySpeed || 0.20; dbgPause.textContent = 'ПАУЗА'; }
-    });
-    const dbgSpeed = $('#dbgSpeed');
-    const speeds = [0.15, 0.25, 0.40];
-    let spIdx = 0;
-    if (dbgSpeed) dbgSpeed.addEventListener('click', () => {
-      const g = this.game;
-      spIdx = (spIdx + 1) % speeds.length;
-      const sp = speeds[spIdx];
-      if (g && g.replayer) g.replayer.speed = sp;
-      dbgSpeed.textContent = `СКОРОСТЬ ${sp.toFixed(2)}×`;
-    });
-    const dbgExit = $('#dbgExit');
-    if (dbgExit) dbgExit.addEventListener('click', () => {
-      const g = this.game;
-      if (g) g.endReplay();
-      this.showDebugMissesList();
-    });
     const pResume = $('#pauseResume'), pMenu = $('#pauseToMenu');
     if (pResume) pResume.addEventListener('click', (e) => { e.stopPropagation(); this.game.setPaused(false); });
     if (pMenu) pMenu.addEventListener('click', (e) => {
@@ -437,6 +389,7 @@ class UI {
       if (e.key === 'Shift' || e.key === ' ') this.game && this.game.setSlowmoHold(false);
     });
     window.addEventListener('keydown', (e) => {
+      if ($('#shotLab').classList.contains('on')) return;
       if ((e.key === 'Shift' || e.key === ' ') && !e.repeat && this.game && this.game.replayer.on) {
         this.game.skipReplay(); e.preventDefault(); return;
       }
@@ -512,44 +465,6 @@ class UI {
       g.watchMoment(g.moments.kept[+b.dataset.i], true);
     }));
     $('#reels').classList.add('on');
-  }
-
-  debugReplayShow(on, miss, index, total) {
-    const hud = $('#debugReplayHud');
-    if (!hud) return;
-    hud.style.display = on ? 'block' : 'none';
-    if (!on || !miss) return;
-    const tEl = $('#dbgReplayTitle'), vEl = $('#dbgReplayVerdict'), mEl = $('#dbgReplayMetrics');
-    if (tEl) tEl.textContent = `ПОВТОР ПРОМАХА #${(index || 0) + 1} ИЗ ${total || 1}`;
-    if (vEl) vEl.textContent = miss.verdict || miss.reason;
-    if (mEl) mEl.textContent = `Дистанция: ${(miss.minDist || 0).toFixed(2)} м (радиус: ${(miss.hitRadius || 0.22).toFixed(2)} м) · Свайп: ${miss.strokeName || 'НЕТ'} · Счёт: ${miss.score ? miss.score.join(':') : '0:0'}`;
-  }
-
-  showDebugMissesList() {
-    const g = this.game; if (!g) return;
-    const list = $('#debugMissList');
-    if (!list) return;
-    const misses = g.missedRallies || [];
-    if (!misses.length) {
-      list.innerHTML = `<div style="padding:24px;text-align:center;color:var(--dim);font-size:13px">В этом матче пока нет не отбитых мячей.<br>Сыграйте несколько очков против бота, и здесь появятся все ваши промахи для замедленного разбора.</div>`;
-    } else {
-      list.innerHTML = misses.map((m, i) => {
-        const col = m.isReachIssue ? '#ff4d6d' : '#39c6ff';
-        return `<button class="mrow" data-miss="${i}" style="border-left:3px solid ${col};margin-bottom:8px">
-          <span class="num">${i + 1}</span>
-          <span class="d">
-            <b style="color:#fff">${m.reason} · Счёт ${m.score[0]}:${m.score[1]}</b>
-            <small style="color:${col}">${m.verdict}</small>
-          </span>
-          <span class="go" style="color:#39c6ff;font-weight:800">0.20× SLO-MO \u203a</span>
-        </button>`;
-      }).join('');
-      Array.from(list.querySelectorAll('.mrow')).forEach((b) => b.addEventListener('click', () => {
-        $('#debugMissesModal').classList.remove('on');
-        g.watchMiss(+b.dataset.miss, 0.20);
-      }));
-    }
-    $('#debugMissesModal').classList.add('on');
   }
 
   /* --------------------- workshop · shop · daily ------------------- */
@@ -778,29 +693,14 @@ class UI {
     const g = this.game; if (!g) return;
     const s = g.settings;
     switch (k) {
-      case 'hitZone':
-        s.hitZone = v / 100;
-        const hzEl = $('#vHitZone'), hzRange = $('#rHitZone');
-        if (hzEl) hzEl.textContent = v + '%';
-        if (hzRange) hzRange.setAttribute('aria-valuetext', v + ' процентов');
-        break;
-      case 'assist':
-        s.assist = v / 100;
-        const astEl = $('#vAssist'), astRange = $('#rAssist');
-        if (astEl) astEl.textContent = v + '%';
-        if (astRange) astRange.setAttribute('aria-valuetext', v + ' процентов');
-        break;
-      case 'posAssist':
-        s.posAssist = v / 100;
-        break;
-      case 'sens': s.sensitivity = v / 100; break;
+      // Gameplay assistance is an authored rule, not a player preference.
+      case 'hitZone': case 'assist': case 'posAssist': case 'sens': case 'zone': return;
       case 'vol': s.volume = v / 100; g.audio.setVolume(v / 100); break;
       case 'cam': s.camera = v; break;
       case 'quality': s.quality = v; g.R.quality = v; g.resize(); break;
-      case 'hand': s.hand = v; break;
+      case 'hand': case 'grip': g.changePaddlePreference(k, v); break;
       case 'trail': s.showTrail = v === 'on'; break;
       case 'predict': s.showPredict = v === 'on'; break;
-      case 'zone': s.showZone = v === 'on'; break;
       case 'tele': s.showTele = v === 'on'; $('#spin').classList.toggle('on', s.showTele); break;
       case 'coach': s.coach = v === 'on'; if (!s.coach) this.hideNote(); break;
       case 'adaptive':
@@ -829,15 +729,13 @@ class UI {
 
   syncSettings() {
     const s = this.game.settings;
-    const hzVal = Math.round((s.hitZone !== undefined ? s.hitZone : 0.85) * 100);
-    const rHz = $('#rHitZone'), vHz = $('#vHitZone');
-    if (rHz) { rHz.value = hzVal; rHz.setAttribute('aria-valuetext', hzVal + ' процентов'); }
-    if (vHz) vHz.textContent = hzVal + '%';
-
-    const astVal = Math.round((s.assist !== undefined ? s.assist : 0.85) * 100);
-    const rAst = $('#rAssist'), vAst = $('#vAssist');
-    if (rAst) { rAst.value = astVal; rAst.setAttribute('aria-valuetext', astVal + ' процентов'); }
-    if (vAst) vAst.textContent = astVal + '%';
+    for (const k of ['hand', 'grip']) {
+      $$(`.opt[data-set="${k}"]`).forEach(b => {
+        const selected = b.dataset.val === s[k];
+        b.classList.toggle('sel', selected);
+        b.setAttribute('aria-pressed', String(selected));
+      });
+    }
     this.syncCameraControls();
   }
   syncCameraControls() {
@@ -872,20 +770,65 @@ class UI {
     $('#oppName').textContent = g.ai.L.name;
   }
 
-  showShot(info) {
+  showShot() { this.syncShotFeedback(); }
+  syncShotFeedback() {
+    const entry = this.game && this.game.shotJournal && this.game.shotJournal.latest;
+    if (!entry) { this._shotEntry = null; $('#shot').classList.remove('on'); return; }
+    if (entry === this._shotEntry && entry.revision === this._shotRevision) return;
+    this._shotEntry = entry; this._shotRevision = entry.revision;
+    const view = shotHudView(entry);
+    if (!view) return;
     const el = $('#shot');
-    el.classList.add('on');
-    this.shotTimer = 1.5;
-    const n = $('#shotName');
-    n.textContent = info.stroke.short || info.stroke.name;
-    n.style.color = info.stroke.col;
-    /* The timing verdict is part of the badge: it is the one thing the player
-       can act on next time, and it belongs in the top band with the rest of
-       the text, never floating over the table. */
-    const extra = info.timing ? ` · ${info.timing}` : '';
-    $('#shotMeta').textContent = `${info.speed.toFixed(0)} км/ч · ${info.spin.toFixed(0)} об/с${extra}`;
-    const meta = $('#shotMeta');
-    if (meta) meta.style.color = info.rim ? 'var(--warn)' : '';
+    $('#shotName').textContent = view.title;
+    $('#shotStatus').textContent = view.status;
+    $('#shotMeta').textContent = view.metrics;
+    el.dataset.tone = view.tone; el.classList.add('on');
+    this.shotTimer = 7;
+  }
+  openShotLab() {
+    this._labWasPaused = this.game.paused;
+    this.game.setPaused(true);
+    $('#shotLab').classList.add('on');
+    this.renderShotLab();
+  }
+  closeShotLab() {
+    this._labCancelled = true;
+    $('#shotLab').classList.remove('on');
+    if (!this._labWasPaused) this.game.setPaused(false);
+  }
+  renderShotLab() {
+    const root = $('#shotLabRecords'); root.replaceChildren();
+    const summary=$('#captureCalibrationSummary');summary.replaceChildren();
+    for(const serving of [false,true]) {
+      const attempts=this.game.shotJournal.records.filter(e=>e.pressZone && e.pressZone.serving===serving);
+      const hits=attempts.filter(e=>e.contact), block=document.createElement('div');block.className='lab-entry';
+      const add=text=>{const p=document.createElement('p');p.textContent=text;block.append(p);};
+      const title=document.createElement('b');title.textContent=`${serving?'Подача':'Приём'} · радиус ${MATCH_RULES.pressRadiusPx} px`;block.append(title);
+      add(`Нажатий: ${attempts.length} · вне зоны: ${attempts.filter(e=>!e.pressZone.accepted).length} · ударов: ${hits.length}`);
+      for(const scale of [.9,.8,.7]) add(`Радиус ${Math.round(MATCH_RULES.pressRadiusPx*scale)} px: заблокировал бы ${hits.filter(e=>e.pressZone.distancePx>e.pressZone.radius*scale).length} из ${hits.length} записанных ударов.`);
+      summary.append(block);
+    }
+    const entries = this.game.shotJournal.records.slice().reverse();
+    if (!entries.length) { root.textContent = 'Пока нет попыток. Сделайте свайп во время игры.'; return; }
+    for (const entry of entries) {
+      const view = shotFeedbackView(entry), card = document.createElement('div'); card.className = 'lab-entry';
+      const title = document.createElement('b'); title.textContent = `#${entry.id} · ${view.title} · ${view.status}`; card.append(title);
+      const add = text => { const p = document.createElement('p'); p.textContent = text; card.append(p); };
+      if (view.metrics) add(view.metrics);
+
+      if (entry.pressZone) add(`Нажатие: ${entry.pressZone.accepted?'внутри':'снаружи'} · расстояние ${Number.isFinite(entry.pressZone.distancePx)?entry.pressZone.distancePx.toFixed(0):'не измерено'} px из ${entry.pressZone.radius} px.`);
+      root.append(card);
+    }
+  }
+  exportShotLab() {
+    const data = this.game.shotJournal.exportData();
+    data.pressCalibration = { radiusPx: MATCH_RULES.pressRadiusPx, attempts: this.game.shotJournal.records.filter(e=>e.pressZone).map(e=>({ id:e.id, press:e.pressZone, contacted:!!e.contact })) };
+    data.preferences = { grip: this.game.settings.grip, hand: this.game.settings.hand, spinBias: this.game.settings.spinBias };
+    data.equipment = JSON.parse(JSON.stringify(this.game.equip));
+    data.career = { active: this.game.career.active, speed: this.game._careerSpeedBoost, spin: this.game._careerSpinBoost };
+    const url = URL.createObjectURL(new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' }));
+    const link = document.createElement('a'); link.href = url; link.download = 'topspin-shot-diagnostics.json'; link.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
   }
   showAiShot() { /* the opponent's choice is readable from the ball itself */ }
 
@@ -904,21 +847,19 @@ class UI {
   hideNote() { this.noteTimer = 0; const el = $('#note'); el && el.classList.remove('on'); }
 
   /* --------------------------- coach panel ------------------------ */
-  trainShow() { $('#train').classList.add('on'); $('#score').style.opacity = '0'; }
-  trainHide() { $('#train').classList.remove('on'); $('#score').style.opacity = ''; $('#tdone').classList.remove('on'); }
+  trainShow() { $('#train').classList.add('on'); $('#score').style.opacity = '0'; $('#trainingActions').hidden = false; }
+  trainHide() { $('#trainingActions').hidden = true; $('#train').classList.remove('on'); $('#score').style.opacity = ''; $('#tdone').classList.remove('on'); }
   trainSync(t) {
-    const S = t.S;
-    $('#trStep').textContent = (t.step + 1) + ' / ' + TRAIN_STEPS.length;
+    const S = t.S, feedback = t.phase === 'ok' || t.phase === 'fail';
+    $('#trStep').textContent = `${t.step + 1}/${TRAIN_STEPS.length}`;
     $('#trTitle').textContent = S.title;
-    $('#trTip').textContent = trainingTip(S, this.inputMode);
-    const m = $('#trMsg');
-    m.textContent = t.msg || '';
-    m.style.color = t.msgCol || 'var(--good)';
-    let pips = '';
-    for (let i = 0; i < S.need; i++) pips += `<i class="${i < t.done ? 'on' : ''}"></i>`;
-    $('#trPips').innerHTML = pips;
+    $('#trProgress').textContent = `${t.done}/${S.need}`;
+    $('#trTip').textContent = feedback ? '' : S.goal;
+    $('#trainPauseTip').textContent = trainingTip(S, this.inputMode);
+    $('#trMsg').textContent = feedback ? t.msg : '';
+    $('#trMsg').style.color = t.msgCol || 'var(--good)';
   }
-  trainDone() { $('#train').classList.remove('on'); $('#tdone').classList.add('on'); }
+  trainDone() { $('#train').classList.remove('on'); $('#trainingActions').hidden = true; $('#tdone').classList.add('on'); }
 
   showMatchEnd(won) {
     const g = this.game, s = g.stats;
@@ -935,8 +876,7 @@ class UI {
     $('#stRally').textContent = g.bestRally;
     const top = Object.entries(s.byStroke).sort((a, b) => b[1] - a[1])[0];
     $('#stFav').textContent = top ? (STROKES[top[0]] ? STROKES[top[0]].short : top[0]) + ' ×' + top[1] : '—';
-    // the match is over, so lead with the thing worth remembering: the
-    // best rally, played back before the numbers
+    // Results are immediate; normal best moments remain an explicit choice.
     const row = $('#overMoments');
     row.innerHTML = '';
     /* what the match paid, in one line, next to the score */
@@ -950,7 +890,6 @@ class UI {
       row.appendChild(line);
       g.lastReward = null;
     }
-    const best = g.moments.best;
     const kept = g.moments.kept.slice(0, 3);
     if (kept.length) {
       const b = document.createElement('button');
@@ -959,23 +898,6 @@ class UI {
       b.addEventListener('click', () => this.showMoments());
       row.appendChild(b);
     }
-    // User requested: "сделай просто в конце матча вместо повтора сразу чтобы подряд шли все мои удары, в которых я промахнулся (потом я верну на место повтор лучшего момента)"
-    if (g.missedRallies && g.missedRallies.length && !this.suppressCinema) {
-      this.suppressCinema = true;
-      setTimeout(() => { this.suppressCinema = false; }, 400);   // one auto-play per match
-      $$('.screen').forEach((s) => s.classList.remove('on'));
-      g.playAllMissesSequential(() => {
-        $('#over').classList.add('on');
-      });
-      return;
-    } else if (best && !this.suppressCinema && (!g.missedRallies || !g.missedRallies.length)) {
-      this.suppressCinema = true;
-      setTimeout(() => { this.suppressCinema = false; }, 400);
-      $$('.screen').forEach((s) => s.classList.remove('on'));
-      g.watchMoment(best, true, () => { $('#over').classList.add('on'); });
-      return;
-    }
-    this.suppressCinema = false;
     $('#over').classList.add('on');
   }
 
@@ -983,162 +905,57 @@ class UI {
    *  2D coaching layer
    * ================================================================== */
 
-  /** The strike ring: a circle that closes onto the ball and flashes
-   *  white at the exact moment the swipe should leave your finger. */
+  /** Timing brackets belong to the ball. They are NOT a capture radius. */
   drawStrikeRing(c, W, H, d) {
     const g = this.game;
-    const w = g._strike;
-    if (!w || !w.on || w.k < 0.02) return;
-    if (!g.settings.showZone) return;
-    const p = g.project({ x: w.x, y: w.y, z: w.z }, this._pv);
-    if (!p.ok) return;
-    const x = p.x * W, y = p.y * H;
-    const r0 = 15 * d;                       // closed radius
-    const tt = clamp(w.t, 0, 0.85);
-    const R = r0 + tt * 150 * d;
-    const hot = w.ready;                     // 0..1 — inside the window
-    const a = w.k * (0.30 + 0.60 * hot);
-    const col = hot > 0.82 ? [255, 236, 140] : hot > 0.4 ? [120, 222, 255] : [110, 150, 190];
-    c.save();
-    c.globalAlpha = a;
-    c.strokeStyle = `rgb(${col[0]},${col[1]},${col[2]})`;
-    c.lineWidth = (1.6 + 2.0 * hot) * d;
-    c.beginPath(); c.arc(x, y, R, 0, TAU); c.stroke();
-    // the fixed target ring you are closing onto
-    c.globalAlpha = a * 0.55;
-    c.lineWidth = 1.2 * d;
-    c.setLineDash([5 * d, 6 * d]);
-    c.beginPath(); c.arc(x, y, r0, 0, TAU); c.stroke();
-    c.setLineDash([]);
-    c.restore();
+    if (g.paused || (g.replayer && g.replayer.on)) return;
+    const cue = strikeCueModel(g._strike);
+    if (!cue) return;
+    const p = g.project(g.ball.p, this._pv);
+    if (!p.ok || !Number.isFinite(p.x) || !Number.isFinite(p.y) || p.x < 0 || p.x > 1 || p.y < 0 || p.y > 1) return;
+    const x = p.x * W, y = p.y * H, r = cue.radius * d, arm = 4 * d;
+    c.save(); c.globalAlpha = cue.alpha;
+    c.strokeStyle = cue.hot ? '#ffe699' : '#8ea5b8';
+    c.lineWidth = (cue.hot ? 2 : 1.3) * d;
+    c.setLineDash(cue.dashed ? [3 * d, 3 * d] : []);
+    // Four L brackets: leave the white ball unobscured and avoid a circular
+    // "hitbox" metaphor. No pulsating radius or extra motion in reduced mode.
+    c.beginPath();
+    for (const sx of [-1, 1]) for (const sy of [-1, 1]) {
+      c.moveTo(x + sx * (r - arm), y + sy * r);
+      c.lineTo(x + sx * r, y + sy * r);
+      c.lineTo(x + sx * r, y + sy * (r - arm));
+    }
+    c.stroke(); c.restore();
   }
 
-  /** The ghost gesture: an animated finger path drawn where the player's
-   *  hand actually has to move. Worth a thousand words of cheat-sheet.
-   *  Everything is stroked twice — dark outline first — so it stays legible
-   *  over the bright table as well as over the dark floor. */
-  drawGhost(c, W, H, d, pts, speed, col) {
-    const CYCLE = 2.0;
-    const T = this.reducedMotion ? 0 : (this.ghostT * speed) % CYCLE;
-    const play = clamp(T / 0.95, 0, 1);
-    const fade = this.reducedMotion ? 0.9
-      : T > 1.40 ? clamp((CYCLE - T) / 0.42, 0, 1) : clamp(T / 0.12, 0, 1);
-    if (fade <= 0.01) return;
-
-    let P = pts.map((q) => [q[0] * W, q[1] * H]);
-    if (P.length > 2) {                       // Catmull-Rom: no dog-legs
-      const sm = [];
-      for (let i = 0; i < P.length - 1; i++) {
-        const p0 = P[Math.max(0, i - 1)], p1 = P[i], p2 = P[i + 1], p3 = P[Math.min(P.length - 1, i + 2)];
-        for (let k = 0; k < 12; k++) {
-          const t = k / 12, t2 = t * t, t3 = t2 * t;
-          sm.push([
-            0.5 * ((2 * p1[0]) + (-p0[0] + p2[0]) * t + (2 * p0[0] - 5 * p1[0] + 4 * p2[0] - p3[0]) * t2 + (-p0[0] + 3 * p1[0] - 3 * p2[0] + p3[0]) * t3),
-            0.5 * ((2 * p1[1]) + (-p0[1] + p2[1]) * t + (2 * p0[1] - 5 * p1[1] + 4 * p2[1] - p3[1]) * t2 + (-p0[1] + 3 * p1[1] - 3 * p2[1] + p3[1]) * t3),
-          ]);
-        }
-      }
-      sm.push(P[P.length - 1]);
-      P = sm;
-    }
-    const seg = [];
-    let total = 0;
-    for (let i = 1; i < P.length; i++) {
-      const l = Math.hypot(P[i][0] - P[i - 1][0], P[i][1] - P[i - 1][1]);
-      seg.push(l); total += l;
-    }
-    const at = (u) => {
-      let want = u * total, i = 0;
-      while (i < seg.length - 1 && want > seg[i]) { want -= seg[i]; i++; }
-      const f = seg[i] ? clamp(want / seg[i], 0, 1) : 0;
-      return [lerp(P[i][0], P[i + 1][0], f), lerp(P[i][1], P[i + 1][1], f)];
-    };
-    const trace = () => {
-      c.beginPath();
-      for (let i = 0; i <= 48; i++) { const q = at(i / 48); i ? c.lineTo(q[0], q[1]) : c.moveTo(q[0], q[1]); }
-    };
-
-    c.save();
-    c.lineCap = 'round'; c.lineJoin = 'round';
-
-    // 1. the whole route: dark halo + dashed bright line
-    c.globalAlpha = 0.38 * fade; c.strokeStyle = '#040a12'; c.lineWidth = 11 * d;
-    trace(); c.stroke();
-    c.globalAlpha = 0.50 * fade; c.strokeStyle = col; c.lineWidth = 3.4 * d;
-    c.setLineDash([9 * d, 9 * d]); trace(); c.stroke(); c.setLineDash([]);
-
-    // 2. the part the finger has already covered, solid and bright
-    c.globalAlpha = 0.95 * fade; c.strokeStyle = col; c.lineWidth = 6 * d;
-    c.beginPath();
-    const n = Math.max(2, Math.round(play * 40));
-    for (let i = 0; i < n; i++) { const q = at((i / (n - 1)) * play); i ? c.lineTo(q[0], q[1]) : c.moveTo(q[0], q[1]); }
-    c.stroke();
-
-    // 3. the finger
-    const h = at(play), hb = at(Math.max(0, play - 0.07));
-    c.globalAlpha = fade;
-    const rg = c.createRadialGradient(h[0], h[1], 0, h[0], h[1], 30 * d);
-    rg.addColorStop(0, 'rgba(255,255,255,.95)');
-    rg.addColorStop(0.3, col + 'cc'); rg.addColorStop(1, col + '00');
-    c.fillStyle = rg; c.beginPath(); c.arc(h[0], h[1], 30 * d, 0, TAU); c.fill();
-    c.fillStyle = '#fff'; c.beginPath(); c.arc(h[0], h[1], 7 * d, 0, TAU); c.fill();
-
-    // 4. arrow head pointing the way out, at the end of the route
-    const e = at(1), eb = at(0.86);
-    const ang = Math.atan2(e[1] - eb[1], e[0] - eb[0]);
-    const ah = 16 * d;
-    const tip = [e[0] + Math.cos(ang) * ah * 0.5, e[1] + Math.sin(ang) * ah * 0.5];
-    c.globalAlpha = fade * (0.45 + 0.45 * play);
-    c.fillStyle = col;
-    c.beginPath();
-    c.moveTo(tip[0], tip[1]);
-    c.lineTo(tip[0] - Math.cos(ang - 0.42) * ah, tip[1] - Math.sin(ang - 0.42) * ah);
-    c.lineTo(tip[0] - Math.cos(ang + 0.42) * ah, tip[1] - Math.sin(ang + 0.42) * ah);
-    c.closePath(); c.fill();
-
-    // 5. where the finger starts
-    const s0 = at(0);
-    c.globalAlpha = fade * 0.75; c.strokeStyle = col; c.lineWidth = 2.4 * d;
-    c.beginPath(); c.arc(s0[0], s0[1], 15 * d, 0, TAU); c.stroke();
-    c.globalAlpha = fade * 0.30; c.fillStyle = col;
-    c.beginPath(); c.arc(s0[0], s0[1], 15 * d, 0, TAU); c.fill();
-    c.restore();
+  /** Only the racket is visible over live play; dialogs retain their cursor. */
+  syncNativeCursor() {
+    const g = this.game, canvas = g && g.canvas;
+    if (!canvas) return;
+    const playing = [GS.SERVE_READY, GS.SERVE_TOSS, GS.RALLY, GS.POINT].includes(g.state);
+    const dialog = typeof document !== 'undefined' && document.querySelector('.screen.on');
+    const cursor = playing && !this.captureDebug && !g.paused && !(g.replayer && g.replayer.on) && !dialog ? 'none' : 'default';
+    if (canvas.style.cursor !== cursor) canvas.style.cursor = cursor;
   }
 
-  /** Tie the two things that used to float apart: the OS cursor (which draws
-   *  your SWIPE) and the 3D bat (which auto-steps to the ball). While you are
-   *  playing we hide the stray arrow and draw one clear hand-reticle under the
-   *  pointer, a marker on the real bat, and a dashed tether between them, so it
-   *  is obvious: aim/time by the ball + ring, the bat follows on its own. */
-  drawHand(c, W, H, d) {
-    const g = this.game;
-    const st = g.state;
-    const play = st === 'RALLY' || st === 'SERVE_READY' || st === 'SERVE_TOSS';
-    if (g.canvas) {
-      const want = (this.hasFinePointer && play) ? 'none' : '';
-      if (this._cur !== want) { g.canvas.style.cursor = want; this._cur = want; }
+  drawCaptureDebug(c, W, H, d) {
+    const g=this.game;
+    if (!this.captureDebug || !g || g.paused || (g.replayer && g.replayer.on) ||
+        ![GS.SERVE_READY,GS.SERVE_TOSS,GS.RALLY].includes(g.state)) return;
+    const rect=g.canvas.getBoundingClientRect ? g.canvas.getBoundingClientRect() : {width:W/d,height:H/d};
+    const saved=g.swipe && g.swipe.pressZone;
+    const serving=[GS.SERVE_READY,GS.SERVE_TOSS].includes(g.state) && g.server===1;
+    const locked=saved && (g.swipe.active || (typeof g.playerStrokeIntent==='function' && g.playerStrokeIntent(serving)));
+    const zone=locked ? saved : pressHitZone(g.project(g.ball.p),g.pointer,rect.width,rect.height);
+    if (!zone || ![zone.x,zone.y,zone.radius].every(Number.isFinite)) return;
+    const sx=W/rect.width,sy=H/rect.height;
+    c.save();c.setLineDash([]);c.globalAlpha=.9;c.lineWidth=2*d;c.strokeStyle=zone.accepted?'#6ee7a8':'#ffb066';
+    c.beginPath();c.arc(zone.x*sx,zone.y*sy,zone.radius*sx,0,TAU);c.stroke();
+    // The dot is the actual sampled pointer, only in this explicit debug mode.
+    if (g.pointer && Number.isFinite(g.pointer.x) && Number.isFinite(g.pointer.y)) {
+      c.fillStyle=c.strokeStyle;c.beginPath();c.arc(locked ? zone.pointerX*sx : g.pointer.x*W,locked ? zone.pointerY*sy : g.pointer.y*H,3*d,0,TAU);c.fill();
     }
-    if (!play || !this.hasFinePointer || !g.pointer) return;
-
-    // Only ONE unified, clean reticle directly under the pointer
-    const hx = g.pointer.x * W, hy = g.pointer.y * H;
-
-    c.save();
-    c.globalAlpha = 0.90;
-    c.strokeStyle = 'rgba(57,198,255,.95)';
-    c.lineWidth = 2 * d;
-    c.beginPath(); c.arc(hx, hy, 11 * d, 0, TAU); c.stroke();
-    // Subtle crosshair ticks on the single reticle
-    c.beginPath();
-    c.moveTo(hx - 16 * d, hy); c.lineTo(hx - 12 * d, hy);
-    c.moveTo(hx + 12 * d, hy); c.lineTo(hx + 16 * d, hy);
-    c.moveTo(hx, hy - 16 * d); c.lineTo(hx, hy - 12 * d);
-    c.moveTo(hx, hy + 12 * d); c.lineTo(hx, hy + 16 * d);
-    c.stroke();
-    c.globalAlpha = 0.35;
-    c.beginPath(); c.arc(hx, hy, 18 * d, 0, TAU); c.stroke();
-    c.globalAlpha = 1; c.fillStyle = 'rgba(57,198,255,.95)';
-    c.beginPath(); c.arc(hx, hy, 2.5 * d, 0, TAU); c.fill();
     c.restore();
   }
 
@@ -1146,131 +963,16 @@ class UI {
     const g = this.game, c = this.fxg, W = this.fx.width, H = this.fx.height, d = this.dpr;
     c.clearRect(0, 0, W, H);
     if (!g) return;
-    this.ghostT += dt;
 
-    this.drawStrikeRing(c, W, H, d);
-    this.drawHand(c, W, H, d);
+    if (!this.captureDebug) this.drawStrikeRing(c, W, H, d);
+    this.drawCaptureDebug(c, W, H, d);
+    this.syncNativeCursor();
 
-    // Replay analysis: Player Click Point & Swipe Direction
-    if (g.replayer && g.replayer.on) {
-      const mo = g.replayer.moment;
-      const swd = mo ? mo.swipeData : null;
-
-      if (swd) {
-        const cx = swd.sx * W, cy = swd.sy * H;
-        const ex = swd.ex * W, ey = swd.ey * H;
-        const dx = ex - cx, dy = ey - cy;
-        const distPx = Math.hypot(dx, dy);
-
-        c.save();
-
-        // 1. If there was a swipe movement (distPx > 10 * d): draw glowing line and directional arrow
-        if (distPx > 10 * d) {
-          const col = (swd.stroke && swd.stroke.col) || '#39c6ff';
-          const angle = Math.atan2(dy, dx);
-
-          // Glowing trail line
-          c.shadowBlur = 14 * d;
-          c.shadowColor = col;
-          c.strokeStyle = col;
-          c.lineWidth = 5 * d;
-          c.lineCap = 'round';
-          c.beginPath();
-          c.moveTo(cx, cy);
-          c.lineTo(ex, ey);
-          c.stroke();
-
-          // Arrow head at end point
-          const arrowLen = 18 * d;
-          c.fillStyle = col;
-          c.beginPath();
-          c.moveTo(ex, ey);
-          c.lineTo(ex - arrowLen * Math.cos(angle - Math.PI / 6), ey - arrowLen * Math.sin(angle - Math.PI / 6));
-          c.lineTo(ex - (arrowLen * 0.6) * Math.cos(angle), ey - (arrowLen * 0.6) * Math.sin(angle));
-          c.lineTo(ex - arrowLen * Math.cos(angle + Math.PI / 6), ey - arrowLen * Math.sin(angle + Math.PI / 6));
-          c.closePath();
-          c.fill();
-          c.shadowBlur = 0;
-
-          // Direction label at the end of the swipe
-          const lblX = clamp(ex + 22 * d * Math.cos(angle), 90 * d, W - 90 * d);
-          const lblY = clamp(ey + 22 * d * Math.sin(angle), 40 * d, H - 35 * d);
-          c.font = `800 ${12 * d}px ${CSSFONT}`;
-          c.textAlign = 'center';
-          c.textBaseline = 'middle';
-          const text = `${swd.arrow} ${swd.dirName}`;
-          const tw = c.measureText(text).width + 18 * d;
-          c.fillStyle = 'rgba(6, 12, 24, 0.90)';
-          c.fillRect(lblX - tw * 0.5, lblY - 12 * d, tw, 24 * d);
-          c.strokeStyle = col;
-          c.lineWidth = 1.5 * d;
-          c.strokeRect(lblX - tw * 0.5, lblY - 12 * d, tw, 24 * d);
-          c.fillStyle = '#ffffff';
-          c.fillText(text, lblX, lblY);
-        }
-
-        // 2. Point of click: pulsating glowing target ring & label
-        const pulse = this.reducedMotion ? 1 : 1 + 0.12 * Math.sin(Date.now() * 0.007);
-        c.shadowBlur = 16 * d;
-        c.shadowColor = '#00ffcc';
-        c.strokeStyle = '#00ffcc';
-        c.lineWidth = 3 * d;
-        c.beginPath();
-        c.arc(cx, cy, 14 * d * pulse, 0, TAU);
-        c.stroke();
-        c.fillStyle = '#ffffff';
-        c.beginPath();
-        c.arc(cx, cy, 5 * d, 0, TAU);
-        c.fill();
-        c.shadowBlur = 0;
-
-        // Click label badge
-        const badgeY = cy > 55 * d ? cy - 26 * d : cy + 28 * d;
-        c.font = `800 ${11 * d}px ${CSSFONT}`;
-        c.textAlign = 'center';
-        c.textBaseline = 'middle';
-         const clkText = 'МЕСТО КАСАНИЯ';
-        const ctw = c.measureText(clkText).width + 16 * d;
-        c.fillStyle = 'rgba(4, 18, 28, 0.92)';
-        c.fillRect(cx - ctw * 0.5, badgeY - 11 * d, ctw, 22 * d);
-        c.strokeStyle = '#00ffcc';
-        c.lineWidth = 1.5 * d;
-        c.strokeRect(cx - ctw * 0.5, badgeY - 11 * d, ctw, 22 * d);
-        c.fillStyle = '#00ffcc';
-        c.fillText(clkText, cx, badgeY);
-
-        c.restore();
-      } else if (mo && (!mo.hadSwipe || !mo.swipeData)) {
-        // No click was made in this point
-        c.save();
-        c.font = `800 ${13 * d}px ${CSSFONT}`;
-        c.textAlign = 'center';
-        c.textBaseline = 'middle';
-        const msg = 'НЕТ СВАЙПА — ПРОПУСК МЯЧА В ЭТОМ РОЗЫГРЫШЕ';
-        const mw = c.measureText(msg).width + 24 * d;
-        c.fillStyle = 'rgba(25, 10, 15, 0.90)';
-        c.fillRect(W * 0.5 - mw * 0.5, H * 0.82 - 14 * d, mw, 28 * d);
-        c.strokeStyle = '#ff4d6d';
-        c.lineWidth = 1.5 * d;
-        c.strokeRect(W * 0.5 - mw * 0.5, H * 0.82 - 14 * d, mw, 28 * d);
-        c.fillStyle = '#ff758f';
-        c.fillText(msg, W * 0.5, H * 0.82);
-        c.restore();
-      }
-    }
-
-    // coach's ghost gesture, only while the drill is waiting for you
-    const tr = g.training;
-    if (tr && tr.phase !== 'done') {
-      const S = tr.S;
-      const show = tr.phase === 'intro' || tr.phase === 'wait' ||
-        (tr.phase === 'live' && !(g.swipe && g.swipe.active));
-      if (show && S.gesture) this.drawGhost(c, W, H, d, S.gesture, S.speed || 1, '#39c6ff');
-    }
-
+    // Calibration shows evidence only, not a decorative swipe or glow.
+    if (this.captureDebug) { this._lastRibbon = null; this.ripples.length = 0; }
     // live swipe ribbon
     const sw = g.swipe;
-    if (sw.active && sw.samples.length > 1) {
+    if (!this.captureDebug && sw.active && sw.samples.length > 1) {
       const pts = sw.samples;
       const n = pts.length;
       c.lineCap = 'round'; c.lineJoin = 'round';
@@ -1355,21 +1057,15 @@ class UI {
     let statusText = '';
     if (g.state === GS.POINT && g.stateT < 0.95)
       statusText = g.lastPoint ? (g.lastPoint.who > 0 ? 'Очко ваше' : 'Очко сопернику') : 'Переигровка';
-    else if (g.state === GS.SERVE_READY || g.state === GS.SERVE_TOSS)
-      statusText = g.server === 1 ? (this.inputMode === 'touch' ? 'Свайп — подача' : 'ЛКМ + вверх — подача') : 'Подаёт соперник';
 
     if (g.training || g.demoMode || g.paused) statusText = '';
     status.textContent = statusText;
     status.hidden = !statusText;
 
     const timing = $('#timingCue'), gesture = $('#gestureCue');
-    const strike = g._strike;
-    const hot = strike && strike.on && strike.ready > 0.82 && strike.k > 0.1;
-    timing.classList.toggle('on', !!hot && !g.training);
-    if (hot) timing.textContent = strike.kind === 'serve' ? 'Подача · свайп вверх' : 'Мяч в зоне · бейте';
-    const live = g.swipe.active && g.liveStroke && g.swipe.m.dist > 0.045;
-    gesture.classList.toggle('on', !!live);
-    if (live) gesture.textContent = 'Удар · ' + (g.liveStroke.stroke.short || g.liveStroke.stroke.name);
+    timing.classList.remove('on');
+    timing.textContent = ''; // No instructional text during normal play.
+    gesture.classList.remove('on'); // ShotJournal is the single source of recognition feedback.
     const box = $('#msgs');
     const bDemo = $('#btnDemoExit');
     if (bDemo) bDemo.style.display = (g.demoMode && g.state !== 'MENU' && g.state !== 'MATCH_END') ? 'block' : 'none';
@@ -1396,7 +1092,10 @@ class UI {
     // Adapt typography to the free space BELOW the table; no guessed pixels.
     const band = $('#playband');
     if (band) {
-      band.classList.toggle('training-compact', !!g.training && window.innerHeight <= 520);
+      if (g.training) {
+        const controls = $('#topright').getBoundingClientRect();
+        $('#train').style.maxWidth = Math.max(100, controls.left - 28) + 'px';
+      }
       const bandSig = `${g.hudBandY}|${window.innerWidth}|${window.innerHeight}|${!!g.training}`;
       if (this._bandH === undefined || this._bandSig !== bandSig) {
         this._bandSig = bandSig;
@@ -1423,6 +1122,7 @@ class UI {
       $('#slowFill').style.height = (sl.energy * 100).toFixed(0) + '%';
       document.body.classList.toggle('is-slow', sl.active);
     }
+    this.syncShotFeedback();
     if (this.shotTimer > 0) { this.shotTimer -= dt; if (this.shotTimer <= 0) $('#shot').classList.remove('on'); }
     if (this.noteTimer > 0) { this.noteTimer -= dt; if (this.noteTimer <= 0) this.hideNote(); }
 
