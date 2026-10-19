@@ -224,6 +224,8 @@ class Game {
     this.camRig = { eye: V3.new(0, 1.68, 2.38), look: V3.new(0, 0.74, -0.25), fov: 48, mode: 'BROADCAST' };
     this._rigBuf = { vp: M4.create(), proj: M4.create(), view: M4.create() };
     this.camVP = M4.create();          // view·proj of the authored rig, no shake
+    this.camView = null;              // view matrix; rebuilt in updateCamera
+    this._lastBallScreenVel = { x: 0, y: 0 };  // ball screen velocity, for the live oval
     this.hudBandY = 0.72;              // screen y below the full table's feet
     this.camPos = V3.new(0, 1.68, 2.38); this.camLook = V3.new(0, 0.74, -0.25);
     this.camPosT = V3.clone(this.camPos); this.camLookT = V3.clone(this.camLook);
@@ -362,13 +364,31 @@ class Game {
         across: null, reason: 'OUTSIDE_ZONE', pointerType };
       /* Admission is stamped once, here, from the ball at pointerdown.
        * Moving into the zone later, landing on the bat, position assist and
-       * CCD are all downstream of this stamp and cannot rewrite it. */
+       * CCD are all downstream of this stamp and cannot rewrite it.
+       *
+       * v3 input bridge: the legacy oval stamp is kept for backwards
+       * compatibility, but the LIVE bridge (11_input_geometry) re-checks
+       * the zone every frame against the actual ball and cursor positions.
+       * A pointerdown stamp that is outside the ball's current oval (very
+       * common on a serve: the cursor lands in front of the toss) is not
+       * a hard reject any more. The bridge decides at contact time. */
       this.swipe.pressZone.pressX = n.x; this.swipe.pressZone.pressY = n.y;
       this.swipe.pressZone.vw = rect.width; this.swipe.pressZone.vh = rect.height;
       this.swipe.pressZone.pointerId = e.pointerId;
       this.swipe.pressZone.pointerType = pointerType;
       this.swipe.pressZone.pressT = this.time;
       this.swipe.pressZone.serving = this.state === GS.SERVE_READY || this.state === GS.SERVE_TOSS;
+      /* Live bridge admission stamp: tells pressAdmitsBall() whether the
+       * legacy zone was admitted, rejected, or the bridge should re-check.
+       * The oval is still the LEGAL container (correct); we add "let the
+       * live oval re-evaluate on each frame" as the DEFAULT. */
+      if (ballZone && ballZone.accepted === true) {
+        this.swipe.pressZone.bridgeAccepted = true;     // legacy already inside
+      } else if (this.camVPReady) {
+        this.swipe.pressZone.bridgeAccepted = null;     // let the bridge decide
+      } else {
+        this.swipe.pressZone.bridgeAccepted = false;    // no rig to evaluate
+      }
       if (this.shotJournal) {
         const attempt = this.shotJournal.create(this.swipe.gestureId, this.time);
         attempt.pressZone = { ...this.swipe.pressZone };
@@ -666,10 +686,26 @@ class Game {
     this.tossQueued = false;
     const b = this.ball;
     const pad = this.player;
-    // ITTF requires a near-vertical toss of at least 16 cm; we throw ~30 cm
-    V3.set(b.p, pad.pos.x,
-      PH.TABLE_Y + 0.14, clamp(pad.pos.z - 0.04, PH.T_HALF_LEN + 0.04, 2.0));
-    V3.set(b.v, rndSym(0.03), 2.45 + rnd(0, 0.2), rndSym(0.03));
+    // ITTF requires a near-vertical toss of at least 16 cm.
+    //
+    // v3 input geometry fix: the toss used to start at TABLE_Y + 0.14 (90 cm
+    // above the floor) regardless of where the bat actually was. On a normal
+    // stance the bat was at ~62 cm — below the toss — so the falling toss
+    // was always above the press oval and a serve could only be played by
+    // sliding the bat up to the ball. That was the "impossible serve" bug.
+    // Now the toss starts where the bat starts (the user's hand), and rises
+    // 30+ cm above that. The hand+racket are below the toss apex and inside
+    // the capture sphere the whole way down. Combined with the live
+    // press-oval check, the player sees the toss at a height their cursor
+    // can actually reach on a normal stance.
+    const tossY = clamp(pad.pos.y + 0.02, PH.TABLE_Y + 0.06, PH.TABLE_Y + 1.10);
+    const tossZ = clamp(pad.pos.z - 0.04, PH.T_HALF_LEN + 0.04, PADDLE_LIMITS.zNear);
+    V3.set(b.p, pad.pos.x, tossY, tossZ);
+    // Toss speed sized so apex = +0.30..0.36 m above release (well above
+    // the ITTF 16 cm minimum). With g=9.81 and rise=h, v = sqrt(2gh).
+    const targetRise = 0.32;
+    const vy = Math.sqrt(2 * 9.81 * targetRise);
+    V3.set(b.v, rndSym(0.025), vy + rnd(-0.10, 0.10), rndSym(0.025));
     this.tossStartY = b.p.y;
     this.tossApex = b.p.y;
     V3.zero(b.w);
@@ -1165,6 +1201,21 @@ class Game {
   stepPhysics(dt) {
     const b = this.ball;
     if (!b.live) return;
+    /* v3 input bridge: keep the ball's screen velocity up to date so the
+     * live oval tracks the ball's motion (oval stretches ahead of a fast
+     * ball, becomes a circle when the ball is slow). Cheap: two projections
+     * per physics step. */
+    if (this.camVPReady && b.v) {
+      const p0 = this.project(b.p, this._bvTmp0 || (this._bvTmp0 = {}));
+      const px = b.p.x + b.v.x * dt, py = b.p.y + b.v.y * dt, pz = b.p.z + b.v.z * dt;
+      const p1 = this.project({ x: px, y: py, z: pz }, this._bvTmp1 || (this._bvTmp1 = {}));
+      if (p0.ok && p1.ok) {
+        this._lastBallScreenVel = {
+          x: (p1.x - p0.x) / Math.max(dt, 1e-3),
+          y: (p1.y - p0.y) / Math.max(dt, 1e-3),
+        };
+      }
+    }
     // a ball that has run out of energy settles instead of micro-bouncing
     if (b.p.y - PH.R <= PH.TABLE_Y + 0.004 && Math.abs(b.v.y) < 0.30 &&
       Math.abs(b.p.x) <= PH.T_HALF_WID && Math.abs(b.p.z) <= PH.T_HALF_LEN) {
@@ -1430,18 +1481,41 @@ class Game {
     return m;
   }
 
-  /** The press gate is the oval/circle stamped at pointerdown (see
+/** The press gate is the oval/circle stamped at pointerdown (see
    *  pressZoneForBall). The oval already reaches ahead of the ball along its
    *  screen trajectory, which is where a backswing starts; anything later
-   *  may only reject (wrong swipe direction), never admit. */
+   * may only reject (wrong swipe direction), never admit.
+   *
+   *  v3 input bridge: in addition to the original pointerdown stamp, we
+   *  re-check the oval against the LIVE ball position and the LIVE cursor
+   *  position. If the player has dragged the cursor back to the ball (or
+   *  the ball has come back to the cursor), the press is admitted even if
+   *  the original stamp was outside — this is how the falling-toss serve
+   *  actually works: the cursor lands in front of the ball at pointerdown
+   *  (outside the oval the ball is currently in), but is inside the oval
+   *  the ball will be in 200-400 ms later when the bat closes in. The old
+   *  code rejected the press because the STAMP was stale. */
   pressAdmitsBall() {
-    const pz = this.swipe && this.swipe.pressZone;
-    /* A missing zone means a synthetic/internal swipe (demo stamps its own,
-     * tools call SwipeTracker directly). Every real pointerdown stamps one
-     * before any physics runs, and that stamp is final: no path, paddle,
-     * assist or CCD re-evaluation may turn an outside press into a hit. */
     if (this.pressConsumed()) return false;
+    const pz = this.swipe && this.swipe.pressZone;
+    const cur = this.pointer;
+    // Synthetic swipes (demo, benchmark, tools) get a free pass: they set
+    // their own zones or none at all. This matches the original behaviour
+    // the test suite pins against.
     if (!pz) return true;
+    // Live bridge check. Only when the camera matrices are available —
+    // before the first frame, the legacy oval is the only signal we have.
+    if (pz && pz.bridgeAccepted === false) return false;     // hard rejection
+    if (pz && pz.bridgeAccepted === true) return true;       // pointerdown admit
+    if (this.camVPReady && cur && this.ball && this.ball.live && cur.x >= 0 && cur.x <= 1) {
+      // Compute screen velocity from two recent projections.
+      const bv = this._lastBallScreenVel || { x: 0, y: 0 };
+      const aim = computePaddleAim(cur.x, cur.y, this.ball.p, this.camVP, this.camView,
+        this.R.aspect(), bv, { depth: PADDLE_LIMITS.zHome, sens: MATCH_RULES.sensitivity,
+        serving: pz && pz.serving, v: this.ball.v });
+      if (aim && aim.zone) return aim.zone.accepted === true;
+    }
+    // Legacy fallback for pre-camera situations.
     return pz.accepted === true;
   }
 
@@ -1866,8 +1940,15 @@ class Game {
      * trying to hit it. drawDynamic applies the same offset to the drawn pose
      * instead, where it cannot take a catchable ball out of the capture
      * volume. */
+    /* v3 input bridge: pass the live camera matrices so the cursor and the
+     * bat agree on where the cursor is on screen for every preset. The
+     * bridge falls back to the legacy formula when no live rig exists
+     * (boot, menu, benchmark), so this is always safe to call. */
     const t = paddleTargetFromPointer(pt.x, pt.y, depthY, sens,
-      this._ptTarget || (this._ptTarget = { tx: 0, ty: 0, tz: 0 }), { zNear });
+      this._ptTarget || (this._ptTarget = { tx: 0, ty: 0, tz: 0 }),
+      { zNear, vp: this.camVP, view: this.camView, ball: this.ball.p,
+        aspect: this.R && this.R.aspect ? this.R.aspect() : 16/9,
+        ballScreenVel: this._lastBallScreenVel, liveBridge: this.camVPReady });
     let tx = t.tx;
     let ty = t.ty;
     let tz = t.tz;
@@ -2202,6 +2283,12 @@ class Game {
     lrig.fov = this.fov;
     lrig.shiftY = this.camShiftY;
     this.camVP = rigViewProj(lrig, aspect, this._rigBuf);
+    /* The input bridge (11_input_geometry) needs the bare view matrix too,
+     * to unproject the cursor onto the paddle plane. Build it from the same
+     * live camera position/target so the cursor and the bat cannot drift. */
+    if (!this._camViewMat) this._camViewMat = M4.create();
+    M4.lookAt(this._camViewMat, this.camPos, this.camLook, { x: 0, y: 1, z: 0 });
+    this.camView = this._camViewMat;
     this.camVPReady = true;
     const bounds = tableScreenBounds(this.camVP, this._hudTableBounds || (this._hudTableBounds = {}));
     const band = clamp(bounds.bottom, 0.2, 0.91);

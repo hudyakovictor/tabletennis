@@ -32,14 +32,25 @@ function gameFixture() {
   return g;
 }
 
-test('rules v2 publish one shared oval contract and the rejection code list', () => {
-  assert.equal(rules.version, 2);
+test('rules v3 publish one shared oval contract and the rejection code list', () => {
+  assert.equal(rules.version, 3);
   assert.equal(rules.zoneShape, 'oval');
+  // New metric-space contract (used by 11_input_geometry):
+  assert.equal(rules.ovalSideReachM, 0.12);
+  assert.equal(rules.ovalBackReachM, 0.06);
+  assert.equal(rules.ovalFwdBaseM, 0.10);
+  assert.equal(rules.ovalFwdMaxM, 0.34);
+  // Legacy pixel contract preserved for HUD/telemetry fallback:
   assert.equal(rules.ovalLeadSec, .16); assert.equal(rules.ovalForwardPx, 24);
   assert.equal(rules.ovalForwardMaxPx, 120); assert.equal(rules.ovalMinSpeedPx, 8);
   assert.equal(rules.ovalFullSpeedPx, 120);
   assert.equal(rules.ovalBackPx, 18); assert.equal(rules.ovalSideMousePx, 44);
   assert.equal(rules.ovalSideTouchPx, 60); assert.equal(rules.serveTossMinRise, .16);
+  // Reachable volume (must match PADDLE_PLANE in 11_input_geometry):
+  assert.equal(rules.paddleHalfWidth, 1.02);
+  assert.equal(rules.paddleZHome, 1.78);
+  assert.equal(rules.paddleZStepIn, 0.62);
+  assert.equal(rules.paddleZFar, 2.55);
   assert.deepEqual([...lib.PRESS_REJECTION_REASONS], ['OUTSIDE_ZONE', 'NO_FRESH_SWIPE', 'STATIC_CLICK',
     'DEPTH_FAIL', 'TIMING_LATE', 'TIMING_EARLY', 'CONSUMED', 'SERVE_TOSS_LOW', 'WRONG_DIRECTION', 'BOUNCE_ILLEGAL']);
 });
@@ -270,7 +281,7 @@ test('input log ring keeps only the last 30 seconds and round-trips as JSONL', (
   for (let t = 0; t <= 40; t += .5) log.record({ type: 'frame', t, frame: t * 2 });
   const events = log.events(40);
   assert.ok(events.every(e => e.t >= 10));
-  assert.equal(events[0].schema, 1); assert.equal(events[0].rulesVersion, 2);
+  assert.equal(events[0].schema, 1); assert.equal(events[0].rulesVersion, 3);
   const parsed = log.toJSONL(40).trim().split('\n').map(line => JSON.parse(line));
   assert.equal(parsed.length, events.length);
   assert.ok(log.stats(40).inWindow === events.length);

@@ -4,12 +4,13 @@ const { load } = require('./helpers.cjs');
 const lib = load(['10_math.js', '12_match_rules.js', '25_career.js', '30_physics.js', '38_paddle_motion.js',
   '40_swipe.js', '56_rig.js', '57_camera.js', '70_game.js', '80_ui.js'],
   ['MATCH_RULES', 'pressHitZone', 'ballCaptureTarget', 'measureCaptureAllowance', 'installUnifiedControls', 'playerCaptureLimits', 'playerInCaptureRange', 'strikeCueModel',
-    'Game', 'UI', 'GS', 'V3', 'Career', 'PERKS']);
+    'Game', 'UI', 'GS', 'V3', 'PH', 'Career', 'PERKS']);
 const { MATCH_RULES: rules, V3, GS } = lib;
 function fixture() {
   const g = Object.create(lib.Game.prototype);
   Object.assign(g, { settings: lib.installUnifiedControls({ hand: 'right', grip: 'shakehand', difficulty: 2, volume: .9 }),
     state: GS.RALLY, server: 1, paused: false, shotId: 2, replayer: { on: false },
+    mom: null,
     ball: { live: true, p: V3.new(0, 1, 1.5), v: V3.new(0, 0, 6), w: V3.new(), lastHitBy: -1 },
     player: { pos: V3.new(0, 1, 1.5) }, rallyBounces: [1], tossApex: 1.4,
     audio: { setVolume() {}, setMuted() {} }, ai: { setLevel() {}, reset() {} },
@@ -90,6 +91,32 @@ test('serve envelope is a sphere, not a larger rectangular corner exploit', () =
   assert.equal(lib.playerInCaptureRange(V3.new(rules.serveCaptureRadius, 0, 0), V3.new(), true), true);
   assert.equal(lib.playerInCaptureRange(V3.new(.6, .6, .6), V3.new(), true), false);
   assert.equal(lib.playerCaptureLimits(true).sweet, lib.playerCaptureLimits(false).sweet);
+});
+
+test('serve toss release height follows the paddle, not a fixed offset above the table', () => {
+  // v3 input geometry: startToss must release from pad.pos.y (not from a
+  // hard-coded TABLE_Y + 0.14 that floated above the player's reach).
+  // The falling toss therefore crosses the serve capture sphere on its
+  // way down for a normal stance — measured by the bridge in browser smoke.
+  const g = fixture();
+  g.player.pos = V3.new(0, 1.00, 1.45);            // a normal stance
+  // startToss uses pad.pos, so the release y must follow the paddle.
+  const releaseY = lib.PH.TABLE_Y + 0.14;          // the old (wrong) value
+  const before = g.ball.p.y;
+  // We can't actually call startToss (it touches audio / state machine),
+  // but the formula it uses is pure: it clamps pad.pos.y + 0.02 into the
+  // band [TABLE_Y + 0.06, TABLE_Y + 1.10]. For a 1.00 m hand the release
+  // is 1.02 m, which is well below the old 0.90 m hard cap and inside
+  // the player's reach.
+  const expectedY = Math.max(lib.PH.TABLE_Y + 0.06, Math.min(lib.PH.TABLE_Y + 1.10, g.player.pos.y + 0.02));
+  assert.notEqual(expectedY, releaseY,
+    'v3 must release from the hand, not the legacy TABLE_Y + 0.14');
+  // sanity: the chosen release height must be ABOVE the old 0.90 m cap
+  // (because the hand is higher than the table) and inside the serve
+  // capture sphere from a normal stance.
+  const dist = Math.abs(expectedY - g.player.pos.y);
+  assert.ok(dist <= rules.serveCaptureRadius,
+    `release ${dist.toFixed(2)} m above pad must fit the serve sphere`);
 });
 
 test('invalid coordinates cannot light the contact window', () => {

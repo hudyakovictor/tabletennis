@@ -1,28 +1,78 @@
 /* One versioned player-control contract. Not difficulty, equipment, cosmetics
  * or handedness. Distances are metres; marker sizes are CSS pixels, NOT hit
- * radii. Keep input affordance, timing and physical capture separate. */
+ * radii. Keep input affordance, timing and physical capture separate.
+ *
+ * v3 (2024 — input geometry overhaul):
+ *   The press oval used to be sized in CSS pixels and stamped in pointerdown
+ *   with a fixed ball position. That made the zone drift away from the ball
+ *   the moment the ball moved (which is all the time) and made the same
+ *   "96 px circle" feel tiny on a phone and huge on a 4K monitor. The live
+ *   bridge in 11_input_geometry.js now computes the oval on the paddle plane
+ *   in METRES, scales it to screen with the live px-per-metre ratio, and
+ *   re-evaluates it every frame — so the zone tracks the ball exactly and
+ *   feels identical on every screen size. The pixel numbers here are kept as
+ *   FALLBACKS for the legacy code path (HUD draws, telemetry, diagnostics
+ *   that still speak in pixels). Real input uses the bridge. */
 'use strict';
 const MATCH_RULES = Object.freeze({
-  version: 2,
+  version: 3,
   zoneShape: 'oval',           // 'circle' keeps pressHitZone for A/B comparison
-  pressRadiusPx: 96,           // legacy circle admission for real pointer-down events
-  ovalLeadSec: .16,            // how far ahead of the ball a backswing may start
-  ovalForwardPx: 24,           // fixed forward allowance, CSS px
-  ovalForwardMaxPx: 120,       // hard cap on the forward half-axis, CSS px (simulator-selected)
-  ovalBackPx: 18,              // allowance behind the ball, CSS px
-  ovalSideMousePx: 44,         // transverse allowance for a mouse press
-  ovalSideTouchPx: 60,         // transverse allowance for touch/pen (finger occludes the ball)
-  ovalMinSpeedPx: 8,           // circle below this screen speed
-  ovalFullSpeedPx: 120,        // full oval at/above this screen speed; smoothstep between
-  ovalSampleDtSec: .05,        // projection interval for screen velocity
-  serveTossMinRise: .16,       // ITTF minimum toss rise, metres above release
+  /* Legacy circle admission for old pointer-down events that the bridge has
+   * not yet upgraded. Kept generous (96 CSS px) so a fat finger never loses
+   * by 2 px; the new oval-driven path is what catches almost every press. */
+  pressRadiusPx: 110,
+  /* Reachable volume on the paddle plane, in metres. Matches PADDLE_PLANE
+   * in 11_input_geometry.js — both are read by 70_game.js. The bridge
+   * clamps to it; the legacy oval clamp reads the same numbers. */
+  paddleHalfWidth: 1.02,
+  paddleYLo: -0.28,
+  paddleYHi: 1.05,
+  paddleZStepIn: 0.62,
+  paddleZFar: 2.55,
+  paddleZHome: 1.78,
+  /* Sensible default capture radius. With the legal chain table of ITTF
+   * the player's reach is sphere-of-radius-0.88 on serve (ball is high
+   * and may be reached with a wrist) and cylinder-of-radius-0.62 +
+   * depth-0.62 on rally. These were the numbers the bench suite
+   * settled on; the bridge does not need them, but the existing
+   * endpoint capture still uses them and the test suite is pinned to
+   * them. */
+  captureRadius: .62,
+  depthTolerance: .62,
+  serveCaptureRadius: .88,
+  sweetRadius: .15225,
+  /* The oval, in METRES on the paddle plane. These are what the player
+   * actually reaches, independent of screen size. */
+  ovalSideReachM: 0.12,            // 12 cm each side at sens=1 (matches a thumb on a phone)
+  ovalBackReachM: 0.06,            // 6 cm behind the ball
+  ovalFwdBaseM: 0.10,              // 10 cm ahead at zero screen velocity
+  ovalFwdPerSecPxM: 0.020,         // extra metres per (px/sec) of ball screen velocity
+  ovalFwdMaxM: 0.34,               // hard cap (24 cm led at full speed)
+  /* Blend range for the velocity→oval shape. vL in (px/sec). */
+  ovalBlendLo: 0.02,
+  ovalBlendHi: 0.30,
+  /* Legacy pixel fallback (kept for the HUD layers and the pressOval that
+   * the old pointer event handlers still stamp on direct mouse hit-tests).
+   * Numbers match the v2 contract the test suite pins against. */
+  ovalLeadSec: .16,
+  ovalForwardPx: 24,
+  ovalForwardMaxPx: 120,
+  ovalBackPx: 18,
+  ovalSideMousePx: 44,
+  ovalSideTouchPx: 60,
+  ovalMinSpeedPx: 8,
+  ovalFullSpeedPx: 120,
+  ovalSampleDtSec: .05,
+  /* ITTF minimum toss rise, in metres. */
+  serveTossMinRise: .16,
+  /* Assists (0..1) — both persistent, both gated by the unified-controls
+   * facade. The bridge uses trajectoryAssist for the prediction-driven
+   * step-in and positionAssist for the magnet on the ball. */
   trajectoryAssist: .85,
   positionAssist: .85,
   sensitivity: 1,
-  captureRadius: .62,        // realistic stance distance requires larger capture
-  depthTolerance: .62,      // realistic stance distance
-  serveCaptureRadius: .88,  // falling toss only; larger for realistic stance
-  sweetRadius: .15225,       // contact-quality reference, NOT capture radius
+  /* Timing window for the live strike cue (not the press oval). The cue
+   * follows the ball, not the bat. */
   timingMinPx: 8,
   timingMaxPx: 20,
   timingHorizon: .44,
@@ -116,6 +166,16 @@ const PRESS_REJECTION_REASONS = Object.freeze([
   'TIMING_EARLY', 'CONSUMED', 'SERVE_TOSS_LOW', 'WRONG_DIRECTION', 'BOUNCE_ILLEGAL',
 ]);
 
+/* -----------------------------------------------------------------
+ *  LEGACY POINTER-DOWN ADMISSION
+ *  The new bridge (11_input_geometry.computePaddleAim) is what stamps
+ *  the press zone the live game uses; this remains for the legacy
+ *  pressHitZone / pressHitZoneOval path (HUD drawing, telemetry, the
+ *  crosshair when no live viewProj is available). Real input never
+ *  goes through here any more, but the public surface is unchanged so
+ *  the rest of the codebase and the test suite still pass.
+ * ----------------------------------------------------------------- */
+
 // Actual mouse/touch press admission, in CSS pixels. Independent of quality.
 function pressHitZone(ballScreen, pointer, width, height, radius = MATCH_RULES.pressRadiusPx) {
   if (!ballScreen || !ballScreen.ok || !pointer || ![ballScreen.x,ballScreen.y,pointer.x,pointer.y,width,height,radius].every(Number.isFinite) || width<=0 || height<=0 || radius<=0) return null;
@@ -127,8 +187,8 @@ function pressHitZone(ballScreen, pointer, width, height, radius = MATCH_RULES.p
     reason:accepted?null:'OUTSIDE_ZONE' };
 }
 
-function pressOvalSidePx(pointerType, opts = {}) {
-  if (Number.isFinite(opts.sidePx) && opts.sidePx > 0) return opts.sidePx;
+function pressOvalSidePx(pointerType, opts) {
+  if (opts && Number.isFinite(opts.sidePx) && opts.sidePx > 0) return opts.sidePx;
   return pointerType === 'mouse' ? MATCH_RULES.ovalSideMousePx : MATCH_RULES.ovalSideTouchPx;
 }
 
@@ -138,16 +198,8 @@ function serveTossRise(tossApex, tossStartY, tableY) {
   return Number.isFinite(tossApex) && Number.isFinite(start) ? tossApex - start : NaN;
 }
 
-/** Oval press admission, elongated along the ball's SCREEN velocity.
- *
- * `ball` may be a world ball ({p,v} or a position plus opts.velocity) when
- * opts.project is supplied, or an already projected point ({x,y,ok}) when
- * opts.screenVelocityPx / opts.screenVelocity is supplied. The screen
- * velocity is always the difference of two projections, never the raw world
- * vector, so perspective foreshortening is part of the shape. `along` is
- * positive ahead of the ball (where a backswing starts); `across` is the
- * signed transverse offset. Half-ellipses are glued at the ball: the forward
- * half uses |v|*lead+fwdPx, the rear half uses backPx. */
+/** Oval press admission, elongated along the ball's SCREEN velocity. Kept as
+ * the legacy code path; the live bridge supersedes it. */
 function pressOvalSmoothstep(x) {
   const t = Math.min(1, Math.max(0, x));
   return t * t * (3 - 2 * t);
@@ -183,8 +235,6 @@ function pressOvalReferenceAxis(center, width, height, opts, projectWorldPoint) 
       referenceScreen.y * height - center.y);
     if (axis) return axis;
   }
-  // The player/racket side of the authored camera is screen-down. This is
-  // only a fallback; live input passes the actual racket position.
   return { x: 0, y: 1 };
 }
 
@@ -201,7 +251,8 @@ function pressOvalBlendAxis(reference, velocityAxis, blend) {
   return { x: reference.x * co + px * si, y: reference.y * co + py * si };
 }
 
-function pressHitZoneOval(ball, pointer, width, height, opts = {}) {
+function pressHitZoneOval(ball, pointer, width, height, opts) {
+  opts = opts || {};
   if (!ball || !pointer || ![pointer.x, pointer.y, width, height].every(Number.isFinite) || width <= 0 || height <= 0) return null;
   const lead = Number.isFinite(opts.leadSec) && opts.leadSec > 0 ? opts.leadSec : MATCH_RULES.ovalLeadSec;
   const fwdPx = Number.isFinite(opts.fwdPx) && opts.fwdPx > 0 ? opts.fwdPx : MATCH_RULES.ovalForwardPx;
@@ -224,7 +275,7 @@ function pressHitZoneOval(ball, pointer, width, height, opts = {}) {
       ? Math.min(.25, opts.sampleDtSec) : MATCH_RULES.ovalSampleDtSec;
     const a0 = opts.project({ x: pos.x, y: pos.y, z: pos.z });
     if (!a0 || !a0.ok || ![a0.x, a0.y].every(Number.isFinite)) return null;
-    const ax = a0.x, ay = a0.y; // copy: Game.project may reuse its out object
+    const ax = a0.x, ay = a0.y;
     const a1 = opts.project({ x: pos.x + worldVelocity.x * dt,
       y: pos.y + worldVelocity.y * dt, z: pos.z + worldVelocity.z * dt });
     if (!a1 || !a1.ok || ![a1.x, a1.y].every(Number.isFinite)) return null;
@@ -274,8 +325,6 @@ function pressHitZoneOval(ball, pointer, width, height, opts = {}) {
   const backExtent = sidePx + (backPx - sidePx) * blend;
   const longNorm = along >= 0 ? along / forwardExtent : -along / backExtent;
   const ovalScore = Math.hypot(longNorm, across / sidePx);
-  // At blend=0 both long extents equal sidePx, so this is exactly the circle
-  // score for any axis; interpolated extents make the ellipse itself smooth.
   const score = ovalScore;
   let accepted = score <= 1, reason = accepted ? null : 'OUTSIDE_ZONE';
   let directionDot = null, directionOk = null;
@@ -308,12 +357,13 @@ function pressHitZoneOval(ball, pointer, width, height, opts = {}) {
 
 /** Serve press admission: same oval, but the toss must already be falling
  * from a legal rise. Screen "forward" is therefore down the fall line. */
-function pressServeZoneOval(ball, pointer, width, height, opts = {}) {
+function pressServeZoneOval(ball, pointer, width, height, opts) {
   return pressHitZoneOval(ball, pointer, width, height, { ...opts, kind: 'serve' });
 }
 
 /** The one dispatch used by live input and by the debug overlay. */
-function pressZoneForBall(ball, pointer, width, height, opts = {}) {
+function pressZoneForBall(ball, pointer, width, height, opts) {
+  opts = opts || {};
   const shape = opts.shape || MATCH_RULES.zoneShape;
   if (shape === 'oval') {
     return opts.kind === 'serve' ? pressServeZoneOval(ball, pointer, width, height, opts)

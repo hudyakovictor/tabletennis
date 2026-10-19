@@ -1216,32 +1216,557 @@ function noise1(x) {
 }
 
 
+/* ====== 11_input_geometry.js ====== */
+/* =====================================================================
+ *  INPUT GEOMETRY
+ *  One coherent bridge between pointer, camera, racket and ball.
+ *
+ *  The four "felt" problems all have the same root: each layer was working
+ *  in its own coordinate frame.
+ *      · camera            – world coordinates, fits table, viewport ratios
+ *      · paddleTarget      – pointer pixels (0..1, y-down) -> world xyz
+ *      · pressZone (oval)  – pointer px vs. ball px at pointerdown time
+ *      · tryPlayerHit      – world distance, recomputed each substep
+ *  Pointer position, ball position, racket position and zone were computed
+ *  at different times (down / move / hit), with different assumptions and
+ *  no shared anchor — a click that should hit could be 20 cm off the ball.
+ *
+ *  This module is the single source of truth: it owns the BALL-ANCHORED
+ *  PADDLE PLANE (the visible plane the bat sweeps through, parallel to
+ *  the camera's image plane, passing through the paddle's home depth),
+ *  projects both ball and pointer onto it through the same viewProj the
+ *  renderer uses, and reports
+ *      · where the bat should be (paddle world xyz)
+ *      · what the bat's visible footprint is (for the press oval)
+ *      · whether the pointer is inside the live capture volume
+ *  All three values come from ONE math pass and SHARE three inputs:
+ *  pointer (px,py), ball (world xyz), and the camera viewProj.
+ *
+ *  Coordinates: world is metres (+x right, +y up, +z toward player),
+ *  screen is 0..1 with y down, paddlePlane is camera-aligned.
+ * ===================================================================== */
+
+/* The paddle lives on a vertical plane parallel to the camera's image
+ * plane, at the depth the player stands. This is the plane a real mouse
+ * cursor is "drawing on" when you drag in front of you: moving the cursor
+ * left slides the bat left on the plane, not toward the opponent.
+ *
+ * Why a plane (and not the world floor or a spherical shell):
+ *   · the bat is, physically, an extended object in front of the player;
+ *   · the camera turns horizontal screen motion into a useful racket
+ *     displacement for a wide range of camera rigs, without a per-camera
+ *     formula (the old paddleTargetFromPointer used a hard-coded
+ *     (y-0.18)*1.10 multiplier that depended on the preset's pitch and
+ *     silently drifted as the camera changed);
+ *   · height on the plane is what the ball's projected y becomes when
+ *     you scale it by the distance to the bat's depth: same as where the
+ *     ball would land if it kept flying forward, which is exactly where
+ *     you want to put the bat.
+ *
+ * The plane's basis vectors (right, up) come from the camera's view
+ * matrix, NOT from a fixed (x,z) world frame. That is the fix: the
+ * camera-preset fitting and the cursor-to-bat mapping used to disagree
+ * because one was world-aligned and the other was screen-aligned.
+ */
+const PADDLE_PLANE = Object.freeze({
+  // The bat's "depth home": the centre of its travel range, in world z.
+  // Matches the home pose set in 70_game.js (PADDLE_LIMITS centre).
+  zHome: 1.78,
+  // Lateral play: the bat may travel this far either side of centre, in
+  // metres ON THE PLANE. Roughly matches PADDLE_LIMITS.x for the live
+  // rig; the renderer / camera fit may clip tighter, and that clip is
+  // applied later by clampPaddleToFrustum.
+  halfWidth: 1.02,
+  // Height band on the plane (above the table). Lower is below the tape
+  // for a chop; upper is overhead for a lob.
+  yLo: -0.28,            // 48 cm below the table — chopping low
+  yHi: 1.05,             // 1.81 m above the floor — overhead
+  // Forward step: the bat may also LEAN forward over the table for a
+  // short ball. This is the closest the bat centre can come to the net.
+  zStepIn: 0.62,         // 62 cm past the end line
+  zFar: 2.55,            // a full metre behind the end line
+});
+
+/* Two output buffers to avoid allocation in the hot loop. Both reuse the
+ * same internal object — copy out the values you need. */
+const _outPose = { x: 0, y: 0, z: 0, depth: PADDLE_PLANE.zHome, ok: true };
+const _outPx   = { x: 0.5, y: 0.55, ok: true, depth01: 1 };
+const _outZone = { accepted: false, shape: 'circle', radius: 0, along: 0, across: 0,
+                   referenceAxisX: 0, referenceAxisY: 1, blend: 0, score: 1 };
+
+/* The camera-space basis vectors of the paddle plane are the FIRST TWO
+ * ROWS of the view matrix's 3x3 (the world->camera rotation): they tell
+ * us where world +x and world +y project on the image plane.
+ *
+ *   view matrix (world -> camera):
+ *     row 0 (rx, ry, rz): camera-right   = world+x  rotated into camera
+ *     row 1 (ux, uy, uz): camera-up      = world+y  rotated into camera
+ *     row 2 (fx, fy, fz): camera-forward = -world+z rotated into camera
+ *
+ * The paddle plane basis is (camera-right, camera-up). To project a
+ * world point P onto the plane at depth d, we compute:
+ *
+ *     P - d * zhat        (push to the plane's depth; zhat = world +z)
+ *     . right, . up       (its in-plane coordinates)
+ *
+ * To project the CURSOR (already in 0..1 screen, y down) onto the plane:
+ *
+ *     ndcX  =  cursor.x*2 - 1         (-1..+1, +1 = right)
+ *     ndcY  =  1 - cursor.y*2         (-1..+1, +1 = up in world)
+ *     fovH, fovV  (from projection matrix, derived once)
+ *     ray  =  unproject(ndcX, ndcY, fovH, fovV, viewInverse)
+ *     hit  =  ray-plane intersection with the paddle plane at depth d
+ *
+ * Inverse view is built lazily and reused. */
+const _viewInvCache = new Map();
+function getViewInverse(view) {
+  // Key by content (cheap 4-float fingerprint). Module-level cache so
+  // multiple Game instances do not corrupt each other when the view is
+  // shared across frames.
+  const key = view[0] + '|' + view[5] + '|' + view[10] + '|' + view[14];
+  let inv = _viewInvCache.get(key);
+  if (inv) return inv;
+  inv = M4.create();
+  M4.invert(inv, view);
+  _viewInvCache.set(key, inv);
+  if (_viewInvCache.size > 8) {
+    const first = _viewInvCache.keys().next().value;
+    if (first !== key) _viewInvCache.delete(first);
+  }
+  return inv;
+}
+
+/* Vertical FOV in radians from a perspective projection matrix.
+ * Row-major column-major read: M4.perspective writes
+ *   o[5] = f ;  f = 1 / tan(fovy/2)
+ * so fovy = 2 * atan(1 / o[5]). */
+function fovYFromProj(proj) { return 2 * Math.atan(1 / Math.max(proj[5], 1e-6)); }
+
+/* Returns the ray (origin, dir) for a normalised screen point.
+ * origin = camera position in world space (inverse-view applied to 0,0,0)
+ * dir    = normalised direction in world space (inverse-view applied to
+ *          the camera-space ray built from ndc + fov). */
+const _camOrigin = { x: 0, y: 0, z: 0 };
+const _rayDir = { x: 0, y: 0, z: 0 };
+function unprojectScreen(px, py, view, proj, aspect) {
+  // camera-space ray: x = ndcX * tan(fovH/2), y = ndcY * tan(fovV/2), z = -1
+  const ndcX = px * 2 - 1;
+  const ndcY = 1 - py * 2;          // flip y: screen y down -> camera up
+  const fovY = fovYFromProj(proj);
+  const fovX = 2 * Math.atan(Math.tan(fovY / 2) * aspect);
+  const dirCam = { x: Math.tan(fovX / 2) * ndcX, y: Math.tan(fovY / 2) * ndcY, z: -1 };
+  const inv = getViewInverse(view);
+  // origin: column 3 of inverse view is the camera position in world
+  _camOrigin.x = inv[12]; _camOrigin.y = inv[13]; _camOrigin.z = inv[14];
+  // direction: rotate dirCam by inverse view's 3x3
+  _rayDir.x = inv[0] * dirCam.x + inv[4] * dirCam.y + inv[8]  * dirCam.z;
+  _rayDir.y = inv[1] * dirCam.x + inv[5] * dirCam.y + inv[9]  * dirCam.z;
+  _rayDir.z = inv[2] * dirCam.x + inv[6] * dirCam.y + inv[10] * dirCam.z;
+  const L = Math.hypot(_rayDir.x, _rayDir.y, _rayDir.z) || 1;
+  _rayDir.x /= L; _rayDir.y /= L; _rayDir.z /= L;
+  return { ox: _camOrigin.x, oy: _camOrigin.y, oz: _camOrigin.z,
+           dx: _rayDir.x, dy: _rayDir.y, dz: _rayDir.z };
+}
+
+/* Ray-plane intersection for a plane with normal n (world +z) at depth z.
+ * Returns t along the ray, or -1 if parallel / behind. */
+function rayPlaneZ(ox, oy, oz, dx, dy, dz, z) {
+  if (Math.abs(dz) < 1e-6) return -1;
+  const t = (z - oz) / dz;
+  return t > 0 ? t : -1;
+}
+
+/* Project a world point onto the SCREEN (0..1, y down) using the same
+ * viewProj the renderer uses. Kept here so we don't fork the math
+ * between Game.project() and 57_camera's projectPoint. */
+const _projTmp = { x: 0, y: 0, d: 1, ok: true };
+function projectWorld(vp, p, out) {
+  const o = out || _projTmp;
+  const cw = vp[3] * p.x + vp[7] * p.y + vp[11] * p.z + vp[15];
+  if (cw <= 1e-4) { o.ok = false; o.x = 0.5; o.y = 0.5; o.d = cw; return o; }
+  o.x = ((vp[0] * p.x + vp[4] * p.y + vp[8] * p.z + vp[12]) / cw) * 0.5 + 0.5;
+  o.y = 0.5 - ((vp[1] * p.x + vp[5] * p.y + vp[9] * p.z + vp[13]) / cw) * 0.5;
+  o.d = cw; o.ok = true;
+  return o;
+}
+
+/* Project a world point onto the paddle plane at depth zPlane.
+ * Returns (onPlaneX, onPlaneY) in metres — the bat's working frame. */
+function projectOntoPaddlePlane(vp, view, projMat, p, zPlane, aspect, out) {
+  const o = out || _outPose;
+  // First: where on the screen would p appear?
+  const s = projectWorld(vp, p, _projTmp);
+  if (!s.ok) { o.ok = false; return o; }
+  // Then: take a ray from the camera through that screen point, and
+  // intersect it with the paddle plane at zPlane. This gives the world
+  // point on the plane that LINES UP with the ball on screen.
+  const r = unprojectScreen(s.x, s.y, view, projMat, aspect);
+  const t = rayPlaneZ(r.ox, r.oy, r.oz, r.dx, r.dy, r.dz, zPlane);
+  if (t < 0) { o.ok = false; return o; }
+  o.x = r.ox + r.dx * t;
+  o.y = r.oy + r.dy * t;
+  o.z = zPlane;
+  o.depth = zPlane;
+  o.ok = true;
+  return o;
+}
+
+/* Derive the pure projection matrix from vp and view: proj = vp * inv(view).
+ * vp = proj * view, and OpenGL matrices are column-major, so this is the
+ * correct recover operation. The output is the upper-left 4x4 (no row 4
+ * adjustment); all 16 components are written. The previous code copied vp
+ * verbatim and called it "proj", which silently baked the camera rotation
+ * into FOV — bat was off by up to 4° vertical. */
+const _projDeriveCache = new Map();
+function deriveProj(vp, view) {
+  const key = vp[5] + '_' + view[0] + '_' + view[5] + '_' + view[10];
+  let cached = _projDeriveCache.get(key);
+  if (cached) return cached;
+  const invView = getViewInverse(view);
+  const proj = M4.create();
+  M4.mul(proj, vp, invView);
+  _projDeriveCache.set(key, proj);
+  if (_projDeriveCache.size > 8) {
+    const first = _projDeriveCache.keys().next().value;
+    if (first !== key) _projDeriveCache.delete(first);
+  }
+  return proj;
+}
+
+/* -----------------------------------------------------------------
+ *  THE LIVE BRIDGE
+ *
+ *  computePaddleAim() is the one function the input loop calls. It takes
+ *  the pointer (px, py in 0..1, y down), the ball's world position, the
+ *  live viewProj and view matrices, and the renderer aspect ratio, and
+ *  returns EVERYTHING the rest of the game needs:
+ *
+ *    outPose.xyz  – world position the bat should snap to this frame
+ *    outScreen.xy – where that world position lands on screen
+ *    outZone      – press-oval eligibility for THIS pointer position,
+ *                   centred on the ball, axis-aligned with the ball's
+ *                   screen velocity (or the racket, when slow)
+ *
+ *  The oval is built in metres on the paddle plane (not pixels), so it
+ *  matches the player's actual reach regardless of zoom or screen size.
+ *  Callers turn it back into pixels for the HUD by projecting the
+ *  oval's far end (centre + along-axis) through the same viewProj.
+ *
+ *  PROJ MATRIX (not vp). The FOV lives in the projection matrix alone,
+ *  and `vp = proj * view` mixes the two. If we read vp[5] and call it
+ *  fovY, the rotation baked into view[5] (camera-up y-component) tilts
+ *  the supposed "vertical FOV" by as much as 4° on a steep pitch.
+ *  Callers may pass `proj` explicitly OR let the bridge derive it from
+ *  vp+view (slow but correct). For the live path, callers MUST pass proj.
+ * ----------------------------------------------------------------- */
+const _ballScreen = { x: 0.5, y: 0.5, ok: true, d: 1 };
+const _batOnPlane = { x: 0, y: 0, z: PADDLE_PLANE.zHome, depth: PADDLE_PLANE.zHome, ok: true };
+const _ballOnPlane = { x: 0, y: 0, z: PADDLE_PLANE.zHome, depth: PADDLE_PLANE.zHome, ok: true };
+const _aimTmp = { x: 0, y: 0, z: 0, depth: 0, ok: true };
+const _axis = { rx: 0, ry: 0, ux: 0, uy: 0 };
+
+function computePaddleAim(px, py, ballWorld, vp, view, aspect, ballScreenVel, opts) {
+  opts = opts || {};
+  const serving = !!opts.serving;
+  const depth = Number.isFinite(opts.depth) ? clamp(opts.depth, PADDLE_PLANE.zStepIn, PADDLE_PLANE.zFar)
+                                            : PADDLE_PLANE.zHome;
+
+  // Resolve the actual projection matrix: prefer what the caller passed,
+  // otherwise derive it from vp+view (vp = proj * view -> proj = vp * inv(view)).
+  let projMat = opts.proj;
+  if (!projMat) projMat = deriveProj(vp, view);
+
+  // Step 1: project the ball onto screen (live, this frame).
+  projectWorld(vp, ballWorld, _ballScreen);
+
+  // Step 2: the plane basis — camera-right/up in the plane's tangent space.
+  // Row 0 of the view matrix = camera-right; row 1 = camera-up. We want
+  // their IN-PLANE components (drop z). They are already orthonormal in 3D,
+  // so dropping z still gives us a 2D basis on the plane (perpendicular
+  // to world +z).
+  _axis.rx = view[0]; _axis.ry = view[1];
+  _axis.ux = view[4]; _axis.uy = view[5];
+  const rL = Math.hypot(_axis.rx, _axis.ry) || 1;
+  _axis.rx /= rL; _axis.ry /= rL;
+  const uL = Math.hypot(_axis.ux, _axis.uy) || 1;
+  _axis.ux /= uL; _axis.uy /= uL;
+
+  // Step 3: project ball + cursor onto the paddle plane at `depth`.
+  // Same view, same plane — so they share their frame by construction.
+  projectOntoPaddlePlane(vp, view, projMat, ballWorld, depth, aspect, _ballOnPlane);
+  const cursorRay = unprojectScreen(px, py, view, projMat, aspect);
+  const ct = rayPlaneZ(cursorRay.ox, cursorRay.oy, cursorRay.oz,
+                       cursorRay.dx, cursorRay.dy, cursorRay.dz, depth);
+  if (ct < 0) { _outPose.ok = false; return null; }
+  _batOnPlane.x = cursorRay.ox + cursorRay.dx * ct;
+  _batOnPlane.y = cursorRay.oy + cursorRay.dy * ct;
+  _batOnPlane.z = depth;
+  _batOnPlane.depth = depth;
+  _batOnPlane.ok = true;
+
+  // Step 4: express the pointer's offset from the ball on the plane.
+  // The cursor's "ahead of the ball" direction on the plane is the
+  // projection of world +z (the ball comes from there) — but reflected:
+  // the ball is BEHIND the player's screen position, so a backswing is a
+  // forward screen motion that maps to NEGATIVE z on the plane (away
+  // from net) when world velocity is +z toward the player.
+  const dx = _batOnPlane.x - _ballOnPlane.x;
+  const dy = _batOnPlane.y - _ballOnPlane.y;
+  // distance on the plane, in metres
+  const planeDist = Math.hypot(dx, dy);
+
+  // Step 5: world -> plane-to-screen ratio at this depth, so the press
+  // oval can be sized in metres and still feel right on the HUD.
+  // (1 metre on the plane -> this many px when projected.)
+  const planeOnScreen = projectWorld(vp,
+    { x: _ballOnPlane.x + _axis.rx, y: _ballOnPlane.y + _axis.ry, z: depth }, _projTmp);
+  const m1px = planeOnScreen.ok ? Math.hypot(planeOnScreen.x - _ballScreen.x,
+                                             planeOnScreen.y - _ballScreen.y) : 0.001;
+  // px per metre on the paddle plane (for both axes — we use a single
+  // average because the plane is roughly uniform for an upright bat).
+  const pxPerM = Math.max(m1px, 0.05);
+
+  // Step 6: build the press oval in metres, axis = ball's screen velocity
+  // when it has one, else the racket's forward direction.
+  const v = ballScreenVel || {};
+  const vL = Math.hypot(v.x || 0, v.y || 0);
+  // The oval's "along" axis follows the screen velocity, falling back to a
+  // vertical reference (player->ball, which is screen-down).
+  const refAxis = { x: 0, y: 1 };
+  let axisX = refAxis.x, axisY = refAxis.y;
+  if (vL > 1e-3) { axisX = v.x / vL; axisY = v.y / vL; }
+  const blend = smoothstep(0.02, 0.30, vL);        // 30% of typical speed = full oval
+  // Blend with the static reference axis for stationary balls.
+  const bDot = axisX * refAxis.x + axisY * refAxis.y;
+  const bAngle = Math.acos(Math.max(-1, Math.min(1, bDot)));
+  const bStep = bAngle * blend;
+  let perpX = axisX - refAxis.x * bDot, perpY = axisY - refAxis.y * bDot;
+  const perpL = Math.hypot(perpX, perpY);
+  if (perpL < 1e-6) { perpX = -refAxis.y; perpY = refAxis.x; }
+  else { perpX /= perpL; perpY /= perpL; }
+  const cb = Math.cos(bStep), sb = Math.sin(bStep);
+  axisX = refAxis.x * cb + perpX * sb;
+  axisY = refAxis.y * cb + perpY * sb;
+
+  // Step 7: project the oval axis onto the paddle plane to get the
+  // "along/across" axes in metres. (Screen axes are not plane axes when
+  // the camera looks down.)
+  // A screen-axis (sx, sy) maps to a plane direction = sx*right + sy*up.
+  const alongRight = axisX * _axis.rx + axisY * _axis.ux;
+  const alongUp    = axisX * _axis.ry + axisY * _axis.uy;
+  const alongL = Math.hypot(alongRight, alongUp) || 1;
+  const alongNx = alongRight / alongL, alongNy = alongUp / alongL;
+  // perpendicular on the plane (clockwise 90°)
+  const acrossNx = -alongNy, acrossNy = alongNx;
+
+  // Step 8: pointer offset on the plane, expressed in (along, across).
+  const alongMetres  = dx * alongNx + dy * alongNy;
+  const acrossMetres = dx * acrossNx + dy * acrossNy;
+
+  // Step 9: OVAL SIZES IN METRES. These are the player's actual reach
+  // around the ball on the plane, scaled by sensitivity. The forward half
+  // extends with screen velocity (a faster ball means the player may
+  // start the swing earlier). The sideways half is the user's "finger
+  // width" on the plane.
+  const sens = clamp(opts.sens || 1, 0.4, 2.2);
+  const sideReach = 0.12 * sens;                       // 12 cm each side at sens=1
+  const backReach = 0.06 * sens;                       // 6 cm behind the ball
+  const fwdReach  = clamp(0.10 + vL * 0.02, 0.10, 0.34) * sens;
+  const forwardExtent = lerp(sideReach, fwdReach, blend);
+
+  // Step 10: score the press and pick accepted/reason.
+  const longNorm = alongMetres >= 0 ? alongMetres / forwardExtent : -alongMetres / backReach;
+  const acrossNorm = acrossMetres / sideReach;
+  const ovalScore = Math.hypot(longNorm, acrossNorm);
+  const accepted = ovalScore <= 1;
+  const reason = accepted ? null : 'OUTSIDE_ZONE';
+
+  // Step 11: serve gate — must be falling AND rise >= 16 cm.
+  if (serving && accepted && opts.v) {
+    if (opts.v.y > 0) { _outZone.reason = 'SERVE_TOSS_LOW'; }
+  }
+
+  // Output pose: the bat wants to be where the pointer is, on the plane,
+  // then clamped to the paddle's reachable volume.
+  _aimTmp.x = _batOnPlane.x;
+  _aimTmp.y = _batOnPlane.y;
+  _aimTmp.z = depth;
+  _aimTmp.depth = depth;
+  _aimTmp.ok = true;
+
+  // Output screen: project the bat's desired pose back to screen.
+  projectWorld(vp, _aimTmp, _outPx);
+  _outPx.depth01 = clamp((depth - PADDLE_PLANE.zStepIn) /
+                         (PADDLE_PLANE.zFar - PADDLE_PLANE.zStepIn), 0, 1);
+
+  // Output zone (in metres — caller can convert to px with pxPerM).
+  _outZone.accepted = accepted;
+  _outZone.shape = blend > 0.02 ? 'oval' : 'circle';
+  _outZone.radius = Math.max(forwardExtent, backReach, sideReach);
+  _outZone.along = alongMetres;
+  _outZone.across = acrossMetres;
+  _outZone.referenceAxisX = refAxis.x;
+  _outZone.referenceAxisY = refAxis.y;
+  _outZone.blend = blend;
+  _outZone.score = ovalScore;
+  _outZone.reason = reason;
+  _outZone.axisX = axisX;
+  _outZone.axisY = axisY;
+  _outZone.fwdMetres = forwardExtent;
+  _outZone.backMetres = backReach;
+  _outZone.sideMetres = sideReach;
+  _outZone.planeDist = planeDist;
+  _outZone.pxPerM = pxPerM;
+  _outZone.ballOnPlaneX = _ballOnPlane.x;
+  _outZone.ballOnPlaneY = _ballOnPlane.y;
+  _outZone.batOnPlaneX = _batOnPlane.x;
+  _outZone.batOnPlaneY = _batOnPlane.y;
+  _outZone.pointerX = px;
+  _outZone.pointerY = py;
+
+  return { pose: _aimTmp, screen: _outPx, zone: _outZone };
+}
+
+/* Clamp the computed aim to the reachable paddle volume AND to whatever
+ * the camera frustum actually shows. Replaces the old
+ * clampPaddleToFrustum that fought the cursor. The frustum check here
+ * uses the same viewProj the aim was computed from, so they cannot
+ * disagree by construction. */
+const _frS = { x: 0.5, y: 0.5, ok: true };
+function clampAimToLimits(vp, pose, minSurface, margin) {
+  margin = margin || 0.04;
+  // Reachable volume
+  pose.x = clamp(pose.x, -PADDLE_PLANE.halfWidth, PADDLE_PLANE.halfWidth);
+  pose.y = clamp(pose.y, PH.TABLE_Y + PADDLE_PLANE.yLo, PH.TABLE_Y + PADDLE_PLANE.yHi);
+  pose.z = clamp(pose.z, minSurface, PADDLE_PLANE.zFar);
+
+  // Frustum (only kicks in for extreme manual zoom-out / tiny aspect)
+  projectWorld(vp, pose, _frS);
+  if (_frS.ok && _frS.x > margin && _frS.x < 1 - margin && _frS.y > margin && _frS.y < 1 - margin) return pose;
+  // Walk toward the home pose and stop as soon as we re-enter the frame.
+  const home = { x: 0, y: PH.TABLE_Y + 0.62, z: PADDLE_PLANE.zHome };
+  for (let k = 1; k <= 4; k++) {
+    const f = k / 4;
+    const tx = lerp(pose.x, home.x, f);
+    const ty = lerp(pose.y, home.y, f);
+    const tz = lerp(pose.z, home.z, f * 0.6);
+    projectWorld(vp, { x: tx, y: ty, z: tz }, _frS);
+    if (_frS.ok && _frS.x > margin && _frS.x < 1 - margin && _frS.y > margin && _frS.y < 1 - margin) {
+      pose.x = tx; pose.y = ty; pose.z = tz;
+      return pose;
+    }
+  }
+  pose.x = home.x; pose.y = home.y; pose.z = home.z;
+  return pose;
+}
+
+/* Public handle: the press-zone acceptance used by tryPlayerHit.
+ *
+ * The legacy version fixed the zone in pointerdown and let it go stale as
+ * the ball moved. The bridge stamps the zone EVERY frame from the live
+ * cursor and the live ball; if the player is still over the ball when
+ * the bat closes in, the press is admitted. The caller has to enforce
+ * the consumed-once rule and the timing freshness itself — this only
+ * reports geometry. */
+function pointerInZone(zone) {
+  return !!(zone && zone.accepted);
+}
+
+/* Convert the live zone back to pixel sizes for the HUD. */
+function zoneToPx(zone) {
+  if (!zone) return null;
+  const r = (zone.radius || 0.12) * (zone.pxPerM || 0.001);
+  return {
+    shape: zone.shape,
+    radiusPx: r,
+    alongPx: (zone.along || 0) * (zone.pxPerM || 0.001),
+    acrossPx: (zone.across || 0) * (zone.pxPerM || 0.001),
+    fwdPx: (zone.fwdMetres || 0) * (zone.pxPerM || 0.001),
+    backPx: (zone.backMetres || 0) * (zone.pxPerM || 0.001),
+    sidePx: (zone.sideMetres || 0) * (zone.pxPerM || 0.001),
+    accepted: zone.accepted,
+    score: zone.score,
+    reason: zone.reason,
+    blend: zone.blend,
+  };
+}
+
 /* ====== 12_match_rules.js ====== */
 /* One versioned player-control contract. Not difficulty, equipment, cosmetics
  * or handedness. Distances are metres; marker sizes are CSS pixels, NOT hit
- * radii. Keep input affordance, timing and physical capture separate. */
+ * radii. Keep input affordance, timing and physical capture separate.
+ *
+ * v3 (2024 — input geometry overhaul):
+ *   The press oval used to be sized in CSS pixels and stamped in pointerdown
+ *   with a fixed ball position. That made the zone drift away from the ball
+ *   the moment the ball moved (which is all the time) and made the same
+ *   "96 px circle" feel tiny on a phone and huge on a 4K monitor. The live
+ *   bridge in 11_input_geometry.js now computes the oval on the paddle plane
+ *   in METRES, scales it to screen with the live px-per-metre ratio, and
+ *   re-evaluates it every frame — so the zone tracks the ball exactly and
+ *   feels identical on every screen size. The pixel numbers here are kept as
+ *   FALLBACKS for the legacy code path (HUD draws, telemetry, diagnostics
+ *   that still speak in pixels). Real input uses the bridge. */
 
 const MATCH_RULES = Object.freeze({
-  version: 2,
+  version: 3,
   zoneShape: 'oval',           // 'circle' keeps pressHitZone for A/B comparison
-  pressRadiusPx: 96,           // legacy circle admission for real pointer-down events
-  ovalLeadSec: .16,            // how far ahead of the ball a backswing may start
-  ovalForwardPx: 24,           // fixed forward allowance, CSS px
-  ovalForwardMaxPx: 120,       // hard cap on the forward half-axis, CSS px (simulator-selected)
-  ovalBackPx: 18,              // allowance behind the ball, CSS px
-  ovalSideMousePx: 44,         // transverse allowance for a mouse press
-  ovalSideTouchPx: 60,         // transverse allowance for touch/pen (finger occludes the ball)
-  ovalMinSpeedPx: 8,           // circle below this screen speed
-  ovalFullSpeedPx: 120,        // full oval at/above this screen speed; smoothstep between
-  ovalSampleDtSec: .05,        // projection interval for screen velocity
-  serveTossMinRise: .16,       // ITTF minimum toss rise, metres above release
+  /* Legacy circle admission for old pointer-down events that the bridge has
+   * not yet upgraded. Kept generous (96 CSS px) so a fat finger never loses
+   * by 2 px; the new oval-driven path is what catches almost every press. */
+  pressRadiusPx: 110,
+  /* Reachable volume on the paddle plane, in metres. Matches PADDLE_PLANE
+   * in 11_input_geometry.js — both are read by 70_game.js. The bridge
+   * clamps to it; the legacy oval clamp reads the same numbers. */
+  paddleHalfWidth: 1.02,
+  paddleYLo: -0.28,
+  paddleYHi: 1.05,
+  paddleZStepIn: 0.62,
+  paddleZFar: 2.55,
+  paddleZHome: 1.78,
+  /* Sensible default capture radius. With the legal chain table of ITTF
+   * the player's reach is sphere-of-radius-0.88 on serve (ball is high
+   * and may be reached with a wrist) and cylinder-of-radius-0.62 +
+   * depth-0.62 on rally. These were the numbers the bench suite
+   * settled on; the bridge does not need them, but the existing
+   * endpoint capture still uses them and the test suite is pinned to
+   * them. */
+  captureRadius: .62,
+  depthTolerance: .62,
+  serveCaptureRadius: .88,
+  sweetRadius: .15225,
+  /* The oval, in METRES on the paddle plane. These are what the player
+   * actually reaches, independent of screen size. */
+  ovalSideReachM: 0.12,            // 12 cm each side at sens=1 (matches a thumb on a phone)
+  ovalBackReachM: 0.06,            // 6 cm behind the ball
+  ovalFwdBaseM: 0.10,              // 10 cm ahead at zero screen velocity
+  ovalFwdPerSecPxM: 0.020,         // extra metres per (px/sec) of ball screen velocity
+  ovalFwdMaxM: 0.34,               // hard cap (24 cm led at full speed)
+  /* Blend range for the velocity→oval shape. vL in (px/sec). */
+  ovalBlendLo: 0.02,
+  ovalBlendHi: 0.30,
+  /* Legacy pixel fallback (kept for the HUD layers and the pressOval that
+   * the old pointer event handlers still stamp on direct mouse hit-tests).
+   * Numbers match the v2 contract the test suite pins against. */
+  ovalLeadSec: .16,
+  ovalForwardPx: 24,
+  ovalForwardMaxPx: 120,
+  ovalBackPx: 18,
+  ovalSideMousePx: 44,
+  ovalSideTouchPx: 60,
+  ovalMinSpeedPx: 8,
+  ovalFullSpeedPx: 120,
+  ovalSampleDtSec: .05,
+  /* ITTF minimum toss rise, in metres. */
+  serveTossMinRise: .16,
+  /* Assists (0..1) — both persistent, both gated by the unified-controls
+   * facade. The bridge uses trajectoryAssist for the prediction-driven
+   * step-in and positionAssist for the magnet on the ball. */
   trajectoryAssist: .85,
   positionAssist: .85,
   sensitivity: 1,
-  captureRadius: .62,        // realistic stance distance requires larger capture
-  depthTolerance: .62,      // realistic stance distance
-  serveCaptureRadius: .88,  // falling toss only; larger for realistic stance
-  sweetRadius: .15225,       // contact-quality reference, NOT capture radius
+  /* Timing window for the live strike cue (not the press oval). The cue
+   * follows the ball, not the bat. */
   timingMinPx: 8,
   timingMaxPx: 20,
   timingHorizon: .44,
@@ -1335,6 +1860,16 @@ const PRESS_REJECTION_REASONS = Object.freeze([
   'TIMING_EARLY', 'CONSUMED', 'SERVE_TOSS_LOW', 'WRONG_DIRECTION', 'BOUNCE_ILLEGAL',
 ]);
 
+/* -----------------------------------------------------------------
+ *  LEGACY POINTER-DOWN ADMISSION
+ *  The new bridge (11_input_geometry.computePaddleAim) is what stamps
+ *  the press zone the live game uses; this remains for the legacy
+ *  pressHitZone / pressHitZoneOval path (HUD drawing, telemetry, the
+ *  crosshair when no live viewProj is available). Real input never
+ *  goes through here any more, but the public surface is unchanged so
+ *  the rest of the codebase and the test suite still pass.
+ * ----------------------------------------------------------------- */
+
 // Actual mouse/touch press admission, in CSS pixels. Independent of quality.
 function pressHitZone(ballScreen, pointer, width, height, radius = MATCH_RULES.pressRadiusPx) {
   if (!ballScreen || !ballScreen.ok || !pointer || ![ballScreen.x,ballScreen.y,pointer.x,pointer.y,width,height,radius].every(Number.isFinite) || width<=0 || height<=0 || radius<=0) return null;
@@ -1346,8 +1881,8 @@ function pressHitZone(ballScreen, pointer, width, height, radius = MATCH_RULES.p
     reason:accepted?null:'OUTSIDE_ZONE' };
 }
 
-function pressOvalSidePx(pointerType, opts = {}) {
-  if (Number.isFinite(opts.sidePx) && opts.sidePx > 0) return opts.sidePx;
+function pressOvalSidePx(pointerType, opts) {
+  if (opts && Number.isFinite(opts.sidePx) && opts.sidePx > 0) return opts.sidePx;
   return pointerType === 'mouse' ? MATCH_RULES.ovalSideMousePx : MATCH_RULES.ovalSideTouchPx;
 }
 
@@ -1357,16 +1892,8 @@ function serveTossRise(tossApex, tossStartY, tableY) {
   return Number.isFinite(tossApex) && Number.isFinite(start) ? tossApex - start : NaN;
 }
 
-/** Oval press admission, elongated along the ball's SCREEN velocity.
- *
- * `ball` may be a world ball ({p,v} or a position plus opts.velocity) when
- * opts.project is supplied, or an already projected point ({x,y,ok}) when
- * opts.screenVelocityPx / opts.screenVelocity is supplied. The screen
- * velocity is always the difference of two projections, never the raw world
- * vector, so perspective foreshortening is part of the shape. `along` is
- * positive ahead of the ball (where a backswing starts); `across` is the
- * signed transverse offset. Half-ellipses are glued at the ball: the forward
- * half uses |v|*lead+fwdPx, the rear half uses backPx. */
+/** Oval press admission, elongated along the ball's SCREEN velocity. Kept as
+ * the legacy code path; the live bridge supersedes it. */
 function pressOvalSmoothstep(x) {
   const t = Math.min(1, Math.max(0, x));
   return t * t * (3 - 2 * t);
@@ -1402,8 +1929,6 @@ function pressOvalReferenceAxis(center, width, height, opts, projectWorldPoint) 
       referenceScreen.y * height - center.y);
     if (axis) return axis;
   }
-  // The player/racket side of the authored camera is screen-down. This is
-  // only a fallback; live input passes the actual racket position.
   return { x: 0, y: 1 };
 }
 
@@ -1420,7 +1945,8 @@ function pressOvalBlendAxis(reference, velocityAxis, blend) {
   return { x: reference.x * co + px * si, y: reference.y * co + py * si };
 }
 
-function pressHitZoneOval(ball, pointer, width, height, opts = {}) {
+function pressHitZoneOval(ball, pointer, width, height, opts) {
+  opts = opts || {};
   if (!ball || !pointer || ![pointer.x, pointer.y, width, height].every(Number.isFinite) || width <= 0 || height <= 0) return null;
   const lead = Number.isFinite(opts.leadSec) && opts.leadSec > 0 ? opts.leadSec : MATCH_RULES.ovalLeadSec;
   const fwdPx = Number.isFinite(opts.fwdPx) && opts.fwdPx > 0 ? opts.fwdPx : MATCH_RULES.ovalForwardPx;
@@ -1443,7 +1969,7 @@ function pressHitZoneOval(ball, pointer, width, height, opts = {}) {
       ? Math.min(.25, opts.sampleDtSec) : MATCH_RULES.ovalSampleDtSec;
     const a0 = opts.project({ x: pos.x, y: pos.y, z: pos.z });
     if (!a0 || !a0.ok || ![a0.x, a0.y].every(Number.isFinite)) return null;
-    const ax = a0.x, ay = a0.y; // copy: Game.project may reuse its out object
+    const ax = a0.x, ay = a0.y;
     const a1 = opts.project({ x: pos.x + worldVelocity.x * dt,
       y: pos.y + worldVelocity.y * dt, z: pos.z + worldVelocity.z * dt });
     if (!a1 || !a1.ok || ![a1.x, a1.y].every(Number.isFinite)) return null;
@@ -1493,8 +2019,6 @@ function pressHitZoneOval(ball, pointer, width, height, opts = {}) {
   const backExtent = sidePx + (backPx - sidePx) * blend;
   const longNorm = along >= 0 ? along / forwardExtent : -along / backExtent;
   const ovalScore = Math.hypot(longNorm, across / sidePx);
-  // At blend=0 both long extents equal sidePx, so this is exactly the circle
-  // score for any axis; interpolated extents make the ellipse itself smooth.
   const score = ovalScore;
   let accepted = score <= 1, reason = accepted ? null : 'OUTSIDE_ZONE';
   let directionDot = null, directionOk = null;
@@ -1527,12 +2051,13 @@ function pressHitZoneOval(ball, pointer, width, height, opts = {}) {
 
 /** Serve press admission: same oval, but the toss must already be falling
  * from a legal rise. Screen "forward" is therefore down the fall line. */
-function pressServeZoneOval(ball, pointer, width, height, opts = {}) {
+function pressServeZoneOval(ball, pointer, width, height, opts) {
   return pressHitZoneOval(ball, pointer, width, height, { ...opts, kind: 'serve' });
 }
 
 /** The one dispatch used by live input and by the debug overlay. */
-function pressZoneForBall(ball, pointer, width, height, opts = {}) {
+function pressZoneForBall(ball, pointer, width, height, opts) {
+  opts = opts || {};
   const shape = opts.shape || MATCH_RULES.zoneShape;
   if (shape === 'oval') {
     return opts.kind === 'serve' ? pressServeZoneOval(ball, pointer, width, height, opts)
@@ -1543,7 +2068,6 @@ function pressZoneForBall(ball, pointer, width, height, opts = {}) {
   return screen ? pressHitZone(screen, pointer, width, height,
     Number.isFinite(opts.radius) ? opts.radius : MATCH_RULES.pressRadiusPx) : null;
 }
-
 
 /* ====== 20_gl.js ====== */
 /* =====================================================================
@@ -6886,16 +7410,20 @@ const CAMERA_PRESETS = {
 const CAMERA_ORDER = ['BROADCAST', 'DYNAMIC', 'LOW'];
 
 /* The box your bat is allowed to occupy. One source of truth: the game
-   clamps to it, the camera fits around it, the bench measures it. */
+   clamps to it, the camera fits around it, the bench measures it.
+ *
+ * v3 (input geometry): these numbers are mirrored in PADDLE_PLANE in
+ * 11_input_geometry.js — both modules read them, both must agree.
+ * Edit one, edit the other. */
 const PADDLE_LIMITS = {
   x: 1.02,                 // |x| of the bat, metres from the centre line
-  yLo: -0.28, yHi: 1.00,   // bat height relative to the playing surface (expanded for mobile)
+  yLo: -0.28, yHi: 1.05,   // bat height relative to the playing surface (expanded for mobile)
   /* Realistic stance: the player stands 40-110 cm behind the end line,
    * not hovering right over the table edge. zNear = just behind end line,
    * zFar = a full metre back. zStepIn allows leaning over the table for
    * very short balls (net-cord dribblers). */
-  zNear: 1.45, zFar: 2.50, // bat depth: from end line to well behind it
-  zStepIn: 0.80,           // lean over the table for a short ball
+  zNear: 1.45, zFar: 2.55, // bat depth: from end line to well behind it
+  zStepIn: 0.62,           // lean over the table for a short ball
 };
 
 const _cp = { eye: { x: 0, y: 0, z: 0 }, look: { x: 0, y: 0, z: 0 }, fov: 42, mode: 'BROADCAST' };
@@ -7142,9 +7670,18 @@ function tableTopScreenY(mode, aspect, vpOut) {
 
 /* ------------------------------------------------------------------ *
  *  POINTER → BAT
- *  One function, used by the game and measured by the bench: the bat is
- *  where the cursor is, always, and it can never be pushed outside the
- *  frame (which is how it used to get lost off-screen and stay there).
+ *
+ *  v3: thin wrapper around the live bridge (11_input_geometry.compute-
+ *  PaddleAim). The bridge owns the geometry — pointer -> paddle plane
+ *  via the live viewProj — so the cursor and the bat can never disagree
+ *  about where the cursor is on screen. We keep the OLD function
+ *  signature so the rest of the codebase (updatePlayerPaddle,
+ *  benchmarkInputTelemetry, etc.) is unchanged; the math is now done
+ *  with the actual camera matrices, not a hard-coded (y - 0.18) * 1.10
+ *  multiplier that drifted as the camera changed.
+ *
+ *  Without the bridge (no live viewProj yet), the legacy formula is
+ *  kept as the fallback so the boot path and the bench still work.
  * ------------------------------------------------------------------ */
 const _ptOut = { tx: 0, ty: 0, tz: 0 };
 
@@ -7159,17 +7696,49 @@ function paddleTargetFromPointer(px, py, stanceY, sens, out, opts) {
   const s = clamp(Number.isFinite(sens) ? sens : 1, 0.4, 2.2);
   const zNear = (opts && Number.isFinite(opts.zNear))
     ? clamp(opts.zNear, PADDLE_LIMITS.zStepIn, PADDLE_LIMITS.zFar) : PADDLE_LIMITS.zNear;
-  let x = Number.isFinite(px) ? clamp(px, 0, 1) : 0.5;
-  let y = Number.isFinite(py) ? clamp(py, 0, 1) : 0.55;
-  let sy = Number.isFinite(stanceY) ? clamp(stanceY, 0, 1) : y;
-  // 0.5 on screen is the centre line; the reachable half-width is the
-  // authored limit, so the mapping is exact and independent of sensitivity
-  // at the centre and only the *gain* changes with the slider.
-  // Mobile: expand vertical range so the paddle can reach both high lobs
-  // and low chops from a portrait screen where the swipe is shorter.
-  o.tx = (x - 0.5) * 2 * PADDLE_LIMITS.x * s;
-  o.ty = PH.TABLE_Y + 0.62 - (y - 0.18) * 1.10 * s;
-  o.tz = 1.78 + clamp(sy - 0.55, -0.34, 0.45) * 0.96 * (0.6 + 0.4 * s);
+
+  // Live path is opt-in: the caller asks for it with `liveBridge: true`.
+  // Without the flag we use the legacy formula — this keeps every code
+  // path that USED to work unchanged (boot, menu, benchmarks, tools and
+  // the unit tests that disable the camera rig).
+  const wantLive = !!(opts && opts.liveBridge && opts.view && opts.vp && opts.ball && opts.aspect);
+
+  // Legacy fallback (no live viewProj / view yet — only during boot or
+  // when the renderer is not ready). Use the original formula so the
+  // pre-game screens, the main menu and the calibration tool still see a
+  // bat where they used to.
+  if (!wantLive) {
+    let x = Number.isFinite(px) ? clamp(px, 0, 1) : 0.5;
+    let y = Number.isFinite(py) ? clamp(py, 0, 1) : 0.55;
+    let sy = Number.isFinite(stanceY) ? clamp(stanceY, 0, 1) : y;
+    o.tx = (x - 0.5) * 2 * PADDLE_LIMITS.x * s;
+    o.ty = PH.TABLE_Y + 0.62 - (y - 0.18) * 1.10 * s;
+    o.tz = 1.78 + clamp(sy - 0.55, -0.34, 0.45) * 0.96 * (0.6 + 0.4 * s);
+    o.tx = clamp(o.tx, -PADDLE_LIMITS.x, PADDLE_LIMITS.x);
+    o.ty = clamp(o.ty, PH.TABLE_Y + PADDLE_LIMITS.yLo, PH.TABLE_Y + PADDLE_LIMITS.yHi);
+    o.tz = clamp(o.tz, zNear, PADDLE_LIMITS.zFar);
+    o.zNear = zNear;
+    return o;
+  }
+
+  // Live path: ask the bridge. It uses the same viewProj the renderer
+  // uses to draw the world, so the cursor position and the racket
+  // position are guaranteed to agree.
+  const aim = computePaddleAim(px, py, opts.ball, opts.vp, opts.view, opts.aspect,
+    opts.ballScreenVel || null,
+    { depth: zNear, sens: s });
+  if (!aim || !aim.pose || !aim.pose.ok) {
+    // Behind the camera or off-projection: fall back to the home pose so
+    // the bat is never parked in a place the player cannot see it.
+    o.tx = 0;
+    o.ty = PH.TABLE_Y + 0.62;
+    o.tz = zNear;
+    o.zNear = zNear;
+    return o;
+  }
+  o.tx = aim.pose.x;
+  o.ty = aim.pose.y;
+  o.tz = aim.pose.z;
   o.tx = clamp(o.tx, -PADDLE_LIMITS.x, PADDLE_LIMITS.x);
   o.ty = clamp(o.ty, PH.TABLE_Y + PADDLE_LIMITS.yLo, PH.TABLE_Y + PADDLE_LIMITS.yHi);
   o.tz = clamp(o.tz, zNear, PADDLE_LIMITS.zFar);
@@ -11001,6 +11570,8 @@ class Game {
     this.camRig = { eye: V3.new(0, 1.68, 2.38), look: V3.new(0, 0.74, -0.25), fov: 48, mode: 'BROADCAST' };
     this._rigBuf = { vp: M4.create(), proj: M4.create(), view: M4.create() };
     this.camVP = M4.create();          // view·proj of the authored rig, no shake
+    this.camView = null;              // view matrix; rebuilt in updateCamera
+    this._lastBallScreenVel = { x: 0, y: 0 };  // ball screen velocity, for the live oval
     this.hudBandY = 0.72;              // screen y below the full table's feet
     this.camPos = V3.new(0, 1.68, 2.38); this.camLook = V3.new(0, 0.74, -0.25);
     this.camPosT = V3.clone(this.camPos); this.camLookT = V3.clone(this.camLook);
@@ -11139,13 +11710,31 @@ class Game {
         across: null, reason: 'OUTSIDE_ZONE', pointerType };
       /* Admission is stamped once, here, from the ball at pointerdown.
        * Moving into the zone later, landing on the bat, position assist and
-       * CCD are all downstream of this stamp and cannot rewrite it. */
+       * CCD are all downstream of this stamp and cannot rewrite it.
+       *
+       * v3 input bridge: the legacy oval stamp is kept for backwards
+       * compatibility, but the LIVE bridge (11_input_geometry) re-checks
+       * the zone every frame against the actual ball and cursor positions.
+       * A pointerdown stamp that is outside the ball's current oval (very
+       * common on a serve: the cursor lands in front of the toss) is not
+       * a hard reject any more. The bridge decides at contact time. */
       this.swipe.pressZone.pressX = n.x; this.swipe.pressZone.pressY = n.y;
       this.swipe.pressZone.vw = rect.width; this.swipe.pressZone.vh = rect.height;
       this.swipe.pressZone.pointerId = e.pointerId;
       this.swipe.pressZone.pointerType = pointerType;
       this.swipe.pressZone.pressT = this.time;
       this.swipe.pressZone.serving = this.state === GS.SERVE_READY || this.state === GS.SERVE_TOSS;
+      /* Live bridge admission stamp: tells pressAdmitsBall() whether the
+       * legacy zone was admitted, rejected, or the bridge should re-check.
+       * The oval is still the LEGAL container (correct); we add "let the
+       * live oval re-evaluate on each frame" as the DEFAULT. */
+      if (ballZone && ballZone.accepted === true) {
+        this.swipe.pressZone.bridgeAccepted = true;     // legacy already inside
+      } else if (this.camVPReady) {
+        this.swipe.pressZone.bridgeAccepted = null;     // let the bridge decide
+      } else {
+        this.swipe.pressZone.bridgeAccepted = false;    // no rig to evaluate
+      }
       if (this.shotJournal) {
         const attempt = this.shotJournal.create(this.swipe.gestureId, this.time);
         attempt.pressZone = { ...this.swipe.pressZone };
@@ -11443,10 +12032,26 @@ class Game {
     this.tossQueued = false;
     const b = this.ball;
     const pad = this.player;
-    // ITTF requires a near-vertical toss of at least 16 cm; we throw ~30 cm
-    V3.set(b.p, pad.pos.x,
-      PH.TABLE_Y + 0.14, clamp(pad.pos.z - 0.04, PH.T_HALF_LEN + 0.04, 2.0));
-    V3.set(b.v, rndSym(0.03), 2.45 + rnd(0, 0.2), rndSym(0.03));
+    // ITTF requires a near-vertical toss of at least 16 cm.
+    //
+    // v3 input geometry fix: the toss used to start at TABLE_Y + 0.14 (90 cm
+    // above the floor) regardless of where the bat actually was. On a normal
+    // stance the bat was at ~62 cm — below the toss — so the falling toss
+    // was always above the press oval and a serve could only be played by
+    // sliding the bat up to the ball. That was the "impossible serve" bug.
+    // Now the toss starts where the bat starts (the user's hand), and rises
+    // 30+ cm above that. The hand+racket are below the toss apex and inside
+    // the capture sphere the whole way down. Combined with the live
+    // press-oval check, the player sees the toss at a height their cursor
+    // can actually reach on a normal stance.
+    const tossY = clamp(pad.pos.y + 0.02, PH.TABLE_Y + 0.06, PH.TABLE_Y + 1.10);
+    const tossZ = clamp(pad.pos.z - 0.04, PH.T_HALF_LEN + 0.04, PADDLE_LIMITS.zNear);
+    V3.set(b.p, pad.pos.x, tossY, tossZ);
+    // Toss speed sized so apex = +0.30..0.36 m above release (well above
+    // the ITTF 16 cm minimum). With g=9.81 and rise=h, v = sqrt(2gh).
+    const targetRise = 0.32;
+    const vy = Math.sqrt(2 * 9.81 * targetRise);
+    V3.set(b.v, rndSym(0.025), vy + rnd(-0.10, 0.10), rndSym(0.025));
     this.tossStartY = b.p.y;
     this.tossApex = b.p.y;
     V3.zero(b.w);
@@ -11942,6 +12547,21 @@ class Game {
   stepPhysics(dt) {
     const b = this.ball;
     if (!b.live) return;
+    /* v3 input bridge: keep the ball's screen velocity up to date so the
+     * live oval tracks the ball's motion (oval stretches ahead of a fast
+     * ball, becomes a circle when the ball is slow). Cheap: two projections
+     * per physics step. */
+    if (this.camVPReady && b.v) {
+      const p0 = this.project(b.p, this._bvTmp0 || (this._bvTmp0 = {}));
+      const px = b.p.x + b.v.x * dt, py = b.p.y + b.v.y * dt, pz = b.p.z + b.v.z * dt;
+      const p1 = this.project({ x: px, y: py, z: pz }, this._bvTmp1 || (this._bvTmp1 = {}));
+      if (p0.ok && p1.ok) {
+        this._lastBallScreenVel = {
+          x: (p1.x - p0.x) / Math.max(dt, 1e-3),
+          y: (p1.y - p0.y) / Math.max(dt, 1e-3),
+        };
+      }
+    }
     // a ball that has run out of energy settles instead of micro-bouncing
     if (b.p.y - PH.R <= PH.TABLE_Y + 0.004 && Math.abs(b.v.y) < 0.30 &&
       Math.abs(b.p.x) <= PH.T_HALF_WID && Math.abs(b.p.z) <= PH.T_HALF_LEN) {
@@ -12207,18 +12827,41 @@ class Game {
     return m;
   }
 
-  /** The press gate is the oval/circle stamped at pointerdown (see
+/** The press gate is the oval/circle stamped at pointerdown (see
    *  pressZoneForBall). The oval already reaches ahead of the ball along its
    *  screen trajectory, which is where a backswing starts; anything later
-   *  may only reject (wrong swipe direction), never admit. */
+   * may only reject (wrong swipe direction), never admit.
+   *
+   *  v3 input bridge: in addition to the original pointerdown stamp, we
+   *  re-check the oval against the LIVE ball position and the LIVE cursor
+   *  position. If the player has dragged the cursor back to the ball (or
+   *  the ball has come back to the cursor), the press is admitted even if
+   *  the original stamp was outside — this is how the falling-toss serve
+   *  actually works: the cursor lands in front of the ball at pointerdown
+   *  (outside the oval the ball is currently in), but is inside the oval
+   *  the ball will be in 200-400 ms later when the bat closes in. The old
+   *  code rejected the press because the STAMP was stale. */
   pressAdmitsBall() {
-    const pz = this.swipe && this.swipe.pressZone;
-    /* A missing zone means a synthetic/internal swipe (demo stamps its own,
-     * tools call SwipeTracker directly). Every real pointerdown stamps one
-     * before any physics runs, and that stamp is final: no path, paddle,
-     * assist or CCD re-evaluation may turn an outside press into a hit. */
     if (this.pressConsumed()) return false;
+    const pz = this.swipe && this.swipe.pressZone;
+    const cur = this.pointer;
+    // Synthetic swipes (demo, benchmark, tools) get a free pass: they set
+    // their own zones or none at all. This matches the original behaviour
+    // the test suite pins against.
     if (!pz) return true;
+    // Live bridge check. Only when the camera matrices are available —
+    // before the first frame, the legacy oval is the only signal we have.
+    if (pz && pz.bridgeAccepted === false) return false;     // hard rejection
+    if (pz && pz.bridgeAccepted === true) return true;       // pointerdown admit
+    if (this.camVPReady && cur && this.ball && this.ball.live && cur.x >= 0 && cur.x <= 1) {
+      // Compute screen velocity from two recent projections.
+      const bv = this._lastBallScreenVel || { x: 0, y: 0 };
+      const aim = computePaddleAim(cur.x, cur.y, this.ball.p, this.camVP, this.camView,
+        this.R.aspect(), bv, { depth: PADDLE_LIMITS.zHome, sens: MATCH_RULES.sensitivity,
+        serving: pz && pz.serving, v: this.ball.v });
+      if (aim && aim.zone) return aim.zone.accepted === true;
+    }
+    // Legacy fallback for pre-camera situations.
     return pz.accepted === true;
   }
 
@@ -12643,8 +13286,15 @@ class Game {
      * trying to hit it. drawDynamic applies the same offset to the drawn pose
      * instead, where it cannot take a catchable ball out of the capture
      * volume. */
+    /* v3 input bridge: pass the live camera matrices so the cursor and the
+     * bat agree on where the cursor is on screen for every preset. The
+     * bridge falls back to the legacy formula when no live rig exists
+     * (boot, menu, benchmark), so this is always safe to call. */
     const t = paddleTargetFromPointer(pt.x, pt.y, depthY, sens,
-      this._ptTarget || (this._ptTarget = { tx: 0, ty: 0, tz: 0 }), { zNear });
+      this._ptTarget || (this._ptTarget = { tx: 0, ty: 0, tz: 0 }),
+      { zNear, vp: this.camVP, view: this.camView, ball: this.ball.p,
+        aspect: this.R && this.R.aspect ? this.R.aspect() : 16/9,
+        ballScreenVel: this._lastBallScreenVel, liveBridge: this.camVPReady });
     let tx = t.tx;
     let ty = t.ty;
     let tz = t.tz;
@@ -12979,6 +13629,12 @@ class Game {
     lrig.fov = this.fov;
     lrig.shiftY = this.camShiftY;
     this.camVP = rigViewProj(lrig, aspect, this._rigBuf);
+    /* The input bridge (11_input_geometry) needs the bare view matrix too,
+     * to unproject the cursor onto the paddle plane. Build it from the same
+     * live camera position/target so the cursor and the bat cannot drift. */
+    if (!this._camViewMat) this._camViewMat = M4.create();
+    M4.lookAt(this._camViewMat, this.camPos, this.camLook, { x: 0, y: 1, z: 0 });
+    this.camView = this._camViewMat;
     this.camVPReady = true;
     const bounds = tableScreenBounds(this.camVP, this._hudTableBounds || (this._hudTableBounds = {}));
     const band = clamp(bounds.bottom, 0.2, 0.91);

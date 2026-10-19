@@ -19,9 +19,9 @@
 <!-- BEGIN GENERATED MATCH_RULES: tt/tools/render_rules_table.cjs -->
 | Параметр `MATCH_RULES` | Значение | Смысл |
 |---|---:|---|
-| `version` | 2 | версия контракта правил |
+| `version` | 3 | версия контракта правил |
 | `zoneShape` | `oval` | активная форма зоны нажатия |
-| `pressRadiusPx` | 96 CSS px | legacy-круг только для A/B-сравнения |
+| `pressRadiusPx` | 110 CSS px | legacy-круг только для A/B-сравнения |
 | `ovalLeadSec` | 0,16 с | опережение по экранной скорости |
 | `ovalForwardPx` | 24 CSS px | фиксированная добавка вперёд |
 | `ovalForwardMaxPx` | 120 CSS px | жёсткий потолок передней полуоси |

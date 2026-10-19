@@ -20,16 +20,20 @@ const CAMERA_PRESETS = {
 const CAMERA_ORDER = ['BROADCAST', 'DYNAMIC', 'LOW'];
 
 /* The box your bat is allowed to occupy. One source of truth: the game
-   clamps to it, the camera fits around it, the bench measures it. */
+   clamps to it, the camera fits around it, the bench measures it.
+ *
+ * v3 (input geometry): these numbers are mirrored in PADDLE_PLANE in
+ * 11_input_geometry.js — both modules read them, both must agree.
+ * Edit one, edit the other. */
 const PADDLE_LIMITS = {
   x: 1.02,                 // |x| of the bat, metres from the centre line
-  yLo: -0.28, yHi: 1.00,   // bat height relative to the playing surface (expanded for mobile)
+  yLo: -0.28, yHi: 1.05,   // bat height relative to the playing surface (expanded for mobile)
   /* Realistic stance: the player stands 40-110 cm behind the end line,
    * not hovering right over the table edge. zNear = just behind end line,
    * zFar = a full metre back. zStepIn allows leaning over the table for
    * very short balls (net-cord dribblers). */
-  zNear: 1.45, zFar: 2.50, // bat depth: from end line to well behind it
-  zStepIn: 0.80,           // lean over the table for a short ball
+  zNear: 1.45, zFar: 2.55, // bat depth: from end line to well behind it
+  zStepIn: 0.62,           // lean over the table for a short ball
 };
 
 const _cp = { eye: { x: 0, y: 0, z: 0 }, look: { x: 0, y: 0, z: 0 }, fov: 42, mode: 'BROADCAST' };
@@ -276,9 +280,18 @@ function tableTopScreenY(mode, aspect, vpOut) {
 
 /* ------------------------------------------------------------------ *
  *  POINTER → BAT
- *  One function, used by the game and measured by the bench: the bat is
- *  where the cursor is, always, and it can never be pushed outside the
- *  frame (which is how it used to get lost off-screen and stay there).
+ *
+ *  v3: thin wrapper around the live bridge (11_input_geometry.compute-
+ *  PaddleAim). The bridge owns the geometry — pointer -> paddle plane
+ *  via the live viewProj — so the cursor and the bat can never disagree
+ *  about where the cursor is on screen. We keep the OLD function
+ *  signature so the rest of the codebase (updatePlayerPaddle,
+ *  benchmarkInputTelemetry, etc.) is unchanged; the math is now done
+ *  with the actual camera matrices, not a hard-coded (y - 0.18) * 1.10
+ *  multiplier that drifted as the camera changed.
+ *
+ *  Without the bridge (no live viewProj yet), the legacy formula is
+ *  kept as the fallback so the boot path and the bench still work.
  * ------------------------------------------------------------------ */
 const _ptOut = { tx: 0, ty: 0, tz: 0 };
 
@@ -293,17 +306,49 @@ function paddleTargetFromPointer(px, py, stanceY, sens, out, opts) {
   const s = clamp(Number.isFinite(sens) ? sens : 1, 0.4, 2.2);
   const zNear = (opts && Number.isFinite(opts.zNear))
     ? clamp(opts.zNear, PADDLE_LIMITS.zStepIn, PADDLE_LIMITS.zFar) : PADDLE_LIMITS.zNear;
-  let x = Number.isFinite(px) ? clamp(px, 0, 1) : 0.5;
-  let y = Number.isFinite(py) ? clamp(py, 0, 1) : 0.55;
-  let sy = Number.isFinite(stanceY) ? clamp(stanceY, 0, 1) : y;
-  // 0.5 on screen is the centre line; the reachable half-width is the
-  // authored limit, so the mapping is exact and independent of sensitivity
-  // at the centre and only the *gain* changes with the slider.
-  // Mobile: expand vertical range so the paddle can reach both high lobs
-  // and low chops from a portrait screen where the swipe is shorter.
-  o.tx = (x - 0.5) * 2 * PADDLE_LIMITS.x * s;
-  o.ty = PH.TABLE_Y + 0.62 - (y - 0.18) * 1.10 * s;
-  o.tz = 1.78 + clamp(sy - 0.55, -0.34, 0.45) * 0.96 * (0.6 + 0.4 * s);
+
+  // Live path is opt-in: the caller asks for it with `liveBridge: true`.
+  // Without the flag we use the legacy formula — this keeps every code
+  // path that USED to work unchanged (boot, menu, benchmarks, tools and
+  // the unit tests that disable the camera rig).
+  const wantLive = !!(opts && opts.liveBridge && opts.view && opts.vp && opts.ball && opts.aspect);
+
+  // Legacy fallback (no live viewProj / view yet — only during boot or
+  // when the renderer is not ready). Use the original formula so the
+  // pre-game screens, the main menu and the calibration tool still see a
+  // bat where they used to.
+  if (!wantLive) {
+    let x = Number.isFinite(px) ? clamp(px, 0, 1) : 0.5;
+    let y = Number.isFinite(py) ? clamp(py, 0, 1) : 0.55;
+    let sy = Number.isFinite(stanceY) ? clamp(stanceY, 0, 1) : y;
+    o.tx = (x - 0.5) * 2 * PADDLE_LIMITS.x * s;
+    o.ty = PH.TABLE_Y + 0.62 - (y - 0.18) * 1.10 * s;
+    o.tz = 1.78 + clamp(sy - 0.55, -0.34, 0.45) * 0.96 * (0.6 + 0.4 * s);
+    o.tx = clamp(o.tx, -PADDLE_LIMITS.x, PADDLE_LIMITS.x);
+    o.ty = clamp(o.ty, PH.TABLE_Y + PADDLE_LIMITS.yLo, PH.TABLE_Y + PADDLE_LIMITS.yHi);
+    o.tz = clamp(o.tz, zNear, PADDLE_LIMITS.zFar);
+    o.zNear = zNear;
+    return o;
+  }
+
+  // Live path: ask the bridge. It uses the same viewProj the renderer
+  // uses to draw the world, so the cursor position and the racket
+  // position are guaranteed to agree.
+  const aim = computePaddleAim(px, py, opts.ball, opts.vp, opts.view, opts.aspect,
+    opts.ballScreenVel || null,
+    { depth: zNear, sens: s });
+  if (!aim || !aim.pose || !aim.pose.ok) {
+    // Behind the camera or off-projection: fall back to the home pose so
+    // the bat is never parked in a place the player cannot see it.
+    o.tx = 0;
+    o.ty = PH.TABLE_Y + 0.62;
+    o.tz = zNear;
+    o.zNear = zNear;
+    return o;
+  }
+  o.tx = aim.pose.x;
+  o.ty = aim.pose.y;
+  o.tz = aim.pose.z;
   o.tx = clamp(o.tx, -PADDLE_LIMITS.x, PADDLE_LIMITS.x);
   o.ty = clamp(o.ty, PH.TABLE_Y + PADDLE_LIMITS.yLo, PH.TABLE_Y + PADDLE_LIMITS.yHi);
   o.tz = clamp(o.tz, zNear, PADDLE_LIMITS.zFar);
