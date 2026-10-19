@@ -500,6 +500,11 @@ class OpponentAI {
     };
 
     const racketFromStroke = deriveStroke(m, serveCtx);
+    /* deriveStroke invents its own aim from the synthetic gesture metrics
+     * (m.x is unset, so it sanitises to the centre): without this line the
+     * placement rolled above never reaches the solver and every serve is
+     * aimed within ~8 cm of the centre line at one fixed depth. */
+    racketFromStroke.aim = { x: aimX, z: aimZ };
     racketFromStroke.vmag = racket.vmag;
     racketFromStroke.normal = racket.normal;
     racketFromStroke.vR = racket.vR;

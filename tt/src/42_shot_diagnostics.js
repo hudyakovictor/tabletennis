@@ -78,15 +78,16 @@ class ShotJournal {
     if (!valid && !context.active && entry.outcome !== 'rejected') { entry.outcome = 'rejected'; entry.revision++; }
     return entry;
   }
-  /** A press that started outside the ball's instantaneous 48 px window can
-   *  still be admitted while the gesture lives (the ball travels into it, or
-   *  the finger landed on the bat). Keep the journal's copy of the gate in
-   *  sync or every such stroke is reported as "outside" forever. */
-  acceptPress(gestureId, how) {
+  /** The pointerdown stamp is final. The only later change is a REJECTION
+   *  (the finished swipe did not move towards the ball it started near), and
+   *  the journal's copy must learn about it or the report disagrees with the
+   *  gate that actually ran. */
+  rejectPress(gestureId, reason, zone) {
     const e = this.records.find(r => r.gestureId === gestureId && !r.contact);
-    if (!e || !e.pressZone || e.pressZone.accepted) return;
-    e.pressZone.accepted = true; e.pressZone.via = how || 'path';
-    if (e.outcome === 'outside') { e.outcome = 'pending'; e.revision++; }
+    if (!e || !e.pressZone) return;
+    if (zone) e.pressZone = { ...zone };
+    e.pressZone.accepted = false; e.pressZone.reason = reason || 'OUTSIDE_ZONE';
+    if (e.outcome === 'pending') { e.outcome = 'outside'; e.revision++; }
   }
   expire(time) {
     for (const entry of this.records) {
@@ -150,6 +151,109 @@ class ShotJournal {
   }
   exportData() { return JSON.parse(JSON.stringify({ schema: SHOT_DIAGNOSTICS_VERSION, rules: MATCH_RULES,
     physics: PH, archetypes: ARCH, profiles: PADDLE_PROFILES, records: this.records })); }
+}
+
+/* ---------------- guided press-zone calibration -----------------------
+ * Development data collection only. The session never changes MATCH_RULES
+ * and never builds a personal zone: every player keeps the one shared oval.
+ * Steps run mouse first, then touch (step 7 of the brief is the repeat). */
+const ZONE_CALIBRATION_STEPS = Object.freeze([
+  Object.freeze({ id: 'corners', title: 'Углы стола', need: 4,
+    instruction: 'Нажимайте точно в углы стола по очереди: ближний левый, ближний правый, дальний правый, дальний левый.' }),
+  Object.freeze({ id: 'stationary', title: 'Неподвижный мяч', need: 30,
+    instruction: 'По 10 ударов: начинайте замах перед мячом, сбоку и сзади. Мяч — в готовности к подаче.' }),
+  Object.freeze({ id: 'slow', title: 'Медленный мяч', need: 20,
+    instruction: '20 приёмов медленного мяча в обучении или матче. Начинайте замах там, где удобно.' }),
+  Object.freeze({ id: 'fast', title: 'Быстрый мяч', need: 20,
+    instruction: '20 приёмов быстрого мяча (упражнение «Тайминг» или подача соперника).' }),
+  Object.freeze({ id: 'serve', title: 'Своя подача', need: 15,
+    instruction: '15 подбросов и подач. Пишутся высота, старт пальца и длина свайпа.' }),
+  Object.freeze({ id: 'power', title: 'Сила и спин', need: 8,
+    instruction: 'По 2 удара: самый слабый, самый сильный, топспин, подрезка. Нужен контакт.' }),
+]);
+const ZONE_CALIBRATION_PASSES = Object.freeze(['mouse', 'touch']);
+
+function calibrationPercentile(values, q) {
+  const xs = values.filter(Number.isFinite).slice().sort((a, b) => a - b);
+  if (!xs.length) return null;
+  return xs[Math.min(xs.length - 1, Math.max(0, Math.ceil(xs.length * q) - 1))];
+}
+
+class ZoneCalibrationSession {
+  constructor() { this.reset(); }
+  reset() { this.samples = []; this.passIndex = 0; this.stepIndex = 0; this.done = false; this.lastSummary = null; }
+  get pass() { return ZONE_CALIBRATION_PASSES[this.passIndex] || null; }
+  get step() { return ZONE_CALIBRATION_STEPS[this.stepIndex] || null; }
+  count(stepId = this.step && this.step.id, pass = this.pass) {
+    return this.samples.filter(s => s.stepId === stepId && s.pass === pass).length;
+  }
+  record(sample) {
+    if (!sample || this.done || !this.step) return null;
+    const inputType = sample.inputType === 'mouse' ? 'mouse' : sample.inputType ? 'touch' : this.pass;
+    if (inputType !== this.pass) return null;      // wrong device for this pass: not evidence
+    const row = { ...sample, pass: this.pass, stepId: this.step.id, inputType };
+    this.samples.push(row);
+    let summary = null;
+    if (this.count() >= this.step.need) {
+      summary = this.summaryFor(this.step.id, this.pass);
+      this.lastSummary = summary;
+      this.stepIndex++;
+      if (this.stepIndex >= ZONE_CALIBRATION_STEPS.length) { this.stepIndex = 0; this.passIndex++; }
+      if (this.passIndex >= ZONE_CALIBRATION_PASSES.length) this.done = true;
+    }
+    return { sample: row, summary, done: this.done,
+      progress: this.done ? null : { pass: this.pass, step: this.step, have: this.count() } };
+  }
+  /** Map ShotJournal records onto the current step. Corners are recorded by
+   *  the UI directly (the journal does not know which corner was the target). */
+  importJournal(records, afterId = 0) {
+    let added = 0, lastId = afterId, summary = null;
+    for (const e of records || []) {
+      if (!e || e.id <= afterId || !e.pressZone) continue;
+      lastId = Math.max(lastId, e.id);
+      const z = e.pressZone, stepId = this.step && this.step.id;
+      if (!stepId || stepId === 'corners') continue;
+      if (stepId === 'serve' && !z.serving) continue;
+      if (stepId === 'power' && !e.contact) continue;
+      const label = stepId === 'stationary'
+        ? (z.along > 20 ? 'front' : z.along < -20 ? 'back' : 'side')
+        : stepId === 'power' ? (e.strokeId || 'shot') : stepId;
+      const result = this.record({ label, along: z.along, across: z.across, score: z.score,
+        accepted: !!z.accepted, reason: z.reason || null, inputType: z.pointerType,
+        gesturePath: e.gesture ? e.gesture.path : null, gesturePeakSpeed: e.gesture ? e.gesture.peakSpeed : null,
+        contactY: e.contact && e.contact.incoming && e.contact.incoming.p ? e.contact.incoming.p.y : null,
+        ballSpeedKmh: e.contact ? e.contact.speedKmh : null, spin: e.contact ? e.contact.spin : null });
+      if (result) { added++; if (result.summary) summary = result.summary; }
+      if (this.done) break;
+    }
+    return { added, lastId, summary };
+  }
+  summaryFor(stepId, pass) {
+    const rows = this.samples.filter(s => s.stepId === stepId && s.pass === pass);
+    const p90along = calibrationPercentile(rows.map(r => r.along).filter(v => v > 0), .9);
+    const p90across = calibrationPercentile(rows.map(r => Math.abs(r.across)), .9);
+    const p90error = calibrationPercentile(rows.map(r => r.errorPx), .9);
+    const byLabel = {};
+    for (const r of rows) byLabel[r.label || stepId] = (byLabel[r.label || stepId] || 0) + 1;
+    let recommendation;
+    if (stepId === 'corners') recommendation = `90-й перцентиль ошибки по углам: ${p90error === null ? '—' : Math.round(p90error)} px.`;
+    else if (stepId === 'serve') recommendation = `90-й перцентиль замаха на подаче: ${p90along === null ? '—' : Math.round(p90along)} px по оси падения, ${p90across === null ? '—' : Math.round(p90across)} px поперёк.`;
+    else if (stepId === 'power') recommendation = 'Таблица «жест → скорость и спин мяча» — в экспорте (samples шага power).';
+    else recommendation = `90-й перцентиль замаха: ${p90along === null ? '—' : Math.round(p90along)} px вперёд, ${p90across === null ? '—' : Math.round(p90across)} px поперёк.`;
+    return { stepId, pass, count: rows.length, byLabel, p90along, p90across, p90error, recommendation };
+  }
+  compareSlowFast(pass) {
+    const slow = this.summaryFor('slow', pass), fast = this.summaryFor('fast', pass);
+    return { pass, slowP90along: slow.p90along, fastP90along: fast.p90along,
+      growsWithSpeed: slow.p90along !== null && fast.p90along !== null ? fast.p90along > slow.p90along : null };
+  }
+  exportData() {
+    return JSON.parse(JSON.stringify({ schema: 'zone-calibration-v1', rulesVersion: MATCH_RULES.version,
+      rules: MATCH_RULES, done: this.done, pass: this.pass, stepIndex: this.stepIndex,
+      samples: this.samples,
+      summaries: ZONE_CALIBRATION_PASSES.flatMap(pass => ZONE_CALIBRATION_STEPS.map(st => this.summaryFor(st.id, pass))),
+      slowVsFast: ZONE_CALIBRATION_PASSES.map(pass => this.compareSlowFast(pass)) }));
+  }
 }
 
 /** Deterministic fixtures, not a promise to cover all possible shots.

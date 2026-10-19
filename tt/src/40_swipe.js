@@ -36,6 +36,7 @@ class SwipeTracker {
   down(x, y, t) {
     this.gestureId++;
     this.realGestureId = -1; this.realAt = 0;
+    this.consumedGestureId = -1; this.consumedAt = -Infinity;
     this.pressZone = null;
     this.active = true; this.startT = t;
     this.samples.length = 0;
