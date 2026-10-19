@@ -19,15 +19,16 @@ test('career restores the exact remaining bracket and round', () => {
 });
 test('career settings do not accumulate on repeated load', () => {
   const { c, PERKS, game } = careerFixture();
-  const perk = PERKS.find(p => p.id === 'steady_hand');
+  const perk = PERKS.find(p => p.id === 'heavy_spin');
   c.perks.push(perk); perk.apply(game); c.save();
   const assist = game.settings.assist;
-  assert.equal(c.load(), true); assert.equal(game.settings.assist, assist);
-  assert.equal(c.load(), true); assert.equal(game.settings.assist, assist);
+  const spin = game._careerSpinBoost;
+  assert.equal(c.load(), true); assert.equal(game.settings.assist, assist); assert.equal(game._careerSpinBoost, spin);
+  assert.equal(c.load(), true); assert.equal(game.settings.assist, assist); assert.equal(game._careerSpinBoost, spin);
 });
 test('leaving career removes all bonuses and restores preferences', () => {
   const { c, game, PERKS } = careerFixture();
-  PERKS.find(p => p.id === 'steady_hand').apply(game); game._careerNetSafe = true;
+  PERKS.find(p => p.id === 'heavy_spin').apply(game); game._careerNetSafe = true;
   c.stop(); assert.equal(game.settings.assist, .6); assert.equal(game._careerNetSafe, false);
   assert.equal(c.active, false);
 });

@@ -19,7 +19,7 @@
 
 const REPLAY_HZ = 30;             // 30 Hz is smooth at 0.35× and halves memory
 const REPLAY_RING_S = 45;         // seconds of rolling history
-const REPLAY_FLOATS = 16;         // ball(3) + myPos(3) + myNrm(3) + aiPos(3) + aiNrm(3) + pad
+const REPLAY_FLOATS = 16;         // ball(3) + myPos(3) + myNrm(3) + aiPos(3) + aiNrm(3) + playerRoll(1), poseVersion 2
 const REPLAY_KEEP = 5;            // how many moments survive a whole match
 
 /* --------------------------- scoring ------------------------------- */
@@ -69,7 +69,7 @@ class MomentRecorder {
     f[i + 6] = g.player.normal.x; f[i + 7] = g.player.normal.y; f[i + 8] = g.player.normal.z;
     f[i + 9] = ap.x; f[i + 10] = ap.y; f[i + 11] = ap.z;
     f[i + 12] = g.aiPaddle.normal.x; f[i + 13] = g.aiPaddle.normal.y; f[i + 14] = g.aiPaddle.normal.z;
-    f[i + 15] = g.ball.live ? 1 : 0;
+    f[i + 15] = Number.isFinite(g.player.roll) ? g.player.roll : 0;
     this.head = (this.head + 1) % this.cap;
     if (this.n < this.cap) this.n++;
     this.t = t;
@@ -87,7 +87,7 @@ class MomentRecorder {
       const src = ((this.head - len + k) % this.cap + this.cap) % this.cap;
       clip.set(this.f.subarray(src * REPLAY_FLOATS, src * REPLAY_FLOATS + REPLAY_FLOATS), k * REPLAY_FLOATS);
     }
-    return { frames: clip, hz: REPLAY_HZ, len };
+    return { frames: clip, hz: REPLAY_HZ, len, poseVersion: 2 };
   }
 
   /**
@@ -126,7 +126,7 @@ class MomentRecorder {
       + BEAUTY.finish(finish) + BEAUTY.clutch(m) + BEAUTY.comeback(m) + BEAUTY.netClip(m);
 
     const moment = {
-      score, shots, frames: clip, hz: REPLAY_HZ,
+      score, shots, frames: clip, hz: REPLAY_HZ, poseVersion: 2,
       speed: peakSpeed, spin: peakSpin, finish,
       events: this.events.slice(),
       winner: meta.winner, reason: meta.reason, mine,
@@ -195,8 +195,20 @@ class MomentPlayer {
     V3.set(g.ball.p, L(0), L(1), L(2));
     V3.set(g.player.pos, L(3), L(4), L(5));
     V3.set(g.player.normal, L(6), L(7), L(8));
+    V3.norm(g.player.normal, g.player.normal);
+    if (mo.poseVersion >= 2) {
+      const delta = Math.atan2(Math.sin(F[b + 15] - F[a + 15]), Math.cos(F[b + 15] - F[a + 15]));
+      g.player.roll = F[a + 15] + delta * u;
+    } else {
+      // Legacy slot 15 was a live-ball flag, never an angle.
+      const settings = g.settings || {};
+      g.player.roll = (settings.hand === 'left' ? -1 : 1) * (settings.grip === 'penhold' ? Math.PI - .052 : .28);
+    }
+    g.player.pitch = Math.asin(clamp(g.player.normal.y, -1, 1));
+    g.player.yaw = -Math.atan2(g.player.normal.x, -g.player.normal.z);
     V3.set(g.aiPaddle.pos, L(9), L(10), L(11));
     V3.set(g.aiPaddle.normal, L(12), L(13), L(14));
+    V3.norm(g.aiPaddle.normal, g.aiPaddle.normal);
     V3.copy(g.ai.pos, g.aiPaddle.pos);
     g.ball.live = true;
     // trail: rebuild the last few frames of history so the ball draws a streak
