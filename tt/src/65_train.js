@@ -1,11 +1,9 @@
 /* =====================================================================
  *  TRAINING — a real, interactive coach.
  *
- *  Not a wall of text: a ball feeder, one skill at a time, an animated
- *  ghost gesture drawn right where your finger has to go, and a pass
- *  condition read straight out of the physics (actual spin, actual
- *  landing point). You cannot "read" your way past a step — you have to
- *  hit it.
+ *  One drill at a time. A read-only objective stays above play;
+ *  no looping gesture overlay and no controls in the swipe area.
+ *  Progress requires measured spin/speed and an actual legal bounce.
  * ===================================================================== */
 
 // Capabilities first, then actual pointer events in UI: a narrow desktop is
@@ -18,47 +16,41 @@ function trainingTip(step, mode) { return mode === 'touch' ? step.tip : step.mou
 
 const TRAIN_STEPS = [
   {
-    id: 'SERVE', title: 'ПОДАЧА', need: 2,
+    id: 'SERVE', goal: 'Подайте на стол', title: 'ПОДАЧА', need: 2,
     tip: 'Проведите пальцем вверх.', mouseTip: 'Зажмите ЛКМ, ведите вверх.',
-    gesture: [[0.50, 0.80], [0.50, 0.50]], speed: 1.0, dur: 0.15,
     feed: null,
   },
   {
-    id: 'TOPSPIN', title: 'ТОПСПИН', need: 3,
-    tip: 'Свайп вверх при замыкании кольца.', mouseTip: 'ЛКМ + вверх при замыкании кольца.',
-    gesture: [[0.49, 0.82], [0.525, 0.46]], speed: 1.0, dur: 0.16,
+    id: 'TOPSPIN', goal: 'Верхнее вращение на стол', title: 'ТОПСПИН', need: 3,
+    tip: 'Свайп вверх по мячу.', mouseTip: 'ЛКМ + вверх по мячу.',
     feed: { kind: 'normal', spin: -95, speed: 6.0 },
     check: (g, s) => s.topspin > 45,
     failHint: 'Длиннее вверх.',
   },
   {
-    id: 'PUSH', title: 'ПОДРЕЗКА', need: 2,
+    id: 'PUSH', goal: 'Нижнее вращение на стол', title: 'ПОДРЕЗКА', need: 2,
     tip: 'Мягкий свайп вниз.', mouseTip: 'ЛКМ + мягкое движение вниз.',
-    gesture: [[0.50, 0.52], [0.50, 0.80]], speed: 0.8, dur: 0.20,
     feed: { kind: 'normal', spin: 40, speed: 5.2 },
     check: (g, s) => s.topspin < -30,
     failHint: 'Ведите вниз.',
   },
   {
-    id: 'SIDE', title: 'БОКОВОЕ ВРАЩЕНИЕ', need: 2,
+    id: 'SIDE', goal: 'Боковое вращение на стол', title: 'БОКОВОЕ', need: 2,
     tip: 'Нарисуйте пальцем дугу вбок.', mouseTip: 'ЛКМ + дуга вбок.',
-    gesture: [[0.455, 0.82], [0.472, 0.695], [0.517, 0.615], [0.605, 0.588]], speed: 1.1, dur: 0.15,
     feed: { kind: 'normal', spin: -40, speed: 5.6 },
     check: (g, s) => Math.abs(s.sidespin) > 32,
     failHint: 'Дугой, не по прямой.',
   },
   {
-    id: 'TIMING', title: 'ТАЙМИНГ', need: 2,
-    tip: 'Кольцо замкнулось — свайп вверх.', mouseTip: 'Кольцо замкнулось — ЛКМ + вверх.',
-    gesture: [[0.50, 0.80], [0.515, 0.54]], speed: 1.25, dur: 0.13,
+    id: 'TIMING', goal: 'Верните быстрый мяч', title: 'ТАЙМИНГ', need: 2,
+    tip: 'Свайп вверх после отскока.', mouseTip: 'После отскока — ЛКМ + вверх.',
     feed: { kind: 'fast', spin: -110, speed: 10.2 },
     check: () => true,
-    failHint: 'Дождитесь замыкания кольца.',
+    failHint: 'Нет возврата на стол.',
   },
   {
-    id: 'SMASH', title: 'СМЕШ', need: 2,
+    id: 'SMASH', goal: 'Удар на стол быстрее 55 км/ч', title: 'СМЕШ', need: 2,
     tip: 'Резкий короткий свайп вбок.', mouseTip: 'ЛКМ + резкое движение вбок.',
-    gesture: [[0.435, 0.655], [0.600, 0.690]], speed: 1.7, dur: 0.055,
     feed: { kind: 'high', spin: -15, v: [0, 3.6, 3.2], y0: 1.02 },
     check: (g, s) => s.speed > 55,
     failHint: 'Быстрее и резче.',
@@ -101,6 +93,8 @@ class Trainer {
     this.msg = ''; this.lastShot = null;
     this.g.ball.live = false;
     this.g.isServeBall = false;
+    this.g.state = GS.RALLY; this.g.stateT = 0;
+    if (this.g.cancelInput) this.g.cancelInput();
     this.sync();
   }
 
@@ -130,6 +124,7 @@ class Trainer {
   /** Serve one practice ball from the far side, shaped for the drill. */
   feed() {
     const g = this.g, b = this.g.ball, S = this.S;
+    this.lastShot = null;
     g.marks.length = 0;
     g.rallyBounces.length = 0;
     g.serveBounces = 0;
@@ -184,7 +179,7 @@ class Trainer {
       // to know the serve crossed after touching the server's half
       // Game.onBounce calls us BEFORE it bumps serveBounces, so the
       // crossing bounce is still counted as #1 here.
-      if (lastHitBy === 1 && side === -1 && this.g.serveBounces >= 1) this.pass();
+      if (lastHitBy === 1 && side === -1 && this.g.serveBounces >= 1 && !this.g.netTouched) this.pass();
       return;
     }
     if (lastHitBy !== 1 || side !== -1) return;
@@ -200,17 +195,17 @@ class Trainer {
     if (who > 0) return;                       // the feeder "lost" the point: ignore
     const S = this.S;
     let r = reason;
-    if (reason === 'АУТ') r = 'Аут. Бейте мягче.';
-    else if (reason === 'В СЕТКУ') r = 'Сетка. Ведите длиннее вверх.';
-    else if (reason === 'ВЫ НЕ ДОСТАЛИ МЯЧ' || reason === 'ОЧКО СОПЕРНИКУ') r = 'Бейте при замыкании кольца.';
-    else if (reason.indexOf('ПОДАЧ') >= 0) r = 'Сначала отскок на своей половине.';
+    if (reason === 'АУТ') r = 'Аут.';
+    else if (reason === 'В СЕТКУ') r = 'Сетка.';
+    else if (reason === 'ВЫ НЕ ДОСТАЛИ МЯЧ' || reason === 'ОЧКО СОПЕРНИКУ') r = 'Нет контакта.';
+    else if (reason.indexOf('ПОДАЧ') >= 0) r = 'Ошибка подачи.';
     this.fail(r);
   }
 
   pass() {
     this.done++;
     this.phase = 'ok'; this.t = 0;
-    this.msg = this.done >= this.S.need ? 'ШАГ ПРОЙДЕН' : 'ОТЛИЧНО!';
+    this.msg = this.done >= this.S.need ? 'Готово' : 'Зачтено';
     this.msgCol = '#4ee39a';
     this.g.audio.ui('good');
     this.sync();
@@ -232,8 +227,8 @@ class Trainer {
     const g = this.g;
     switch (this.phase) {
       case 'intro':
-        // read the card, watch the ghost loop once, then go (tap skips)
-        if (this.t > 2.8 || (this.t > 0.4 && g.pointerDown)) { this.phase = 'wait'; this.t = 0; }
+        // A short settling interval, independent of pointer clicks.
+        if (this.t > 1.0) { this.phase = 'wait'; this.t = 0; }
         break;
       case 'wait':
         if (this.t > 0.45) this.feed();

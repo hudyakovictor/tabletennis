@@ -25,24 +25,18 @@
       <div id="mnToast"></div>
       <div id="note" role="status" aria-live="polite"><i></i><span></span></div>
       <div id="msgs" role="log" aria-live="polite" aria-atomic="false"></div>
-      <!-- last shot: one line, fades away on its own -->
-      <div id="shot"><b id="shotName">—</b><small id="shotMeta"></small></div>
-      <!-- interactive coach -->
-      <div id="train" class="pe">
-        <div class="th"><span id="trStep">1 / 6</span><b id="trTitle">ПОДАЧА</b></div>
-        <div class="tpips" id="trPips"></div>
-        <div class="ttip" id="trTip"></div>
-        <div class="tmsg" id="trMsg"></div>
-        <div class="tbtns">
-          <button class="tbt" id="trSkip">ДАЛЬШЕ ▸</button>
-          <button class="tbt" id="trExit">ВЫЙТИ</button>
-        </div>
-      </div>
-
+      <!-- Latest attempt: recognition, real contact, measured spin and actual result. -->
+      <div id="shot" role="status" aria-live="polite" aria-atomic="true"><b id="shotName">—</b><span id="shotStatus"></span><small id="shotMeta"></small></div>
       <button id="btnDemoExit" class="tbt pe" style="display:none">ДЕМО · ВЕРНУТЬ УПРАВЛЕНИЕ</button>
       <div id="timingCue" role="status" aria-live="off"></div>
       <div id="gestureCue" aria-live="off"></div>
       <div id="playStatus" role="status" aria-live="polite"></div>
+    </div>
+
+    <!-- Read-only objective; the entire gesture area stays free of controls. -->
+    <div id="train" role="status" aria-live="polite" aria-atomic="true">
+      <div class="th"><span id="trStep"></span><b id="trTitle"></b><span id="trProgress"></span></div>
+      <div id="trTip"></div><div id="trMsg"></div>
     </div>
 
     <div id="dbg"></div>
@@ -66,7 +60,13 @@
       <div class="pause-actions">
         <button id="pauseResume" class="tbt">ПРОДОЛЖИТЬ</button>
         <button id="pauseSettings" class="tbt"><span class="ui-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></span>НАСТРОЙКИ</button>
-        <button id="pauseDebugMisses" class="tbt"><span class="ui-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="10.8" cy="10.8" r="6.8"/><path d="m16 16 5 5"/></svg></span>ПОВТОРЫ ПРОМАХОВ</button>
+        <label class="capture-debug-toggle"><input type="checkbox" id="captureDebugPause"> Зона нажатия</label>
+        <button id="shotLabPause" class="tbt">КАЛИБРОВКА ПОПАДАНИЯ</button>
+        <div id="trainingActions" hidden>
+          <p id="trainPauseTip"></p>
+          <button class="tbt" id="trSkip">ПРОПУСТИТЬ УПРАЖНЕНИЕ</button>
+          <button class="tbt" id="trExit">ЗАКОНЧИТЬ ОБУЧЕНИЕ</button>
+        </div>
         <button id="pauseToMenu" class="tbt">В МЕНЮ</button>
       </div>
     </div>
@@ -160,27 +160,20 @@
   <div class="screen" id="settings" role="dialog" aria-modal="true" aria-label="Настройки">
     <div class="card settings-card">
       <div class="logo" style="font-size:24px">НАСТРОЙКИ</div>
-      <div class="sub">Игра и камера</div>
+      <div class="sub">Личные предпочтения · единые правила игры</div>
 
-      <h3 class="sec">1. ОБЛАСТЬ ПОПАДАНИЯ</h3>
-      <div class="sl">
-        <label for="rHitZone">Радиус приёма<small>захват мяча вокруг курсора</small></label>
-        <input type="range" id="rHitZone" data-set="hitZone" min="30" max="100" value="85" aria-valuetext="85 процентов">
-        <span class="v" id="vHitZone">85%</span>
-      </div>
-      <div style="font-size:11px;color:var(--dim);line-height:1.5;margin:4px 0 16px">
-        Больше радиус — проще попасть.
-      </div>
+      <p class="note">Допуски попадания и помощь настроены одинаково для всех — без ползунков. Мяч отбивается ракеткой. Мышь или палец управляют её движением, свайп задаёт удар. Скобки у мяча подсказывают время: пунктир — приближение, сплошные — окно для свайпа. Сам по себе маркер мяч не отбивает.</p>
 
-      <h3 class="sec">2. ВЫРАВНИВАНИЕ УДАРА</h3>
-      <div class="sl">
-        <label for="rAssist">Авто-доводка<small>исправление дуги на стол</small></label>
-        <input type="range" id="rAssist" data-set="assist" min="0" max="100" value="85" aria-valuetext="85 процентов">
-        <span class="v" id="vAssist">85%</span>
+      <h3 class="sec">ХВАТ И ВЕДУЩАЯ РУКА</h3>
+      <div class="row" role="group" aria-label="Хват ракетки">
+        <button class="opt" data-set="grip" data-val="shakehand" aria-pressed="true"><b>SHAKEHAND</b></button>
+        <button class="opt" data-set="grip" data-val="penhold" aria-pressed="false"><b>PENHOLD · ПЕРО</b></button>
       </div>
-      <div style="font-size:11px;color:var(--dim);line-height:1.5;margin:4px 0 16px">
-        Помогает направить мяч на стол.
+      <div class="row" role="group" aria-label="Ведущая рука">
+        <button class="opt" data-set="hand" data-val="right" aria-pressed="true"><b>ПРАВША</b></button>
+        <button class="opt" data-set="hand" data-val="left" aria-pressed="false"><b>ЛЕВША</b></button>
       </div>
+      <p class="note">Shakehand: лёгкий наклон вперёд. Перо: почти вертикально, рукоятка вверх. Поза зеркалится; направление свайпа остаётся экранным.</p>
 
       <h3 class="sec">КАМЕРА</h3>
       <div class="row" id="cameraViews" role="group" aria-label="Вид камеры">
@@ -285,8 +278,8 @@
         <div class="st"><small>Любимый удар</small><b id="stFav">—</b></div>
       </div>
       <div id="overMoments" class="omrow"></div>
+      <button class="btn ghost" id="shotLabResults">КАЛИБРОВКА ПОПАДАНИЯ</button>
       <button class="btn" id="again">РЕВАНШ</button>
-      <button class="btn ghost insight" id="btnDebugMisses"><span class="ui-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="10.8" cy="10.8" r="6.8"/><path d="m16 16 5 5"/></svg></span>ПОВТОРЫ ПРОМАХОВ</button>
       <button class="btn ghost" id="backMenu">В МЕНЮ</button>
     </div>
   </div>
@@ -322,30 +315,17 @@
     </div>
   </div>
 
-  <!-- ==================== DEBUG MISSES MODAL ===================== -->
-  <div class="screen" id="debugMissesModal" role="dialog" aria-modal="true" aria-label="Повторы промахов">
-    <div class="card insight-card">
-      <div class="logo insight-title">ПОВТОРЫ ПРОМАХОВ</div>
-      <div class="sub">Выберите розыгрыш — разберём его в замедленном повторе.</div>
-      <div id="debugMissList" class="mlist"></div>
-      <button class="btn ghost" id="debugMissesClose">ЗАКРЫТЬ</button>
-    </div>
-  </div>
-
-  <!-- ==================== DEBUG REPLAY HUD ====================== -->
-  <div id="debugReplayHud" class="debug-replay" style="display:none">
-    <div class="debug-replay-info">
-      <div class="debug-replay-title" id="dbgReplayTitle">ПОВТОР ПРОМАХА #1</div>
-      <div class="debug-replay-verdict" id="dbgReplayVerdict">НЕ ДОТЯНУЛСЯ</div>
-      <div class="debug-replay-metrics" id="dbgReplayMetrics">Дистанция: 0.35 м · Радиус ракетки: 0.22 м</div>
-    </div>
-    <div class="debug-replay-controls">
-      <button class="tbt" id="dbgPrev">НАЗАД</button>
-      <button class="tbt" id="dbgRestart">ЗАНОВО</button>
-      <button class="tbt" id="dbgPause">ПАУЗА</button>
-      <button class="tbt" id="dbgSpeed">0.20×</button>
-      <button class="tbt" id="dbgNext">ВПЕРЁД</button>
-      <button class="tbt" id="dbgExit">ВЫЙТИ</button>
+  <div class="screen" id="shotLab" role="dialog" aria-modal="true" aria-labelledby="shotLabTitle">
+    <div class="card">
+      <h2 id="shotLabTitle">КАЛИБРОВКА ПОПАДАНИЯ</h2>
+      <div class="lab-actions"><button class="tbt" id="shotLabExport">СКАЧАТЬ ИЗМЕРЕНИЯ</button><button class="tbt" id="shotLabClose">ЗАКРЫТЬ</button></div>
+      <label class="capture-debug-toggle"><input type="checkbox" id="captureDebugLab"> Показывать зону у мяча</label>
+      <p class="lab-help">Один круг — допустимое место начала нажатия. Снаружи удар блокируется. Внутри всё ещё нужны движение и правильный момент. Радиус одинаковый при подаче и приёме: 48 экранных пикселей, независимо от камеры.</p>
+      <h3>Уменьшать ли зону?</h3>
+      <p class="lab-help">Ниже — сколько ваших реальных ударов отсекла бы меньшая зона. Точность и качество удара здесь не оцениваются.</p>
+      <div id="captureCalibrationSummary"></div>
+      <details><summary>Последние попытки</summary>
+      <div id="shotLabRecords"></div></details>
     </div>
   </div>
 

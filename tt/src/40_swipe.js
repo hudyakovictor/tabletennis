@@ -11,6 +11,7 @@
 /* --------------------------- gesture tracker ----------------------- */
 class SwipeTracker {
   constructor() {
+    this.gestureId = 0;
     this.active = false;
     this.samples = [];          // {x,y,t} normalized screen units (y down)
     this.maxSamples = 64;
@@ -28,6 +29,8 @@ class SwipeTracker {
     };
   }
   down(x, y, t) {
+    this.gestureId++;
+    this.pressZone = null;
     this.active = true; this.startT = t;
     this.samples.length = 0;
     this.samples.push({ x, y, t });
@@ -45,6 +48,7 @@ class SwipeTracker {
   /** Abandon the gesture without producing a stroke — used when a second
    *  finger lands and the touch turns into a camera orbit. */
   cancel() {
+    this.pressZone = null;
     this.active = false;
     this.samples.length = 0;
     this.lastReleased = null;
@@ -365,6 +369,9 @@ function deriveStroke(m, ctx) {
   if (!A.back && !A.absorb && !ctx.isServe) {
     phi = clamp(phi - (0.18 + 0.10 * clamp(sp01, 0, 1)), -1.35, 1.35);
   }
+  const faceRange = paddleContactRange(ctx.grip, st.id, ctx.forehand !== false, ctx.isServe,
+    { swingSpeed: vmag, contactY: b.y, incomingTop });
+  if (faceRange) phi = clamp(phi, faceRange[0] * DEG, faceRange[1] * DEG);
   const normal = V3.new(
     Math.sin(azFace) * Math.cos(phi),
     Math.sin(phi),
@@ -407,7 +414,7 @@ function deriveStroke(m, ctx) {
   };
 
   return {
-    stroke: st, arch: A, vR, normal, vmag, aim: { x: aimX, z: aimZ },
+    stroke: st, arch: A, vR, normal, vmag, faceEnvelope: faceRange, grip: ctx.grip, forehand: ctx.forehand !== false, aim: { x: aimX, z: aimZ },
     power: sp01, quality, elev, contact, azSwing, azFace, faceElev: phi, spinIntent, rubber,
     swipe: m, side, isServe: !!ctx.isServe,
     /* Air left over the tape. A push and a chop carry the least energy of any
@@ -439,17 +446,20 @@ function dirFromAngles(out, elev, az, fwd) {
 }
 
 /** Rebuild (swing, normal) for a stroke rotated by (dElev, dAz). */
-function strokeFrame(racket, dElev, dAz, scale, outSwing, outNormal) {
+function strokeFrame(racket, dElev, dAz, scale, outSwing, outNormal, wristCorrection = 0) {
   const fwd = -racket.side;
   const e = clamp(racket.elev * DEG + dElev, -1.30, 1.40);
   const a = clamp(racket.azSwing + dAz, -1.40, 1.40);
   const contact = racket.contact * DEG;
   // Preserve the actual contact face, including wrist pitch and lateral
   // brushing. Rebuilding only from contact degrees silently discarded both.
-  const phi = clamp(Number.isFinite(racket.faceElev)
+  let phi = clamp(Number.isFinite(racket.faceElev)
     ? racket.faceElev + (e - racket.elev * DEG)
     : (racket.arch.back ? e + contact : e - contact), -1.35, 1.35);
-  const af = clamp(racket.azFace + dAz, -1.10, 1.10);
+  phi += Number.isFinite(wristCorrection) ? wristCorrection : 0;
+  const range = racket.faceEnvelope || paddleContactRange(racket.grip, racket.stroke && racket.stroke.id, racket.forehand !== false, racket.isServe);
+  if (range) phi = clamp(phi, range[0] * DEG, range[1] * DEG);
+  const af = clamp(racket.azFace + dAz, -1.35, 1.35);
   dirFromAngles(outSwing, e, a, fwd);
   dirFromAngles(outNormal, phi, af, fwd);
   V3.mul(outSwing, outSwing, racket.vmag * (racket.arch.absorb ? 1 - racket.arch.absorb : 1) * scale);
@@ -496,7 +506,7 @@ const SERVE_WARM = new Map();
 function serveWarmKey(side, racket) {
   const st = racket.stroke || {};
   const aim = racket.aim || {};
-  return side + '|' + (st.id || '?') + '|' + Math.round((aim.z || 0) * 3) + '|' + Math.round((aim.x || 0) * 3);
+  return side + '|' + (racket.grip || 'legacy') + '|' + (racket.forehand !== false ? 'fh' : 'bh') + '|' + (st.id || '?') + '|' + Math.round((aim.z || 0) * 3) + '|' + Math.round((aim.x || 0) * 3);
 }
 function ownFor(aim, side) {
   return { x: aim.x * 0.35, z: side * (0.78 + Math.abs(aim.z) * 0.16) };
@@ -909,14 +919,28 @@ function solveBlockNormal(ballP, ballV, ballW, face, vR, quality, rubber, out) {
   return o;
 }
 
+/** A refined stroke is a new physical frame, not just a replacement normal.
+ * Keep its angle metadata consistent, so a second refinement starts from
+ * the frame the player actually sees rather than the unassisted gesture. */
+function resolvedRacketFrame(racket, normal, swing, extra) {
+  const n = V3.norm(V3.new(), normal), v = V3.clone(swing);
+  const fwd = -racket.side, speed = V3.len(v);
+  const absorb = racket.arch.absorb ? 1 - racket.arch.absorb : 1;
+  return { ...racket, ...extra, normal: n, vR: v,
+    faceElev: Math.asin(clamp(n.y, -1, 1)), azFace: Math.atan2(n.x, n.z * fwd),
+    elev: Math.asin(clamp(v.y / (speed || 1), -1, 1)) / DEG,
+    azSwing: Math.atan2(v.x, v.z * fwd), vmag: speed / absorb };
+}
+
 function refineRacket(ballP, ballV, ballW, racket, assist, quality) {
   const fwd = -racket.side;
   const rubber = Object.assign({}, racket.rubber || {});
   const q = quality !== undefined ? quality : racket.quality;
   const side = racket.side;
+  let wristCorrection = 0;
 
   const evalStroke = (dE, dA, sc, dmp, outV, outW) => {
-    strokeFrame(racket, dE, dA, sc, _rs, _rn);
+    strokeFrame(racket, dE, dA, sc, _rs, _rn, wristCorrection);
     V3.copy(outV, ballV); V3.copy(outW, ballW);
     rubber.damp = dmp;
     impactRacket(outV, outW, _rn, _rs, q, rubber);
@@ -935,8 +959,8 @@ function refineRacket(ballP, ballV, ballW, racket, assist, quality) {
     const spd = V3.len(_rs);
     if (spd > SERVE_VMAX) V3.mul(_rs, _rs, SERVE_VMAX / spd);
     rubber.damp = srv.dmp;
-    return Object.assign({}, racket, {
-      normal: V3.clone(_rn), vR: V3.clone(_rs), rubber,
+    return resolvedRacketFrame(racket, _rn, _rs, {
+      rubber,
       dElev: srv.dE, dAz: srv.dA, scale: srv.sc, damp: srv.dmp,
       solved: true, valid: srv.ok, target: srv.target,
     });
@@ -1082,10 +1106,42 @@ function refineRacket(ballP, ballV, ballW, racket, assist, quality) {
     verdict = validate(dE, dA, sc, dmp, true);
   }
 
+  // A grip-constrained face can reach its limit before the arm has found a
+  // useful path. Rotating both together then has a flat/reversed gradient.
+  // Separate wrist flexion from arm elevation, as a real loop does. This
+  // bounded recovery is only for high assistance and an otherwise illegal
+  // shot; it never edits ball velocity or escapes the grip's face envelope.
+  const envelope = racket.faceEnvelope || paddleContactRange(racket.grip, racket.stroke && racket.stroke.id, racket.forehand !== false, false);
+  if (verdict !== 0 && assist >= .65 && envelope) {
+    const candidates = [];
+    const aimAz = clamp(Math.atan2(target.x - ballP.x, fwd * (target.z - ballP.z)) - racket.azFace, -1, 1);
+    const maxScale = Math.min(1.35, 19.5 / Math.max(.8, racket.vmag));
+    for (const face of [envelope[1], (envelope[0] + envelope[1]) * .5, envelope[0]]) {
+      for (const arm of [35, 50, 20, 65]) {
+        for (const scale of [Math.min(1, maxScale), Math.min(.75, maxScale), maxScale]) {
+          const de = arm * DEG - racket.elev * DEG;
+          wristCorrection = face * DEG - (racket.faceElev + de);
+          if (validate(de, aimAz, scale, 1, false) !== 0) continue;
+          const distance = Math.hypot(chk.landed.x - target.x, chk.landed.z - target.z);
+          const cost = distance + Math.abs(de) * .08 + Math.abs(wristCorrection) * .08 + Math.abs(1 - scale) * .1;
+          candidates.push({ de, da: aimAz, scale, wrist: wristCorrection, cost });
+        }
+      }
+    }
+    candidates.sort((a, b) => a.cost - b.cost);
+    wristCorrection = 0;
+    for (const candidate of candidates.slice(0, 6)) {
+      wristCorrection = candidate.wrist;
+      if (validate(candidate.de, candidate.da, candidate.scale, 1, true) !== 0) { wristCorrection = 0; continue; }
+      dE = candidate.de; dA = candidate.da; sc = candidate.scale; dmp = 1;
+      verdict = 0; break;
+    }
+  }
+
   const swing = V3.new(), normal = V3.new();
-  strokeFrame(racket, dE, dA, sc, swing, normal);
+  strokeFrame(racket, dE, dA, sc, swing, normal, wristCorrection);
   rubber.damp = dmp;
-  return { ...racket, normal, vR: swing, rubber, dElev: dE, dAz: dA, scale: sc, damp: dmp, solved: sol, target, valid: verdict === 0 };
+  return resolvedRacketFrame(racket, normal, swing, { rubber, dElev: dE, dAz: dA, dWrist: wristCorrection, scale: sc, damp: dmp, solved: sol, target, valid: verdict === 0 });
 }
 
 /** Cheap post-hoc report of where a struck ball will actually go. */

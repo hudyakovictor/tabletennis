@@ -24,8 +24,8 @@ const SRC = path.join(__dirname, '..', 'src');
 /* Everything build.py ships, in the same order, minus 90_boot.js (the smoke
    suite performs the boot sequence itself so it can drive the frames). */
 const MODULES = [
-  '10_math.js', '20_gl.js', '25_career.js', '27_network.js', '30_physics.js',
-  '40_swipe.js', '50_audio.js', '55_ai.js', '56_rig.js', '57_camera.js',
+  '10_math.js', '12_match_rules.js', '20_gl.js', '25_career.js', '27_network.js', '30_physics.js',
+  '38_paddle_motion.js', '40_swipe.js', '42_shot_diagnostics.js', '50_audio.js', '55_ai.js', '56_rig.js', '57_camera.js',
   '58_coach.js', '59_replay.js', '60_scene.js', '65_train.js', '84_racket.js',
   '86_meta.js', '70_game.js', '80_ui.js',
 ];
