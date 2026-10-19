@@ -349,8 +349,19 @@ class Game {
 
       this.swipe.down(n.x, n.y, this.time);
       const rect = c.getBoundingClientRect();
-      this.swipe.pressZone = pressHitZone(this.project(this.ball.p), n, rect.width, rect.height)
-        || { accepted: false, radius: MATCH_RULES.pressRadiusPx, distancePx: null };
+      const ballZone = pressHitZone(this.project(this.ball.p), n, rect.width, rect.height);
+      const padZone = pressHitZone(this.project(this.player.pos), n, rect.width, rect.height);
+      this.swipe.pressZone = ballZone || { accepted: false, radius: MATCH_RULES.pressRadiusPx, distancePx: null };
+      /* The press is remembered in screen terms so the gate can be re-evaluated
+       * as the ball travels (see pressAdmitsBall). The bat itself counts as the
+       * action too: a finger that lands on the blade is aiming a stroke. */
+      this.swipe.pressZone.pressX = n.x; this.swipe.pressZone.pressY = n.y;
+      this.swipe.pressZone.vw = rect.width; this.swipe.pressZone.vh = rect.height;
+      if (padZone && padZone.accepted && !this.swipe.pressZone.accepted) {
+        this.swipe.pressZone.accepted = true;
+        this.swipe.pressZone.via = 'paddle';
+        this.swipe.pressZone.paddleDistancePx = padZone.distancePx;
+      }
       this.swipe.pressZone.serving = this.state === GS.SERVE_READY || this.state === GS.SERVE_TOSS;
       if (this.shotJournal) {
         const attempt = this.shotJournal.create(this.swipe.gestureId, this.time);
@@ -717,10 +728,16 @@ class Game {
 
     if (this.isServeBall) {
       this.serveBounces++;
+      /* Before the strike `lastHitBy` is 0, and `-lh` is also 0 — which
+       * `awardPoint` reads as "the AI won the point". A toss that bounced on
+       * the server's own table (a fault) therefore gave the point to the AI
+       * even when the AI was the server. Resolve 0 to the actual server. */
+      const server = lh === 0 ? this.server : lh;
       if (this.serveBounces === 1) {
-        if (side !== lh) { this.awardPoint(-lh, 'ОШИБКА ПОДАЧИ'); return; }
+        if (side !== server) { this.awardPoint(-server, 'ОШИБКА ПОДАЧИ'); return; }
+        if (lh === 0) { this.awardPoint(-server, 'ОШИБКА ПОДАЧИ'); return; }
       } else if (this.serveBounces === 2) {
-        if (side !== -lh) { this.awardPoint(-lh, 'ОШИБКА ПОДАЧИ'); return; }
+        if (side !== -server) { this.awardPoint(-server, 'ОШИБКА ПОДАЧИ'); return; }
         if (this.netTouched) { this.letServe(); return; }
         this.isServeBall = false;      // serve is good, normal rally from here
         this.rallyBounces.length = 0;
@@ -729,12 +746,34 @@ class Game {
       return;
     }
 
-    if (side === lh) { this.awardPoint(-lh, lh > 0 ? 'МЯЧ НЕ ПЕРЕЛЕТЕЛ' : 'СОПЕРНИК НЕ ПЕРЕЛЕТЕЛ'); return; }
+    if (side === lh) {
+      /* The ball bounced back onto the hitter's own half. If it had ALREADY
+       * touched the opponent's court, that was a legal return and the
+       * opponent failed to play it (ITTF 2.10.1): the point belongs to the
+       * hitter, not against them. Only a ball that never crossed is a
+       * 「did not go over」 fault. */
+      const crossed = this.rallyBounces.filter((s) => s === -lh).length > 0;
+      if (crossed) { this.awardPoint(lh, lh > 0 ? 'ОЧКО! СОПЕРНИК НЕ ДОСТАЛ' : 'ВЫ НЕ ДОСТАЛИ МЯЧ'); return; }
+      this.awardPoint(-lh, lh > 0 ? 'МЯЧ НЕ ПЕРЕЛЕТЕЛ' : 'СОПЕРНИК НЕ ПЕРЕЛЕТЕЛ');
+      return;
+    }
     // second bounce on the receiver's side -> the receiver failed to return
     const onRecv = this.rallyBounces.filter((s) => s === -lh).length;
     if (onRecv >= 2) {
       this.awardPoint(lh, lh > 0 ? 'ОЧКО! СОПЕРНИК НЕ ДОСТАЛ' : 'ВЫ НЕ ДОСТАЛИ МЯЧ');
     }
+  }
+
+  /** A ball that has stopped on the table is out of play. Resolved by the
+   *  same rule the floor uses: whoever failed to make the return loses. */
+  settleDeadBall() {
+    const b = this.ball, lh = b.lastHitBy;
+    b.live = false;
+    if (this.isServeBall) { this.awardPoint(-this.server, 'ПОДАЧА НЕ ВЫПОЛНЕНА'); return; }
+    if (lh === 0) return;
+    const onRecv = this.rallyBounces.filter((s) => s === -lh).length;
+    if (onRecv >= 1) this.awardPoint(lh, lh > 0 ? 'ОЧКО! СОПЕРНИК НЕ ДОСТАЛ' : 'ВЫ НЕ ДОСТАЛИ МЯЧ');
+    else this.awardPoint(-lh, lh > 0 ? 'МЯЧ НЕ ПЕРЕЛЕТЕЛ' : 'СОПЕРНИК НЕ ПЕРЕЛЕТЕЛ');
   }
 
   onFloor() {
@@ -1104,6 +1143,14 @@ class Game {
       b.restT = (b.restT || 0) + dt;
       if (b.restT > 0.9 || V3.len(b.v) < 0.45) {
         if (this.state === GS.POINT || this.state === GS.MATCH_END) { b.live = false; return; }
+        /* The ball came to rest ON the table during a rally. Nothing else
+         * would ever resolve it: no bounce, no floor, no point — the rally
+         * hung with a motionless ball until the player left the match.
+         * `restT` (0.9 s of sitting on the table), not the instantaneous
+         * speed: a short ball still trickling at 0.3 m/s is a ball the
+         * player can and should be able to run in and flick, and the old
+         * speed test killed exactly those. */
+        if ((this.state === GS.RALLY || this.state === GS.SERVE_TOSS) && b.restT > 0.9) { this.settleDeadBall(); return; }
       }
     } else b.restT = 0;
     const p0 = V3.clone(b.p);
@@ -1113,11 +1160,16 @@ class Game {
     b.speed = V3.len(b.v);
 
     /* --- table --- */
-    if (b.p.y - PH.R <= PH.TABLE_Y && b.v.y < 0 && p0.y - PH.R > PH.TABLE_Y - 0.02) {
-      const inX = Math.abs(b.p.x) <= PH.T_HALF_WID + PH.R * 0.5;
-      const inZ = Math.abs(b.p.z) <= PH.T_HALF_LEN + PH.R * 0.5;
-      if (inX && inZ) {
+    /* tableContact() is the same function predict() runs: it rejects a ball
+     * that was already below the surface at the start of the step and it
+     * returns the INTERPOLATED touch point, not the end of the step. At
+     * 30 m/s the end of a 1/600 s step is 5 cm past the line, which is how a
+     * ball that landed inside the line got recorded outside it. */
+    if (b.v.y < 0) {
+      const tb = tableContact(p0.x, p0.y, p0.z, b.p.x, b.p.y, b.p.z, this._tabHit || (this._tabHit = { x: 0, y: 0, z: 0 }));
+      if (tb) {
         const sp = -b.v.y;
+        b.p.x = tb.x; b.p.y = tb.y + 1e-5; b.p.z = tb.z;
         /* The white line is physics now (bounceTable tilts the contact normal
          * outward and takes a third of the restitution off). The old handler
          * did its own thing on top of it — v.y *= 0.45 and rndSym(1.2) m/s of
@@ -1136,26 +1188,28 @@ class Game {
     }
 
     /* --- net --- */
-    if ((p0.z > 0) !== (b.p.z > 0) || Math.abs(b.p.z) < PH.R + 0.004) {
-      const a = Math.abs(p0.z) / (Math.abs(p0.z) + Math.abs(b.p.z) + 1e-9);
-      const yAt = lerp(p0.y, b.p.y, a);
-      const xAt = lerp(p0.x, b.p.x, a);
-      if (Math.abs(xAt) < PH.NET_HALF_WID) {
-        if (yAt - PH.R < PH.NET_TOP && yAt + PH.R > PH.NET_TOP - PH.TAPE_R * 2 && yAt + PH.R > PH.NET_TOP) {
-          clipTape(b.p, b.v, b.w);
-          this.audio.hitNet();
-          this.msg('СЕТКА — ЭДЖ!', 1.1, '#ffd34d');
-          this.emitParticles(xAt, PH.NET_TOP, 0, 8, 1.1, 0.3, 0.014, 1, 0.9, 0.5);
-          this.netTouched = true;
-          if (b.lastHitBy === 1 && this.shotJournal) this.shotJournal.net();
-        } else if (yAt < PH.NET_TOP) {
-          bounceNet(b.p, b.v, b.w, Math.sign(p0.z) || 1);
-          this.audio.hitNet();
-          this.emitParticles(xAt, yAt, 0, 7, 0.7, 0.3, 0.013, 0.8, 0.85, 1);
-          this.netTouched = true;
-          if (b.lastHitBy === 1 && this.shotJournal) this.shotJournal.net();
-          this.moments.addBounce(true);
-        }
+    /* netContactStep() is the same model predict() and every solver use:
+     * 0 clean, 1 mesh, 2 white tape. A ball whose whole body is under the
+     * table passes BENEATH the net — the plane used to reflect it, so a ball
+     * that had already fallen off the table bounced off an invisible wall. */
+    const nk = netContactStep(p0.x, p0.y, p0.z, b.p.x, b.p.y, b.p.z,
+      this._netHit || (this._netHit = { x: 0, y: 0, z: 0 }));
+    if (nk > 0) {
+      const nh = this._netHit;
+      if (nk === 2) {
+        clipTape(b.p, b.v, b.w);
+        this.audio.hitNet();
+        this.msg('СЕТКА — ЭДЖ!', 1.1, '#ffd34d');
+        this.emitParticles(nh.x, PH.NET_TOP, 0, 8, 1.1, 0.3, 0.014, 1, 0.9, 0.5);
+        this.netTouched = true;
+        if (b.lastHitBy === 1 && this.shotJournal) this.shotJournal.net();
+      } else {
+        bounceNet(b.p, b.v, b.w, Math.sign(p0.z) || 1);
+        this.audio.hitNet();
+        this.emitParticles(nh.x, nh.y, 0, 7, 0.7, 0.3, 0.013, 0.8, 0.85, 1);
+        this.netTouched = true;
+        if (b.lastHitBy === 1 && this.shotJournal) this.shotJournal.net();
+        this.moments.addBounce(true);
       }
     }
 
@@ -1224,16 +1278,99 @@ class Game {
        freshness (correct for a rally) dropped a legal toss strike. */
     const liveWin = serving ? 1.15 : 0.18;
     const deadWin = serving ? 1.15 : 0.25;
-    const m = sw.active && lastSample && this.time - lastSample.t >= 0 && this.time - lastSample.t < liveWin ? sw.m
+    /* A BLOCK is a real stroke that then stands still: the hand moves into
+       position and waits for the ball. Sample freshness alone killed it
+       180 ms after the finger stopped moving, so the one shot where holding
+       still is the whole technique could not be played at all. Remember that
+       THIS gesture has already been a real stroke; a tap (never real) still
+       produces no intent, which the browser test pins down. */
+    if (sw.active && sw.gestureId !== sw.realGestureId && isRealStroke(sw.m, serving)) {
+      sw.realGestureId = sw.gestureId;
+      sw.realAt = this.time;
+    }
+    const held = sw.active && sw.gestureId === sw.realGestureId &&
+      this.time - (sw.realAt || 0) < (serving ? 1.15 : 2.5);
+    const fresh = sw.active && lastSample && this.time - lastSample.t >= 0 && this.time - lastSample.t < liveWin;
+    const m = fresh || held ? sw.m
       : !sw.active && this.time - releasedAt >= 0 && this.time - releasedAt < deadWin ? sw.lastReleased : null;
     if (!isRealStroke(m, serving)) return null;
     return m;
   }
 
+  /** The press gate asks "did this gesture start near the action", not
+   *  "was the finger exactly on the ball at the instant of pointerdown".
+   *  A ball moving at 10 m/s travels 1.5 m in the time the bat needs to
+   *  arrive, and on a touch screen the thumb naturally lands where the ball
+   *  is GOING. Measured with the old instantaneous test: pressing the ball's
+   *  own landing spot 0.2-0.3 s early was rejected in 9 of 9 attempts, and a
+   *  press on the bat while it covered the ball was rejected as well. The
+   *  gesture is admitted when it starts within the 48 CSS px radius of the
+   *  ball, of the bat, or when the ball later enters that radius while the
+   *  gesture is still alive. A tap in an empty corner still never hits. */
+  pressAdmitsBall() {
+    const pz = this.swipe.pressZone;
+    if (!pz || pz.accepted) return true;
+    /* A zone we cannot verify is not admitted. Every real pointerdown stores
+     * the screen geometry; only synthetic callers omit it. */
+    if (!Number.isFinite(pz.pressX) || !Number.isFinite(pz.pressY) ||
+        !(pz.vw > 0) || !(pz.vh > 0)) return false;
+    if (!this.R || !this.R.viewProj) return false;
+    const bs = this.project(this.ball.p, this._pressBallScreen || (this._pressBallScreen = {}));
+    if (!bs || !bs.ok) return false;
+    const d = Math.hypot((bs.x - pz.pressX) * pz.vw, (bs.y - pz.pressY) * pz.vh);
+    if (d <= pz.radius) {
+      pz.accepted = true; pz.via = 'path'; pz.distancePx = d;
+      if (this.shotJournal) this.shotJournal.acceptPress(this.swipe.gestureId, 'path');
+      return true;
+    }
+    return false;
+  }
+
+  /** The pose the blade is drawn with this frame. The continuous test must use
+   *  it, not prevPos -> pos replayed once per physics substep: that multiplied
+   *  a frame of bat travel by the number of substeps and manufactured
+   *  interceptions the blade never made. */
+  staticPad(pad) {
+    /* During the substep loop the blade is a MOVING body: its frame-long
+     * travel is distributed over the physics steps (substepPadPose), so the
+     * CCD sees a real sweep instead of a teleport. Outside the loop the
+     * blade is still for the whole test. */
+    if (this._subPad) return this._subPad;
+    const s = this._staticPad || (this._staticPad = { pos: V3.new(), prevPos: V3.new(), normal: V3.new() });
+    V3.copy(s.pos, pad.pos); V3.copy(s.prevPos, pad.pos); V3.copy(s.normal, pad.normal);
+    return s;
+  }
+
+  /** The blade pose for substep k of n. One frame-long move is split into n
+   *  equal pieces, so the bat cannot pass through a ball between physics
+   *  steps (the old single pose per frame both missed real contacts and
+   *  manufactured phantom ones) and it cannot travel n times as far either. */
+  substepPadPose(k, n) {
+    const p = this.player;
+    const s = this._subPadBuf || (this._subPadBuf = { pos: V3.new(), prevPos: V3.new(), normal: V3.new() });
+    const a0 = n > 1 ? k / n : 0, a1 = n > 1 ? (k + 1) / n : 1;
+    s.prevPos.x = lerp(p.prevPos.x, p.pos.x, a0);
+    s.prevPos.y = lerp(p.prevPos.y, p.pos.y, a0);
+    s.prevPos.z = lerp(p.prevPos.z, p.pos.z, a0);
+    s.pos.x = lerp(p.prevPos.x, p.pos.x, a1);
+    s.pos.y = lerp(p.prevPos.y, p.pos.y, a1);
+    s.pos.z = lerp(p.prevPos.z, p.pos.z, a1);
+    V3.copy(s.normal, p.normal);
+    return s;
+  }
+
   tryPlayerHit(p0) {
     const pad = this.player, b = this.ball;
     if (!b.live) return;
-    if (this.swipe.pressZone && !this.swipe.pressZone.accepted) return;
+    /* The point is over. A ball still in the air during the point-end pause
+     * is scenery: striking it used to change lastHitBy, consume the gesture
+     * and feed the journal a contact that belonged to no rally. */
+    if (this.state !== GS.RALLY && this.state !== GS.SERVE_TOSS) return;
+    /* A serve has to bounce on the receiver's side before it can be returned.
+     * `isServeBall` alone did not stop the near side from volleying the
+     * opponent's serve straight out of the toss. */
+    if (this.isServeBall && b.lastHitBy === -1) return;
+    if (!this.pressAdmitsBall()) return;
 
     // The fixed envelope belongs to the racket, NOT the pointer marker.
     const reachRadius = MATCH_RULES.captureRadius;
@@ -1242,8 +1379,21 @@ class Game {
     const serveCtx = this.state === GS.SERVE_TOSS && this.server === 1 && b.lastHitBy === 0;
     const sw = this.swipe, m = this.playerStrokeIntent(serveCtx);
     if (!m) return;
+    /* ITTF 2.07: a return must follow a bounce on the receiver's court.
+     * Without this gate the generous endpoint envelope returned
+     *   · a ball still on its way to the player (a volley, a fault), and
+     *   · a ball that had already passed the end line and missed the table
+     *     — a point the player had already won, turned back into a rally.
+     * An out ball is allowed to finish its flight; the gesture is not
+     * consumed, so it is still there for the real chance. */
+    const ownBounce = this.rallyBounces.some((s) => s > 0);
+    if (!serveCtx && !ownBounce) {
+      if (b.p.z >= PH.T_HALF_LEN) this.hintOut = this.time;
+      return;
+    }
     const endpointEligible = serveCtx || (b.lastHitBy === -1 && (this.rallyBounces.some(s => s > 0) || b.p.z >= .50));
-    const captureSample = measureCaptureAllowance(pad, p0, b.p, serveCtx, endpointEligible);
+    const spad = this.staticPad(pad);
+    const captureSample = measureCaptureAllowance(spad, p0, b.p, serveCtx, endpointEligible);
     if (captureSample && this.shotJournal) this.shotJournal.observeCapture(sw.gestureId, captureSample, this.time);
     if (b.v.z < 0 && b.p.z < pad.pos.z - .35) return;
     if (serveCtx && (b.v.y >= 0 || this.tossApex - PH.TABLE_Y <= 0.10)) return;
@@ -1255,38 +1405,44 @@ class Game {
       if (b.v.y < 0 && this.tossApex - PH.TABLE_Y > 0.10 && playerInCaptureRange(b.p, pad.pos, true)) {
         hit = { t: 1, x: b.p.x, y: b.p.y, z: b.p.z, captureKind: 'serve', rad: rad * 0.40, px: pad.pos.x, py: pad.pos.y, pz: pad.pos.z };
       }
-    } else {
-      // Receiving ball from opponent: forgiving capture across the player's zone
-      const incoming = b.lastHitBy === -1 && (this.rallyBounces.some((s) => s > 0) || b.p.z >= 0.50);
-      if (incoming) {
-        const dist2d = Math.hypot(b.p.x - pad.pos.x, b.p.y - pad.pos.y);
-        if (playerInCaptureRange(b.p, pad.pos)) {
-          hit = { t: 1, x: b.p.x, y: b.p.y, z: b.p.z, captureKind: 'endpoint', rad: dist2d * 0.35, px: pad.pos.x, py: pad.pos.y, pz: pad.pos.z };
-        }
+    } else if (ownBounce) {
+      /* The endpoint route fires at the CLOSEST APPROACH of the ball to the
+       * blade, not the instant it enters the assist box. The box is 0.36 m
+       * wide and 0.35 m deep, so firing on entry put the contact up to 35 cm
+       * in front of the racket — the ball left a place the blade visibly
+       * never reached. While the ball is still closing, this substep simply
+       * does not hit; the gesture stays alive and the next substep (or the
+       * bat's own sweep) takes it at the blade. */
+      const closing = (b.p.x - pad.pos.x) * b.v.x + (b.p.y - pad.pos.y) * b.v.y +
+        (b.p.z - pad.pos.z) * b.v.z;
+      const inside = playerInCaptureRange(b.p, pad.pos);
+      const still = b.v.x * b.v.x + b.v.y * b.v.y + b.v.z * b.v.z < 0.04;
+      if (inside && (closing <= 0.02 || still)) {
+        const dx = b.p.x - p0.x, dy = b.p.y - p0.y, dz = b.p.z - p0.z;
+        const dd = dx * dx + dy * dy + dz * dz;
+        const u = dd > 1e-12
+          ? clamp((-(p0.x - pad.pos.x) * dx - (p0.y - pad.pos.y) * dy - (p0.z - pad.pos.z) * dz) / dd, 0, 1)
+          : 1;
+        const cx = p0.x + dx * u, cy = p0.y + dy * u, cz = p0.z + dz * u;
+        /* Quality is the NORMALISED distance inside the box, on both axes.
+         * `dist2d * 0.35` ignored depth entirely: a ball 30 cm in front of
+         * the blade scored as a dead-centre contact with the full sweet
+         * spot. */
+        const lat = Math.hypot(cx - pad.pos.x, cy - pad.pos.y);
+        const frac = Math.max(lat / reachRadius,
+          Math.abs(cz - pad.pos.z) / MATCH_RULES.depthTolerance);
+        hit = { t: u, x: cx, y: cy, z: cz, captureKind: 'endpoint',
+          rad: clamp(frac, 0, 1) * reachRadius, px: pad.pos.x, py: pad.pos.y, pz: pad.pos.z };
       }
     }
 
     if (!hit) {
-      hit = this.sweepPaddle(pad, p0, b.p, serveCtx ? serveReach : reachRadius);
+      hit = this.sweepPaddle(spad, p0, b.p, serveCtx ? serveReach : reachRadius);
     }
     if (!hit) return;
     if (b.lastHitBy === 1) return;                 // you already hit it
 
-    // volley check: returning before the ball bounced on your own half.
-    if (!this.isServeBall && b.lastHitBy === -1 && !this.rallyBounces.some((s) => s > 0) && b.p.z < PH.T_HALF_LEN) {
-      const o = this._volleyPred || (this._volleyPred = {});
-      predict(V3.clone(b.p), V3.clone(b.v), V3.clone(b.w),
-        { dt: 1 / 240, maxT: 2.0, stopOnFirstBounce: true, out: o });
-      const landsIn = o.landed && o.landed.z > 0.01 && Math.abs(o.landed.x) <= PH.T_HALF_WID + PH.R;
-      if (!landsIn) { this.hintOut = this.time; return; }
-      if (o.landed.z > b.p.z - 0.50) return;
-      this.awardPoint(-1, 'УДАР С ЛЁТА НАД СТОЛОМ');
-      b.live = false;
-      return;
-    }
-
     const isServeStroke = this.isServeBall && b.lastHitBy === 0 && this.server === 1;
-    pad.lastHitT = this.time;
     const contact = V3.new(hit.x, hit.y, hit.z);
     const forehand = paddleForehand(pad.pos.x, this.settings.hand, pad.forehand);
     const grip = playerWristPose(pad.pos, pad.vel, this.settings.hand, { grip: this.settings.grip, forehand });
@@ -1344,6 +1500,19 @@ class Game {
       context: { grip: this.settings.grip, hand: this.settings.hand, forehand, isServe: isServeStroke,
         equip: { ...sideParams }, vmagK: this.equip.vmagK, moveYaw: this.padYaw || 0, movePitch: this.padPitch || 0 } };
     const info = impactRacket(b.v, b.w, racket.normal, racket.vR, quality, racket.rubber || {});
+    /* A separating face returns null and leaves the ball untouched. Consuming
+     * the gesture (and the 90 ms hit cooldown, and the paddle's position) on a
+     * null impact is how a ball that never touched the rubber still counted as
+     * returned — and why the next, real attempt was ignored. */
+    if (!info) return;
+    pad.lastHitT = this.time;
+    /* The blade is where the contact is. The old code left the bat up to one
+     * full capture radius away and launched the ball from a point it visibly
+     * never reached; the AI already snaps its paddle to the contact. prevPos is
+     * moved too, so the next frame does not read the snap as 20 m/s of bat. */
+    V3.copy(pad.pos, contact);
+    V3.copy(pad.prevPos, pad.pos);
+    V3.copy(pad.prev, pad.pos);
     V3.copy(b.p, contact);
     V3.addScaled(b.p, b.p, racket.normal, PH.R * 1.05);
     V3.copy(pad.normal, racket.normal); // show the assisted contact face too
@@ -1392,8 +1561,17 @@ class Game {
 
   tryAiHit() {
     if (this.training) return;           // the feeder never returns the ball
+    /* The point is over: the bot may not touch a ball that is only still
+     * flying through the point-end pause. Its plan used to survive the point
+     * and pull the next serve into a phantom backswing. */
+    if (this.state !== GS.RALLY) return;
     const b = this.ball, pad = this.aiPaddle, ai = this.ai;
     if (!b.live || b.lastHitBy === -1) return;
+    /* A serve must bounce on the receiver's side before it can be returned.
+     * The old code skipped the bounce rule for `isServeBall`, so the AI could
+     * (and did) volley the player's serve out of the toss — and even reset the
+     * serve state, turning a valid serve into a rally it had already won. */
+    if (this.isServeBall) return;
     if (!ai.plan) return;
     // the bot only swings at the moment it committed to during the
     // backswing — that is what makes the shot readable in advance
@@ -1402,16 +1580,23 @@ class Game {
     if (b.p.z > ai.pos.z + 0.08) return;
     if (reach > 0.42) return;
 
-    // legality: AI must let the ball bounce on its own side first
-    if (!this.isServeBall && !this.rallyBounces.some((s) => s < 0) && b.p.z > -PH.T_HALF_LEN) return;
+    /* ITTF 2.07: the ball must touch the AI's court before the AI returns
+     * it. The old test only refused while the ball was still over the table,
+     * so a ball that had already flown past the end line — a point the bot
+     * had won — could still be “returned” and the rally carried on from a
+     * dead ball. */
+    if (!this.rallyBounces.some((s) => s < 0)) return;
 
     const racket = ai.swing(this);
     if (!racket) { return; }
     const contact = V3.clone(b.p);
     const info = impactRacket(b.v, b.w, racket.normal, racket.vR, racket.quality, racket.rubber || {});
+    if (!info) return;
     V3.copy(pad.normal, racket.normal);
     V3.copy(pad.pos, b.p);
-    if (this.isServeBall) { this.serveBounces = 0; this.rallyBounces.length = 0; this.isServeBall = false; }
+    /* Same separation as the player's contact: the flight the solver fitted
+     * starts one radius off the face, so the live ball must too. */
+    V3.addScaled(b.p, b.p, racket.normal, PH.R * 1.05);
     this.applyHit(-1, racket, contact, racket.quality, info);
   }
 
@@ -1474,9 +1659,13 @@ class Game {
     if (this.recenterT > 0) {
       this.recenterT = Math.max(0, this.recenterT - dt);
       /* release a serve the player asked for during the reset */
+      /* Only a finger that is STILL on the screen may release a queued toss.
+       * A tap during the bat's glide home queued the toss, the finger came
+       * up, and the toss fired anyway — the ball then dropped with no stroke
+       * behind it and the point was lost to «ПОДАЧА НЕ ВЫПОЛНЕНА». */
       if (this.recenterT === 0 && this.tossQueued) {
         this.tossQueued = false;
-        if (this.state === GS.SERVE_READY && this.server === 1) this.startToss();
+        if (this.state === GS.SERVE_READY && this.server === 1 && this.pointerDown) this.startToss();
       }
     }
 
@@ -1502,35 +1691,47 @@ class Game {
     const A = MATCH_RULES.positionAssist;
     const o = this._paddlePred || (this._paddlePred = {});
     const incoming = this.ball.live && this.ball.v.z > 0.4 && this.ball.lastHitBy === -1;
+    /* A ball that has already bounced and died short is not "not incoming":
+     * it is the one ball the step-in exists for. The old test also demanded
+     * v.z > 0.4, so a dead or trickling ball never advanced the read clock,
+     * never predicted a reach, and the bat stayed 0.47 m behind it — measured
+     * in the dead-short probe: 120 frames, bat never closer than z 1.43, a
+     * point awarded against the player who was never allowed to touch it. */
+    const looseShort = this.ball.live && this.ball.lastHitBy === -1 &&
+      this.ball.p.z > 0.02 && this.ball.p.z < 1.30 &&
+      this.ball.p.y < PH.TABLE_Y + 0.60;
+    const canReachShort = incoming || looseShort;
     const readClock = this.paddleReadClock || (this.paddleReadClock = new PaddleReadClock());
-    if (readClock.advance(dt, incoming, this.shotId)) {
+    if (readClock.advance(dt, canReachShort, this.shotId)) {
       predict(V3.clone(this.ball.p), V3.clone(this.ball.v), V3.clone(this.ball.w),
         { dt: PHYS_DT, maxT: 1.6, stopZ: pad.pos.z, stopDir: 1, out: o });
-      if (!o.reach && o.landed && o.landed.z > 0) {
-        o.reach = { x: o.landed.x, y: PH.TABLE_Y + 0.22, z: clamp(o.landed.z + 0.25, PADDLE_LIMITS.zStepIn, PADDLE_LIMITS.zFar), vx: 0, vy: 0, vz: 4 };
-        o.reachT = Math.max(0.05, o.landed.t + 0.10);
+      if (!o.reach) {
+        const rz = o.landed && o.landed.z > 0 ? o.landed.z + 0.25 : (looseShort ? this.ball.p.z : NaN);
+        if (Number.isFinite(rz)) {
+          o.reach = { x: o.landed ? o.landed.x : this.ball.p.x, y: PH.TABLE_Y + 0.22,
+            z: clamp(rz, PADDLE_LIMITS.zStepIn, PADDLE_LIMITS.zFar), vx: 0, vy: 0, vz: 4 };
+          o.reachT = Math.max(0.05, (o.landed ? o.landed.t : 0) + 0.10);
+        }
       }
     }
-    const shortBall = incoming && ((o.landed && o.landed.z > 0 && o.landed.z < 1.15) ||
+    const shortBall = canReachShort && ((o.landed && o.landed.z > 0 && o.landed.z < 1.15) ||
       (o.reach && o.reach.z < PADDLE_LIMITS.zNear + 0.22) || this.ball.p.z < 1.15);
     if (shortBall) zNear = PADDLE_LIMITS.zStepIn;
     /* The step is visible: the body goes forward and down, the blade tips
        into the ball. Without this the bat simply appeared 16 cm closer. */
     pad.stepIn = expSmooth(pad.stepIn || 0, shortBall ? 1 : 0, 8, dt);
 
-    // During anticipation, pull the paddle back visually
-    let anticipationOffset = V3.new();
-    if (this.settings.anticipationHint && this.anticipation.active && this.anticipation.t < this.anticipation.duration) {
-      const progress = this.anticipation.t / this.anticipation.duration;
-      const pullAmount = Math.sin(progress * Math.PI) * this.anticipation.intensity * 0.12;
-      anticipationOffset = V3.mul(V3.new(), this.anticipation.targetDir, -pullAmount);
-    }
-
+    /* Anticipation is a render cue, NOT a movement. It used to be added to
+     * the physical target, so pressing pulled the blade up to 12 cm away from
+     * the ball — backwards, opposite the stroke, exactly when the player was
+     * trying to hit it. drawDynamic applies the same offset to the drawn pose
+     * instead, where it cannot take a catchable ball out of the capture
+     * volume. */
     const t = paddleTargetFromPointer(pt.x, pt.y, depthY, sens,
       this._ptTarget || (this._ptTarget = { tx: 0, ty: 0, tz: 0 }), { zNear });
-    let tx = t.tx + anticipationOffset.x;
-    let ty = t.ty + anticipationOffset.y;
-    let tz = t.tz + anticipationOffset.z;
+    let tx = t.tx;
+    let ty = t.ty;
+    let tz = t.tz;
     // Position follow-through uses the SAME smoothed/clamped target path.
     // A squared-sine envelope has zero velocity at both ends; never write
     // an independent visual position over the simulation after its update.
@@ -1584,8 +1785,12 @@ class Game {
       const under = this.ball.p.y - 0.04;
       ty = lerp(ty, under, this.ball.v.y < 0 ? k : 0.45 * A);
     }
-    // positional assist: slide towards the predicted intercept
-    if (A > 0.01 && incoming && this.recenterT <= 0 && this.playerStrokeIntent()) {
+    /* Footwork follows INTENT, not swipe length. It used to require a
+     * completed "real stroke", so a player who pressed and ran in at a short
+     * ball — the only sane way to play one — got no step-in at all and the
+     * bat stayed 0.45 m behind the ball until the point was awarded against
+     * them. A live press in the admitted zone is intent. */
+    if (A > 0.01 && canReachShort && this.recenterT <= 0 && (this.swipe.active || this.playerStrokeIntent())) {
       if (o.reach) {
         // Footwork assist, not a magnet: a swipe on the far wing must not
         // teleport the bat onto a ball it was never near.
@@ -1595,7 +1800,15 @@ class Game {
           const k = A * clamp(1.3 - o.reachT * 1.0, 0.30, 1);
           tx = lerp(tx, clamp(o.reach.x, -PADDLE_LIMITS.x, PADDLE_LIMITS.x), k);
           ty = lerp(ty, clamp(o.reach.y, PH.TABLE_Y + PADDLE_LIMITS.yLo, PH.TABLE_Y + PADDLE_LIMITS.yHi), k * 0.95);
-          if (o.reach.z < tz) tz = Math.max(zNear, o.reach.z - 0.02);
+          /* THE STEP-IN ITSELF. `o.reach.z` is where the ball crosses the
+           * bat's own plane, so it can never ask the bat to move: the old
+           * line was a no-op, and the bat stayed at z 1.44 while a short ball
+           * died at 1.05 in front of it. For a ball that is genuinely short
+           * (already in the front half of the table) the reach depth is the
+           * BALL's depth, and the bat leans in to meet it — the one motion
+           * this whole branch exists for. */
+          const deepZ = shortBall ? Math.min(o.reach.z, this.ball.p.z) : o.reach.z;
+          if (deepZ < tz) tz = Math.max(zNear, Math.min(tz, lerp(tz, deepZ - 0.02, clamp(A * 0.75, 0, 1))));
         }
       }
     }
@@ -1821,6 +2034,12 @@ class Game {
     t.tx = pad.pos.x; t.ty = pad.pos.y; t.tz = pad.pos.z;
     clampPaddleToFrustum(this.camVP, t, m);
     pad.pos.x = t.tx; pad.pos.y = t.ty; pad.pos.z = t.tz;
+    /* A correction the physics can see as motion is worse than no
+     * correction: prevPos/vel used to keep the OLD pose, so the next frame
+     * looked like a half-metre bat sweep through whatever was in the way. */
+    V3.copy(pad.prevPos, pad.pos);
+    V3.copy(pad.prev, pad.pos);
+    V3.zero(pad.vel);
   }
 
   updateCamera(dt) {
@@ -2023,6 +2242,11 @@ class Game {
     this.pointer = { x: x0, y: y0 };
     this.pointerDown = true;
     this.swipe.down(x0, y0, this.time);
+    /* The attract-mode bot does not go through pointerdown, so it must not
+     * inherit a rejected press zone from the last human gesture. */
+    const rectD = this.canvas && this.canvas.getBoundingClientRect ? this.canvas.getBoundingClientRect() : null;
+    this.swipe.pressZone = { accepted: true, via: 'demo', radius: MATCH_RULES.pressRadiusPx,
+      pressX: x0, pressY: y0, vw: rectD ? rectD.width : 1, vh: rectD ? rectD.height : 1 };
     this._demoGesture = {
       x0, y0, x1, y1,
       t: 0,
@@ -2105,8 +2329,10 @@ class Game {
           }
           const contact = V3.clone(this.ball.p);
           const info = impactRacket(this.ball.v, this.ball.w, racket.normal, racket.vR, racket.quality, racket.rubber || {});
+          if (!info) break;
           V3.copy(this.aiPaddle.pos, this.ball.p);
           V3.copy(this.aiPaddle.normal, racket.normal);
+          V3.addScaled(this.ball.p, this.ball.p, racket.normal, PH.R * 1.05);
           this.serveBounces = 0; this.rallyBounces.length = 0;
           this.applyHit(-1, racket, contact, racket.quality, info);
           this.setState(GS.RALLY);
@@ -2139,22 +2365,33 @@ class Game {
         }
         break;
     }
+    /* Move the player's paddle BEFORE the ball. The capture test used to run
+     * against the previous frame's pose (the paddle was updated after the
+     * substeps), so a bat that had visibly arrived was still a frame behind
+     * for the contact — 0.1-0.2 m at a normal swipe speed. */
+    this.updatePlayerPaddle(dtReal);
+
     // physics substeps
     if (this.ball.live) {
       this._acc += dt;
       let guard = 0;
+      /* How many physics steps this frame will take, so the paddle's own
+       * frame-long travel can be split into exactly that many poses. */
+      const nSub = Math.max(1, Math.min(400, Math.floor(this._acc / PHYS_DT + 1e-9)));
+      this._subK = 0;
       while (this._acc >= PHYS_DT && guard++ < 400) {
+        this._subPad = this.substepPadPose(this._subK++, nSub);
         this.stepPhysics(PHYS_DT);
         this._acc -= PHYS_DT;
         if (!this.ball.live) break;
       }
+      this._subPad = null;
       // trail history
       const h = this.ball.hist;
       h.push(this.ball.p.x, this.ball.p.y, this.ball.p.z);
       if (h.length > 96 * 3) h.splice(0, 3);
     } else this._acc = 0;
 
-    this.updatePlayerPaddle(dtReal);
     this.updateStrikeWindow(dtReal);
     if (this.state === GS.RALLY || this.state === GS.SERVE_TOSS) this.moments.push(this.time, this);
     if (this.training) this.training.update(dtReal);
@@ -2344,8 +2581,14 @@ class Game {
        rendering must not mutate the simulation's orientation. */
     if (this.settings.showPlayerPaddle !== false) {
       const pp = this.player;
+      /* The telegraph lives here and only here: the simulation keeps the
+       * blade on the ball, the drawing pulls it back for the wind-up. */
+      const ao = this.anticipation.active ? this.anticipation.visualOffset : null;
+      const dpos = this._drawPadPos || (this._drawPadPos = V3.new());
+      if (ao && (ao.x || ao.y || ao.z)) V3.set(dpos, pp.pos.x + ao.x, pp.pos.y + ao.y, pp.pos.z + ao.z);
+      else V3.copy(dpos, pp.pos);
       this.rig.draw(R, S, {
-        pos: pp.pos, normal: pp.normal, hand: this.settings.hand, shadowPass,
+        pos: dpos, normal: pp.normal, hand: this.settings.hand, shadowPass,
         swing: pp.swing, roll: pp.roll || 0, absoluteRoll: true,
         mats: this.paddleMats(S, this.equip),
       });

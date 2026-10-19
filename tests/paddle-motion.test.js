@@ -4,7 +4,7 @@ const { load } = require('./helpers.cjs');
 const lib = load(['10_math.js', '30_physics.js', '38_paddle_motion.js', '40_swipe.js', '56_rig.js'],
   ['PaddleStrokeMotion', 'PaddleReadClock', 'PaddleRig', 'paddleGripProfile', 'paddleContactRange',
     'paddleForehand', 'stepPaddleAngle', 'paddleAngleDelta', 'paddleBottomExtent', 'keepPaddleAboveTable',
-    'faceFromWrist', 'paddleFaceAngles', 'playerWristPose', 'deriveStroke', 'refineRacket',
+    'faceFromWrist', 'paddleFaceAngles', 'playerWristPose', 'deriveStroke', 'refineRacket', 'classifyStroke',
     'strokeFrame', 'resolvedRacketFrame', 'SwipeTracker', 'impactRacket', 'predict', 'PH', 'V3', 'Q', 'M4', 'DEG']);
 const { V3, DEG, faceFromWrist, PaddleStrokeMotion } = lib;
 const near = (a, b, eps = 1e-9) => assert.ok(Math.abs(a - b) < eps, `${a} != ${b}`);
@@ -263,4 +263,65 @@ test('penhold follow-through reverses local roll, not the physical contact face'
       assert.equal(Math.sign(follow.roll - ready.roll), sign * (grip === 'penhold' ? -1 : 1));
     }
   }
+});
+
+test('a fast downward flick on a high ball stays a backspin shot, never a free smash', () => {
+  const sw = new lib.SwipeTracker();
+  sw.down(.5, .35, 0); sw.move(.5, .51, .06); sw.up(.5, .68, .12);
+  const w = V3.new(0, 0, 0), v = V3.new(0, -1.6, 1.0);
+  const contact = V3.new(0, 1.15, 1.30);
+  const raw = lib.deriveStroke(sw.lastReleased, { side: 1, grip: 'shakehand', forehand: true,
+    ball: { y: contact.y, z: contact.z }, ballSpin: w, ballSpeed: V3.len(v), movePitch: -.12 });
+  assert.notEqual(raw.stroke.id, 'SMASH', 'downward hand must not be reclassified as a smash');
+  const r = lib.refineRacket(contact, V3.clone(v), V3.clone(w), raw, .85, .85);
+  const bv = V3.clone(v), bw = V3.clone(w);
+  lib.impactRacket(bv, bw, r.normal, r.vR, .85, r.rubber || {});
+  /* A 1.9 m/s ball off a slow, downward flick cannot come back faster than a
+   * hard drive. Before the classification fix this returned at 25 m/s, i.e.
+   * 90 km/h out of a hand that never swung forward. */
+  assert.ok(V3.len(bv) < 16, `returned at ${V3.len(bv).toFixed(1)} m/s`);
+});
+
+test('trajectory assist never buys a shot with a superhuman bat speed', () => {
+  const worst = [];
+  for (const up of [-.9, -.45, 0, .45, .9]) for (const speed of [2, 3.4, 4.4]) {
+    const sw = new lib.SwipeTracker();
+    sw.down(.5, .55, 0); sw.move(.5 + up * .02, .55 - up * .12, .05);
+    sw.up(.5 + up * .04, .55 - up * .24, .08 + 1 / speed * .1);
+    const contact = V3.new(.1, 1.0, 1.35), v = V3.new(0, -.8, 6), w = V3.new(150, 0, 0);
+    const raw = lib.deriveStroke(sw.lastReleased, { side: 1, grip: 'shakehand', forehand: true,
+      ball: { y: contact.y, z: contact.z }, ballSpin: w, ballSpeed: 6, movePitch: -.12 });
+    const r = lib.refineRacket(contact, v, w, raw, .85, .85);
+    worst.push(V3.len(r.vR));
+  }
+  const max = Math.max(...worst);
+  assert.ok(max <= 19.5 + 1e-6, `assisted bat speed reached ${max.toFixed(2)} m/s`);
+});
+
+test('a short upward hand against a fast ball is a block, not a lob', () => {
+  const m = { right: 0, up: .8, dist: .10, curl: 0, speed: 2, peakSpeed: 2,
+    releaseSpeed: 2, smooth: .9, straightness: .9, samples: 8, jerk: .1 };
+  const ctx = (ballSpeed, dist = .10) => ({ ball: { y: 1.02, z: 1.44 }, incomingTop: 0, ballSpeed, dist });
+  const at = (ballSpeed, dist = .10) => lib.classifyStroke({ ...m, dist }, ctx(ballSpeed), .2).id;
+  assert.equal(at(14), 'BLOCK', 'no time to lob a 14 m/s ball');
+  assert.equal(at(5), 'LOB', 'a slow ball still allows the lob');
+  assert.equal(at(14, .30), 'LOB', 'a full lob swing stays a lob');
+});
+
+test('the face keeps its travel when the swing elevation is capped', () => {
+  /* A lob swing sits at ~75°, 5° below the 80° frame ceiling. The assist may
+   * still rotate the face further; before the fix it silently stopped at the
+   * ceiling, so every lob aim above 0.09 rad was discarded. */
+  const racket = { side: 1, grip: 'shakehand', forehand: true, elev: 75.06,
+    azSwing: 0, contact: 1.03, faceElev: -25.91 * DEG, azFace: 0, vmag: 4.61,
+    arch: {}, stroke: { id: 'LOB' }, faceEnvelope: null, isServe: false };
+  const n = (dE) => { const s = V3.new(), nn = V3.new(); lib.strokeFrame(racket, dE, 0, 1, s, nn); return nn.y; };
+  assert.ok(n(0.5) > n(0.05) + 0.2, `face stuck: ${n(0.05)} -> ${n(0.5)}`);
+});
+
+test('a block may open its face for a ball the spin does not lift', () => {
+  const flat = lib.paddleContactRange('shakehand', 'BLOCK', true, false, { incomingTop: 0 });
+  const top = lib.paddleContactRange('shakehand', 'BLOCK', true, false, { incomingTop: 300 });
+  assert.ok(flat[1] >= 15, `flat-ball block face capped at ${flat[1]}°`);
+  assert.equal(top[1], 0, 'topspin keeps the classic closed block');
 });
