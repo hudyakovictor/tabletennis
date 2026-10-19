@@ -378,8 +378,11 @@ const { root } = require('./helpers.cjs');
         });
         check('full table and opponent swing volume have safe headroom', () => {
           for(let i=0;i<80;i++)g.updateCamera(.1);
-          const b=tableScreenBounds(g.R.viewProj);
-          return b.top>0 && b.bottom<.91 && opponentScreenTop(g.R.viewProj)>=CAMERA_HEADROOM-.001;
+          const b=tableScreenBounds(g.R.viewProj), a=g.R.aspect();
+          // Aspect-aware framing contract: the readability headroom is 10% on
+          // wide screens and 5.5% on portrait phones (see cameraHeadroom).
+          return b.top>0 && b.bottom<frameBottomRoom(a)+.01 &&
+            opponentScreenTop(g.R.viewProj)>=cameraHeadroom(a)-.001;
         });
         check('replay skip is a visible touch target only during replay and returns focus safely', () => {
           const skip=document.getElementById('reelSkip'),reel=document.getElementById('reel');

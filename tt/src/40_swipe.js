@@ -30,7 +30,7 @@ class SwipeTracker {
       dist: 0, pathLen: 0, straightness: 1,
       speed: 0, peakSpeed: 0, releaseSpeed: 0, accel: 0,
       angle: 0, angleDeg: 0, up: 0, right: 0,
-      curl: 0, dur: 0, samples: 0, jerk: 0, smooth: 1,
+      curl: 0, dur: 0, samples: 0, jerk: 0, smooth: 1, holdT: 0,
     };
   }
   down(x, y, t) {
@@ -42,11 +42,19 @@ class SwipeTracker {
     this.samples.push({ x, y, t });
     this.m = this.blankMetrics();
     this.m.sx = x; this.m.sy = y; this.m.x = x; this.m.y = y;
+    /* How long the finger sat still BEFORE the stroke began. Tracked live
+     * (not from the sample window, which truncates) so a deliberate hold is
+     * readable even after a long jittery press. */
+    this._pathAcc = 0; this._movedT = 0;
   }
   move(x, y, t) {
     if (!this.active) return;
     const s = this.samples, last = s[s.length - 1];
     if (last && t - last.t < 0.0025) { last.x = x; last.y = y; return; }
+    if (!this._movedT && last) {
+      this._pathAcc += Math.hypot(x - last.x, y - last.y);
+      if (this._pathAcc > 0.012) this._movedT = t;
+    }
     s.push({ x, y, t });
     if (s.length > this.maxSamples) s.shift();
     this.compute(t);
@@ -96,6 +104,7 @@ class SwipeTracker {
       }
     }
     m.pathLen = pl;
+    m.holdT = clamp((this._movedT || b.t) - this.startT, 0, 3);
     m.straightness = pl > 1e-5 ? clamp(m.dist / pl, 0, 1) : 1;
     m.curl = clamp(curl, -3.2, 3.2);          // total signed turning [rad]
     m.jerk = speedChanges ? jerkAcc / speedChanges : 0;
@@ -212,11 +221,23 @@ function classifyStroke(m, ctx, sp01) {
   const overTable = depth < PH.T_HALF_LEN - 0.02;
   const incomingTop = ctx.incomingTop || 0;
   const incSpeed = ctx.ballSpeed || 6;
+  /* SAFE GESTURE PROFILE (Telegram mini-apps, phones). A downward drag is
+   * owned by the host app — Telegram collapses the whole mini app on
+   * swipe-down — so a stroke must not REQUIRE one. Two honest substitutes:
+   *   · hold the press, then move = explicit "open racket / defence" intent
+   *     (rallies only: on a serve the press-and-hold IS the toss ritual);
+   *   · a slow short stroke = soft hands = push/chop family.
+   * Classic downward gestures keep working wherever the platform passes
+   * them, so no player loses a shot they already had. */
+  const safe = !!ctx.safeGestures;
+  const holdDef = safe && !ctx.isServe && (m.holdT || 0) >= 0.18;
 
   if (ctx.isServe) {
     if (veryFast && Math.abs(u) < 0.45) return STROKES.SERVE_FAST;
     if (latMag > 0.70 || curly) return STROKES.SERVE_SIDE;
     if (u < -0.18) return STROKES.SERVE_BACK;
+    // soft serve without a down-swipe: gentle = backspin serve
+    if (safe && slow && m.dist < 0.24) return STROKES.SERVE_BACK;
     return STROKES.SERVE_TOP;
   }
   // tiny gesture = touch play
@@ -231,16 +252,22 @@ function classifyStroke(m, ctx, sp01) {
    * assist then rotated the swing up until the chop "landed", and a 1.9 m/s
    * ball came back at 25 m/s off a hand that never swung forward. The
    * boundary is the same -0.28 the backspin family uses, so the two rules
-   * cannot overlap. */
-  if (hAboveNet > 0.14 && sp01 > 0.52 && u > -0.28 && u < 0.52) return STROKES.SMASH;
-  // downward gestures = backspin family
-  if (u < -0.28) {
+   * cannot overlap. A held press is defence intent and skips the smash too. */
+  if (hAboveNet > 0.14 && sp01 > 0.52 && u > -0.28 && u < 0.52 && !holdDef) return STROKES.SMASH;
+  // downward gestures (or a held press in the safe profile) = backspin family
+  if (u < -0.28 || holdDef) {
     if (depth > PH.T_HALF_LEN + 0.40 || (fast && m.dist > 0.20)) return STROKES.CHOP;
     if (sp01 < 0.22 && overTable && hAboveTable < 0.35) return STROKES.DROP;
     return STROKES.PUSH;
   }
   // a clearly curved sideways gesture = sidespin
   if (latMag > 0.58 && curly) return (r > 0) ? STROKES.HOOK : STROKES.FADE;
+  /* Safe profile: soft hands without a hold — a slow, short, unhurried
+   * stroke is a push, never a drive. Fast short strokes stay flicks. */
+  if (safe && slow && m.dist < 0.16) {
+    if (sp01 < 0.22 && overTable && hAboveTable < 0.35) return STROKES.DROP;
+    return STROKES.PUSH;
+  }
   // upward gestures = topspin family
   if (u > 0.70) {
     if (slow && hAboveTable < 0.55) {
@@ -282,6 +309,7 @@ function deriveStroke(m, ctx) {
     m.curl = sane(m.curl, -6, 6, 0);
     m.smooth = sane(m.smooth, 0.15, 1, 0.6);
     m.straightness = sane(m.straightness, 0, 1, 1);
+    m.holdT = sane(m.holdT, 0, 3, 0);
     m.samples = Number.isFinite(m.samples) ? m.samples : 0;
     m.x = sane(m.x, -2, 3, 0.5);
     m.y = sane(m.y, -2, 3, 0.5);

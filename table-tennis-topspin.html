@@ -30,7 +30,7 @@ canvas{display:block;width:100%;height:100%}
 .pe{pointer-events:auto}
 
 /* ============================ scoreboard ============================ */
-#score{position:absolute;top:max(12px,env(safe-area-inset-top));left:max(12px,env(safe-area-inset-left));
+#score{position:absolute;top:max(12px,env(safe-area-inset-top),var(--sa-top,0px));left:max(12px,env(safe-area-inset-left));
   display:flex;align-items:stretch;gap:0;background:var(--glass2);border:1px solid var(--line);
   border-radius:14px;overflow:hidden;backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);
   box-shadow:0 10px 40px rgba(0,0,0,.55)}
@@ -49,7 +49,7 @@ canvas{display:block;width:100%;height:100%}
 
 /* ======================== lower play reading area =================== */
 #playband{position:absolute;left:max(16px,env(safe-area-inset-left));right:max(16px,env(safe-area-inset-right));
-  top:calc(var(--table-bottom,.70) * 100% + 16px);bottom:max(16px,env(safe-area-inset-bottom));
+  top:calc(var(--table-bottom,.70) * 100% + 16px);bottom:max(16px,env(safe-area-inset-bottom),var(--sa-bottom,0px));
   display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;
   min-height:0;overflow:hidden;pointer-events:none;z-index:4;
   --play-size:clamp(12px,1.2vw,15px);--play-weight:650}
@@ -150,7 +150,7 @@ h3.sec::after{content:"";flex:1;height:1px;background:var(--line)}
 .st b{font-family:var(--mono);font-size:18px;font-weight:700}
 
 /* ============================ misc ================================= */
-#topright{position:absolute;top:max(12px,env(safe-area-inset-top));right:max(12px,env(safe-area-inset-right));
+#topright{position:absolute;top:max(12px,env(safe-area-inset-top),var(--sa-top,0px));right:max(12px,env(safe-area-inset-right));
   display:flex;align-items:flex-start;gap:7px;z-index:7}
 .ic{width:34px;height:34px;border-radius:10px;border:1px solid var(--line);background:var(--glass);
   display:grid;place-items:center;cursor:pointer;backdrop-filter:blur(10px);transition:.16s;color:var(--dim);
@@ -617,7 +617,7 @@ body:not(.is-playing) #topright{visibility:hidden;pointer-events:none}
 #playband:has(#shot.on) #playStatus{display:none}
 
 /* Training has no bottom panel, hit targets, or automatic gesture animation. */
-#train{display:none;position:absolute;top:max(14px,env(safe-area-inset-top));left:max(16px,env(safe-area-inset-left));
+#train{display:none;position:absolute;top:max(14px,env(safe-area-inset-top),var(--sa-top,0px));left:max(16px,env(safe-area-inset-left));
   width:440px;max-width:calc(100% - 180px);pointer-events:none;z-index:4;color:var(--txt)}
 #train.on{display:block}#train,#train *{pointer-events:none!important}
 #train .th{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-bottom:5px}
@@ -815,6 +815,13 @@ body:not(.is-playing) #topright{visibility:hidden;pointer-events:none}
       </div>
       <p class="note">Shakehand: лёгкий наклон вперёд. Перо: почти вертикально, рукоятка вверх. Поза зеркалится; направление свайпа остаётся экранным.</p>
 
+      <h3 class="sec">ЖЕСТЫ</h3>
+      <div class="row" role="group" aria-label="Профиль жестов">
+        <button class="opt" data-set="gestures" data-val="classic" aria-pressed="false"><b>КЛАССИКА</b><small>подрезка свайпом вниз</small></button>
+        <button class="opt" data-set="gestures" data-val="safe" aria-pressed="true"><b>БЕЗ СВАЙПА ВНИЗ</b><small>удержание = подрезка</small></button>
+      </div>
+      <p class="note">Профиль «Без свайпа вниз» нужен там, где вертикальный свайп сворачивает приложение (Telegram, системные жесты). Подрезка: зажмите палец и мягко ведите вверх — или медленный короткий свайп. В «Классике» подрезка — свайп вниз.</p>
+
       <h3 class="sec">КАМЕРА</h3>
       <div class="row" id="cameraViews" role="group" aria-label="Вид камеры">
         <button class="opt" data-camera="BROADCAST"><b>ИГРА</b></button>
@@ -892,7 +899,7 @@ body:not(.is-playing) #topright{visibility:hidden;pointer-events:none}
       <div class="sub">Шесть ударов в руках. Дальше — матч</div>
       <div class="recap">
         <div class="rc"><i style="background:#4ee39a"></i><b>Вверх</b><small>топспин: мяч ныряет в стол</small></div>
-        <div class="rc"><i style="background:#39c6ff"></i><b>Вниз</b><small>подрезка: низко и медленно</small></div>
+        <div class="rc"><i style="background:#39c6ff"></i><b>Мягко</b><small>подрезка: вниз или с удержанием вверх</small></div>
         <div class="rc"><i style="background:#ffd34d"></i><b>Дугой вбок</b><small>боковое: мяч уходит вбок</small></div>
         <div class="rc"><i style="background:#9aa7b8"></i><b>Коротко</b><small>блок: гасит чужую скорость</small></div>
         <div class="rc"><i style="background:#ff7a2f"></i><b>Быстро и плоско</b><small>смеш по высокому мячу</small></div>
@@ -3694,7 +3701,7 @@ class SwipeTracker {
       dist: 0, pathLen: 0, straightness: 1,
       speed: 0, peakSpeed: 0, releaseSpeed: 0, accel: 0,
       angle: 0, angleDeg: 0, up: 0, right: 0,
-      curl: 0, dur: 0, samples: 0, jerk: 0, smooth: 1,
+      curl: 0, dur: 0, samples: 0, jerk: 0, smooth: 1, holdT: 0,
     };
   }
   down(x, y, t) {
@@ -3706,11 +3713,19 @@ class SwipeTracker {
     this.samples.push({ x, y, t });
     this.m = this.blankMetrics();
     this.m.sx = x; this.m.sy = y; this.m.x = x; this.m.y = y;
+    /* How long the finger sat still BEFORE the stroke began. Tracked live
+     * (not from the sample window, which truncates) so a deliberate hold is
+     * readable even after a long jittery press. */
+    this._pathAcc = 0; this._movedT = 0;
   }
   move(x, y, t) {
     if (!this.active) return;
     const s = this.samples, last = s[s.length - 1];
     if (last && t - last.t < 0.0025) { last.x = x; last.y = y; return; }
+    if (!this._movedT && last) {
+      this._pathAcc += Math.hypot(x - last.x, y - last.y);
+      if (this._pathAcc > 0.012) this._movedT = t;
+    }
     s.push({ x, y, t });
     if (s.length > this.maxSamples) s.shift();
     this.compute(t);
@@ -3760,6 +3775,7 @@ class SwipeTracker {
       }
     }
     m.pathLen = pl;
+    m.holdT = clamp((this._movedT || b.t) - this.startT, 0, 3);
     m.straightness = pl > 1e-5 ? clamp(m.dist / pl, 0, 1) : 1;
     m.curl = clamp(curl, -3.2, 3.2);          // total signed turning [rad]
     m.jerk = speedChanges ? jerkAcc / speedChanges : 0;
@@ -3876,11 +3892,23 @@ function classifyStroke(m, ctx, sp01) {
   const overTable = depth < PH.T_HALF_LEN - 0.02;
   const incomingTop = ctx.incomingTop || 0;
   const incSpeed = ctx.ballSpeed || 6;
+  /* SAFE GESTURE PROFILE (Telegram mini-apps, phones). A downward drag is
+   * owned by the host app — Telegram collapses the whole mini app on
+   * swipe-down — so a stroke must not REQUIRE one. Two honest substitutes:
+   *   · hold the press, then move = explicit "open racket / defence" intent
+   *     (rallies only: on a serve the press-and-hold IS the toss ritual);
+   *   · a slow short stroke = soft hands = push/chop family.
+   * Classic downward gestures keep working wherever the platform passes
+   * them, so no player loses a shot they already had. */
+  const safe = !!ctx.safeGestures;
+  const holdDef = safe && !ctx.isServe && (m.holdT || 0) >= 0.18;
 
   if (ctx.isServe) {
     if (veryFast && Math.abs(u) < 0.45) return STROKES.SERVE_FAST;
     if (latMag > 0.70 || curly) return STROKES.SERVE_SIDE;
     if (u < -0.18) return STROKES.SERVE_BACK;
+    // soft serve without a down-swipe: gentle = backspin serve
+    if (safe && slow && m.dist < 0.24) return STROKES.SERVE_BACK;
     return STROKES.SERVE_TOP;
   }
   // tiny gesture = touch play
@@ -3895,16 +3923,22 @@ function classifyStroke(m, ctx, sp01) {
    * assist then rotated the swing up until the chop "landed", and a 1.9 m/s
    * ball came back at 25 m/s off a hand that never swung forward. The
    * boundary is the same -0.28 the backspin family uses, so the two rules
-   * cannot overlap. */
-  if (hAboveNet > 0.14 && sp01 > 0.52 && u > -0.28 && u < 0.52) return STROKES.SMASH;
-  // downward gestures = backspin family
-  if (u < -0.28) {
+   * cannot overlap. A held press is defence intent and skips the smash too. */
+  if (hAboveNet > 0.14 && sp01 > 0.52 && u > -0.28 && u < 0.52 && !holdDef) return STROKES.SMASH;
+  // downward gestures (or a held press in the safe profile) = backspin family
+  if (u < -0.28 || holdDef) {
     if (depth > PH.T_HALF_LEN + 0.40 || (fast && m.dist > 0.20)) return STROKES.CHOP;
     if (sp01 < 0.22 && overTable && hAboveTable < 0.35) return STROKES.DROP;
     return STROKES.PUSH;
   }
   // a clearly curved sideways gesture = sidespin
   if (latMag > 0.58 && curly) return (r > 0) ? STROKES.HOOK : STROKES.FADE;
+  /* Safe profile: soft hands without a hold — a slow, short, unhurried
+   * stroke is a push, never a drive. Fast short strokes stay flicks. */
+  if (safe && slow && m.dist < 0.16) {
+    if (sp01 < 0.22 && overTable && hAboveTable < 0.35) return STROKES.DROP;
+    return STROKES.PUSH;
+  }
   // upward gestures = topspin family
   if (u > 0.70) {
     if (slow && hAboveTable < 0.55) {
@@ -3946,6 +3980,7 @@ function deriveStroke(m, ctx) {
     m.curl = sane(m.curl, -6, 6, 0);
     m.smooth = sane(m.smooth, 0.15, 1, 0.6);
     m.straightness = sane(m.straightness, 0, 1, 1);
+    m.holdT = sane(m.holdT, 0, 3, 0);
     m.samples = Number.isFinite(m.samples) ? m.samples : 0;
     m.x = sane(m.x, -2, 3, 0.5);
     m.y = sane(m.y, -2, 3, 0.5);
@@ -6410,6 +6445,30 @@ function effectiveFov(fovDeg, aspect) {
   return vf / DEG;
 }
 
+/* ------------------------------------------------------------------ *
+ *  PHONE VS DESKTOP FRAMING
+ *  A portrait screen is tall and narrow: the table fills the width long
+ *  before it fills the height, so the vertical bands (opponent raise,
+ *  reading room, dead margins) decide how much of the screen is empty.
+ *  Phones get a tighter fit margin and tighter bands, so the table reads
+ *  as big as its width allows and the spare space goes to the game, not
+ *  to the frame. Desktop keeps the authored roomy contract.
+ * ------------------------------------------------------------------ */
+function phoneFactor(aspect) {
+  return 1 - smoothstep(0.85, 1.3, aspect);
+}
+function frameMargin(aspect) {
+  return lerp(0.055, 0.012, phoneFactor(aspect));
+}
+/** Dead air above the opponent's raised bat: the readability headroom. */
+function cameraHeadroom(aspect) {
+  return lerp(CAMERA_HEADROOM, 0.055, phoneFactor(aspect));
+}
+/** Lowest screen fraction the table feet may reach (HUD room below). */
+function frameBottomRoom(aspect) {
+  return lerp(0.901, 0.955, phoneFactor(aspect));
+}
+
 /** view·proj for a rig — the same matrices the renderer builds. */
 function rigViewProj(rig, aspect, out) {
   const vf = effectiveFov(rig.fov, aspect) * DEG;
@@ -6511,12 +6570,13 @@ function fitRig(P, aspect) {
   const key = P.id + '|' + Math.round(aspect * 1000);
   const hit = _fitCache.get(key);
   if (hit) return hit;
-  const phone = 1 - smoothstep(0.85, 1.3, aspect);
+  const phone = phoneFactor(aspect);
   const pitch = P.pitch * DEG; // Identical angle on phone and desktop.
   const rig = { eye: { x: 0, y: PH.TABLE_Y + Math.tan(pitch) * 3.32, z: 3.2 },
     look: { x: 0, y: PH.TABLE_Y, z: -0.12 }, fov: lerp(P.fov, 34, phone), mode: P.id };
   // No automatic lift or ball-following: the chosen view stays predictable.
-  fitTablePresentation(rig, aspect, P.height, phone > 0.5 ? 0.045 : 0.055);
+  fitTablePresentation(rig, aspect, lerp(P.height, 0.80, phone),
+    frameMargin(aspect), lerp(0.76, 0.90, phone));
   _fitCache.set(key, rig);
   return rig;
 }
@@ -6552,7 +6612,15 @@ function cameraRigFor(mode, ball, aspect, out, controls) {
     o.eye.x = o.look.x + (o.eye.x - o.look.x) * zoom;
     o.eye.y = o.look.y + (o.eye.y - o.look.y) * zoom;
     o.eye.z = o.look.z + (o.eye.z - o.look.z) * zoom;
-    if (zoom !== 1 || height !== 0) fitTablePresentation(o, aspect, 0.72, 0.025, 0.80);
+    if (zoom !== 1 || height !== 0) {
+      const phone = phoneFactor(aspect);
+      /* The manual dolly may enlarge the table past the base framing, but
+       * never past the frame: the play span stops at 0.88 so the shift can
+       * still give the opponent its headroom AND leave the lower reading
+       * room for the shot breakdown. */
+      fitTablePresentation(o, aspect, lerp(0.72, 0.78, phone),
+        Math.min(frameMargin(aspect), 0.025), lerp(0.80, 0.88, phone));
+    }
   }
   return o;
 }
@@ -6612,7 +6680,7 @@ function tableFrameShift(rig, aspect) {
   // Prefer the old lower reading room, but never crop the opponent to keep
   // an exact 1:3 ratio. Move the complete play volume down into the frame.
   const preferred = (1 - b.bottom - 3 * b.top) / 4;
-  return Math.max(preferred, CAMERA_HEADROOM - opponentScreenTop(vp));
+  return Math.max(preferred, cameraHeadroom(aspect) - opponentScreenTop(vp));
 }
 
 /** Highest pixel the table itself occupies (0..1, y down). The HUD text
@@ -6633,12 +6701,47 @@ function tableTopScreenY(mode, aspect, vpOut) {
  *  frame (which is how it used to get lost off-screen and stay there).
  * ------------------------------------------------------------------ */
 const _ptOut = { tx: 0, ty: 0, tz: 0 };
+const _ptRayPt = { x: 0, y: 0, z: 0 }, _ptAnchorPt = { x: 0, y: 0, z: 0 };
+
+const _fpInv = M4.create(), _fpNa = { x: 0, y: 0, z: 0 }, _fpNb = { x: 0, y: 0, z: 0 };
+/**
+ * World point under a normalised screen point on the plane z = depth.
+ * Perspective-exact: the blade lands WHERE THE POINTER LOOKS at its own
+ * depth. The old linear screen→metre map drifted 0.2–0.4 m from the finger
+ * on the wings and at deep, high balls — outside the capture box before any
+ * timing error was added, which is why on a phone returns worked only over
+ * the middle of the table.
+ */
+function pointerPlanePoint(vp, px, py, depth, out) {
+  if (!vp || !out || !Number.isFinite(px) || !Number.isFinite(py) || !Number.isFinite(depth)) return null;
+  if (!M4.invert(_fpInv, vp)) return null;
+  const nx = px * 2 - 1, ny = 1 - py * 2;
+  const un = (ndcZ, o) => {
+    const x = _fpInv[0] * nx + _fpInv[4] * ny + _fpInv[8] * ndcZ + _fpInv[12];
+    const y = _fpInv[1] * nx + _fpInv[5] * ny + _fpInv[9] * ndcZ + _fpInv[13];
+    const z = _fpInv[2] * nx + _fpInv[6] * ny + _fpInv[10] * ndcZ + _fpInv[14];
+    const w = _fpInv[3] * nx + _fpInv[7] * ny + _fpInv[11] * ndcZ + _fpInv[15];
+    if (Math.abs(w) < 1e-9) return false;
+    o.x = x / w; o.y = y / w; o.z = z / w;
+    return Number.isFinite(o.x) && Number.isFinite(o.y) && Number.isFinite(o.z);
+  };
+  if (!un(-1, _fpNa) || !un(1, _fpNb)) return null;
+  const dz = _fpNb.z - _fpNa.z;
+  if (Math.abs(dz) < 1e-6) return null;
+  const t = (depth - _fpNa.z) / dz;
+  if (!(t > 0)) return null;
+  out.x = _fpNa.x + (_fpNb.x - _fpNa.x) * t;
+  out.y = _fpNa.y + (_fpNb.y - _fpNa.y) * t;
+  out.z = depth;
+  return out;
+}
 
 /**
  * @param px,py   pointer in normalised screen space (0..1, y down)
  * @param stanceY the y the hand landed at — it sets how deep you stand,
  *                so flicking the wrist upward cannot lunge you over the table
  * @param sens    the player's sensitivity multiplier
+ * @param opts.vp current view·proj: enables the perspective-correct map
  */
 function paddleTargetFromPointer(px, py, stanceY, sens, out, opts) {
   const o = out || _ptOut;
@@ -6651,12 +6754,22 @@ function paddleTargetFromPointer(px, py, stanceY, sens, out, opts) {
   // 0.5 on screen is the centre line; the reachable half-width is the
   // authored limit, so the mapping is exact and independent of sensitivity
   // at the centre and only the *gain* changes with the slider.
+  const tz = clamp(1.44 + clamp(sy - 0.55, -0.34, 0.45) * 0.86 * (0.6 + 0.4 * s),
+    zNear, PADDLE_LIMITS.zFar);
+  const vp = opts && opts.vp;
+  const _pp = _ptRayPt, _pa = _ptAnchorPt;
+  if (vp && pointerPlanePoint(vp, x, y, tz, _pp) && pointerPlanePoint(vp, 0.5, 0.5, tz, _pa)) {
+    o.tx = clamp(_pa.x + (_pp.x - _pa.x) * s, -PADDLE_LIMITS.x, PADDLE_LIMITS.x);
+    o.ty = clamp(_pa.y + (_pp.y - _pa.y) * s,
+      PH.TABLE_Y + PADDLE_LIMITS.yLo, PH.TABLE_Y + PADDLE_LIMITS.yHi);
+    o.tz = tz; o.zNear = zNear;
+    return o;
+  }
   o.tx = (x - 0.5) * 2 * PADDLE_LIMITS.x * s;
   o.ty = PH.TABLE_Y + 0.62 - (y - 0.18) * 0.95 * s;
-  o.tz = 1.44 + clamp(sy - 0.55, -0.34, 0.45) * 0.86 * (0.6 + 0.4 * s);
+  o.tz = tz;
   o.tx = clamp(o.tx, -PADDLE_LIMITS.x, PADDLE_LIMITS.x);
   o.ty = clamp(o.ty, PH.TABLE_Y + PADDLE_LIMITS.yLo, PH.TABLE_Y + PADDLE_LIMITS.yHi);
-  o.tz = clamp(o.tz, zNear, PADDLE_LIMITS.zFar);
   o.zNear = zNear;
   return o;
 }
@@ -7776,7 +7889,10 @@ function detectInputMode(win = window, nav = navigator) {
   const matches = query => !!(win.matchMedia && win.matchMedia(query).matches);
   return matches('(pointer: coarse)') || ((nav.maxTouchPoints || 0) > 0 && !matches('(pointer: fine)')) ? 'touch' : 'mouse';
 }
-function trainingTip(step, mode) { return mode === 'touch' ? step.tip : step.mouseTip; }
+function trainingTip(step, mode, safe) {
+  if (mode === 'touch') return (safe && step.safeTip) ? step.safeTip : step.tip;
+  return (safe && (step.safeMouseTip || step.safeTip)) ? (step.safeMouseTip || step.safeTip) : step.mouseTip;
+}
 
 const TRAIN_STEPS = [
   {
@@ -7794,6 +7910,8 @@ const TRAIN_STEPS = [
   {
     id: 'PUSH', goal: 'Нижнее вращение на стол', title: 'ПОДРЕЗКА', need: 2,
     tip: 'Мягкий свайп вниз.', mouseTip: 'ЛКМ + мягкое движение вниз.',
+    safeTip: 'Зажмите палец и мягко ведите вверх.',
+    safeMouseTip: 'Зажмите ЛКМ и мягко ведите вверх.',
     feed: { kind: 'normal', spin: 40, speed: 5.2 },
     check: (g, s) => s.topspin < -30,
     failHint: 'Ведите вниз.',
@@ -10260,6 +10378,21 @@ const GS = {
 
 const PHYS_DT = PH.SIM_DT;        // 600 Hz — and the same step every solver verdicts on
 
+/* Gesture vocabulary default. 'classic' plays backspin with a downward
+ * swipe; 'safe' never needs one (see classifyStroke) because a downward
+ * drag belongs to the host app — Telegram collapses the whole mini app on
+ * swipe-down, and system gestures fight it elsewhere. Coarse pointers and
+ * embedded apps start in 'safe'; a saved choice always wins. */
+function defaultGestureProfile() {
+  try {
+    if (typeof window !== 'undefined' && window.__tgWebApp) return 'safe';
+  } catch (e) { /* headless */ }
+  try {
+    return (typeof detectInputMode === 'function' ? detectInputMode() : 'mouse') === 'touch'
+      ? 'safe' : 'classic';
+  } catch (e) { return 'classic'; }
+}
+
 /* --------------------------- particles ----------------------------- */
 class Particles {
   constructor(max = 260) {
@@ -10354,6 +10487,7 @@ class Game {
       slowmoPlayer: true,
       targetScore: 11,
       spinBias: 'norm',
+      gestureProfile: defaultGestureProfile(),   // 'classic' | 'safe'
       // NEW: Enhanced gameplay settings
       showSpinIndicator: true,
       followThrough: true,
@@ -11225,7 +11359,7 @@ class Game {
       showTrail: s.showTrail, showPredict: s.showPredict,
       showTele: s.showTele, haptics: s.haptics, coach: s.coach, adaptive: s.adaptive,
       slowmoPlayer: s.slowmoPlayer, targetScore: s.targetScore,
-      spinBias: s.spinBias,
+      spinBias: s.spinBias, gestureProfile: s.gestureProfile,
     };
     if (this.career && this.career.active && this.career._baseSettings)
       this.profile.data.settings.difficulty = this.career._baseSettings.difficulty;
@@ -11245,7 +11379,8 @@ class Game {
     }
     s.difficulty = Math.round(s.difficulty);
     for (const [k, values] of Object.entries({ quality: ['low', 'medium', 'high'],
-      camera: CAMERA_ORDER, hand: ['left', 'right'], grip: ['shakehand', 'penhold'], spinBias: ['low', 'norm', 'high'], targetScore: [5, 11, 21] })) {
+      camera: CAMERA_ORDER, hand: ['left', 'right'], grip: ['shakehand', 'penhold'], spinBias: ['low', 'norm', 'high'],
+      gestureProfile: ['classic', 'safe'], targetScore: [5, 11, 21] })) {
       if (values.includes(raw[k])) s[k] = raw[k];
     }
     if (this.settings.volume !== undefined) this.audio.setVolume(this.settings.volume);
@@ -11507,7 +11642,8 @@ class Game {
     const serving = this.state === GS.SERVE_TOSS || this.state === GS.SERVE_READY;
     const forehand = (this.player.pos.x * (this.settings.hand === 'left' ? -1 : 1)) >= -.05;
     const ctx = { side: 1, isServe: serving, ball: this.ball.p, ballSpin: this.ball.w,
-      grip: this.settings.grip, forehand, ballSpeed: this.ball.speed || V3.len(this.ball.v), movePitch: -.15 };
+      grip: this.settings.grip, forehand, ballSpeed: this.ball.speed || V3.len(this.ball.v), movePitch: -.15,
+      safeGestures: this.settings.gestureProfile === 'safe' };
     const r = isRealStroke(m, serving) ? deriveStroke(m, ctx) : null;
     const lastSample = sw.samples[sw.samples.length - 1];
     journal.observe(sw.gestureId, m, { time: this.time, isServe: serving, active: sw.active,
@@ -11715,7 +11851,8 @@ class Game {
         powerScale: 1,
         moveYaw: this.padYaw || 0, movePitch: this.padPitch || 0,
         equip: sideParams,
-        spinBias: 'norm',
+        spinBias: this.settings.spinBias || 'norm',
+        safeGestures: this.settings.gestureProfile === 'safe',
       };
       racket = deriveStroke(m, ctx);
       racket.vmag *= this.equip.vmagK;
@@ -11974,7 +12111,8 @@ class Game {
      * instead, where it cannot take a catchable ball out of the capture
      * volume. */
     const t = paddleTargetFromPointer(pt.x, pt.y, depthY, sens,
-      this._ptTarget || (this._ptTarget = { tx: 0, ty: 0, tz: 0 }), { zNear });
+      this._ptTarget || (this._ptTarget = { tx: 0, ty: 0, tz: 0 }),
+      { zNear, vp: this.camVPReady ? this.camVP : null });
     let tx = t.tx;
     let ty = t.ty;
     let tz = t.tz;
@@ -12039,23 +12177,43 @@ class Game {
     if (A > 0.01 && canReachShort && this.recenterT <= 0 && (this.swipe.active || this.playerStrokeIntent())) {
       if (o.reach) {
         // Footwork assist, not a magnet: a swipe on the far wing must not
-        // teleport the bat onto a ball it was never near.
+        // teleport the bat onto a ball it was never near. The gate widened
+        // 0.42 -> 0.52: on a phone the press lands where the ball is GOING,
+        // and the pre-press bat can be a third of a metre from the crossing
+        // point — outside the old gate meant no assist at all, which is
+        // exactly the "only balls over the table are returnable" report.
         const near = Math.hypot(pad.pos.x - o.reach.x, pad.pos.y - o.reach.y)
-          < 0.42 + 0.28 * A;
+          < 0.52 + 0.28 * A;
         if (near) {
           const k = A * clamp(1.3 - o.reachT * 1.0, 0.30, 1);
           tx = lerp(tx, clamp(o.reach.x, -PADDLE_LIMITS.x, PADDLE_LIMITS.x), k);
           ty = lerp(ty, clamp(o.reach.y, PH.TABLE_Y + PADDLE_LIMITS.yLo, PH.TABLE_Y + PADDLE_LIMITS.yHi), k * 0.95);
-          /* THE STEP-IN ITSELF. `o.reach.z` is where the ball crosses the
-           * bat's own plane, so it can never ask the bat to move: the old
-           * line was a no-op, and the bat stayed at z 1.44 while a short ball
-           * died at 1.05 in front of it. For a ball that is genuinely short
-           * (already in the front half of the table) the reach depth is the
-           * BALL's depth, and the bat leans in to meet it — the one motion
-           * this whole branch exists for. */
+          /* Depth follows the intercept BOTH ways. The old line only stepped
+           * IN, so a ball met past the end line left the stance frozen at
+           * z 1.4 — a depth gap of 0.35-0.40 m failed the capture box by
+           * itself, before any timing error. For a genuinely short ball
+           * (front half of the table) the reach depth is the BALL's depth and
+           * the bat leans in; for a deep one it now backs off to meet it. */
           const deepZ = shortBall ? Math.min(o.reach.z, this.ball.p.z) : o.reach.z;
-          if (deepZ < tz) tz = Math.max(zNear, Math.min(tz, lerp(tz, deepZ - 0.02, clamp(A * 0.75, 0, 1))));
+          const wantZ = clamp(deepZ - 0.02, zNear, PADDLE_LIMITS.zFar);
+          tz = clamp(lerp(tz, wantZ, clamp(A * 0.75, 0, 1)), zNear, PADDLE_LIMITS.zFar);
         }
+      }
+    } else if (A > 0.01 && canReachShort && this.recenterT <= 0 &&
+        !this.pointerFine && !this.swipe.active && !this.playerStrokeIntent() && o.reach) {
+      /* TOUCH PRE-AIM. A mouse has hover: the hand is already near the ball
+       * when the button goes down. A finger has none — the bat froze where
+       * the last swipe ended and every return depended on the press-time
+       * jump alone. While the ball is incoming the game now leads the bat
+       * toward the predicted crossing point, gently (a lead, not a magnet:
+       * the fresh gesture still has to meet the ball). */
+      const near = Math.hypot(pad.pos.x - o.reach.x, pad.pos.y - o.reach.y) < 0.85;
+      if (near) {
+        const k = A * 0.55 * clamp(1.15 - (o.reachT || 0.6) * 0.7, 0.18, 0.55);
+        tx = lerp(tx, clamp(o.reach.x, -PADDLE_LIMITS.x, PADDLE_LIMITS.x), k);
+        ty = lerp(ty, clamp(o.reach.y, PH.TABLE_Y + PADDLE_LIMITS.yLo, PH.TABLE_Y + PADDLE_LIMITS.yHi), k);
+        const wantZ = clamp(o.reach.z, zNear, PADDLE_LIMITS.zFar);
+        tz = clamp(lerp(tz, wantZ, k * 0.8), zNear, PADDLE_LIMITS.zFar);
       }
     }
     /* Neither the cursor nor the assist may ever park the bat outside the
@@ -12157,6 +12315,7 @@ class Game {
       const ctx = {
         side: 1, grip: this.settings.grip, forehand: pad.forehand, isServe: servingNow, ball: { y: pad.pos.y, z: pad.pos.z },
         ballSpin: this.ball.w, ballSpeed: V3.len(this.ball.v), moveYaw: this.padYaw, movePitch: this.padPitch,
+        safeGestures: this.settings.gestureProfile === 'safe',
       };
       const st = deriveStroke(m, ctx);
       /* First ~45 ms keep the ready face so the bat does not pop onto
@@ -13698,6 +13857,7 @@ class UI {
       case 'cam': s.camera = v; break;
       case 'quality': s.quality = v; g.R.quality = v; g.resize(); break;
       case 'hand': case 'grip': g.changePaddlePreference(k, v); break;
+      case 'gestures': s.gestureProfile = v === 'safe' ? 'safe' : 'classic'; break;
       case 'trail': s.showTrail = v === 'on'; break;
       case 'predict': s.showPredict = v === 'on'; break;
       case 'tele': s.showTele = v === 'on'; $('#spin').classList.toggle('on', s.showTele); break;
@@ -13728,9 +13888,9 @@ class UI {
 
   syncSettings() {
     const s = this.game.settings;
-    for (const k of ['hand', 'grip']) {
+    for (const [k, key] of [['hand', 'hand'], ['grip', 'grip'], ['gestures', 'gestureProfile']]) {
       $$(`.opt[data-set="${k}"]`).forEach(b => {
-        const selected = b.dataset.val === s[k];
+        const selected = b.dataset.val === s[key];
         b.classList.toggle('sel', selected);
         b.setAttribute('aria-pressed', String(selected));
       });
@@ -13854,7 +14014,8 @@ class UI {
     $('#trTitle').textContent = S.title;
     $('#trProgress').textContent = `${t.done}/${S.need}`;
     $('#trTip').textContent = feedback ? '' : S.goal;
-    $('#trainPauseTip').textContent = trainingTip(S, this.inputMode);
+    $('#trainPauseTip').textContent = trainingTip(S, this.inputMode,
+      this.game && this.game.settings && this.game.settings.gestureProfile === 'safe');
     $('#trMsg').textContent = feedback ? t.msg : '';
     $('#trMsg').style.color = t.msgCol || 'var(--good)';
   }
@@ -14387,8 +14548,54 @@ const ICON = {
  *  BOOT
  * ===================================================================== */
 
+/* ---------------------------------------------------------------------
+ *  TELEGRAM HOST. Inside a mini app a downward drag is not a stroke — it
+ *  is the host's "close the app" gesture, and it fires in the middle of a
+ *  rally. The official bridge can turn that off (disableVerticalSwipes);
+ *  this is the ONLY external script the game ever loads, and only when it
+ *  is actually running inside Telegram. Standalone builds stay offline.
+ *  If the bridge is unavailable, the 'safe' gesture profile still plays
+ *  (no stroke needs a downward drag).
+ * ------------------------------------------------------------------- */
+function initTelegramHost() {
+  const win = typeof window !== 'undefined' ? window : null;
+  if (!win || !document) return;
+  let tg = win.Telegram && win.Telegram.WebApp;
+  const params = String(win.location ? (win.location.search + win.location.hash) : '');
+  const inTg = !!tg || /[?&#]tgWebApp/.test(params) ||
+    /Telegram/i.test((win.navigator && win.navigator.userAgent) || '');
+  if (!inTg) return;
+  win.__tgWebApp = true;                 // read by defaultGestureProfile()
+  const configure = () => {
+    const api = win.Telegram && win.Telegram.WebApp;
+    if (!api) return;
+    try {
+      api.ready();
+      api.expand();
+      if (typeof api.disableVerticalSwipes === 'function') api.disableVerticalSwipes();
+      if (api.setHeaderColor) api.setHeaderColor('#05070c');
+      if (api.setBackgroundColor) api.setBackgroundColor('#05070c');
+    } catch (e) { /* an old client without the API — the gesture profile covers it */ }
+    try {
+      const sa = api.safeAreaInset || {}, csa = api.contentSafeAreaInset || {};
+      const top = Math.max(sa.top || 0, csa.top || 0);
+      const bottom = Math.max(sa.bottom || 0, csa.bottom || 0);
+      const root = document.documentElement.style;
+      if (top > 0) root.setProperty('--sa-top', top + 'px');
+      if (bottom > 0) root.setProperty('--sa-bottom', bottom + 'px');
+    } catch (e) { /* no safe-area info: env() insets still apply */ }
+  };
+  if (tg) { configure(); return; }
+  const s = document.createElement('script');
+  s.src = 'https://telegram.org/js/telegram-web-app.js';
+  s.onload = configure;
+  s.onerror = () => { /* no bridge: the safe profile plays without it */ };
+  document.head.appendChild(s);
+}
+
 (function boot() {
   const start = () => {
+    initTelegramHost();
     const canvas = document.getElementById('gl');
     let ui, game;
     try {

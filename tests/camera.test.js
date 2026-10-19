@@ -2,7 +2,8 @@ const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const { load } = require('./helpers.cjs');
 const lib = load(['10_math.js', '30_physics.js', '57_camera.js'],
-  ['cameraRigFor', 'tableFrameShift', 'rigViewProj', 'tableScreenBounds', 'CAMERA_ORDER', 'opponentScreenTop', 'CAMERA_HEADROOM']);
+  ['cameraRigFor', 'tableFrameShift', 'rigViewProj', 'tableScreenBounds', 'CAMERA_ORDER', 'opponentScreenTop', 'CAMERA_HEADROOM',
+    'cameraHeadroom', 'frameBottomRoom', 'frameMargin', 'phoneFactor', 'paddleTargetFromPointer', 'pointerPlanePoint', 'PADDLE_LIMITS']);
 for (const [w,h] of [[1920,1080],[1280,760],[1024,768],[844,390],[390,844],[360,640],[768,1024]]) {
   test(`table framing and manual dolly: ${w}x${h}`, () => {
     for (const mode of lib.CAMERA_ORDER) for (const controls of [
@@ -16,11 +17,64 @@ for (const [w,h] of [[1920,1080],[1280,760],[1024,768],[844,390],[390,844],[360,
       assert.ok([b.top,b.bottom,b.left,b.right].every(Number.isFinite), mode);
       assert.ok(b.top>0 && b.bottom<1 && b.left>=0 && b.right<=1, `${mode}: ${JSON.stringify(b)}`);
       const top=lib.opponentScreenTop(lib.rigViewProj(rig,aspect));
-      assert.ok(top>=lib.CAMERA_HEADROOM-1e-6, `${mode}: opponent clipped at ${top}`);
-      assert.ok(b.bottom<=.901, `${mode}: no lower reading room`);
+      // The headroom is a property of the screen shape: phones trade dead
+      // air above the raised opponent bat for table size, desktop keeps the
+      // authored 10 %.
+      assert.ok(top>=lib.cameraHeadroom(aspect)-1e-6, `${mode}: opponent clipped at ${top}`);
+      assert.ok(b.bottom<=lib.frameBottomRoom(aspect)+1e-9, `${mode}: no lower reading room`);
     }
   });
 }
+
+test('phone framing reads bigger than the desktop contract allows', () => {
+  // The portrait contract: tighter margins and bands, same 25° tilt.
+  assert.ok(lib.frameMargin(390/844) < lib.frameMargin(16/9));
+  assert.ok(lib.cameraHeadroom(390/844) < lib.CAMERA_HEADROOM);
+  assert.ok(lib.frameBottomRoom(390/844) > 0.901);
+  assert.ok(lib.phoneFactor(390/844) > 0.9 && lib.phoneFactor(16/9) < 0.01);
+});
+
+test('perspective pointer map lands the blade under the finger at the ball', () => {
+  // The phone bug measured against the old linear map: a finger ON the ball
+  // produced a blade 0.2-0.4 m away — outside the capture box before any
+  // timing error. The perspective map must be exact at the blade depth.
+  const aspect = 390 / 844;
+  const rig = lib.cameraRigFor('BROADCAST', null, aspect);
+  rig.shiftY = lib.tableFrameShift(rig, aspect);
+  const vp = lib.rigViewProj(rig, aspect);
+  const project = (p) => {
+    const cw = vp[3] * p.x + vp[7] * p.y + vp[11] * p.z + vp[15];
+    return {
+      x: ((vp[0] * p.x + vp[4] * p.y + vp[8] * p.z + vp[12]) / cw) * 0.5 + 0.5,
+      y: 0.5 - ((vp[1] * p.x + vp[5] * p.y + vp[9] * p.z + vp[13]) / cw) * 0.5,
+    };
+  };
+  for (const ball of [
+    { x: 0, y: 0.95, z: 1.6 }, { x: 0.55, y: 1.1, z: 1.8 },
+    { x: -0.6, y: 0.9, z: 1.2 }, { x: 0, y: 1.2, z: 1.75 },
+  ]) {
+    const scr = project(ball);
+    // Invert the stance map so the bat's depth plane is the ball's own.
+    const stanceY = Math.min(1, Math.max(0, 0.55 + (ball.z - 1.44) / 0.86));
+    const t = lib.paddleTargetFromPointer(scr.x, scr.y, stanceY, 1, {}, { vp });
+    const errXY = Math.hypot(t.tx - ball.x, t.ty - ball.y);
+    assert.ok(errXY < 0.02, `blade ${errXY.toFixed(3)} m off the ball at ${JSON.stringify(ball)}`);
+    assert.ok(Math.abs(t.tz - ball.z) < 0.02);
+    assert.ok(Math.abs(t.tx) <= lib.PADDLE_LIMITS.x + 1e-9);
+  }
+});
+test('pointer plane point is the inverse of the projection', () => {
+  const aspect = 16 / 9;
+  const rig = lib.cameraRigFor('BROADCAST', null, aspect);
+  const vp = lib.rigViewProj(rig, aspect);
+  const p = { x: 0.35, y: 1.12, z: 1.44 };
+  const cw = vp[3] * p.x + vp[7] * p.y + vp[11] * p.z + vp[15];
+  const sx = ((vp[0] * p.x + vp[4] * p.y + vp[8] * p.z + vp[12]) / cw) * 0.5 + 0.5;
+  const sy = 0.5 - ((vp[1] * p.x + vp[5] * p.y + vp[9] * p.z + vp[13]) / cw) * 0.5;
+  const o = {};
+  assert.ok(lib.pointerPlanePoint(vp, sx, sy, p.z, o));
+  assert.ok(Math.hypot(o.x - p.x, o.y - p.y) < 1e-4);
+});
 test('camera dolly moves forward/back without changing the viewing direction', () => {
   const a=16/9;
   const base=JSON.parse(JSON.stringify(lib.cameraRigFor('BROADCAST',null,a,undefined,{zoom:1})));
