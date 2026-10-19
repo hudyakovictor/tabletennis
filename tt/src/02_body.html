@@ -56,6 +56,7 @@
         <button id="pauseSettings" class="tbt"><span class="ui-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></span>НАСТРОЙКИ</button>
         <label class="capture-debug-toggle"><input type="checkbox" id="captureDebugPause"> Зона нажатия</label>
         <button id="shotLabPause" class="tbt">КАЛИБРОВКА ПОПАДАНИЯ</button>
+        <button id="inputLogPause" class="tbt">СОХРАНИТЬ ПОСЛЕДНИЕ 30 С</button>
         <div id="trainingActions" hidden>
           <p id="trainPauseTip"></p>
           <button class="tbt" id="trSkip">ПРОПУСТИТЬ УПРАЖНЕНИЕ</button>
@@ -100,6 +101,7 @@
         <div class="row menu-mode-actions">
           <button class="btn ghost" id="careerStart"><span class="ui-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M8 21h8m-4-4v4m-5-15h10v5a5 5 0 0 1-10 0V6Zm0 2H4v2a4 4 0 0 0 4 4m8-6h4v2a4 4 0 0 1-4 4"/></svg></span>КАРЬЕРА</button>
           <button class="btn ghost" id="onlineStart"><span class="ui-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a15 15 0 0 1 0 18M12 3a15 15 0 0 0 0 18"/></svg></span>ОНЛАЙН</button>
+          <button class="btn ghost" id="zoneCalMenu"><b>КАЛИБРОВКА ЗОНЫ</b></button>
           <button class="btn ghost" id="demoStart"><span class="ui-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><rect x="5" y="7" width="14" height="13" rx="3"/><path d="M12 3v4m-3 5h.01M15 12h.01M9 16h6M3 11H5m14 0h2"/></svg></span>ДЕМО</button>
         </div>
         <div class="row menu-meta-actions">
@@ -314,10 +316,15 @@
       <h2 id="shotLabTitle">КАЛИБРОВКА ПОПАДАНИЯ</h2>
       <div class="lab-actions"><button class="tbt" id="shotLabExport">СКАЧАТЬ ИЗМЕРЕНИЯ</button><button class="tbt" id="shotLabClose">ЗАКРЫТЬ</button></div>
       <label class="capture-debug-toggle"><input type="checkbox" id="captureDebugLab"> Показывать зону у мяча</label>
-      <p class="lab-help">Один круг — допустимое место начала нажатия. Снаружи удар блокируется. Внутри всё ещё нужны движение и правильный момент. Радиус одинаковый при подаче и приёме: 48 экранных пикселей, независимо от камеры.</p>
+      <p class="lab-help">Овал у мяча — допустимое место начала нажатия: длинная ось смотрит по экранной скорости мяча, вперёд — скорость×0,16 с + 24 px, назад — 18 px, поперёк — 40 px (мышь) / 56 px (касание). Снаружи удар блокируется окончательно. Внутри всё ещё нужны движение к мячу и правильный момент.</p>
       <h3>Уменьшать ли зону?</h3>
       <p class="lab-help">Ниже — сколько ваших реальных ударов отсекла бы меньшая зона. Точность и качество удара здесь не оцениваются.</p>
       <div id="captureCalibrationSummary"></div>
+      <h3>Калибровка зоны по заданиям</h3>
+      <p class="lab-help">Пошаговый сбор данных для разработки: углы стола, неподвижный мяч, медленный и быстрый мяч, подача, сила и спин — сначала мышью, затем касанием. Данные не меняют общую зону и не создают личный профиль.</p>
+      <p class="lab-help" id="zoneCalStatus">Калибровка не начата.</p>
+      <div class="lab-actions"><button class="tbt" id="zoneCalStart">НАЧАТЬ ЗАНОВО</button><button class="tbt" id="zoneCalImport">ЗАПИСАТЬ ПОПЫТКИ ИЗ ИГРЫ</button><button class="tbt" id="zoneCalExport">СКАЧАТЬ ДАННЫЕ КАЛИБРОВКИ</button></div>
+      <div id="zoneCalSummary"></div>
       <details><summary>Последние попытки</summary>
       <div id="shotLabRecords"></div></details>
     </div>

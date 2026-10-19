@@ -3,8 +3,19 @@
  * radii. Keep input affordance, timing and physical capture separate. */
 'use strict';
 const MATCH_RULES = Object.freeze({
-  version: 1,
-  pressRadiusPx: 96,          // screen-space admission for real pointer-down events
+  version: 2,
+  zoneShape: 'oval',           // 'circle' keeps pressHitZone for A/B comparison
+  pressRadiusPx: 96,           // legacy circle admission for real pointer-down events
+  ovalLeadSec: .16,            // how far ahead of the ball a backswing may start
+  ovalForwardPx: 24,           // fixed forward allowance, CSS px
+  ovalForwardMaxPx: 120,       // hard cap on the forward half-axis, CSS px (simulator-selected)
+  ovalBackPx: 18,              // allowance behind the ball, CSS px
+  ovalSideMousePx: 44,         // transverse allowance for a mouse press
+  ovalSideTouchPx: 60,         // transverse allowance for touch/pen (finger occludes the ball)
+  ovalMinSpeedPx: 8,           // circle below this screen speed
+  ovalFullSpeedPx: 120,        // full oval at/above this screen speed; smoothstep between
+  ovalSampleDtSec: .05,        // projection interval for screen velocity
+  serveTossMinRise: .16,       // ITTF minimum toss rise, metres above release
   trajectoryAssist: .85,
   positionAssist: .85,
   sensitivity: 1,
@@ -100,10 +111,216 @@ function measureCaptureAllowance(paddle, p0, p1, serving, endpointEligible) {
     score: serving ? distance/limits.radius : Math.max(lateral/limits.radius,Math.abs(dz)/limits.depth) };
 }
 
+const PRESS_REJECTION_REASONS = Object.freeze([
+  'OUTSIDE_ZONE', 'NO_FRESH_SWIPE', 'STATIC_CLICK', 'DEPTH_FAIL', 'TIMING_LATE',
+  'TIMING_EARLY', 'CONSUMED', 'SERVE_TOSS_LOW', 'WRONG_DIRECTION', 'BOUNCE_ILLEGAL',
+]);
+
 // Actual mouse/touch press admission, in CSS pixels. Independent of quality.
 function pressHitZone(ballScreen, pointer, width, height, radius = MATCH_RULES.pressRadiusPx) {
   if (!ballScreen || !ballScreen.ok || !pointer || ![ballScreen.x,ballScreen.y,pointer.x,pointer.y,width,height,radius].every(Number.isFinite) || width<=0 || height<=0 || radius<=0) return null;
   const x=ballScreen.x*width,y=ballScreen.y*height;
   const distancePx=Math.hypot(pointer.x*width-x,pointer.y*height-y);
-  return { x,y,radius,distancePx,pointerX:pointer.x*width,pointerY:pointer.y*height,accepted:distancePx<=radius };
+  const accepted=distancePx<=radius;
+  return { x,y,radius,distancePx,pointerX:pointer.x*width,pointerY:pointer.y*height,accepted,
+    shape:'circle', score:distancePx/radius, along:null, across:null,
+    reason:accepted?null:'OUTSIDE_ZONE' };
+}
+
+function pressOvalSidePx(pointerType, opts = {}) {
+  if (Number.isFinite(opts.sidePx) && opts.sidePx > 0) return opts.sidePx;
+  return pointerType === 'mouse' ? MATCH_RULES.ovalSideMousePx : MATCH_RULES.ovalSideTouchPx;
+}
+
+function serveTossRise(tossApex, tossStartY, tableY) {
+  const start = Number.isFinite(tossStartY) ? tossStartY
+    : Number.isFinite(tableY) ? tableY + .14 : NaN;
+  return Number.isFinite(tossApex) && Number.isFinite(start) ? tossApex - start : NaN;
+}
+
+/** Oval press admission, elongated along the ball's SCREEN velocity.
+ *
+ * `ball` may be a world ball ({p,v} or a position plus opts.velocity) when
+ * opts.project is supplied, or an already projected point ({x,y,ok}) when
+ * opts.screenVelocityPx / opts.screenVelocity is supplied. The screen
+ * velocity is always the difference of two projections, never the raw world
+ * vector, so perspective foreshortening is part of the shape. `along` is
+ * positive ahead of the ball (where a backswing starts); `across` is the
+ * signed transverse offset. Half-ellipses are glued at the ball: the forward
+ * half uses |v|*lead+fwdPx, the rear half uses backPx. */
+function pressOvalSmoothstep(x) {
+  const t = Math.min(1, Math.max(0, x));
+  return t * t * (3 - 2 * t);
+}
+
+function pressOvalReferenceAxis(center, width, height, opts, projectWorldPoint) {
+  const fromVector = (x, y) => {
+    const len = Math.hypot(x, y);
+    return len > 1e-9 ? { x: x / len, y: y / len } : null;
+  };
+  const axisPx = opts.referenceAxisPx || opts.referenceAxis;
+  if (axisPx && [axisPx.x, axisPx.y].every(Number.isFinite)) {
+    const axis = fromVector(axisPx.x, axisPx.y);
+    if (axis) return axis;
+  }
+  const referenceWorld = opts.referenceWorld || opts.referencePoint || opts.racketWorld || opts.playerWorld;
+  if (referenceWorld && [referenceWorld.x, referenceWorld.y, referenceWorld.z].every(Number.isFinite) &&
+      typeof projectWorldPoint === 'function') {
+    const p = projectWorldPoint(referenceWorld);
+    if (p && [p.x, p.y].every(Number.isFinite)) {
+      const axis = fromVector(p.x - center.x, p.y - center.y);
+      if (axis) return axis;
+    }
+  }
+  const referencePx = opts.referencePx || opts.racketPx || opts.playerPx;
+  if (referencePx && [referencePx.x, referencePx.y].every(Number.isFinite)) {
+    const axis = fromVector(referencePx.x - center.x, referencePx.y - center.y);
+    if (axis) return axis;
+  }
+  const referenceScreen = opts.referenceScreen || opts.racketScreen || opts.playerScreen;
+  if (referenceScreen && [referenceScreen.x, referenceScreen.y].every(Number.isFinite)) {
+    const axis = fromVector(referenceScreen.x * width - center.x,
+      referenceScreen.y * height - center.y);
+    if (axis) return axis;
+  }
+  // The player/racket side of the authored camera is screen-down. This is
+  // only a fallback; live input passes the actual racket position.
+  return { x: 0, y: 1 };
+}
+
+function pressOvalBlendAxis(reference, velocityAxis, blend) {
+  if (!(blend > 0)) return reference;
+  if (blend >= 1) return velocityAxis;
+  const dot = Math.min(1, Math.max(-1, reference.x * velocityAxis.x + reference.y * velocityAxis.y));
+  const angle = Math.acos(dot), step = angle * blend;
+  let px = velocityAxis.x - reference.x * dot, py = velocityAxis.y - reference.y * dot;
+  const plen = Math.hypot(px, py);
+  if (plen <= 1e-9) { px = -reference.y; py = reference.x; }
+  else { px /= plen; py /= plen; }
+  const co = Math.cos(step), si = Math.sin(step);
+  return { x: reference.x * co + px * si, y: reference.y * co + py * si };
+}
+
+function pressHitZoneOval(ball, pointer, width, height, opts = {}) {
+  if (!ball || !pointer || ![pointer.x, pointer.y, width, height].every(Number.isFinite) || width <= 0 || height <= 0) return null;
+  const lead = Number.isFinite(opts.leadSec) && opts.leadSec > 0 ? opts.leadSec : MATCH_RULES.ovalLeadSec;
+  const fwdPx = Number.isFinite(opts.fwdPx) && opts.fwdPx > 0 ? opts.fwdPx : MATCH_RULES.ovalForwardPx;
+  const forwardMaxPx = Number.isFinite(opts.forwardMaxPx) && opts.forwardMaxPx > 0
+    ? opts.forwardMaxPx : MATCH_RULES.ovalForwardMaxPx;
+  const backPx = Number.isFinite(opts.backPx) && opts.backPx > 0 ? opts.backPx : MATCH_RULES.ovalBackPx;
+  const pointerType = opts.pointerType || opts.inputType || 'touch';
+  const sidePx = pressOvalSidePx(pointerType, opts);
+  if (!(lead > 0) || !(fwdPx > 0) || !(forwardMaxPx > 0) || !(backPx > 0) || !(sidePx > 0)) return null;
+
+  let center = null, screenVx = 0, screenVy = 0, worldVelocity = null;
+  let projectWorldPoint = null;
+  const pos = ball.p && [ball.p.x, ball.p.y, ball.p.z].every(Number.isFinite) ? ball.p
+    : [ball.x, ball.y, ball.z].every(Number.isFinite) ? ball : null;
+  if (pos && typeof opts.project === 'function') {
+    worldVelocity = ball.v && [ball.v.x, ball.v.y, ball.v.z].every(Number.isFinite) ? ball.v
+      : opts.velocity && [opts.velocity.x, opts.velocity.y, opts.velocity.z].every(Number.isFinite) ? opts.velocity : null;
+    if (!worldVelocity) return null;
+    const dt = Number.isFinite(opts.sampleDtSec) && opts.sampleDtSec > 0
+      ? Math.min(.25, opts.sampleDtSec) : MATCH_RULES.ovalSampleDtSec;
+    const a0 = opts.project({ x: pos.x, y: pos.y, z: pos.z });
+    if (!a0 || !a0.ok || ![a0.x, a0.y].every(Number.isFinite)) return null;
+    const ax = a0.x, ay = a0.y; // copy: Game.project may reuse its out object
+    const a1 = opts.project({ x: pos.x + worldVelocity.x * dt,
+      y: pos.y + worldVelocity.y * dt, z: pos.z + worldVelocity.z * dt });
+    if (!a1 || !a1.ok || ![a1.x, a1.y].every(Number.isFinite)) return null;
+    center = { x: ax * width, y: ay * height };
+    screenVx = (a1.x - ax) * width / dt;
+    screenVy = (a1.y - ay) * height / dt;
+    projectWorldPoint = (p) => {
+      const q = opts.project({ x: p.x, y: p.y, z: p.z });
+      return q && q.ok && [q.x, q.y].every(Number.isFinite)
+        ? { x: q.x * width, y: q.y * height } : null;
+    };
+  } else if (ball.ok && [ball.x, ball.y].every(Number.isFinite)) {
+    center = { x: ball.x * width, y: ball.y * height };
+    const sv = opts.screenVelocityPx || opts.screenVelocity || ball.screenVelocityPx || ball.screenVelocity;
+    if (sv) {
+      if (![sv.x, sv.y].every(Number.isFinite)) return null;
+      const inPx = !!opts.screenVelocityPx || !!ball.screenVelocityPx;
+      screenVx = inPx ? sv.x : sv.x * width;
+      screenVy = inPx ? sv.y : sv.y * height;
+    }
+    worldVelocity = ball.v && [ball.v.x, ball.v.y, ball.v.z].every(Number.isFinite) ? ball.v : opts.velocity || null;
+    if (typeof opts.project === 'function') projectWorldPoint = (p) => {
+      const q = opts.project({ x: p.x, y: p.y, z: p.z });
+      return q && q.ok && [q.x, q.y].every(Number.isFinite)
+        ? { x: q.x * width, y: q.y * height } : null;
+    };
+  } else return null;
+  if (![screenVx, screenVy].every(Number.isFinite)) return null;
+
+  const pointerX = pointer.x * width, pointerY = pointer.y * height;
+  const dx = pointerX - center.x, dy = pointerY - center.y;
+  const distancePx = Math.hypot(dx, dy);
+  const speedPx = Math.hypot(screenVx, screenVy);
+  const referenceAxis = pressOvalReferenceAxis(center, width, height, opts, projectWorldPoint);
+  const velocityAxis = speedPx > 1e-9
+    ? { x: screenVx / speedPx, y: screenVy / speedPx } : referenceAxis;
+  const minSpeedPx = MATCH_RULES.ovalMinSpeedPx;
+  const fullSpeedPx = Math.max(minSpeedPx + 1e-9, MATCH_RULES.ovalFullSpeedPx);
+  const blend = pressOvalSmoothstep((speedPx - minSpeedPx) / (fullSpeedPx - minSpeedPx));
+  const axis = pressOvalBlendAxis(referenceAxis, velocityAxis, blend);
+  const axisX = axis.x, axisY = axis.y;
+  const along = dx * axisX + dy * axisY;
+  const across = -dx * axisY + dy * axisX;
+  const uncappedForwardPx = speedPx * lead + fwdPx;
+  const cappedForwardPx = Math.min(forwardMaxPx, uncappedForwardPx);
+  const forwardExtent = sidePx + (cappedForwardPx - sidePx) * blend;
+  const backExtent = sidePx + (backPx - sidePx) * blend;
+  const longNorm = along >= 0 ? along / forwardExtent : -along / backExtent;
+  const ovalScore = Math.hypot(longNorm, across / sidePx);
+  // At blend=0 both long extents equal sidePx, so this is exactly the circle
+  // score for any axis; interpolated extents make the ellipse itself smooth.
+  const score = ovalScore;
+  let accepted = score <= 1, reason = accepted ? null : 'OUTSIDE_ZONE';
+  let directionDot = null, directionOk = null;
+  const swipe = opts.swipe || opts.swipeDirection;
+  if (swipe && [swipe.x, swipe.y].every(Number.isFinite)) {
+    const sl = Math.hypot(swipe.x, swipe.y);
+    if (sl > 1e-9) {
+      directionDot = distancePx > 1e-9 ? -(swipe.x * dx + swipe.y * dy) / (sl * distancePx) : 1;
+      directionOk = directionDot > 0;
+      if (accepted && !directionOk) { accepted = false; reason = 'WRONG_DIRECTION'; }
+    }
+  }
+  if (opts.kind === 'serve' && accepted) {
+    const falling = typeof opts.falling === 'boolean' ? opts.falling
+      : worldVelocity ? worldVelocity.y < 0 : screenVy > 0;
+    const rise = Number.isFinite(opts.tossRise) ? opts.tossRise
+      : serveTossRise(opts.tossApex, opts.tossStartY, opts.tableY);
+    if (!falling || !(rise > MATCH_RULES.serveTossMinRise)) { accepted = false; reason = 'SERVE_TOSS_LOW'; }
+  }
+  return { x: center.x, y: center.y, radius: Math.max(forwardExtent, backExtent, sidePx),
+    distancePx, pointerX, pointerY, accepted, shape: blend > 0 ? 'oval' : 'circle',
+    score, along, across, reason, directionDot, directionOk,
+    axisX, axisY, referenceAxisX: referenceAxis.x, referenceAxisY: referenceAxis.y,
+    velocityAxisX: velocityAxis.x, velocityAxisY: velocityAxis.y, blend,
+    screenVx, screenVy, speedPx, leadSec: lead,
+    fwdPx: forwardExtent, uncappedForwardPx, forwardMaxPx,
+    backPx: backExtent, sidePx, pointerType,
+    kind: opts.kind === 'serve' ? 'serve' : 'rally' };
+}
+
+/** Serve press admission: same oval, but the toss must already be falling
+ * from a legal rise. Screen "forward" is therefore down the fall line. */
+function pressServeZoneOval(ball, pointer, width, height, opts = {}) {
+  return pressHitZoneOval(ball, pointer, width, height, { ...opts, kind: 'serve' });
+}
+
+/** The one dispatch used by live input and by the debug overlay. */
+function pressZoneForBall(ball, pointer, width, height, opts = {}) {
+  const shape = opts.shape || MATCH_RULES.zoneShape;
+  if (shape === 'oval') {
+    return opts.kind === 'serve' ? pressServeZoneOval(ball, pointer, width, height, opts)
+      : pressHitZoneOval(ball, pointer, width, height, opts);
+  }
+  const screen = ball && ball.ok ? ball
+    : typeof opts.project === 'function' ? opts.project(ball && ball.p ? ball.p : ball) : null;
+  return screen ? pressHitZone(screen, pointer, width, height,
+    Number.isFinite(opts.radius) ? opts.radius : MATCH_RULES.pressRadiusPx) : null;
 }

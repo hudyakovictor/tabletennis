@@ -1,0 +1,2897 @@
+{
+  "seed": 20261019,
+  "scenarios": 144,
+  "viewport": [
+    1280,
+    760
+  ],
+  "command": "node tt/tools/noise_zone_sim.cjs --seed 20261019 --out test-results",
+  "labels": {
+    "lead": {
+      "good": "|across|<=24px and lead 0.10..0.22s",
+      "bad": "|across|>=64px or lead<=0.02s or lead>=0.30s"
+    },
+    "worldDistance": {
+      "contactPlaneZ": 1.78,
+      "good": "world distance <= 0.15225 m (MATCH_RULES.sweetRadius)",
+      "bad": "world distance >= 0.35 m",
+      "note": "Press ray is unprojected at the contact plane; the ball is advanced linearly to that plane. Independent of ovalLeadSec."
+    }
+  },
+  "targets": {
+    "goodAcceptRate": 0.95,
+    "badRejectRate": 0.95
+  },
+  "screenSpeedPx": {
+    "main": {
+      "min": 120.04,
+      "p50": 154.45,
+      "p90": 255.18,
+      "max": 255.18
+    },
+    "stress": {
+      "min": 120.04,
+      "p50": 366.82,
+      "p90": 2360.38,
+      "max": 2690.95
+    }
+  },
+  "rules": {
+    "version": 2,
+    "zoneShape": "oval",
+    "pressRadiusPx": 96,
+    "ovalLeadSec": 0.16,
+    "ovalForwardPx": 24,
+    "ovalForwardMaxPx": 120,
+    "ovalBackPx": 18,
+    "ovalSideMousePx": 44,
+    "ovalSideTouchPx": 60,
+    "ovalMinSpeedPx": 8,
+    "ovalFullSpeedPx": 120
+  },
+  "datasets": {
+    "lead": {
+      "circle-48": {
+        "total": 11520,
+        "ambiguous": 7577,
+        "good": 1591,
+        "goodAccepted": 1476,
+        "goodAcceptRate": 0.9277,
+        "bad": 2352,
+        "badRejected": 2352,
+        "badRejectRate": 1,
+        "byFps": {
+          "30": {
+            "good": 320,
+            "goodAccepted": 301,
+            "goodAcceptRate": 0.9406,
+            "bad": 585,
+            "badRejected": 585,
+            "badRejectRate": 1
+          },
+          "60": {
+            "good": 431,
+            "goodAccepted": 397,
+            "goodAcceptRate": 0.9211,
+            "bad": 577,
+            "badRejected": 577,
+            "badRejectRate": 1
+          },
+          "120": {
+            "good": 408,
+            "goodAccepted": 378,
+            "goodAcceptRate": 0.9265,
+            "bad": 613,
+            "badRejected": 613,
+            "badRejectRate": 1
+          },
+          "144": {
+            "good": 432,
+            "goodAccepted": 400,
+            "goodAcceptRate": 0.9259,
+            "bad": 577,
+            "badRejected": 577,
+            "badRejectRate": 1
+          }
+        },
+        "byInput": {
+          "mouse": {
+            "good": 809,
+            "goodAccepted": 745,
+            "goodAcceptRate": 0.9209,
+            "bad": 1202,
+            "badRejected": 1202,
+            "badRejectRate": 1
+          },
+          "touch": {
+            "good": 782,
+            "goodAccepted": 731,
+            "goodAcceptRate": 0.9348,
+            "bad": 1150,
+            "badRejected": 1150,
+            "badRejectRate": 1
+          }
+        }
+      },
+      "circle-72": {
+        "total": 11520,
+        "ambiguous": 7577,
+        "good": 1591,
+        "goodAccepted": 1591,
+        "goodAcceptRate": 1,
+        "bad": 2352,
+        "badRejected": 1904,
+        "badRejectRate": 0.8095,
+        "byFps": {
+          "30": {
+            "good": 320,
+            "goodAccepted": 320,
+            "goodAcceptRate": 1,
+            "bad": 585,
+            "badRejected": 484,
+            "badRejectRate": 0.8274
+          },
+          "60": {
+            "good": 431,
+            "goodAccepted": 431,
+            "goodAcceptRate": 1,
+            "bad": 577,
+            "badRejected": 462,
+            "badRejectRate": 0.8007
+          },
+          "120": {
+            "good": 408,
+            "goodAccepted": 408,
+            "goodAcceptRate": 1,
+            "bad": 613,
+            "badRejected": 490,
+            "badRejectRate": 0.7993
+          },
+          "144": {
+            "good": 432,
+            "goodAccepted": 432,
+            "goodAcceptRate": 1,
+            "bad": 577,
+            "badRejected": 468,
+            "badRejectRate": 0.8111
+          }
+        },
+        "byInput": {
+          "mouse": {
+            "good": 809,
+            "goodAccepted": 809,
+            "goodAcceptRate": 1,
+            "bad": 1202,
+            "badRejected": 985,
+            "badRejectRate": 0.8195
+          },
+          "touch": {
+            "good": 782,
+            "goodAccepted": 782,
+            "goodAcceptRate": 1,
+            "bad": 1150,
+            "badRejected": 919,
+            "badRejectRate": 0.7991
+          }
+        }
+      },
+      "circle-96-current-legacy": {
+        "total": 11520,
+        "ambiguous": 7577,
+        "good": 1591,
+        "goodAccepted": 1591,
+        "goodAcceptRate": 1,
+        "bad": 2352,
+        "badRejected": 64,
+        "badRejectRate": 0.0272,
+        "byFps": {
+          "30": {
+            "good": 320,
+            "goodAccepted": 320,
+            "goodAcceptRate": 1,
+            "bad": 585,
+            "badRejected": 24,
+            "badRejectRate": 0.041
+          },
+          "60": {
+            "good": 431,
+            "goodAccepted": 431,
+            "goodAcceptRate": 1,
+            "bad": 577,
+            "badRejected": 12,
+            "badRejectRate": 0.0208
+          },
+          "120": {
+            "good": 408,
+            "goodAccepted": 408,
+            "goodAcceptRate": 1,
+            "bad": 613,
+            "badRejected": 14,
+            "badRejectRate": 0.0228
+          },
+          "144": {
+            "good": 432,
+            "goodAccepted": 432,
+            "goodAcceptRate": 1,
+            "bad": 577,
+            "badRejected": 14,
+            "badRejectRate": 0.0243
+          }
+        },
+        "byInput": {
+          "mouse": {
+            "good": 809,
+            "goodAccepted": 809,
+            "goodAcceptRate": 1,
+            "bad": 1202,
+            "badRejected": 29,
+            "badRejectRate": 0.0241
+          },
+          "touch": {
+            "good": 782,
+            "goodAccepted": 782,
+            "goodAcceptRate": 1,
+            "bad": 1150,
+            "badRejected": 35,
+            "badRejectRate": 0.0304
+          }
+        }
+      },
+      "oval": {
+        "total": 11520,
+        "ambiguous": 7577,
+        "good": 1591,
+        "goodAccepted": 1590,
+        "goodAcceptRate": 0.9994,
+        "bad": 2352,
+        "badRejected": 2352,
+        "badRejectRate": 1,
+        "byFps": {
+          "30": {
+            "good": 320,
+            "goodAccepted": 320,
+            "goodAcceptRate": 1,
+            "bad": 585,
+            "badRejected": 585,
+            "badRejectRate": 1
+          },
+          "60": {
+            "good": 431,
+            "goodAccepted": 431,
+            "goodAcceptRate": 1,
+            "bad": 577,
+            "badRejected": 577,
+            "badRejectRate": 1
+          },
+          "120": {
+            "good": 408,
+            "goodAccepted": 407,
+            "goodAcceptRate": 0.9975,
+            "bad": 613,
+            "badRejected": 613,
+            "badRejectRate": 1
+          },
+          "144": {
+            "good": 432,
+            "goodAccepted": 432,
+            "goodAcceptRate": 1,
+            "bad": 577,
+            "badRejected": 577,
+            "badRejectRate": 1
+          }
+        },
+        "byInput": {
+          "mouse": {
+            "good": 809,
+            "goodAccepted": 808,
+            "goodAcceptRate": 0.9988,
+            "bad": 1202,
+            "badRejected": 1202,
+            "badRejectRate": 1
+          },
+          "touch": {
+            "good": 782,
+            "goodAccepted": 782,
+            "goodAcceptRate": 1,
+            "bad": 1150,
+            "badRejected": 1150,
+            "badRejectRate": 1
+          }
+        }
+      }
+    },
+    "worldDistance": {
+      "circle-48": {
+        "total": 11520,
+        "ambiguous": 6239,
+        "good": 3261,
+        "goodAccepted": 3156,
+        "goodAcceptRate": 0.9678,
+        "bad": 2020,
+        "badRejected": 2020,
+        "badRejectRate": 1,
+        "byFps": {
+          "30": {
+            "good": 777,
+            "goodAccepted": 751,
+            "goodAcceptRate": 0.9665,
+            "bad": 492,
+            "badRejected": 492,
+            "badRejectRate": 1
+          },
+          "60": {
+            "good": 857,
+            "goodAccepted": 837,
+            "goodAcceptRate": 0.9767,
+            "bad": 495,
+            "badRejected": 495,
+            "badRejectRate": 1
+          },
+          "120": {
+            "good": 791,
+            "goodAccepted": 760,
+            "goodAcceptRate": 0.9608,
+            "bad": 520,
+            "badRejected": 520,
+            "badRejectRate": 1
+          },
+          "144": {
+            "good": 836,
+            "goodAccepted": 808,
+            "goodAcceptRate": 0.9665,
+            "bad": 513,
+            "badRejected": 513,
+            "badRejectRate": 1
+          }
+        },
+        "byInput": {
+          "mouse": {
+            "good": 1606,
+            "goodAccepted": 1569,
+            "goodAcceptRate": 0.977,
+            "bad": 1033,
+            "badRejected": 1033,
+            "badRejectRate": 1
+          },
+          "touch": {
+            "good": 1655,
+            "goodAccepted": 1587,
+            "goodAcceptRate": 0.9589,
+            "bad": 987,
+            "badRejected": 987,
+            "badRejectRate": 1
+          }
+        }
+      },
+      "circle-72": {
+        "total": 11520,
+        "ambiguous": 6239,
+        "good": 3261,
+        "goodAccepted": 3261,
+        "goodAcceptRate": 1,
+        "bad": 2020,
+        "badRejected": 1621,
+        "badRejectRate": 0.8025,
+        "byFps": {
+          "30": {
+            "good": 777,
+            "goodAccepted": 777,
+            "goodAcceptRate": 1,
+            "bad": 492,
+            "badRejected": 396,
+            "badRejectRate": 0.8049
+          },
+          "60": {
+            "good": 857,
+            "goodAccepted": 857,
+            "goodAcceptRate": 1,
+            "bad": 495,
+            "badRejected": 409,
+            "badRejectRate": 0.8263
+          },
+          "120": {
+            "good": 791,
+            "goodAccepted": 791,
+            "goodAcceptRate": 1,
+            "bad": 520,
+            "badRejected": 420,
+            "badRejectRate": 0.8077
+          },
+          "144": {
+            "good": 836,
+            "goodAccepted": 836,
+            "goodAcceptRate": 1,
+            "bad": 513,
+            "badRejected": 396,
+            "badRejectRate": 0.7719
+          }
+        },
+        "byInput": {
+          "mouse": {
+            "good": 1606,
+            "goodAccepted": 1606,
+            "goodAcceptRate": 1,
+            "bad": 1033,
+            "badRejected": 840,
+            "badRejectRate": 0.8132
+          },
+          "touch": {
+            "good": 1655,
+            "goodAccepted": 1655,
+            "goodAcceptRate": 1,
+            "bad": 987,
+            "badRejected": 781,
+            "badRejectRate": 0.7913
+          }
+        }
+      },
+      "circle-96-current-legacy": {
+        "total": 11520,
+        "ambiguous": 6239,
+        "good": 3261,
+        "goodAccepted": 3261,
+        "goodAcceptRate": 1,
+        "bad": 2020,
+        "badRejected": 34,
+        "badRejectRate": 0.0168,
+        "byFps": {
+          "30": {
+            "good": 777,
+            "goodAccepted": 777,
+            "goodAcceptRate": 1,
+            "bad": 492,
+            "badRejected": 14,
+            "badRejectRate": 0.0285
+          },
+          "60": {
+            "good": 857,
+            "goodAccepted": 857,
+            "goodAcceptRate": 1,
+            "bad": 495,
+            "badRejected": 6,
+            "badRejectRate": 0.0121
+          },
+          "120": {
+            "good": 791,
+            "goodAccepted": 791,
+            "goodAcceptRate": 1,
+            "bad": 520,
+            "badRejected": 5,
+            "badRejectRate": 0.0096
+          },
+          "144": {
+            "good": 836,
+            "goodAccepted": 836,
+            "goodAcceptRate": 1,
+            "bad": 513,
+            "badRejected": 9,
+            "badRejectRate": 0.0175
+          }
+        },
+        "byInput": {
+          "mouse": {
+            "good": 1606,
+            "goodAccepted": 1606,
+            "goodAcceptRate": 1,
+            "bad": 1033,
+            "badRejected": 18,
+            "badRejectRate": 0.0174
+          },
+          "touch": {
+            "good": 1655,
+            "goodAccepted": 1655,
+            "goodAcceptRate": 1,
+            "bad": 987,
+            "badRejected": 16,
+            "badRejectRate": 0.0162
+          }
+        }
+      },
+      "oval": {
+        "total": 11520,
+        "ambiguous": 6239,
+        "good": 3261,
+        "goodAccepted": 3229,
+        "goodAcceptRate": 0.9902,
+        "bad": 2020,
+        "badRejected": 2020,
+        "badRejectRate": 1,
+        "byFps": {
+          "30": {
+            "good": 777,
+            "goodAccepted": 764,
+            "goodAcceptRate": 0.9833,
+            "bad": 492,
+            "badRejected": 492,
+            "badRejectRate": 1
+          },
+          "60": {
+            "good": 857,
+            "goodAccepted": 850,
+            "goodAcceptRate": 0.9918,
+            "bad": 495,
+            "badRejected": 495,
+            "badRejectRate": 1
+          },
+          "120": {
+            "good": 791,
+            "goodAccepted": 785,
+            "goodAcceptRate": 0.9924,
+            "bad": 520,
+            "badRejected": 520,
+            "badRejectRate": 1
+          },
+          "144": {
+            "good": 836,
+            "goodAccepted": 830,
+            "goodAcceptRate": 0.9928,
+            "bad": 513,
+            "badRejected": 513,
+            "badRejectRate": 1
+          }
+        },
+        "byInput": {
+          "mouse": {
+            "good": 1606,
+            "goodAccepted": 1577,
+            "goodAcceptRate": 0.9819,
+            "bad": 1033,
+            "badRejected": 1033,
+            "badRejectRate": 1
+          },
+          "touch": {
+            "good": 1655,
+            "goodAccepted": 1652,
+            "goodAcceptRate": 0.9982,
+            "bad": 987,
+            "badRejected": 987,
+            "badRejectRate": 1
+          }
+        }
+      }
+    }
+  },
+  "shapes": {
+    "circle-48": {
+      "total": 11520,
+      "ambiguous": 7577,
+      "good": 1591,
+      "goodAccepted": 1476,
+      "goodAcceptRate": 0.9277,
+      "bad": 2352,
+      "badRejected": 2352,
+      "badRejectRate": 1,
+      "byFps": {
+        "30": {
+          "good": 320,
+          "goodAccepted": 301,
+          "goodAcceptRate": 0.9406,
+          "bad": 585,
+          "badRejected": 585,
+          "badRejectRate": 1
+        },
+        "60": {
+          "good": 431,
+          "goodAccepted": 397,
+          "goodAcceptRate": 0.9211,
+          "bad": 577,
+          "badRejected": 577,
+          "badRejectRate": 1
+        },
+        "120": {
+          "good": 408,
+          "goodAccepted": 378,
+          "goodAcceptRate": 0.9265,
+          "bad": 613,
+          "badRejected": 613,
+          "badRejectRate": 1
+        },
+        "144": {
+          "good": 432,
+          "goodAccepted": 400,
+          "goodAcceptRate": 0.9259,
+          "bad": 577,
+          "badRejected": 577,
+          "badRejectRate": 1
+        }
+      },
+      "byInput": {
+        "mouse": {
+          "good": 809,
+          "goodAccepted": 745,
+          "goodAcceptRate": 0.9209,
+          "bad": 1202,
+          "badRejected": 1202,
+          "badRejectRate": 1
+        },
+        "touch": {
+          "good": 782,
+          "goodAccepted": 731,
+          "goodAcceptRate": 0.9348,
+          "bad": 1150,
+          "badRejected": 1150,
+          "badRejectRate": 1
+        }
+      }
+    },
+    "circle-72": {
+      "total": 11520,
+      "ambiguous": 7577,
+      "good": 1591,
+      "goodAccepted": 1591,
+      "goodAcceptRate": 1,
+      "bad": 2352,
+      "badRejected": 1904,
+      "badRejectRate": 0.8095,
+      "byFps": {
+        "30": {
+          "good": 320,
+          "goodAccepted": 320,
+          "goodAcceptRate": 1,
+          "bad": 585,
+          "badRejected": 484,
+          "badRejectRate": 0.8274
+        },
+        "60": {
+          "good": 431,
+          "goodAccepted": 431,
+          "goodAcceptRate": 1,
+          "bad": 577,
+          "badRejected": 462,
+          "badRejectRate": 0.8007
+        },
+        "120": {
+          "good": 408,
+          "goodAccepted": 408,
+          "goodAcceptRate": 1,
+          "bad": 613,
+          "badRejected": 490,
+          "badRejectRate": 0.7993
+        },
+        "144": {
+          "good": 432,
+          "goodAccepted": 432,
+          "goodAcceptRate": 1,
+          "bad": 577,
+          "badRejected": 468,
+          "badRejectRate": 0.8111
+        }
+      },
+      "byInput": {
+        "mouse": {
+          "good": 809,
+          "goodAccepted": 809,
+          "goodAcceptRate": 1,
+          "bad": 1202,
+          "badRejected": 985,
+          "badRejectRate": 0.8195
+        },
+        "touch": {
+          "good": 782,
+          "goodAccepted": 782,
+          "goodAcceptRate": 1,
+          "bad": 1150,
+          "badRejected": 919,
+          "badRejectRate": 0.7991
+        }
+      }
+    },
+    "circle-96-current-legacy": {
+      "total": 11520,
+      "ambiguous": 7577,
+      "good": 1591,
+      "goodAccepted": 1591,
+      "goodAcceptRate": 1,
+      "bad": 2352,
+      "badRejected": 64,
+      "badRejectRate": 0.0272,
+      "byFps": {
+        "30": {
+          "good": 320,
+          "goodAccepted": 320,
+          "goodAcceptRate": 1,
+          "bad": 585,
+          "badRejected": 24,
+          "badRejectRate": 0.041
+        },
+        "60": {
+          "good": 431,
+          "goodAccepted": 431,
+          "goodAcceptRate": 1,
+          "bad": 577,
+          "badRejected": 12,
+          "badRejectRate": 0.0208
+        },
+        "120": {
+          "good": 408,
+          "goodAccepted": 408,
+          "goodAcceptRate": 1,
+          "bad": 613,
+          "badRejected": 14,
+          "badRejectRate": 0.0228
+        },
+        "144": {
+          "good": 432,
+          "goodAccepted": 432,
+          "goodAcceptRate": 1,
+          "bad": 577,
+          "badRejected": 14,
+          "badRejectRate": 0.0243
+        }
+      },
+      "byInput": {
+        "mouse": {
+          "good": 809,
+          "goodAccepted": 809,
+          "goodAcceptRate": 1,
+          "bad": 1202,
+          "badRejected": 29,
+          "badRejectRate": 0.0241
+        },
+        "touch": {
+          "good": 782,
+          "goodAccepted": 782,
+          "goodAcceptRate": 1,
+          "bad": 1150,
+          "badRejected": 35,
+          "badRejectRate": 0.0304
+        }
+      }
+    },
+    "oval": {
+      "total": 11520,
+      "ambiguous": 7577,
+      "good": 1591,
+      "goodAccepted": 1590,
+      "goodAcceptRate": 0.9994,
+      "bad": 2352,
+      "badRejected": 2352,
+      "badRejectRate": 1,
+      "byFps": {
+        "30": {
+          "good": 320,
+          "goodAccepted": 320,
+          "goodAcceptRate": 1,
+          "bad": 585,
+          "badRejected": 585,
+          "badRejectRate": 1
+        },
+        "60": {
+          "good": 431,
+          "goodAccepted": 431,
+          "goodAcceptRate": 1,
+          "bad": 577,
+          "badRejected": 577,
+          "badRejectRate": 1
+        },
+        "120": {
+          "good": 408,
+          "goodAccepted": 407,
+          "goodAcceptRate": 0.9975,
+          "bad": 613,
+          "badRejected": 613,
+          "badRejectRate": 1
+        },
+        "144": {
+          "good": 432,
+          "goodAccepted": 432,
+          "goodAcceptRate": 1,
+          "bad": 577,
+          "badRejected": 577,
+          "badRejectRate": 1
+        }
+      },
+      "byInput": {
+        "mouse": {
+          "good": 809,
+          "goodAccepted": 808,
+          "goodAcceptRate": 0.9988,
+          "bad": 1202,
+          "badRejected": 1202,
+          "badRejectRate": 1
+        },
+        "touch": {
+          "good": 782,
+          "goodAccepted": 782,
+          "goodAcceptRate": 1,
+          "bad": 1150,
+          "badRejected": 1150,
+          "badRejectRate": 1
+        }
+      }
+    }
+  },
+  "capSweep": {
+    "oval-cap-64": {
+      "capPx": 64,
+      "lead": {
+        "total": 11520,
+        "ambiguous": 7577,
+        "good": 1591,
+        "goodAccepted": 1590,
+        "goodAcceptRate": 0.9994,
+        "bad": 2352,
+        "badRejected": 2352,
+        "badRejectRate": 1,
+        "byFps": {
+          "30": {
+            "good": 320,
+            "goodAccepted": 320,
+            "goodAcceptRate": 1,
+            "bad": 585,
+            "badRejected": 585,
+            "badRejectRate": 1
+          },
+          "60": {
+            "good": 431,
+            "goodAccepted": 431,
+            "goodAcceptRate": 1,
+            "bad": 577,
+            "badRejected": 577,
+            "badRejectRate": 1
+          },
+          "120": {
+            "good": 408,
+            "goodAccepted": 407,
+            "goodAcceptRate": 0.9975,
+            "bad": 613,
+            "badRejected": 613,
+            "badRejectRate": 1
+          },
+          "144": {
+            "good": 432,
+            "goodAccepted": 432,
+            "goodAcceptRate": 1,
+            "bad": 577,
+            "badRejected": 577,
+            "badRejectRate": 1
+          }
+        },
+        "byInput": {
+          "mouse": {
+            "good": 809,
+            "goodAccepted": 808,
+            "goodAcceptRate": 0.9988,
+            "bad": 1202,
+            "badRejected": 1202,
+            "badRejectRate": 1
+          },
+          "touch": {
+            "good": 782,
+            "goodAccepted": 782,
+            "goodAcceptRate": 1,
+            "bad": 1150,
+            "badRejected": 1150,
+            "badRejectRate": 1
+          }
+        }
+      },
+      "worldDistance": {
+        "total": 11520,
+        "ambiguous": 6239,
+        "good": 3261,
+        "goodAccepted": 3229,
+        "goodAcceptRate": 0.9902,
+        "bad": 2020,
+        "badRejected": 2020,
+        "badRejectRate": 1,
+        "byFps": {
+          "30": {
+            "good": 777,
+            "goodAccepted": 764,
+            "goodAcceptRate": 0.9833,
+            "bad": 492,
+            "badRejected": 492,
+            "badRejectRate": 1
+          },
+          "60": {
+            "good": 857,
+            "goodAccepted": 850,
+            "goodAcceptRate": 0.9918,
+            "bad": 495,
+            "badRejected": 495,
+            "badRejectRate": 1
+          },
+          "120": {
+            "good": 791,
+            "goodAccepted": 785,
+            "goodAcceptRate": 0.9924,
+            "bad": 520,
+            "badRejected": 520,
+            "badRejectRate": 1
+          },
+          "144": {
+            "good": 836,
+            "goodAccepted": 830,
+            "goodAcceptRate": 0.9928,
+            "bad": 513,
+            "badRejected": 513,
+            "badRejectRate": 1
+          }
+        },
+        "byInput": {
+          "mouse": {
+            "good": 1606,
+            "goodAccepted": 1577,
+            "goodAcceptRate": 0.9819,
+            "bad": 1033,
+            "badRejected": 1033,
+            "badRejectRate": 1
+          },
+          "touch": {
+            "good": 1655,
+            "goodAccepted": 1652,
+            "goodAcceptRate": 0.9982,
+            "bad": 987,
+            "badRejected": 987,
+            "badRejectRate": 1
+          }
+        }
+      },
+      "stressWorldDistance": {
+        "total": 10368,
+        "ambiguous": 3791,
+        "good": 1444,
+        "goodAccepted": 1422,
+        "goodAcceptRate": 0.9848,
+        "bad": 5133,
+        "badRejected": 5133,
+        "badRejectRate": 1,
+        "byFps": {
+          "30": {
+            "good": 367,
+            "goodAccepted": 364,
+            "goodAcceptRate": 0.9918,
+            "bad": 1286,
+            "badRejected": 1286,
+            "badRejectRate": 1
+          },
+          "60": {
+            "good": 363,
+            "goodAccepted": 359,
+            "goodAcceptRate": 0.989,
+            "bad": 1288,
+            "badRejected": 1288,
+            "badRejectRate": 1
+          },
+          "120": {
+            "good": 365,
+            "goodAccepted": 360,
+            "goodAcceptRate": 0.9863,
+            "bad": 1275,
+            "badRejected": 1275,
+            "badRejectRate": 1
+          },
+          "144": {
+            "good": 349,
+            "goodAccepted": 339,
+            "goodAcceptRate": 0.9713,
+            "bad": 1284,
+            "badRejected": 1284,
+            "badRejectRate": 1
+          }
+        },
+        "byInput": {
+          "mouse": {
+            "good": 696,
+            "goodAccepted": 678,
+            "goodAcceptRate": 0.9741,
+            "bad": 2610,
+            "badRejected": 2610,
+            "badRejectRate": 1
+          },
+          "touch": {
+            "good": 748,
+            "goodAccepted": 744,
+            "goodAcceptRate": 0.9947,
+            "bad": 2523,
+            "badRejected": 2523,
+            "badRejectRate": 1
+          }
+        }
+      }
+    },
+    "oval-cap-80": {
+      "capPx": 80,
+      "lead": {
+        "total": 11520,
+        "ambiguous": 7577,
+        "good": 1591,
+        "goodAccepted": 1590,
+        "goodAcceptRate": 0.9994,
+        "bad": 2352,
+        "badRejected": 2352,
+        "badRejectRate": 1,
+        "byFps": {
+          "30": {
+            "good": 320,
+            "goodAccepted": 320,
+            "goodAcceptRate": 1,
+            "bad": 585,
+            "badRejected": 585,
+            "badRejectRate": 1
+          },
+          "60": {
+            "good": 431,
+            "goodAccepted": 431,
+            "goodAcceptRate": 1,
+            "bad": 577,
+            "badRejected": 577,
+            "badRejectRate": 1
+          },
+          "120": {
+            "good": 408,
+            "goodAccepted": 407,
+            "goodAcceptRate": 0.9975,
+            "bad": 613,
+            "badRejected": 613,
+            "badRejectRate": 1
+          },
+          "144": {
+            "good": 432,
+            "goodAccepted": 432,
+            "goodAcceptRate": 1,
+            "bad": 577,
+            "badRejected": 577,
+            "badRejectRate": 1
+          }
+        },
+        "byInput": {
+          "mouse": {
+            "good": 809,
+            "goodAccepted": 808,
+            "goodAcceptRate": 0.9988,
+            "bad": 1202,
+            "badRejected": 1202,
+            "badRejectRate": 1
+          },
+          "touch": {
+            "good": 782,
+            "goodAccepted": 782,
+            "goodAcceptRate": 1,
+            "bad": 1150,
+            "badRejected": 1150,
+            "badRejectRate": 1
+          }
+        }
+      },
+      "worldDistance": {
+        "total": 11520,
+        "ambiguous": 6239,
+        "good": 3261,
+        "goodAccepted": 3229,
+        "goodAcceptRate": 0.9902,
+        "bad": 2020,
+        "badRejected": 2020,
+        "badRejectRate": 1,
+        "byFps": {
+          "30": {
+            "good": 777,
+            "goodAccepted": 764,
+            "goodAcceptRate": 0.9833,
+            "bad": 492,
+            "badRejected": 492,
+            "badRejectRate": 1
+          },
+          "60": {
+            "good": 857,
+            "goodAccepted": 850,
+            "goodAcceptRate": 0.9918,
+            "bad": 495,
+            "badRejected": 495,
+            "badRejectRate": 1
+          },
+          "120": {
+            "good": 791,
+            "goodAccepted": 785,
+            "goodAcceptRate": 0.9924,
+            "bad": 520,
+            "badRejected": 520,
+            "badRejectRate": 1
+          },
+          "144": {
+            "good": 836,
+            "goodAccepted": 830,
+            "goodAcceptRate": 0.9928,
+            "bad": 513,
+            "badRejected": 513,
+            "badRejectRate": 1
+          }
+        },
+        "byInput": {
+          "mouse": {
+            "good": 1606,
+            "goodAccepted": 1577,
+            "goodAcceptRate": 0.9819,
+            "bad": 1033,
+            "badRejected": 1033,
+            "badRejectRate": 1
+          },
+          "touch": {
+            "good": 1655,
+            "goodAccepted": 1652,
+            "goodAcceptRate": 0.9982,
+            "bad": 987,
+            "badRejected": 987,
+            "badRejectRate": 1
+          }
+        }
+      },
+      "stressWorldDistance": {
+        "total": 10368,
+        "ambiguous": 3791,
+        "good": 1444,
+        "goodAccepted": 1437,
+        "goodAcceptRate": 0.9952,
+        "bad": 5133,
+        "badRejected": 5132,
+        "badRejectRate": 0.9998,
+        "byFps": {
+          "30": {
+            "good": 367,
+            "goodAccepted": 367,
+            "goodAcceptRate": 1,
+            "bad": 1286,
+            "badRejected": 1286,
+            "badRejectRate": 1
+          },
+          "60": {
+            "good": 363,
+            "goodAccepted": 361,
+            "goodAcceptRate": 0.9945,
+            "bad": 1288,
+            "badRejected": 1287,
+            "badRejectRate": 0.9992
+          },
+          "120": {
+            "good": 365,
+            "goodAccepted": 362,
+            "goodAcceptRate": 0.9918,
+            "bad": 1275,
+            "badRejected": 1275,
+            "badRejectRate": 1
+          },
+          "144": {
+            "good": 349,
+            "goodAccepted": 347,
+            "goodAcceptRate": 0.9943,
+            "bad": 1284,
+            "badRejected": 1284,
+            "badRejectRate": 1
+          }
+        },
+        "byInput": {
+          "mouse": {
+            "good": 696,
+            "goodAccepted": 690,
+            "goodAcceptRate": 0.9914,
+            "bad": 2610,
+            "badRejected": 2610,
+            "badRejectRate": 1
+          },
+          "touch": {
+            "good": 748,
+            "goodAccepted": 747,
+            "goodAcceptRate": 0.9987,
+            "bad": 2523,
+            "badRejected": 2522,
+            "badRejectRate": 0.9996
+          }
+        }
+      }
+    },
+    "oval-cap-96": {
+      "capPx": 96,
+      "lead": {
+        "total": 11520,
+        "ambiguous": 7577,
+        "good": 1591,
+        "goodAccepted": 1590,
+        "goodAcceptRate": 0.9994,
+        "bad": 2352,
+        "badRejected": 2352,
+        "badRejectRate": 1,
+        "byFps": {
+          "30": {
+            "good": 320,
+            "goodAccepted": 320,
+            "goodAcceptRate": 1,
+            "bad": 585,
+            "badRejected": 585,
+            "badRejectRate": 1
+          },
+          "60": {
+            "good": 431,
+            "goodAccepted": 431,
+            "goodAcceptRate": 1,
+            "bad": 577,
+            "badRejected": 577,
+            "badRejectRate": 1
+          },
+          "120": {
+            "good": 408,
+            "goodAccepted": 407,
+            "goodAcceptRate": 0.9975,
+            "bad": 613,
+            "badRejected": 613,
+            "badRejectRate": 1
+          },
+          "144": {
+            "good": 432,
+            "goodAccepted": 432,
+            "goodAcceptRate": 1,
+            "bad": 577,
+            "badRejected": 577,
+            "badRejectRate": 1
+          }
+        },
+        "byInput": {
+          "mouse": {
+            "good": 809,
+            "goodAccepted": 808,
+            "goodAcceptRate": 0.9988,
+            "bad": 1202,
+            "badRejected": 1202,
+            "badRejectRate": 1
+          },
+          "touch": {
+            "good": 782,
+            "goodAccepted": 782,
+            "goodAcceptRate": 1,
+            "bad": 1150,
+            "badRejected": 1150,
+            "badRejectRate": 1
+          }
+        }
+      },
+      "worldDistance": {
+        "total": 11520,
+        "ambiguous": 6239,
+        "good": 3261,
+        "goodAccepted": 3229,
+        "goodAcceptRate": 0.9902,
+        "bad": 2020,
+        "badRejected": 2020,
+        "badRejectRate": 1,
+        "byFps": {
+          "30": {
+            "good": 777,
+            "goodAccepted": 764,
+            "goodAcceptRate": 0.9833,
+            "bad": 492,
+            "badRejected": 492,
+            "badRejectRate": 1
+          },
+          "60": {
+            "good": 857,
+            "goodAccepted": 850,
+            "goodAcceptRate": 0.9918,
+            "bad": 495,
+            "badRejected": 495,
+            "badRejectRate": 1
+          },
+          "120": {
+            "good": 791,
+            "goodAccepted": 785,
+            "goodAcceptRate": 0.9924,
+            "bad": 520,
+            "badRejected": 520,
+            "badRejectRate": 1
+          },
+          "144": {
+            "good": 836,
+            "goodAccepted": 830,
+            "goodAcceptRate": 0.9928,
+            "bad": 513,
+            "badRejected": 513,
+            "badRejectRate": 1
+          }
+        },
+        "byInput": {
+          "mouse": {
+            "good": 1606,
+            "goodAccepted": 1577,
+            "goodAcceptRate": 0.9819,
+            "bad": 1033,
+            "badRejected": 1033,
+            "badRejectRate": 1
+          },
+          "touch": {
+            "good": 1655,
+            "goodAccepted": 1652,
+            "goodAcceptRate": 0.9982,
+            "bad": 987,
+            "badRejected": 987,
+            "badRejectRate": 1
+          }
+        }
+      },
+      "stressWorldDistance": {
+        "total": 10368,
+        "ambiguous": 3791,
+        "good": 1444,
+        "goodAccepted": 1437,
+        "goodAcceptRate": 0.9952,
+        "bad": 5133,
+        "badRejected": 5103,
+        "badRejectRate": 0.9942,
+        "byFps": {
+          "30": {
+            "good": 367,
+            "goodAccepted": 367,
+            "goodAcceptRate": 1,
+            "bad": 1286,
+            "badRejected": 1278,
+            "badRejectRate": 0.9938
+          },
+          "60": {
+            "good": 363,
+            "goodAccepted": 361,
+            "goodAcceptRate": 0.9945,
+            "bad": 1288,
+            "badRejected": 1278,
+            "badRejectRate": 0.9922
+          },
+          "120": {
+            "good": 365,
+            "goodAccepted": 362,
+            "goodAcceptRate": 0.9918,
+            "bad": 1275,
+            "badRejected": 1270,
+            "badRejectRate": 0.9961
+          },
+          "144": {
+            "good": 349,
+            "goodAccepted": 347,
+            "goodAcceptRate": 0.9943,
+            "bad": 1284,
+            "badRejected": 1277,
+            "badRejectRate": 0.9945
+          }
+        },
+        "byInput": {
+          "mouse": {
+            "good": 696,
+            "goodAccepted": 690,
+            "goodAcceptRate": 0.9914,
+            "bad": 2610,
+            "badRejected": 2604,
+            "badRejectRate": 0.9977
+          },
+          "touch": {
+            "good": 748,
+            "goodAccepted": 747,
+            "goodAcceptRate": 0.9987,
+            "bad": 2523,
+            "badRejected": 2499,
+            "badRejectRate": 0.9905
+          }
+        }
+      }
+    },
+    "oval-cap-120": {
+      "capPx": 120,
+      "lead": {
+        "total": 11520,
+        "ambiguous": 7577,
+        "good": 1591,
+        "goodAccepted": 1590,
+        "goodAcceptRate": 0.9994,
+        "bad": 2352,
+        "badRejected": 2352,
+        "badRejectRate": 1,
+        "byFps": {
+          "30": {
+            "good": 320,
+            "goodAccepted": 320,
+            "goodAcceptRate": 1,
+            "bad": 585,
+            "badRejected": 585,
+            "badRejectRate": 1
+          },
+          "60": {
+            "good": 431,
+            "goodAccepted": 431,
+            "goodAcceptRate": 1,
+            "bad": 577,
+            "badRejected": 577,
+            "badRejectRate": 1
+          },
+          "120": {
+            "good": 408,
+            "goodAccepted": 407,
+            "goodAcceptRate": 0.9975,
+            "bad": 613,
+            "badRejected": 613,
+            "badRejectRate": 1
+          },
+          "144": {
+            "good": 432,
+            "goodAccepted": 432,
+            "goodAcceptRate": 1,
+            "bad": 577,
+            "badRejected": 577,
+            "badRejectRate": 1
+          }
+        },
+        "byInput": {
+          "mouse": {
+            "good": 809,
+            "goodAccepted": 808,
+            "goodAcceptRate": 0.9988,
+            "bad": 1202,
+            "badRejected": 1202,
+            "badRejectRate": 1
+          },
+          "touch": {
+            "good": 782,
+            "goodAccepted": 782,
+            "goodAcceptRate": 1,
+            "bad": 1150,
+            "badRejected": 1150,
+            "badRejectRate": 1
+          }
+        }
+      },
+      "worldDistance": {
+        "total": 11520,
+        "ambiguous": 6239,
+        "good": 3261,
+        "goodAccepted": 3229,
+        "goodAcceptRate": 0.9902,
+        "bad": 2020,
+        "badRejected": 2020,
+        "badRejectRate": 1,
+        "byFps": {
+          "30": {
+            "good": 777,
+            "goodAccepted": 764,
+            "goodAcceptRate": 0.9833,
+            "bad": 492,
+            "badRejected": 492,
+            "badRejectRate": 1
+          },
+          "60": {
+            "good": 857,
+            "goodAccepted": 850,
+            "goodAcceptRate": 0.9918,
+            "bad": 495,
+            "badRejected": 495,
+            "badRejectRate": 1
+          },
+          "120": {
+            "good": 791,
+            "goodAccepted": 785,
+            "goodAcceptRate": 0.9924,
+            "bad": 520,
+            "badRejected": 520,
+            "badRejectRate": 1
+          },
+          "144": {
+            "good": 836,
+            "goodAccepted": 830,
+            "goodAcceptRate": 0.9928,
+            "bad": 513,
+            "badRejected": 513,
+            "badRejectRate": 1
+          }
+        },
+        "byInput": {
+          "mouse": {
+            "good": 1606,
+            "goodAccepted": 1577,
+            "goodAcceptRate": 0.9819,
+            "bad": 1033,
+            "badRejected": 1033,
+            "badRejectRate": 1
+          },
+          "touch": {
+            "good": 1655,
+            "goodAccepted": 1652,
+            "goodAcceptRate": 0.9982,
+            "bad": 987,
+            "badRejected": 987,
+            "badRejectRate": 1
+          }
+        }
+      },
+      "stressWorldDistance": {
+        "total": 10368,
+        "ambiguous": 3791,
+        "good": 1444,
+        "goodAccepted": 1437,
+        "goodAcceptRate": 0.9952,
+        "bad": 5133,
+        "badRejected": 5003,
+        "badRejectRate": 0.9747,
+        "byFps": {
+          "30": {
+            "good": 367,
+            "goodAccepted": 367,
+            "goodAcceptRate": 1,
+            "bad": 1286,
+            "badRejected": 1245,
+            "badRejectRate": 0.9681
+          },
+          "60": {
+            "good": 363,
+            "goodAccepted": 361,
+            "goodAcceptRate": 0.9945,
+            "bad": 1288,
+            "badRejected": 1251,
+            "badRejectRate": 0.9713
+          },
+          "120": {
+            "good": 365,
+            "goodAccepted": 362,
+            "goodAcceptRate": 0.9918,
+            "bad": 1275,
+            "badRejected": 1251,
+            "badRejectRate": 0.9812
+          },
+          "144": {
+            "good": 349,
+            "goodAccepted": 347,
+            "goodAcceptRate": 0.9943,
+            "bad": 1284,
+            "badRejected": 1256,
+            "badRejectRate": 0.9782
+          }
+        },
+        "byInput": {
+          "mouse": {
+            "good": 696,
+            "goodAccepted": 690,
+            "goodAcceptRate": 0.9914,
+            "bad": 2610,
+            "badRejected": 2566,
+            "badRejectRate": 0.9831
+          },
+          "touch": {
+            "good": 748,
+            "goodAccepted": 747,
+            "goodAcceptRate": 0.9987,
+            "bad": 2523,
+            "badRejected": 2437,
+            "badRejectRate": 0.9659
+          }
+        }
+      }
+    },
+    "oval-cap-140": {
+      "capPx": 140,
+      "lead": {
+        "total": 11520,
+        "ambiguous": 7577,
+        "good": 1591,
+        "goodAccepted": 1590,
+        "goodAcceptRate": 0.9994,
+        "bad": 2352,
+        "badRejected": 2352,
+        "badRejectRate": 1,
+        "byFps": {
+          "30": {
+            "good": 320,
+            "goodAccepted": 320,
+            "goodAcceptRate": 1,
+            "bad": 585,
+            "badRejected": 585,
+            "badRejectRate": 1
+          },
+          "60": {
+            "good": 431,
+            "goodAccepted": 431,
+            "goodAcceptRate": 1,
+            "bad": 577,
+            "badRejected": 577,
+            "badRejectRate": 1
+          },
+          "120": {
+            "good": 408,
+            "goodAccepted": 407,
+            "goodAcceptRate": 0.9975,
+            "bad": 613,
+            "badRejected": 613,
+            "badRejectRate": 1
+          },
+          "144": {
+            "good": 432,
+            "goodAccepted": 432,
+            "goodAcceptRate": 1,
+            "bad": 577,
+            "badRejected": 577,
+            "badRejectRate": 1
+          }
+        },
+        "byInput": {
+          "mouse": {
+            "good": 809,
+            "goodAccepted": 808,
+            "goodAcceptRate": 0.9988,
+            "bad": 1202,
+            "badRejected": 1202,
+            "badRejectRate": 1
+          },
+          "touch": {
+            "good": 782,
+            "goodAccepted": 782,
+            "goodAcceptRate": 1,
+            "bad": 1150,
+            "badRejected": 1150,
+            "badRejectRate": 1
+          }
+        }
+      },
+      "worldDistance": {
+        "total": 11520,
+        "ambiguous": 6239,
+        "good": 3261,
+        "goodAccepted": 3229,
+        "goodAcceptRate": 0.9902,
+        "bad": 2020,
+        "badRejected": 2020,
+        "badRejectRate": 1,
+        "byFps": {
+          "30": {
+            "good": 777,
+            "goodAccepted": 764,
+            "goodAcceptRate": 0.9833,
+            "bad": 492,
+            "badRejected": 492,
+            "badRejectRate": 1
+          },
+          "60": {
+            "good": 857,
+            "goodAccepted": 850,
+            "goodAcceptRate": 0.9918,
+            "bad": 495,
+            "badRejected": 495,
+            "badRejectRate": 1
+          },
+          "120": {
+            "good": 791,
+            "goodAccepted": 785,
+            "goodAcceptRate": 0.9924,
+            "bad": 520,
+            "badRejected": 520,
+            "badRejectRate": 1
+          },
+          "144": {
+            "good": 836,
+            "goodAccepted": 830,
+            "goodAcceptRate": 0.9928,
+            "bad": 513,
+            "badRejected": 513,
+            "badRejectRate": 1
+          }
+        },
+        "byInput": {
+          "mouse": {
+            "good": 1606,
+            "goodAccepted": 1577,
+            "goodAcceptRate": 0.9819,
+            "bad": 1033,
+            "badRejected": 1033,
+            "badRejectRate": 1
+          },
+          "touch": {
+            "good": 1655,
+            "goodAccepted": 1652,
+            "goodAcceptRate": 0.9982,
+            "bad": 987,
+            "badRejected": 987,
+            "badRejectRate": 1
+          }
+        }
+      },
+      "stressWorldDistance": {
+        "total": 10368,
+        "ambiguous": 3791,
+        "good": 1444,
+        "goodAccepted": 1437,
+        "goodAcceptRate": 0.9952,
+        "bad": 5133,
+        "badRejected": 4926,
+        "badRejectRate": 0.9597,
+        "byFps": {
+          "30": {
+            "good": 367,
+            "goodAccepted": 367,
+            "goodAcceptRate": 1,
+            "bad": 1286,
+            "badRejected": 1222,
+            "badRejectRate": 0.9502
+          },
+          "60": {
+            "good": 363,
+            "goodAccepted": 361,
+            "goodAcceptRate": 0.9945,
+            "bad": 1288,
+            "badRejected": 1235,
+            "badRejectRate": 0.9589
+          },
+          "120": {
+            "good": 365,
+            "goodAccepted": 362,
+            "goodAcceptRate": 0.9918,
+            "bad": 1275,
+            "badRejected": 1237,
+            "badRejectRate": 0.9702
+          },
+          "144": {
+            "good": 349,
+            "goodAccepted": 347,
+            "goodAcceptRate": 0.9943,
+            "bad": 1284,
+            "badRejected": 1232,
+            "badRejectRate": 0.9595
+          }
+        },
+        "byInput": {
+          "mouse": {
+            "good": 696,
+            "goodAccepted": 690,
+            "goodAcceptRate": 0.9914,
+            "bad": 2610,
+            "badRejected": 2531,
+            "badRejectRate": 0.9697
+          },
+          "touch": {
+            "good": 748,
+            "goodAccepted": 747,
+            "goodAcceptRate": 0.9987,
+            "bad": 2523,
+            "badRejected": 2395,
+            "badRejectRate": 0.9493
+          }
+        }
+      }
+    },
+    "oval-cap-160": {
+      "capPx": 160,
+      "lead": {
+        "total": 11520,
+        "ambiguous": 7577,
+        "good": 1591,
+        "goodAccepted": 1590,
+        "goodAcceptRate": 0.9994,
+        "bad": 2352,
+        "badRejected": 2352,
+        "badRejectRate": 1,
+        "byFps": {
+          "30": {
+            "good": 320,
+            "goodAccepted": 320,
+            "goodAcceptRate": 1,
+            "bad": 585,
+            "badRejected": 585,
+            "badRejectRate": 1
+          },
+          "60": {
+            "good": 431,
+            "goodAccepted": 431,
+            "goodAcceptRate": 1,
+            "bad": 577,
+            "badRejected": 577,
+            "badRejectRate": 1
+          },
+          "120": {
+            "good": 408,
+            "goodAccepted": 407,
+            "goodAcceptRate": 0.9975,
+            "bad": 613,
+            "badRejected": 613,
+            "badRejectRate": 1
+          },
+          "144": {
+            "good": 432,
+            "goodAccepted": 432,
+            "goodAcceptRate": 1,
+            "bad": 577,
+            "badRejected": 577,
+            "badRejectRate": 1
+          }
+        },
+        "byInput": {
+          "mouse": {
+            "good": 809,
+            "goodAccepted": 808,
+            "goodAcceptRate": 0.9988,
+            "bad": 1202,
+            "badRejected": 1202,
+            "badRejectRate": 1
+          },
+          "touch": {
+            "good": 782,
+            "goodAccepted": 782,
+            "goodAcceptRate": 1,
+            "bad": 1150,
+            "badRejected": 1150,
+            "badRejectRate": 1
+          }
+        }
+      },
+      "worldDistance": {
+        "total": 11520,
+        "ambiguous": 6239,
+        "good": 3261,
+        "goodAccepted": 3229,
+        "goodAcceptRate": 0.9902,
+        "bad": 2020,
+        "badRejected": 2020,
+        "badRejectRate": 1,
+        "byFps": {
+          "30": {
+            "good": 777,
+            "goodAccepted": 764,
+            "goodAcceptRate": 0.9833,
+            "bad": 492,
+            "badRejected": 492,
+            "badRejectRate": 1
+          },
+          "60": {
+            "good": 857,
+            "goodAccepted": 850,
+            "goodAcceptRate": 0.9918,
+            "bad": 495,
+            "badRejected": 495,
+            "badRejectRate": 1
+          },
+          "120": {
+            "good": 791,
+            "goodAccepted": 785,
+            "goodAcceptRate": 0.9924,
+            "bad": 520,
+            "badRejected": 520,
+            "badRejectRate": 1
+          },
+          "144": {
+            "good": 836,
+            "goodAccepted": 830,
+            "goodAcceptRate": 0.9928,
+            "bad": 513,
+            "badRejected": 513,
+            "badRejectRate": 1
+          }
+        },
+        "byInput": {
+          "mouse": {
+            "good": 1606,
+            "goodAccepted": 1577,
+            "goodAcceptRate": 0.9819,
+            "bad": 1033,
+            "badRejected": 1033,
+            "badRejectRate": 1
+          },
+          "touch": {
+            "good": 1655,
+            "goodAccepted": 1652,
+            "goodAcceptRate": 0.9982,
+            "bad": 987,
+            "badRejected": 987,
+            "badRejectRate": 1
+          }
+        }
+      },
+      "stressWorldDistance": {
+        "total": 10368,
+        "ambiguous": 3791,
+        "good": 1444,
+        "goodAccepted": 1437,
+        "goodAcceptRate": 0.9952,
+        "bad": 5133,
+        "badRejected": 4822,
+        "badRejectRate": 0.9394,
+        "byFps": {
+          "30": {
+            "good": 367,
+            "goodAccepted": 367,
+            "goodAcceptRate": 1,
+            "bad": 1286,
+            "badRejected": 1199,
+            "badRejectRate": 0.9323
+          },
+          "60": {
+            "good": 363,
+            "goodAccepted": 361,
+            "goodAcceptRate": 0.9945,
+            "bad": 1288,
+            "badRejected": 1201,
+            "badRejectRate": 0.9325
+          },
+          "120": {
+            "good": 365,
+            "goodAccepted": 362,
+            "goodAcceptRate": 0.9918,
+            "bad": 1275,
+            "badRejected": 1214,
+            "badRejectRate": 0.9522
+          },
+          "144": {
+            "good": 349,
+            "goodAccepted": 347,
+            "goodAcceptRate": 0.9943,
+            "bad": 1284,
+            "badRejected": 1208,
+            "badRejectRate": 0.9408
+          }
+        },
+        "byInput": {
+          "mouse": {
+            "good": 696,
+            "goodAccepted": 690,
+            "goodAcceptRate": 0.9914,
+            "bad": 2610,
+            "badRejected": 2484,
+            "badRejectRate": 0.9517
+          },
+          "touch": {
+            "good": 748,
+            "goodAccepted": 747,
+            "goodAcceptRate": 0.9987,
+            "bad": 2523,
+            "badRejected": 2338,
+            "badRejectRate": 0.9267
+          }
+        }
+      }
+    },
+    "oval-cap-200": {
+      "capPx": 200,
+      "lead": {
+        "total": 11520,
+        "ambiguous": 7577,
+        "good": 1591,
+        "goodAccepted": 1590,
+        "goodAcceptRate": 0.9994,
+        "bad": 2352,
+        "badRejected": 2352,
+        "badRejectRate": 1,
+        "byFps": {
+          "30": {
+            "good": 320,
+            "goodAccepted": 320,
+            "goodAcceptRate": 1,
+            "bad": 585,
+            "badRejected": 585,
+            "badRejectRate": 1
+          },
+          "60": {
+            "good": 431,
+            "goodAccepted": 431,
+            "goodAcceptRate": 1,
+            "bad": 577,
+            "badRejected": 577,
+            "badRejectRate": 1
+          },
+          "120": {
+            "good": 408,
+            "goodAccepted": 407,
+            "goodAcceptRate": 0.9975,
+            "bad": 613,
+            "badRejected": 613,
+            "badRejectRate": 1
+          },
+          "144": {
+            "good": 432,
+            "goodAccepted": 432,
+            "goodAcceptRate": 1,
+            "bad": 577,
+            "badRejected": 577,
+            "badRejectRate": 1
+          }
+        },
+        "byInput": {
+          "mouse": {
+            "good": 809,
+            "goodAccepted": 808,
+            "goodAcceptRate": 0.9988,
+            "bad": 1202,
+            "badRejected": 1202,
+            "badRejectRate": 1
+          },
+          "touch": {
+            "good": 782,
+            "goodAccepted": 782,
+            "goodAcceptRate": 1,
+            "bad": 1150,
+            "badRejected": 1150,
+            "badRejectRate": 1
+          }
+        }
+      },
+      "worldDistance": {
+        "total": 11520,
+        "ambiguous": 6239,
+        "good": 3261,
+        "goodAccepted": 3229,
+        "goodAcceptRate": 0.9902,
+        "bad": 2020,
+        "badRejected": 2020,
+        "badRejectRate": 1,
+        "byFps": {
+          "30": {
+            "good": 777,
+            "goodAccepted": 764,
+            "goodAcceptRate": 0.9833,
+            "bad": 492,
+            "badRejected": 492,
+            "badRejectRate": 1
+          },
+          "60": {
+            "good": 857,
+            "goodAccepted": 850,
+            "goodAcceptRate": 0.9918,
+            "bad": 495,
+            "badRejected": 495,
+            "badRejectRate": 1
+          },
+          "120": {
+            "good": 791,
+            "goodAccepted": 785,
+            "goodAcceptRate": 0.9924,
+            "bad": 520,
+            "badRejected": 520,
+            "badRejectRate": 1
+          },
+          "144": {
+            "good": 836,
+            "goodAccepted": 830,
+            "goodAcceptRate": 0.9928,
+            "bad": 513,
+            "badRejected": 513,
+            "badRejectRate": 1
+          }
+        },
+        "byInput": {
+          "mouse": {
+            "good": 1606,
+            "goodAccepted": 1577,
+            "goodAcceptRate": 0.9819,
+            "bad": 1033,
+            "badRejected": 1033,
+            "badRejectRate": 1
+          },
+          "touch": {
+            "good": 1655,
+            "goodAccepted": 1652,
+            "goodAcceptRate": 0.9982,
+            "bad": 987,
+            "badRejected": 987,
+            "badRejectRate": 1
+          }
+        }
+      },
+      "stressWorldDistance": {
+        "total": 10368,
+        "ambiguous": 3791,
+        "good": 1444,
+        "goodAccepted": 1437,
+        "goodAcceptRate": 0.9952,
+        "bad": 5133,
+        "badRejected": 4681,
+        "badRejectRate": 0.9119,
+        "byFps": {
+          "30": {
+            "good": 367,
+            "goodAccepted": 367,
+            "goodAcceptRate": 1,
+            "bad": 1286,
+            "badRejected": 1166,
+            "badRejectRate": 0.9067
+          },
+          "60": {
+            "good": 363,
+            "goodAccepted": 361,
+            "goodAcceptRate": 0.9945,
+            "bad": 1288,
+            "badRejected": 1163,
+            "badRejectRate": 0.903
+          },
+          "120": {
+            "good": 365,
+            "goodAccepted": 362,
+            "goodAcceptRate": 0.9918,
+            "bad": 1275,
+            "badRejected": 1181,
+            "badRejectRate": 0.9263
+          },
+          "144": {
+            "good": 349,
+            "goodAccepted": 347,
+            "goodAcceptRate": 0.9943,
+            "bad": 1284,
+            "badRejected": 1171,
+            "badRejectRate": 0.912
+          }
+        },
+        "byInput": {
+          "mouse": {
+            "good": 696,
+            "goodAccepted": 690,
+            "goodAcceptRate": 0.9914,
+            "bad": 2610,
+            "badRejected": 2431,
+            "badRejectRate": 0.9314
+          },
+          "touch": {
+            "good": 748,
+            "goodAccepted": 747,
+            "goodAcceptRate": 0.9987,
+            "bad": 2523,
+            "badRejected": 2250,
+            "badRejectRate": 0.8918
+          }
+        }
+      }
+    },
+    "oval-cap-240": {
+      "capPx": 240,
+      "lead": {
+        "total": 11520,
+        "ambiguous": 7577,
+        "good": 1591,
+        "goodAccepted": 1590,
+        "goodAcceptRate": 0.9994,
+        "bad": 2352,
+        "badRejected": 2352,
+        "badRejectRate": 1,
+        "byFps": {
+          "30": {
+            "good": 320,
+            "goodAccepted": 320,
+            "goodAcceptRate": 1,
+            "bad": 585,
+            "badRejected": 585,
+            "badRejectRate": 1
+          },
+          "60": {
+            "good": 431,
+            "goodAccepted": 431,
+            "goodAcceptRate": 1,
+            "bad": 577,
+            "badRejected": 577,
+            "badRejectRate": 1
+          },
+          "120": {
+            "good": 408,
+            "goodAccepted": 407,
+            "goodAcceptRate": 0.9975,
+            "bad": 613,
+            "badRejected": 613,
+            "badRejectRate": 1
+          },
+          "144": {
+            "good": 432,
+            "goodAccepted": 432,
+            "goodAcceptRate": 1,
+            "bad": 577,
+            "badRejected": 577,
+            "badRejectRate": 1
+          }
+        },
+        "byInput": {
+          "mouse": {
+            "good": 809,
+            "goodAccepted": 808,
+            "goodAcceptRate": 0.9988,
+            "bad": 1202,
+            "badRejected": 1202,
+            "badRejectRate": 1
+          },
+          "touch": {
+            "good": 782,
+            "goodAccepted": 782,
+            "goodAcceptRate": 1,
+            "bad": 1150,
+            "badRejected": 1150,
+            "badRejectRate": 1
+          }
+        }
+      },
+      "worldDistance": {
+        "total": 11520,
+        "ambiguous": 6239,
+        "good": 3261,
+        "goodAccepted": 3229,
+        "goodAcceptRate": 0.9902,
+        "bad": 2020,
+        "badRejected": 2020,
+        "badRejectRate": 1,
+        "byFps": {
+          "30": {
+            "good": 777,
+            "goodAccepted": 764,
+            "goodAcceptRate": 0.9833,
+            "bad": 492,
+            "badRejected": 492,
+            "badRejectRate": 1
+          },
+          "60": {
+            "good": 857,
+            "goodAccepted": 850,
+            "goodAcceptRate": 0.9918,
+            "bad": 495,
+            "badRejected": 495,
+            "badRejectRate": 1
+          },
+          "120": {
+            "good": 791,
+            "goodAccepted": 785,
+            "goodAcceptRate": 0.9924,
+            "bad": 520,
+            "badRejected": 520,
+            "badRejectRate": 1
+          },
+          "144": {
+            "good": 836,
+            "goodAccepted": 830,
+            "goodAcceptRate": 0.9928,
+            "bad": 513,
+            "badRejected": 513,
+            "badRejectRate": 1
+          }
+        },
+        "byInput": {
+          "mouse": {
+            "good": 1606,
+            "goodAccepted": 1577,
+            "goodAcceptRate": 0.9819,
+            "bad": 1033,
+            "badRejected": 1033,
+            "badRejectRate": 1
+          },
+          "touch": {
+            "good": 1655,
+            "goodAccepted": 1652,
+            "goodAcceptRate": 0.9982,
+            "bad": 987,
+            "badRejected": 987,
+            "badRejectRate": 1
+          }
+        }
+      },
+      "stressWorldDistance": {
+        "total": 10368,
+        "ambiguous": 3791,
+        "good": 1444,
+        "goodAccepted": 1437,
+        "goodAcceptRate": 0.9952,
+        "bad": 5133,
+        "badRejected": 4616,
+        "badRejectRate": 0.8993,
+        "byFps": {
+          "30": {
+            "good": 367,
+            "goodAccepted": 367,
+            "goodAcceptRate": 1,
+            "bad": 1286,
+            "badRejected": 1154,
+            "badRejectRate": 0.8974
+          },
+          "60": {
+            "good": 363,
+            "goodAccepted": 361,
+            "goodAcceptRate": 0.9945,
+            "bad": 1288,
+            "badRejected": 1144,
+            "badRejectRate": 0.8882
+          },
+          "120": {
+            "good": 365,
+            "goodAccepted": 362,
+            "goodAcceptRate": 0.9918,
+            "bad": 1275,
+            "badRejected": 1162,
+            "badRejectRate": 0.9114
+          },
+          "144": {
+            "good": 349,
+            "goodAccepted": 347,
+            "goodAcceptRate": 0.9943,
+            "bad": 1284,
+            "badRejected": 1156,
+            "badRejectRate": 0.9003
+          }
+        },
+        "byInput": {
+          "mouse": {
+            "good": 696,
+            "goodAccepted": 690,
+            "goodAcceptRate": 0.9914,
+            "bad": 2610,
+            "badRejected": 2398,
+            "badRejectRate": 0.9188
+          },
+          "touch": {
+            "good": 748,
+            "goodAccepted": 747,
+            "goodAcceptRate": 0.9987,
+            "bad": 2523,
+            "badRejected": 2218,
+            "badRejectRate": 0.8791
+          }
+        }
+      }
+    },
+    "oval-cap-320": {
+      "capPx": 320,
+      "lead": {
+        "total": 11520,
+        "ambiguous": 7577,
+        "good": 1591,
+        "goodAccepted": 1590,
+        "goodAcceptRate": 0.9994,
+        "bad": 2352,
+        "badRejected": 2352,
+        "badRejectRate": 1,
+        "byFps": {
+          "30": {
+            "good": 320,
+            "goodAccepted": 320,
+            "goodAcceptRate": 1,
+            "bad": 585,
+            "badRejected": 585,
+            "badRejectRate": 1
+          },
+          "60": {
+            "good": 431,
+            "goodAccepted": 431,
+            "goodAcceptRate": 1,
+            "bad": 577,
+            "badRejected": 577,
+            "badRejectRate": 1
+          },
+          "120": {
+            "good": 408,
+            "goodAccepted": 407,
+            "goodAcceptRate": 0.9975,
+            "bad": 613,
+            "badRejected": 613,
+            "badRejectRate": 1
+          },
+          "144": {
+            "good": 432,
+            "goodAccepted": 432,
+            "goodAcceptRate": 1,
+            "bad": 577,
+            "badRejected": 577,
+            "badRejectRate": 1
+          }
+        },
+        "byInput": {
+          "mouse": {
+            "good": 809,
+            "goodAccepted": 808,
+            "goodAcceptRate": 0.9988,
+            "bad": 1202,
+            "badRejected": 1202,
+            "badRejectRate": 1
+          },
+          "touch": {
+            "good": 782,
+            "goodAccepted": 782,
+            "goodAcceptRate": 1,
+            "bad": 1150,
+            "badRejected": 1150,
+            "badRejectRate": 1
+          }
+        }
+      },
+      "worldDistance": {
+        "total": 11520,
+        "ambiguous": 6239,
+        "good": 3261,
+        "goodAccepted": 3229,
+        "goodAcceptRate": 0.9902,
+        "bad": 2020,
+        "badRejected": 2020,
+        "badRejectRate": 1,
+        "byFps": {
+          "30": {
+            "good": 777,
+            "goodAccepted": 764,
+            "goodAcceptRate": 0.9833,
+            "bad": 492,
+            "badRejected": 492,
+            "badRejectRate": 1
+          },
+          "60": {
+            "good": 857,
+            "goodAccepted": 850,
+            "goodAcceptRate": 0.9918,
+            "bad": 495,
+            "badRejected": 495,
+            "badRejectRate": 1
+          },
+          "120": {
+            "good": 791,
+            "goodAccepted": 785,
+            "goodAcceptRate": 0.9924,
+            "bad": 520,
+            "badRejected": 520,
+            "badRejectRate": 1
+          },
+          "144": {
+            "good": 836,
+            "goodAccepted": 830,
+            "goodAcceptRate": 0.9928,
+            "bad": 513,
+            "badRejected": 513,
+            "badRejectRate": 1
+          }
+        },
+        "byInput": {
+          "mouse": {
+            "good": 1606,
+            "goodAccepted": 1577,
+            "goodAcceptRate": 0.9819,
+            "bad": 1033,
+            "badRejected": 1033,
+            "badRejectRate": 1
+          },
+          "touch": {
+            "good": 1655,
+            "goodAccepted": 1652,
+            "goodAcceptRate": 0.9982,
+            "bad": 987,
+            "badRejected": 987,
+            "badRejectRate": 1
+          }
+        }
+      },
+      "stressWorldDistance": {
+        "total": 10368,
+        "ambiguous": 3791,
+        "good": 1444,
+        "goodAccepted": 1437,
+        "goodAcceptRate": 0.9952,
+        "bad": 5133,
+        "badRejected": 4498,
+        "badRejectRate": 0.8763,
+        "byFps": {
+          "30": {
+            "good": 367,
+            "goodAccepted": 367,
+            "goodAcceptRate": 1,
+            "bad": 1286,
+            "badRejected": 1120,
+            "badRejectRate": 0.8709
+          },
+          "60": {
+            "good": 363,
+            "goodAccepted": 361,
+            "goodAcceptRate": 0.9945,
+            "bad": 1288,
+            "badRejected": 1119,
+            "badRejectRate": 0.8688
+          },
+          "120": {
+            "good": 365,
+            "goodAccepted": 362,
+            "goodAcceptRate": 0.9918,
+            "bad": 1275,
+            "badRejected": 1137,
+            "badRejectRate": 0.8918
+          },
+          "144": {
+            "good": 349,
+            "goodAccepted": 347,
+            "goodAcceptRate": 0.9943,
+            "bad": 1284,
+            "badRejected": 1122,
+            "badRejectRate": 0.8738
+          }
+        },
+        "byInput": {
+          "mouse": {
+            "good": 696,
+            "goodAccepted": 690,
+            "goodAcceptRate": 0.9914,
+            "bad": 2610,
+            "badRejected": 2342,
+            "badRejectRate": 0.8973
+          },
+          "touch": {
+            "good": 748,
+            "goodAccepted": 747,
+            "goodAcceptRate": 0.9987,
+            "bad": 2523,
+            "badRejected": 2156,
+            "badRejectRate": 0.8545
+          }
+        }
+      }
+    },
+    "oval-cap-480": {
+      "capPx": 480,
+      "lead": {
+        "total": 11520,
+        "ambiguous": 7577,
+        "good": 1591,
+        "goodAccepted": 1590,
+        "goodAcceptRate": 0.9994,
+        "bad": 2352,
+        "badRejected": 2352,
+        "badRejectRate": 1,
+        "byFps": {
+          "30": {
+            "good": 320,
+            "goodAccepted": 320,
+            "goodAcceptRate": 1,
+            "bad": 585,
+            "badRejected": 585,
+            "badRejectRate": 1
+          },
+          "60": {
+            "good": 431,
+            "goodAccepted": 431,
+            "goodAcceptRate": 1,
+            "bad": 577,
+            "badRejected": 577,
+            "badRejectRate": 1
+          },
+          "120": {
+            "good": 408,
+            "goodAccepted": 407,
+            "goodAcceptRate": 0.9975,
+            "bad": 613,
+            "badRejected": 613,
+            "badRejectRate": 1
+          },
+          "144": {
+            "good": 432,
+            "goodAccepted": 432,
+            "goodAcceptRate": 1,
+            "bad": 577,
+            "badRejected": 577,
+            "badRejectRate": 1
+          }
+        },
+        "byInput": {
+          "mouse": {
+            "good": 809,
+            "goodAccepted": 808,
+            "goodAcceptRate": 0.9988,
+            "bad": 1202,
+            "badRejected": 1202,
+            "badRejectRate": 1
+          },
+          "touch": {
+            "good": 782,
+            "goodAccepted": 782,
+            "goodAcceptRate": 1,
+            "bad": 1150,
+            "badRejected": 1150,
+            "badRejectRate": 1
+          }
+        }
+      },
+      "worldDistance": {
+        "total": 11520,
+        "ambiguous": 6239,
+        "good": 3261,
+        "goodAccepted": 3229,
+        "goodAcceptRate": 0.9902,
+        "bad": 2020,
+        "badRejected": 2020,
+        "badRejectRate": 1,
+        "byFps": {
+          "30": {
+            "good": 777,
+            "goodAccepted": 764,
+            "goodAcceptRate": 0.9833,
+            "bad": 492,
+            "badRejected": 492,
+            "badRejectRate": 1
+          },
+          "60": {
+            "good": 857,
+            "goodAccepted": 850,
+            "goodAcceptRate": 0.9918,
+            "bad": 495,
+            "badRejected": 495,
+            "badRejectRate": 1
+          },
+          "120": {
+            "good": 791,
+            "goodAccepted": 785,
+            "goodAcceptRate": 0.9924,
+            "bad": 520,
+            "badRejected": 520,
+            "badRejectRate": 1
+          },
+          "144": {
+            "good": 836,
+            "goodAccepted": 830,
+            "goodAcceptRate": 0.9928,
+            "bad": 513,
+            "badRejected": 513,
+            "badRejectRate": 1
+          }
+        },
+        "byInput": {
+          "mouse": {
+            "good": 1606,
+            "goodAccepted": 1577,
+            "goodAcceptRate": 0.9819,
+            "bad": 1033,
+            "badRejected": 1033,
+            "badRejectRate": 1
+          },
+          "touch": {
+            "good": 1655,
+            "goodAccepted": 1652,
+            "goodAcceptRate": 0.9982,
+            "bad": 987,
+            "badRejected": 987,
+            "badRejectRate": 1
+          }
+        }
+      },
+      "stressWorldDistance": {
+        "total": 10368,
+        "ambiguous": 3791,
+        "good": 1444,
+        "goodAccepted": 1437,
+        "goodAcceptRate": 0.9952,
+        "bad": 5133,
+        "badRejected": 4368,
+        "badRejectRate": 0.851,
+        "byFps": {
+          "30": {
+            "good": 367,
+            "goodAccepted": 367,
+            "goodAcceptRate": 1,
+            "bad": 1286,
+            "badRejected": 1090,
+            "badRejectRate": 0.8476
+          },
+          "60": {
+            "good": 363,
+            "goodAccepted": 361,
+            "goodAcceptRate": 0.9945,
+            "bad": 1288,
+            "badRejected": 1083,
+            "badRejectRate": 0.8408
+          },
+          "120": {
+            "good": 365,
+            "goodAccepted": 362,
+            "goodAcceptRate": 0.9918,
+            "bad": 1275,
+            "badRejected": 1102,
+            "badRejectRate": 0.8643
+          },
+          "144": {
+            "good": 349,
+            "goodAccepted": 347,
+            "goodAcceptRate": 0.9943,
+            "bad": 1284,
+            "badRejected": 1093,
+            "badRejectRate": 0.8512
+          }
+        },
+        "byInput": {
+          "mouse": {
+            "good": 696,
+            "goodAccepted": 690,
+            "goodAcceptRate": 0.9914,
+            "bad": 2610,
+            "badRejected": 2287,
+            "badRejectRate": 0.8762
+          },
+          "touch": {
+            "good": 748,
+            "goodAccepted": 747,
+            "goodAcceptRate": 0.9987,
+            "bad": 2523,
+            "badRejected": 2081,
+            "badRejectRate": 0.8248
+          }
+        }
+      }
+    },
+    "uncapped": {
+      "capPx": null,
+      "lead": {
+        "total": 11520,
+        "ambiguous": 7577,
+        "good": 1591,
+        "goodAccepted": 1590,
+        "goodAcceptRate": 0.9994,
+        "bad": 2352,
+        "badRejected": 2352,
+        "badRejectRate": 1,
+        "byFps": {
+          "30": {
+            "good": 320,
+            "goodAccepted": 320,
+            "goodAcceptRate": 1,
+            "bad": 585,
+            "badRejected": 585,
+            "badRejectRate": 1
+          },
+          "60": {
+            "good": 431,
+            "goodAccepted": 431,
+            "goodAcceptRate": 1,
+            "bad": 577,
+            "badRejected": 577,
+            "badRejectRate": 1
+          },
+          "120": {
+            "good": 408,
+            "goodAccepted": 407,
+            "goodAcceptRate": 0.9975,
+            "bad": 613,
+            "badRejected": 613,
+            "badRejectRate": 1
+          },
+          "144": {
+            "good": 432,
+            "goodAccepted": 432,
+            "goodAcceptRate": 1,
+            "bad": 577,
+            "badRejected": 577,
+            "badRejectRate": 1
+          }
+        },
+        "byInput": {
+          "mouse": {
+            "good": 809,
+            "goodAccepted": 808,
+            "goodAcceptRate": 0.9988,
+            "bad": 1202,
+            "badRejected": 1202,
+            "badRejectRate": 1
+          },
+          "touch": {
+            "good": 782,
+            "goodAccepted": 782,
+            "goodAcceptRate": 1,
+            "bad": 1150,
+            "badRejected": 1150,
+            "badRejectRate": 1
+          }
+        }
+      },
+      "worldDistance": {
+        "total": 11520,
+        "ambiguous": 6239,
+        "good": 3261,
+        "goodAccepted": 3229,
+        "goodAcceptRate": 0.9902,
+        "bad": 2020,
+        "badRejected": 2020,
+        "badRejectRate": 1,
+        "byFps": {
+          "30": {
+            "good": 777,
+            "goodAccepted": 764,
+            "goodAcceptRate": 0.9833,
+            "bad": 492,
+            "badRejected": 492,
+            "badRejectRate": 1
+          },
+          "60": {
+            "good": 857,
+            "goodAccepted": 850,
+            "goodAcceptRate": 0.9918,
+            "bad": 495,
+            "badRejected": 495,
+            "badRejectRate": 1
+          },
+          "120": {
+            "good": 791,
+            "goodAccepted": 785,
+            "goodAcceptRate": 0.9924,
+            "bad": 520,
+            "badRejected": 520,
+            "badRejectRate": 1
+          },
+          "144": {
+            "good": 836,
+            "goodAccepted": 830,
+            "goodAcceptRate": 0.9928,
+            "bad": 513,
+            "badRejected": 513,
+            "badRejectRate": 1
+          }
+        },
+        "byInput": {
+          "mouse": {
+            "good": 1606,
+            "goodAccepted": 1577,
+            "goodAcceptRate": 0.9819,
+            "bad": 1033,
+            "badRejected": 1033,
+            "badRejectRate": 1
+          },
+          "touch": {
+            "good": 1655,
+            "goodAccepted": 1652,
+            "goodAcceptRate": 0.9982,
+            "bad": 987,
+            "badRejected": 987,
+            "badRejectRate": 1
+          }
+        }
+      },
+      "stressWorldDistance": {
+        "total": 10368,
+        "ambiguous": 3791,
+        "good": 1444,
+        "goodAccepted": 1437,
+        "goodAcceptRate": 0.9952,
+        "bad": 5133,
+        "badRejected": 4368,
+        "badRejectRate": 0.851,
+        "byFps": {
+          "30": {
+            "good": 367,
+            "goodAccepted": 367,
+            "goodAcceptRate": 1,
+            "bad": 1286,
+            "badRejected": 1090,
+            "badRejectRate": 0.8476
+          },
+          "60": {
+            "good": 363,
+            "goodAccepted": 361,
+            "goodAcceptRate": 0.9945,
+            "bad": 1288,
+            "badRejected": 1083,
+            "badRejectRate": 0.8408
+          },
+          "120": {
+            "good": 365,
+            "goodAccepted": 362,
+            "goodAcceptRate": 0.9918,
+            "bad": 1275,
+            "badRejected": 1102,
+            "badRejectRate": 0.8643
+          },
+          "144": {
+            "good": 349,
+            "goodAccepted": 347,
+            "goodAcceptRate": 0.9943,
+            "bad": 1284,
+            "badRejected": 1093,
+            "badRejectRate": 0.8512
+          }
+        },
+        "byInput": {
+          "mouse": {
+            "good": 696,
+            "goodAccepted": 690,
+            "goodAcceptRate": 0.9914,
+            "bad": 2610,
+            "badRejected": 2287,
+            "badRejectRate": 0.8762
+          },
+          "touch": {
+            "good": 748,
+            "goodAccepted": 747,
+            "goodAcceptRate": 0.9987,
+            "bad": 2523,
+            "badRejected": 2081,
+            "badRejectRate": 0.8248
+          }
+        }
+      }
+    }
+  },
+  "capSelection": {
+    "criterion": "Largest finite candidate with per-input good/bad >= .95 on both main datasets and per-input stress-world badRejectRate >= .95.",
+    "selectedPx": 120,
+    "currentRulesPx": 120,
+    "matchesRules": true,
+    "stressVelocityScales": [
+      1,
+      2,
+      4,
+      8
+    ]
+  }
+}
