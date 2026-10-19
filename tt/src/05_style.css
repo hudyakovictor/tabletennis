@@ -245,6 +245,18 @@ body.is-paused #slow { display:none !important; }
 #slow.off{opacity:.32;pointer-events:none}
 body.is-slow #gl{filter:saturate(1.12) contrast(1.04)}
 
+/* ======================== defend button ============================= */
+.defend-btn{height:34px;min-width:58px;border-radius:10px;display:flex;flex-direction:column;
+  align-items:center;justify-content:center;pointer-events:auto;cursor:pointer;padding:0 10px;
+  background:radial-gradient(circle at 50% 35%,rgba(34,58,44,.85),rgba(9,18,14,.85));
+  border:1px solid var(--line2);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);
+  color:var(--dim);transition:color .18s,border-color .18s,transform .1s;
+  appearance:none;-webkit-appearance:none;font:inherit}
+.defend-btn:active,.defend-btn.on{color:#e0ffe8;border-color:rgba(78,227,154,.75);
+  box-shadow:0 0 20px rgba(78,227,154,.30);transform:scale(.94)}
+.defend-btn b{font-size:9px;font-weight:900;letter-spacing:.06em;line-height:1.15}
+body:not(.is-playing) .defend-btn{display:none !important}
+
 /* ======================== replay cinema ============================= */
 #reel{position:absolute;inset:0;z-index:6;pointer-events:none;opacity:0;transition:opacity .28s;
   font-family:var(--ui)}
