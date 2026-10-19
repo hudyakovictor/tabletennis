@@ -31,9 +31,9 @@ function canvasFixture() {
 
 test('shared gameplay contract is frozen and retains the previous authored baseline', () => {
   assert.equal(Object.isFrozen(rules), true);
-  assert.equal(rules.captureRadius, .50);
-  assert.equal(rules.depthTolerance, .48);
-  assert.equal(rules.serveCaptureRadius, .72);
+  assert.equal(rules.captureRadius, .62);
+  assert.equal(rules.depthTolerance, .62);
+  assert.equal(rules.serveCaptureRadius, .88);
   assert.equal(rules.trajectoryAssist, .85);
   assert.equal(rules.positionAssist, .85);
 });
@@ -83,12 +83,12 @@ test('capture boundaries are inclusive and outside endpoint capture is rejected'
   assert.equal(lib.playerInCaptureRange(V3.new(rules.captureRadius + .0001, 0, 0), origin), false);
   assert.equal(lib.playerInCaptureRange(V3.new(0, 0, rules.depthTolerance + .0001), origin), false);
   assert.equal(lib.playerInCaptureRange(V3.new(0, rules.captureRadius, 0), origin), true);
-  assert.equal(lib.playerInCaptureRange(V3.new(.4, .4, 0), origin), false);
+  assert.equal(lib.playerInCaptureRange(V3.new(.5, .5, 0), origin), false);
 });
 
 test('serve envelope is a sphere, not a larger rectangular corner exploit', () => {
   assert.equal(lib.playerInCaptureRange(V3.new(rules.serveCaptureRadius, 0, 0), V3.new(), true), true);
-  assert.equal(lib.playerInCaptureRange(V3.new(.5, .5, .5), V3.new(), true), false);
+  assert.equal(lib.playerInCaptureRange(V3.new(.6, .6, .6), V3.new(), true), false);
   assert.equal(lib.playerCaptureLimits(true).sweet, lib.playerCaptureLimits(false).sweet);
 });
 

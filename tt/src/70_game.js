@@ -105,7 +105,6 @@ class Game {
       showDebug: false,
       showPlayerPaddle: true,
       slowmoOnBigShots: true,
-      slowmoPlayer: true,
       targetScore: 11,
       spinBias: 'norm',
       // NEW: Enhanced gameplay settings
@@ -453,9 +452,14 @@ class Game {
     }, { passive: false });
     c.style.touchAction = 'none';
 
-    /* Prevent Telegram / embedded WebView "swipe down to close" gesture.
-     * A passive touchmove listener on the document tells the browser the
-     * page will handle every gesture, so the host app never sees a drag. */
+    /* Keep vertical gestures in the mini app when Telegram supports the API;
+     * retain the DOM fallback for older Telegram clients and embedded webviews. */
+    try {
+      const tg = window.Telegram && window.Telegram.WebApp;
+      if (tg && typeof tg.setupSwipeBehavior === 'function') {
+        tg.setupSwipeBehavior({ allow_vertical_swipe: false });
+      }
+    } catch (e) { console.debug('Telegram swipe behavior unavailable', e); }
     document.addEventListener('touchmove', (e) => {
       if (e.cancelable) e.preventDefault();
     }, { passive: false });
@@ -988,7 +992,7 @@ class Game {
       sound: s.sound, volume: s.volume, camera: s.camera, hand: s.hand, grip: s.grip,
       showTrail: s.showTrail, showPredict: s.showPredict,
       showTele: s.showTele, haptics: s.haptics, coach: s.coach, adaptive: s.adaptive,
-      slowmoPlayer: s.slowmoPlayer, targetScore: s.targetScore,
+      targetScore: s.targetScore,
       spinBias: s.spinBias,
     };
     if (this.career && this.career.active && this.career._baseSettings)
@@ -1389,15 +1393,6 @@ class Game {
     const serveCtx = this.state === GS.SERVE_TOSS && this.server === 1 && b.lastHitBy === 0;
     const sw = this.swipe, m = this.playerStrokeIntent(serveCtx);
     if (!m) {
-      /* Defend button: when held on mobile, auto-generate a BLOCK gesture
-       * if the ball is incoming and there's no active swipe. This lets
-       * Telegram/iOS users play defensive shots without swiping down. */
-      if (this.defendHeld && b.lastHitBy === -1 && b.v.z > 0) {
-        m = { releaseSpeed: 0.3, peakSpeed: 0.4, speed: 0.3, up: 0.05,
-          right: 0, dist: 0.04, pathLen: 0.04, straightness: 0.9,
-          curl: 0, dur: 0.15, samples: 4, jerk: 0, smooth: 0.9,
-          angle: 0, angleDeg: 0, sx: 0.5, sy: 0.6, x: 0.5, y: 0.58, dx: 0, dy: -0.02 };
-      }
       if (!m) return;
     }
     /* ITTF 2.07: a return must follow a bounce on the receiver's court.
