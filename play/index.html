@@ -15181,24 +15181,39 @@ class UI {
       c.lineCap = 'round'; c.lineJoin = 'round';
       const st = g.liveStroke;
       const col = st ? st.stroke.col : '#39c6ff';
+      /* The trail is the raw pointer path, but the bat lives in a clamped,
+       * smoothed world pose — near the screen edges they diverge and the
+       * stroke reads as "somewhere far from the racket". Anchor the ribbon on
+       * the bat's own projected position (shift the whole shape so its head
+       * lands on the bat) so the swing always visibly belongs to the racket. */
+      let ox = 0, oy = 0;
+      const pad = g.player;
+      if (pad && pad.pos) {
+        const bp = g.project(pad.pos, this._rb || (this._rb = {}));
+        if (bp && bp.ok && Number.isFinite(bp.x) && Number.isFinite(bp.y)) {
+          ox = bp.x * W - pts[n - 1].x * W;
+          oy = bp.y * H - pts[n - 1].y * H;
+        }
+      }
+      const nox = ox / W, noy = oy / H;
       for (let i = 1; i < n; i++) {
         const t = i / (n - 1);
         c.strokeStyle = col;
         c.globalAlpha = 0.07 + t * 0.5;
         c.lineWidth = (1.5 + t * 11) * d;
         c.beginPath();
-        c.moveTo(pts[i - 1].x * W, pts[i - 1].y * H);
-        c.lineTo(pts[i].x * W, pts[i].y * H);
+        c.moveTo((pts[i - 1].x + nox) * W, (pts[i - 1].y + noy) * H);
+        c.lineTo((pts[i].x + nox) * W, (pts[i].y + noy) * H);
         c.stroke();
       }
       c.globalAlpha = 1;
-      const hx = pts[n - 1].x * W, hy = pts[n - 1].y * H;
+      const hx = pts[n - 1].x * W + ox, hy = pts[n - 1].y * H + oy;
       const rg = c.createRadialGradient(hx, hy, 0, hx, hy, 34 * d);
       rg.addColorStop(0, col + 'cc'); rg.addColorStop(1, col + '00');
       c.fillStyle = rg; c.beginPath(); c.arc(hx, hy, 34 * d, 0, TAU); c.fill();
 
       this._lastRibbon = {
-        pts: sw.samples.map((p) => ({ x: p.x, y: p.y })),
+        pts: sw.samples.map((p) => ({ x: p.x + nox, y: p.y + noy })),
         col,
         label: (st && sw.m.dist > 0.045) ? (st.stroke.short || st.stroke.name) : '',
         fade: 1.0,
