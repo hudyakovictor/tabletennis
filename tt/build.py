@@ -2,9 +2,17 @@
 """Bundle every source file into one standalone, offline-capable HTML."""
 import os, re, sys, datetime, base64
 SRC = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'src')
-OUT = sys.argv[1] if len(sys.argv) > 1 else os.path.join(os.path.dirname(SRC), '..', 'table-tennis-topspin.html')
+ROOT = os.path.abspath(os.path.join(os.path.dirname(SRC), '..'))
+# The published pages `tests/build.test.js` guards, in the order it checks them.
+PAGES = [os.path.join(ROOT, 'play', 'index.html'),
+         os.path.join(ROOT, 'table-tennis-topspin.html')]
+# A flag is not an output path: `python3 tt/build.py --check` used to be read as
+# argv[1] and wrote a 1.4 MB file named `--check` into the repository root.
+_ARGS = [a for a in sys.argv[1:] if not a.startswith('-')]
+CHECK = '--check' in sys.argv[1:]
+OUT = _ARGS[0] if _ARGS else PAGES[1]
 
-JS_ORDER = ['10_math.js','12_match_rules.js','20_gl.js','25_career.js','27_network.js','30_physics.js','38_paddle_motion.js','40_swipe.js','42_shot_diagnostics.js','50_audio.js',
+JS_ORDER = ['10_math.js','12_match_rules.js','20_gl.js','25_career.js','27_network.js','30_physics.js','38_paddle_motion.js','40_swipe.js','42_shot_diagnostics.js','44_host.js','50_audio.js',
             '55_ai.js','56_rig.js','57_camera.js','58_coach.js','59_replay.js','60_scene.js',
             '65_train.js','75_feedback.js','75_music.js','76_emotion.js','81_uiAnim.js','84_racket.js',
             '86_meta.js','70_game.js','80_ui.js','90_boot.js']
@@ -57,8 +65,26 @@ html = f"""<!DOCTYPE html>
 </body>
 </html>
 """
-with open(OUT,'w',encoding='utf-8') as f: f.write(html)
-if len(sys.argv) <= 1:
-    with open(os.path.join(os.path.dirname(SRC), '..', 'play', 'index.html'), 'w', encoding='utf-8') as f:
-        f.write(html)
-print(f"built {OUT}  ({len(html)/1024:.1f} KB)")
+# The build date is the only intended difference between two identical bundles.
+strip_stamp = lambda t: re.sub(r'self-contained build \d{4}-\d{2}-\d{2}',
+                              'self-contained build DATE', t)
+
+if CHECK:
+    stale = []
+    for path in PAGES:
+        try:
+            current = strip_stamp(open(path, encoding='utf-8').read())
+        except OSError:
+            current = None
+        if current != strip_stamp(html):
+            stale.append(os.path.relpath(path, ROOT))
+    if stale:
+        print('published pages are out of date: ' + ', '.join(stale) + ' — run: npm run build')
+        sys.exit(1)
+    print(f"--check ok · both published pages match src  ({len(html)/1024:.1f} KB)")
+    sys.exit(0)
+
+for path in ([OUT] if _ARGS else PAGES):
+    with open(path, 'w', encoding='utf-8') as f: f.write(html)
+print(f"built {OUT if _ARGS else ', '.join(os.path.relpath(x, ROOT) for x in PAGES)}"
+      f"  ({len(html)/1024:.1f} KB)")

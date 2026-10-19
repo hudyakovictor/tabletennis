@@ -36,8 +36,6 @@ const PERKS = [
   { id: 'deception',     name: 'Обманный удар',        desc: 'Боковое вращение +50%',       rarity: 'blue',
     apply(g) { g._careerSidespinBoost = 1.50; } },
   // --- GOLD (rare, unlock after tournament 7) ---
-  { id: 'time_master',   name: 'Повелитель времени',   desc: 'Замедление 0.3x при smash > 80 км/ч', rarity: 'gold',
-    apply(g) { g._careerSlowmoThreshold = 80; g._careerSlowmoScale = 0.3; } },
 ];
 
 function getAvailablePerks(career) {
@@ -144,7 +142,7 @@ class Career {
     g._careerBackspinPenalty = 1; g._careerSmashBoost = 1; g._careerCounterBoost = 1;
     g._careerChopBoost = 1; g._careerSidespinBoost = 1; g._careerDecisiveBoost = 0;
     g._careerFatigueReduce = 1; g._careerRingSlow = 1; g._careerNetSafe = false;
-    g._careerAISlowdown = 1; g._careerSlowmoThreshold = 999; g._careerSlowmoScale = 0.42;
+    g._careerAISlowdown = 1;
   }
 
   enterTournament() {

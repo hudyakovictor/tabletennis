@@ -138,7 +138,6 @@ class UI {
   updateInputCopy() {
     const touch = this.inputMode === 'touch';
     $('#cameraHelp').textContent = touch ? 'Виды настроены. Выберите удобный.' : 'Колесо — масштаб. ПКМ ↕ — высота.';
-    $('#slowKey').textContent = touch ? 'ДЕРЖАТЬ' : 'SHIFT';
     $('#gl').setAttribute('aria-label', touch ? 'Игровое поле. Удар — свайп. Камера — в настройках.'
       : 'Игровое поле. Удар — ЛКМ и движение. Колесо — масштаб, ПКМ вверх/вниз — высота камеры, C — сброс.');
     if (this.game && this.game.training) this.trainSync(this.game.training);
@@ -374,45 +373,11 @@ class UI {
       g.audio.init(); g.audio.ui('click');
       this.syncSpinBias();
     });
-    /* slow-mo: press and hold, on a phone or on the keyboard */
-    const slow = $('#slow');
-    const hold = (v) => (e) => {
-      if (e && e.cancelable) e.preventDefault();
-      this.game && this.game.setSlowmoHold(v);
-      if (v) this.game && this.game.audio.init();
-    };
-    slow.addEventListener('pointerdown', hold(true));
-    slow.addEventListener('pointerup', hold(false));
-    slow.addEventListener('pointerleave', hold(false));
-    slow.addEventListener('pointercancel', hold(false));
-    /* Defend button: mobile alternative to swipe-down (push/chop/block).
-     * When held, simulates a short downward gesture near the ball so the
-     * stroke classifier produces a BLOCK or PUSH. This lets Telegram/iOS
-     * users play defensive shots without swiping down (which Telegram
-     * intercepts as "close webapp"). */
-    const defendBtn = $('#defend');
-    if (defendBtn) {
-      const defendOn = (v) => (e) => {
-        if (e && e.cancelable) e.preventDefault();
-        if (!this.game) return;
-        this.game.defendHeld = v;
-        defendBtn.classList.toggle('on', v);
-        if (v) this.game.audio.init();
-      };
-      defendBtn.addEventListener('pointerdown', defendOn(true));
-      defendBtn.addEventListener('pointerup', defendOn(false));
-      defendBtn.addEventListener('pointerleave', defendOn(false));
-      defendBtn.addEventListener('pointercancel', defendOn(false));
-    }
-    window.addEventListener('keyup', (e) => {
-      if (e.key === 'Shift' || e.key === ' ') this.game && this.game.setSlowmoHold(false);
-    });
     window.addEventListener('keydown', (e) => {
       if ($('#shotLab').classList.contains('on')) return;
       if ((e.key === 'Shift' || e.key === ' ') && !e.repeat && this.game && this.game.replayer.on) {
         this.game.skipReplay(); e.preventDefault(); return;
       }
-      if ((e.key === 'Shift' || e.key === ' ') && !e.repeat) this.game && this.game.setSlowmoHold(true);
       if ((e.key === 'm' || e.key === 'M' || e.key === 'ь' || e.key === 'Ь')) this.showMoments();
     });
     $('#reelSkip').addEventListener('click', () => this.game && this.game.skipReplay());
@@ -727,11 +692,6 @@ class UI {
         if (g.director) { g.director.enabled = s.adaptive; if (!s.adaptive) { g.director.reset(); g.ai.setHandicap(1); } }
         break;
       case 'haptics': s.haptics = v === 'on'; if (s.haptics) g.buzz(12); break;
-      case 'slowmoPlayer':
-        s.slowmoPlayer = v === 'on';
-        if (!s.slowmoPlayer) g.setSlowmoHold(false);
-        $('#slow').classList.toggle('off', !s.slowmoPlayer);
-        break;
       case 'target': s.targetScore = +v; $('#toWin').textContent = v; break;
       default: break;
     }
@@ -822,7 +782,7 @@ class UI {
       const attempts=this.game.shotJournal.records.filter(e=>e.pressZone && e.pressZone.serving===serving);
       const hits=attempts.filter(e=>e.contact), block=document.createElement('div');block.className='lab-entry';
       const add=text=>{const p=document.createElement('p');p.textContent=text;block.append(p);};
-      const title=document.createElement('b');title.textContent=`${serving?'Подача':'Приём'} · радиус ${MATCH_RULES.pressRadiusPx} px`;block.append(title);
+      const title=document.createElement('b');title.textContent=`${serving?'Подача':'Приём'} · радиус ${pressRadiusFor(serving)} px`;block.append(title);
       add(`Нажатий: ${attempts.length} · вне зоны: ${attempts.filter(e=>!e.pressZone.accepted).length} · ударов: ${hits.length}`);
       for(const scale of [.9,.8,.7]) add(`Радиус ${Math.round(MATCH_RULES.pressRadiusPx*scale)} px: заблокировал бы ${hits.filter(e=>e.pressZone.distancePx>e.pressZone.radius*scale).length} из ${hits.length} записанных ударов.`);
       summary.append(block);
@@ -966,7 +926,8 @@ class UI {
     const saved=g.swipe && g.swipe.pressZone;
     const serving=[GS.SERVE_READY,GS.SERVE_TOSS].includes(g.state) && g.server===1;
     const locked=saved && (g.swipe.active || (typeof g.playerStrokeIntent==='function' && g.playerStrokeIntent(serving)));
-    const zone=locked ? saved : pressHitZone(g.project(g.ball.p),g.pointer,rect.width,rect.height);
+    const zone=locked ? saved
+      : pressHitZone(g.project(g.ball.p),g.pointer,rect.width,rect.height,pressRadiusFor(serving));
     if (!zone || ![zone.x,zone.y,zone.radius].every(Number.isFinite)) return;
     const sx=W/rect.width,sy=H/rect.height;
     c.save();c.setLineDash([]);c.globalAlpha=.9;c.lineWidth=2*d;c.strokeStyle=zone.accepted?'#6ee7a8':'#ffb066';
@@ -1130,17 +1091,6 @@ class UI {
     rb.classList.toggle('on', showRally);
     if (showRally) rb.innerHTML = `РАЛЛИ <b>${g.rally}</b> · РЕКОРД <b>${Math.max(g.bestRally, g.rally)}</b>`;
 
-    /* slow-mo meter: the ring fills back up while you wait, and drops
-       while you hold — the one piece of state the player must feel */
-    const sl = g.slowmo, slEl = $('#slow');
-    if (slEl) {
-      const avail = g.slowmoAvailable();
-      slEl.classList.toggle('on', sl.active);
-      slEl.classList.toggle('ready', !sl.active && sl.energy > 0.995);
-      slEl.classList.toggle('off', g.settings.slowmoPlayer === false || !sl.allowed);
-      $('#slowFill').style.height = (sl.energy * 100).toFixed(0) + '%';
-      document.body.classList.toggle('is-slow', sl.active);
-    }
     this.syncShotFeedback();
     if (this.shotTimer > 0) { this.shotTimer -= dt; if (this.shotTimer <= 0) $('#shot').classList.remove('on'); }
     if (this.noteTimer > 0) { this.noteTimer -= dt; if (this.noteTimer <= 0) this.hideNote(); }
@@ -1176,7 +1126,7 @@ class UI {
       dbg.innerHTML =
         `<b>FPS</b> ${g.fps.toFixed(0)}  <b>DC</b> ${g.R.drawCalls}  <b>TRI</b> ${(g.R.tris / 1000).toFixed(1)}k\n` +
         `<b>GL</b> ${g.R.isGL2 ? 'WebGL2' : 'WebGL1'}\n` +
-        `<b>state</b> ${g.state}  <b>ts</b> ${g.timeScale.toFixed(2)}\n` +
+        `<b>state</b> ${g.state}  <b>host</b> ${g.host ? (g.host.telegram ? 'telegram/' + g.host.swipe : 'browser') : '?'}\n` +
         `<b>ball</b> p(${b.p.x.toFixed(2)},${b.p.y.toFixed(2)},${b.p.z.toFixed(2)})\n` +
         `      v ${sp.toFixed(2)} m/s = ${(sp * 3.6).toFixed(0)} km/h\n` +
         `      w (${b.w.x.toFixed(0)},${b.w.y.toFixed(0)},${b.w.z.toFixed(0)}) = ${(wl / TAU).toFixed(0)} rev/s\n` +

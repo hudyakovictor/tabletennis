@@ -5,6 +5,13 @@
 const MATCH_RULES = Object.freeze({
   version: 1,
   pressRadiusPx: 72,          // screen-space admission for real pointer-down events
+  /* A serve is the one moment the ball stands still in your other hand, and
+   * the 72 px circle is a 144 px disc — 1.8 % of a 1280x760 screen. Measured
+   * with `node tt/tools/probe_zone.js serve`: 32 of 36 screen cells were
+   * rejected as "outside" while the stroke itself was a clean SERVE_TOP. The
+   * gate exists so a tap in an empty corner cannot hit a moving ball; a
+   * stationary toss is not that problem, so serving gets a wider disc. */
+  servePressRadiusPx: 168,
   trajectoryAssist: .85,
   positionAssist: .85,
   sensitivity: 1,
@@ -101,6 +108,10 @@ function measureCaptureAllowance(paddle, p0, p1, serving, endpointEligible) {
 }
 
 // Actual mouse/touch press admission, in CSS pixels. Independent of quality.
+function pressRadiusFor(serving) {
+  return serving ? MATCH_RULES.servePressRadiusPx : MATCH_RULES.pressRadiusPx;
+}
+/** The toss and the strike: the same numbers the input gate uses. */
 function pressHitZone(ballScreen, pointer, width, height, radius = MATCH_RULES.pressRadiusPx) {
   if (!ballScreen || !ballScreen.ok || !pointer || ![ballScreen.x,ballScreen.y,pointer.x,pointer.y,width,height,radius].every(Number.isFinite) || width<=0 || height<=0 || radius<=0) return null;
   const x=ballScreen.x*width,y=ballScreen.y*height;

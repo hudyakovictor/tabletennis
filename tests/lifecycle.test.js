@@ -9,7 +9,7 @@ function fixture() {
   const g = Object.create(Game.prototype);
   Object.assign(g, {
     replayer: new MomentPlayer(), state: GS.MATCH_END, settings: {},
-    setSlowmoHold() {}, setState(s) { this.state = s; },
+    setState(s) { this.state = s; },
     audio: { applause() {} }, ball: { p: V3.new(), v: V3.new(), w: V3.new(), hist: [] },
     player: { pos: V3.new(), normal: V3.new() }, aiPaddle: { pos: V3.new(), normal: V3.new() },
     ai: { pos: V3.new() },

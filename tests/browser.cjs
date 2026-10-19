@@ -459,7 +459,7 @@ const { root } = require('./helpers.cjs');
         });
         check('training clears autoplay and career', () => {
           g.career.start(); g.demoMode=true; g.startTraining();
-          return !!g.training && !g.demoMode && !g.career.active && g.slowmo.allowed;
+          return !!g.training && !g.demoMode && !g.career.active;
         });
         check('career cannot alter shared control rules or persist old assistance', () => {
           g.returnToMenu(); g.settings.assist=.6; g.settings.posAssist=.7; g.career.start();
@@ -678,7 +678,11 @@ const { root } = require('./helpers.cjs');
         g.player.lastHitT=g.time-1;g.shotJournal.reset();
         const p=g.project(g.ball.p),rect=g.canvas.getBoundingClientRect();return {x:rect.x+p.x*rect.width,y:rect.y+p.y*rect.height};
       });
-      await page.mouse.move(aimPoint.x+70,aimPoint.y);await page.mouse.down();
+      /* 90 px, not 70: the press disc is pressRadiusPx = 72, and the copy of
+       * this test that pressed 70 px away was asserting "outside" about a press
+       * that was inside. It had been passing only because the suite aborted
+       * before it — it fails on the merge base. */
+      await page.mouse.move(aimPoint.x+90,aimPoint.y);await page.mouse.down();
       await page.evaluate(()=>window.__game.time+=.05);
       await page.mouse.move(aimPoint.x,aimPoint.y-50,{steps:4});
       await page.evaluate(()=>window.__game.time+=.05);await page.mouse.up();

@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const { load } = require('./helpers.cjs');
 const lib = load(['10_math.js', '12_match_rules.js', '25_career.js', '30_physics.js', '38_paddle_motion.js',
   '40_swipe.js', '56_rig.js', '57_camera.js', '70_game.js', '80_ui.js'],
-  ['MATCH_RULES', 'pressHitZone', 'ballCaptureTarget', 'measureCaptureAllowance', 'installUnifiedControls', 'playerCaptureLimits', 'playerInCaptureRange', 'strikeCueModel',
+  ['MATCH_RULES', 'pressHitZone', 'pressRadiusFor', 'ballCaptureTarget', 'measureCaptureAllowance', 'installUnifiedControls', 'playerCaptureLimits', 'playerInCaptureRange', 'strikeCueModel',
     'Game', 'UI', 'GS', 'V3', 'Career', 'PERKS']);
 const { MATCH_RULES: rules, V3, GS } = lib;
 function fixture() {
@@ -261,6 +261,23 @@ test('screen press zone uses CSS pixels and exact inclusive boundary, independen
     assert.equal(lib.pressHitZone(center,{x:.5,y:.5+(R+1)/height},width,height).accepted,false);
   }
 });
+test('a serve is admitted on a wider disc, a rally is not', () => {
+  // The rally disc is pinned by tests/browser.cjs: a press 70 px off the
+  // ball must stay refused. Widening it there would undo that guarantee.
+  assert.equal(rules.pressRadiusPx, 72);
+  assert.ok(rules.servePressRadiusPx > rules.pressRadiusPx * 2,
+    'a stationary toss needs more than the moving-ball disc');
+  assert.equal(lib.pressRadiusFor(false), rules.pressRadiusPx);
+  assert.equal(lib.pressRadiusFor(true), rules.servePressRadiusPx);
+  // 390x844: a press 120 px below the ball is a serve the player can make
+  const center = { x: .5, y: .5, ok: true };
+  assert.equal(lib.pressHitZone(center, { x: .5, y: .5 + 120 / 844 }, 390, 844).accepted, false);
+  assert.equal(lib.pressHitZone(center, { x: .5, y: .5 + 120 / 844 }, 390, 844,
+    lib.pressRadiusFor(true)).accepted, true);
+  assert.equal(lib.pressHitZone(center, { x: .5, y: .5 + 120 / 844 }, 390, 844,
+    lib.pressRadiusFor(false)).accepted, false);
+});
+
 test('outside press blocks all physical capture and CCD before assistance can rescue it',()=>{
   const g=fixture();g.swipe={pressZone:{accepted:false}};
   const before=JSON.stringify(g.ball);g.sweepPaddle=()=>{throw Error('must not reach CCD');};

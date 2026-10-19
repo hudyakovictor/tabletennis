@@ -252,6 +252,11 @@ function impactSphere(v, w, n, vSurf, e, mu, et) {
 const N_UP = V3.new(0, 1, 0), ZERO3 = V3.new(0, 0, 0);
 /* 27 mm band around the white line where a contact counts as an edge ball. */
 PH.EDGE_BAND = PH.R * 1.35;
+/* A table contact that leaves less than this upward speed is not a bounce: it
+ * is the ball coming to rest, or trickling along the white line. At 600 Hz a
+ * dribbling ball touches the surface on almost every substep, so anything that
+ * reacts to "a bounce happened" has to agree on this one number. */
+PH.WEAK_BOUNCE_VY = 0.30;
 const _edgeN = { x: 0, y: 1, z: 0 };
 
 /**

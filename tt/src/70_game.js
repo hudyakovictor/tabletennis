@@ -104,8 +104,6 @@ class Game {
       adaptive: true,
       showDebug: false,
       showPlayerPaddle: true,
-      slowmoOnBigShots: true,
-      slowmoPlayer: true,
       targetScore: 11,
       spinBias: 'norm',
       // NEW: Enhanced gameplay settings
@@ -114,7 +112,6 @@ class Game {
       anticipationHint: true,
       shotFeedback: true,
       momentumBar: true,
-      replaySlowmo: true,
     };
     /* Saved settings are applied AFTER the defaults exist. It used to run
      * 60 lines earlier, while this.settings was still undefined, so
@@ -165,7 +162,6 @@ class Game {
     this.serveBounces = 0;
     this.isServeBall = false;
     this.lastPoint = null;
-    this.timeScale = 1; this.targetTimeScale = 1;
     this.shake = 0; this.shakeDir = V3.new();
 
     // Follow-through state
@@ -234,7 +230,6 @@ class Game {
       byStroke: {}, totalSpin: 0, rallies: 0,
     };
     this.replayBuf = []; this.replayMax = 360; this.replay = null;
-    this.slowmo = { on: false, energy: 1, active: false, allowed: true, used: 0 };
     this.predictPath = [];
     this.predictOut = {};
     this.lastShotInfo = null;
@@ -349,8 +344,11 @@ class Game {
 
       this.swipe.down(n.x, n.y, this.time);
       const rect = c.getBoundingClientRect();
-      const ballZone = pressHitZone(this.project(this.ball.p), n, rect.width, rect.height);
-      const padZone = pressHitZone(this.project(this.player.pos), n, rect.width, rect.height);
+      /* The serve is admitted on its own, wider terms — see MATCH_RULES. */
+      const pressRadius = pressRadiusFor(
+        (this.state === GS.SERVE_READY || this.state === GS.SERVE_TOSS) && this.server === 1);
+      const ballZone = pressHitZone(this.project(this.ball.p), n, rect.width, rect.height, pressRadius);
+      const padZone = pressHitZone(this.project(this.player.pos), n, rect.width, rect.height, pressRadius);
       this.swipe.pressZone = ballZone || { accepted: false, radius: MATCH_RULES.pressRadiusPx, distancePx: null };
       /* The press is remembered in screen terms so the gate can be re-evaluated
        * as the ball travels (see pressAdmitsBall). The bat itself counts as the
@@ -363,6 +361,7 @@ class Game {
         this.swipe.pressZone.paddleDistancePx = padZone.distancePx;
       }
       this.swipe.pressZone.serving = this.state === GS.SERVE_READY || this.state === GS.SERVE_TOSS;
+      this.swipe.pressZone.radius = pressRadius;
       if (this.shotJournal) {
         const attempt = this.shotJournal.create(this.swipe.gestureId, this.time);
         attempt.pressZone = { ...this.swipe.pressZone };
@@ -453,15 +452,19 @@ class Game {
     }, { passive: false });
     c.style.touchAction = 'none';
 
-    /* Prevent Telegram / embedded WebView "swipe down to close" gesture.
-     * A passive touchmove listener on the document tells the browser the
-     * page will handle every gesture, so the host app never sees a drag. */
-    document.addEventListener('touchmove', (e) => {
-      if (e.cancelable) e.preventDefault();
-    }, { passive: false });
-    /* Prevent iOS rubber-banding / pull-to-refresh on the body. */
-    document.body.style.overscrollBehavior = 'none';
-    document.documentElement.style.overscrollBehavior = 'none';
+    /* "Swipe down" is not one gesture but two, and they need two answers.
+     * The browser's own pull-to-refresh/rubber-band is CSS: touch-action on
+     * the canvas plus overflow:hidden and overscroll-behavior:none on the
+     * root, which is why the panels can still scroll. Telegram's
+     * "drag the sheet down to close the Mini App" is native — the page cannot
+     * cancel it with preventDefault() at all; it has to be switched off
+     * through the client (web_app_setup_swipe_behavior). What is left for the
+     * page is the narrow guard in 44_host.js: it silences touchmove on the
+     * play surface and deliberately stays out of every scrollable card. The
+     * old blanket document listener was the reason a "ЗАЩИТА" button had to
+     * exist at all; it is gone, and so is the button. */
+    this.host = applyHostBehavior(window);
+    installHostTouchGuard(window, document);
 
     window.addEventListener('keydown', (e) => {
       if (document.getElementById('settings').classList.contains('on') || document.getElementById('shotLab').classList.contains('on')) return;
@@ -502,8 +505,6 @@ class Game {
     this.matchWinner = 0;
     this.messages.length = 0;
     this.pointNote = null;
-    this.slowmo.energy = 1; this.slowmo.on = false; this.slowmo.active = false;
-    this.targetTimeScale = 1; this.timeScale = 1; this.slowmoUntil = 0;
     if (CAMERA_ORDER.indexOf(this.settings.camera) < 0) this.settings.camera = CAMERA_ORDER[0];
     this.resetPaddle(true);            // hard: the bat is placed, not glided
     this.ai.reset();
@@ -516,8 +517,6 @@ class Game {
     if (this.career.active && this._careerAISlowdown < 1) {
       this.ai.maxSpeed = this.ai.L.move * this._careerAISlowdown;
     }
-    // career and online are scored modes: no bullet time there
-    this.setSlowmoAllowed(!(this.career.active || this.network.isInMatch));
     this.score = [0, 0]; this.games = [0, 0];
     this.rally = 0; this.bestRally = 0;
     this.stats = { shots: 0, winners: 0, errors: 0, maxSpeed: 0, maxSpin: 0, byStroke: {}, totalSpin: 0, rallies: 0 };
@@ -564,9 +563,6 @@ class Game {
     this._acc = 0;
     this.cancelInput && this.cancelInput();
     this.setState(GS.MENU);
-    this.setSlowmoAllowed(true);
-    this.slowmo.on = false; this.slowmo.active = false;
-    this.timeScale = this.targetTimeScale = 1; this.slowmoUntil = 0;
     this.saveSettings(); this.profile.save(true);
   }
 
@@ -577,8 +573,6 @@ class Game {
     this.career.stop();
     this.network.disconnect();
     this.demoMode = false;
-    this.setSlowmoAllowed(true);
-    this.timeScale = this.targetTimeScale = 1; this.slowmoUntil = 0;
     this.resetPaddle(true);
     this.score = [0, 0]; this.rally = 0; this.bestRally = 0;
     this.matchWinner = 0;
@@ -828,6 +822,7 @@ class Game {
     this.shotId++;                       // the opponent reacts once per shot
     this.rallyBounces.length = 0;
     this.netTouched = false;
+    this._weakBounce = false;            // a new shot, a new contact sequence
     // career perks act on the player's own shots: the chosen boosts scale
     // speed/spin right after the impact resolves, before anything reads them
     if (side > 0 && this.career.active) {
@@ -898,7 +893,6 @@ class Game {
       else if (sid === 'SERVE_TOP' || sid === 'SERVE_SIDE' || sid === 'SERVE_FAST' || sid === 'SERVE_BACK') this.matchTasks.serves++;
       this.buzz(Math.round(lerp(8, 26, clamp(speed / 90, 0, 1))));
       this.shakeIt(clamp(speed / 55, 0.03, 0.38), V3.new(rndSym(0.4), 0.5, 1));
-      if (this.settings.slowmoOnBigShots && speed * 3.6 > 78) this.punchSlowmo(0.42, 0.26);
       // refresh the landing preview
       if (this.settings.showPredict) {
         predict(V3.clone(b.p), V3.clone(b.v), V3.clone(b.w),
@@ -920,48 +914,6 @@ class Game {
       });
     }
   }
-
-  punchSlowmo(scale, dur) {
-    this.targetTimeScale = scale;
-    this.slowmoUntil = this.time + dur;
-  }
-
-  /* ------------------------- player slow-mo ------------------------ *
-   * Bullet time for the player, and only for the player. It is a
-   * reaction aid, not a way to win: the ball slows, but so does the
-   * opponent's racket and your own swing window, so the shot you
-   * produce is the shot you produce. It is switched off entirely in
-   * career tournaments and online matches, where the score counts. */
-  setSlowmoHold(v) {
-    const S = this.slowmo;
-    if (v && !this.slowmoAvailable()) return;
-    S.on = !!v;
-    if (S.on && !S.active) this.audio.slowIn && this.audio.slowIn();
-  }
-
-  slowmoAvailable() {
-    const S = this.slowmo;
-    return this.settings.slowmoPlayer !== false && S.allowed && !this.training &&
-      (this.state === GS.RALLY || this.state === GS.SERVE_TOSS || this.state === GS.SERVE_READY);
-  }
-
-  updateSlowmo(dtReal) {
-    const S = this.slowmo;
-    const want = S.on && this.slowmoAvailable() && S.energy > 0.015;
-    if (want) {
-      S.energy = Math.max(0, S.energy - dtReal * 0.40);     // ~2.5 s from full
-      S.used += dtReal;
-    } else {
-      S.energy = Math.min(1, S.energy + dtReal * 0.09);     // ~11 s to refill
-      S.on = S.on && S.energy > 0.015;                      // ran dry → release
-    }
-    S.active = want;
-    if (want) { this.targetTimeScale = 0.34; this.slowmoUntil = 0; }
-    else if (!this.slowmoUntil) this.targetTimeScale = 1;
-  }
-
-  /** Career tournaments and online matches call this with false. */
-  setSlowmoAllowed(v) { this.slowmo.allowed = !!v; if (!v) this.setSlowmoHold(false); }
 
   /* --------------------------- settings ---------------------------- */
 
@@ -988,7 +940,7 @@ class Game {
       sound: s.sound, volume: s.volume, camera: s.camera, hand: s.hand, grip: s.grip,
       showTrail: s.showTrail, showPredict: s.showPredict,
       showTele: s.showTele, haptics: s.haptics, coach: s.coach, adaptive: s.adaptive,
-      slowmoPlayer: s.slowmoPlayer, targetScore: s.targetScore,
+      targetScore: s.targetScore,
       spinBias: s.spinBias,
     };
     if (this.career && this.career.active && this.career._baseSettings)
@@ -1061,7 +1013,6 @@ class Game {
   /** Play a recorded moment. `after` runs when the clip ends or is skipped. */
   watchMoment(moment, hero, after) {
     if (!moment) return false;
-    this.setSlowmoHold(false);
     this.ball.live = true;
     if (!this.replayer.play(moment, hero ? 0.35 : 0.5, () => this.endReplay())) return false;
     this.replayAfter = after || null;
@@ -1148,7 +1099,7 @@ class Game {
     const b = this.ball;
     if (!b.live) return;
     // a ball that has run out of energy settles instead of micro-bouncing
-    if (b.p.y - PH.R <= PH.TABLE_Y + 0.004 && Math.abs(b.v.y) < 0.30 &&
+    if (b.p.y - PH.R <= PH.TABLE_Y + 0.004 && Math.abs(b.v.y) < PH.WEAK_BOUNCE_VY &&
       Math.abs(b.p.x) <= PH.T_HALF_WID && Math.abs(b.p.z) <= PH.T_HALF_LEN) {
       b.restT = (b.restT || 0) + dt;
       if (b.restT > 0.9 || V3.len(b.v) < 0.45) {
@@ -1187,13 +1138,27 @@ class Game {
          * same shot gave a different answer every time. An edge ball should be
          * unreadable for the RECEIVER, not random for the game. */
         const info = bounceTable(b.p, b.v, b.w);
-        if (info && info.edge > 0.25) {
-          this.audio.hitEdge();
-          this.msg(info.edgeAxis === 'x' ? 'РЕБРО СТОЛА!' : 'ЗАДНЯЯ КРОМКА!', 1.0, '#ffd34d');
-          this.shakeIt(0.10 + 0.16 * info.edge, V3.new(0, 1, 0));
-          this.stats.edgeBalls = (this.stats.edgeBalls || 0) + 1;
+        /* One contact sequence, one report. A ball that dies on the white
+         * line keeps touching the table on nearly every substep (the rebound
+         * is smaller than one step of gravity), and every one of those touches
+         * used to be announced: edge sound, «РЕБРО СТОЛА!», screen shake,
+         * particles, a landing mark, a rallyBounces entry. 600 square-wave
+         * 1.5 kHz beeps per second is exactly the loud stuck squeal that was
+         * reported, and the point logic was being fed hundreds of the same
+         * bounce. Anything below the settle threshold is therefore only
+         * reported when it is the first touch of the sequence. */
+        const weak = b.v.y < PH.WEAK_BOUNCE_VY;
+        const reported = !(weak && this._weakBounce === true);
+        this._weakBounce = weak;
+        if (reported) {
+          if (info && info.edge > 0.25) {
+            this.audio.hitEdge();
+            this.msg(info.edgeAxis === 'x' ? 'РЕБРО СТОЛА!' : 'ЗАДНЯЯ КРОМКА!', 1.0, '#ffd34d');
+            this.shakeIt(0.10 + 0.16 * info.edge, V3.new(0, 1, 0));
+            this.stats.edgeBalls = (this.stats.edgeBalls || 0) + 1;
+          }
+          this.onBounce(Math.sign(b.p.z) || 1, sp, info);
         }
-        this.onBounce(Math.sign(b.p.z) || 1, sp, info);
       }
     }
 
@@ -1208,14 +1173,19 @@ class Game {
       const nh = this._netHit;
       if (nk === 2) {
         clipTape(b.p, b.v, b.w);
-        this.audio.hitNet();
-        this.msg('СЕТКА — ЭДЖ!', 1.1, '#ffd34d');
+        /* A ball resting on the tape re-triggers every substep; the tape has
+         * one sound and one message per shot (netTouched is cleared in
+         * applyHit), the physics still answers on every step. */
+        if (!this.netTouched) {
+          this.audio.hitNet();
+          this.msg('СЕТКА — ЭДЖ!', 1.1, '#ffd34d');
+        }
         this.emitParticles(nh.x, PH.NET_TOP, 0, 8, 1.1, 0.3, 0.014, 1, 0.9, 0.5);
         this.netTouched = true;
         if (b.lastHitBy === 1 && this.shotJournal) this.shotJournal.net();
       } else {
         bounceNet(b.p, b.v, b.w, Math.sign(p0.z) || 1);
-        this.audio.hitNet();
+        if (!this.netTouched) this.audio.hitNet();
         this.emitParticles(nh.x, nh.y, 0, 7, 0.7, 0.3, 0.013, 0.8, 0.85, 1);
         this.netTouched = true;
         if (b.lastHitBy === 1 && this.shotJournal) this.shotJournal.net();
@@ -1388,18 +1358,7 @@ class Game {
 
     const serveCtx = this.state === GS.SERVE_TOSS && this.server === 1 && b.lastHitBy === 0;
     const sw = this.swipe, m = this.playerStrokeIntent(serveCtx);
-    if (!m) {
-      /* Defend button: when held on mobile, auto-generate a BLOCK gesture
-       * if the ball is incoming and there's no active swipe. This lets
-       * Telegram/iOS users play defensive shots without swiping down. */
-      if (this.defendHeld && b.lastHitBy === -1 && b.v.z > 0) {
-        m = { releaseSpeed: 0.3, peakSpeed: 0.4, speed: 0.3, up: 0.05,
-          right: 0, dist: 0.04, pathLen: 0.04, straightness: 0.9,
-          curl: 0, dur: 0.15, samples: 4, jerk: 0, smooth: 0.9,
-          angle: 0, angleDeg: 0, sx: 0.5, sy: 0.6, x: 0.5, y: 0.58, dx: 0, dy: -0.02 };
-      }
-      if (!m) return;
-    }
+    if (!m) return;
     /* ITTF 2.07: a return must follow a bounce on the receiver's court.
      * Without this gate the generous endpoint envelope returned
      *   · a ball still on its way to the player (a volley, a fault), and
@@ -2294,14 +2253,9 @@ class Game {
       this.updateCameraReplay(dtReal);
       return;
     }
-    const ts = this.timeScale;
-    const dt = Math.min(dtReal, 0.05) * ts;
+    const dt = Math.min(dtReal, 0.05);   // real time: the simulation has no clock of its own
     this.time += dtReal;
     this.stateT += dtReal;
-
-    if (this.slowmoUntil && this.time > this.slowmoUntil) { this.targetTimeScale = 1; this.slowmoUntil = 0; }
-    this.updateSlowmo(dtReal);
-    this.timeScale = expSmooth(this.timeScale, this.targetTimeScale, 9, dtReal);
 
     if (this.demoMode && !this.paused) {
       this.updateDemoPlayer(dtReal);
@@ -2329,11 +2283,11 @@ class Game {
         }
         break;
       case GS.SERVE_TOSS:
-        /* The opponent strikes at a HEIGHT, not at a deadline. `aiSwingAt`
-         * is real seconds while the ball integrates scaled seconds, so under
-         * slow-mo a fixed deadline met the ball 10-20 cm lower than intended
-         * and every slowed-down serve came out a different serve. The height
-         * is also what makes a fast serve geometrically possible: from 0.61 m
+        /* The opponent strikes at a HEIGHT, not at a deadline. A fixed timer
+         * met the ball 10-20 cm lower or higher than intended depending on
+         * which frame the toss happened to fall into, so the same serve came
+         * out different every time. The height is also what makes a fast
+         * serve geometrically possible: from 0.61 m
          * above the table even a full-speed flat swing cannot bounce on the
          * server's own half, so the solver used to halve it (measured: the
          * fast serve left the bat at 24 km/h at swing scale 0.50). At 0.36 m
@@ -2503,7 +2457,7 @@ class Game {
       P.radial = expSmooth(P.radial, this.ball.live ? sp * sp * 0.85 : 0, 5, dtReal);
       P.flash = expSmooth(P.flash, this.hitFlash * 0.05, 10, dtReal);
     }
-    P.sat = expSmooth(P.sat, 1.05 + (1 - this.timeScale) * 0.25, 4, dtReal);
+    P.sat = expSmooth(P.sat, 1.05, 4, dtReal);
     P.ca = expSmooth(P.ca, 0.55 + sp * 0.75, 4, dtReal);
     this.audio.setCrowd(clamp(this.rally / 18, 0, 1) * 0.6 + (this.state === GS.POINT ? 0.4 : 0));
 

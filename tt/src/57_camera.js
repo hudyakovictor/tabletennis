@@ -303,10 +303,19 @@ function paddleTargetFromPointer(px, py, stanceY, sens, out, opts) {
   // and low chops from a portrait screen where the swipe is shorter.
   o.tx = (x - 0.5) * 2 * PADDLE_LIMITS.x * s;
   o.ty = PH.TABLE_Y + 0.62 - (y - 0.18) * 1.10 * s;
-  o.tz = 1.78 + clamp(sy - 0.55, -0.34, 0.45) * 0.96 * (0.6 + 0.4 * s);
+  /* Depth of the stance, and it is deliberately asymmetric. Forward, the
+   * table itself is the limit: leaning over it is what zNear (and the
+   * predicted step-in) are for, so that half of the mapping keeps its old
+   * gain. Backwards, the old gain topped the bat at 2.21 m while
+   * PADDLE_LIMITS.zFar is 2.50 — a deep ball had to be taken out in front,
+   * over the table, because standing further back was not something the
+   * pointer could actually ask for. Now the bottom of the screen reaches the
+   * depth the rig and the camera were already framed around. */
+  const dzFwd = clamp(0.55 - sy, 0, 0.34) * 0.96;
+  const dzBack = clamp(sy - 0.55, 0, 0.45) * ((PADDLE_LIMITS.zFar - PADDLE_HOME.z) / 0.45);
+  o.tz = clamp(PADDLE_HOME.z + (dzBack - dzFwd) * (0.6 + 0.4 * s), zNear, PADDLE_LIMITS.zFar);
   o.tx = clamp(o.tx, -PADDLE_LIMITS.x, PADDLE_LIMITS.x);
   o.ty = clamp(o.ty, PH.TABLE_Y + PADDLE_LIMITS.yLo, PH.TABLE_Y + PADDLE_LIMITS.yHi);
-  o.tz = clamp(o.tz, zNear, PADDLE_LIMITS.zFar);
   o.zNear = zNear;
   return o;
 }

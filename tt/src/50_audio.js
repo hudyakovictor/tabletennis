@@ -31,6 +31,41 @@ class AudioEngine {
     this._audienceSources = new Set(); this._audienceBus = null;
     this._lastApplause = -Infinity; this._lastReaction = -Infinity; this._rallyMilestone = 0;
     this._noiseBuf = null; this._crowdGain = null; this._lastWhoosh = 0;
+    /* Repeated-effect gate and the number of impact voices currently alive.
+     * Both exist because of one class of bug: the physics runs at 600 Hz and a
+     * ball that dribbles along the white line or rests on the tape used to
+     * report a contact on every substep. Hundreds of overlapping short tones
+     * is not an impact, it is a loud sustained squeal. */
+    this._gates = Object.create(null); this._voices = 0;
+  }
+
+  /** True when this effect may fire again. `gap` seconds is the minimum
+   *  distance between two plays of the same effect. */
+  _gate(key, gap) {
+    const t = this.ctx ? this.ctx.currentTime : 0;
+    if (!Number.isFinite(t)) return true;
+    const last = this._gates[key];
+    if (last !== undefined && t >= last && t - last < gap) return false;
+    this._gates[key] = t;
+    return true;
+  }
+
+  /** Impacts share a small budget; UI clicks and the audience do not queue
+   *  behind a physics loop, so only the ball-and-racket events check it. */
+  _impactOk(key, gap) {
+    if (!this.ok || this.muted) return false;
+    if (this._voices >= 12) return false;
+    return this._gate(key, gap);
+  }
+
+  /** One voice is claimed for the life of the node. `onended` returns it;
+   *  the timer is the safety net for a node that never reached the graph. */
+  _claimVoice(dur) {
+    this._voices = Math.min(64, this._voices + 1);
+    let done = false;
+    const back = () => { if (done) return; done = true; this._voices = Math.max(0, this._voices - 1); };
+    setTimeout(back, Math.max(0, dur) * 1000 + 120);
+    return back;
   }
   init() {
     if (this.ok) return true;
@@ -92,6 +127,7 @@ class AudioEngine {
     g.gain.linearRampToValueAtTime(gainV, t + 0.0012);
     g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
     s.connect(flt); flt.connect(g); g.connect(this.bus);
+    s.onended = this._claimVoice(dur);
     s.start(t); s.stop(t + dur + 0.02);
     return { s, g, flt };
   }
@@ -104,6 +140,7 @@ class AudioEngine {
     g.gain.linearRampToValueAtTime(gainV, t + 0.0015);
     g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
     o.connect(g); g.connect(this.bus);
+    o.onended = this._claimVoice(dur);
     o.start(t); o.stop(t + dur + 0.02);
     return { o, g };
   }
@@ -111,7 +148,7 @@ class AudioEngine {
   /* ---------------- gameplay events ---------------- */
   /** ball hits the table: bright celluloid "pock" + plywood body */
   hitTable(speed, x) {
-    if (!this.ok) return;
+    if (!this._impactOk('table', 0.03)) return;
     const v = clamp(speed / 7, 0.08, 1.4);
     const t = this.ctx.currentTime;
     this._noise(0.055 + v * 0.02, 0.26 * v, 'bandpass', 2400 + v * 2600, 2.2, t);
@@ -120,7 +157,7 @@ class AudioEngine {
   }
   /** ball meets rubber: duller, with a "brush" layer proportional to slip */
   hitRacket(speed, slip, soft) {
-    if (!this.ok) return;
+    if (!this._impactOk('racket', 0.02)) return;
     const v = clamp(speed / 13, 0.1, 1.5), t = this.ctx.currentTime;
     const body = soft ? 0.55 : 1;
     this._tone(300 + v * 240, 0.085, 0.34 * v * body, 'triangle', t, 0.42);
@@ -129,19 +166,24 @@ class AudioEngine {
     if (sl > 0.05) this._noise(0.10 + sl * 0.09, 0.14 * sl, 'bandpass', 3600 + sl * 3800, 0.9, t);
   }
   hitNet() {
-    if (!this.ok) return;
+    if (!this._impactOk('net', 0.09)) return;
     const t = this.ctx.currentTime;
     this._noise(0.14, 0.14, 'bandpass', 640, 1.0, t);
     this._tone(150, 0.17, 0.08, 'sine', t, 0.5);
   }
+  /** The ball caught the white line: a short wooden tick. It used to be a
+   *  0.22 square wave at 1.5 kHz — the loudest single voice in the mix and a
+   *  shriek the moment the contact repeated. A square wave also has no body,
+   *  so it read as an error beep rather than as wood. */
   hitEdge() {
-    if (!this.ok) return;
+    if (!this._impactOk('edge', 0.16)) return;
     const t = this.ctx.currentTime;
-    this._noise(0.05, 0.3, 'highpass', 3600, 0.7, t);
-    this._tone(1500, 0.06, 0.22, 'square', t, 0.3);
+    this._noise(0.04, 0.16, 'highpass', 3200, 0.7, t);
+    this._tone(1480, 0.045, 0.05, 'triangle', t, 0.62);
+    this._tone(560, 0.085, 0.055, 'sine', t, 0.66);
   }
   hitFloor(speed) {
-    if (!this.ok) return;
+    if (!this._impactOk('floor', 0.08)) return;
     const v = clamp(speed / 6, 0.05, 1);
     this._tone(150 + v * 90, 0.1, 0.16 * v, 'sine', 0, 0.5);
     this._noise(0.06, 0.08 * v, 'lowpass', 900, 0.6);
