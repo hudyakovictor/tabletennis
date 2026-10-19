@@ -63,7 +63,7 @@ test('new saves never resurrect assistance through career base settings', () => 
   const g = fixture();
   g.career = { active: true, _baseSettings: { difficulty: 1, assist: .1, posAssist: .2 } };
   g.saveSettings();
-  assert.equal(g.profile.data.settings.rulesVersion, 1);
+  assert.equal(g.profile.data.settings.rulesVersion, rules.version);
   assert.equal(g.profile.data.settings.difficulty, 1);
   for (const key of ['assist', 'posAssist', 'hitZone', 'sensitivity', 'showZone'])
     assert.equal(key in g.profile.data.settings, false);
@@ -254,7 +254,7 @@ test('allowance measurement agrees with real CCD and is read-only over 100 deter
 
 test('screen press zone uses CSS pixels and exact inclusive boundary, independent of world geometry',()=>{
   const center={x:.5,y:.5,ok:true};
-  const R = rules.pressRadiusPx; // 72
+  const R = rules.pressRadiusPx; // legacy circle; the live default shape is the oval
   for(const [width,height] of [[1280,760],[390,844]]){
     assert.equal(lib.pressHitZone(center,{x:.5+R/width,y:.5},width,height).accepted,true);
     assert.equal(lib.pressHitZone(center,{x:.5+(R+0.01)/width,y:.5},width,height).accepted,false);
