@@ -257,6 +257,18 @@ body.is-paused #slow { display:none !important; }
 #slow.off{opacity:.32;pointer-events:none}
 body.is-slow #gl{filter:saturate(1.12) contrast(1.04)}
 
+/* ======================== defend button ============================= */
+.defend-btn{height:34px;min-width:58px;border-radius:10px;display:flex;flex-direction:column;
+  align-items:center;justify-content:center;pointer-events:auto;cursor:pointer;padding:0 10px;
+  background:radial-gradient(circle at 50% 35%,rgba(34,58,44,.85),rgba(9,18,14,.85));
+  border:1px solid var(--line2);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);
+  color:var(--dim);transition:color .18s,border-color .18s,transform .1s;
+  appearance:none;-webkit-appearance:none;font:inherit}
+.defend-btn:active,.defend-btn.on{color:#e0ffe8;border-color:rgba(78,227,154,.75);
+  box-shadow:0 0 20px rgba(78,227,154,.30);transform:scale(.94)}
+.defend-btn b{font-size:9px;font-weight:900;letter-spacing:.06em;line-height:1.15}
+body:not(.is-playing) .defend-btn{display:none !important}
+
 /* ======================== replay cinema ============================= */
 #reel{position:absolute;inset:0;z-index:6;pointer-events:none;opacity:0;transition:opacity .28s;
   font-family:var(--ui)}
@@ -687,6 +699,10 @@ body:not(.is-playing) #topright{visibility:hidden;pointer-events:none}
         <i id="slowFill"></i>
         <b>SLOW</b>
         <small id="slowKey">SHIFT</small>
+      </button>
+      <!-- defend: mobile alternative to swipe-down (conflicts with Telegram/iOS) -->
+      <button id="defend" class="pe defend-btn" title="Защита (подрезка/блок)" aria-label="Защитный удар, удерживайте">
+        <b>🛡 ЗАЩИТА</b>
       </button>
       <button class="ic pe" id="btnFullscreen" title="Полный экран (F)" aria-label="Полный экран" aria-pressed="false"></button>
       <button class="ic pe" id="btnSound" title="Выключить звук" aria-label="Выключить звук" aria-pressed="true"></button>
@@ -1244,13 +1260,13 @@ function noise1(x) {
 
 const MATCH_RULES = Object.freeze({
   version: 1,
-  pressRadiusPx: 48,          // screen-space admission for real pointer-down events
+  pressRadiusPx: 72,          // screen-space admission for real pointer-down events
   trajectoryAssist: .85,
   positionAssist: .85,
   sensitivity: 1,
-  captureRadius: .361,        // previous .14 + .85*.26; preserve baseline feel
-  depthTolerance: .347,      // previous .16 + .85*.22
-  serveCaptureRadius: .618,  // falling toss only; different task, same for all
+  captureRadius: .50,        // realistic stance distance requires larger capture
+  depthTolerance: .48,      // realistic stance distance
+  serveCaptureRadius: .72,  // falling toss only; larger for realistic stance
   sweetRadius: .15225,       // contact-quality reference, NOT capture radius
   timingMinPx: 8,
   timingMaxPx: 20,
@@ -6378,20 +6394,13 @@ const CAMERA_ORDER = ['BROADCAST', 'DYNAMIC', 'LOW'];
    clamps to it, the camera fits around it, the bench measures it. */
 const PADDLE_LIMITS = {
   x: 1.02,                 // |x| of the bat, metres from the centre line
-  yLo: -0.24, yHi: 0.94,   // bat height relative to the playing surface
-  zNear: 1.02, zFar: 2.06, // bat depth: from just inside the table to well back
-  /* Extra reach, granted ONLY for a ball that dies short AND leaves time to
-   * get there (the game gates it on time-to-contact). 0.86 -> 0.66 because the
-   * opponent's shots used to land at a median 0.76-0.82 m past the net — every
-   * ball was a short ball, and a short ball arrives at the bat plane in
-   * ~0.20 s, which is inside human reaction time. Measured with the old value:
-   * 0-14 % of the opponent's returns were returnable at all. Leaning over the
-   * table to pick a ball out of the front half is a real thing players do.
-   * 0.46 is what a net-cord needs: a ball that clips the tape dribbles over and
-   * dies 0.15-0.35 m in, so the bat has to be able to get almost to the net.
-   * Checked against the frame rather than guessed: at 0.46 the step-in plane is
-   * on screen for all 4 rigs x 8 aspects (0/128 corners outside). */
-  zStepIn: 0.46,
+  yLo: -0.28, yHi: 1.00,   // bat height relative to the playing surface (expanded for mobile)
+  /* Realistic stance: the player stands 40-110 cm behind the end line,
+   * not hovering right over the table edge. zNear = just behind end line,
+   * zFar = a full metre back. zStepIn allows leaning over the table for
+   * very short balls (net-cord dribblers). */
+  zNear: 1.45, zFar: 2.50, // bat depth: from end line to well behind it
+  zStepIn: 0.80,           // lean over the table for a short ball
 };
 
 const _cp = { eye: { x: 0, y: 0, z: 0 }, look: { x: 0, y: 0, z: 0 }, fov: 42, mode: 'BROADCAST' };
@@ -6464,10 +6473,10 @@ for (const sx of [-1, 1]) {
 
 /* Fairness set: contact poses kept in frame */
 const REACH_POSES = [
-  [0.85, 0.10, 0.46],       // reaching over the table for a net-cord dribbler
-  [0.85, 0.25, 1.02],
+  [0.85, 0.10, 0.80],       // reaching over the table for a net-cord dribbler
+  [0.85, 0.25, 1.45],       // at the end line
   [0.85, 0.28, 1.37],       // wide, at the end line
-  [0.85, 0.15, 1.48],       // wide and low
+  [0.85, 0.15, 1.78],       // wide and low, normal stance
 ];
 const REACH_POINTS = [];
 for (const sx of [-1, 1]) {
@@ -6513,10 +6522,20 @@ function fitRig(P, aspect) {
   if (hit) return hit;
   const phone = 1 - smoothstep(0.85, 1.3, aspect);
   const pitch = P.pitch * DEG; // Identical angle on phone and desktop.
-  const rig = { eye: { x: 0, y: PH.TABLE_Y + Math.tan(pitch) * 3.32, z: 3.2 },
-    look: { x: 0, y: PH.TABLE_Y, z: -0.12 }, fov: lerp(P.fov, 34, phone), mode: P.id };
+  /* Mobile (portrait) fix: start much closer so the table fills the screen.
+   * The old eye.z=3.2 + fitTablePresentation pushed the camera back until
+   * the whole hall was visible on a narrow phone — the table became a stamp.
+   * Now: bring the eye ~30% closer on phones and allow tighter margins so
+   * the fit solver doesn't undo the closeness. */
+  const eyeZ = lerp(3.2, 2.1, phone);
+  const eyeY = PH.TABLE_Y + Math.tan(pitch) * eyeZ;
+  const fov = lerp(P.fov, 30, phone);
+  const rig = { eye: { x: 0, y: eyeY, z: eyeZ },
+    look: { x: 0, y: PH.TABLE_Y, z: -0.12 }, fov, mode: P.id };
   // No automatic lift or ball-following: the chosen view stays predictable.
-  fitTablePresentation(rig, aspect, P.height, phone > 0.5 ? 0.045 : 0.055);
+  // On phones use much tighter margins so the table is big.
+  fitTablePresentation(rig, aspect, P.height, phone > 0.5 ? 0.015 : 0.055,
+    phone > 0.5 ? 0.82 : 0.76);
   _fitCache.set(key, rig);
   return rig;
 }
@@ -6651,9 +6670,11 @@ function paddleTargetFromPointer(px, py, stanceY, sens, out, opts) {
   // 0.5 on screen is the centre line; the reachable half-width is the
   // authored limit, so the mapping is exact and independent of sensitivity
   // at the centre and only the *gain* changes with the slider.
+  // Mobile: expand vertical range so the paddle can reach both high lobs
+  // and low chops from a portrait screen where the swipe is shorter.
   o.tx = (x - 0.5) * 2 * PADDLE_LIMITS.x * s;
-  o.ty = PH.TABLE_Y + 0.62 - (y - 0.18) * 0.95 * s;
-  o.tz = 1.44 + clamp(sy - 0.55, -0.34, 0.45) * 0.86 * (0.6 + 0.4 * s);
+  o.ty = PH.TABLE_Y + 0.62 - (y - 0.18) * 1.10 * s;
+  o.tz = 1.78 + clamp(sy - 0.55, -0.34, 0.45) * 0.96 * (0.6 + 0.4 * s);
   o.tx = clamp(o.tx, -PADDLE_LIMITS.x, PADDLE_LIMITS.x);
   o.ty = clamp(o.ty, PH.TABLE_Y + PADDLE_LIMITS.yLo, PH.TABLE_Y + PADDLE_LIMITS.yHi);
   o.tz = clamp(o.tz, zNear, PADDLE_LIMITS.zFar);
@@ -6669,7 +6690,7 @@ const _clampS = {}, _clampA = {}, _clampP = { x: 0, y: 0, z: 0 };
  * by resetPaddle() and the home blend in updatePlayerPaddle(). */
 const RECENTER_S = 0.34;
 
-const PADDLE_HOME = { x: 0, y: PH.TABLE_Y + 0.62, z: 1.44 };
+const PADDLE_HOME = { x: 0, y: PH.TABLE_Y + 0.62, z: 1.78 };
 
 function insideFrame(s, m) {
   return s.ok && s.x > m && s.x < 1 - m && s.y > m && s.y < 1 - m;
@@ -10377,11 +10398,11 @@ class Game {
       q: Q.new(), live: false, hist: [], lastHitBy: 0, speed: 0,
     };
     this.player = {
-      pos: V3.new(0, PH.TABLE_Y + 0.25, 1.45),
-      prev: V3.new(0, PH.TABLE_Y + 0.25, 1.45),
+      pos: V3.new(0, PH.TABLE_Y + 0.25, 1.78),
+      prev: V3.new(0, PH.TABLE_Y + 0.25, 1.78),
       vel: V3.new(), normal: V3.new(0, 0, -1),
       q: Q.new(), swing: 0, side: 1, hitRadius: MATCH_RULES.sweetRadius, lastHitT: -9,
-      prevPos: V3.new(0, PH.TABLE_Y + 0.25, 1.45),
+      prevPos: V3.new(0, PH.TABLE_Y + 0.25, 1.78),
     };
     this.paddleMotion = new PaddleStrokeMotion();
     this.aiPaddle = {
@@ -10698,6 +10719,16 @@ class Game {
       if (Number.isFinite(delta)) this.cameraControls.zoom = clamp(this.cameraControls.zoom * Math.exp(delta * 0.0015), 0.72, 1.6);
     }, { passive: false });
     c.style.touchAction = 'none';
+
+    /* Prevent Telegram / embedded WebView "swipe down to close" gesture.
+     * A passive touchmove listener on the document tells the browser the
+     * page will handle every gesture, so the host app never sees a drag. */
+    document.addEventListener('touchmove', (e) => {
+      if (e.cancelable) e.preventDefault();
+    }, { passive: false });
+    /* Prevent iOS rubber-banding / pull-to-refresh on the body. */
+    document.body.style.overscrollBehavior = 'none';
+    document.documentElement.style.overscrollBehavior = 'none';
 
     window.addEventListener('keydown', (e) => {
       if (document.getElementById('settings').classList.contains('on') || document.getElementById('shotLab').classList.contains('on')) return;
@@ -11624,7 +11655,18 @@ class Game {
 
     const serveCtx = this.state === GS.SERVE_TOSS && this.server === 1 && b.lastHitBy === 0;
     const sw = this.swipe, m = this.playerStrokeIntent(serveCtx);
-    if (!m) return;
+    if (!m) {
+      /* Defend button: when held on mobile, auto-generate a BLOCK gesture
+       * if the ball is incoming and there's no active swipe. This lets
+       * Telegram/iOS users play defensive shots without swiping down. */
+      if (this.defendHeld && b.lastHitBy === -1 && b.v.z > 0) {
+        m = { releaseSpeed: 0.3, peakSpeed: 0.4, speed: 0.3, up: 0.05,
+          right: 0, dist: 0.04, pathLen: 0.04, straightness: 0.9,
+          curl: 0, dur: 0.15, samples: 4, jerk: 0, smooth: 0.9,
+          angle: 0, angleDeg: 0, sx: 0.5, sy: 0.6, x: 0.5, y: 0.58, dx: 0, dy: -0.02 };
+      }
+      if (!m) return;
+    }
     /* ITTF 2.07: a return must follow a bounce on the receiver's court.
      * Without this gate the generous endpoint envelope returned
      *   · a ball still on its way to the player (a volley, a fault), and
@@ -11887,14 +11929,14 @@ class Game {
     if (this._volleyPred) this._volleyPred.reach = null;
     const broken = ![pad.pos.x, pad.pos.y, pad.pos.z].every(Number.isFinite);
     if (hard || broken) {
-      V3.set(pad.pos, 0, PH.TABLE_Y + 0.25, 1.44);
+      V3.set(pad.pos, 0, PH.TABLE_Y + 0.25, 1.78);
       V3.copy(pad.prevPos, pad.pos);
       V3.copy(pad.prev, pad.pos);
       V3.zero(pad.vel);
     }
     V3.set(pad.normal, 0, Math.sin(this.padPitch), -Math.cos(this.padPitch));
     pad.swing = 0;
-    this._ptTarget = { tx: 0, ty: PH.TABLE_Y + 0.25, tz: 1.44 };
+    this._ptTarget = { tx: 0, ty: PH.TABLE_Y + 0.25, tz: 1.78 };
   }
 
   updatePlayerPaddle(dt) {
@@ -12011,7 +12053,7 @@ class Game {
       const kHome = clamp((this.recenterT / RECENTER_S - 0.25) / 0.75, 0, 1);
       tx = lerp(tx, 0, kHome);
       ty = lerp(ty, PH.TABLE_Y + 0.25, kHome);
-      tz = lerp(tz, 1.44, kHome);
+      tz = lerp(tz, 1.78, kHome);
     }
 
     // during your own toss the bat slides under the ball: serving is about
@@ -13384,6 +13426,25 @@ class UI {
     slow.addEventListener('pointerup', hold(false));
     slow.addEventListener('pointerleave', hold(false));
     slow.addEventListener('pointercancel', hold(false));
+    /* Defend button: mobile alternative to swipe-down (push/chop/block).
+     * When held, simulates a short downward gesture near the ball so the
+     * stroke classifier produces a BLOCK or PUSH. This lets Telegram/iOS
+     * users play defensive shots without swiping down (which Telegram
+     * intercepts as "close webapp"). */
+    const defendBtn = $('#defend');
+    if (defendBtn) {
+      const defendOn = (v) => (e) => {
+        if (e && e.cancelable) e.preventDefault();
+        if (!this.game) return;
+        this.game.defendHeld = v;
+        defendBtn.classList.toggle('on', v);
+        if (v) this.game.audio.init();
+      };
+      defendBtn.addEventListener('pointerdown', defendOn(true));
+      defendBtn.addEventListener('pointerup', defendOn(false));
+      defendBtn.addEventListener('pointerleave', defendOn(false));
+      defendBtn.addEventListener('pointercancel', defendOn(false));
+    }
     window.addEventListener('keyup', (e) => {
       if (e.key === 'Shift' || e.key === ' ') this.game && this.game.setSlowmoHold(false);
     });

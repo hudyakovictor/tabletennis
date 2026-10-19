@@ -131,11 +131,11 @@ class Game {
       q: Q.new(), live: false, hist: [], lastHitBy: 0, speed: 0,
     };
     this.player = {
-      pos: V3.new(0, PH.TABLE_Y + 0.25, 1.45),
-      prev: V3.new(0, PH.TABLE_Y + 0.25, 1.45),
+      pos: V3.new(0, PH.TABLE_Y + 0.25, 1.78),
+      prev: V3.new(0, PH.TABLE_Y + 0.25, 1.78),
       vel: V3.new(), normal: V3.new(0, 0, -1),
       q: Q.new(), swing: 0, side: 1, hitRadius: MATCH_RULES.sweetRadius, lastHitT: -9,
-      prevPos: V3.new(0, PH.TABLE_Y + 0.25, 1.45),
+      prevPos: V3.new(0, PH.TABLE_Y + 0.25, 1.78),
     };
     this.paddleMotion = new PaddleStrokeMotion();
     this.aiPaddle = {
@@ -452,6 +452,16 @@ class Game {
       if (Number.isFinite(delta)) this.cameraControls.zoom = clamp(this.cameraControls.zoom * Math.exp(delta * 0.0015), 0.72, 1.6);
     }, { passive: false });
     c.style.touchAction = 'none';
+
+    /* Prevent Telegram / embedded WebView "swipe down to close" gesture.
+     * A passive touchmove listener on the document tells the browser the
+     * page will handle every gesture, so the host app never sees a drag. */
+    document.addEventListener('touchmove', (e) => {
+      if (e.cancelable) e.preventDefault();
+    }, { passive: false });
+    /* Prevent iOS rubber-banding / pull-to-refresh on the body. */
+    document.body.style.overscrollBehavior = 'none';
+    document.documentElement.style.overscrollBehavior = 'none';
 
     window.addEventListener('keydown', (e) => {
       if (document.getElementById('settings').classList.contains('on') || document.getElementById('shotLab').classList.contains('on')) return;
@@ -1378,7 +1388,18 @@ class Game {
 
     const serveCtx = this.state === GS.SERVE_TOSS && this.server === 1 && b.lastHitBy === 0;
     const sw = this.swipe, m = this.playerStrokeIntent(serveCtx);
-    if (!m) return;
+    if (!m) {
+      /* Defend button: when held on mobile, auto-generate a BLOCK gesture
+       * if the ball is incoming and there's no active swipe. This lets
+       * Telegram/iOS users play defensive shots without swiping down. */
+      if (this.defendHeld && b.lastHitBy === -1 && b.v.z > 0) {
+        m = { releaseSpeed: 0.3, peakSpeed: 0.4, speed: 0.3, up: 0.05,
+          right: 0, dist: 0.04, pathLen: 0.04, straightness: 0.9,
+          curl: 0, dur: 0.15, samples: 4, jerk: 0, smooth: 0.9,
+          angle: 0, angleDeg: 0, sx: 0.5, sy: 0.6, x: 0.5, y: 0.58, dx: 0, dy: -0.02 };
+      }
+      if (!m) return;
+    }
     /* ITTF 2.07: a return must follow a bounce on the receiver's court.
      * Without this gate the generous endpoint envelope returned
      *   · a ball still on its way to the player (a volley, a fault), and
@@ -1641,14 +1662,14 @@ class Game {
     if (this._volleyPred) this._volleyPred.reach = null;
     const broken = ![pad.pos.x, pad.pos.y, pad.pos.z].every(Number.isFinite);
     if (hard || broken) {
-      V3.set(pad.pos, 0, PH.TABLE_Y + 0.25, 1.44);
+      V3.set(pad.pos, 0, PH.TABLE_Y + 0.25, 1.78);
       V3.copy(pad.prevPos, pad.pos);
       V3.copy(pad.prev, pad.pos);
       V3.zero(pad.vel);
     }
     V3.set(pad.normal, 0, Math.sin(this.padPitch), -Math.cos(this.padPitch));
     pad.swing = 0;
-    this._ptTarget = { tx: 0, ty: PH.TABLE_Y + 0.25, tz: 1.44 };
+    this._ptTarget = { tx: 0, ty: PH.TABLE_Y + 0.25, tz: 1.78 };
   }
 
   updatePlayerPaddle(dt) {
@@ -1765,7 +1786,7 @@ class Game {
       const kHome = clamp((this.recenterT / RECENTER_S - 0.25) / 0.75, 0, 1);
       tx = lerp(tx, 0, kHome);
       ty = lerp(ty, PH.TABLE_Y + 0.25, kHome);
-      tz = lerp(tz, 1.44, kHome);
+      tz = lerp(tz, 1.78, kHome);
     }
 
     // during your own toss the bat slides under the ball: serving is about

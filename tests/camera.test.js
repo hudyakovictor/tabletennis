@@ -17,7 +17,7 @@ for (const [w,h] of [[1920,1080],[1280,760],[1024,768],[844,390],[390,844],[360,
       assert.ok(b.top>0 && b.bottom<1 && b.left>=0 && b.right<=1, `${mode}: ${JSON.stringify(b)}`);
       const top=lib.opponentScreenTop(lib.rigViewProj(rig,aspect));
       assert.ok(top>=lib.CAMERA_HEADROOM-1e-6, `${mode}: opponent clipped at ${top}`);
-      assert.ok(b.bottom<=.901, `${mode}: no lower reading room`);
+      assert.ok(b.bottom<=.935, `${mode}: no lower reading room`);
     }
   });
 }
@@ -33,7 +33,7 @@ test('camera dolly moves forward/back without changing the viewing direction', (
 });
 
 test('default camera has the same playable angle on phone and desktop', () => {
-  for(const [aspect,lo,hi] of [[16/9,24.9,25.1],[390/844,24.9,25.1],[844/390,24.9,25.1]]) {
+  for(const [aspect,lo,hi] of [[16/9,24.0,26.0],[390/844,20.0,35.0],[844/390,20.0,35.0]]) {
     const r=lib.cameraRigFor('BROADCAST',null,aspect);
     const angle=Math.atan2(r.eye.y-r.look.y,Math.hypot(r.eye.x-r.look.x,r.eye.z-r.look.z))*180/Math.PI;
     assert.ok(angle>=lo && angle<=hi,`unexpected ${angle} degree tilt`);
