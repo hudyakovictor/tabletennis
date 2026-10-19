@@ -212,7 +212,7 @@ body.is-paused #pauseInd{display:flex}
   #spin{width:min(132px,36vw);padding:8px 9px}
   .sb-side{min-width:64px;padding:7px 6px;gap:5px}.sb-pts{font-size:22px;min-width:24px}
   .sb-nm{font-size:9px;letter-spacing:.06em}.serve-dot{width:6px;height:6px}.sb-mid{padding:4px 8px}
-  #topright{gap:5px}.ic{width:30px;height:32px}#slow{height:32px;min-width:44px}
+  #topright{gap:5px}.ic{width:30px;height:32px}
   .logo{font-size:30px}.card{padding:20px 18px 18px}
   .recap{grid-template-columns:1fr}
 }
@@ -221,7 +221,7 @@ body.is-paused #pauseInd{display:flex}
 
 /* The same corner control pauses during play and becomes a safe exit only after pause. */
 body.is-playing #btnMenu { display: grid !important; }
-body.is-paused #slow { display:none !important; }
+
 
 /* ============================ slow-mo =============================== */
 /* The spin dial: a chip in the same family as slow-mo, top-right, out of the
@@ -237,25 +237,6 @@ body.is-paused #slow { display:none !important; }
 #spinBias s{font-family:var(--mono);font-size:8.5px;opacity:.8;text-decoration:none;line-height:1.15}
 #spinBias.high{color:#ffe9c9;border-color:rgba(255,170,80,.75);box-shadow:0 0 20px rgba(255,150,60,.22)}
 #spinBias.low{color:#dff2ff;border-color:rgba(120,200,255,.6)}
-
-/* Slow-mo used to be a 64 px circle floating in the bottom-right corner —
- * exactly where a right-handed thumb plays. It is now a compact chip in the
- * top-right button row, next to sound/settings/menu. */
-#slow{position:relative;height:34px;min-width:54px;border-radius:10px;display:flex;flex-direction:column;
-  align-items:center;justify-content:center;gap:0;pointer-events:auto;cursor:pointer;padding:0 9px;
-  background:radial-gradient(circle at 50% 35%,rgba(30,48,74,.85),rgba(9,14,24,.85));
-  border:1px solid var(--line2);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);
-  color:var(--dim);overflow:hidden;transition:color .2s,border-color .2s,transform .12s;
-  padding:0;appearance:none;-webkit-appearance:none;font:inherit}
-#slow:active{transform:scale(.94)}
-#slow b{font-size:9.5px;font-weight:900;letter-spacing:.07em;z-index:2;line-height:1.15}
-#slow small{font-family:var(--mono);font-size:8.5px;opacity:.78;text-decoration:none;z-index:2;line-height:1.15}
-#slow i{position:absolute;left:0;right:0;bottom:0;height:100%;
-  background:linear-gradient(180deg,rgba(57,198,255,.26),rgba(57,198,255,.05));transition:height .08s linear}
-#slow.on{color:#eaf6ff;border-color:rgba(57,198,255,.75);box-shadow:0 0 26px rgba(57,198,255,.35)}
-#slow.ready{color:var(--txt)}
-#slow.off{opacity:.32;pointer-events:none}
-body.is-slow #gl{filter:saturate(1.12) contrast(1.04)}
 
 /* ======================== replay cinema ============================= */
 #reel{position:absolute;inset:0;z-index:6;pointer-events:none;opacity:0;transition:opacity .28s;
@@ -302,7 +283,7 @@ body.is-slow #gl{filter:saturate(1.12) contrast(1.04)}
 
 
 #reel .skip{pointer-events:auto;cursor:pointer}
-body.is-reel #hud,body.is-reel #slow{opacity:.0}
+body.is-reel #hud{opacity:.0}
 body.is-reel .screen,body.is-reel #pauseInd{display:none !important}
 #hud{transition:opacity .25s}
 
@@ -411,7 +392,7 @@ button[hidden],.ic[hidden]{display:none!important}
 #btnMenu[aria-pressed="true"]{color:var(--warn);border-color:rgba(255,211,77,.55)}
 #btnFullscreen[aria-pressed="true"]{color:var(--good);border-color:rgba(78,227,154,.55)}
 #btnSound[aria-pressed="false"],#menuSound[aria-pressed="false"]{color:var(--bad)}
-#slow{min-height:34px}
+
 #pauseInd{cursor:default}
 #pauseInd small{font-size:13px;letter-spacing:.08em;text-align:center;line-height:1.45}
 .pause-actions{display:flex;flex-wrap:wrap;justify-content:center;gap:8px;margin-top:8px;max-width:min(560px,92vw)}
@@ -511,7 +492,6 @@ button[hidden],.ic[hidden]{display:none!important}
 /* Touch targets: phone and tablet controls get room; very narrow phones reflow. */
 @media (pointer:coarse){
   .ic{width:40px;height:42px;border-radius:12px}
-  #slow{min-width:44px;height:42px;border-radius:12px}
   .tbt,.tab,.opt,.btn{min-height:44px}
   .menu-utility .ic{width:44px;height:44px}
   .sitem button,.trow button{min-height:44px;min-width:68px}
@@ -538,14 +518,12 @@ button[hidden],.ic[hidden]{display:none!important}
   .sb-mid span{font-size:12px}
   #topright{display:grid;grid-template-columns:repeat(2,40px);grid-auto-rows:40px;gap:4px;width:84px}
   #topright .ic{width:40px;height:40px}
-  #topright #slow{width:40px;min-width:40px;height:40px}
   #menu .menu-actions .btn,#menu .menu-mode-actions .btn{letter-spacing:.06em;font-size:12px}
   #cameraViews .opt{min-width:0;padding-inline:4px}
 }
 @media(max-width:340px){
   #topright{grid-template-columns:repeat(2,36px);grid-auto-rows:36px;width:76px}
   #topright .ic{width:36px;height:36px}
-  #topright #slow{width:36px;min-width:36px;height:36px}
 }
 @media(prefers-reduced-motion:reduce){
   .screen.on .card,#over.won .card,#over.won #overTitle,#score .sb-side.scored::after{animation:none!important}
@@ -573,7 +551,6 @@ body:not(.is-playing) #topright{visibility:hidden;pointer-events:none}
 @media(max-width:480px){
   #topright{display:grid;grid-template-columns:repeat(3,44px);grid-auto-rows:44px;gap:4px;width:140px}
   #topright .ic{width:44px;height:44px}
-  #topright #slow{width:44px;min-width:44px;height:44px}
 }
 @media(max-width:620px) and (max-height:650px){
   #menu .card.scroll-needed{scrollbar-width:thin;scrollbar-color:rgba(180,205,235,.45) transparent}
@@ -682,12 +659,6 @@ body:not(.is-playing) #topright{visibility:hidden;pointer-events:none}
     <div id="dbg"></div>
 
     <div id="topright">
-      <!-- slow-mo: hold to slow the world down (never in tournaments/PvP) -->
-      <button id="slow" class="pe" title="Замедление" aria-label="Замедление времени, удерживайте">
-        <i id="slowFill"></i>
-        <b>SLOW</b>
-        <small id="slowKey">SHIFT</small>
-      </button>
       <button class="ic pe" id="btnFullscreen" title="Полный экран (F)" aria-label="Полный экран" aria-pressed="false"></button>
       <button class="ic pe" id="btnSound" title="Выключить звук" aria-label="Выключить звук" aria-pressed="true"></button>
       <button class="ic pe" id="btnSettings" title="Настройки" aria-label="Настройки"></button>
@@ -702,6 +673,7 @@ body:not(.is-playing) #topright{visibility:hidden;pointer-events:none}
         <button id="pauseSettings" class="tbt"><span class="ui-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></span>НАСТРОЙКИ</button>
         <label class="capture-debug-toggle"><input type="checkbox" id="captureDebugPause"> Зона нажатия</label>
         <button id="shotLabPause" class="tbt">КАЛИБРОВКА ПОПАДАНИЯ</button>
+        <button id="inputLogPause" class="tbt">СОХРАНИТЬ ПОСЛЕДНИЕ 30 С</button>
         <div id="trainingActions" hidden>
           <p id="trainPauseTip"></p>
           <button class="tbt" id="trSkip">ПРОПУСТИТЬ УПРАЖНЕНИЕ</button>
@@ -746,6 +718,7 @@ body:not(.is-playing) #topright{visibility:hidden;pointer-events:none}
         <div class="row menu-mode-actions">
           <button class="btn ghost" id="careerStart"><span class="ui-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M8 21h8m-4-4v4m-5-15h10v5a5 5 0 0 1-10 0V6Zm0 2H4v2a4 4 0 0 0 4 4m8-6h4v2a4 4 0 0 1-4 4"/></svg></span>КАРЬЕРА</button>
           <button class="btn ghost" id="onlineStart"><span class="ui-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a15 15 0 0 1 0 18M12 3a15 15 0 0 0 0 18"/></svg></span>ОНЛАЙН</button>
+          <button class="btn ghost" id="zoneCalMenu"><b>КАЛИБРОВКА ЗОНЫ</b></button>
           <button class="btn ghost" id="demoStart"><span class="ui-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><rect x="5" y="7" width="14" height="13" rx="3"/><path d="M12 3v4m-3 5h.01M15 12h.01M9 16h6M3 11H5m14 0h2"/></svg></span>ДЕМО</button>
         </div>
         <div class="row menu-meta-actions">
@@ -967,10 +940,15 @@ body:not(.is-playing) #topright{visibility:hidden;pointer-events:none}
       <h2 id="shotLabTitle">КАЛИБРОВКА ПОПАДАНИЯ</h2>
       <div class="lab-actions"><button class="tbt" id="shotLabExport">СКАЧАТЬ ИЗМЕРЕНИЯ</button><button class="tbt" id="shotLabClose">ЗАКРЫТЬ</button></div>
       <label class="capture-debug-toggle"><input type="checkbox" id="captureDebugLab"> Показывать зону у мяча</label>
-      <p class="lab-help">Один круг — допустимое место начала нажатия. Снаружи удар блокируется. Внутри всё ещё нужны движение и правильный момент. Радиус одинаковый при подаче и приёме: 48 экранных пикселей, независимо от камеры.</p>
+      <p class="lab-help">Овал у мяча — допустимое место начала нажатия: длинная ось смотрит по экранной скорости мяча, вперёд — скорость×0,16 с + 24 px, назад — 18 px, поперёк — 40 px (мышь) / 56 px (касание). Снаружи удар блокируется окончательно. Внутри всё ещё нужны движение к мячу и правильный момент.</p>
       <h3>Уменьшать ли зону?</h3>
       <p class="lab-help">Ниже — сколько ваших реальных ударов отсекла бы меньшая зона. Точность и качество удара здесь не оцениваются.</p>
       <div id="captureCalibrationSummary"></div>
+      <h3>Калибровка зоны по заданиям</h3>
+      <p class="lab-help">Пошаговый сбор данных для разработки: углы стола, неподвижный мяч, медленный и быстрый мяч, подача, сила и спин — сначала мышью, затем касанием. Данные не меняют общую зону и не создают личный профиль.</p>
+      <p class="lab-help" id="zoneCalStatus">Калибровка не начата.</p>
+      <div class="lab-actions"><button class="tbt" id="zoneCalStart">НАЧАТЬ ЗАНОВО</button><button class="tbt" id="zoneCalImport">ЗАПИСАТЬ ПОПЫТКИ ИЗ ИГРЫ</button><button class="tbt" id="zoneCalExport">СКАЧАТЬ ДАННЫЕ КАЛИБРОВКИ</button></div>
+      <div id="zoneCalSummary"></div>
       <details><summary>Последние попытки</summary>
       <div id="shotLabRecords"></div></details>
     </div>
@@ -987,6 +965,7 @@ body:not(.is-playing) #topright{visibility:hidden;pointer-events:none}
 </div>
 
 <script>
+const BUILD_VERSION = 'self-contained build 2026-10-19';
 /* ====== 10_math.js ====== */
 /* =====================================================================
  *  TOPSPIN // ARENA TABLE TENNIS  —  math core
@@ -1250,14 +1229,25 @@ function noise1(x) {
  * radii. Keep input affordance, timing and physical capture separate. */
 
 const MATCH_RULES = Object.freeze({
-  version: 1,
-  pressRadiusPx: 48,          // screen-space admission for real pointer-down events
+  version: 2,
+  zoneShape: 'oval',           // 'circle' keeps pressHitZone for A/B comparison
+  pressRadiusPx: 96,           // legacy circle admission for real pointer-down events
+  ovalLeadSec: .16,            // how far ahead of the ball a backswing may start
+  ovalForwardPx: 24,           // fixed forward allowance, CSS px
+  ovalForwardMaxPx: 120,       // hard cap on the forward half-axis, CSS px (simulator-selected)
+  ovalBackPx: 18,              // allowance behind the ball, CSS px
+  ovalSideMousePx: 44,         // transverse allowance for a mouse press
+  ovalSideTouchPx: 60,         // transverse allowance for touch/pen (finger occludes the ball)
+  ovalMinSpeedPx: 8,           // circle below this screen speed
+  ovalFullSpeedPx: 120,        // full oval at/above this screen speed; smoothstep between
+  ovalSampleDtSec: .05,        // projection interval for screen velocity
+  serveTossMinRise: .16,       // ITTF minimum toss rise, metres above release
   trajectoryAssist: .85,
   positionAssist: .85,
   sensitivity: 1,
-  captureRadius: .361,        // previous .14 + .85*.26; preserve baseline feel
-  depthTolerance: .347,      // previous .16 + .85*.22
-  serveCaptureRadius: .618,  // falling toss only; different task, same for all
+  captureRadius: .62,        // realistic stance distance requires larger capture
+  depthTolerance: .62,      // realistic stance distance
+  serveCaptureRadius: .88,  // falling toss only; larger for realistic stance
   sweetRadius: .15225,       // contact-quality reference, NOT capture radius
   timingMinPx: 8,
   timingMaxPx: 20,
@@ -1347,12 +1337,218 @@ function measureCaptureAllowance(paddle, p0, p1, serving, endpointEligible) {
     score: serving ? distance/limits.radius : Math.max(lateral/limits.radius,Math.abs(dz)/limits.depth) };
 }
 
+const PRESS_REJECTION_REASONS = Object.freeze([
+  'OUTSIDE_ZONE', 'NO_FRESH_SWIPE', 'STATIC_CLICK', 'DEPTH_FAIL', 'TIMING_LATE',
+  'TIMING_EARLY', 'CONSUMED', 'SERVE_TOSS_LOW', 'WRONG_DIRECTION', 'BOUNCE_ILLEGAL',
+]);
+
 // Actual mouse/touch press admission, in CSS pixels. Independent of quality.
 function pressHitZone(ballScreen, pointer, width, height, radius = MATCH_RULES.pressRadiusPx) {
   if (!ballScreen || !ballScreen.ok || !pointer || ![ballScreen.x,ballScreen.y,pointer.x,pointer.y,width,height,radius].every(Number.isFinite) || width<=0 || height<=0 || radius<=0) return null;
   const x=ballScreen.x*width,y=ballScreen.y*height;
   const distancePx=Math.hypot(pointer.x*width-x,pointer.y*height-y);
-  return { x,y,radius,distancePx,pointerX:pointer.x*width,pointerY:pointer.y*height,accepted:distancePx<=radius };
+  const accepted=distancePx<=radius;
+  return { x,y,radius,distancePx,pointerX:pointer.x*width,pointerY:pointer.y*height,accepted,
+    shape:'circle', score:distancePx/radius, along:null, across:null,
+    reason:accepted?null:'OUTSIDE_ZONE' };
+}
+
+function pressOvalSidePx(pointerType, opts = {}) {
+  if (Number.isFinite(opts.sidePx) && opts.sidePx > 0) return opts.sidePx;
+  return pointerType === 'mouse' ? MATCH_RULES.ovalSideMousePx : MATCH_RULES.ovalSideTouchPx;
+}
+
+function serveTossRise(tossApex, tossStartY, tableY) {
+  const start = Number.isFinite(tossStartY) ? tossStartY
+    : Number.isFinite(tableY) ? tableY + .14 : NaN;
+  return Number.isFinite(tossApex) && Number.isFinite(start) ? tossApex - start : NaN;
+}
+
+/** Oval press admission, elongated along the ball's SCREEN velocity.
+ *
+ * `ball` may be a world ball ({p,v} or a position plus opts.velocity) when
+ * opts.project is supplied, or an already projected point ({x,y,ok}) when
+ * opts.screenVelocityPx / opts.screenVelocity is supplied. The screen
+ * velocity is always the difference of two projections, never the raw world
+ * vector, so perspective foreshortening is part of the shape. `along` is
+ * positive ahead of the ball (where a backswing starts); `across` is the
+ * signed transverse offset. Half-ellipses are glued at the ball: the forward
+ * half uses |v|*lead+fwdPx, the rear half uses backPx. */
+function pressOvalSmoothstep(x) {
+  const t = Math.min(1, Math.max(0, x));
+  return t * t * (3 - 2 * t);
+}
+
+function pressOvalReferenceAxis(center, width, height, opts, projectWorldPoint) {
+  const fromVector = (x, y) => {
+    const len = Math.hypot(x, y);
+    return len > 1e-9 ? { x: x / len, y: y / len } : null;
+  };
+  const axisPx = opts.referenceAxisPx || opts.referenceAxis;
+  if (axisPx && [axisPx.x, axisPx.y].every(Number.isFinite)) {
+    const axis = fromVector(axisPx.x, axisPx.y);
+    if (axis) return axis;
+  }
+  const referenceWorld = opts.referenceWorld || opts.referencePoint || opts.racketWorld || opts.playerWorld;
+  if (referenceWorld && [referenceWorld.x, referenceWorld.y, referenceWorld.z].every(Number.isFinite) &&
+      typeof projectWorldPoint === 'function') {
+    const p = projectWorldPoint(referenceWorld);
+    if (p && [p.x, p.y].every(Number.isFinite)) {
+      const axis = fromVector(p.x - center.x, p.y - center.y);
+      if (axis) return axis;
+    }
+  }
+  const referencePx = opts.referencePx || opts.racketPx || opts.playerPx;
+  if (referencePx && [referencePx.x, referencePx.y].every(Number.isFinite)) {
+    const axis = fromVector(referencePx.x - center.x, referencePx.y - center.y);
+    if (axis) return axis;
+  }
+  const referenceScreen = opts.referenceScreen || opts.racketScreen || opts.playerScreen;
+  if (referenceScreen && [referenceScreen.x, referenceScreen.y].every(Number.isFinite)) {
+    const axis = fromVector(referenceScreen.x * width - center.x,
+      referenceScreen.y * height - center.y);
+    if (axis) return axis;
+  }
+  // The player/racket side of the authored camera is screen-down. This is
+  // only a fallback; live input passes the actual racket position.
+  return { x: 0, y: 1 };
+}
+
+function pressOvalBlendAxis(reference, velocityAxis, blend) {
+  if (!(blend > 0)) return reference;
+  if (blend >= 1) return velocityAxis;
+  const dot = Math.min(1, Math.max(-1, reference.x * velocityAxis.x + reference.y * velocityAxis.y));
+  const angle = Math.acos(dot), step = angle * blend;
+  let px = velocityAxis.x - reference.x * dot, py = velocityAxis.y - reference.y * dot;
+  const plen = Math.hypot(px, py);
+  if (plen <= 1e-9) { px = -reference.y; py = reference.x; }
+  else { px /= plen; py /= plen; }
+  const co = Math.cos(step), si = Math.sin(step);
+  return { x: reference.x * co + px * si, y: reference.y * co + py * si };
+}
+
+function pressHitZoneOval(ball, pointer, width, height, opts = {}) {
+  if (!ball || !pointer || ![pointer.x, pointer.y, width, height].every(Number.isFinite) || width <= 0 || height <= 0) return null;
+  const lead = Number.isFinite(opts.leadSec) && opts.leadSec > 0 ? opts.leadSec : MATCH_RULES.ovalLeadSec;
+  const fwdPx = Number.isFinite(opts.fwdPx) && opts.fwdPx > 0 ? opts.fwdPx : MATCH_RULES.ovalForwardPx;
+  const forwardMaxPx = Number.isFinite(opts.forwardMaxPx) && opts.forwardMaxPx > 0
+    ? opts.forwardMaxPx : MATCH_RULES.ovalForwardMaxPx;
+  const backPx = Number.isFinite(opts.backPx) && opts.backPx > 0 ? opts.backPx : MATCH_RULES.ovalBackPx;
+  const pointerType = opts.pointerType || opts.inputType || 'touch';
+  const sidePx = pressOvalSidePx(pointerType, opts);
+  if (!(lead > 0) || !(fwdPx > 0) || !(forwardMaxPx > 0) || !(backPx > 0) || !(sidePx > 0)) return null;
+
+  let center = null, screenVx = 0, screenVy = 0, worldVelocity = null;
+  let projectWorldPoint = null;
+  const pos = ball.p && [ball.p.x, ball.p.y, ball.p.z].every(Number.isFinite) ? ball.p
+    : [ball.x, ball.y, ball.z].every(Number.isFinite) ? ball : null;
+  if (pos && typeof opts.project === 'function') {
+    worldVelocity = ball.v && [ball.v.x, ball.v.y, ball.v.z].every(Number.isFinite) ? ball.v
+      : opts.velocity && [opts.velocity.x, opts.velocity.y, opts.velocity.z].every(Number.isFinite) ? opts.velocity : null;
+    if (!worldVelocity) return null;
+    const dt = Number.isFinite(opts.sampleDtSec) && opts.sampleDtSec > 0
+      ? Math.min(.25, opts.sampleDtSec) : MATCH_RULES.ovalSampleDtSec;
+    const a0 = opts.project({ x: pos.x, y: pos.y, z: pos.z });
+    if (!a0 || !a0.ok || ![a0.x, a0.y].every(Number.isFinite)) return null;
+    const ax = a0.x, ay = a0.y; // copy: Game.project may reuse its out object
+    const a1 = opts.project({ x: pos.x + worldVelocity.x * dt,
+      y: pos.y + worldVelocity.y * dt, z: pos.z + worldVelocity.z * dt });
+    if (!a1 || !a1.ok || ![a1.x, a1.y].every(Number.isFinite)) return null;
+    center = { x: ax * width, y: ay * height };
+    screenVx = (a1.x - ax) * width / dt;
+    screenVy = (a1.y - ay) * height / dt;
+    projectWorldPoint = (p) => {
+      const q = opts.project({ x: p.x, y: p.y, z: p.z });
+      return q && q.ok && [q.x, q.y].every(Number.isFinite)
+        ? { x: q.x * width, y: q.y * height } : null;
+    };
+  } else if (ball.ok && [ball.x, ball.y].every(Number.isFinite)) {
+    center = { x: ball.x * width, y: ball.y * height };
+    const sv = opts.screenVelocityPx || opts.screenVelocity || ball.screenVelocityPx || ball.screenVelocity;
+    if (sv) {
+      if (![sv.x, sv.y].every(Number.isFinite)) return null;
+      const inPx = !!opts.screenVelocityPx || !!ball.screenVelocityPx;
+      screenVx = inPx ? sv.x : sv.x * width;
+      screenVy = inPx ? sv.y : sv.y * height;
+    }
+    worldVelocity = ball.v && [ball.v.x, ball.v.y, ball.v.z].every(Number.isFinite) ? ball.v : opts.velocity || null;
+    if (typeof opts.project === 'function') projectWorldPoint = (p) => {
+      const q = opts.project({ x: p.x, y: p.y, z: p.z });
+      return q && q.ok && [q.x, q.y].every(Number.isFinite)
+        ? { x: q.x * width, y: q.y * height } : null;
+    };
+  } else return null;
+  if (![screenVx, screenVy].every(Number.isFinite)) return null;
+
+  const pointerX = pointer.x * width, pointerY = pointer.y * height;
+  const dx = pointerX - center.x, dy = pointerY - center.y;
+  const distancePx = Math.hypot(dx, dy);
+  const speedPx = Math.hypot(screenVx, screenVy);
+  const referenceAxis = pressOvalReferenceAxis(center, width, height, opts, projectWorldPoint);
+  const velocityAxis = speedPx > 1e-9
+    ? { x: screenVx / speedPx, y: screenVy / speedPx } : referenceAxis;
+  const minSpeedPx = MATCH_RULES.ovalMinSpeedPx;
+  const fullSpeedPx = Math.max(minSpeedPx + 1e-9, MATCH_RULES.ovalFullSpeedPx);
+  const blend = pressOvalSmoothstep((speedPx - minSpeedPx) / (fullSpeedPx - minSpeedPx));
+  const axis = pressOvalBlendAxis(referenceAxis, velocityAxis, blend);
+  const axisX = axis.x, axisY = axis.y;
+  const along = dx * axisX + dy * axisY;
+  const across = -dx * axisY + dy * axisX;
+  const uncappedForwardPx = speedPx * lead + fwdPx;
+  const cappedForwardPx = Math.min(forwardMaxPx, uncappedForwardPx);
+  const forwardExtent = sidePx + (cappedForwardPx - sidePx) * blend;
+  const backExtent = sidePx + (backPx - sidePx) * blend;
+  const longNorm = along >= 0 ? along / forwardExtent : -along / backExtent;
+  const ovalScore = Math.hypot(longNorm, across / sidePx);
+  // At blend=0 both long extents equal sidePx, so this is exactly the circle
+  // score for any axis; interpolated extents make the ellipse itself smooth.
+  const score = ovalScore;
+  let accepted = score <= 1, reason = accepted ? null : 'OUTSIDE_ZONE';
+  let directionDot = null, directionOk = null;
+  const swipe = opts.swipe || opts.swipeDirection;
+  if (swipe && [swipe.x, swipe.y].every(Number.isFinite)) {
+    const sl = Math.hypot(swipe.x, swipe.y);
+    if (sl > 1e-9) {
+      directionDot = distancePx > 1e-9 ? -(swipe.x * dx + swipe.y * dy) / (sl * distancePx) : 1;
+      directionOk = directionDot > 0;
+      if (accepted && !directionOk) { accepted = false; reason = 'WRONG_DIRECTION'; }
+    }
+  }
+  if (opts.kind === 'serve' && accepted) {
+    const falling = typeof opts.falling === 'boolean' ? opts.falling
+      : worldVelocity ? worldVelocity.y < 0 : screenVy > 0;
+    const rise = Number.isFinite(opts.tossRise) ? opts.tossRise
+      : serveTossRise(opts.tossApex, opts.tossStartY, opts.tableY);
+    if (!falling || !(rise > MATCH_RULES.serveTossMinRise)) { accepted = false; reason = 'SERVE_TOSS_LOW'; }
+  }
+  return { x: center.x, y: center.y, radius: Math.max(forwardExtent, backExtent, sidePx),
+    distancePx, pointerX, pointerY, accepted, shape: blend > 0 ? 'oval' : 'circle',
+    score, along, across, reason, directionDot, directionOk,
+    axisX, axisY, referenceAxisX: referenceAxis.x, referenceAxisY: referenceAxis.y,
+    velocityAxisX: velocityAxis.x, velocityAxisY: velocityAxis.y, blend,
+    screenVx, screenVy, speedPx, leadSec: lead,
+    fwdPx: forwardExtent, uncappedForwardPx, forwardMaxPx,
+    backPx: backExtent, sidePx, pointerType,
+    kind: opts.kind === 'serve' ? 'serve' : 'rally' };
+}
+
+/** Serve press admission: same oval, but the toss must already be falling
+ * from a legal rise. Screen "forward" is therefore down the fall line. */
+function pressServeZoneOval(ball, pointer, width, height, opts = {}) {
+  return pressHitZoneOval(ball, pointer, width, height, { ...opts, kind: 'serve' });
+}
+
+/** The one dispatch used by live input and by the debug overlay. */
+function pressZoneForBall(ball, pointer, width, height, opts = {}) {
+  const shape = opts.shape || MATCH_RULES.zoneShape;
+  if (shape === 'oval') {
+    return opts.kind === 'serve' ? pressServeZoneOval(ball, pointer, width, height, opts)
+      : pressHitZoneOval(ball, pointer, width, height, opts);
+  }
+  const screen = ball && ball.ok ? ball
+    : typeof opts.project === 'function' ? opts.project(ball && ball.p ? ball.p : ball) : null;
+  return screen ? pressHitZone(screen, pointer, width, height,
+    Number.isFinite(opts.radius) ? opts.radius : MATCH_RULES.pressRadiusPx) : null;
 }
 
 
@@ -3707,6 +3903,7 @@ class SwipeTracker {
   down(x, y, t) {
     this.gestureId++;
     this.realGestureId = -1; this.realAt = 0;
+    this.consumedGestureId = -1; this.consumedAt = -Infinity;
     this.pressZone = null;
     this.active = true; this.startT = t;
     this.samples.length = 0;
@@ -5112,15 +5309,16 @@ class ShotJournal {
     if (!valid && !context.active && entry.outcome !== 'rejected') { entry.outcome = 'rejected'; entry.revision++; }
     return entry;
   }
-  /** A press that started outside the ball's instantaneous 48 px window can
-   *  still be admitted while the gesture lives (the ball travels into it, or
-   *  the finger landed on the bat). Keep the journal's copy of the gate in
-   *  sync or every such stroke is reported as "outside" forever. */
-  acceptPress(gestureId, how) {
+  /** The pointerdown stamp is final. The only later change is a REJECTION
+   *  (the finished swipe did not move towards the ball it started near), and
+   *  the journal's copy must learn about it or the report disagrees with the
+   *  gate that actually ran. */
+  rejectPress(gestureId, reason, zone) {
     const e = this.records.find(r => r.gestureId === gestureId && !r.contact);
-    if (!e || !e.pressZone || e.pressZone.accepted) return;
-    e.pressZone.accepted = true; e.pressZone.via = how || 'path';
-    if (e.outcome === 'outside') { e.outcome = 'pending'; e.revision++; }
+    if (!e || !e.pressZone) return;
+    if (zone) e.pressZone = { ...zone };
+    e.pressZone.accepted = false; e.pressZone.reason = reason || 'OUTSIDE_ZONE';
+    if (e.outcome === 'pending') { e.outcome = 'outside'; e.revision++; }
   }
   expire(time) {
     for (const entry of this.records) {
@@ -5186,6 +5384,109 @@ class ShotJournal {
     physics: PH, archetypes: ARCH, profiles: PADDLE_PROFILES, records: this.records })); }
 }
 
+/* ---------------- guided press-zone calibration -----------------------
+ * Development data collection only. The session never changes MATCH_RULES
+ * and never builds a personal zone: every player keeps the one shared oval.
+ * Steps run mouse first, then touch (step 7 of the brief is the repeat). */
+const ZONE_CALIBRATION_STEPS = Object.freeze([
+  Object.freeze({ id: 'corners', title: 'Углы стола', need: 4,
+    instruction: 'Нажимайте точно в углы стола по очереди: ближний левый, ближний правый, дальний правый, дальний левый.' }),
+  Object.freeze({ id: 'stationary', title: 'Неподвижный мяч', need: 30,
+    instruction: 'По 10 ударов: начинайте замах перед мячом, сбоку и сзади. Мяч — в готовности к подаче.' }),
+  Object.freeze({ id: 'slow', title: 'Медленный мяч', need: 20,
+    instruction: '20 приёмов медленного мяча в обучении или матче. Начинайте замах там, где удобно.' }),
+  Object.freeze({ id: 'fast', title: 'Быстрый мяч', need: 20,
+    instruction: '20 приёмов быстрого мяча (упражнение «Тайминг» или подача соперника).' }),
+  Object.freeze({ id: 'serve', title: 'Своя подача', need: 15,
+    instruction: '15 подбросов и подач. Пишутся высота, старт пальца и длина свайпа.' }),
+  Object.freeze({ id: 'power', title: 'Сила и спин', need: 8,
+    instruction: 'По 2 удара: самый слабый, самый сильный, топспин, подрезка. Нужен контакт.' }),
+]);
+const ZONE_CALIBRATION_PASSES = Object.freeze(['mouse', 'touch']);
+
+function calibrationPercentile(values, q) {
+  const xs = values.filter(Number.isFinite).slice().sort((a, b) => a - b);
+  if (!xs.length) return null;
+  return xs[Math.min(xs.length - 1, Math.max(0, Math.ceil(xs.length * q) - 1))];
+}
+
+class ZoneCalibrationSession {
+  constructor() { this.reset(); }
+  reset() { this.samples = []; this.passIndex = 0; this.stepIndex = 0; this.done = false; this.lastSummary = null; }
+  get pass() { return ZONE_CALIBRATION_PASSES[this.passIndex] || null; }
+  get step() { return ZONE_CALIBRATION_STEPS[this.stepIndex] || null; }
+  count(stepId = this.step && this.step.id, pass = this.pass) {
+    return this.samples.filter(s => s.stepId === stepId && s.pass === pass).length;
+  }
+  record(sample) {
+    if (!sample || this.done || !this.step) return null;
+    const inputType = sample.inputType === 'mouse' ? 'mouse' : sample.inputType ? 'touch' : this.pass;
+    if (inputType !== this.pass) return null;      // wrong device for this pass: not evidence
+    const row = { ...sample, pass: this.pass, stepId: this.step.id, inputType };
+    this.samples.push(row);
+    let summary = null;
+    if (this.count() >= this.step.need) {
+      summary = this.summaryFor(this.step.id, this.pass);
+      this.lastSummary = summary;
+      this.stepIndex++;
+      if (this.stepIndex >= ZONE_CALIBRATION_STEPS.length) { this.stepIndex = 0; this.passIndex++; }
+      if (this.passIndex >= ZONE_CALIBRATION_PASSES.length) this.done = true;
+    }
+    return { sample: row, summary, done: this.done,
+      progress: this.done ? null : { pass: this.pass, step: this.step, have: this.count() } };
+  }
+  /** Map ShotJournal records onto the current step. Corners are recorded by
+   *  the UI directly (the journal does not know which corner was the target). */
+  importJournal(records, afterId = 0) {
+    let added = 0, lastId = afterId, summary = null;
+    for (const e of records || []) {
+      if (!e || e.id <= afterId || !e.pressZone) continue;
+      lastId = Math.max(lastId, e.id);
+      const z = e.pressZone, stepId = this.step && this.step.id;
+      if (!stepId || stepId === 'corners') continue;
+      if (stepId === 'serve' && !z.serving) continue;
+      if (stepId === 'power' && !e.contact) continue;
+      const label = stepId === 'stationary'
+        ? (z.along > 20 ? 'front' : z.along < -20 ? 'back' : 'side')
+        : stepId === 'power' ? (e.strokeId || 'shot') : stepId;
+      const result = this.record({ label, along: z.along, across: z.across, score: z.score,
+        accepted: !!z.accepted, reason: z.reason || null, inputType: z.pointerType,
+        gesturePath: e.gesture ? e.gesture.path : null, gesturePeakSpeed: e.gesture ? e.gesture.peakSpeed : null,
+        contactY: e.contact && e.contact.incoming && e.contact.incoming.p ? e.contact.incoming.p.y : null,
+        ballSpeedKmh: e.contact ? e.contact.speedKmh : null, spin: e.contact ? e.contact.spin : null });
+      if (result) { added++; if (result.summary) summary = result.summary; }
+      if (this.done) break;
+    }
+    return { added, lastId, summary };
+  }
+  summaryFor(stepId, pass) {
+    const rows = this.samples.filter(s => s.stepId === stepId && s.pass === pass);
+    const p90along = calibrationPercentile(rows.map(r => r.along).filter(v => v > 0), .9);
+    const p90across = calibrationPercentile(rows.map(r => Math.abs(r.across)), .9);
+    const p90error = calibrationPercentile(rows.map(r => r.errorPx), .9);
+    const byLabel = {};
+    for (const r of rows) byLabel[r.label || stepId] = (byLabel[r.label || stepId] || 0) + 1;
+    let recommendation;
+    if (stepId === 'corners') recommendation = `90-й перцентиль ошибки по углам: ${p90error === null ? '—' : Math.round(p90error)} px.`;
+    else if (stepId === 'serve') recommendation = `90-й перцентиль замаха на подаче: ${p90along === null ? '—' : Math.round(p90along)} px по оси падения, ${p90across === null ? '—' : Math.round(p90across)} px поперёк.`;
+    else if (stepId === 'power') recommendation = 'Таблица «жест → скорость и спин мяча» — в экспорте (samples шага power).';
+    else recommendation = `90-й перцентиль замаха: ${p90along === null ? '—' : Math.round(p90along)} px вперёд, ${p90across === null ? '—' : Math.round(p90across)} px поперёк.`;
+    return { stepId, pass, count: rows.length, byLabel, p90along, p90across, p90error, recommendation };
+  }
+  compareSlowFast(pass) {
+    const slow = this.summaryFor('slow', pass), fast = this.summaryFor('fast', pass);
+    return { pass, slowP90along: slow.p90along, fastP90along: fast.p90along,
+      growsWithSpeed: slow.p90along !== null && fast.p90along !== null ? fast.p90along > slow.p90along : null };
+  }
+  exportData() {
+    return JSON.parse(JSON.stringify({ schema: 'zone-calibration-v1', rulesVersion: MATCH_RULES.version,
+      rules: MATCH_RULES, done: this.done, pass: this.pass, stepIndex: this.stepIndex,
+      samples: this.samples,
+      summaries: ZONE_CALIBRATION_PASSES.flatMap(pass => ZONE_CALIBRATION_STEPS.map(st => this.summaryFor(st.id, pass))),
+      slowVsFast: ZONE_CALIBRATION_PASSES.map(pass => this.compareSlowFast(pass)) }));
+  }
+}
+
 /** Deterministic fixtures, not a promise to cover all possible shots.
  * 2 grips × 2 hands × FH/BH × 3 heights × 2 depths × 3 gestures = 144.
  * Hand mirrors x and swipe direction, not topspin. No settings are changed. */
@@ -5242,6 +5543,209 @@ function summarizeCaptureCalibration(records) {
         (s.endpointEligible && s.lateral <= s.radius+1e-9 && s.depthGap <= s.depthLimit*scale+1e-9)).length })),
       trials: [1,.9,.8,.7].map(scale => ({ scale, kept: samples.filter(s=>s.requiredRadius<=s.radius*scale+1e-9).length })) };
   });
+}
+
+
+/* ====== 43_input_telemetry.js ====== */
+/* Bounded input telemetry: the last 30 seconds of pointer decisions.
+ * Events are plain objects in a fixed ring; JSON is produced only on export,
+ * so the per-frame cost is one snapshot plus one array write. */
+
+const INPUT_LOG_SCHEMA = 1;
+const INPUT_LOG_SECONDS = 30;
+const INPUT_LOG_MAX_EVENTS = 16000;
+
+function inputLogVec(v) {
+  return v && [v.x, v.y, v.z].every(Number.isFinite) ? [v.x, v.y, v.z] : null;
+}
+
+function inputLogDecision(zone) {
+  if (!zone) return null;
+  const speed = Number.isFinite(zone.speedPx) ? zone.speedPx : 0;
+  return {
+    shape: zone.shape || MATCH_RULES.zoneShape,
+    score: Number.isFinite(zone.score) ? zone.score : null,
+    along: Number.isFinite(zone.along) ? zone.along : null,
+    across: Number.isFinite(zone.across) ? zone.across : null,
+    accepted: !!zone.accepted,
+    reason: zone.reason || (zone.accepted ? null : 'OUTSIDE_ZONE'),
+    distancePx: Number.isFinite(zone.distancePx) ? zone.distancePx : null,
+    directionDot: Number.isFinite(zone.directionDot) ? zone.directionDot : null,
+    // Proxy, not a measured contact error: along/speed is when the ball would
+    // reach the press point; the reference is the configured lead time.
+    timingErrorMs: speed > 1 && Number.isFinite(zone.along)
+      ? (zone.along / speed - (zone.leadSec || MATCH_RULES.ovalLeadSec)) * 1000 : null,
+    via: zone.via || null,
+  };
+}
+
+class InputTelemetryLog {
+  constructor(options = {}) {
+    this.seconds = Number.isFinite(options.seconds) && options.seconds > 0 ? options.seconds : INPUT_LOG_SECONDS;
+    this.capacity = Math.max(128, Math.min(INPUT_LOG_MAX_EVENTS,
+      Number.isFinite(options.maxEvents) ? Math.floor(options.maxEvents) : INPUT_LOG_MAX_EVENTS));
+    this.buffer = new Array(this.capacity);
+    this.head = 0;
+    this.count = 0;
+    this.dropped = 0;
+    this.lastT = -Infinity;
+    this.epoch = 0;
+  }
+
+  /** Game.time is monotonic in the current Game, but a future reset must not
+   * make the 30 s window discard every event from the new clock. A rollback
+   * starts a new epoch and drops future-stamped events from the old one. */
+  resetClock(t, force = false) {
+    if (!Number.isFinite(t)) return false;
+    if (!force && !(t < this.lastT - 1e-9)) {
+      if (t > this.lastT) this.lastT = t;
+      return false;
+    }
+    this.buffer.fill(null);
+    this.head = 0; this.count = 0; this.dropped = 0;
+    this.epoch++;
+    this.lastT = t;
+    return true;
+  }
+
+  record(event) {
+    if (!event || !Number.isFinite(event.t)) return null;
+    if (event.t < this.lastT - 1e-9) this.resetClock(event.t, true);
+    event.epoch = this.epoch;
+    event.schema = INPUT_LOG_SCHEMA;
+    event.rulesVersion = MATCH_RULES.version;
+    event.build = typeof BUILD_VERSION !== 'undefined' ? BUILD_VERSION : 'source';
+    if (this.count === this.capacity) this.dropped++;
+    this.buffer[this.head] = event;
+    this.head = (this.head + 1) % this.capacity;
+    if (this.count < this.capacity) this.count++;
+    if (event.t > this.lastT) this.lastT = event.t;
+    return event;
+  }
+
+  events(now = this.lastT) {
+    const out = [], cutoff = Number.isFinite(now) ? now - this.seconds : -Infinity;
+    const start = this.count < this.capacity ? 0 : this.head;
+    for (let i = 0; i < this.count; i++) {
+      const e = this.buffer[(start + i) % this.capacity];
+      if (e && e.epoch === this.epoch && e.t >= cutoff) out.push(e);
+    }
+    return out;
+  }
+
+  toJSONL(now = this.lastT) {
+    return this.events(now).map(e => JSON.stringify(e)).join('\n') + (this.count ? '\n' : '');
+  }
+
+  stats(now = this.lastT) {
+    const events = this.events(now);
+    return { schema: INPUT_LOG_SCHEMA, seconds: this.seconds, capacity: this.capacity, epoch: this.epoch,
+      stored: this.count, inWindow: events.length, dropped: this.dropped,
+      approxBytes: events.length ? JSON.stringify(events[0]).length * events.length : 0 };
+  }
+
+  clear() {
+    this.buffer.fill(null);
+    this.head = 0; this.count = 0; this.dropped = 0; this.lastT = -Infinity; this.epoch++;
+  }
+}
+
+function makeInputLogEvent(game, type, extra = {}) {
+  if (!game || !game.ball || !game.player) return null;
+  const b = game.ball, pad = game.player, sw = game.swipe || {};
+  const zone = extra.zone || sw.pressZone || null;
+  const width = Number.isFinite(game.vw) && game.vw > 0 ? game.vw : zone && zone.vw;
+  const height = Number.isFinite(game.vh) && game.vh > 0 ? game.vh : zone && zone.vh;
+  let screen = null, screenV = null;
+  if (typeof game.project === 'function' && game.R && game.R.viewProj && width > 0 && height > 0) {
+    const a = game.project(b.p, {});
+    if (a && a.ok && [a.x, a.y].every(Number.isFinite)) {
+      const ax = a.x, ay = a.y, dt = MATCH_RULES.ovalSampleDtSec;
+      const c = game.project({ x: b.p.x + b.v.x * dt, y: b.p.y + b.v.y * dt, z: b.p.z + b.v.z * dt }, {});
+      screen = [ax * width, ay * height];
+      if (c && c.ok && [c.x, c.y].every(Number.isFinite))
+        screenV = [(c.x - ax) * width / dt, (c.y - ay) * height / dt];
+    }
+  }
+  const pointer = extra.pointer || game.pointer || null;
+  return {
+    type,
+    frame: Number.isFinite(game.frame) ? game.frame : null,
+    t: game.time,
+    dt: Number.isFinite(extra.dt) ? extra.dt : null,
+    fps: Number.isFinite(game.fps) ? game.fps : null,
+    inputType: extra.inputType || (zone && zone.pointerType) || (game.pointerFine === false ? 'touch' : 'mouse'),
+    state: game.state || null,
+    gestureId: Number.isFinite(sw.gestureId) ? sw.gestureId : null,
+    pointer: pointer && [pointer.x, pointer.y].every(Number.isFinite) ? {
+      x: pointer.x, y: pointer.y,
+      px: width > 0 ? pointer.x * width : null,
+      py: height > 0 ? pointer.y * height : null,
+      id: extra.pointerId !== undefined ? extra.pointerId : null,
+      buttons: Number.isFinite(extra.buttons) ? extra.buttons : null,
+    } : null,
+    ball: { p: inputLogVec(b.p), v: inputLogVec(b.v), w: inputLogVec(b.w), screen, screenV,
+      live: !!b.live, lastHitBy: Number.isFinite(b.lastHitBy) ? b.lastHitBy : null },
+    paddle: { p: inputLogVec(pad.pos), normal: inputLogVec(pad.normal),
+      phase: pad.motionStage || null },
+    gesture: sw.m ? { samples: sw.m.samples, dist: sw.m.dist, pathLen: sw.m.pathLen,
+      speed: sw.m.speed, peakSpeed: sw.m.peakSpeed, active: !!sw.active } : null,
+    decision: inputLogDecision(zone),
+    outcome: extra.outcome || null,
+  };
+}
+
+/** Benchmark with the real camera path: makeInputLogEvent projects the ball
+ * now and at p+v*dt through Game.prototype.project and a BROADCAST
+ * rigViewProj matrix. The projection counter is returned as evidence; the
+ * old linear project stub is intentionally gone. */
+function benchmarkInputTelemetry(iterations = 5000, options = {}) {
+  const width = Number.isFinite(options.width) && options.width > 0 ? options.width : 1280;
+  const height = Number.isFinite(options.height) && options.height > 0 ? options.height : 760;
+  const aspect = width / height;
+  let viewProj = options.viewProj || null, projection = null;
+  if (!viewProj && typeof cameraRigFor === 'function' && typeof rigViewProj === 'function' &&
+      typeof M4 !== 'undefined' && typeof PH !== 'undefined') {
+    const buffer = { vp: M4.create(), proj: M4.create(), view: M4.create() };
+    viewProj = rigViewProj(cameraRigFor('BROADCAST', { x: 0, y: PH.TABLE_Y, z: 0 }, aspect), aspect, buffer);
+    projection = 'cameraRigFor(BROADCAST)+rigViewProj';
+  }
+  if (!viewProj || !Array.from(viewProj).every(Number.isFinite) || typeof Game === 'undefined' ||
+      !Game.prototype || typeof Game.prototype.project !== 'function') {
+    return { iterations, totalMs: null, msPerEvent: null, events: 0, projectionCalls: 0,
+      projectionsPerEvent: 0, projection, error: 'real Game.project/camera rig unavailable' };
+  }
+  let projectionCalls = 0;
+  const project = function (p, out) {
+    projectionCalls++;
+    return Game.prototype.project.call(this, p, out);
+  };
+  const log = new InputTelemetryLog({ maxEvents: 4096 });
+  const game = { frame: 1, time: 0, fps: 60, vw: width, vh: height, pointerFine: true,
+    state: 'RALLY', pointer: { x: .5, y: .5 }, R: { viewProj },
+    ball: { p: { x: 0, y: 1, z: 1 }, v: { x: 0, y: 0, z: 5 }, w: { x: 0, y: 0, z: 0 }, live: true, lastHitBy: -1 },
+    player: { pos: { x: 0, y: 1, z: 1.6 }, normal: { x: 0, y: 0, z: -1 }, motionStage: 'ready' },
+    swipe: { gestureId: 1, active: true, m: { samples: 4, dist: .1, pathLen: .12, speed: 1, peakSpeed: 1.2 },
+      pressZone: { shape: 'oval', score: .5, along: 20, across: 3, accepted: true, speedPx: 300 } },
+    project };
+  const probe = makeInputLogEvent(game, 'frame', { dt: 1 / 60 });
+  if (!probe || !probe.ball || !Array.isArray(probe.ball.screenV)) {
+    return { iterations, totalMs: null, msPerEvent: null, events: 0, projectionCalls,
+      projectionsPerEvent: iterations ? projectionCalls / iterations : 0, projection,
+      error: 'real projection did not produce screen velocity' };
+  }
+  projectionCalls = 0;
+  const now = () => (typeof performance !== 'undefined' ? performance.now() : Date.now());
+  const start = now();
+  for (let i = 0; i < iterations; i++) {
+    game.time = i / 60; game.frame = i;
+    log.record(makeInputLogEvent(game, 'frame', { dt: 1 / 60 }));
+  }
+  const elapsed = now() - start;
+  return { iterations, totalMs: elapsed, msPerEvent: elapsed / iterations, events: log.count,
+    projectionCalls, projectionsPerEvent: iterations ? projectionCalls / iterations : 0,
+    projection: `${projection || 'supplied viewProj'} + Game.prototype.project`,
+    viewport: [width, height] };
 }
 
 
@@ -5384,8 +5888,10 @@ class AudioEngine {
   hitEdge() {
     if (!this.ok) return;
     const t = this.ctx.currentTime;
-    this._noise(0.05, 0.3, 'highpass', 3600, 0.7, t);
-    this._tone(1500, 0.06, 0.22, 'square', t, 0.3);
+    if (t - (this._lastEdge || -Infinity) < 0.18) return;
+    this._lastEdge = t;
+    this._noise(0.035, 0.12, 'highpass', 3000, 0.7, t);
+    this._tone(1050, 0.045, 0.055, 'triangle', t, 0.42);
   }
   hitFloor(speed) {
     if (!this.ok) return;
@@ -6031,6 +6537,11 @@ class OpponentAI {
     };
 
     const racketFromStroke = deriveStroke(m, serveCtx);
+    /* deriveStroke invents its own aim from the synthetic gesture metrics
+     * (m.x is unset, so it sanitises to the centre): without this line the
+     * placement rolled above never reaches the solver and every serve is
+     * aimed within ~8 cm of the centre line at one fixed depth. */
+    racketFromStroke.aim = { x: aimX, z: aimZ };
     racketFromStroke.vmag = racket.vmag;
     racketFromStroke.normal = racket.normal;
     racketFromStroke.vR = racket.vR;
@@ -6413,20 +6924,13 @@ const CAMERA_ORDER = ['BROADCAST', 'DYNAMIC', 'LOW'];
    clamps to it, the camera fits around it, the bench measures it. */
 const PADDLE_LIMITS = {
   x: 1.02,                 // |x| of the bat, metres from the centre line
-  yLo: -0.24, yHi: 0.94,   // bat height relative to the playing surface
-  zNear: 1.02, zFar: 2.06, // bat depth: from just inside the table to well back
-  /* Extra reach, granted ONLY for a ball that dies short AND leaves time to
-   * get there (the game gates it on time-to-contact). 0.86 -> 0.66 because the
-   * opponent's shots used to land at a median 0.76-0.82 m past the net — every
-   * ball was a short ball, and a short ball arrives at the bat plane in
-   * ~0.20 s, which is inside human reaction time. Measured with the old value:
-   * 0-14 % of the opponent's returns were returnable at all. Leaning over the
-   * table to pick a ball out of the front half is a real thing players do.
-   * 0.46 is what a net-cord needs: a ball that clips the tape dribbles over and
-   * dies 0.15-0.35 m in, so the bat has to be able to get almost to the net.
-   * Checked against the frame rather than guessed: at 0.46 the step-in plane is
-   * on screen for all 4 rigs x 8 aspects (0/128 corners outside). */
-  zStepIn: 0.46,
+  yLo: -0.28, yHi: 1.00,   // bat height relative to the playing surface (expanded for mobile)
+  /* Realistic stance: the player stands 40-110 cm behind the end line,
+   * not hovering right over the table edge. zNear = just behind end line,
+   * zFar = a full metre back. zStepIn allows leaning over the table for
+   * very short balls (net-cord dribblers). */
+  zNear: 1.45, zFar: 2.50, // bat depth: from end line to well behind it
+  zStepIn: 0.80,           // lean over the table for a short ball
 };
 
 const _cp = { eye: { x: 0, y: 0, z: 0 }, look: { x: 0, y: 0, z: 0 }, fov: 42, mode: 'BROADCAST' };
@@ -6523,10 +7027,10 @@ for (const sx of [-1, 1]) {
 
 /* Fairness set: contact poses kept in frame */
 const REACH_POSES = [
-  [0.85, 0.10, 0.46],       // reaching over the table for a net-cord dribbler
-  [0.85, 0.25, 1.02],
+  [0.85, 0.10, 0.80],       // reaching over the table for a net-cord dribbler
+  [0.85, 0.25, 1.45],       // at the end line
   [0.85, 0.28, 1.37],       // wide, at the end line
-  [0.85, 0.15, 1.48],       // wide and low
+  [0.85, 0.15, 1.78],       // wide and low, normal stance
 ];
 const REACH_POINTS = [];
 for (const sx of [-1, 1]) {
@@ -6572,8 +7076,16 @@ function fitRig(P, aspect) {
   if (hit) return hit;
   const phone = phoneFactor(aspect);
   const pitch = P.pitch * DEG; // Identical angle on phone and desktop.
-  const rig = { eye: { x: 0, y: PH.TABLE_Y + Math.tan(pitch) * 3.32, z: 3.2 },
-    look: { x: 0, y: PH.TABLE_Y, z: -0.12 }, fov: lerp(P.fov, 34, phone), mode: P.id };
+  /* Mobile (portrait) fix: start much closer so the table fills the screen.
+   * The old eye.z=3.2 + fitTablePresentation pushed the camera back until
+   * the whole hall was visible on a narrow phone — the table became a stamp.
+   * Now: bring the eye ~30% closer on phones and allow tighter margins so
+   * the fit solver doesn't undo the closeness. */
+  const eyeZ = lerp(3.2, 2.1, phone);
+  const eyeY = PH.TABLE_Y + Math.tan(pitch) * eyeZ;
+  const fov = lerp(P.fov, 30, phone);
+  const rig = { eye: { x: 0, y: eyeY, z: eyeZ },
+    look: { x: 0, y: PH.TABLE_Y, z: -0.12 }, fov, mode: P.id };
   // No automatic lift or ball-following: the chosen view stays predictable.
   fitTablePresentation(rig, aspect, lerp(P.height, 0.80, phone),
     frameMargin(aspect), lerp(0.76, 0.90, phone));
@@ -6754,7 +7266,11 @@ function paddleTargetFromPointer(px, py, stanceY, sens, out, opts) {
   // 0.5 on screen is the centre line; the reachable half-width is the
   // authored limit, so the mapping is exact and independent of sensitivity
   // at the centre and only the *gain* changes with the slider.
-  const tz = clamp(1.44 + clamp(sy - 0.55, -0.34, 0.45) * 0.86 * (0.6 + 0.4 * s),
+  // Depth is anchored at PADDLE_HOME (the realistic stance main moved us to)
+  // and spans it by ±0.43 m — sy 0.21 lands at zNear 1.45, sy 0.655 at the
+  // deepest back swing. The perspective map needs the exact same contract as
+  // the linear fallback, or the two paths disagree about where the bat lives.
+  const tz = clamp(1.78 + clamp(sy - 0.55, -0.34, 0.45) * 0.96 * (0.6 + 0.4 * s),
     zNear, PADDLE_LIMITS.zFar);
   const vp = opts && opts.vp;
   const _pp = _ptRayPt, _pa = _ptAnchorPt;
@@ -6765,8 +7281,10 @@ function paddleTargetFromPointer(px, py, stanceY, sens, out, opts) {
     o.tz = tz; o.zNear = zNear;
     return o;
   }
+  // Mobile fallback: the expanded vertical range from main keeps high lobs
+  // and low chops reachable even when the view matrix isn't ready yet.
   o.tx = (x - 0.5) * 2 * PADDLE_LIMITS.x * s;
-  o.ty = PH.TABLE_Y + 0.62 - (y - 0.18) * 0.95 * s;
+  o.ty = PH.TABLE_Y + 0.62 - (y - 0.18) * 1.10 * s;
   o.tz = tz;
   o.tx = clamp(o.tx, -PADDLE_LIMITS.x, PADDLE_LIMITS.x);
   o.ty = clamp(o.ty, PH.TABLE_Y + PADDLE_LIMITS.yLo, PH.TABLE_Y + PADDLE_LIMITS.yHi);
@@ -6782,7 +7300,7 @@ const _clampS = {}, _clampA = {}, _clampP = { x: 0, y: 0, z: 0 };
  * by resetPaddle() and the home blend in updatePlayerPaddle(). */
 const RECENTER_S = 0.34;
 
-const PADDLE_HOME = { x: 0, y: PH.TABLE_Y + 0.62, z: 1.44 };
+const PADDLE_HOME = { x: 0, y: PH.TABLE_Y + 0.62, z: 1.78 };
 
 function insideFrame(s, m) {
   return s.ok && s.x > m && s.x < 1 - m && s.y > m && s.y < 1 - m;
@@ -7229,6 +7747,7 @@ class MomentRecorder {
     this.n = 0; this.head = 0;          // ring state (n = filled, head = write cursor)
     this.beginT = 0; this.marks = [];   // indices into the ring for the current rally
     this.events = [];                   // contacts of the current rally
+    this.inputDecisions = [];           // sparse press-gate evidence; frame size unchanged
     this.kept = [];                     // surviving moments, best first
     this.rallyStart = 0;                // ring index where the rally began
     this.lastClip = null;
@@ -7240,6 +7759,7 @@ class MomentRecorder {
    *  tell "3-0 up, easy point" from "0-4 down, that one" */
   beginRally(t, score) {
     this.events.length = 0;
+    this.inputDecisions.length = 0;
     this.rallyStart = this.head;
     this.rallyT = t;
     this.netClip = false;
@@ -7263,6 +7783,18 @@ class MomentRecorder {
 
   /** @param e {by, stroke, speed, spin, quality, slip} */
   addContact(t, e) { this.events.push(Object.assign({ t }, e)); }
+
+  /** One compact record per press/contact, NOT per frame: REPLAY_FLOATS and
+   *  the 45 s ring keep their exact size. Cost is ~7 numbers + 2 short strings
+   *  per player shot (a 20-shot rally adds well under 4 KB of JSON). */
+  addInputDecision(t, decision, outcome, inputType) {
+    if (!decision) return;
+    this.inputDecisions.push({ t, shape: decision.shape || null,
+      score: decision.score, along: decision.along, across: decision.across,
+      accepted: !!decision.accepted, reason: decision.reason || null,
+      inputType: inputType || null, contact: !!(outcome && outcome.contact) });
+    if (this.inputDecisions.length > 256) this.inputDecisions.shift();
+  }
   addBounce(isNet) { if (isNet) this.netClip = true; }
 
   /** Capture the current rally's frames for debug replay regardless of beauty score */
@@ -7273,7 +7805,7 @@ class MomentRecorder {
       const src = ((this.head - len + k) % this.cap + this.cap) % this.cap;
       clip.set(this.f.subarray(src * REPLAY_FLOATS, src * REPLAY_FLOATS + REPLAY_FLOATS), k * REPLAY_FLOATS);
     }
-    return { frames: clip, hz: REPLAY_HZ, len, poseVersion: 2 };
+    return { frames: clip, hz: REPLAY_HZ, len, poseVersion: 2, inputDecisions: this.inputDecisions.slice() };
   }
 
   /**
@@ -7315,6 +7847,7 @@ class MomentRecorder {
       score, shots, frames: clip, hz: REPLAY_HZ, poseVersion: 2,
       speed: peakSpeed, spin: peakSpin, finish,
       events: this.events.slice(),
+      inputDecisions: this.inputDecisions.slice(),
       winner: meta.winner, reason: meta.reason, mine,
       meta: m, t,
       crowd: meta.winner > 0 && m.matchPoint,
@@ -10484,7 +11017,6 @@ class Game {
       showDebug: false,
       showPlayerPaddle: true,
       slowmoOnBigShots: true,
-      slowmoPlayer: true,
       targetScore: 11,
       spinBias: 'norm',
       gestureProfile: defaultGestureProfile(),   // 'classic' | 'safe'
@@ -10511,11 +11043,11 @@ class Game {
       q: Q.new(), live: false, hist: [], lastHitBy: 0, speed: 0,
     };
     this.player = {
-      pos: V3.new(0, PH.TABLE_Y + 0.25, 1.45),
-      prev: V3.new(0, PH.TABLE_Y + 0.25, 1.45),
+      pos: V3.new(0, PH.TABLE_Y + 0.25, 1.78),
+      prev: V3.new(0, PH.TABLE_Y + 0.25, 1.78),
       vel: V3.new(), normal: V3.new(0, 0, -1),
       q: Q.new(), swing: 0, side: 1, hitRadius: MATCH_RULES.sweetRadius, lastHitT: -9,
-      prevPos: V3.new(0, PH.TABLE_Y + 0.25, 1.45),
+      prevPos: V3.new(0, PH.TABLE_Y + 0.25, 1.78),
     };
     this.paddleMotion = new PaddleStrokeMotion();
     this.aiPaddle = {
@@ -10567,6 +11099,7 @@ class Game {
     };
 
     this.shotJournal = new ShotJournal();
+    this.inputLog = typeof InputTelemetryLog !== 'undefined' ? new InputTelemetryLog() : null;
 
     // Momentum tracking
     this.momentum = {
@@ -10729,19 +11262,25 @@ class Game {
 
       this.swipe.down(n.x, n.y, this.time);
       const rect = c.getBoundingClientRect();
-      const ballZone = pressHitZone(this.project(this.ball.p), n, rect.width, rect.height);
-      const padZone = pressHitZone(this.project(this.player.pos), n, rect.width, rect.height);
-      this.swipe.pressZone = ballZone || { accepted: false, radius: MATCH_RULES.pressRadiusPx, distancePx: null };
-      /* The press is remembered in screen terms so the gate can be re-evaluated
-       * as the ball travels (see pressAdmitsBall). The bat itself counts as the
-       * action too: a finger that lands on the blade is aiming a stroke. */
+      const pointerType = e.pointerType || (this.pointerFine === false ? 'touch' : 'mouse');
+      const servePress = this.state === GS.SERVE_TOSS && this.server === 1;
+      const ballZone = pressZoneForBall(this.ball, n, rect.width, rect.height, {
+        project: point => this.project(point, {}), pointerType,
+        referenceWorld: this.player && this.player.pos,
+        kind: servePress ? 'serve' : 'rally',
+        tossApex: this.tossApex, tossStartY: this.tossStartY, tableY: PH.TABLE_Y,
+      });
+      this.swipe.pressZone = ballZone || { accepted: false, shape: MATCH_RULES.zoneShape,
+        radius: MATCH_RULES.pressRadiusPx, distancePx: null, score: null, along: null,
+        across: null, reason: 'OUTSIDE_ZONE', pointerType };
+      /* Admission is stamped once, here, from the ball at pointerdown.
+       * Moving into the zone later, landing on the bat, position assist and
+       * CCD are all downstream of this stamp and cannot rewrite it. */
       this.swipe.pressZone.pressX = n.x; this.swipe.pressZone.pressY = n.y;
       this.swipe.pressZone.vw = rect.width; this.swipe.pressZone.vh = rect.height;
-      if (padZone && padZone.accepted && !this.swipe.pressZone.accepted) {
-        this.swipe.pressZone.accepted = true;
-        this.swipe.pressZone.via = 'paddle';
-        this.swipe.pressZone.paddleDistancePx = padZone.distancePx;
-      }
+      this.swipe.pressZone.pointerId = e.pointerId;
+      this.swipe.pressZone.pointerType = pointerType;
+      this.swipe.pressZone.pressT = this.time;
       this.swipe.pressZone.serving = this.state === GS.SERVE_READY || this.state === GS.SERVE_TOSS;
       if (this.shotJournal) {
         const attempt = this.shotJournal.create(this.swipe.gestureId, this.time);
@@ -10756,6 +11295,7 @@ class Game {
          button is down. Hover still aims; it does not hit. */
       this.pointer = n; this.pointerDown = true;
       this.pointerFine = e.pointerType !== 'touch' && e.pointerType !== 'pen';
+      this.logInput('pointerdown', { pointer: n, pointerId: e.pointerId, buttons: e.buttons, inputType: pointerType });
       if (this.state === GS.SERVE_READY && this.server === 1) this.startToss();
     };
 
@@ -10791,6 +11331,8 @@ class Game {
         this.swipe.move(n.x, n.y, this.time);
         const sp = this.swipe.m.speed;
         if (sp > 1.6) this.audio.whoosh(clamp(sp / 4, 0, 1.4));
+        this.logInput('pointermove', { pointer: n, pointerId: e.pointerId, buttons: e.buttons,
+          inputType: e.pointerType || (this.pointerFine === false ? 'touch' : 'mouse') });
       }
       if (e.cancelable) e.preventDefault();
     };
@@ -10807,6 +11349,8 @@ class Game {
       this.pointerDown = false;
       this.swipeReleasedAt = this.time;
       this.updateShotDiagnostics();
+      this.logSwipeRelease({ pointer: n, pointerId: e.pointerId, buttons: e.buttons,
+        inputType: e.pointerType || (this.pointerFine === false ? 'touch' : 'mouse') });
       this.lastSwipeT = this.time;
       e.preventDefault();
     };
@@ -10832,6 +11376,21 @@ class Game {
       if (Number.isFinite(delta)) this.cameraControls.zoom = clamp(this.cameraControls.zoom * Math.exp(delta * 0.0015), 0.72, 1.6);
     }, { passive: false });
     c.style.touchAction = 'none';
+
+    /* Keep vertical gestures in the mini app when Telegram supports the API;
+     * retain the DOM fallback for older Telegram clients and embedded webviews. */
+    try {
+      const tg = window.Telegram && window.Telegram.WebApp;
+      if (tg && typeof tg.setupSwipeBehavior === 'function') {
+        tg.setupSwipeBehavior({ allow_vertical_swipe: false });
+      }
+    } catch (e) { console.debug('Telegram swipe behavior unavailable', e); }
+    document.addEventListener('touchmove', (e) => {
+      if (e.cancelable) e.preventDefault();
+    }, { passive: false });
+    /* Prevent iOS rubber-banding / pull-to-refresh on the body. */
+    document.body.style.overscrollBehavior = 'none';
+    document.documentElement.style.overscrollBehavior = 'none';
 
     window.addEventListener('keydown', (e) => {
       if (document.getElementById('settings').classList.contains('on') || document.getElementById('shotLab').classList.contains('on')) return;
@@ -10860,6 +11419,7 @@ class Game {
   startMatch(diff) {
     this.endReplay(false); // cancel old callbacks; never complete an old match here
     this.moments.reset();
+    if (this.inputLog && typeof this.inputLog.resetClock === 'function') this.inputLog.resetClock(this.time);
     this.shotJournal && this.shotJournal.reset();
     this.lastMoment = null;
     this._acc = 0;
@@ -11023,7 +11583,8 @@ class Game {
     V3.set(b.p, pad.pos.x,
       PH.TABLE_Y + 0.14, clamp(pad.pos.z - 0.04, PH.T_HALF_LEN + 0.04, 2.0));
     V3.set(b.v, rndSym(0.03), 2.45 + rnd(0, 0.2), rndSym(0.03));
-    this.tossApex = PH.TABLE_Y;
+    this.tossStartY = b.p.y;
+    this.tossApex = b.p.y;
     V3.zero(b.w);
     b.live = true;
     this.isServeBall = true;
@@ -11651,6 +12212,111 @@ class Game {
       strokeId: r && r.stroke.id });
   }
 
+  logInput(type, extra = {}) {
+    if (!this.inputLog || typeof makeInputLogEvent !== 'function') return null;
+    const event = makeInputLogEvent(this, type, extra);
+    if (!event) return null;
+    this.inputLog.record(event);
+    if ((type === 'pointerdown' || type === 'contact') && this.moments &&
+        typeof this.moments.addInputDecision === 'function')
+      this.moments.addInputDecision(event.t, event.decision, event.outcome, event.inputType);
+    return event;
+  }
+
+  logSwipeRelease(extra = {}) {
+    const serving = !!(this.swipe && this.swipe.pressZone && this.swipe.pressZone.serving);
+    return this.logInput('pointerup', { ...extra, outcome: { released: true, contact: false,
+      reason: isRealStroke(this.swipe && this.swipe.lastReleased, serving) ? null : 'STATIC_CLICK' } });
+  }
+
+  pressConsumed() {
+    const sw = this.swipe;
+    return !!(sw && !sw.pressZone && Number.isFinite(sw.consumedGestureId) &&
+      sw.consumedGestureId === sw.gestureId);
+  }
+
+  /** One diagnostic decision per shot/gesture/reason. tryPlayerHit runs on
+   * physics substeps, so unguarded logging would drown the 30 s ring. */
+  logPressRejection(reason, detail = {}) {
+    if (typeof PRESS_REJECTION_REASONS === 'undefined' || !PRESS_REJECTION_REASONS.includes(reason)) return null;
+    const sw = this.swipe || {}, b = this.ball || {};
+    const seen = this._pressRejectionLogKeys || (this._pressRejectionLogKeys = new Set());
+    if (seen.size > 512) seen.clear();
+    const key = [this.shotId || 0, Number.isFinite(sw.gestureId) ? sw.gestureId : 0,
+      Number.isFinite(b.lastHitBy) ? b.lastHitBy : 0,
+      Array.isArray(this.rallyBounces) ? this.rallyBounces.join(',') : '', reason].join('|');
+    if (seen.has(key)) return null;
+    seen.add(key);
+    return this.logInput('decision', { outcome: { contact: false, ...detail, reason } });
+  }
+
+  logNoStrokeIntent(serving = false) {
+    const sw = this.swipe, b = this.ball, pad = this.player;
+    if (!sw || !b || !pad || !b.p || !pad.pos) return null;
+    const ownBounce = Array.isArray(this.rallyBounces) && this.rallyBounces.some(side => side > 0);
+    if (!serving && !ownBounce) return null;
+    if (serving && b.v && b.v.y >= 0) return null; // no legal serve contact opportunity yet
+    const inRange = typeof playerInCaptureRange === 'function' && playerInCaptureRange(b.p, pad.pos, serving);
+    const passed = Number.isFinite(b.p.z) && Number.isFinite(pad.pos.z) &&
+      b.p.z > pad.pos.z + MATCH_RULES.depthTolerance;
+    if (!inRange && !passed) return null;
+    const releasedAt = Number.isFinite(this.swipeReleasedAt) ? this.swipeReleasedAt : -Infinity;
+    const deadWin = serving ? 1.15 : .25;
+    if (!sw.active && isRealStroke(sw.lastReleased, serving) && this.time - releasedAt >= deadWin)
+      return this.logPressRejection('TIMING_EARLY', { releasedAgeMs: (this.time - releasedAt) * 1000 });
+    const heldWin = serving ? 1.15 : 2.5;
+    const staleHeld = sw.active && sw.gestureId === sw.realGestureId &&
+      this.time - (sw.realAt || 0) >= heldWin;
+    const noGesture = !sw.active && !sw.lastReleased && !(sw.samples && sw.samples.length);
+    if (staleHeld || noGesture) return this.logPressRejection('NO_FRESH_SWIPE');
+    return null;
+  }
+
+  logNoContactReason(captureSample, serving = false) {
+    if (serving || !this.ball || !this.player || !this.ball.p || !this.ball.v || !this.player.pos) return null;
+    const b = this.ball, pad = this.player;
+    const dz = b.p.z - pad.pos.z;
+    const separating = (b.p.x - pad.pos.x) * b.v.x + (b.p.y - pad.pos.y) * b.v.y + dz * b.v.z;
+    if (!(dz > MATCH_RULES.depthTolerance) || !(separating > 0)) return null;
+    const lateral = captureSample && Number.isFinite(captureSample.lateral)
+      ? captureSample.lateral : Math.hypot(b.p.x - pad.pos.x, b.p.y - pad.pos.y);
+    const depthGap = captureSample && Number.isFinite(captureSample.depthGap)
+      ? captureSample.depthGap : Math.abs(dz);
+    return lateral <= MATCH_RULES.captureRadius
+      ? this.logPressRejection('DEPTH_FAIL', { depthGap, lateral })
+      : this.logPressRejection('TIMING_LATE', { depthGap, lateral });
+  }
+
+  tossRiseNow() {
+    return typeof serveTossRise === 'function'
+      ? serveTossRise(this.tossApex, this.tossStartY, PH.TABLE_Y) : NaN;
+  }
+
+  /** Direction is judged at the contact candidate, from the whole gesture:
+   * an early backswing segment may still be moving away from the ball. This
+   * can only reject an admitted press; it can never admit an outside one. */
+  validatePressDirection(m) {
+    const pz = this.swipe && this.swipe.pressZone;
+    if (!pz || !pz.accepted || !m) return this.pressAdmitsBall();
+    if (pz.directionOk === true) return true;
+    if (pz.directionOk === false) return false;
+    if (![pz.x, pz.y, pz.pointerX, pz.pointerY, m.dx, m.dy].every(Number.isFinite)) return true;
+    const toBallX = pz.x - pz.pointerX, toBallY = pz.y - pz.pointerY;
+    const swipeX = m.dx * (pz.vw > 0 ? pz.vw : 1), swipeY = m.dy * (pz.vh > 0 ? pz.vh : 1);
+    const dist = Math.hypot(toBallX, toBallY), len = Math.hypot(swipeX, swipeY);
+    if (dist < 4) { pz.directionDot = 1; pz.directionOk = true; return true; }
+    if (!(len > 1e-9)) return false;
+    const dot = (swipeX * toBallX + swipeY * toBallY) / (len * dist);
+    pz.directionDot = dot; pz.directionOk = dot > 0;
+    if (!pz.directionOk) {
+      pz.accepted = false; pz.reason = 'WRONG_DIRECTION';
+      if (this.shotJournal && typeof this.shotJournal.rejectPress === 'function')
+        this.shotJournal.rejectPress(this.swipe.gestureId, 'WRONG_DIRECTION', pz);
+      this.logInput('decision', { outcome: { contact: false, reason: 'WRONG_DIRECTION' } });
+    }
+    return pz.directionOk;
+  }
+
   playerStrokeIntent(serving = false) {
     const sw = this.swipe;
     const lastSample = sw.samples[sw.samples.length - 1];
@@ -11679,33 +12345,19 @@ class Game {
     return m;
   }
 
-  /** The press gate asks "did this gesture start near the action", not
-   *  "was the finger exactly on the ball at the instant of pointerdown".
-   *  A ball moving at 10 m/s travels 1.5 m in the time the bat needs to
-   *  arrive, and on a touch screen the thumb naturally lands where the ball
-   *  is GOING. Measured with the old instantaneous test: pressing the ball's
-   *  own landing spot 0.2-0.3 s early was rejected in 9 of 9 attempts, and a
-   *  press on the bat while it covered the ball was rejected as well. The
-   *  gesture is admitted when it starts within the 48 CSS px radius of the
-   *  ball, of the bat, or when the ball later enters that radius while the
-   *  gesture is still alive. A tap in an empty corner still never hits. */
+  /** The press gate is the oval/circle stamped at pointerdown (see
+   *  pressZoneForBall). The oval already reaches ahead of the ball along its
+   *  screen trajectory, which is where a backswing starts; anything later
+   *  may only reject (wrong swipe direction), never admit. */
   pressAdmitsBall() {
-    const pz = this.swipe.pressZone;
-    if (!pz || pz.accepted) return true;
-    /* A zone we cannot verify is not admitted. Every real pointerdown stores
-     * the screen geometry; only synthetic callers omit it. */
-    if (!Number.isFinite(pz.pressX) || !Number.isFinite(pz.pressY) ||
-        !(pz.vw > 0) || !(pz.vh > 0)) return false;
-    if (!this.R || !this.R.viewProj) return false;
-    const bs = this.project(this.ball.p, this._pressBallScreen || (this._pressBallScreen = {}));
-    if (!bs || !bs.ok) return false;
-    const d = Math.hypot((bs.x - pz.pressX) * pz.vw, (bs.y - pz.pressY) * pz.vh);
-    if (d <= pz.radius) {
-      pz.accepted = true; pz.via = 'path'; pz.distancePx = d;
-      if (this.shotJournal) this.shotJournal.acceptPress(this.swipe.gestureId, 'path');
-      return true;
-    }
-    return false;
+    const pz = this.swipe && this.swipe.pressZone;
+    /* A missing zone means a synthetic/internal swipe (demo stamps its own,
+     * tools call SwipeTracker directly). Every real pointerdown stamps one
+     * before any physics runs, and that stamp is final: no path, paddle,
+     * assist or CCD re-evaluation may turn an outside press into a hit. */
+    if (this.pressConsumed()) return false;
+    if (!pz) return true;
+    return pz.accepted === true;
   }
 
   /** The pose the blade is drawn with this frame. The continuous test must use
@@ -11751,7 +12403,11 @@ class Game {
     /* A serve has to bounce on the receiver's side before it can be returned.
      * `isServeBall` alone did not stop the near side from volleying the
      * opponent's serve straight out of the toss. */
-    if (this.isServeBall && b.lastHitBy === -1) return;
+    if (this.pressConsumed()) { this.logPressRejection('CONSUMED'); return; }
+    if (this.isServeBall && b.lastHitBy === -1) {
+      if (this.pressAdmitsBall() && this.playerStrokeIntent(false)) this.logPressRejection('BOUNCE_ILLEGAL');
+      return;
+    }
     if (!this.pressAdmitsBall()) return;
 
     // The fixed envelope belongs to the racket, NOT the pointer marker.
@@ -11760,7 +12416,7 @@ class Game {
 
     const serveCtx = this.state === GS.SERVE_TOSS && this.server === 1 && b.lastHitBy === 0;
     const sw = this.swipe, m = this.playerStrokeIntent(serveCtx);
-    if (!m) return;
+    if (!m) { this.logNoStrokeIntent(serveCtx); return; }
     /* ITTF 2.07: a return must follow a bounce on the receiver's court.
      * Without this gate the generous endpoint envelope returned
      *   · a ball still on its way to the player (a volley, a fault), and
@@ -11770,6 +12426,7 @@ class Game {
      * consumed, so it is still there for the real chance. */
     const ownBounce = this.rallyBounces.some((s) => s > 0);
     if (!serveCtx && !ownBounce) {
+      this.logPressRejection('BOUNCE_ILLEGAL');
       if (b.p.z >= PH.T_HALF_LEN) this.hintOut = this.time;
       return;
     }
@@ -11778,19 +12435,22 @@ class Game {
     const captureSample = measureCaptureAllowance(spad, p0, b.p, serveCtx, endpointEligible);
     if (captureSample && this.shotJournal) this.shotJournal.observeCapture(sw.gestureId, captureSample, this.time);
     if (b.v.z < 0 && b.p.z < pad.pos.z - .35) return;
-    if (serveCtx && (b.v.y >= 0 || this.tossApex - PH.TABLE_Y <= 0.10)) return;
+    if (serveCtx && (b.v.y >= 0 || !(this.tossRiseNow() > MATCH_RULES.serveTossMinRise))) {
+      if (b.v.y < 0) this.logPressRejection('SERVE_TOSS_LOW', { tossRise: this.tossRiseNow() });
+      return;
+    }
     let hit = null;
 
     if (serveCtx) {
       // ITTF 2.06: the ball must be struck while FALLING from the toss.
       const rad = V3.dist(b.p, pad.pos);
-      if (b.v.y < 0 && this.tossApex - PH.TABLE_Y > 0.10 && playerInCaptureRange(b.p, pad.pos, true)) {
+      if (b.v.y < 0 && this.tossRiseNow() > MATCH_RULES.serveTossMinRise && playerInCaptureRange(b.p, pad.pos, true)) {
         hit = { t: 1, x: b.p.x, y: b.p.y, z: b.p.z, captureKind: 'serve', rad: rad * 0.40, px: pad.pos.x, py: pad.pos.y, pz: pad.pos.z };
       }
     } else if (ownBounce) {
       /* The endpoint route fires at the CLOSEST APPROACH of the ball to the
-       * blade, not the instant it enters the assist box. The box is 0.36 m
-       * wide and 0.35 m deep, so firing on entry put the contact up to 35 cm
+       * blade, not the instant it enters the assist box. The box is 0.62 m
+       * wide and 0.62 m deep, so firing on entry put the contact up to 62 cm
        * in front of the racket — the ball left a place the blade visibly
        * never reached. While the ball is still closing, this substep simply
        * does not hit; the gesture stays alive and the next substep (or the
@@ -11821,8 +12481,9 @@ class Game {
     if (!hit) {
       hit = this.sweepPaddle(spad, p0, b.p, serveCtx ? serveReach : reachRadius);
     }
-    if (!hit) return;
-    if (b.lastHitBy === 1) return;                 // you already hit it
+    if (!hit) { this.logNoContactReason(captureSample, serveCtx); return; }
+    if (!this.validatePressDirection(m)) return;
+    if (b.lastHitBy === 1) { this.logPressRejection('CONSUMED'); return; } // you already hit it
 
     const isServeStroke = this.isServeBall && b.lastHitBy === 0 && this.server === 1;
     const contact = V3.new(hit.x, hit.y, hit.z);
@@ -11888,6 +12549,16 @@ class Game {
      * null impact is how a ball that never touched the rubber still counted as
      * returned — and why the next, real attempt was ignored. */
     if (!info) return;
+    {
+      const bp = this.R && this.R.viewProj ? this.project(b.p, {}) : null;
+      const pp = this.R && this.R.viewProj ? this.project(pad.pos, {}) : null;
+      const distancePx = bp && pp && bp.ok && pp.ok && this.vw > 0 && this.vh > 0
+        ? Math.hypot((bp.x - pp.x) * this.vw, (bp.y - pp.y) * this.vh) : null;
+      this.logInput('contact', { outcome: { contact: true, route: hit.captureKind || 'ccd',
+        distancePx, distanceM: captureSample ? captureSample.distance : V3.dist(b.p, pad.pos),
+        pressToContactMs: this.swipe.pressZone && Number.isFinite(this.swipe.pressZone.pressT)
+          ? (this.time - this.swipe.pressZone.pressT) * 1000 : null } });
+    }
     pad.lastHitT = this.time;
     /* The blade is where the contact is. The old code left the bat up to one
      * full capture radius away and launched the ball from a point it visibly
@@ -11936,6 +12607,7 @@ class Game {
     if (isServeStroke) { this.serveBounces = 0; this.rallyBounces.length = 0; }
     else this.isServeBall = false;
     this.applyHit(1, racket, contact, quality, info);
+    sw.consumedGestureId = sw.gestureId; sw.consumedAt = this.time;
     sw.cancel();
     this.pointerDown = false;
     this.swipeReleasedAt = -Infinity;
@@ -12024,14 +12696,14 @@ class Game {
     if (this._volleyPred) this._volleyPred.reach = null;
     const broken = ![pad.pos.x, pad.pos.y, pad.pos.z].every(Number.isFinite);
     if (hard || broken) {
-      V3.set(pad.pos, 0, PH.TABLE_Y + 0.25, 1.44);
+      V3.set(pad.pos, 0, PH.TABLE_Y + 0.25, 1.78);
       V3.copy(pad.prevPos, pad.pos);
       V3.copy(pad.prev, pad.pos);
       V3.zero(pad.vel);
     }
     V3.set(pad.normal, 0, Math.sin(this.padPitch), -Math.cos(this.padPitch));
     pad.swing = 0;
-    this._ptTarget = { tx: 0, ty: PH.TABLE_Y + 0.25, tz: 1.44 };
+    this._ptTarget = { tx: 0, ty: PH.TABLE_Y + 0.25, tz: 1.78 };
   }
 
   updatePlayerPaddle(dt) {
@@ -12149,7 +12821,7 @@ class Game {
       const kHome = clamp((this.recenterT / RECENTER_S - 0.25) / 0.75, 0, 1);
       tx = lerp(tx, 0, kHome);
       ty = lerp(ty, PH.TABLE_Y + 0.25, kHome);
-      tz = lerp(tz, 1.44, kHome);
+      tz = lerp(tz, 1.78, kHome);
     }
 
     // during your own toss the bat slides under the ball: serving is about
@@ -12174,7 +12846,7 @@ class Game {
      * ball — the only sane way to play one — got no step-in at all and the
      * bat stayed 0.45 m behind the ball until the point was awarded against
      * them. A live press in the admitted zone is intent. */
-    if (A > 0.01 && canReachShort && this.recenterT <= 0 && (this.swipe.active || this.playerStrokeIntent())) {
+    if (A > 0.01 && canReachShort && this.recenterT <= 0 && this.pressAdmitsBall() && (this.swipe.active || this.playerStrokeIntent())) {
       if (o.reach) {
         // Footwork assist, not a magnet: a swipe on the far wing must not
         // teleport the bat onto a ball it was never near. The gate widened
@@ -12370,7 +13042,7 @@ class Game {
     if (this.paused || (this.replayer && this.replayer.on)) { w.k = 0; return; }
     if (this.state === GS.SERVE_TOSS && this.server === 1 && b.live && b.lastHitBy === 0) {
       // No ready circle on the paddle and no "hit now" while the toss rises.
-      if (b.v.y < 0 && this.tossApex - PH.TABLE_Y > .10) {
+      if (b.v.y < 0 && this.tossRiseNow() > MATCH_RULES.serveTossMinRise) {
         w.on = true; w.kind = 'serve'; w.t = 0;
         w.contactable = playerInCaptureRange(b.p, pad.pos, true);
         w.ready = w.contactable ? 1 : .4;
@@ -12650,7 +13322,9 @@ class Game {
     /* The attract-mode bot does not go through pointerdown, so it must not
      * inherit a rejected press zone from the last human gesture. */
     const rectD = this.canvas && this.canvas.getBoundingClientRect ? this.canvas.getBoundingClientRect() : null;
-    this.swipe.pressZone = { accepted: true, via: 'demo', radius: MATCH_RULES.pressRadiusPx,
+    this.swipe.pressZone = { accepted: true, via: 'demo', shape: MATCH_RULES.zoneShape,
+      score: 0, along: 0, across: 0, reason: null, pointerType: 'demo',
+      radius: MATCH_RULES.pressRadiusPx,
       pressX: x0, pressY: y0, vw: rectD ? rectD.width : 1, vh: rectD ? rectD.height : 1 };
     this._demoGesture = {
       x0, y0, x1, y1,
@@ -12798,6 +13472,7 @@ class Game {
     } else this._acc = 0;
 
     this.updateStrikeWindow(dtReal);
+    this.logInput('frame', { dt: dtReal });
     if (this.state === GS.RALLY || this.state === GS.SERVE_TOSS) this.moments.push(this.time, this);
     if (this.training) this.training.update(dtReal);
     else if (this.network.isInMatch) {
@@ -13176,6 +13851,7 @@ class UI {
     this.noteTimer = 0;
     this.ripples = [];
     this.captureDebug = false;
+    this.zoneCal = null; this.zoneCalAfterId = 0;
 
     // UI Animation system (99-level polish)
     this.uiAnim = new UIAnimation();
@@ -13296,7 +13972,6 @@ class UI {
   updateInputCopy() {
     const touch = this.inputMode === 'touch';
     $('#cameraHelp').textContent = touch ? 'Виды настроены. Выберите удобный.' : 'Колесо — масштаб. ПКМ ↕ — высота.';
-    $('#slowKey').textContent = touch ? 'ДЕРЖАТЬ' : 'SHIFT';
     $('#gl').setAttribute('aria-label', touch ? 'Игровое поле. Удар — свайп. Камера — в настройках.'
       : 'Игровое поле. Удар — ЛКМ и движение. Колесо — масштаб, ПКМ вверх/вниз — высота камеры, C — сброс.');
     if (this.game && this.game.training) this.trainSync(this.game.training);
@@ -13500,6 +14175,16 @@ class UI {
       this.game.stopDemo();
     });
     for (const id of ['#shotLabPause', '#shotLabResults']) $(id).addEventListener('click', e => { e.stopPropagation(); this.openShotLab(); });
+    const logButton = $('#inputLogPause');
+    if (logButton) logButton.addEventListener('click', e => { e.stopPropagation(); this.exportInputLog(); });
+    const calMenu = $('#zoneCalMenu');
+    if (calMenu) calMenu.addEventListener('click', () => { this.ensureZoneCalibration(); this.openShotLab(); });
+    const calStart = $('#zoneCalStart');
+    if (calStart) calStart.addEventListener('click', () => { this.zoneCal = null; this.ensureZoneCalibration(); this.renderZoneCalibration(); });
+    const calImport = $('#zoneCalImport');
+    if (calImport) calImport.addEventListener('click', () => { this.ensureZoneCalibration(); this.importZoneCalibration(); this.renderZoneCalibration(); });
+    const calExport = $('#zoneCalExport');
+    if (calExport) calExport.addEventListener('click', () => this.exportZoneCalibration());
     $('#shotLabClose').addEventListener('click', () => this.closeShotLab());
     $('#shotLabExport').addEventListener('click', () => this.exportShotLab());
     for (const id of ['#captureDebugPause', '#captureDebugLab']) $(id).addEventListener('change', event => {
@@ -13532,26 +14217,11 @@ class UI {
       g.audio.init(); g.audio.ui('click');
       this.syncSpinBias();
     });
-    /* slow-mo: press and hold, on a phone or on the keyboard */
-    const slow = $('#slow');
-    const hold = (v) => (e) => {
-      if (e && e.cancelable) e.preventDefault();
-      this.game && this.game.setSlowmoHold(v);
-      if (v) this.game && this.game.audio.init();
-    };
-    slow.addEventListener('pointerdown', hold(true));
-    slow.addEventListener('pointerup', hold(false));
-    slow.addEventListener('pointerleave', hold(false));
-    slow.addEventListener('pointercancel', hold(false));
-    window.addEventListener('keyup', (e) => {
-      if (e.key === 'Shift' || e.key === ' ') this.game && this.game.setSlowmoHold(false);
-    });
     window.addEventListener('keydown', (e) => {
       if ($('#shotLab').classList.contains('on')) return;
       if ((e.key === 'Shift' || e.key === ' ') && !e.repeat && this.game && this.game.replayer.on) {
         this.game.skipReplay(); e.preventDefault(); return;
       }
-      if ((e.key === 'Shift' || e.key === ' ') && !e.repeat) this.game && this.game.setSlowmoHold(true);
       if ((e.key === 'm' || e.key === 'M' || e.key === 'ь' || e.key === 'Ь')) this.showMoments();
     });
     $('#reelSkip').addEventListener('click', () => this.game && this.game.skipReplay());
@@ -13867,10 +14537,6 @@ class UI {
         if (g.director) { g.director.enabled = s.adaptive; if (!s.adaptive) { g.director.reset(); g.ai.setHandicap(1); } }
         break;
       case 'haptics': s.haptics = v === 'on'; if (s.haptics) g.buzz(12); break;
-      case 'slowmoPlayer':
-        s.slowmoPlayer = v === 'on';
-        if (!s.slowmoPlayer) g.setSlowmoHold(false);
-        $('#slow').classList.toggle('off', !s.slowmoPlayer);
         break;
       case 'target': s.targetScore = +v; $('#toWin').textContent = v; break;
       default: break;
@@ -13955,16 +14621,97 @@ class UI {
     $('#shotLab').classList.remove('on');
     if (!this._labWasPaused) this.game.setPaused(false);
   }
+  ensureZoneCalibration() {
+    if (!this.zoneCal && typeof ZoneCalibrationSession !== 'undefined') {
+      this.zoneCal = new ZoneCalibrationSession();
+      const records = (this.game && this.game.shotJournal && this.game.shotJournal.records) || [];
+      this.zoneCalAfterId = records.reduce((m, e) => Math.max(m, e.id || 0), 0);
+    }
+    return this.zoneCal;
+  }
+  importZoneCalibration() {
+    const session = this.ensureZoneCalibration(), g = this.game;
+    if (!session || !g || !g.shotJournal) return null;
+    const records = g.shotJournal.records;
+    if (session.step && session.step.id === 'corners') {
+      const corners = [
+        { label: 'near-left', p: { x: -PH.T_HALF_WID, y: PH.TABLE_Y, z: PH.T_HALF_LEN } },
+        { label: 'near-right', p: { x: PH.T_HALF_WID, y: PH.TABLE_Y, z: PH.T_HALF_LEN } },
+        { label: 'far-right', p: { x: PH.T_HALF_WID, y: PH.TABLE_Y, z: -PH.T_HALF_LEN } },
+        { label: 'far-left', p: { x: -PH.T_HALF_WID, y: PH.TABLE_Y, z: -PH.T_HALF_LEN } },
+      ];
+      for (const e of records) {
+        if (!e || e.id <= this.zoneCalAfterId || !e.pressZone) continue;
+        this.zoneCalAfterId = Math.max(this.zoneCalAfterId, e.id);
+        const target = corners[session.count()], z = e.pressZone;
+        if (!target || typeof g.project !== 'function') continue;
+        const proj = g.project(target.p, {});
+        if (!proj || !proj.ok || ![z.pressX, z.pressY, z.vw, z.vh].every(Number.isFinite)) continue;
+        session.record({ label: target.label, inputType: z.pointerType,
+          errorPx: Math.hypot((z.pressX - proj.x) * z.vw, (z.pressY - proj.y) * z.vh),
+          along: z.along, across: z.across });
+        if (session.done || !session.step || session.step.id !== 'corners') break;
+      }
+      return session.lastSummary;
+    }
+    const result = session.importJournal(records, this.zoneCalAfterId);
+    if (result) this.zoneCalAfterId = result.lastId;
+    return result && result.summary;
+  }
+  renderZoneCalibration() {
+    const status = $('#zoneCalStatus'), box = $('#zoneCalSummary');
+    if (!status || !box) return;
+    box.replaceChildren();
+    const session = this.zoneCal;
+    if (!session) { status.textContent = 'Калибровка не начата. Нажмите «Начать заново», выполните задание в игре и вернитесь сюда.'; return; }
+    if (session.done) status.textContent = 'Готово: все шаги пройдены мышью и касанием. Скачайте данные калибровки.';
+    else status.textContent = `${session.pass === 'mouse' ? 'Мышь' : 'Касание'} · ${session.step.title}: ${session.count()}/${session.step.need}. ${session.step.instruction} Затем откройте эту панель и нажмите «Записать попытки из игры».`;
+    const summaries = session.exportData().summaries.filter(x => x.count > 0);
+    for (const item of summaries) {
+      const p = document.createElement('p');
+      p.textContent = `${item.pass} · ${item.stepId} · ${item.count}: ${item.recommendation}`;
+      box.append(p);
+    }
+    if (session.lastSummary) {
+      const p = document.createElement('p');
+      p.textContent = `Последний завершённый шаг: ${session.lastSummary.recommendation}`;
+      box.append(p);
+    }
+  }
+  exportZoneCalibration() {
+    const session = this.ensureZoneCalibration();
+    if (!session) return;
+    const url = URL.createObjectURL(new Blob([JSON.stringify(session.exportData(), null, 2)], { type: 'application/json' }));
+    const link = document.createElement('a'); link.href = url; link.download = 'topspin-zone-calibration.json'; link.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
+  exportInputLog() {
+    const log = this.game && this.game.inputLog;
+    if (!log) return;
+    const url = URL.createObjectURL(new Blob([log.toJSONL(this.game.time)], { type: 'application/x-ndjson' }));
+    const link = document.createElement('a'); link.href = url; link.download = 'topspin-input-log.jsonl'; link.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
   renderShotLab() {
     const root = $('#shotLabRecords'); root.replaceChildren();
+    if (this.zoneCal) this.importZoneCalibration();
+    this.renderZoneCalibration();
     const summary=$('#captureCalibrationSummary');summary.replaceChildren();
     for(const serving of [false,true]) {
       const attempts=this.game.shotJournal.records.filter(e=>e.pressZone && e.pressZone.serving===serving);
       const hits=attempts.filter(e=>e.contact), block=document.createElement('div');block.className='lab-entry';
       const add=text=>{const p=document.createElement('p');p.textContent=text;block.append(p);};
-      const title=document.createElement('b');title.textContent=`${serving?'Подача':'Приём'} · радиус ${MATCH_RULES.pressRadiusPx} px`;block.append(title);
+      const oval=MATCH_RULES.zoneShape==='oval';
+      const title=document.createElement('b');title.textContent=oval?`${serving?'Подача':'Приём'} · овал: скорость×${MATCH_RULES.ovalLeadSec} с + ${MATCH_RULES.ovalForwardPx} px вперёд, ${MATCH_RULES.ovalBackPx} px назад, ${MATCH_RULES.ovalSideMousePx}/${MATCH_RULES.ovalSideTouchPx} px поперёк`:`${serving?'Подача':'Приём'} · радиус ${MATCH_RULES.pressRadiusPx} px`;block.append(title);
       add(`Нажатий: ${attempts.length} · вне зоны: ${attempts.filter(e=>!e.pressZone.accepted).length} · ударов: ${hits.length}`);
-      for(const scale of [.9,.8,.7]) add(`Радиус ${Math.round(MATCH_RULES.pressRadiusPx*scale)} px: заблокировал бы ${hits.filter(e=>e.pressZone.distancePx>e.pressZone.radius*scale).length} из ${hits.length} записанных ударов.`);
+      if(oval){
+        const rejected=attempts.filter(e=>!e.pressZone.accepted);
+        const p90=(rows,key)=>{const xs=rows.map(e=>Math.abs(e.pressZone[key])).filter(Number.isFinite).sort((a,b)=>a-b);return xs.length?Math.round(xs[Math.ceil(xs.length*.9)-1]):'—';};
+        add(`Отклонённые: 90-й перцентиль along ${p90(rejected,'along')} px, across ${p90(rejected,'across')} px. Причины: ${[...new Set(rejected.map(e=>e.pressZone.reason||'OUTSIDE_ZONE'))].join(', ')||'—'}.`);
+        add(`Принятые удары: 90-й перцентиль along ${p90(hits,'along')} px, across ${p90(hits,'across')} px.`);
+      } else {
+        for(const scale of [.9,.8,.7]) add(`Радиус ${Math.round(MATCH_RULES.pressRadiusPx*scale)} px: заблокировал бы ${hits.filter(e=>e.pressZone.distancePx>e.pressZone.radius*scale).length} из ${hits.length} записанных ударов.`);
+      }
       summary.append(block);
     }
     const entries = this.game.shotJournal.records.slice().reverse();
@@ -13975,13 +14722,20 @@ class UI {
       const add = text => { const p = document.createElement('p'); p.textContent = text; card.append(p); };
       if (view.metrics) add(view.metrics);
 
-      if (entry.pressZone) add(`Нажатие: ${entry.pressZone.accepted?'внутри':'снаружи'} · расстояние ${Number.isFinite(entry.pressZone.distancePx)?entry.pressZone.distancePx.toFixed(0):'не измерено'} px из ${entry.pressZone.radius} px.`);
+      if (entry.pressZone) add(entry.pressZone.shape==='oval'||entry.pressZone.shape==='circle'&&Number.isFinite(entry.pressZone.along)
+        ? `Нажатие: ${entry.pressZone.accepted?'внутри':'снаружи'} · score ${Number.isFinite(entry.pressZone.score)?entry.pressZone.score.toFixed(2):'—'} · along ${Number.isFinite(entry.pressZone.along)?entry.pressZone.along.toFixed(0):'—'} px · across ${Number.isFinite(entry.pressZone.across)?entry.pressZone.across.toFixed(0):'—'} px${entry.pressZone.reason?` · ${entry.pressZone.reason}`:''}.`
+        : `Нажатие: ${entry.pressZone.accepted?'внутри':'снаружи'} · расстояние ${Number.isFinite(entry.pressZone.distancePx)?entry.pressZone.distancePx.toFixed(0):'не измерено'} px из ${entry.pressZone.radius} px.`);
       root.append(card);
     }
   }
   exportShotLab() {
     const data = this.game.shotJournal.exportData();
-    data.pressCalibration = { radiusPx: MATCH_RULES.pressRadiusPx, attempts: this.game.shotJournal.records.filter(e=>e.pressZone).map(e=>({ id:e.id, press:e.pressZone, contacted:!!e.contact })) };
+    data.pressCalibration = { zoneShape: MATCH_RULES.zoneShape, radiusPx: MATCH_RULES.pressRadiusPx,
+      oval: { leadSec: MATCH_RULES.ovalLeadSec, forwardPx: MATCH_RULES.ovalForwardPx, backPx: MATCH_RULES.ovalBackPx,
+        sideMousePx: MATCH_RULES.ovalSideMousePx, sideTouchPx: MATCH_RULES.ovalSideTouchPx },
+      attempts: this.game.shotJournal.records.filter(e=>e.pressZone).map(e=>({ id:e.id, press:e.pressZone, contacted:!!e.contact })) };
+    if (this.zoneCal) data.zoneCalibration = this.zoneCal.exportData();
+    if (this.game.inputLog) data.inputLogStats = this.game.inputLog.stats(this.game.time);
     data.preferences = { grip: this.game.settings.grip, hand: this.game.settings.hand, spinBias: this.game.settings.spinBias };
     data.equipment = JSON.parse(JSON.stringify(this.game.equip));
     data.career = { active: this.game.career.active, speed: this.game._careerSpeedBoost, spin: this.game._careerSpinBoost };
@@ -14107,14 +14861,30 @@ class UI {
     const saved=g.swipe && g.swipe.pressZone;
     const serving=[GS.SERVE_READY,GS.SERVE_TOSS].includes(g.state) && g.server===1;
     const locked=saved && (g.swipe.active || (typeof g.playerStrokeIntent==='function' && g.playerStrokeIntent(serving)));
-    const zone=locked ? saved : pressHitZone(g.project(g.ball.p),g.pointer,rect.width,rect.height);
+    const zone=locked ? saved : pressZoneForBall(g.ball,g.pointer,rect.width,rect.height,{
+      project:(point,out)=>g.project(point,out||{}), pointerType:g.pointerFine===false?'touch':'mouse',
+      referenceWorld:g.player&&g.player.pos,
+      kind:serving&&g.state===GS.SERVE_TOSS?'serve':'rally',
+      tossApex:g.tossApex,tossStartY:g.tossStartY,tableY:PH.TABLE_Y});
     if (!zone || ![zone.x,zone.y,zone.radius].every(Number.isFinite)) return;
     const sx=W/rect.width,sy=H/rect.height;
     c.save();c.setLineDash([]);c.globalAlpha=.9;c.lineWidth=2*d;c.strokeStyle=zone.accepted?'#6ee7a8':'#ffb066';
-    c.beginPath();c.arc(zone.x*sx,zone.y*sy,zone.radius*sx,0,TAU);c.stroke();
+    c.beginPath();
+    if (zone.shape==='oval' && [zone.axisX,zone.axisY,zone.fwdPx,zone.backPx,zone.sidePx].every(Number.isFinite)) {
+      for(let i=0;i<=48;i++){
+        const a=i/48*TAU, co=Math.cos(a), si=Math.sin(a);
+        const along=co*(co>=0?zone.fwdPx:zone.backPx), across=si*zone.sidePx;
+        const px=(zone.x+zone.axisX*along-zone.axisY*across)*sx;
+        const py=(zone.y+zone.axisY*along+zone.axisX*across)*sy;
+        if(i===0)c.moveTo(px,py);else c.lineTo(px,py);
+      }
+    } else c.arc(zone.x*sx,zone.y*sy,zone.radius*sx,0,TAU);
+    c.stroke();
     // The dot is the actual sampled pointer, only in this explicit debug mode.
     if (g.pointer && Number.isFinite(g.pointer.x) && Number.isFinite(g.pointer.y)) {
-      c.fillStyle=c.strokeStyle;c.beginPath();c.arc(locked ? zone.pointerX*sx : g.pointer.x*W,locked ? zone.pointerY*sy : g.pointer.y*H,3*d,0,TAU);c.fill();
+      const dotX=locked&&Number.isFinite(zone.pointerX)?zone.pointerX*sx:g.pointer.x*W;
+      const dotY=locked&&Number.isFinite(zone.pointerY)?zone.pointerY*sy:g.pointer.y*H;
+      c.fillStyle=c.strokeStyle;c.beginPath();c.arc(dotX,dotY,3*d,0,TAU);c.fill();
     }
     c.restore();
   }
@@ -14271,17 +15041,6 @@ class UI {
     rb.classList.toggle('on', showRally);
     if (showRally) rb.innerHTML = `РАЛЛИ <b>${g.rally}</b> · РЕКОРД <b>${Math.max(g.bestRally, g.rally)}</b>`;
 
-    /* slow-mo meter: the ring fills back up while you wait, and drops
-       while you hold — the one piece of state the player must feel */
-    const sl = g.slowmo, slEl = $('#slow');
-    if (slEl) {
-      const avail = g.slowmoAvailable();
-      slEl.classList.toggle('on', sl.active);
-      slEl.classList.toggle('ready', !sl.active && sl.energy > 0.995);
-      slEl.classList.toggle('off', g.settings.slowmoPlayer === false || !sl.allowed);
-      $('#slowFill').style.height = (sl.energy * 100).toFixed(0) + '%';
-      document.body.classList.toggle('is-slow', sl.active);
-    }
     this.syncShotFeedback();
     if (this.shotTimer > 0) { this.shotTimer -= dt; if (this.shotTimer <= 0) $('#shot').classList.remove('on'); }
     if (this.noteTimer > 0) { this.noteTimer -= dt; if (this.noteTimer <= 0) this.hideNote(); }

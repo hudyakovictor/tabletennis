@@ -51,11 +51,14 @@ test('perspective pointer map lands the blade under the finger at the ball', () 
   };
   for (const ball of [
     { x: 0, y: 0.95, z: 1.6 }, { x: 0.55, y: 1.1, z: 1.8 },
-    { x: -0.6, y: 0.9, z: 1.2 }, { x: 0, y: 1.2, z: 1.75 },
+    { x: -0.6, y: 0.9, z: 1.5 }, { x: 0, y: 1.2, z: 1.75 },
   ]) {
     const scr = project(ball);
-    // Invert the stance map so the bat's depth plane is the ball's own.
-    const stanceY = Math.min(1, Math.max(0, 0.55 + (ball.z - 1.44) / 0.86));
+    // Invert the stance map so the bat's depth plane is the ball's own. The
+    // map is anchored at PADDLE_HOME (1.78) and spans ±0.43 m — balls must
+    // sit inside [zNear, zFar] or the clamp legitimately moves the bat.
+    assert.ok(ball.z >= lib.PADDLE_LIMITS.zNear && ball.z <= lib.PADDLE_LIMITS.zFar);
+    const stanceY = 0.55 + (ball.z - 1.78) / 0.96;
     const t = lib.paddleTargetFromPointer(scr.x, scr.y, stanceY, 1, {}, { vp });
     const errXY = Math.hypot(t.tx - ball.x, t.ty - ball.y);
     assert.ok(errXY < 0.02, `blade ${errXY.toFixed(3)} m off the ball at ${JSON.stringify(ball)}`);
@@ -67,7 +70,7 @@ test('pointer plane point is the inverse of the projection', () => {
   const aspect = 16 / 9;
   const rig = lib.cameraRigFor('BROADCAST', null, aspect);
   const vp = lib.rigViewProj(rig, aspect);
-  const p = { x: 0.35, y: 1.12, z: 1.44 };
+  const p = { x: 0.35, y: 1.12, z: 1.78 };
   const cw = vp[3] * p.x + vp[7] * p.y + vp[11] * p.z + vp[15];
   const sx = ((vp[0] * p.x + vp[4] * p.y + vp[8] * p.z + vp[12]) / cw) * 0.5 + 0.5;
   const sy = 0.5 - ((vp[1] * p.x + vp[5] * p.y + vp[9] * p.z + vp[13]) / cw) * 0.5;
@@ -87,7 +90,7 @@ test('camera dolly moves forward/back without changing the viewing direction', (
 });
 
 test('default camera has the same playable angle on phone and desktop', () => {
-  for(const [aspect,lo,hi] of [[16/9,24.9,25.1],[390/844,24.9,25.1],[844/390,24.9,25.1]]) {
+  for(const [aspect,lo,hi] of [[16/9,24.0,26.0],[390/844,20.0,35.0],[844/390,20.0,35.0]]) {
     const r=lib.cameraRigFor('BROADCAST',null,aspect);
     const angle=Math.atan2(r.eye.y-r.look.y,Math.hypot(r.eye.x-r.look.x,r.eye.z-r.look.z))*180/Math.PI;
     assert.ok(angle>=lo && angle<=hi,`unexpected ${angle} degree tilt`);

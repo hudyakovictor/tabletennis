@@ -1,0 +1,174 @@
+
+> test:browser
+> node tests/browser.cjs
+
+PASS 1280x760: boot and render
+PASS 1280x760: restored menu difficulty
+PASS 1280x760: paddle is the sole striking object: no custom pointer dot or reticle
+PASS 1280x760: native cursor hides in live play and returns for pause and dialogs
+PASS 1280x760: capture debug toggles real geometry without changing physics and restores hidden cursor when off
+PASS 1280x760: gameplay sliders are removed rather than merely hidden
+PASS 1280x760: shared controls survive old writes and are absent from new saves
+PASS 1280x760: no racket cue at readiness; timing brackets follow legal incoming ball
+PASS 1280x760: grip and hand buttons update and save accessible settings
+PASS 1280x760: idle paddle never accumulates rotation at 30, 60 or 120 FPS
+PASS 1280x760: paddles remain forward-facing through lateral sweeps and rendering is read-only
+PASS 1280x760: player has relaxed ready grip, asymmetric strokes and swipe-driven forward pitch
+PASS 1280x760: physical impact face survives the full update and rendering on both grips
+PASS 1280x760: changing grip cancels stale motion and converges by the shortest roll path
+PASS 1280x760: current gesture pose is independent of the previous frame archetype
+PASS 1280x760: a new swipe interrupts follow-through without a discontinuous roll
+PASS 1280x760: expired mouse hover velocity cannot leave a permanent wrist lean
+PASS 1280x760: input instructions use pointer capabilities, not viewport width
+PASS 1280x760: all six training tips are brief and specific to the active input
+PASS 1280x760: training keeps the swipe area empty; controls exist only inside pause
+PASS 1280x760: touch event switches copy immediately on a hybrid device
+PASS 1280x760: only fixed camera presets are available in settings, no camera sliders
+PASS 1280x760: touch play cannot adjust the camera, including two fingers
+PASS 1280x760: no swipe means no automatic return, even at the racket centre
+PASS 1280x760: holding a button and tapping without movement cannot hit
+PASS 1280x760: a deliberate swipe hits once and cannot return the next ball automatically
+PASS 1280x760: old released or held swipe cannot hit a later ball
+PASS 1280x760: complete AI serves cannot be returned by an idle player or pointer hovering
+PASS 1280x760: one real return followed by no input never produces a second return
+PASS 1280x760: leaving demo clears its synthetic swipe and cannot keep playing for you
+PASS 1280x760: normal match has no serving instructions or unsolicited coaching text
+PASS 1280x760: logo is embedded in splash and menu, no external assets
+PASS 1280x760: full table and opponent swing volume have safe headroom
+PASS 1280x760: replay skip is a visible touch target only during replay and returns focus safely
+PASS 1280x760: score is upper-left and does not overlap right-hand controls
+PASS 1280x760: all reading cues are placed below the full table
+PASS 1280x760: ball trail uses 20 percent opacity
+PASS 1280x760: pause control pauses first, then exits to MENU without further scoring
+PASS 1280x760: R in menu does not start an invisible game
+PASS 1280x760: keyboard shortcuts ignore text fields
+PASS 1280x760: settings pause a live match and resume it on close
+PASS 1280x760: settings opened from pause do not unpause via bubbling
+PASS 1280x760: invalid dt does not corrupt game time
+PASS 1280x760: pause cancels gesture
+PASS 1280x760: pointercancel does not release or retain an old shot
+PASS 1280x760: explicit input reset cancels gesture
+PASS 1280x760: blur pauses and clears controls
+PASS 1280x760: training clears autoplay and career
+PASS 1280x760: career cannot alter shared control rules or persist old assistance
+PASS 1280x760: career intro clears stale opponent buttons
+PASS 1280x760: career selection hides ready button
+PASS 1280x760: career end names current, not previous tournament
+PASS 1280x760: completed career cannot be resurrected by end-of-frame save
+PASS 1280x760: bad persisted settings are bounded and unknown keys ignored
+PASS 1280x760: sound toggle is persisted
+PASS 1280x760: legal net-cord serve is a let only after receiver bounce
+PASS 1280x760: net serve that never reaches receiver loses a point
+PASS 1280x760: net-cord serve landing twice on server side is a fault
+PASS 1280x760: low-level AI impact preserves solver launch velocity/spin
+PASS 1280x760: initialized music climax and emotional winner effects cannot interrupt updates
+PASS 1280x760: miss playback system is absent, not hidden
+PASS 1280x760: recognized swipe without contact reports no contact, not a successful topspin
+PASS 1280x760: contact feedback waits for actual bounce and survives opponent return
+PASS 1280x760: shot lab is an accessible paused numeric report, closes without resuming paused play
+PASS 1280x760: five consecutive match/replay/restart cycles release old clips and callbacks
+PASS 1280x760: demo cannot farm currency and match statistics
+PASS 1280x760: full demo match finishes with finite state, level 0
+PASS 1280x760: full demo match finishes with finite state, level 1
+PASS 1280x760: full demo match finishes with finite state, level 2
+PASS 1280x760: full demo match finishes with finite state, level 3
+PASS 1280x760: full demo match finishes with finite state, level 4
+PASS 1280x760: real animation loop survives winner effect after music initialization
+PASS 1280x760: reduced motion suppresses optional VFX and UI motion, physics remains active
+PASS 1280x760: warm reload preserves settings and mute icon
+PASS 1280x760: saved mute survives AudioContext creation
+PASS 1280x760: real mouse takes control from demo without a hidden autoplay toggle
+PASS 1280x760: actual mouse press boundary rejects outside starts and stationary clicks, accepts an inside stroke
+PASS 1280x760: real mouse wheel zooms without a stroke
+PASS 1280x760: right vertical drag raises height independently of wheel zoom
+PASS 1280x760: right horizontal drag does not rotate camera and releases cleanly
+PASS 1280x760: C restores the default framing
+PASS 1280x760: small audience renders finite unclipped stereo, ends in silence and cleans up
+PASS 1280x760: fullscreen button, 1920×1080 framing and F exit
+PASS 1280x760: denied fullscreen leaves a working normal viewport
+PASS 390x844: boot and render
+PASS 390x844: restored menu difficulty
+PASS 390x844: paddle is the sole striking object: no custom pointer dot or reticle
+PASS 390x844: native cursor hides in live play and returns for pause and dialogs
+PASS 390x844: capture debug toggles real geometry without changing physics and restores hidden cursor when off
+PASS 390x844: gameplay sliders are removed rather than merely hidden
+PASS 390x844: shared controls survive old writes and are absent from new saves
+PASS 390x844: no racket cue at readiness; timing brackets follow legal incoming ball
+PASS 390x844: grip and hand buttons update and save accessible settings
+PASS 390x844: idle paddle never accumulates rotation at 30, 60 or 120 FPS
+PASS 390x844: paddles remain forward-facing through lateral sweeps and rendering is read-only
+PASS 390x844: player has relaxed ready grip, asymmetric strokes and swipe-driven forward pitch
+PASS 390x844: physical impact face survives the full update and rendering on both grips
+PASS 390x844: changing grip cancels stale motion and converges by the shortest roll path
+PASS 390x844: current gesture pose is independent of the previous frame archetype
+PASS 390x844: a new swipe interrupts follow-through without a discontinuous roll
+PASS 390x844: expired mouse hover velocity cannot leave a permanent wrist lean
+PASS 390x844: input instructions use pointer capabilities, not viewport width
+PASS 390x844: all six training tips are brief and specific to the active input
+PASS 390x844: training keeps the swipe area empty; controls exist only inside pause
+PASS 390x844: touch event switches copy immediately on a hybrid device
+PASS 390x844: only fixed camera presets are available in settings, no camera sliders
+PASS 390x844: touch play cannot adjust the camera, including two fingers
+PASS 390x844: no swipe means no automatic return, even at the racket centre
+PASS 390x844: holding a button and tapping without movement cannot hit
+PASS 390x844: a deliberate swipe hits once and cannot return the next ball automatically
+PASS 390x844: old released or held swipe cannot hit a later ball
+PASS 390x844: complete AI serves cannot be returned by an idle player or pointer hovering
+PASS 390x844: one real return followed by no input never produces a second return
+PASS 390x844: leaving demo clears its synthetic swipe and cannot keep playing for you
+PASS 390x844: normal match has no serving instructions or unsolicited coaching text
+PASS 390x844: logo is embedded in splash and menu, no external assets
+PASS 390x844: full table and opponent swing volume have safe headroom
+PASS 390x844: replay skip is a visible touch target only during replay and returns focus safely
+PASS 390x844: score is upper-left and does not overlap right-hand controls
+PASS 390x844: all reading cues are placed below the full table
+PASS 390x844: ball trail uses 20 percent opacity
+PASS 390x844: pause control pauses first, then exits to MENU without further scoring
+PASS 390x844: R in menu does not start an invisible game
+PASS 390x844: keyboard shortcuts ignore text fields
+PASS 390x844: settings pause a live match and resume it on close
+PASS 390x844: settings opened from pause do not unpause via bubbling
+PASS 390x844: invalid dt does not corrupt game time
+PASS 390x844: pause cancels gesture
+PASS 390x844: pointercancel does not release or retain an old shot
+PASS 390x844: explicit input reset cancels gesture
+PASS 390x844: blur pauses and clears controls
+PASS 390x844: training clears autoplay and career
+PASS 390x844: career cannot alter shared control rules or persist old assistance
+PASS 390x844: career intro clears stale opponent buttons
+PASS 390x844: career selection hides ready button
+PASS 390x844: career end names current, not previous tournament
+PASS 390x844: completed career cannot be resurrected by end-of-frame save
+PASS 390x844: bad persisted settings are bounded and unknown keys ignored
+PASS 390x844: sound toggle is persisted
+PASS 390x844: legal net-cord serve is a let only after receiver bounce
+PASS 390x844: net serve that never reaches receiver loses a point
+PASS 390x844: net-cord serve landing twice on server side is a fault
+PASS 390x844: low-level AI impact preserves solver launch velocity/spin
+PASS 390x844: initialized music climax and emotional winner effects cannot interrupt updates
+PASS 390x844: miss playback system is absent, not hidden
+PASS 390x844: recognized swipe without contact reports no contact, not a successful topspin
+PASS 390x844: contact feedback waits for actual bounce and survives opponent return
+PASS 390x844: shot lab is an accessible paused numeric report, closes without resuming paused play
+PASS 390x844: five consecutive match/replay/restart cycles release old clips and callbacks
+PASS 390x844: demo cannot farm currency and match statistics
+PASS 390x844: full demo match finishes with finite state, level 0
+PASS 390x844: full demo match finishes with finite state, level 1
+PASS 390x844: full demo match finishes with finite state, level 2
+PASS 390x844: full demo match finishes with finite state, level 3
+PASS 390x844: full demo match finishes with finite state, level 4
+PASS 390x844: real animation loop survives winner effect after music initialization
+PASS 390x844: reduced motion suppresses optional VFX and UI motion, physics remains active
+PASS 390x844: warm reload preserves settings and mute icon
+PASS 390x844: saved mute survives AudioContext creation
+PASS 390x844: real mouse takes control from demo without a hidden autoplay toggle
+PASS 390x844: actual mouse press boundary rejects outside starts and stationary clicks, accepts an inside stroke
+PASS 390x844: real mouse wheel zooms without a stroke
+PASS 390x844: right vertical drag raises height independently of wheel zoom
+PASS 390x844: right horizontal drag does not rotate camera and releases cleanly
+PASS 390x844: C restores the default framing
+PASS 390x844: actual touch switches instructions and selects a camera without a mouse
+PASS 390x844: real touch pauses, opens settings safely, resumes, exits, and toggles sound
+PASS 390x844: small audience renders finite unclipped stereo, ends in silence and cleans up
+PASS 390x844: denied fullscreen leaves a working normal viewport
+Browser: 169 checks passed, desktop + mobile, no uncaught exceptions.
