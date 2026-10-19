@@ -18,6 +18,7 @@ class UI {
     this.noteTimer = 0;
     this.ripples = [];
     this.captureDebug = false;
+    this.zoneCal = null; this.zoneCalAfterId = 0;
 
     // UI Animation system (99-level polish)
     this.uiAnim = new UIAnimation();
@@ -341,6 +342,16 @@ class UI {
       this.game.stopDemo();
     });
     for (const id of ['#shotLabPause', '#shotLabResults']) $(id).addEventListener('click', e => { e.stopPropagation(); this.openShotLab(); });
+    const logButton = $('#inputLogPause');
+    if (logButton) logButton.addEventListener('click', e => { e.stopPropagation(); this.exportInputLog(); });
+    const calMenu = $('#zoneCalMenu');
+    if (calMenu) calMenu.addEventListener('click', () => { this.ensureZoneCalibration(); this.openShotLab(); });
+    const calStart = $('#zoneCalStart');
+    if (calStart) calStart.addEventListener('click', () => { this.zoneCal = null; this.ensureZoneCalibration(); this.renderZoneCalibration(); });
+    const calImport = $('#zoneCalImport');
+    if (calImport) calImport.addEventListener('click', () => { this.ensureZoneCalibration(); this.importZoneCalibration(); this.renderZoneCalibration(); });
+    const calExport = $('#zoneCalExport');
+    if (calExport) calExport.addEventListener('click', () => this.exportZoneCalibration());
     $('#shotLabClose').addEventListener('click', () => this.closeShotLab());
     $('#shotLabExport').addEventListener('click', () => this.exportShotLab());
     for (const id of ['#captureDebugPause', '#captureDebugLab']) $(id).addEventListener('change', event => {
@@ -776,16 +787,97 @@ class UI {
     $('#shotLab').classList.remove('on');
     if (!this._labWasPaused) this.game.setPaused(false);
   }
+  ensureZoneCalibration() {
+    if (!this.zoneCal && typeof ZoneCalibrationSession !== 'undefined') {
+      this.zoneCal = new ZoneCalibrationSession();
+      const records = (this.game && this.game.shotJournal && this.game.shotJournal.records) || [];
+      this.zoneCalAfterId = records.reduce((m, e) => Math.max(m, e.id || 0), 0);
+    }
+    return this.zoneCal;
+  }
+  importZoneCalibration() {
+    const session = this.ensureZoneCalibration(), g = this.game;
+    if (!session || !g || !g.shotJournal) return null;
+    const records = g.shotJournal.records;
+    if (session.step && session.step.id === 'corners') {
+      const corners = [
+        { label: 'near-left', p: { x: -PH.T_HALF_WID, y: PH.TABLE_Y, z: PH.T_HALF_LEN } },
+        { label: 'near-right', p: { x: PH.T_HALF_WID, y: PH.TABLE_Y, z: PH.T_HALF_LEN } },
+        { label: 'far-right', p: { x: PH.T_HALF_WID, y: PH.TABLE_Y, z: -PH.T_HALF_LEN } },
+        { label: 'far-left', p: { x: -PH.T_HALF_WID, y: PH.TABLE_Y, z: -PH.T_HALF_LEN } },
+      ];
+      for (const e of records) {
+        if (!e || e.id <= this.zoneCalAfterId || !e.pressZone) continue;
+        this.zoneCalAfterId = Math.max(this.zoneCalAfterId, e.id);
+        const target = corners[session.count()], z = e.pressZone;
+        if (!target || typeof g.project !== 'function') continue;
+        const proj = g.project(target.p, {});
+        if (!proj || !proj.ok || ![z.pressX, z.pressY, z.vw, z.vh].every(Number.isFinite)) continue;
+        session.record({ label: target.label, inputType: z.pointerType,
+          errorPx: Math.hypot((z.pressX - proj.x) * z.vw, (z.pressY - proj.y) * z.vh),
+          along: z.along, across: z.across });
+        if (session.done || !session.step || session.step.id !== 'corners') break;
+      }
+      return session.lastSummary;
+    }
+    const result = session.importJournal(records, this.zoneCalAfterId);
+    if (result) this.zoneCalAfterId = result.lastId;
+    return result && result.summary;
+  }
+  renderZoneCalibration() {
+    const status = $('#zoneCalStatus'), box = $('#zoneCalSummary');
+    if (!status || !box) return;
+    box.replaceChildren();
+    const session = this.zoneCal;
+    if (!session) { status.textContent = 'Калибровка не начата. Нажмите «Начать заново», выполните задание в игре и вернитесь сюда.'; return; }
+    if (session.done) status.textContent = 'Готово: все шаги пройдены мышью и касанием. Скачайте данные калибровки.';
+    else status.textContent = `${session.pass === 'mouse' ? 'Мышь' : 'Касание'} · ${session.step.title}: ${session.count()}/${session.step.need}. ${session.step.instruction} Затем откройте эту панель и нажмите «Записать попытки из игры».`;
+    const summaries = session.exportData().summaries.filter(x => x.count > 0);
+    for (const item of summaries) {
+      const p = document.createElement('p');
+      p.textContent = `${item.pass} · ${item.stepId} · ${item.count}: ${item.recommendation}`;
+      box.append(p);
+    }
+    if (session.lastSummary) {
+      const p = document.createElement('p');
+      p.textContent = `Последний завершённый шаг: ${session.lastSummary.recommendation}`;
+      box.append(p);
+    }
+  }
+  exportZoneCalibration() {
+    const session = this.ensureZoneCalibration();
+    if (!session) return;
+    const url = URL.createObjectURL(new Blob([JSON.stringify(session.exportData(), null, 2)], { type: 'application/json' }));
+    const link = document.createElement('a'); link.href = url; link.download = 'topspin-zone-calibration.json'; link.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
+  exportInputLog() {
+    const log = this.game && this.game.inputLog;
+    if (!log) return;
+    const url = URL.createObjectURL(new Blob([log.toJSONL(this.game.time)], { type: 'application/x-ndjson' }));
+    const link = document.createElement('a'); link.href = url; link.download = 'topspin-input-log.jsonl'; link.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
   renderShotLab() {
     const root = $('#shotLabRecords'); root.replaceChildren();
+    if (this.zoneCal) this.importZoneCalibration();
+    this.renderZoneCalibration();
     const summary=$('#captureCalibrationSummary');summary.replaceChildren();
     for(const serving of [false,true]) {
       const attempts=this.game.shotJournal.records.filter(e=>e.pressZone && e.pressZone.serving===serving);
       const hits=attempts.filter(e=>e.contact), block=document.createElement('div');block.className='lab-entry';
       const add=text=>{const p=document.createElement('p');p.textContent=text;block.append(p);};
-      const title=document.createElement('b');title.textContent=`${serving?'Подача':'Приём'} · радиус ${MATCH_RULES.pressRadiusPx} px`;block.append(title);
+      const oval=MATCH_RULES.zoneShape==='oval';
+      const title=document.createElement('b');title.textContent=oval?`${serving?'Подача':'Приём'} · овал: скорость×${MATCH_RULES.ovalLeadSec} с + ${MATCH_RULES.ovalForwardPx} px вперёд, ${MATCH_RULES.ovalBackPx} px назад, ${MATCH_RULES.ovalSideMousePx}/${MATCH_RULES.ovalSideTouchPx} px поперёк`:`${serving?'Подача':'Приём'} · радиус ${MATCH_RULES.pressRadiusPx} px`;block.append(title);
       add(`Нажатий: ${attempts.length} · вне зоны: ${attempts.filter(e=>!e.pressZone.accepted).length} · ударов: ${hits.length}`);
-      for(const scale of [.9,.8,.7]) add(`Радиус ${Math.round(MATCH_RULES.pressRadiusPx*scale)} px: заблокировал бы ${hits.filter(e=>e.pressZone.distancePx>e.pressZone.radius*scale).length} из ${hits.length} записанных ударов.`);
+      if(oval){
+        const rejected=attempts.filter(e=>!e.pressZone.accepted);
+        const p90=(rows,key)=>{const xs=rows.map(e=>Math.abs(e.pressZone[key])).filter(Number.isFinite).sort((a,b)=>a-b);return xs.length?Math.round(xs[Math.ceil(xs.length*.9)-1]):'—';};
+        add(`Отклонённые: 90-й перцентиль along ${p90(rejected,'along')} px, across ${p90(rejected,'across')} px. Причины: ${[...new Set(rejected.map(e=>e.pressZone.reason||'OUTSIDE_ZONE'))].join(', ')||'—'}.`);
+        add(`Принятые удары: 90-й перцентиль along ${p90(hits,'along')} px, across ${p90(hits,'across')} px.`);
+      } else {
+        for(const scale of [.9,.8,.7]) add(`Радиус ${Math.round(MATCH_RULES.pressRadiusPx*scale)} px: заблокировал бы ${hits.filter(e=>e.pressZone.distancePx>e.pressZone.radius*scale).length} из ${hits.length} записанных ударов.`);
+      }
       summary.append(block);
     }
     const entries = this.game.shotJournal.records.slice().reverse();
@@ -796,13 +888,20 @@ class UI {
       const add = text => { const p = document.createElement('p'); p.textContent = text; card.append(p); };
       if (view.metrics) add(view.metrics);
 
-      if (entry.pressZone) add(`Нажатие: ${entry.pressZone.accepted?'внутри':'снаружи'} · расстояние ${Number.isFinite(entry.pressZone.distancePx)?entry.pressZone.distancePx.toFixed(0):'не измерено'} px из ${entry.pressZone.radius} px.`);
+      if (entry.pressZone) add(entry.pressZone.shape==='oval'||entry.pressZone.shape==='circle'&&Number.isFinite(entry.pressZone.along)
+        ? `Нажатие: ${entry.pressZone.accepted?'внутри':'снаружи'} · score ${Number.isFinite(entry.pressZone.score)?entry.pressZone.score.toFixed(2):'—'} · along ${Number.isFinite(entry.pressZone.along)?entry.pressZone.along.toFixed(0):'—'} px · across ${Number.isFinite(entry.pressZone.across)?entry.pressZone.across.toFixed(0):'—'} px${entry.pressZone.reason?` · ${entry.pressZone.reason}`:''}.`
+        : `Нажатие: ${entry.pressZone.accepted?'внутри':'снаружи'} · расстояние ${Number.isFinite(entry.pressZone.distancePx)?entry.pressZone.distancePx.toFixed(0):'не измерено'} px из ${entry.pressZone.radius} px.`);
       root.append(card);
     }
   }
   exportShotLab() {
     const data = this.game.shotJournal.exportData();
-    data.pressCalibration = { radiusPx: MATCH_RULES.pressRadiusPx, attempts: this.game.shotJournal.records.filter(e=>e.pressZone).map(e=>({ id:e.id, press:e.pressZone, contacted:!!e.contact })) };
+    data.pressCalibration = { zoneShape: MATCH_RULES.zoneShape, radiusPx: MATCH_RULES.pressRadiusPx,
+      oval: { leadSec: MATCH_RULES.ovalLeadSec, forwardPx: MATCH_RULES.ovalForwardPx, backPx: MATCH_RULES.ovalBackPx,
+        sideMousePx: MATCH_RULES.ovalSideMousePx, sideTouchPx: MATCH_RULES.ovalSideTouchPx },
+      attempts: this.game.shotJournal.records.filter(e=>e.pressZone).map(e=>({ id:e.id, press:e.pressZone, contacted:!!e.contact })) };
+    if (this.zoneCal) data.zoneCalibration = this.zoneCal.exportData();
+    if (this.game.inputLog) data.inputLogStats = this.game.inputLog.stats(this.game.time);
     data.preferences = { grip: this.game.settings.grip, hand: this.game.settings.hand, spinBias: this.game.settings.spinBias };
     data.equipment = JSON.parse(JSON.stringify(this.game.equip));
     data.career = { active: this.game.career.active, speed: this.game._careerSpeedBoost, spin: this.game._careerSpinBoost };
@@ -927,14 +1026,30 @@ class UI {
     const saved=g.swipe && g.swipe.pressZone;
     const serving=[GS.SERVE_READY,GS.SERVE_TOSS].includes(g.state) && g.server===1;
     const locked=saved && (g.swipe.active || (typeof g.playerStrokeIntent==='function' && g.playerStrokeIntent(serving)));
-    const zone=locked ? saved : pressHitZone(g.project(g.ball.p),g.pointer,rect.width,rect.height);
+    const zone=locked ? saved : pressZoneForBall(g.ball,g.pointer,rect.width,rect.height,{
+      project:(point,out)=>g.project(point,out||{}), pointerType:g.pointerFine===false?'touch':'mouse',
+      referenceWorld:g.player&&g.player.pos,
+      kind:serving&&g.state===GS.SERVE_TOSS?'serve':'rally',
+      tossApex:g.tossApex,tossStartY:g.tossStartY,tableY:PH.TABLE_Y});
     if (!zone || ![zone.x,zone.y,zone.radius].every(Number.isFinite)) return;
     const sx=W/rect.width,sy=H/rect.height;
     c.save();c.setLineDash([]);c.globalAlpha=.9;c.lineWidth=2*d;c.strokeStyle=zone.accepted?'#6ee7a8':'#ffb066';
-    c.beginPath();c.arc(zone.x*sx,zone.y*sy,zone.radius*sx,0,TAU);c.stroke();
+    c.beginPath();
+    if (zone.shape==='oval' && [zone.axisX,zone.axisY,zone.fwdPx,zone.backPx,zone.sidePx].every(Number.isFinite)) {
+      for(let i=0;i<=48;i++){
+        const a=i/48*TAU, co=Math.cos(a), si=Math.sin(a);
+        const along=co*(co>=0?zone.fwdPx:zone.backPx), across=si*zone.sidePx;
+        const px=(zone.x+zone.axisX*along-zone.axisY*across)*sx;
+        const py=(zone.y+zone.axisY*along+zone.axisX*across)*sy;
+        if(i===0)c.moveTo(px,py);else c.lineTo(px,py);
+      }
+    } else c.arc(zone.x*sx,zone.y*sy,zone.radius*sx,0,TAU);
+    c.stroke();
     // The dot is the actual sampled pointer, only in this explicit debug mode.
     if (g.pointer && Number.isFinite(g.pointer.x) && Number.isFinite(g.pointer.y)) {
-      c.fillStyle=c.strokeStyle;c.beginPath();c.arc(locked ? zone.pointerX*sx : g.pointer.x*W,locked ? zone.pointerY*sy : g.pointer.y*H,3*d,0,TAU);c.fill();
+      const dotX=locked&&Number.isFinite(zone.pointerX)?zone.pointerX*sx:g.pointer.x*W;
+      const dotY=locked&&Number.isFinite(zone.pointerY)?zone.pointerY*sy:g.pointer.y*H;
+      c.fillStyle=c.strokeStyle;c.beginPath();c.arc(dotX,dotY,3*d,0,TAU);c.fill();
     }
     c.restore();
   }

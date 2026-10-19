@@ -43,6 +43,7 @@ class MomentRecorder {
     this.n = 0; this.head = 0;          // ring state (n = filled, head = write cursor)
     this.beginT = 0; this.marks = [];   // indices into the ring for the current rally
     this.events = [];                   // contacts of the current rally
+    this.inputDecisions = [];           // sparse press-gate evidence; frame size unchanged
     this.kept = [];                     // surviving moments, best first
     this.rallyStart = 0;                // ring index where the rally began
     this.lastClip = null;
@@ -54,6 +55,7 @@ class MomentRecorder {
    *  tell "3-0 up, easy point" from "0-4 down, that one" */
   beginRally(t, score) {
     this.events.length = 0;
+    this.inputDecisions.length = 0;
     this.rallyStart = this.head;
     this.rallyT = t;
     this.netClip = false;
@@ -77,6 +79,18 @@ class MomentRecorder {
 
   /** @param e {by, stroke, speed, spin, quality, slip} */
   addContact(t, e) { this.events.push(Object.assign({ t }, e)); }
+
+  /** One compact record per press/contact, NOT per frame: REPLAY_FLOATS and
+   *  the 45 s ring keep their exact size. Cost is ~7 numbers + 2 short strings
+   *  per player shot (a 20-shot rally adds well under 4 KB of JSON). */
+  addInputDecision(t, decision, outcome, inputType) {
+    if (!decision) return;
+    this.inputDecisions.push({ t, shape: decision.shape || null,
+      score: decision.score, along: decision.along, across: decision.across,
+      accepted: !!decision.accepted, reason: decision.reason || null,
+      inputType: inputType || null, contact: !!(outcome && outcome.contact) });
+    if (this.inputDecisions.length > 256) this.inputDecisions.shift();
+  }
   addBounce(isNet) { if (isNet) this.netClip = true; }
 
   /** Capture the current rally's frames for debug replay regardless of beauty score */
@@ -87,7 +101,7 @@ class MomentRecorder {
       const src = ((this.head - len + k) % this.cap + this.cap) % this.cap;
       clip.set(this.f.subarray(src * REPLAY_FLOATS, src * REPLAY_FLOATS + REPLAY_FLOATS), k * REPLAY_FLOATS);
     }
-    return { frames: clip, hz: REPLAY_HZ, len, poseVersion: 2 };
+    return { frames: clip, hz: REPLAY_HZ, len, poseVersion: 2, inputDecisions: this.inputDecisions.slice() };
   }
 
   /**
@@ -129,6 +143,7 @@ class MomentRecorder {
       score, shots, frames: clip, hz: REPLAY_HZ, poseVersion: 2,
       speed: peakSpeed, spin: peakSpin, finish,
       events: this.events.slice(),
+      inputDecisions: this.inputDecisions.slice(),
       winner: meta.winner, reason: meta.reason, mine,
       meta: m, t,
       crowd: meta.winner > 0 && m.matchPoint,

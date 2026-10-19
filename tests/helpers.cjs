@@ -16,6 +16,10 @@ function load(files, names, extra = {}) {
     files = [...files]; const index = files.findIndex(f => ['70_game.js', '80_ui.js'].includes(f));
     files.splice(index, 0, '42_shot_diagnostics.js');
   }
+  if (!process.env.TT_TEST_REF && files.some(f => ['70_game.js', '80_ui.js'].includes(f)) && !files.includes('43_input_telemetry.js')) {
+    files = [...files]; const index = files.findIndex(f => ['70_game.js', '80_ui.js'].includes(f));
+    files.splice(index, 0, '43_input_telemetry.js');
+  }
   const saved = new Map();
   const context = vm.createContext({ console, setInterval, clearInterval, URLSearchParams,
     localStorage: { getItem: k => saved.get(k) ?? null, setItem: (k, v) => saved.set(k, v), removeItem: k => saved.delete(k) },
