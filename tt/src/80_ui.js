@@ -385,6 +385,25 @@ class UI {
     slow.addEventListener('pointerup', hold(false));
     slow.addEventListener('pointerleave', hold(false));
     slow.addEventListener('pointercancel', hold(false));
+    /* Defend button: mobile alternative to swipe-down (push/chop/block).
+     * When held, simulates a short downward gesture near the ball so the
+     * stroke classifier produces a BLOCK or PUSH. This lets Telegram/iOS
+     * users play defensive shots without swiping down (which Telegram
+     * intercepts as "close webapp"). */
+    const defendBtn = $('#defend');
+    if (defendBtn) {
+      const defendOn = (v) => (e) => {
+        if (e && e.cancelable) e.preventDefault();
+        if (!this.game) return;
+        this.game.defendHeld = v;
+        defendBtn.classList.toggle('on', v);
+        if (v) this.game.audio.init();
+      };
+      defendBtn.addEventListener('pointerdown', defendOn(true));
+      defendBtn.addEventListener('pointerup', defendOn(false));
+      defendBtn.addEventListener('pointerleave', defendOn(false));
+      defendBtn.addEventListener('pointercancel', defendOn(false));
+    }
     window.addEventListener('keyup', (e) => {
       if (e.key === 'Shift' || e.key === ' ') this.game && this.game.setSlowmoHold(false);
     });

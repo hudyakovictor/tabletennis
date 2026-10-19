@@ -4,13 +4,13 @@
 'use strict';
 const MATCH_RULES = Object.freeze({
   version: 1,
-  pressRadiusPx: 48,          // screen-space admission for real pointer-down events
+  pressRadiusPx: 72,          // screen-space admission for real pointer-down events
   trajectoryAssist: .85,
   positionAssist: .85,
   sensitivity: 1,
-  captureRadius: .361,        // previous .14 + .85*.26; preserve baseline feel
-  depthTolerance: .347,      // previous .16 + .85*.22
-  serveCaptureRadius: .618,  // falling toss only; different task, same for all
+  captureRadius: .50,        // realistic stance distance requires larger capture
+  depthTolerance: .48,      // realistic stance distance
+  serveCaptureRadius: .72,  // falling toss only; larger for realistic stance
   sweetRadius: .15225,       // contact-quality reference, NOT capture radius
   timingMinPx: 8,
   timingMaxPx: 20,
