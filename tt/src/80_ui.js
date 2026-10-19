@@ -149,6 +149,7 @@ class UI {
     this._settingsWasPaused = this.game.paused;
     this.game.setPaused(true);
     $('#settings').classList.add('on');
+    this.renderZonePreview();   // draw now that the panel has a real size
   }
   closeSettings() {
     $('#settings').classList.remove('on');
@@ -711,6 +712,11 @@ class UI {
         break;
       case 'paddle': s.showPlayerPaddle = v !== 'hide'; break;
       case 'serveToss': s.serveToss = clamp(+v, 0.8, 2.2); this.syncServeToss(); break;
+      case 'capScale': s.capScale = clamp(+v, 0.8, 2.5); this.syncGameplaySliders(); break;
+      case 'zoneScale': s.zoneScale = clamp(+v, 0.8, 2.5); this.syncGameplaySliders(); break;
+      case 'aimAssist': s.aimAssist = clamp(+v, 0.5, 1); this.syncGameplaySliders(); break;
+      case 'footAssist': s.footAssist = clamp(+v, 0, 1); this.syncGameplaySliders(); break;
+      case 'batSens': s.batSens = clamp(+v, 0.4, 2.2); this.syncGameplaySliders(); break;
       case 'target': s.targetScore = +v; $('#toWin').textContent = v; break;
       default: break;
     }
@@ -743,6 +749,7 @@ class UI {
       b.setAttribute('aria-pressed', String(selected));
     });
     this.syncServeToss();
+    this.syncGameplaySliders();
   }
   /** The serve-toss height slider reflects settings.serveToss as a cm rise. */
   syncServeToss() {
@@ -753,6 +760,26 @@ class UI {
     const riseCm = Math.round(30.6 * mul);
     const lab = $('#serveTossVal'); if (lab) lab.textContent = riseCm + ' см';
   }
+  /** Reflect the optional human-help sliders (capture, zone, assists, gain). */
+  syncGameplaySliders() {
+    const s = this.game.settings;
+    const set = (id, val, labId, text) => {
+      const el = $('#' + id); if (el) el.value = String(val);
+      const lab = $('#' + labId); if (lab) lab.textContent = text;
+    };
+    const cap = clamp(Number.isFinite(s.capScale) ? s.capScale : 1, 0.8, 2.5);
+    set('capScale', cap, 'capScaleVal', Math.round(cap * 100) + '%');
+    const zone = clamp(Number.isFinite(s.zoneScale) ? s.zoneScale : 1, 0.8, 2.5);
+    set('zoneScale', zone, 'zoneScaleVal', Math.round(zone * 100) + '%');
+    const aim = clamp(Number.isFinite(s.aimAssist) ? s.aimAssist : 0.85, 0.5, 1);
+    set('aimAssist', aim, 'aimAssistVal', Math.round(aim * 100) + '%');
+    const foot = clamp(Number.isFinite(s.footAssist) ? s.footAssist : 0.85, 0, 1);
+    set('footAssist', foot, 'footAssistVal', Math.round(foot * 100) + '%');
+    const sens = clamp(Number.isFinite(s.batSens) ? s.batSens : 1, 0.4, 2.2);
+    set('batSens', sens, 'batSensVal', sens.toFixed(2) + '\u00d7');
+    this.renderZonePreview();
+  }
+
   syncCameraControls() {
     const g = this.game;
     $$('#cameraViews [data-camera]').forEach(b => {
@@ -1062,6 +1089,61 @@ class UI {
     c.restore();
   }
 
+  /** The bat is clamped to a reachable band (PADDLE_LIMITS.yLo..yHi around the
+   *  table). The native cursor can wander outside it, which reads as "the click
+   *  is on the cursor, not on the racket". Drawing the lane the bat actually
+   *  lives in — with the top and bottom limits marked — makes the racket, not
+   *  the phantom cursor, the visual focus. Purely a guide, no physics. */
+  drawRacketLane(c, W, H, d) {
+    const g = this.game;
+    if (g.paused || (g.replayer && g.replayer.on) || this.captureDebug) return;
+    if (![GS.SERVE_READY, GS.SERVE_TOSS, GS.RALLY].includes(g.state)) return;
+    const pad = g.player; if (!pad || !pad.pos) return;
+    const ty = PH.TABLE_Y, bx = pad.pos.x, bz = pad.pos.z;
+    const top = g.project({ x: bx, y: ty + PADDLE_LIMITS.yHi, z: bz }, this._laneT || (this._laneT = {}));
+    const bot = g.project({ x: bx, y: ty + PADDLE_LIMITS.yLo, z: bz }, this._laneB || (this._laneB = {}));
+    if (!top || !top.ok || !bot || !bot.ok || !Number.isFinite(top.x) || !Number.isFinite(bot.x)) return;
+    const x = top.x * W, yT = top.y * H, yB = bot.y * H;
+    c.save(); c.setLineDash([]); c.lineCap = 'round';
+    c.strokeStyle = '#39c6ff'; c.globalAlpha = 0.13; c.lineWidth = 30 * d;
+    c.beginPath(); c.moveTo(x, yT); c.lineTo(x, yB); c.stroke();
+    c.globalAlpha = 0.55; c.lineWidth = 1.6 * d;
+    for (const y of [yT, yB]) { c.beginPath(); c.moveTo(x - 20 * d, y); c.lineTo(x + 20 * d, y); c.stroke(); }
+    c.restore();
+  }
+
+  /** A small live diagram inside the settings panel. It draws the reach window
+   *  (capScale) and the admission press-circle (zoneScale, doubled on serve)
+   *  as concentric rings so dragging a slider instantly shows the shape change
+   *  instead of an abstract percentage. Rendered into its own canvas element so
+   *  it is never hidden behind the modal backdrop. Purely illustrative. */
+  renderZonePreview() {
+    const cv = (typeof document !== 'undefined') ? document.querySelector('#zonePreview') : null;
+    if (!cv || !cv.getContext) return;
+    const g = this.game; if (!g) return;
+    const cs = clamp(Number.isFinite(g.settings.capScale) ? g.settings.capScale : 1, 0.8, 2.5);
+    const zs = clamp(Number.isFinite(g.settings.zoneScale) ? g.settings.zoneScale : 1, 0.8, 2.5);
+    const serving = g.server === 1 && [GS.SERVE_READY, GS.SERVE_TOSS].includes(g.state);
+    const dpr = Math.min(2, (typeof devicePixelRatio === 'number' && devicePixelRatio) || 1);
+    const w = cv.clientWidth || cv.width || 240, h = cv.clientHeight || cv.height || 160;
+    if (cv.width !== Math.round(w * dpr) || cv.height !== Math.round(h * dpr)) {
+      cv.width = Math.round(w * dpr); cv.height = Math.round(h * dpr);
+    }
+    const c = cv.getContext('2d'); if (!c) return;
+    c.setTransform(dpr, 0, 0, dpr, 0, 0); c.clearRect(0, 0, w, h);
+    const cx = w * 0.5, cy = h * 0.56, unit = Math.min(w, h) * 0.24;
+    const zoneR = unit * zs * (serving ? 2 : 1);   // green admission press-circle
+    const reachR = unit * 0.62 * cs;               // blue physical reach ring
+    c.save(); c.lineWidth = 2; c.setLineDash([]);
+    c.fillStyle = 'rgba(57,198,255,0.10)'; c.beginPath(); c.arc(cx, cy, reachR, 0, TAU); c.fill();
+    c.strokeStyle = '#6ee7a8'; c.globalAlpha = 0.9; c.beginPath(); c.arc(cx, cy, zoneR, 0, TAU); c.stroke();
+    c.strokeStyle = '#39c6ff'; c.globalAlpha = 0.95; c.beginPath(); c.arc(cx, cy, reachR, 0, TAU); c.stroke();
+    c.fillStyle = '#39c6ff'; c.beginPath(); c.arc(cx, cy, 3, 0, TAU); c.fill();
+    c.fillStyle = '#9fb4c6'; c.globalAlpha = 0.95; c.font = '11px system-ui, sans-serif'; c.textAlign = 'center';
+    c.fillText('reach \u00d7' + cs.toFixed(2) + '   \u00b7   zone \u00d7' + (zs * (serving ? 2 : 1)).toFixed(2) + (serving ? ' \u2192 \u043f\u043e\u0434\u0430\u0447\u0430' : ''), cx, h - 8);
+    c.restore();
+  }
+
   /** Training: paint how to make the stroke. Each drill carries a `guide`
    *  gesture shape; we trace it as a groove with a travelling highlight and an
    *  arrowhead, anchored on the live ball (or the bat) so the pupil sees where
@@ -1121,6 +1203,10 @@ class UI {
     const dialog = typeof document !== 'undefined' && document.querySelector('.screen.on');
     const cursor = playing && !this.captureDebug && !g.paused && !(g.replayer && g.replayer.on) && !dialog ? 'none' : 'default';
     if (canvas.style.cursor !== cursor) canvas.style.cursor = cursor;
+    /* The fx canvas sits above the play surface; force its cursor too so the
+     * native arrow can never flash over the table mid-rally, and keep the
+     * whole stage pointer-free while the ball is live. */
+    if (this.fx && this.fx.style && this.fx.style.cursor !== cursor) this.fx.style.cursor = cursor;
   }
 
   drawCaptureDebug(c, W, H, d) {
@@ -1165,6 +1251,7 @@ class UI {
     if (!g) return;
 
     if (!this.captureDebug) this.drawStrikeRing(c, W, H, d);
+    this.drawRacketLane(c, W, H, d);
     this.drawAimReticle(c, W, H, d);
     this.drawTrainGuide(c, W, H, d);
     this.drawCaptureDebug(c, W, H, d);

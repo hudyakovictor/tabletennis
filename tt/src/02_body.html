@@ -202,6 +202,39 @@
       </div>
       <p class="note">Выше подброс — больше времени на замах и более пологий, длинный удар; ниже — быстрее, короче. Подброс всегда остаётся законным (не ниже минимума). Влияет только на вашу подачу.</p>
 
+      <h3 class="sec">УПРАВЛЕНИЕ · ПОМОЩЬ</h3>
+      <div class="sl">
+        <label for="capScale">ОКНО ЗАХВАТА<small>насколько близко нужно подвести ракетку к мячу</small></label>
+        <input type="range" id="capScale" data-set="capScale" min="0.8" max="2.5" step="0.05" value="1" aria-label="Размер окна захвата мяча">
+        <span class="v" id="capScaleVal">100%</span>
+      </div>
+      <div class="sl">
+        <label for="zoneScale">ЗОНА НАЖАТИЯ<small>как далеко от мяча засчитывается свайп</small></label>
+        <input type="range" id="zoneScale" data-set="zoneScale" min="0.8" max="2.5" step="0.05" value="1" aria-label="Размер зоны нажатия">
+        <span class="v" id="zoneScaleVal">100%</span>
+      </div>
+      <div class="sl">
+        <label for="aimAssist">ПОМОЩЬ ПРИЦЕЛА<small>авто-коррекция полёта, чтобы мяч шёл на стол</small></label>
+        <input type="range" id="aimAssist" data-set="aimAssist" min="0.5" max="1" step="0.05" value="0.85" aria-label="Помощь прицела">
+        <span class="v" id="aimAssistVal">85%</span>
+      </div>
+      <div class="sl">
+        <label for="footAssist">ПОДХОД ЗА МЯЧОМ<small>ракетка сама тянется к предсказанной точке</small></label>
+        <input type="range" id="footAssist" data-set="footAssist" min="0" max="1" step="0.05" value="0.85" aria-label="Ассист подвода ракетки">
+        <span class="v" id="footAssistVal">85%</span>
+      </div>
+      <div class="sl">
+        <label for="batSens">ЧУВСТВИТЕЛЬНОСТЬ<small>усиление движения курсора или пальца</small></label>
+        <input type="range" id="batSens" data-set="batSens" min="0.4" max="2.2" step="0.05" value="1" aria-label="Чувствительность ракетки">
+        <span class="v" id="batSensVal">1.00×</span>
+      </div>
+      <div class="zp">
+        <canvas id="zonePreview" width="240" height="160" aria-hidden="true"></canvas>
+        <small>Живой предпросмотр: <b style="color:#39c6ff">синее</b> — окно захвата (ракетка), <b style="color:#6ee7a8">зелёное</b> — зона нажатия (мяч). Двигайте ползунки — круги меняются сразу. При подаче зона нажатия автоматически ×2.</small>
+      </div>
+      <p class="note">Работает только на вашу ракетку — на соперника не влияет. «Окно захвата» и «зона нажатия» выше — прощают неточность, легче попасть по мячу. «Подход за мячом» и «помощь прицела» авто-доводят ракетку и полёт. По умолчанию стоят авторские значения (100% / 85%).</p>
+
+
       <button class="btn" id="setClose">СОХРАНИТЬ И ЗАКРЫТЬ</button>
     </div>
   </div>

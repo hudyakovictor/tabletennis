@@ -40,19 +40,21 @@ function installUnifiedControls(settings) {
   }
   return settings;
 }
-function playerCaptureLimits(isServe) {
-  return { radius: isServe ? MATCH_RULES.serveCaptureRadius : MATCH_RULES.captureRadius,
-    depth: MATCH_RULES.depthTolerance, sweet: MATCH_RULES.sweetRadius };
+function playerCaptureLimits(isServe, scale = 1) {
+  const sc = Number.isFinite(scale) && scale > 0 ? scale : 1;
+  return { radius: (isServe ? MATCH_RULES.serveCaptureRadius : MATCH_RULES.captureRadius) * sc,
+    depth: MATCH_RULES.depthTolerance * sc, sweet: MATCH_RULES.sweetRadius };
 }
 /** Endpoint capture used by impact AND the timing cue. CCD remains the
  * additional continuous path for a fast crossing between physical substeps.
  * This does not manufacture a stroke: callers still enforce fresh gestures,
  * bounce legality, toss height and the consumed-once rule. */
-function playerInCaptureRange(ball, paddle, isServe = false) {
+function playerInCaptureRange(ball, paddle, isServe = false, scale = 1) {
   if (!ball || !paddle || ![ball.x, ball.y, ball.z, paddle.x, paddle.y, paddle.z].every(Number.isFinite)) return false;
+  const sc = Number.isFinite(scale) && scale > 0 ? scale : 1;
   const dx = ball.x - paddle.x, dy = ball.y - paddle.y, dz = ball.z - paddle.z;
-  return isServe ? Math.hypot(dx, dy, dz) <= MATCH_RULES.serveCaptureRadius
-    : Math.hypot(dx, dy) <= MATCH_RULES.captureRadius && Math.abs(dz) <= MATCH_RULES.depthTolerance;
+  return isServe ? Math.hypot(dx, dy, dz) <= MATCH_RULES.serveCaptureRadius * sc
+    : Math.hypot(dx, dy) <= MATCH_RULES.captureRadius * sc && Math.abs(dz) <= MATCH_RULES.depthTolerance * sc;
 }
 /** Pure overlay model: cue follows the ball; no fake area-of-effect circle.
  * A warm solid bracket means an available time/position window, never an

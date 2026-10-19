@@ -106,6 +106,9 @@ h3.sec::after{content:"";flex:1;height:1px;background:var(--line)}
   background:#fff;cursor:pointer;box-shadow:0 2px 9px rgba(0,0,0,.6)}
 .sl input[type=range]::-moz-range-thumb{width:22px;height:22px;border:0;border-radius:50%;background:#fff;cursor:pointer}
 .sl .v{font-family:var(--mono);font-size:12px;color:var(--acc);width:50px;text-align:right}
+.zp{display:flex;flex-direction:column;align-items:center;gap:7px;margin:12px 0 4px;padding:10px;border:1px solid var(--line);border-radius:12px;background:rgba(57,198,255,.05)}
+.zp canvas{width:100%;max-width:240px;height:160px;display:block;border-radius:8px}
+.zp small{font-size:10.5px;line-height:1.45;color:var(--dim);text-align:center;max-width:340px}
 #settings.on{z-index:20}
 .btn{display:block;width:100%;margin-top:18px;padding:14px;border:0;border-radius:12px;cursor:pointer;
   font-family:inherit;font-size:14px;font-weight:800;letter-spacing:.14em;color:#04121c;

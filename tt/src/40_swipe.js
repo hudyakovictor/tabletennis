@@ -442,6 +442,19 @@ function deriveStroke(m, ctx) {
     case 'CHOP': depth01 = 0.58; break;
     default: depth01 = clamp(0.34 + sp01 * 0.44 + m.dist * 0.26, 0.2, 0.96);
   }
+
+  /* A serve's DEPTH is driven by the swing, not silently averaged away. Before
+   * this, every archetype fell through the default branch above and the serve
+   * solver then pulled it to a safe mid-length, so a tap and a hard whip felt
+   * identical. Here the player's effort maps straight onto how deep the ball is
+   * asked to land: a soft flick sits short, a strong drive reaches the far
+   * line. solveServeStroke keeps the requested landing legal (on the table),
+   * so this changes WHERE a good serve goes without turning power into a
+   * coin-flip fault. The wider the power, the deeper and faster the serve. */
+  if (ctx.isServe) {
+    depth01 = clamp(0.18 + sp01 * 0.60 + Math.max(0, m.dist) * 0.16, 0.12, 0.98);
+  }
+
   const aimZ = -side * lerp(0.16, PH.T_HALF_LEN - 0.07, depth01);
 
   /* ---- 7. execution quality --------------------------------------- */
