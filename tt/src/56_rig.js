@@ -41,10 +41,13 @@ function playerWristPose(pos, vel, hand, phase = {}) {
   const h = hand === 'left' ? -1 : 1;
   const px = pos.x || 0;
   const reach = Math.tanh(px / 0.48);
-  const forehand = px * h >= -0.08;
+  const forehand = typeof phase.forehand === 'boolean' ? phase.forehand : px * h >= -0.08;
+  const key = wristStrokeKey(phase.grip, phase.serving ? 'SERVE' : phase.stroke, phase.preparation, phase.follow, forehand);
   const t = clamp(Math.abs(px) / 0.72, 0, 1);
   const stance = t * t * (3 - 2 * t);
-  const readyRoll = 0.28; // relaxed ready grip (~16°), never rigid 12 o'clock
+  const penhold = phase.grip === 'penhold';
+
+  const readyRoll = penhold ? 0.08 : 0.28; // relaxed ready grip (~16°), never rigid 12 o'clock
   const cross = clamp((px * h + 0.24) / 0.32, 0, 1);
   const mix = cross * cross * (3 - 2 * cross);
   const sideRoll = lerp(-1.05, 1.35, mix);
@@ -116,8 +119,8 @@ function playerWristPose(pos, vel, hand, phase = {}) {
     -reach * 0.27 - vx * 0.035 + gestureYaw + trackYaw + aimYaw,
     -0.52, 0.52);
 
-  let pitch = -0.03 + depthPitch + heightPitch + vz * 0.10 - vy * 0.025
-    + gesturePitch + preparation * 0.07 - follow * 0.12
+  let pitch = key.pitch + depthPitch + heightPitch + vz * 0.10 - vy * 0.025
+    + gesturePitch
     + readPitch + stepIn * 0.09 + serving * 0.07 + sidePitch
     + aimPitch - snap * 0.08
     - clamp(phase.attackLean || 0, 0, 1) * 0.28;
@@ -144,8 +147,10 @@ function playerWristPose(pos, vel, hand, phase = {}) {
 
   return {
     yaw,
-    pitch: clamp(pitch, -0.55, 0.55),
-    roll: clamp(roll, -1.55, 1.55),
+    pitch: clamp(pitch, -0.90, 0.78),
+    // Handle-up penhold reverses local roll: the same world-space wrist
+    // motion must not lean the handle in the opposite lateral direction.
+    roll: (penhold ? h * Math.PI : 0) + clamp(roll * (penhold ? (forehand ? -0.65 : -0.85) : 1), -1.55, 1.55),
     forehand,
   };
 }
@@ -181,7 +186,7 @@ class PaddleRig {
   /** Player supplies an absolute wrist roll; AI retains its compact grip. */
   paddleQuat(out, normal, hand, swing, extraRoll, absoluteRoll = false) {
     Q.lookRotation(out, normal, this._up);
-    const roll = absoluteRoll ? clamp(extraRoll || 0, -1.55, 1.55)
+    const roll = absoluteRoll ? (Number.isFinite(extraRoll) ? paddleAngleDelta(0, extraRoll) : 0)
       : (hand === 'left' ? 0.42 : -0.42)
       + clamp(swing || 0, -1, 1) * 0.3 + clamp(extraRoll || 0, -0.55, 0.55);
     return Q.mul(out, out, Q.setAxisAngle(this._rollQ, 0, 0, 1, roll));

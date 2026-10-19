@@ -2,7 +2,7 @@
  *  CAREER — Roguelike tournament mode: basement to world championship.
  *
  *  12 tournaments, each harder than the last. Between matches you pick
- *  one of three perks that alter physics, assist or AI behaviour.
+ *  up to three perks that alter physics or AI behaviour, never capture/aim assistance.
  *  A loss ends the run; a win advances to the next tournament.
  *  Every run is different because the perk pool is shuffled.
  * ===================================================================== */
@@ -11,24 +11,19 @@
 /* ------------------------------------------------------------------ */
 /*  PERK DEFINITIONS                                                   */
 /* ------------------------------------------------------------------ */
+// Retired assistance IDs (steady_hand, quick_feet, sharp_eye, net_touch,
+// berserker, glass_cannon) are deliberately absent. Legacy career loading
+// already drops unknown IDs; they cannot silently restore private rules.
 const PERKS = [
   // --- GREEN (common, always available) ---
-  { id: 'steady_hand',   name: 'Стальная рука',       desc: 'Помощь прицела +8%',         rarity: 'green',
-    apply(g) { g.settings.assist = clamp(g.settings.assist + 0.08, 0, 1); } },
-  { id: 'quick_feet',    name: 'Быстрые ноги',         desc: 'Помощь позиции +10%',        rarity: 'green',
-    apply(g) { g.settings.posAssist = clamp(g.settings.posAssist + 0.10, 0, 1); } },
   { id: 'heavy_spin',    name: 'Тяжёлое вращение',     desc: 'Вращение +12% на всех ударах', rarity: 'green',
     apply(g) { g._careerSpinBoost = (g._careerSpinBoost || 1) * 1.12; } },
   { id: 'fast_arms',     name: 'Быстрые руки',         desc: 'Макс. скорость замаха +15%',  rarity: 'green',
     apply(g) { g._careerSpeedBoost = (g._careerSpeedBoost || 1) * 1.15; } },
-  { id: 'iron_will',     name: 'Железная воля',        desc: 'Помощь +12% на решающих очках', rarity: 'green',
+  { id: 'iron_will',     name: 'Железная воля',        desc: 'Мощность +12% на решающих очках', rarity: 'green',
     apply(g) { g._careerDecisiveBoost = 0.12; } },
   { id: 'deep_breath',   name: 'Глубокий вдох',        desc: 'Усталость -30%',              rarity: 'green',
     apply(g) { g._careerFatigueReduce = 0.70; } },
-  { id: 'sharp_eye',     name: 'Зоркий глаз',          desc: 'Кольцо удара сжимается на 15% медленнее', rarity: 'green',
-    apply(g) { g._careerRingSlow = 0.85; } },
-  { id: 'net_touch',     name: 'Чутьё сетки',          desc: 'У сетки мяч всегда перелетает', rarity: 'green',
-    apply(g) { g._careerNetSafe = true; } },
   // --- BLUE (uncommon, unlock after tournament 3) ---
   { id: 'topspin_master',name: 'Мастер топспина',      desc: 'Топспин +25%, бэкспин -10%',  rarity: 'blue',
     apply(g) { g._careerTopspinBoost = 1.25; g._careerBackspinPenalty = 0.90; } },
@@ -41,10 +36,6 @@ const PERKS = [
   { id: 'deception',     name: 'Обманный удар',        desc: 'Боковое вращение +50%',       rarity: 'blue',
     apply(g) { g._careerSidespinBoost = 1.50; } },
   // --- GOLD (rare, unlock after tournament 7) ---
-  { id: 'berserker',     name: 'Берсерк',              desc: 'Assist = 0, все удары +25% мощности', rarity: 'gold',
-    apply(g) { g.settings.assist = 0; g._careerSpeedBoost = (g._careerSpeedBoost || 1) * 1.25; } },
-  { id: 'glass_cannon',  name: 'Стеклянная пушка',     desc: 'Скорость +35%, точность -15%', rarity: 'gold',
-    apply(g) { g._careerSpeedBoost = (g._careerSpeedBoost || 1) * 1.35; g.settings.assist = clamp(g.settings.assist - 0.15, 0, 1); } },
   { id: 'time_master',   name: 'Повелитель времени',   desc: 'Замедление 0.3x при smash > 80 км/ч', rarity: 'gold',
     apply(g) { g._careerSlowmoThreshold = 80; g._careerSlowmoScale = 0.3; } },
 ];
@@ -124,7 +115,7 @@ class Career {
 
   start() {
     this.stop();
-    this._baseSettings = { assist: this.game.settings.assist, posAssist: this.game.settings.posAssist, difficulty: this.game.settings.difficulty };
+    this._baseSettings = { difficulty: this.game.settings.difficulty };
     this.active = true;
     this.currentTournament = 0;
     this.currentRound = 0;
@@ -299,7 +290,7 @@ class Career {
             Number.isInteger(o.level) && o.level >= 0 && o.level <= 4))) return false;
     } catch(e) { return false; }
     this.stop();
-    this._baseSettings = { assist: this.game.settings.assist, posAssist: this.game.settings.posAssist, difficulty: this.game.settings.difficulty };
+    this._baseSettings = { difficulty: this.game.settings.difficulty };
     this.active = true;
     this.currentTournament = data.currentTournament;
     this.enterTournament();

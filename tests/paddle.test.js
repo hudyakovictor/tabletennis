@@ -212,3 +212,57 @@ test('stroke refinement frame preserves wrist pitch at zero correction', () => {
     assert.ok(V3.dist(n, racket.normal) < 1e-9);
   }
 });
+
+test('grip ready angles and handle orientation are distinct and mirrored', () => {
+  const { playerWristPose: pose, faceFromWrist } = load(['10_math.js', '56_rig.js'], ['playerWristPose', 'faceFromWrist']);
+  const { rig, Q, V3, M4 } = rigFixture();
+  for (const grip of ['shakehand', 'penhold']) {
+    const r = pose({ x: 0, y: 1.01, z: 1.44 }, V3.new(), 'right', { grip });
+    assert.ok(Math.abs(-r.pitch * 180 / Math.PI - (grip === 'penhold' ? 5 : 15)) < 1e-8);
+    for (const x of [-.7, -.1, 0, .4, .7]) {
+      const a = pose({ x, y: 1, z: 1.4 }, V3.new(1, .2, -.4), 'right', { grip, preparation: .7, follow: .2, stroke: 'LOOP' });
+      const b = pose({ x: -x, y: 1, z: 1.4 }, V3.new(-1, .2, -.4), 'left', { grip, preparation: .7, follow: .2, stroke: 'LOOP' });
+      assert.ok(Math.abs(a.roll + b.roll) < 1e-10);
+      assert.ok(Math.abs(a.yaw + b.yaw) < 1e-10);
+      assert.equal(a.pitch, b.pitch);
+    }
+    const n = faceFromWrist(V3.new(), r.yaw, r.pitch, 1);
+    const q = rig.paddleQuat(Q.new(), n, 'right', 0, r.roll, true);
+    const m = M4.compose(M4.create(), V3.new(), q, V3.new(1, 1, 1));
+    const handle = M4.transformDir(V3.new(), m, V3.new(0, -1, 0));
+    assert.equal(handle.y > 0, grip === 'penhold');
+    assert.ok(V3.dist(M4.transformDir(V3.new(), m, V3.new(0, 0, 1)), n) < 1e-6);
+  }
+});
+
+test('four stroke keys are bounded, smooth and differentiate strokes', () => {
+  const { wristStrokeKey: key } = load(['10_math.js', '56_rig.js'], ['wristStrokeKey']);
+  for (const grip of ['shakehand', 'penhold']) {
+    for (const stroke of ['DRIVE', 'LOOP', 'CHOP', 'PUSH', 'BLOCK', 'SERVE']) {
+      for (let t = 0; t <= 1; t += .01) {
+        const a = key(grip, stroke, t, 0), b = key(grip, stroke, t + .001, 0);
+        assert.ok(Number.isFinite(a.pitch) && Math.abs(a.pitch) < Math.PI / 2);
+        assert.ok(Math.abs(a.pitch - b.pitch) < .003);
+      }
+    }
+  }
+  assert.equal(key('shakehand', 'LOOP', 0, 0).contact, 40);
+  assert.equal(key('penhold', 'LOOP', 0, 0).contact, 25);
+  assert.equal(key('shakehand', 'CHOP', 0, 0).contact, -30);
+});
+
+test('grip-aware contact stays normalized within its coaching envelope', () => {
+  const { SwipeTracker, deriveStroke } = load(['10_math.js', '30_physics.js', '40_swipe.js'], ['SwipeTracker', 'deriveStroke']);
+  for (const grip of ['shakehand', 'penhold']) {
+    for (const dy of [-.4, -.15, .2, .4]) {
+      const sw = new SwipeTracker();
+      sw.down(.5, .5, 0); sw.move(.52, .5 + dy / 2, .05); sw.up(.54, .5 + dy, .1);
+      const r = deriveStroke(sw.lastReleased, { side: 1, grip });
+      assert.ok(Math.abs(Math.hypot(r.normal.x, r.normal.y, r.normal.z) - 1) < 1e-9);
+      if (r.stroke.id === 'LOOP') {
+        const angle = Math.asin(r.normal.y) * 180 / Math.PI;
+        assert.ok(angle >= (grip === 'penhold' ? -30 : -50) - 1e-8 && angle <= -10 + 1e-8);
+      }
+    }
+  }
+});

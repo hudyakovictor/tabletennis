@@ -76,23 +76,9 @@ canvas{display:block;width:100%;height:100%}
 #playband.band-tiny{gap:3px;--play-size:11px}
 #playband.band-tiny #rally,#playband.band-tiny #gestureCue{display:none}
 
-/* Training uses the SAME bottom reading area, not a second top-left HUD. */
-#playband #train{position:static;display:none;max-width:min(580px,100%);padding:0;pointer-events:none}
-#playband #train.on{display:block}
-#train .th{display:flex;justify-content:center;align-items:center;gap:10px;margin-bottom:6px}
-#train .th span{color:var(--dim);font:650 11px/1.4 var(--ui)}
-#train .th b,.ttip,.twhy,.tmsg{font:650 var(--play-size)/1.4 var(--ui);text-align:center;color:var(--txt);letter-spacing:.025em}
-.twhy{color:var(--dim);margin-top:4px}.tmsg{color:var(--good);margin-top:4px}.tmsg:empty{display:none}
-.tpips{display:flex;justify-content:center;gap:4px;margin:0 auto 8px;max-width:130px}
-.tpips i{flex:1;height:2px;background:var(--line2)}.tpips i.on{background:#ff263e}
-.tbtns{display:flex;justify-content:center;gap:6px;margin-top:8px;pointer-events:auto}
 .tbt{padding:5px 10px;border-radius:6px;border:1px solid var(--line2);background:rgba(8,13,22,.65);
   color:var(--txt);font:650 11px/1.4 var(--ui);letter-spacing:.04em;cursor:pointer;transition:.16s}
 .tbt:hover{background:rgba(255,255,255,.12)}
-#playband:has(#train.on)>:not(#train){display:none!important}
-#playband.band-tiny #train .twhy,#playband.band-tiny #train .tpips{display:none}
-#playband.band-tiny #train .th{margin-bottom:2px}
-#playband.band-tiny #train .tbtns{margin-top:3px}
 
 /* ============================ overlays ============================== */
 .screen{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
@@ -402,15 +388,13 @@ body.is-reel .screen,body.is-reel #pauseInd{display:none !important}
 
 /* Minimal match HUD: only one short line. Training is an explicit exception. */
 #playband::before{display:none}
-#playband > :not(#playStatus):not(#train):not(#btnDemoExit){display:none!important}
+#playband > :not(#playStatus):not(#shot):not(#train):not(#btnDemoExit){display:none!important}
 #playStatus{max-width:min(100%,720px);font:650 14px/1.45 var(--ui);letter-spacing:.015em;color:#d1dbea;
   white-space:normal;overflow-wrap:anywhere;text-align:center;text-shadow:0 2px 14px #000}
 #playStatus[hidden]{display:none}
 
 /* Quiet during the rally; no persistent instruction or timing text. */
 #playStatus{font-size:14px;color:#d1dbea}
-#playband #train .twhy{display:none}
-#playband #train:has(.tmsg:not(:empty)) .ttip{display:none}
 
 /* ====================== responsive + accessibility pass ============ */
 button,input,select,textarea{font:inherit}
@@ -493,17 +477,6 @@ button[hidden],.ic[hidden]{display:none!important}
   #menu .menu-meta-actions{margin-top:6px}
 }
 
-/* The training coach can use the leg-only strip on a short landscape screen. */
-#playband #train{background:rgba(6,12,21,.64);border:1px solid rgba(130,170,220,.20);border-radius:14px;
-  padding:10px 14px;backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);box-shadow:0 12px 35px rgba(0,0,0,.25)}
-#train .tbt{min-height:40px}
-#playband.training-compact{top:auto;bottom:max(12px,env(safe-area-inset-bottom));height:104px;overflow:visible;
-  justify-content:center;z-index:8}
-#playband.training-compact #train{padding:7px 10px;max-width:min(620px,100%)}
-#playband.training-compact #train .tpips,#playband.training-compact #train .twhy{display:none}
-#playband.training-compact #train .th{margin-bottom:2px}
-#playband.training-compact #train .tbtns{margin-top:4px}
-@media(max-height:520px){#playband.training-compact{height:104px}}
 
 /* Shop and modal typography no longer relies on 8–10 px captions. */
 .sl .v{min-width:42px}
@@ -535,18 +508,6 @@ button[hidden],.ic[hidden]{display:none!important}
 .insight-card{max-width:540px}
 .insight-title{font-size:clamp(22px,5vw,30px);color:#ffb1b9}
 #debugMissList .mrow{min-height:60px}
-.debug-replay{position:fixed;inset:0;z-index:95;pointer-events:none}
-.debug-replay-info{position:absolute;top:max(12px,env(safe-area-inset-top));left:50%;transform:translateX(-50%);
-  width:min(560px,calc(100vw - 24px));padding:12px 16px;text-align:center;pointer-events:auto;
-  background:rgba(15,20,30,.94);border:1px solid rgba(255,93,110,.65);border-radius:14px;backdrop-filter:blur(10px)}
-.debug-replay-title{font-size:13px;font-weight:900;letter-spacing:.08em;color:#ff9cac}
-.debug-replay-verdict{font-size:14px;font-weight:750;color:#fff;margin:4px 0}
-.debug-replay-metrics{font:12px/1.5 var(--mono);color:#b9dfff}
-.debug-replay-controls{position:absolute;left:50%;bottom:max(14px,env(safe-area-inset-bottom));transform:translateX(-50%);
-  display:flex;flex-wrap:wrap;justify-content:center;gap:6px;width:min(900px,calc(100vw - 24px));
-  padding:8px 10px;background:rgba(15,20,30,.94);border:1px solid var(--line2);border-radius:18px;backdrop-filter:blur(10px);pointer-events:auto}
-.debug-replay-controls .tbt{min-height:44px}
-
 /* Touch targets: phone and tablet controls get room; very narrow phones reflow. */
 @media (pointer:coarse){
   .ic{width:40px;height:42px;border-radius:12px}
@@ -630,6 +591,50 @@ body:not(.is-playing) #topright{visibility:hidden;pointer-events:none}
   #score .sb-side.scored::after,.sb-pts.bump{animation:none!important}
 }
 
+/* Personal preferences remain finger-sized; gameplay sliders no longer exist. */
+.settings-card .opt{min-height:44px}
+.settings-card .row + .row{margin-top:8px}
+
+/* Shot evidence stays in the reading band; never a second input marker. */
+#shot.on{display:grid;grid-template-columns:auto auto;column-gap:10px;row-gap:4px;text-align:center}
+#playband #shot b,#shot #shotStatus{font:750 clamp(20px,2.2vw,28px)/1.2 var(--ui);letter-spacing:0;color:var(--txt)}
+#shotName:empty{display:none}
+#shot #shotMeta{grid-column:1/-1;font:600 clamp(18px,1.7vw,22px)/1.25 var(--ui);color:var(--dim)}
+#shot[data-tone="good"] #shotStatus{color:var(--good)}
+#shot[data-tone="bad"] #shotStatus{color:var(--warn)}
+#shotMeta:empty{display:none}
+#shotLab{z-index:70}#shotLab .card{width:min(850px,100%)}
+.lab-actions{display:flex;flex-wrap:wrap;gap:8px;margin:14px 0}
+.lab-help,#shotLabProgress{font:500 13px/1.5 var(--ui);color:var(--dim)}
+.lab-entry{border-top:1px solid var(--line);padding:12px 0;font:500 13px/1.5 var(--ui)}
+.lab-entry b{display:block;color:var(--txt)}.lab-entry p{margin:4px 0;overflow-wrap:anywhere}
+
+#playband:has(#shot.on) #msgs,#playband:has(#shot.on) #note,
+#playband:has(#shot.on) #gestureCue,#playband:has(#shot.on) #mnToast{display:none}
+#playband.band-tiny:has(#shot.on) #timingCue,#playband.band-tiny:has(#shot.on) #mpInd{display:none}
+#playband:has(#shot.on)::before{display:none}
+/* Do not stack the point announcement on top of the larger shot result. */
+#playband:has(#shot.on) #playStatus{display:none}
+
+/* Training has no bottom panel, hit targets, or automatic gesture animation. */
+#train{display:none;position:absolute;top:max(14px,env(safe-area-inset-top));left:max(16px,env(safe-area-inset-left));
+  width:440px;max-width:calc(100% - 180px);pointer-events:none;z-index:4;color:var(--txt)}
+#train.on{display:block}#train,#train *{pointer-events:none!important}
+#train .th{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-bottom:5px}
+#train .th b{font:750 18px/1.3 var(--ui)}
+#train .th span{font:650 16px/1.3 var(--ui);color:var(--dim)}
+#train #trProgress{color:var(--good)}
+#trTip,#trMsg{font:600 17px/1.35 var(--ui);text-align:left;text-shadow:0 2px 12px #000}
+#trTip:empty,#trMsg:empty{display:none}
+#hud:has(#train.on) #playband{visibility:hidden;pointer-events:none}
+#trainingActions{flex-basis:100%;text-align:center}
+#trainingActions[hidden]{display:none!important}
+#trainingActions .tbt{min-height:44px;margin:4px}
+#trainPauseTip{font:500 16px/1.5 var(--ui);color:var(--dim);margin:8px 0}
+
+.capture-debug-toggle{display:flex;align-items:center;gap:10px;min-height:44px;padding:8px 10px;font:600 15px/1.4 var(--ui);color:var(--txt);cursor:pointer}
+.capture-debug-toggle input{width:20px;height:20px;accent-color:#39c6ff;cursor:pointer}
+
 </style>
 </head>
 <body>
@@ -660,24 +665,18 @@ body:not(.is-playing) #topright{visibility:hidden;pointer-events:none}
       <div id="mnToast"></div>
       <div id="note" role="status" aria-live="polite"><i></i><span></span></div>
       <div id="msgs" role="log" aria-live="polite" aria-atomic="false"></div>
-      <!-- last shot: one line, fades away on its own -->
-      <div id="shot"><b id="shotName">—</b><small id="shotMeta"></small></div>
-      <!-- interactive coach -->
-      <div id="train" class="pe">
-        <div class="th"><span id="trStep">1 / 6</span><b id="trTitle">ПОДАЧА</b></div>
-        <div class="tpips" id="trPips"></div>
-        <div class="ttip" id="trTip"></div>
-        <div class="tmsg" id="trMsg"></div>
-        <div class="tbtns">
-          <button class="tbt" id="trSkip">ДАЛЬШЕ ▸</button>
-          <button class="tbt" id="trExit">ВЫЙТИ</button>
-        </div>
-      </div>
-
+      <!-- Latest attempt: recognition, real contact, measured spin and actual result. -->
+      <div id="shot" role="status" aria-live="polite" aria-atomic="true"><b id="shotName">—</b><span id="shotStatus"></span><small id="shotMeta"></small></div>
       <button id="btnDemoExit" class="tbt pe" style="display:none">ДЕМО · ВЕРНУТЬ УПРАВЛЕНИЕ</button>
       <div id="timingCue" role="status" aria-live="off"></div>
       <div id="gestureCue" aria-live="off"></div>
       <div id="playStatus" role="status" aria-live="polite"></div>
+    </div>
+
+    <!-- Read-only objective; the entire gesture area stays free of controls. -->
+    <div id="train" role="status" aria-live="polite" aria-atomic="true">
+      <div class="th"><span id="trStep"></span><b id="trTitle"></b><span id="trProgress"></span></div>
+      <div id="trTip"></div><div id="trMsg"></div>
     </div>
 
     <div id="dbg"></div>
@@ -701,7 +700,13 @@ body:not(.is-playing) #topright{visibility:hidden;pointer-events:none}
       <div class="pause-actions">
         <button id="pauseResume" class="tbt">ПРОДОЛЖИТЬ</button>
         <button id="pauseSettings" class="tbt"><span class="ui-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></span>НАСТРОЙКИ</button>
-        <button id="pauseDebugMisses" class="tbt"><span class="ui-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="10.8" cy="10.8" r="6.8"/><path d="m16 16 5 5"/></svg></span>ПОВТОРЫ ПРОМАХОВ</button>
+        <label class="capture-debug-toggle"><input type="checkbox" id="captureDebugPause"> Зона нажатия</label>
+        <button id="shotLabPause" class="tbt">КАЛИБРОВКА ПОПАДАНИЯ</button>
+        <div id="trainingActions" hidden>
+          <p id="trainPauseTip"></p>
+          <button class="tbt" id="trSkip">ПРОПУСТИТЬ УПРАЖНЕНИЕ</button>
+          <button class="tbt" id="trExit">ЗАКОНЧИТЬ ОБУЧЕНИЕ</button>
+        </div>
         <button id="pauseToMenu" class="tbt">В МЕНЮ</button>
       </div>
     </div>
@@ -795,27 +800,20 @@ body:not(.is-playing) #topright{visibility:hidden;pointer-events:none}
   <div class="screen" id="settings" role="dialog" aria-modal="true" aria-label="Настройки">
     <div class="card settings-card">
       <div class="logo" style="font-size:24px">НАСТРОЙКИ</div>
-      <div class="sub">Игра и камера</div>
+      <div class="sub">Личные предпочтения · единые правила игры</div>
 
-      <h3 class="sec">1. ОБЛАСТЬ ПОПАДАНИЯ</h3>
-      <div class="sl">
-        <label for="rHitZone">Радиус приёма<small>захват мяча вокруг курсора</small></label>
-        <input type="range" id="rHitZone" data-set="hitZone" min="30" max="100" value="85" aria-valuetext="85 процентов">
-        <span class="v" id="vHitZone">85%</span>
-      </div>
-      <div style="font-size:11px;color:var(--dim);line-height:1.5;margin:4px 0 16px">
-        Больше радиус — проще попасть.
-      </div>
+      <p class="note">Допуски попадания и помощь настроены одинаково для всех — без ползунков. Мяч отбивается ракеткой. Мышь или палец управляют её движением, свайп задаёт удар. Скобки у мяча подсказывают время: пунктир — приближение, сплошные — окно для свайпа. Сам по себе маркер мяч не отбивает.</p>
 
-      <h3 class="sec">2. ВЫРАВНИВАНИЕ УДАРА</h3>
-      <div class="sl">
-        <label for="rAssist">Авто-доводка<small>исправление дуги на стол</small></label>
-        <input type="range" id="rAssist" data-set="assist" min="0" max="100" value="85" aria-valuetext="85 процентов">
-        <span class="v" id="vAssist">85%</span>
+      <h3 class="sec">ХВАТ И ВЕДУЩАЯ РУКА</h3>
+      <div class="row" role="group" aria-label="Хват ракетки">
+        <button class="opt" data-set="grip" data-val="shakehand" aria-pressed="true"><b>SHAKEHAND</b></button>
+        <button class="opt" data-set="grip" data-val="penhold" aria-pressed="false"><b>PENHOLD · ПЕРО</b></button>
       </div>
-      <div style="font-size:11px;color:var(--dim);line-height:1.5;margin:4px 0 16px">
-        Помогает направить мяч на стол.
+      <div class="row" role="group" aria-label="Ведущая рука">
+        <button class="opt" data-set="hand" data-val="right" aria-pressed="true"><b>ПРАВША</b></button>
+        <button class="opt" data-set="hand" data-val="left" aria-pressed="false"><b>ЛЕВША</b></button>
       </div>
+      <p class="note">Shakehand: лёгкий наклон вперёд. Перо: почти вертикально, рукоятка вверх. Поза зеркалится; направление свайпа остаётся экранным.</p>
 
       <h3 class="sec">КАМЕРА</h3>
       <div class="row" id="cameraViews" role="group" aria-label="Вид камеры">
@@ -920,8 +918,8 @@ body:not(.is-playing) #topright{visibility:hidden;pointer-events:none}
         <div class="st"><small>Любимый удар</small><b id="stFav">—</b></div>
       </div>
       <div id="overMoments" class="omrow"></div>
+      <button class="btn ghost" id="shotLabResults">КАЛИБРОВКА ПОПАДАНИЯ</button>
       <button class="btn" id="again">РЕВАНШ</button>
-      <button class="btn ghost insight" id="btnDebugMisses"><span class="ui-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="10.8" cy="10.8" r="6.8"/><path d="m16 16 5 5"/></svg></span>ПОВТОРЫ ПРОМАХОВ</button>
       <button class="btn ghost" id="backMenu">В МЕНЮ</button>
     </div>
   </div>
@@ -957,30 +955,17 @@ body:not(.is-playing) #topright{visibility:hidden;pointer-events:none}
     </div>
   </div>
 
-  <!-- ==================== DEBUG MISSES MODAL ===================== -->
-  <div class="screen" id="debugMissesModal" role="dialog" aria-modal="true" aria-label="Повторы промахов">
-    <div class="card insight-card">
-      <div class="logo insight-title">ПОВТОРЫ ПРОМАХОВ</div>
-      <div class="sub">Выберите розыгрыш — разберём его в замедленном повторе.</div>
-      <div id="debugMissList" class="mlist"></div>
-      <button class="btn ghost" id="debugMissesClose">ЗАКРЫТЬ</button>
-    </div>
-  </div>
-
-  <!-- ==================== DEBUG REPLAY HUD ====================== -->
-  <div id="debugReplayHud" class="debug-replay" style="display:none">
-    <div class="debug-replay-info">
-      <div class="debug-replay-title" id="dbgReplayTitle">ПОВТОР ПРОМАХА #1</div>
-      <div class="debug-replay-verdict" id="dbgReplayVerdict">НЕ ДОТЯНУЛСЯ</div>
-      <div class="debug-replay-metrics" id="dbgReplayMetrics">Дистанция: 0.35 м · Радиус ракетки: 0.22 м</div>
-    </div>
-    <div class="debug-replay-controls">
-      <button class="tbt" id="dbgPrev">НАЗАД</button>
-      <button class="tbt" id="dbgRestart">ЗАНОВО</button>
-      <button class="tbt" id="dbgPause">ПАУЗА</button>
-      <button class="tbt" id="dbgSpeed">0.20×</button>
-      <button class="tbt" id="dbgNext">ВПЕРЁД</button>
-      <button class="tbt" id="dbgExit">ВЫЙТИ</button>
+  <div class="screen" id="shotLab" role="dialog" aria-modal="true" aria-labelledby="shotLabTitle">
+    <div class="card">
+      <h2 id="shotLabTitle">КАЛИБРОВКА ПОПАДАНИЯ</h2>
+      <div class="lab-actions"><button class="tbt" id="shotLabExport">СКАЧАТЬ ИЗМЕРЕНИЯ</button><button class="tbt" id="shotLabClose">ЗАКРЫТЬ</button></div>
+      <label class="capture-debug-toggle"><input type="checkbox" id="captureDebugLab"> Показывать зону у мяча</label>
+      <p class="lab-help">Один круг — допустимое место начала нажатия. Снаружи удар блокируется. Внутри всё ещё нужны движение и правильный момент. Радиус одинаковый при подаче и приёме: 48 экранных пикселей, независимо от камеры.</p>
+      <h3>Уменьшать ли зону?</h3>
+      <p class="lab-help">Ниже — сколько ваших реальных ударов отсекла бы меньшая зона. Точность и качество удара здесь не оцениваются.</p>
+      <div id="captureCalibrationSummary"></div>
+      <details><summary>Последние попытки</summary>
+      <div id="shotLabRecords"></div></details>
     </div>
   </div>
 
@@ -1249,6 +1234,118 @@ function noise1(x) {
   const i = Math.floor(x), f = x - i;
   const u = f * f * (3 - 2 * f);
   return lerp(hash1(i), hash1(i + 1), u);
+}
+
+
+/* ====== 12_match_rules.js ====== */
+/* One versioned player-control contract. Not difficulty, equipment, cosmetics
+ * or handedness. Distances are metres; marker sizes are CSS pixels, NOT hit
+ * radii. Keep input affordance, timing and physical capture separate. */
+
+const MATCH_RULES = Object.freeze({
+  version: 1,
+  pressRadiusPx: 48,          // screen-space admission for real pointer-down events
+  trajectoryAssist: .85,
+  positionAssist: .85,
+  sensitivity: 1,
+  captureRadius: .361,        // previous .14 + .85*.26; preserve baseline feel
+  depthTolerance: .347,      // previous .16 + .85*.22
+  serveCaptureRadius: .618,  // falling toss only; different task, same for all
+  sweetRadius: .15225,       // contact-quality reference, NOT capture radius
+  timingMinPx: 8,
+  timingMaxPx: 20,
+  timingHorizon: .44,
+});
+
+/** Read-only compatibility for old modules/saves. Setters deliberately ignore
+ * legacy writes instead of crashing a strict-mode old career/perk caller.
+ * Physics reads MATCH_RULES directly. These keys do not enter new saves. */
+function installUnifiedControls(settings) {
+  const fixed = { hitZone: .85, assist: MATCH_RULES.trajectoryAssist,
+    posAssist: MATCH_RULES.positionAssist, sensitivity: MATCH_RULES.sensitivity, showZone: true };
+  for (const [key, value] of Object.entries(fixed)) {
+    Object.defineProperty(settings, key, { configurable: false, enumerable: false,
+      get() { return value; }, set(_ignored) {} });
+  }
+  return settings;
+}
+function playerCaptureLimits(isServe) {
+  return { radius: isServe ? MATCH_RULES.serveCaptureRadius : MATCH_RULES.captureRadius,
+    depth: MATCH_RULES.depthTolerance, sweet: MATCH_RULES.sweetRadius };
+}
+/** Endpoint capture used by impact AND the timing cue. CCD remains the
+ * additional continuous path for a fast crossing between physical substeps.
+ * This does not manufacture a stroke: callers still enforce fresh gestures,
+ * bounce legality, toss height and the consumed-once rule. */
+function playerInCaptureRange(ball, paddle, isServe = false) {
+  if (!ball || !paddle || ![ball.x, ball.y, ball.z, paddle.x, paddle.y, paddle.z].every(Number.isFinite)) return false;
+  const dx = ball.x - paddle.x, dy = ball.y - paddle.y, dz = ball.z - paddle.z;
+  return isServe ? Math.hypot(dx, dy, dz) <= MATCH_RULES.serveCaptureRadius
+    : Math.hypot(dx, dy) <= MATCH_RULES.captureRadius && Math.abs(dz) <= MATCH_RULES.depthTolerance;
+}
+/** Pure overlay model: cue follows the ball; no fake area-of-effect circle.
+ * A warm solid bracket means an available time/position window, never an
+ * automatic hit. Early dashed brackets differ by shape as well as colour. */
+function strikeCueModel(window) {
+  if (!window || !window.on || !['rally', 'serve'].includes(window.kind) || !Number.isFinite(window.t)
+      || !Number.isFinite(window.k) || !Number.isFinite(window.ready)
+      || window.t > MATCH_RULES.timingHorizon || window.k < .02) return null;
+  const hot = window.contactable === true && window.ready > .82;
+  return { radius: MATCH_RULES.timingMinPx + Math.min(1, Math.max(0, window.t / MATCH_RULES.timingHorizon))
+      * (MATCH_RULES.timingMaxPx - MATCH_RULES.timingMinPx),
+    hot, dashed: !hot, alpha: Math.min(1, Math.max(0, window.k)) * (hot ? .9 : .5) };
+}
+
+/** Inverse capture: where the bat centre may be for this actual ball.
+ * Section is drawn at the bat's depth, not a misleading screen-space circle. */
+function ballCaptureTarget(paddle, ball, serving = false) {
+  if (!paddle || !paddle.pos || !ball || ![paddle.pos.x,paddle.pos.y,paddle.pos.z,ball.x,ball.y,ball.z].every(Number.isFinite)) return null;
+  const limits = playerCaptureLimits(serving), dz = ball.z - paddle.pos.z;
+  const depth = serving ? limits.radius : limits.depth, depthOk = Math.abs(dz) <= depth;
+  const radius = serving ? Math.sqrt(Math.max(0, limits.radius ** 2 - dz ** 2)) : limits.radius;
+  const center = { x: ball.x, y: ball.y, z: paddle.pos.z }, points = [];
+  if (depthOk) for (let i = 0; i <= 48; i++) {
+    const a = i / 48 * Math.PI * 2;
+    points.push({ x: center.x + Math.cos(a)*radius, y: center.y + Math.sin(a)*radius, z: center.z });
+  }
+  return { center, points, radius, limitRadius: limits.radius, depth, depthGap: Math.abs(dz), depthOk,
+    inside: playerInCaptureRange(ball, paddle.pos, serving), serving };
+}
+
+/** Numeric evidence at one physical substep, before impact changes the ball.
+ * Includes the alternate CCD route so endpoint-only counting cannot overstate
+ * how many hits a smaller radius would reject. Depth is held fixed. */
+function measureCaptureAllowance(paddle, p0, p1, serving, endpointEligible) {
+  const p = paddle.pos, n = paddle.normal, previous = paddle.prevPos;
+  if (!p || !n || !previous || !p0 || !p1 ||
+      ![p.x,p.y,p.z,n.x,n.y,n.z,previous.x,previous.y,previous.z,p0.x,p0.y,p0.z,p1.x,p1.y,p1.z].every(Number.isFinite)) return null;
+  const limits = playerCaptureLimits(serving), dx = p1.x-p.x, dy = p1.y-p.y, dz = p1.z-p.z;
+  const lateral = Math.hypot(dx,dy), distance = Math.hypot(dx,dy,dz);
+  const endpointRadius = endpointEligible && (serving || Math.abs(dz)<=limits.depth) ? (serving ? distance : lateral) : null;
+  const d0 = (p0.x-previous.x)*n.x+(p0.y-previous.y)*n.y+(p0.z-previous.z)*n.z;
+  const d1 = dx*n.x+dy*n.y+dz*n.z;
+  let ccdRadius = null;
+  if (d0 > PH.R && d1 <= PH.R) {
+    const t = Math.max(0,Math.min(1,(d0-PH.R)/Math.max(d0-d1,1e-9)));
+    const ex = p0.x+(p1.x-p0.x)*t-(previous.x+(p.x-previous.x)*t);
+    const ey = p0.y+(p1.y-p0.y)*t-(previous.y+(p.y-previous.y)*t);
+    const ez = p0.z+(p1.z-p0.z)*t-(previous.z+(p.z-previous.z)*t);
+    const dn = ex*n.x+ey*n.y+ez*n.z;
+    ccdRadius = Math.hypot(ex-n.x*dn,ey-n.y*dn,ez-n.z*dn);
+  }
+  const candidates = [endpointRadius,ccdRadius].filter(Number.isFinite);
+  return { serving: !!serving, radius: limits.radius, depthLimit: limits.depth,
+    lateral, depthGap: Math.abs(dz), distance, endpointEligible: !!endpointEligible,
+    endpointRadius, ccdRadius, requiredRadius: candidates.length ? Math.min(...candidates) : null,
+    score: serving ? distance/limits.radius : Math.max(lateral/limits.radius,Math.abs(dz)/limits.depth) };
+}
+
+// Actual mouse/touch press admission, in CSS pixels. Independent of quality.
+function pressHitZone(ballScreen, pointer, width, height, radius = MATCH_RULES.pressRadiusPx) {
+  if (!ballScreen || !ballScreen.ok || !pointer || ![ballScreen.x,ballScreen.y,pointer.x,pointer.y,width,height,radius].every(Number.isFinite) || width<=0 || height<=0 || radius<=0) return null;
+  const x=ballScreen.x*width,y=ballScreen.y*height;
+  const distancePx=Math.hypot(pointer.x*width-x,pointer.y*height-y);
+  return { x,y,radius,distancePx,pointerX:pointer.x*width,pointerY:pointer.y*height,accepted:distancePx<=radius };
 }
 
 
@@ -2121,7 +2218,7 @@ class Renderer {
  *  CAREER — Roguelike tournament mode: basement to world championship.
  *
  *  12 tournaments, each harder than the last. Between matches you pick
- *  one of three perks that alter physics, assist or AI behaviour.
+ *  up to three perks that alter physics or AI behaviour, never capture/aim assistance.
  *  A loss ends the run; a win advances to the next tournament.
  *  Every run is different because the perk pool is shuffled.
  * ===================================================================== */
@@ -2129,24 +2226,19 @@ class Renderer {
 /* ------------------------------------------------------------------ */
 /*  PERK DEFINITIONS                                                   */
 /* ------------------------------------------------------------------ */
+// Retired assistance IDs (steady_hand, quick_feet, sharp_eye, net_touch,
+// berserker, glass_cannon) are deliberately absent. Legacy career loading
+// already drops unknown IDs; they cannot silently restore private rules.
 const PERKS = [
   // --- GREEN (common, always available) ---
-  { id: 'steady_hand',   name: 'Стальная рука',       desc: 'Помощь прицела +8%',         rarity: 'green',
-    apply(g) { g.settings.assist = clamp(g.settings.assist + 0.08, 0, 1); } },
-  { id: 'quick_feet',    name: 'Быстрые ноги',         desc: 'Помощь позиции +10%',        rarity: 'green',
-    apply(g) { g.settings.posAssist = clamp(g.settings.posAssist + 0.10, 0, 1); } },
   { id: 'heavy_spin',    name: 'Тяжёлое вращение',     desc: 'Вращение +12% на всех ударах', rarity: 'green',
     apply(g) { g._careerSpinBoost = (g._careerSpinBoost || 1) * 1.12; } },
   { id: 'fast_arms',     name: 'Быстрые руки',         desc: 'Макс. скорость замаха +15%',  rarity: 'green',
     apply(g) { g._careerSpeedBoost = (g._careerSpeedBoost || 1) * 1.15; } },
-  { id: 'iron_will',     name: 'Железная воля',        desc: 'Помощь +12% на решающих очках', rarity: 'green',
+  { id: 'iron_will',     name: 'Железная воля',        desc: 'Мощность +12% на решающих очках', rarity: 'green',
     apply(g) { g._careerDecisiveBoost = 0.12; } },
   { id: 'deep_breath',   name: 'Глубокий вдох',        desc: 'Усталость -30%',              rarity: 'green',
     apply(g) { g._careerFatigueReduce = 0.70; } },
-  { id: 'sharp_eye',     name: 'Зоркий глаз',          desc: 'Кольцо удара сжимается на 15% медленнее', rarity: 'green',
-    apply(g) { g._careerRingSlow = 0.85; } },
-  { id: 'net_touch',     name: 'Чутьё сетки',          desc: 'У сетки мяч всегда перелетает', rarity: 'green',
-    apply(g) { g._careerNetSafe = true; } },
   // --- BLUE (uncommon, unlock after tournament 3) ---
   { id: 'topspin_master',name: 'Мастер топспина',      desc: 'Топспин +25%, бэкспин -10%',  rarity: 'blue',
     apply(g) { g._careerTopspinBoost = 1.25; g._careerBackspinPenalty = 0.90; } },
@@ -2159,10 +2251,6 @@ const PERKS = [
   { id: 'deception',     name: 'Обманный удар',        desc: 'Боковое вращение +50%',       rarity: 'blue',
     apply(g) { g._careerSidespinBoost = 1.50; } },
   // --- GOLD (rare, unlock after tournament 7) ---
-  { id: 'berserker',     name: 'Берсерк',              desc: 'Assist = 0, все удары +25% мощности', rarity: 'gold',
-    apply(g) { g.settings.assist = 0; g._careerSpeedBoost = (g._careerSpeedBoost || 1) * 1.25; } },
-  { id: 'glass_cannon',  name: 'Стеклянная пушка',     desc: 'Скорость +35%, точность -15%', rarity: 'gold',
-    apply(g) { g._careerSpeedBoost = (g._careerSpeedBoost || 1) * 1.35; g.settings.assist = clamp(g.settings.assist - 0.15, 0, 1); } },
   { id: 'time_master',   name: 'Повелитель времени',   desc: 'Замедление 0.3x при smash > 80 км/ч', rarity: 'gold',
     apply(g) { g._careerSlowmoThreshold = 80; g._careerSlowmoScale = 0.3; } },
 ];
@@ -2242,7 +2330,7 @@ class Career {
 
   start() {
     this.stop();
-    this._baseSettings = { assist: this.game.settings.assist, posAssist: this.game.settings.posAssist, difficulty: this.game.settings.difficulty };
+    this._baseSettings = { difficulty: this.game.settings.difficulty };
     this.active = true;
     this.currentTournament = 0;
     this.currentRound = 0;
@@ -2417,7 +2505,7 @@ class Career {
             Number.isInteger(o.level) && o.level >= 0 && o.level <= 4))) return false;
     } catch(e) { return false; }
     this.stop();
-    this._baseSettings = { assist: this.game.settings.assist, posAssist: this.game.settings.posAssist, difficulty: this.game.settings.difficulty };
+    this._baseSettings = { difficulty: this.game.settings.difficulty };
     this.active = true;
     this.currentTournament = data.currentTournament;
     this.enterTournament();
@@ -3306,6 +3394,182 @@ function solveLaunch(from, target, spin, opts = {}) {
 }
 
 
+/* ====== 38_paddle_motion.js ====== */
+/* Shared paddle-only motion contract. Degrees in profiles: + closes toward
+ * the net. World pitch has the opposite sign. No render-time mutation. */
+
+const PADDLE_PROFILES = Object.freeze({
+  DRIVE: Object.freeze({ keys: Object.freeze([15, 5, 15, 20]), range: Object.freeze([-20, -10]), roll: .16, follow: .11, recover: .19 }),
+  LOOP: Object.freeze({ keys: Object.freeze([15, 12, 40, 48]), range: Object.freeze([-50, -30]), roll: .24, follow: .15, recover: .23 }),
+  CHOP: Object.freeze({ keys: Object.freeze([15, -12, -30, -38]), range: Object.freeze([20, 40]), roll: -.20, follow: .16, recover: .23 }),
+  PUSH: Object.freeze({ keys: Object.freeze([15, -10, -25, -30]), range: Object.freeze([15, 40]), roll: -.10, follow: .10, recover: .17 }),
+  FLICK: Object.freeze({ keys: Object.freeze([15, 0, 20, 28]), range: Object.freeze([-30, -5]), roll: .20, follow: .09, recover: .16 }),
+  BLOCK: Object.freeze({ keys: Object.freeze([15, 8, 8, 10]), range: Object.freeze([-15, 0]), roll: .03, follow: .06, recover: .13 }),
+  SERVE: Object.freeze({ keys: Object.freeze([15, -20, 0, 25]), range: Object.freeze([-45, 45]), roll: .20, follow: .12, recover: .20 }),
+});
+function paddleStrokeFamily(stroke) {
+  if (typeof stroke !== 'string') return 'DRIVE';
+  if (stroke.startsWith('SERVE')) return 'SERVE';
+  if (stroke === 'COUNTER') return 'LOOP';
+  if (stroke === 'DROP') return 'PUSH';
+  return PADDLE_PROFILES[stroke] ? stroke : 'DRIVE';
+}
+function paddleGripProfile(grip, stroke, forehand = true) {
+  const family = paddleStrokeFamily(stroke), base = PADDLE_PROFILES[family];
+  const pen = grip === 'penhold', k = base.keys;
+  const loop = pen && family === 'LOOP';
+  const contact = loop ? (forehand ? 25 : 30) : k[2];
+  return { family, ready: pen ? 5 : k[0], prepare: k[1], contact,
+    follow: loop ? contact + (forehand ? 7 : 12) : k[3],
+    // Reverse-penhold backhand needs more wrist travel than the forehand.
+    roll: base.roll * (pen ? (forehand ? 1.15 : 1.45) : 1),
+    followTime: base.follow, recoverTime: base.recover,
+    range: loop ? (forehand ? [-30, -10] : [-40, -15]) : base.range };
+}
+// A narrow dead band prevents tiny touch noise flipping the FH/BH grip.
+function paddleForehand(x, hand, previous) {
+  const lateral = (Number.isFinite(x) ? x : 0) * (hand === 'left' ? -1 : 1);
+  if (typeof previous !== 'boolean') return lateral >= -.08;
+  return previous ? lateral >= -.125 : lateral > -.035;
+}
+function paddleContactRange(grip, stroke, forehand = true, isServe = false, context = {}) {
+  if (grip !== 'shakehand' && grip !== 'penhold') return null;
+  // Lob, smash and sidespin keep their unconstrained physical archetypes.
+  if (!isServe && !['DRIVE', 'LOOP', 'COUNTER', 'FLICK', 'CHOP', 'PUSH', 'DROP', 'BLOCK'].includes(stroke)) return null;
+  const range = paddleGripProfile(grip, isServe ? 'SERVE' : stroke, forehand).range;
+  if (grip === 'shakehand' && !isServe && ['LOOP', 'COUNTER'].includes(stroke)) {
+    // 30–50 degrees is a strong loop, not a universal joint limit. A weak
+    // or below-net opening needs a more open face, especially off backspin.
+    // Preserve a closed face, but do not turn a coaching guideline into an
+    // impossible low-ball return in the actual friction/impulse model.
+    const weak = Number.isFinite(context.swingSpeed) ? clamp((12 - context.swingSpeed) / 4, 0, 1) : 0;
+    const low = Number.isFinite(context.contactY) ? clamp((1.10 - context.contactY) / .30, 0, 1) : 0;
+    const back = Number.isFinite(context.incomingTop) ? clamp(-context.incomingTop / 300, 0, 1) : 0;
+    const opening = Math.min(15, Math.max(weak * 15, low * 10, back * 12));
+    return [range[0], range[1] + opening];
+  }
+  return range;
+}
+function wristStrokeKey(grip, stroke, preparation, follow, forehand = true) {
+  const p = paddleGripProfile(grip, stroke, forehand);
+  const a = smoothstep(0, 1, Number.isFinite(preparation) ? preparation : 0);
+  const b = smoothstep(0, 1, Number.isFinite(follow) ? follow : 0);
+  return { ready: p.ready, contact: p.contact,
+    pitch: -lerp(lerp(p.ready, p.prepare, a), p.follow, b) * DEG };
+}
+function paddleAngleDelta(a, b) {
+  return Math.atan2(Math.sin(b - a), Math.cos(b - a));
+}
+/** Exact solution of error' = -min(rate*error, maxSpeed). Unlike error-
+ * dependent lerp coefficients this has the same response at 30/60/120 Hz.
+ * Angular wrapping is opt-in: penhold +pi and -pi are the same grip. */
+function stepPaddleAngle(current, target, rate, dt, maxSpeed = 12, wrap = false) {
+  if (!Number.isFinite(target)) return Number.isFinite(current) ? current : 0;
+  if (!Number.isFinite(current)) return target;
+  if (!Number.isFinite(dt) || dt <= 0) return current;
+  if (!(rate > 0) || !(maxSpeed > 0)) return current;
+  const delta = wrap ? paddleAngleDelta(current, target) : target - current;
+  let error = Math.abs(delta), t = Math.min(dt, 1);
+  const boundary = maxSpeed / rate;
+  const linearTime = Math.max(0, (error - boundary) / maxSpeed);
+  if (t <= linearTime) return current + Math.sign(delta) * maxSpeed * t;
+  const remaining = Math.min(error, boundary) * Math.exp(-rate * (t - linearTime));
+  return current + Math.sign(delta) * (error - remaining);
+}
+function paddleFaceAngles(normal) {
+  const length = Math.hypot(normal.x, normal.y, normal.z);
+  if (!Number.isFinite(length) || length < 1e-8) return { yaw: 0, pitch: -15 * DEG };
+  return { yaw: -Math.atan2(normal.x, -normal.z), pitch: Math.asin(clamp(normal.y / length, -1, 1)) };
+}
+
+/** Physical impact -> contact hold -> authored follow -> recovery.
+ * The first sample is EXACTLY the assisted impact normal, even when physics
+ * and drawing happen in the same render frame. No frame-counted timers. */
+class PaddleStrokeMotion {
+  constructor() { this.reset(); }
+  reset() { this.active = false; this.stage = 'ready'; this.elapsed = 0; this.fresh = false; }
+  contact(normal, roll, stroke, grip, hand, forehand = true, followEnabled = true) {
+    this.profile = paddleGripProfile(grip, stroke, forehand);
+    this.start = { ...paddleFaceAngles(normal), roll: Number.isFinite(roll) ? roll : 0 };
+    this.hand = hand === 'left' ? -1 : 1;
+    this.rollDirection = this.hand * (grip === 'penhold' ? -1 : 1);
+    this.followEnabled = followEnabled;
+    this.elapsed = 0; this.fresh = true; this.active = true; this.stage = 'contact';
+  }
+  sample(dt, ready, interrupt = false) {
+    if (interrupt) this.reset();
+    if (!this.active) return null;
+    if (this.fresh) this.fresh = false;
+    else if (Number.isFinite(dt) && dt > 0) this.elapsed += dt;
+    const p = this.profile, hold = .025;
+    const follow = this.followEnabled ? p.followTime : 0;
+    const end = hold + follow + p.recoverTime;
+    if (this.elapsed >= end) { this.reset(); return null; }
+    const delta = this.followEnabled ? -(p.follow - p.contact) * DEG : 0;
+    const followPitch = clamp(this.start.pitch + delta, -1.15, 1.05);
+    const followRoll = this.start.roll + (this.followEnabled ? this.rollDirection * p.roll : 0);
+    if (this.elapsed <= hold) { this.stage = 'contact'; return { ...this.start, stage: this.stage }; }
+    if (follow && this.elapsed < hold + follow) {
+      this.stage = 'follow';
+      const t = smoothstep(0, 1, (this.elapsed - hold) / follow);
+      return { yaw: this.start.yaw, pitch: lerp(this.start.pitch, followPitch, t),
+        roll: lerp(this.start.roll, followRoll, t), stage: this.stage };
+    }
+    this.stage = 'recover';
+    const t = smoothstep(0, 1, (this.elapsed - hold - follow) / p.recoverTime);
+    return { yaw: this.start.yaw + paddleAngleDelta(this.start.yaw, ready.yaw) * t,
+      pitch: lerp(followPitch, ready.pitch, t),
+      roll: followRoll + paddleAngleDelta(followRoll, ready.roll) * t, stage: this.stage };
+  }
+}
+
+/** Exact vertical support of the meshes in 60_scene / 56_rig. Includes
+ * both rubber layers and the offset rectangular handle (metres).
+ * Y projection of a lookRotation basis depends only on normal.y and roll. */
+function paddleBottomExtent(normal, roll) {
+  const len = Math.hypot(normal.x, normal.y, normal.z) || 1;
+  const ny = Number.isFinite(len) && len > 1e-8 ? clamp(normal.y / len, -1, 1) : 0;
+  roll = Number.isFinite(roll) ? roll : 0;
+  const upright = Math.sqrt(Math.max(0, 1 - ny * ny));
+  const by = upright * Math.cos(roll), bx = upright * Math.sin(roll);
+  const blade = Math.hypot(.077 * bx, .082 * by) + .007 * Math.abs(ny);
+  const rubber = Math.hypot(.072 * bx, .077 * by) + .010 * Math.abs(ny);
+  const handle = .125 * by + .015 * Math.abs(bx) + .050 * Math.abs(by) + .011 * Math.abs(ny);
+  return Math.max(blade, rubber, handle);
+}
+function keepPaddleAboveTable(pos, normal, roll, tableY, halfWidth, halfLength) {
+  // Start lifting outside the conservative .18 m mesh footprint, so a
+  // below-table bat does not teleport when it crosses the table edge.
+  const x = smoothstep(halfWidth + .24, halfWidth + .18, Math.abs(pos.x));
+  const z = smoothstep(halfLength + .24, halfLength + .18, Math.abs(pos.z));
+  if (x * z <= 0) return 0;
+  const minY = tableY + paddleBottomExtent(normal, roll) + .006;
+  const lift = Math.max(0, minY - pos.y) * x * z;
+  pos.y += lift;
+  return lift;
+}
+
+/** Time-based tactical reads. frame % 4 would read at only 7.5 Hz on a
+ * 30 FPS phone and at 36 Hz on a 144 Hz monitor. Cap work at 30 Hz. */
+class PaddleReadClock {
+  constructor() { this.reset(); }
+  reset() { this.clock = 0; this.age = 0; this.shot = null; }
+  advance(dt, incoming, shot) {
+    if (!incoming) { this.reset(); return false; }
+    const t = Number.isFinite(dt) ? clamp(dt, 0, .1) : 0;
+    this.clock += t; this.age += t;
+    if (shot !== this.shot || this.clock + 1e-9 >= 1 / 30) {
+      this.clock = shot !== this.shot ? 0 : this.clock % (1 / 30);
+      // Suppress a floating-point remainder infinitesimally below one tick.
+      if (this.clock > 1 / 30 - 1e-9) this.clock = 0;
+      this.age = 0; this.shot = shot;
+      return true;
+    }
+    return false;
+  }
+}
+
+
 /* ====== 40_swipe.js ====== */
 /* =====================================================================
  *  SWIPE  ->  STROKE
@@ -3319,6 +3583,7 @@ function solveLaunch(from, target, spin, opts = {}) {
 /* --------------------------- gesture tracker ----------------------- */
 class SwipeTracker {
   constructor() {
+    this.gestureId = 0;
     this.active = false;
     this.samples = [];          // {x,y,t} normalized screen units (y down)
     this.maxSamples = 64;
@@ -3336,6 +3601,8 @@ class SwipeTracker {
     };
   }
   down(x, y, t) {
+    this.gestureId++;
+    this.pressZone = null;
     this.active = true; this.startT = t;
     this.samples.length = 0;
     this.samples.push({ x, y, t });
@@ -3353,6 +3620,7 @@ class SwipeTracker {
   /** Abandon the gesture without producing a stroke — used when a second
    *  finger lands and the touch turns into a camera orbit. */
   cancel() {
+    this.pressZone = null;
     this.active = false;
     this.samples.length = 0;
     this.lastReleased = null;
@@ -3673,6 +3941,9 @@ function deriveStroke(m, ctx) {
   if (!A.back && !A.absorb && !ctx.isServe) {
     phi = clamp(phi - (0.18 + 0.10 * clamp(sp01, 0, 1)), -1.35, 1.35);
   }
+  const faceRange = paddleContactRange(ctx.grip, st.id, ctx.forehand !== false, ctx.isServe,
+    { swingSpeed: vmag, contactY: b.y, incomingTop });
+  if (faceRange) phi = clamp(phi, faceRange[0] * DEG, faceRange[1] * DEG);
   const normal = V3.new(
     Math.sin(azFace) * Math.cos(phi),
     Math.sin(phi),
@@ -3715,7 +3986,7 @@ function deriveStroke(m, ctx) {
   };
 
   return {
-    stroke: st, arch: A, vR, normal, vmag, aim: { x: aimX, z: aimZ },
+    stroke: st, arch: A, vR, normal, vmag, faceEnvelope: faceRange, grip: ctx.grip, forehand: ctx.forehand !== false, aim: { x: aimX, z: aimZ },
     power: sp01, quality, elev, contact, azSwing, azFace, faceElev: phi, spinIntent, rubber,
     swipe: m, side, isServe: !!ctx.isServe,
     /* Air left over the tape. A push and a chop carry the least energy of any
@@ -3747,17 +4018,20 @@ function dirFromAngles(out, elev, az, fwd) {
 }
 
 /** Rebuild (swing, normal) for a stroke rotated by (dElev, dAz). */
-function strokeFrame(racket, dElev, dAz, scale, outSwing, outNormal) {
+function strokeFrame(racket, dElev, dAz, scale, outSwing, outNormal, wristCorrection = 0) {
   const fwd = -racket.side;
   const e = clamp(racket.elev * DEG + dElev, -1.30, 1.40);
   const a = clamp(racket.azSwing + dAz, -1.40, 1.40);
   const contact = racket.contact * DEG;
   // Preserve the actual contact face, including wrist pitch and lateral
   // brushing. Rebuilding only from contact degrees silently discarded both.
-  const phi = clamp(Number.isFinite(racket.faceElev)
+  let phi = clamp(Number.isFinite(racket.faceElev)
     ? racket.faceElev + (e - racket.elev * DEG)
     : (racket.arch.back ? e + contact : e - contact), -1.35, 1.35);
-  const af = clamp(racket.azFace + dAz, -1.10, 1.10);
+  phi += Number.isFinite(wristCorrection) ? wristCorrection : 0;
+  const range = racket.faceEnvelope || paddleContactRange(racket.grip, racket.stroke && racket.stroke.id, racket.forehand !== false, racket.isServe);
+  if (range) phi = clamp(phi, range[0] * DEG, range[1] * DEG);
+  const af = clamp(racket.azFace + dAz, -1.35, 1.35);
   dirFromAngles(outSwing, e, a, fwd);
   dirFromAngles(outNormal, phi, af, fwd);
   V3.mul(outSwing, outSwing, racket.vmag * (racket.arch.absorb ? 1 - racket.arch.absorb : 1) * scale);
@@ -3804,7 +4078,7 @@ const SERVE_WARM = new Map();
 function serveWarmKey(side, racket) {
   const st = racket.stroke || {};
   const aim = racket.aim || {};
-  return side + '|' + (st.id || '?') + '|' + Math.round((aim.z || 0) * 3) + '|' + Math.round((aim.x || 0) * 3);
+  return side + '|' + (racket.grip || 'legacy') + '|' + (racket.forehand !== false ? 'fh' : 'bh') + '|' + (st.id || '?') + '|' + Math.round((aim.z || 0) * 3) + '|' + Math.round((aim.x || 0) * 3);
 }
 function ownFor(aim, side) {
   return { x: aim.x * 0.35, z: side * (0.78 + Math.abs(aim.z) * 0.16) };
@@ -4217,14 +4491,28 @@ function solveBlockNormal(ballP, ballV, ballW, face, vR, quality, rubber, out) {
   return o;
 }
 
+/** A refined stroke is a new physical frame, not just a replacement normal.
+ * Keep its angle metadata consistent, so a second refinement starts from
+ * the frame the player actually sees rather than the unassisted gesture. */
+function resolvedRacketFrame(racket, normal, swing, extra) {
+  const n = V3.norm(V3.new(), normal), v = V3.clone(swing);
+  const fwd = -racket.side, speed = V3.len(v);
+  const absorb = racket.arch.absorb ? 1 - racket.arch.absorb : 1;
+  return { ...racket, ...extra, normal: n, vR: v,
+    faceElev: Math.asin(clamp(n.y, -1, 1)), azFace: Math.atan2(n.x, n.z * fwd),
+    elev: Math.asin(clamp(v.y / (speed || 1), -1, 1)) / DEG,
+    azSwing: Math.atan2(v.x, v.z * fwd), vmag: speed / absorb };
+}
+
 function refineRacket(ballP, ballV, ballW, racket, assist, quality) {
   const fwd = -racket.side;
   const rubber = Object.assign({}, racket.rubber || {});
   const q = quality !== undefined ? quality : racket.quality;
   const side = racket.side;
+  let wristCorrection = 0;
 
   const evalStroke = (dE, dA, sc, dmp, outV, outW) => {
-    strokeFrame(racket, dE, dA, sc, _rs, _rn);
+    strokeFrame(racket, dE, dA, sc, _rs, _rn, wristCorrection);
     V3.copy(outV, ballV); V3.copy(outW, ballW);
     rubber.damp = dmp;
     impactRacket(outV, outW, _rn, _rs, q, rubber);
@@ -4243,8 +4531,8 @@ function refineRacket(ballP, ballV, ballW, racket, assist, quality) {
     const spd = V3.len(_rs);
     if (spd > SERVE_VMAX) V3.mul(_rs, _rs, SERVE_VMAX / spd);
     rubber.damp = srv.dmp;
-    return Object.assign({}, racket, {
-      normal: V3.clone(_rn), vR: V3.clone(_rs), rubber,
+    return resolvedRacketFrame(racket, _rn, _rs, {
+      rubber,
       dElev: srv.dE, dAz: srv.dA, scale: srv.sc, damp: srv.dmp,
       solved: true, valid: srv.ok, target: srv.target,
     });
@@ -4390,16 +4678,250 @@ function refineRacket(ballP, ballV, ballW, racket, assist, quality) {
     verdict = validate(dE, dA, sc, dmp, true);
   }
 
+  // A grip-constrained face can reach its limit before the arm has found a
+  // useful path. Rotating both together then has a flat/reversed gradient.
+  // Separate wrist flexion from arm elevation, as a real loop does. This
+  // bounded recovery is only for high assistance and an otherwise illegal
+  // shot; it never edits ball velocity or escapes the grip's face envelope.
+  const envelope = racket.faceEnvelope || paddleContactRange(racket.grip, racket.stroke && racket.stroke.id, racket.forehand !== false, false);
+  if (verdict !== 0 && assist >= .65 && envelope) {
+    const candidates = [];
+    const aimAz = clamp(Math.atan2(target.x - ballP.x, fwd * (target.z - ballP.z)) - racket.azFace, -1, 1);
+    const maxScale = Math.min(1.35, 19.5 / Math.max(.8, racket.vmag));
+    for (const face of [envelope[1], (envelope[0] + envelope[1]) * .5, envelope[0]]) {
+      for (const arm of [35, 50, 20, 65]) {
+        for (const scale of [Math.min(1, maxScale), Math.min(.75, maxScale), maxScale]) {
+          const de = arm * DEG - racket.elev * DEG;
+          wristCorrection = face * DEG - (racket.faceElev + de);
+          if (validate(de, aimAz, scale, 1, false) !== 0) continue;
+          const distance = Math.hypot(chk.landed.x - target.x, chk.landed.z - target.z);
+          const cost = distance + Math.abs(de) * .08 + Math.abs(wristCorrection) * .08 + Math.abs(1 - scale) * .1;
+          candidates.push({ de, da: aimAz, scale, wrist: wristCorrection, cost });
+        }
+      }
+    }
+    candidates.sort((a, b) => a.cost - b.cost);
+    wristCorrection = 0;
+    for (const candidate of candidates.slice(0, 6)) {
+      wristCorrection = candidate.wrist;
+      if (validate(candidate.de, candidate.da, candidate.scale, 1, true) !== 0) { wristCorrection = 0; continue; }
+      dE = candidate.de; dA = candidate.da; sc = candidate.scale; dmp = 1;
+      verdict = 0; break;
+    }
+  }
+
   const swing = V3.new(), normal = V3.new();
-  strokeFrame(racket, dE, dA, sc, swing, normal);
+  strokeFrame(racket, dE, dA, sc, swing, normal, wristCorrection);
   rubber.damp = dmp;
-  return { ...racket, normal, vR: swing, rubber, dElev: dE, dAz: dA, scale: sc, damp: dmp, solved: sol, target, valid: verdict === 0 };
+  return resolvedRacketFrame(racket, normal, swing, { rubber, dElev: dE, dAz: dA, dWrist: wristCorrection, scale: sc, damp: dmp, solved: sol, target, valid: verdict === 0 });
 }
 
 /** Cheap post-hoc report of where a struck ball will actually go. */
 function shotReport(p, v, w, out) {
   return predict(V3.clone(p), V3.clone(v), V3.clone(w),
     { dt: PH.SIM_DT, maxT: 2.6, stopOnFirstBounce: true, out: out || _rout });
+}
+
+
+/* ====== 42_shot_diagnostics.js ====== */
+/* Evidence-based shot feedback. Intent != contact != legal return != point.
+ * Stores bounded numeric events, never video frames or miss replays. */
+
+const SHOT_DIAGNOSTICS_VERSION = 1;
+const SHOT_OUTCOMES = Object.freeze({ outside: 'Вне зоны нажатия', pending: 'Ждём отскок', table: 'На стол', net: 'В сетку',
+  out: 'Аут', own_half: 'На своей половине', serve_fault: 'Ошибка подачи', let: 'Переподача',
+  no_contact: 'Нет контакта', rejected: 'Жест слишком короткий', no_swipe: 'Мяч пропущен — нет нового удара' });
+const shotVec = v => v && [v.x, v.y, v.z].every(Number.isFinite) ? { x: v.x, y: v.y, z: v.z } : null;
+function measureShotSpin(w, velocity) {
+  const omega = shotVec(w) || { x: 0, y: 0, z: 0 };
+  const v = shotVec(velocity) || { x: 0, y: 0, z: -1 };
+  const len = Math.hypot(v.x, v.z);
+  const fx = len > 1e-8 ? v.x / len : 0, fz = len > 1e-8 ? v.z / len : -1;
+  return { totalRps: Math.hypot(omega.x, omega.y, omega.z) / TAU,
+    topRps: (omega.x * fz - omega.z * fx) / TAU,
+    sideRps: omega.y / TAU, corkRps: (omega.x * fx + omega.z * fz) / TAU };
+}
+function shotSpinText(spin) {
+  if (!spin || spin.totalRps < 1) return 'Практически без вращения';
+  const parts = [];
+  if (Math.abs(spin.topRps) >= 1) parts.push(`${spin.topRps > 0 ? 'Верхнее' : 'Нижнее'} ${Math.abs(spin.topRps).toFixed(1)} об/с`);
+  if (Math.abs(spin.sideRps) >= 1) parts.push(`боковое ${Math.abs(spin.sideRps).toFixed(1)} об/с`);
+  if (Math.abs(spin.corkRps) >= 1) parts.push(`продольное ${Math.abs(spin.corkRps).toFixed(1)} об/с`);
+  return parts.join(' · ') || `Суммарно ${spin.totalRps.toFixed(1)} об/с`;
+}
+function shotFeedbackView(entry) {
+  if (!entry) return null;
+  if (entry.outcome === 'no_swipe') return { title: 'НОВОГО УДАРА НЕ БЫЛО', status: 'Мяч пропущен', metrics: '', detail: '', tone: 'neutral' };
+  const stroke = STROKES[entry.strokeId];
+  const name = stroke ? stroke.name : 'ЖЕСТ';
+  if (!entry.contact) return { title: entry.valid ? `Жест: ${name.toLowerCase()}` : 'Жест не распознан',
+    status: entry.outcome === 'pending' ? 'Ищем контакт' : SHOT_OUTCOMES[entry.outcome] || 'Нет контакта',
+    metrics: '', detail: entry.outcome === 'no_contact' ? 'Свайп был, касания мяча не было' : '', tone: 'neutral' };
+  return { title: `Жест: ${name.toLowerCase()}`, status: entry.outcome === 'pending' ? 'Контакт есть · ждём отскок' : SHOT_OUTCOMES[entry.outcome] || entry.outcome,
+    metrics: `${entry.contact.speedKmh.toFixed(0)} км/ч · ${shotSpinText(entry.contact.spin)}`,
+    detail: `Оценка контакта ${Math.round(entry.contact.quality * 100)}% · вращение измерено после удара`,
+    tone: entry.outcome === 'table' ? 'good' : ['net', 'out', 'own_half', 'serve_fault'].includes(entry.outcome) ? 'bad' : 'neutral' };
+}
+// Live HUD is deliberately brief; the pause journal retains the full report.
+function shotHudView(entry) {
+  if (!entry || (!entry.contact && entry.outcome === 'pending')) return null;
+  const full = shotFeedbackView(entry);
+  if (!entry.contact) return { ...full, title: '', status: entry.outcome === 'no_swipe' ? 'Мяч пропущен' : entry.outcome === 'rejected' ? 'Нет удара' : full.status, metrics: '' };
+  const spin = entry.contact.spin;
+  const components = [ ['Верхнее', spin.topRps], ['Боковое', spin.sideRps], ['Продольное', spin.corkRps] ];
+  components.sort((a, b) => Math.abs(b[1]) - Math.abs(a[1]));
+  let [label, value] = components[0];
+  if (label === 'Верхнее' && value < 0) label = 'Нижнее';
+  return { ...full, title: (STROKES[entry.strokeId] || {}).short || '',
+    status: entry.outcome === 'pending' ? 'Контакт' : full.status,
+    metrics: spin.totalRps < 1 ? 'Без вращения' : `${label} ${Math.round(Math.abs(value))} об/с` };
+}
+
+class ShotJournal {
+  constructor(limit = 120) { this.limit = Math.max(1, Math.min(500, limit)); this.reset(); }
+  reset() { this.records = []; this.sequence = 0; this.latest = null; this.flight = null; }
+  create(gestureId, time) {
+    const entry = { id: ++this.sequence, revision: 1, gestureId, time, strokeId: null, valid: false,
+      outcome: 'pending', contact: null, bounces: [], netTouches: 0 };
+    this.records.push(entry); if (this.records.length > this.limit) this.records.shift();
+    this.latest = entry; return entry;
+  }
+  observe(gestureId, metrics, context) {
+    if (!metrics || !Number.isFinite(gestureId) || gestureId <= 0) return null;
+    let entry = this.records.find(e => e.gestureId === gestureId);
+    if (entry && entry.contact) return entry;
+    if (!entry) entry = this.create(gestureId, context.time);
+    const valid = isRealStroke(metrics, context.isServe);
+    const kind = valid ? context.strokeId : null;
+    if (entry.valid !== valid || entry.strokeId !== kind) entry.revision++;
+    entry.valid = valid; entry.strokeId = kind; entry.isServe = !!context.isServe;
+    entry.gestureMetrics = { ...metrics };
+    entry.gesture = { dx: metrics.dx, dy: metrics.dy, duration: metrics.dur, path: metrics.pathLen,
+      peakSpeed: metrics.peakSpeed, releaseSpeed: metrics.releaseSpeed, samples: metrics.samples, curl: metrics.curl };
+    entry.deadline = context.sampleTime + (context.isServe ? 1.15 : context.active ? .18 : .25);
+    if (['no_contact', 'rejected'].includes(entry.outcome) && valid && context.time <= entry.deadline) { entry.outcome = 'pending'; entry.revision++; }
+    if (entry.pressZone && !entry.pressZone.accepted) { entry.outcome = 'outside'; return entry; }
+    if (!valid && !context.active && entry.outcome !== 'rejected') { entry.outcome = 'rejected'; entry.revision++; }
+    return entry;
+  }
+  expire(time) {
+    for (const entry of this.records) {
+      if (!entry.contact && entry.outcome === 'pending' && time > entry.deadline) {
+        entry.outcome = entry.valid ? 'no_contact' : 'rejected'; entry.revision++;
+      }
+    }
+  }
+  observeCapture(gestureId, sample, time) {
+    const entry = this.records.find(e => e.gestureId === gestureId && !e.contact);
+    if (!entry || !Number.isFinite(sample.score)) return;
+    if (!entry.closest || sample.score < entry.closest.score) entry.closest = { ...sample, time };
+  }
+  capture(gestureId, time, racket, ball, extra = {}) {
+    let entry = this.records.find(e => e.gestureId === gestureId && !e.contact);
+    if (!entry) entry = this.create(gestureId, time);
+    const outgoing = { v: shotVec(ball.v), w: shotVec(ball.w) };
+    const input = racket.contactInput || null;
+    entry.strokeId = racket.stroke ? racket.stroke.id : 'DRIVE'; entry.valid = true;
+    entry.isServe = !!racket.isServe; entry.outcome = 'pending'; entry.revision++;
+    entry.contact = { time, speedKmh: V3.len(ball.v) * 3.6, spin: measureShotSpin(ball.w, ball.v),
+      quality: clamp(Number.isFinite(racket.quality) ? racket.quality : 0, 0, 1),
+      incoming: input, outgoing, normal: shotVec(racket.normal), racketVelocity: shotVec(racket.vR),
+      raw: racket.unassisted || null, assist: { elevation: racket.dElev || 0, azimuth: racket.dAz || 0, wrist: racket.dWrist || 0 },
+      grip: extra.grip || 'shakehand', hand: extra.hand || 'right', shotId: extra.shotId };
+    if (input && input.w) {
+      entry.contact.spinChangeRps = Math.hypot(ball.w.x - input.w.x, ball.w.y - input.w.y, ball.w.z - input.w.z) / TAU;
+    }
+    this.flight = entry; this.latest = entry; return entry;
+  }
+  resolve(outcome) {
+    const e = this.flight;
+    if (!e || e.outcome === outcome) return;
+    e.outcome = outcome; e.revision++;
+  }
+  bounce(side, time) {
+    const e = this.flight; if (!e || e.outcome !== 'pending') return;
+    e.bounces.push({ side, time });
+    if (e.isServe) {
+      if (e.bounces.length === 1 && side !== 1) this.resolve('serve_fault');
+      else if (e.bounces.length >= 2) this.resolve(side === -1 ? (e.netTouches ? 'let' : 'table') : 'serve_fault');
+    } else this.resolve(side === -1 ? 'table' : 'own_half');
+    if (e.outcome === 'let') this.flight = null; // let is not part of the next scored rally
+  }
+  net() { if (this.flight && this.flight.outcome === 'pending') { this.flight.netTouches++; this.flight.revision++; } }
+  returned(time) { if (this.flight) this.flight.returnedAt = time; }
+  point(who, reason, lastHitBy, time) {
+    this.expire(time + .001);
+    const e = this.flight;
+    if (e) { e.point = { won: who > 0, reason }; e.revision++; }
+    if (e && lastHitBy === 1 && e.outcome === 'pending') {
+      this.resolve(reason.includes('СЕТКУ') ? 'net' : reason.includes('ПОДАЧ') ? 'serve_fault' : reason.includes('ПЕРЕЛЕТЕЛ') ? 'own_half' : 'out');
+    } else if (who < 0 && lastHitBy <= 0 && (!this.latest || this.latest.contact)) {
+      const missed = this.create(null, time); missed.outcome = 'no_swipe';
+    } else if (this.latest && !this.latest.contact && this.latest.outcome === 'pending') {
+      this.latest.outcome = this.latest.valid ? 'no_contact' : 'rejected'; this.latest.revision++;
+    }
+    this.flight = null; // a later rally must not rewrite this point
+  }
+  exportData() { return JSON.parse(JSON.stringify({ schema: SHOT_DIAGNOSTICS_VERSION, rules: MATCH_RULES,
+    physics: PH, archetypes: ARCH, profiles: PADDLE_PROFILES, records: this.records })); }
+}
+
+/** Deterministic fixtures, not a promise to cover all possible shots.
+ * 2 grips × 2 hands × FH/BH × 3 heights × 2 depths × 3 gestures = 144.
+ * Hand mirrors x and swipe direction, not topspin. No settings are changed. */
+function shotCalibrationCases() {
+  const cases = [];
+  for (const grip of ['shakehand', 'penhold']) for (const hand of ['right', 'left']) for (const forehand of [true, false])
+    for (const y of [.88, 1.05, 1.3]) for (const z of [1.2, 1.65]) for (const dy of [-.35, -.12, .25])
+      cases.push({ grip, hand, forehand, y, z, dy });
+  return cases;
+}
+function evaluateShotCalibration(c) {
+  const h = c.hand === 'left' ? -1 : 1, sw = new SwipeTracker();
+  sw.down(.5, .5, 0); sw.move(.5 + .02 * h, .5 + c.dy / 2, .05); sw.up(.5 + .04 * h, .5 + c.dy, .1);
+  const p = V3.new(.15 * h * (c.forehand ? 1 : -1), c.y, c.z), inputV = V3.new(0, -1, 6), inputW = V3.new(150, 0, 0);
+  const raw = deriveStroke(sw.lastReleased, { side: 1, grip: c.grip, forehand: c.forehand,
+    ball: { y: c.y, z: c.z }, ballSpin: inputW, ballSpeed: 6, movePitch: -.15 });
+  const r = refineRacket(p, inputV, inputW, raw, MATCH_RULES.trajectoryAssist, .85);
+  const v = V3.clone(inputV), w = V3.clone(inputW);
+  impactRacket(v, w, r.normal, r.vR, .85, r.rubber);
+  V3.addScaled(p, p, r.normal, PH.R * 1.05);
+  const report = predict(p, v, w, { dt: PH.SIM_DT, maxT: 2.6, stopOnFirstBounce: true, out: {} });
+  const finite = [...Object.values(v), ...Object.values(w), ...Object.values(r.normal)].every(Number.isFinite);
+  const face = Math.asin(clamp(r.normal.y, -1, 1)) / DEG, range = r.faceEnvelope;
+  const inEnvelope = !range || (face >= range[0] - 1e-6 && face <= range[1] + 1e-6);
+  return { ...c, stroke: r.stroke.id, finite, inEnvelope, faceDegrees: face, speedKmh: V3.len(v) * 3.6,
+    spin: measureShotSpin(w, v), rawNormal: shotVec(raw.normal), finalNormal: shotVec(r.normal),
+    correction: { elevation: r.dElev || 0, wrist: r.dWrist || 0 },
+    legal: !!(!report.hitNet && report.landed && report.landed.z < 0), landed: report.landed || null, hitNet: !!report.hitNet };
+}
+async function runShotCalibration(options = {}) {
+  const cases = shotCalibrationCases(), results = [];
+  for (const c of cases) {
+    if (options.cancelled && options.cancelled()) return { cancelled: true, results };
+    results.push(evaluateShotCalibration(c));
+    if (options.progress) options.progress(results.length, cases.length);
+    if (options.yield) await options.yield();
+  }
+  return { schema: SHOT_DIAGNOSTICS_VERSION, fixture: 'player-144-v1', rulesVersion: MATCH_RULES.version,
+    dt: PH.SIM_DT, total: results.length, legal: results.filter(r => r.legal).length,
+    invariantFailures: results.filter(r => !r.finite || !r.inEnvelope).length, results };
+}
+
+
+/** A same-substep sensitivity study, NOT a replay or prediction of a whole rally. */
+function summarizeCaptureCalibration(records) {
+  return [false,true].map(serving => {
+    const samples = records.map(e => e.contact && e.contact.incoming && e.contact.incoming.capture)
+      .filter(s => s && s.serving === serving && Number.isFinite(s.requiredRadius) && s.requiredRadius >= 0 && Number.isFinite(s.radius) && s.radius > 0);
+    const fractions = samples.map(s => s.requiredRadius/s.radius).sort((a,b)=>a-b);
+    return { serving, count: samples.length, nearEdge: fractions.filter(f=>f>=.8).length,
+      p90: fractions.length ? fractions[Math.ceil(fractions.length*.9)-1] : null,
+      depthTrials: serving ? [] : [.9,.8,.7].map(scale => ({ scale, kept: samples.filter(s =>
+        (Number.isFinite(s.ccdRadius) && s.ccdRadius <= s.radius+1e-9) ||
+        (s.endpointEligible && s.lateral <= s.radius+1e-9 && s.depthGap <= s.depthLimit*scale+1e-9)).length })),
+      trials: [1,.9,.8,.7].map(scale => ({ scale, kept: samples.filter(s=>s.requiredRadius<=s.radius*scale+1e-9).length })) };
+  });
 }
 
 
@@ -5355,10 +5877,13 @@ function playerWristPose(pos, vel, hand, phase = {}) {
   const h = hand === 'left' ? -1 : 1;
   const px = pos.x || 0;
   const reach = Math.tanh(px / 0.48);
-  const forehand = px * h >= -0.08;
+  const forehand = typeof phase.forehand === 'boolean' ? phase.forehand : px * h >= -0.08;
+  const key = wristStrokeKey(phase.grip, phase.serving ? 'SERVE' : phase.stroke, phase.preparation, phase.follow, forehand);
   const t = clamp(Math.abs(px) / 0.72, 0, 1);
   const stance = t * t * (3 - 2 * t);
-  const readyRoll = 0.28; // relaxed ready grip (~16°), never rigid 12 o'clock
+  const penhold = phase.grip === 'penhold';
+
+  const readyRoll = penhold ? 0.08 : 0.28; // relaxed ready grip (~16°), never rigid 12 o'clock
   const cross = clamp((px * h + 0.24) / 0.32, 0, 1);
   const mix = cross * cross * (3 - 2 * cross);
   const sideRoll = lerp(-1.05, 1.35, mix);
@@ -5430,8 +5955,8 @@ function playerWristPose(pos, vel, hand, phase = {}) {
     -reach * 0.27 - vx * 0.035 + gestureYaw + trackYaw + aimYaw,
     -0.52, 0.52);
 
-  let pitch = -0.03 + depthPitch + heightPitch + vz * 0.10 - vy * 0.025
-    + gesturePitch + preparation * 0.07 - follow * 0.12
+  let pitch = key.pitch + depthPitch + heightPitch + vz * 0.10 - vy * 0.025
+    + gesturePitch
     + readPitch + stepIn * 0.09 + serving * 0.07 + sidePitch
     + aimPitch - snap * 0.08
     - clamp(phase.attackLean || 0, 0, 1) * 0.28;
@@ -5458,8 +5983,10 @@ function playerWristPose(pos, vel, hand, phase = {}) {
 
   return {
     yaw,
-    pitch: clamp(pitch, -0.55, 0.55),
-    roll: clamp(roll, -1.55, 1.55),
+    pitch: clamp(pitch, -0.90, 0.78),
+    // Handle-up penhold reverses local roll: the same world-space wrist
+    // motion must not lean the handle in the opposite lateral direction.
+    roll: (penhold ? h * Math.PI : 0) + clamp(roll * (penhold ? (forehand ? -0.65 : -0.85) : 1), -1.55, 1.55),
     forehand,
   };
 }
@@ -5495,7 +6022,7 @@ class PaddleRig {
   /** Player supplies an absolute wrist roll; AI retains its compact grip. */
   paddleQuat(out, normal, hand, swing, extraRoll, absoluteRoll = false) {
     Q.lookRotation(out, normal, this._up);
-    const roll = absoluteRoll ? clamp(extraRoll || 0, -1.55, 1.55)
+    const roll = absoluteRoll ? (Number.isFinite(extraRoll) ? paddleAngleDelta(0, extraRoll) : 0)
       : (hand === 'left' ? 0.42 : -0.42)
       + clamp(swing || 0, -1, 1) * 0.3 + clamp(extraRoll || 0, -0.55, 0.55);
     return Q.mul(out, out, Q.setAxisAngle(this._rollQ, 0, 0, 1, roll));
@@ -6280,7 +6807,7 @@ class MatchDirector {
 
 const REPLAY_HZ = 30;             // 30 Hz is smooth at 0.35× and halves memory
 const REPLAY_RING_S = 45;         // seconds of rolling history
-const REPLAY_FLOATS = 16;         // ball(3) + myPos(3) + myNrm(3) + aiPos(3) + aiNrm(3) + pad
+const REPLAY_FLOATS = 16;         // ball(3) + myPos(3) + myNrm(3) + aiPos(3) + aiNrm(3) + playerRoll(1), poseVersion 2
 const REPLAY_KEEP = 5;            // how many moments survive a whole match
 
 /* --------------------------- scoring ------------------------------- */
@@ -6330,7 +6857,7 @@ class MomentRecorder {
     f[i + 6] = g.player.normal.x; f[i + 7] = g.player.normal.y; f[i + 8] = g.player.normal.z;
     f[i + 9] = ap.x; f[i + 10] = ap.y; f[i + 11] = ap.z;
     f[i + 12] = g.aiPaddle.normal.x; f[i + 13] = g.aiPaddle.normal.y; f[i + 14] = g.aiPaddle.normal.z;
-    f[i + 15] = g.ball.live ? 1 : 0;
+    f[i + 15] = Number.isFinite(g.player.roll) ? g.player.roll : 0;
     this.head = (this.head + 1) % this.cap;
     if (this.n < this.cap) this.n++;
     this.t = t;
@@ -6348,7 +6875,7 @@ class MomentRecorder {
       const src = ((this.head - len + k) % this.cap + this.cap) % this.cap;
       clip.set(this.f.subarray(src * REPLAY_FLOATS, src * REPLAY_FLOATS + REPLAY_FLOATS), k * REPLAY_FLOATS);
     }
-    return { frames: clip, hz: REPLAY_HZ, len };
+    return { frames: clip, hz: REPLAY_HZ, len, poseVersion: 2 };
   }
 
   /**
@@ -6387,7 +6914,7 @@ class MomentRecorder {
       + BEAUTY.finish(finish) + BEAUTY.clutch(m) + BEAUTY.comeback(m) + BEAUTY.netClip(m);
 
     const moment = {
-      score, shots, frames: clip, hz: REPLAY_HZ,
+      score, shots, frames: clip, hz: REPLAY_HZ, poseVersion: 2,
       speed: peakSpeed, spin: peakSpin, finish,
       events: this.events.slice(),
       winner: meta.winner, reason: meta.reason, mine,
@@ -6456,8 +6983,20 @@ class MomentPlayer {
     V3.set(g.ball.p, L(0), L(1), L(2));
     V3.set(g.player.pos, L(3), L(4), L(5));
     V3.set(g.player.normal, L(6), L(7), L(8));
+    V3.norm(g.player.normal, g.player.normal);
+    if (mo.poseVersion >= 2) {
+      const delta = Math.atan2(Math.sin(F[b + 15] - F[a + 15]), Math.cos(F[b + 15] - F[a + 15]));
+      g.player.roll = F[a + 15] + delta * u;
+    } else {
+      // Legacy slot 15 was a live-ball flag, never an angle.
+      const settings = g.settings || {};
+      g.player.roll = (settings.hand === 'left' ? -1 : 1) * (settings.grip === 'penhold' ? Math.PI - .052 : .28);
+    }
+    g.player.pitch = Math.asin(clamp(g.player.normal.y, -1, 1));
+    g.player.yaw = -Math.atan2(g.player.normal.x, -g.player.normal.z);
     V3.set(g.aiPaddle.pos, L(9), L(10), L(11));
     V3.set(g.aiPaddle.normal, L(12), L(13), L(14));
+    V3.norm(g.aiPaddle.normal, g.aiPaddle.normal);
     V3.copy(g.ai.pos, g.aiPaddle.pos);
     g.ball.live = true;
     // trail: rebuild the last few frames of history so the ball draws a streak
@@ -6941,11 +7480,9 @@ class Scene {
 /* =====================================================================
  *  TRAINING — a real, interactive coach.
  *
- *  Not a wall of text: a ball feeder, one skill at a time, an animated
- *  ghost gesture drawn right where your finger has to go, and a pass
- *  condition read straight out of the physics (actual spin, actual
- *  landing point). You cannot "read" your way past a step — you have to
- *  hit it.
+ *  One drill at a time. A read-only objective stays above play;
+ *  no looping gesture overlay and no controls in the swipe area.
+ *  Progress requires measured spin/speed and an actual legal bounce.
  * ===================================================================== */
 
 // Capabilities first, then actual pointer events in UI: a narrow desktop is
@@ -6958,47 +7495,41 @@ function trainingTip(step, mode) { return mode === 'touch' ? step.tip : step.mou
 
 const TRAIN_STEPS = [
   {
-    id: 'SERVE', title: 'ПОДАЧА', need: 2,
+    id: 'SERVE', goal: 'Подайте на стол', title: 'ПОДАЧА', need: 2,
     tip: 'Проведите пальцем вверх.', mouseTip: 'Зажмите ЛКМ, ведите вверх.',
-    gesture: [[0.50, 0.80], [0.50, 0.50]], speed: 1.0, dur: 0.15,
     feed: null,
   },
   {
-    id: 'TOPSPIN', title: 'ТОПСПИН', need: 3,
-    tip: 'Свайп вверх при замыкании кольца.', mouseTip: 'ЛКМ + вверх при замыкании кольца.',
-    gesture: [[0.49, 0.82], [0.525, 0.46]], speed: 1.0, dur: 0.16,
+    id: 'TOPSPIN', goal: 'Верхнее вращение на стол', title: 'ТОПСПИН', need: 3,
+    tip: 'Свайп вверх по мячу.', mouseTip: 'ЛКМ + вверх по мячу.',
     feed: { kind: 'normal', spin: -95, speed: 6.0 },
     check: (g, s) => s.topspin > 45,
     failHint: 'Длиннее вверх.',
   },
   {
-    id: 'PUSH', title: 'ПОДРЕЗКА', need: 2,
+    id: 'PUSH', goal: 'Нижнее вращение на стол', title: 'ПОДРЕЗКА', need: 2,
     tip: 'Мягкий свайп вниз.', mouseTip: 'ЛКМ + мягкое движение вниз.',
-    gesture: [[0.50, 0.52], [0.50, 0.80]], speed: 0.8, dur: 0.20,
     feed: { kind: 'normal', spin: 40, speed: 5.2 },
     check: (g, s) => s.topspin < -30,
     failHint: 'Ведите вниз.',
   },
   {
-    id: 'SIDE', title: 'БОКОВОЕ ВРАЩЕНИЕ', need: 2,
+    id: 'SIDE', goal: 'Боковое вращение на стол', title: 'БОКОВОЕ', need: 2,
     tip: 'Нарисуйте пальцем дугу вбок.', mouseTip: 'ЛКМ + дуга вбок.',
-    gesture: [[0.455, 0.82], [0.472, 0.695], [0.517, 0.615], [0.605, 0.588]], speed: 1.1, dur: 0.15,
     feed: { kind: 'normal', spin: -40, speed: 5.6 },
     check: (g, s) => Math.abs(s.sidespin) > 32,
     failHint: 'Дугой, не по прямой.',
   },
   {
-    id: 'TIMING', title: 'ТАЙМИНГ', need: 2,
-    tip: 'Кольцо замкнулось — свайп вверх.', mouseTip: 'Кольцо замкнулось — ЛКМ + вверх.',
-    gesture: [[0.50, 0.80], [0.515, 0.54]], speed: 1.25, dur: 0.13,
+    id: 'TIMING', goal: 'Верните быстрый мяч', title: 'ТАЙМИНГ', need: 2,
+    tip: 'Свайп вверх после отскока.', mouseTip: 'После отскока — ЛКМ + вверх.',
     feed: { kind: 'fast', spin: -110, speed: 10.2 },
     check: () => true,
-    failHint: 'Дождитесь замыкания кольца.',
+    failHint: 'Нет возврата на стол.',
   },
   {
-    id: 'SMASH', title: 'СМЕШ', need: 2,
+    id: 'SMASH', goal: 'Удар на стол быстрее 55 км/ч', title: 'СМЕШ', need: 2,
     tip: 'Резкий короткий свайп вбок.', mouseTip: 'ЛКМ + резкое движение вбок.',
-    gesture: [[0.435, 0.655], [0.600, 0.690]], speed: 1.7, dur: 0.055,
     feed: { kind: 'high', spin: -15, v: [0, 3.6, 3.2], y0: 1.02 },
     check: (g, s) => s.speed > 55,
     failHint: 'Быстрее и резче.',
@@ -7041,6 +7572,8 @@ class Trainer {
     this.msg = ''; this.lastShot = null;
     this.g.ball.live = false;
     this.g.isServeBall = false;
+    this.g.state = GS.RALLY; this.g.stateT = 0;
+    if (this.g.cancelInput) this.g.cancelInput();
     this.sync();
   }
 
@@ -7070,6 +7603,7 @@ class Trainer {
   /** Serve one practice ball from the far side, shaped for the drill. */
   feed() {
     const g = this.g, b = this.g.ball, S = this.S;
+    this.lastShot = null;
     g.marks.length = 0;
     g.rallyBounces.length = 0;
     g.serveBounces = 0;
@@ -7124,7 +7658,7 @@ class Trainer {
       // to know the serve crossed after touching the server's half
       // Game.onBounce calls us BEFORE it bumps serveBounces, so the
       // crossing bounce is still counted as #1 here.
-      if (lastHitBy === 1 && side === -1 && this.g.serveBounces >= 1) this.pass();
+      if (lastHitBy === 1 && side === -1 && this.g.serveBounces >= 1 && !this.g.netTouched) this.pass();
       return;
     }
     if (lastHitBy !== 1 || side !== -1) return;
@@ -7140,17 +7674,17 @@ class Trainer {
     if (who > 0) return;                       // the feeder "lost" the point: ignore
     const S = this.S;
     let r = reason;
-    if (reason === 'АУТ') r = 'Аут. Бейте мягче.';
-    else if (reason === 'В СЕТКУ') r = 'Сетка. Ведите длиннее вверх.';
-    else if (reason === 'ВЫ НЕ ДОСТАЛИ МЯЧ' || reason === 'ОЧКО СОПЕРНИКУ') r = 'Бейте при замыкании кольца.';
-    else if (reason.indexOf('ПОДАЧ') >= 0) r = 'Сначала отскок на своей половине.';
+    if (reason === 'АУТ') r = 'Аут.';
+    else if (reason === 'В СЕТКУ') r = 'Сетка.';
+    else if (reason === 'ВЫ НЕ ДОСТАЛИ МЯЧ' || reason === 'ОЧКО СОПЕРНИКУ') r = 'Нет контакта.';
+    else if (reason.indexOf('ПОДАЧ') >= 0) r = 'Ошибка подачи.';
     this.fail(r);
   }
 
   pass() {
     this.done++;
     this.phase = 'ok'; this.t = 0;
-    this.msg = this.done >= this.S.need ? 'ШАГ ПРОЙДЕН' : 'ОТЛИЧНО!';
+    this.msg = this.done >= this.S.need ? 'Готово' : 'Зачтено';
     this.msgCol = '#4ee39a';
     this.g.audio.ui('good');
     this.sync();
@@ -7172,8 +7706,8 @@ class Trainer {
     const g = this.g;
     switch (this.phase) {
       case 'intro':
-        // read the card, watch the ghost loop once, then go (tap skips)
-        if (this.t > 2.8 || (this.t > 0.4 && g.pointerDown)) { this.phase = 'wait'; this.t = 0; }
+        // A short settling interval, independent of pointer clicks.
+        if (this.t > 1.0) { this.phase = 'wait'; this.t = 0; }
         break;
       case 'wait':
         if (this.t > 0.45) this.feed();
@@ -9516,18 +10050,15 @@ class Game {
     this.replayer = new MomentPlayer();
 
     this.settings = {
-      hitZone: 0.85,
-      assist: 0.85,
-      posAssist: 0.85,
       difficulty: 0,
       quality: 'high',
       sound: true,
       volume: 0.9,
       camera: 'BROADCAST',
       hand: 'right',
+      grip: 'shakehand',
       showTrail: true,
       showPredict: true,
-      showZone: true,
       showTele: false,
       haptics: true,
       coach: true,
@@ -9537,12 +10068,9 @@ class Game {
       slowmoOnBigShots: true,
       slowmoPlayer: true,
       targetScore: 11,
-      sensitivity: 1.0,
       spinBias: 'norm',
       // NEW: Enhanced gameplay settings
       showSpinIndicator: true,
-      showZoneIndicators: true,
-      showQualityRing: true,
       followThrough: true,
       anticipationHint: true,
       shotFeedback: true,
@@ -9556,6 +10084,7 @@ class Game {
      * every following visit. A first visit worked (profile.data.settings is
      * null then), which is why it survived to here. Found by the headless
      * smoke suite: 2 of 3 matches failed to boot once localStorage was warm. */
+    installUnifiedControls(this.settings);
     this.loadSettings();
 
     this.ball = {
@@ -9566,9 +10095,10 @@ class Game {
       pos: V3.new(0, PH.TABLE_Y + 0.25, 1.45),
       prev: V3.new(0, PH.TABLE_Y + 0.25, 1.45),
       vel: V3.new(), normal: V3.new(0, 0, -1),
-      q: Q.new(), swing: 0, side: 1, hitRadius: 0.095, lastHitT: -9,
+      q: Q.new(), swing: 0, side: 1, hitRadius: MATCH_RULES.sweetRadius, lastHitT: -9,
       prevPos: V3.new(0, PH.TABLE_Y + 0.25, 1.45),
     };
+    this.paddleMotion = new PaddleStrokeMotion();
     this.aiPaddle = {
       pos: V3.new(0, PH.TABLE_Y + 0.25, -1.45), normal: V3.new(0, 0, 1),
       q: Q.new(), side: -1,
@@ -9603,12 +10133,8 @@ class Game {
     this.followThrough = {
       active: false,
       t: 0,
-      startPos: V3.new(),
-      startNormal: V3.new(),
       swingDir: V3.new(),
       duration: 0.15,
-      visualPos: V3.new(),
-      visualNormal: V3.new(),
     };
 
     // Anticipation state
@@ -9621,14 +10147,7 @@ class Game {
       visualOffset: V3.new(),
     };
 
-    // Shot feedback state
-    this.shotFeedback = {
-      lastQuality: 1,
-      lastSpeed: 0,
-      lastSpin: 0,
-      lastStroke: 'DRIVE',
-      showTimer: 0,
-    };
+    this.shotJournal = new ShotJournal();
 
     // Momentum tracking
     this.momentum = {
@@ -9790,17 +10309,21 @@ class Game {
       }
 
       this.swipe.down(n.x, n.y, this.time);
+      const rect = c.getBoundingClientRect();
+      this.swipe.pressZone = pressHitZone(this.project(this.ball.p), n, rect.width, rect.height)
+        || { accepted: false, radius: MATCH_RULES.pressRadiusPx, distancePx: null };
+      this.swipe.pressZone.serving = this.state === GS.SERVE_READY || this.state === GS.SERVE_TOSS;
+      if (this.shotJournal) {
+        const attempt = this.shotJournal.create(this.swipe.gestureId, this.time);
+        attempt.pressZone = { ...this.swipe.pressZone };
+        attempt.deadline = this.time + (attempt.pressZone.serving ? 1.15 : .25);
+        if (!attempt.pressZone.accepted) attempt.outcome = 'outside';
+      }
       /* Mouse hover already drives the BAT. Committing that trail (or worse,
          inventing a 3.5 % upward flick) on button-down made a motionless
          click look like a stroke — the ball came off the rubber with no
          swing. Desktop now matches touch: the stroke is the drag while the
          button is down. Hover still aims; it does not hit. */
-      this._lastPointSwipe = {
-        startT: this.time,
-        sx: n.x, sy: n.y,
-        samples: [{ x: n.x, y: n.y, t: this.time }],
-        stroke: null
-      };
       this.pointer = n; this.pointerDown = true;
       this.pointerFine = e.pointerType !== 'touch' && e.pointerType !== 'pen';
       if (this.state === GS.SERVE_READY && this.server === 1) this.startToss();
@@ -9836,10 +10359,6 @@ class Game {
       const n = track(e);
       if (this.swipe.active && ptrs.size < 2) {
         this.swipe.move(n.x, n.y, this.time);
-        if (this._lastPointSwipe) {
-          this._lastPointSwipe.samples.push({ x: n.x, y: n.y, t: this.time });
-          if (this.liveStroke) this._lastPointSwipe.stroke = { ...this.liveStroke.stroke };
-        }
         const sp = this.swipe.m.speed;
         if (sp > 1.6) this.audio.whoosh(clamp(sp / 4, 0, 1.4));
       }
@@ -9855,16 +10374,9 @@ class Game {
       const n = norm(e);
       this.pointer = n;
       this.swipe.up(n.x, n.y, this.time);
-      if (this._lastPointSwipe) {
-        this._lastPointSwipe.samples.push({ x: n.x, y: n.y, t: this.time });
-        this._lastPointSwipe.endT = this.time;
-        this._lastPointSwipe.ex = n.x;
-        this._lastPointSwipe.ey = n.y;
-        this._lastPointSwipe.dist = Math.hypot(n.x - this._lastPointSwipe.sx, n.y - this._lastPointSwipe.sy);
-        if (this.liveStroke) this._lastPointSwipe.stroke = { ...this.liveStroke.stroke };
-      }
       this.pointerDown = false;
       this.swipeReleasedAt = this.time;
+      this.updateShotDiagnostics();
       this.lastSwipeT = this.time;
       e.preventDefault();
     };
@@ -9892,7 +10404,7 @@ class Game {
     c.style.touchAction = 'none';
 
     window.addEventListener('keydown', (e) => {
-      if (document.getElementById('settings').classList.contains('on')) return;
+      if (document.getElementById('settings').classList.contains('on') || document.getElementById('shotLab').classList.contains('on')) return;
       if (e.repeat || e.ctrlKey || e.metaKey || e.altKey ||
           (e.target && (e.target.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName)))) return;
       if (e.key === 'r' || e.key === 'R' || e.key === 'к' || e.key === 'К') this.restart();
@@ -9918,6 +10430,7 @@ class Game {
   startMatch(diff) {
     this.endReplay(false); // cancel old callbacks; never complete an old match here
     this.moments.reset();
+    this.shotJournal && this.shotJournal.reset();
     this.lastMoment = null;
     this._acc = 0;
     this.followThrough.active = false;
@@ -9948,9 +10461,6 @@ class Game {
     this.score = [0, 0]; this.games = [0, 0];
     this.rally = 0; this.bestRally = 0;
     this.stats = { shots: 0, winners: 0, errors: 0, maxSpeed: 0, maxSpin: 0, byStroke: {}, totalSpin: 0, rallies: 0 };
-    this.missedRallies = [];
-    this.isDebugReplay = false;
-    this.currentMissIndex = -1;
     this.server = Math.random() < 0.5 ? 1 : -1;
     this.servesLeft = 2;
     this.audio.init(); this.audio.resume();
@@ -9959,10 +10469,8 @@ class Game {
     this.prepServe();
     if (this.demoMode) {
       this.msg('РЕЖИМ НАБЛЮДЕНИЯ · БОТ ПРОТИВ БОТА', 3.0, '#39c6ff', true);
-      this.msg('СМОТРИТЕ НА ТРАЕКТОРИЮ СВАЙПОВ', 3.0, '#7fd4ff');
     } else {
       this.msg(this.server === 1 ? 'ВАША ПОДАЧА' : 'ПОДАЁТ СОПЕРНИК', 1.6, '#7fd4ff');
-      this.msg('СВАЙП = УДАР', 3.4, '#9fe0ff');
     }
   }
   startDemo(diff = 2) {
@@ -10004,6 +10512,8 @@ class Game {
 
   /* --------------------------- training ---------------------------- */
   startTraining() {
+    this.endReplay(false);
+    this.shotJournal && this.shotJournal.reset();
     this.career.stop();
     this.network.disconnect();
     this.demoMode = false;
@@ -10058,8 +10568,6 @@ class Game {
     this.rallyBounces.length = 0;
     this.serveBounces = 0;
     this.isServeBall = true;
-    this._minBallPaddleDist = 99;
-    this._lastPointSwipe = null;
     /* Every point begins from the same known state: bat back in the centre,
      * cursor binding re-anchored, no stale intercept from the last rally. */
     this.resetPaddle();
@@ -10096,6 +10604,7 @@ class Game {
   /* ---------------------------- scoring ---------------------------- */
   awardPoint(who, reason) {
     if (this.training) {                 // drills have no score, only feedback
+      if (this.shotJournal) this.shotJournal.point(who, reason, this.ball.lastHitBy, this.time);
       this.training.onFault(who, reason);
       this.ball.live = false;
       return;
@@ -10103,6 +10612,7 @@ class Game {
     if (this.state === GS.POINT || this.state === GS.MATCH_END) return;
     const idx = who > 0 ? 0 : 1;
     this.score[idx]++;
+    if (this.shotJournal) this.shotJournal.point(who, reason, this.ball.lastHitBy, this.time);
     this.lastPoint = { who, reason };
     this.buzz(who > 0 ? [14, 50, 22] : 42);
     this.stats.rallies++;
@@ -10126,9 +10636,6 @@ class Game {
 
     this.audio.point(who > 0);
     this.msg(reason, 1.5, who > 0 ? '#6ee7a8' : '#ff8a8a', true);
-    if (who === -1 && !this.training) {
-      this.recordMissedPoint(reason);
-    }
     // the filter: keep this rally only if it is worth watching again
     this.lastMoment = this.moments.endRally(this.time, this, {
       winner: who, reason, score: this.score, target: this.settings.targetScore,
@@ -10157,6 +10664,7 @@ class Game {
 
   /* ------------------------- ball <-> world ------------------------ */
   onBounce(side, speed, info) {
+    if (this.ball.lastHitBy === 1 && this.shotJournal) this.shotJournal.bounce(side, this.time);
     if (!(info && info.edge > 0.25)) this.audio.hitTable(speed, this.ball.p.x);
     this.addMark(this.ball.p.x, this.ball.p.z, speed);
     this.emitParticles(this.ball.p.x, PH.TABLE_Y + 0.005, this.ball.p.z,
@@ -10226,6 +10734,7 @@ class Game {
 
   /* -------------------------- impact events ------------------------ */
   applyHit(side, racket, contactP, quality, info) {
+    if (side < 0 && this.shotJournal) this.shotJournal.returned(this.time);
     const b = this.ball;
     b.lastHitBy = side;
     this.shotId++;                       // the opponent reacts once per shot
@@ -10284,6 +10793,8 @@ class Game {
         sweet: side > 0 ? (this.lastSweet !== undefined ? this.lastSweet : 1) : 1,
         rim: side > 0 && this.lastSweet !== undefined && this.lastSweet < 0.42,
       };
+      if (this.shotJournal) this.shotJournal.capture(this.swipe.gestureId, this.time,
+        { ...racket, quality }, b, { grip: this.settings.grip, hand: this.settings.hand, shotId: this.shotId });
       this.ui && this.ui.showShot(this.lastShotInfo);
       this.recorder.addShot(1, Object.assign({
         x: contactP.x, y: contactP.y, z: contactP.z, quality,
@@ -10366,21 +10877,34 @@ class Game {
 
   /* --------------------------- settings ---------------------------- */
 
-  /** The player's preferences are part of the save: coming back to a game
-   *  that has forgotten your sensitivity is coming back to a stranger. */
+  changePaddlePreference(key, value) {
+    const choices = { hand: ['left', 'right'], grip: ['shakehand', 'penhold'] };
+    if (!choices[key] || !choices[key].includes(value)) return false;
+    if (this.settings[key] === value) return true;
+    this.settings[key] = value;
+    if (this.paddleMotion) this.paddleMotion.reset();
+    if (this.followThrough) this.followThrough.active = false;
+    if (this.swipe) this.swipe.cancel();
+    this.pointerDown = false; this.swipeReleasedAt = -Infinity;
+    this._prep = 0; this.liveStroke = null; this._settlePaddleFace = true;
+    this.player.forehand = paddleForehand(this.player.pos.x, this.settings.hand);
+    return true;
+  }
+
+  /** Save personal preferences, never private versions of control rules. */
   saveSettings() {
     if (!this.profile) return;
     const s = this.settings;
     this.profile.data.settings = {
-      hitZone: s.hitZone, assist: s.assist, posAssist: s.posAssist, difficulty: s.difficulty, quality: s.quality,
-      sound: s.sound, volume: s.volume, camera: s.camera, hand: s.hand,
-      showTrail: s.showTrail, showPredict: s.showPredict, showZone: s.showZone,
+      rulesVersion: MATCH_RULES.version, difficulty: s.difficulty, quality: s.quality,
+      sound: s.sound, volume: s.volume, camera: s.camera, hand: s.hand, grip: s.grip,
+      showTrail: s.showTrail, showPredict: s.showPredict,
       showTele: s.showTele, haptics: s.haptics, coach: s.coach, adaptive: s.adaptive,
-      slowmoPlayer: s.slowmoPlayer, targetScore: s.targetScore, sensitivity: s.sensitivity,
+      slowmoPlayer: s.slowmoPlayer, targetScore: s.targetScore,
       spinBias: s.spinBias,
     };
     if (this.career && this.career.active && this.career._baseSettings)
-      Object.assign(this.profile.data.settings, this.career._baseSettings);
+      this.profile.data.settings.difficulty = this.career._baseSettings.difficulty;
     this.profile.touch();
   }
 
@@ -10391,20 +10915,21 @@ class Game {
     for (const k of Object.keys(s)) {
       if (typeof s[k] === 'boolean' && typeof raw[k] === 'boolean') s[k] = raw[k];
     }
-    const ranges = { assist: [0, 1], posAssist: [0, 1], hitZone: [0.3, 1],
-      difficulty: [0, 4], volume: [0, 1], sensitivity: [0.5, 1.8] };
+    const ranges = { difficulty: [0, 4], volume: [0, 1] };
     for (const [k, [lo, hi]] of Object.entries(ranges)) {
       if (Number.isFinite(raw[k])) s[k] = clamp(raw[k], lo, hi);
     }
     s.difficulty = Math.round(s.difficulty);
     for (const [k, values] of Object.entries({ quality: ['low', 'medium', 'high'],
-      camera: CAMERA_ORDER, hand: ['left', 'right'], spinBias: ['low', 'norm', 'high'], targetScore: [5, 11, 21] })) {
+      camera: CAMERA_ORDER, hand: ['left', 'right'], grip: ['shakehand', 'penhold'], spinBias: ['low', 'norm', 'high'], targetScore: [5, 11, 21] })) {
       if (values.includes(raw[k])) s[k] = raw[k];
     }
     if (this.settings.volume !== undefined) this.audio.setVolume(this.settings.volume);
     if (this.settings.sound === false) this.audio.setMuted(true);
     if (this.settings.difficulty !== undefined) this.ai.setLevel(this.settings.difficulty);
     if (this.settings.quality) this.R.quality = this.settings.quality;
+    if (raw.rulesVersion !== MATCH_RULES.version || ['hitZone', 'assist', 'posAssist', 'sensitivity', 'showZone'].some(k => Object.prototype.hasOwnProperty.call(raw, k)))
+      this.saveSettings(); // one-way migration: never re-persist private control rules
     return true;
   }
 
@@ -10468,18 +10993,13 @@ class Game {
 
   skipReplay() {
     if (!this.replayer.on) return;
-    // Each playback owns its completion: sequence advances, inspection exits.
-    if (this.isDebugReplay && !this._missSequence) this.endReplay();
-    else this.replayer.finish();
+    this.replayer.finish();
   }
 
   endReplay(complete = true) {
     this.replayer.stop();
-    this._missSequence = false;
     this.ui && this.ui.replayShow(false);
-    this.ui && this.ui.debugReplayShow && this.ui.debugReplayShow(false);
     if (typeof document !== 'undefined') document.body.classList.remove('is-reel');
-    this.isDebugReplay = false;
     this.camFov = undefined;
     if (this.state === GS.REPLAY) {
       this.ball.live = false;
@@ -10488,178 +11008,6 @@ class Game {
     const cb = this.replayAfter;
     this.replayAfter = null;
     if (complete && cb) cb();
-  }
-
-  recordMissedPoint(reason) {
-    if (!this.missedRallies) this.missedRallies = [];
-    const clipData = this.moments.captureClip(this.time);
-    const b = this.ball, pad = this.player;
-    const curDist = V3.dist(b.p, pad.pos);
-    const minDist = Math.min(this._minBallPaddleDist !== undefined ? this._minBallPaddleDist : 99, curDist);
-    const rad = pad.hitRadius || 0.22;
-    const hadSwipe = (this.time - (this.swipeReleasedAt || -99)) < 0.85 || (this.swipe && this.swipe.active);
-    const strokeName = this.liveStroke ? (this.liveStroke.stroke.short || this.liveStroke.stroke.name)
-      : (this.swipe.lastReleased ? 'СВАЙП' : 'НЕТ СВАЙПА');
-
-    let verdict = '';
-    let isReachIssue = false;
-    if (!hadSwipe) {
-      verdict = 'Свайп не был выполнен (пропуск мяча)';
-    } else if (minDist > rad * 1.45) {
-      verdict = `Не дотянулся: мяч в ${minDist.toFixed(2)} м (радиус ракетки ${rad.toFixed(2)} м)`;
-      isReachIssue = true;
-    } else if (reason === 'В СЕТКУ') {
-      verdict = 'Удар выполнен, но мяч попал в сетку (слишком низкая дуга)';
-    } else if (reason === 'АУТ') {
-      verdict = 'Удар выполнен, но мяч улетел в аут (слишком сильный удар/высокая дуга)';
-    } else if (reason === 'МЯЧ НЕ ПЕРЕЛЕТЕЛ') {
-      verdict = 'Касание было, но мяч сорвался с ракетки';
-    } else {
-      verdict = `${reason} (дистанция до мяча ${minDist.toFixed(2)} м)`;
-    }
-
-    let sw = this._lastPointSwipe;
-    if (!sw && this.swipe && this.swipe.lastReleased) {
-      const lr = this.swipe.lastReleased;
-      sw = {
-        sx: lr.sx, sy: lr.sy,
-        ex: lr.x, ey: lr.y,
-        dist: lr.dist,
-        samples: [{ x: lr.sx, y: lr.sy }, { x: lr.x, y: lr.y }],
-        stroke: this.liveStroke ? { ...this.liveStroke.stroke } : null
-      };
-    } else if (!sw && this.swipe && this.swipe.active && this.swipe.samples && this.swipe.samples.length) {
-      const s0 = this.swipe.samples[0], sN = this.swipe.samples[this.swipe.samples.length - 1];
-      sw = {
-        sx: s0.x, sy: s0.y,
-        ex: sN.x, ey: sN.y,
-        dist: Math.hypot(sN.x - s0.x, sN.y - s0.y),
-        samples: this.swipe.samples.map(p => ({ x: p.x, y: p.y })),
-        stroke: this.liveStroke ? { ...this.liveStroke.stroke } : null
-      };
-    }
-
-    let swipeData = null;
-    if (sw) {
-      const sx = sw.sx, sy = sw.sy;
-      const ex = sw.ex !== undefined ? sw.ex : sx;
-      const ey = sw.ey !== undefined ? sw.ey : sy;
-      const dx = ex - sx, dy = ey - sy;
-      const dist = sw.dist !== undefined ? sw.dist : Math.hypot(dx, dy);
-
-      let dirName = 'ТОЛЬКО КЛИК (БЕЗ СВАЙПА)';
-      let arrow = '•';
-      if (dist >= 0.02) {
-        if (Math.abs(dy) > Math.abs(dx) * 1.5) {
-          if (dy < 0) { dirName = 'СВАЙП ВВЕРХ (ТОПСПИН)'; arrow = '↑'; }
-          else { dirName = 'СВАЙП ВНИЗ (ПОДРЕЗКА)'; arrow = '↓'; }
-        } else if (Math.abs(dx) > Math.abs(dy) * 1.5) {
-          if (dx > 0) { dirName = 'СВАЙП ВПРАВО'; arrow = '→'; }
-          else { dirName = 'СВАЙП ВЛЕВО'; arrow = '←'; }
-        } else {
-          if (dy < 0) {
-            if (dx > 0) { dirName = 'СВАЙП ВВЕРХ-ВПРАВО'; arrow = '↗'; }
-            else { dirName = 'СВАЙП ВВЕРХ-ВЛЕВО'; arrow = '↖'; }
-          } else {
-            if (dx > 0) { dirName = 'СВАЙП ВНИЗ-ВПРАВО'; arrow = '↘'; }
-            else { dirName = 'СВАЙП ВНИЗ-ВЛЕВО'; arrow = '↙'; }
-          }
-        }
-      }
-
-      swipeData = {
-        sx, sy, ex, ey, dx, dy, dist, dirName, arrow,
-        samples: sw.samples && sw.samples.length ? sw.samples.map(p => ({ x: p.x, y: p.y })) : [{ x: sx, y: sy }, { x: ex, y: ey }],
-        stroke: sw.stroke || (this.liveStroke ? { ...this.liveStroke.stroke } : null)
-      };
-    }
-
-    const miss = {
-      id: this.missedRallies.length + 1,
-      time: this.time,
-      score: [this.score[0], this.score[1]],
-      reason,
-      verdict,
-      isReachIssue,
-      shots: this.rally,
-      minDist,
-      hitRadius: rad,
-      hadSwipe: !!swipeData,
-      strokeName,
-      swipeData,
-      frames: clipData.frames,
-      hz: clipData.hz,
-      ballP: { x: b.p.x, y: b.p.y, z: b.p.z },
-      paddleP: { x: pad.pos.x, y: pad.pos.y, z: pad.pos.z }
-    };
-    this.missedRallies.push(miss);
-    if (this.missedRallies.length > 50) this.missedRallies.shift();
-  }
-
-  watchMiss(index, speed = 0.20) {
-    if (!this.missedRallies || !this.missedRallies[index]) return false;
-    const miss = this.missedRallies[index];
-    this.currentMissIndex = index;
-    this.isDebugReplay = true;
-    this.setSlowmoHold(false);
-    this.ball.live = true;
-
-    // Use MomentPlayer to replay the miss clip at ultra slowmo
-    this._missSequence = false;
-    const loop = () => {
-      if (this.isDebugReplay) this.replayer.play(miss, speed, loop);
-    };
-    this.replayer.play(miss, speed, loop);
-
-    const back = this.state;
-    this.replayFrom = back === GS.MATCH_END ? GS.MATCH_END : (this.paused ? GS.SERVE_READY : GS.POINT);
-    this.setState(GS.REPLAY);
-    if (typeof document !== 'undefined') {
-      document.body.classList.add('is-reel');
-      document.querySelectorAll('.screen').forEach((s) => s.classList.remove('on'));
-    }
-    this.ui && this.ui.debugReplayShow && this.ui.debugReplayShow(true, miss, index, this.missedRallies.length);
-    return true;
-  }
-
-  playAllMissesSequential(onComplete) {
-    if (!this.missedRallies || !this.missedRallies.length) {
-      if (onComplete) onComplete();
-      return;
-    }
-    this._missIndex = 0;
-    this._missSequence = true;
-    this.replayAfter = onComplete || null;
-
-    const playCurrent = () => {
-      if (this._missIndex >= this.missedRallies.length) {
-        this.endReplay();
-        return;
-      }
-      const miss = this.missedRallies[this._missIndex];
-      this.currentMissIndex = this._missIndex;
-      this.isDebugReplay = true;
-      this.setSlowmoHold(false);
-      this.ball.live = true;
-      this.replayFrom = GS.MATCH_END;
-      this.setState(GS.REPLAY);
-
-      if (typeof document !== 'undefined') {
-        document.body.classList.add('is-reel');
-        document.querySelectorAll('.screen').forEach((s) => s.classList.remove('on'));
-      }
-
-      this.replayer.play(miss, 0.22, () => {
-        this._missIndex++;
-        playCurrent();
-      });
-
-      if (this.ui) {
-        this.ui.debugReplayShow(true, miss, this._missIndex, this.missedRallies.length);
-      }
-    };
-
-    playCurrent();
   }
 
   /** Everything that has to be written down when the last point lands. */
@@ -10760,11 +11108,13 @@ class Game {
           this.msg('СЕТКА — ЭДЖ!', 1.1, '#ffd34d');
           this.emitParticles(xAt, PH.NET_TOP, 0, 8, 1.1, 0.3, 0.014, 1, 0.9, 0.5);
           this.netTouched = true;
+          if (b.lastHitBy === 1 && this.shotJournal) this.shotJournal.net();
         } else if (yAt < PH.NET_TOP) {
           bounceNet(b.p, b.v, b.w, Math.sign(p0.z) || 1);
           this.audio.hitNet();
           this.emitParticles(xAt, yAt, 0, 7, 0.7, 0.3, 0.013, 0.8, 0.85, 1);
           this.netTouched = true;
+          if (b.lastHitBy === 1 && this.shotJournal) this.shotJournal.net();
           this.moments.addBounce(true);
         }
       }
@@ -10808,6 +11158,24 @@ class Game {
     this.stateT = 0.35;              // short pause, nothing is scored
   }
 
+  updateShotDiagnostics() {
+    const journal = this.shotJournal, sw = this.swipe;
+    if (!journal || !sw) return;
+    journal.expire(this.time);
+    if (![GS.SERVE_READY, GS.SERVE_TOSS, GS.RALLY].includes(this.state)) return;
+    const m = sw.active ? sw.m : sw.lastReleased;
+    if (!m || m.samples < 2) return;
+    const serving = this.state === GS.SERVE_TOSS || this.state === GS.SERVE_READY;
+    const forehand = (this.player.pos.x * (this.settings.hand === 'left' ? -1 : 1)) >= -.05;
+    const ctx = { side: 1, isServe: serving, ball: this.ball.p, ballSpin: this.ball.w,
+      grip: this.settings.grip, forehand, ballSpeed: this.ball.speed || V3.len(this.ball.v), movePitch: -.15 };
+    const r = isRealStroke(m, serving) ? deriveStroke(m, ctx) : null;
+    const lastSample = sw.samples[sw.samples.length - 1];
+    journal.observe(sw.gestureId, m, { time: this.time, isServe: serving, active: sw.active,
+      sampleTime: sw.active && lastSample ? lastSample.t : this.swipeReleasedAt,
+      strokeId: r && r.stroke.id });
+  }
+
   playerStrokeIntent(serving = false) {
     const sw = this.swipe;
     const lastSample = sw.samples[sw.samples.length - 1];
@@ -10826,39 +11194,35 @@ class Game {
   tryPlayerHit(p0) {
     const pad = this.player, b = this.ball;
     if (!b.live) return;
-    if (b.v.z < 0 && b.p.z < pad.pos.z - 0.35) return;
+    if (this.swipe.pressZone && !this.swipe.pressZone.accepted) return;
 
-    // Parameter 1: hit zone. The blade is ~15 cm; the slider adds forgiveness,
-    // it does not magnet the whole court (the old 0.35+0.95·hz ≈ 1.16 m let
-    // any click on the half return the ball).
-    const hzSetting = this.settings.hitZone !== undefined ? this.settings.hitZone : 0.85;
-    const reachRadius = 0.14 + hzSetting * 0.26;
-    const zReach = 0.16 + hzSetting * 0.22;
-    /* Serve: the toss is a 40 mm sphere you swipe through, not a pixel hunt.
-       Rally reach is tight; the toss needs the bat to still meet a dropping
-       ball after an upward flick lifted the pointer. */
-    const serveReach = Math.max(reachRadius, 0.38 + hzSetting * 0.28);
+    // The fixed envelope belongs to the racket, NOT the pointer marker.
+    const reachRadius = MATCH_RULES.captureRadius;
+    const serveReach = MATCH_RULES.serveCaptureRadius;
 
     const serveCtx = this.state === GS.SERVE_TOSS && this.server === 1 && b.lastHitBy === 0;
     const sw = this.swipe, m = this.playerStrokeIntent(serveCtx);
     if (!m) return;
+    const endpointEligible = serveCtx || (b.lastHitBy === -1 && (this.rallyBounces.some(s => s > 0) || b.p.z >= .50));
+    const captureSample = measureCaptureAllowance(pad, p0, b.p, serveCtx, endpointEligible);
+    if (captureSample && this.shotJournal) this.shotJournal.observeCapture(sw.gestureId, captureSample, this.time);
+    if (b.v.z < 0 && b.p.z < pad.pos.z - .35) return;
     if (serveCtx && (b.v.y >= 0 || this.tossApex - PH.TABLE_Y <= 0.10)) return;
     let hit = null;
 
     if (serveCtx) {
       // ITTF 2.06: the ball must be struck while FALLING from the toss.
       const rad = V3.dist(b.p, pad.pos);
-      if (b.v.y < 0 && this.tossApex - PH.TABLE_Y > 0.10 && rad <= serveReach) {
-        hit = { t: 1, x: b.p.x, y: b.p.y, z: b.p.z, rad: rad * 0.40, px: pad.pos.x, py: pad.pos.y, pz: pad.pos.z };
+      if (b.v.y < 0 && this.tossApex - PH.TABLE_Y > 0.10 && playerInCaptureRange(b.p, pad.pos, true)) {
+        hit = { t: 1, x: b.p.x, y: b.p.y, z: b.p.z, captureKind: 'serve', rad: rad * 0.40, px: pad.pos.x, py: pad.pos.y, pz: pad.pos.z };
       }
     } else {
       // Receiving ball from opponent: forgiving capture across the player's zone
       const incoming = b.lastHitBy === -1 && (this.rallyBounces.some((s) => s > 0) || b.p.z >= 0.50);
       if (incoming) {
         const dist2d = Math.hypot(b.p.x - pad.pos.x, b.p.y - pad.pos.y);
-        const distZ = Math.abs(b.p.z - pad.pos.z);
-        if (dist2d <= reachRadius && distZ <= zReach) {
-          hit = { t: 1, x: b.p.x, y: b.p.y, z: b.p.z, rad: dist2d * 0.35, px: pad.pos.x, py: pad.pos.y, pz: pad.pos.z };
+        if (playerInCaptureRange(b.p, pad.pos)) {
+          hit = { t: 1, x: b.p.x, y: b.p.y, z: b.p.z, captureKind: 'endpoint', rad: dist2d * 0.35, px: pad.pos.x, py: pad.pos.y, pz: pad.pos.z };
         }
       }
     }
@@ -10885,9 +11249,10 @@ class Game {
     const isServeStroke = this.isServeBall && b.lastHitBy === 0 && this.server === 1;
     pad.lastHitT = this.time;
     const contact = V3.new(hit.x, hit.y, hit.z);
-    const grip = playerWristPose(pad.pos, pad.vel, this.settings.hand);
+    const forehand = paddleForehand(pad.pos.x, this.settings.hand, pad.forehand);
+    const grip = playerWristPose(pad.pos, pad.vel, this.settings.hand, { grip: this.settings.grip, forehand });
     const sideParams = this.equip.forSide(grip.forehand ? 1 : -1);
-    const radius = pad.hitRadius || 0.095;
+    const radius = MATCH_RULES.sweetRadius;
     const sweet = clamp((1 - hit.rad / reachRadius) * (sideParams.sweet || this.equip.sweetK), 0, 1);
     const offLat = clamp((hit.x - pad.pos.x) / Math.max(radius, 1e-4), -1, 1);
     const offVer = clamp((hit.y - pad.pos.y) / Math.max(radius, 1e-4), -1, 1);
@@ -10903,11 +11268,11 @@ class Game {
       const tq = timing >= 0.93 ? 1.08 : timing >= 0.80 ? 1.0 : timing >= 0.62 ? 0.90 : 0.74;
       this.lastTiming = tband;
       const ctx = {
-        side: 1, isServe: isServeStroke,
+        side: 1, grip: this.settings.grip, forehand, isServe: isServeStroke,
         ball: { y: contact.y, z: contact.z },
         ballSpin: b.w, ballSpeed: V3.len(b.v),
         powerScale: 1,
-        moveYaw: pad.yaw || 0, movePitch: pad.pitch || 0,
+        moveYaw: this.padYaw || 0, movePitch: this.padPitch || 0,
         equip: sideParams,
         spinBias: 'norm',
       };
@@ -10921,27 +11286,41 @@ class Game {
       }
       quality = clamp(racket.quality * (0.60 + 0.40 * sweet) * (0.70 + 0.30 * timing) * tq, 0.25, 1);
       racket.quality = quality;
-      // Parameter 2: Выравнивание удара
-      const assistLvl = this.settings.assist !== undefined ? this.settings.assist : 0.85;
+      // One authored trajectory assist level, shared by every player.
+      const assistLvl = MATCH_RULES.trajectoryAssist;
+      const rawSwing = V3.new(), rawNormal = V3.new();
+      strokeFrame(racket, 0, 0, 1, rawSwing, rawNormal);
+      const rawShotFrame = { normal: shotVec(rawNormal), vR: shotVec(rawSwing),
+        faceElev: racket.faceElev, swingElevation: racket.elev, swingAzimuth: racket.azSwing,
+        faceAzimuth: racket.azFace, speed: racket.vmag, rubber: { ...racket.rubber } };
       racket = refineRacket(contact, b.v, b.w, racket, assistLvl, quality);
       if (isServeStroke && racket.valid === false && clamp(assistLvl, 0, 1) < 0.999) {
         racket = refineRacket(contact, b.v, b.w, racket, 1, quality);
       }
       racket.sweet = sweet; racket.timing = timing;
+      racket.unassisted = rawShotFrame;
     }
 
+    racket.contactInput = { pressZone: this.swipe.pressZone && { ...this.swipe.pressZone }, capture: captureSample && { ...captureSample, route: hit.captureKind || 'ccd' }, p: shotVec(contact), v: shotVec(b.v), w: shotVec(b.w), gesture: { ...m },
+      context: { grip: this.settings.grip, hand: this.settings.hand, forehand, isServe: isServeStroke,
+        equip: { ...sideParams }, vmagK: this.equip.vmagK, moveYaw: this.padYaw || 0, movePitch: this.padPitch || 0 } };
     const info = impactRacket(b.v, b.w, racket.normal, racket.vR, quality, racket.rubber || {});
     V3.copy(b.p, contact);
     V3.addScaled(b.p, b.p, racket.normal, PH.R * 1.05);
     V3.copy(pad.normal, racket.normal); // show the assisted contact face too
     pad.swing = 1;
+    const motion = this.paddleMotion || (this.paddleMotion = new PaddleStrokeMotion());
+    motion.contact(racket.normal, pad.roll, racket.stroke.id, this.settings.grip,
+      this.settings.hand, forehand, this.settings.followThrough !== false);
+    const impactAngles = paddleFaceAngles(racket.normal);
+    pad.pitch = impactAngles.pitch; pad.yaw = impactAngles.yaw; pad.motionStage = 'contact';
     if (this.settings.followThrough && racket.vR) {
       const ft = this.followThrough;
       ft.active = true;
       ft.t = 0;
-      ft.duration = 0.16 + 0.12 * clamp(racket.power || 0.5, 0, 1.2);
-      V3.copy(ft.startPos, pad.pos);
-      V3.copy(ft.startNormal, racket.normal);
+      ft.duration = .025 + motion.profile.followTime + motion.profile.recoverTime * .5;
+      ft.amplitude = (motion.profile.family === 'BLOCK' ? .025 : motion.profile.family === 'PUSH' ? .055 : .14)
+        * (this.settings.grip === 'penhold' ? .85 : 1);
       const spd = V3.len(racket.vR) || 1;
       V3.set(ft.swingDir, racket.vR.x / spd, racket.vR.y / spd, racket.vR.z / spd);
     }
@@ -11012,9 +11391,17 @@ class Game {
     this.pointerDown = false;
     this.stanceY = undefined;
     this.padYaw = 0;
-    this.padRoll = this.settings.hand === 'left' ? -0.28 : 0.28;
-    this.padPitch = -0.03;
+    this.padRoll = (this.settings.hand === 'left' ? -1 : 1)
+      * (this.settings.grip === 'penhold' ? Math.PI - 0.052 : 0.28);
+    this.padPitch = -(this.settings.grip === 'penhold' ? 5 : 15) * Math.PI / 180;
+    if (this.paddleMotion) this.paddleMotion.reset();
+    if (this.paddleReadClock) this.paddleReadClock.reset();
+    if (this.strikeReadClock) this.strikeReadClock.reset();
+    if (this._strike) { this._strike.on = false; this._strike.k = 0; }
+    pad.forehand = true; pad.motionStage = 'ready';
+    this.liveStroke = null;
     this._prep = 0;
+    this._settlePaddleFace = false;
     this.mouseTrail = [];
     pad.yaw = 0; pad.pitch = this.padPitch; pad.roll = this.padRoll;
     if (this.followThrough) this.followThrough.active = false;
@@ -11035,7 +11422,7 @@ class Game {
       V3.copy(pad.prev, pad.pos);
       V3.zero(pad.vel);
     }
-    V3.set(pad.normal, 0, -0.05, -1); V3.norm(pad.normal, pad.normal);
+    V3.set(pad.normal, 0, Math.sin(this.padPitch), -Math.cos(this.padPitch));
     pad.swing = 0;
     this._ptTarget = { tx: 0, ty: PH.TABLE_Y + 0.25, tz: 1.44 };
   }
@@ -11060,7 +11447,7 @@ class Game {
       this.pointer = pt;                 // self-heal: never stay broken
     }
     if (!Number.isFinite(this.stanceY)) this.stanceY = undefined;
-    const sens = this.settings.sensitivity;
+    const sens = MATCH_RULES.sensitivity;
     // the depth of the stance is set when the hand lands, not by the swipe:
     // flicking the wrist upward must not lunge you over the table
     if (this.swipe.active && this.swipe.m.samples > 0) {
@@ -11073,10 +11460,11 @@ class Game {
      * short serve simply could not be reached no matter what you did. Now a
      * predicted short ball grants the step-in depth. */
     let zNear = PADDLE_LIMITS.zNear;
-    const A = this.settings.posAssist !== undefined ? this.settings.posAssist : 0.85;
+    const A = MATCH_RULES.positionAssist;
     const o = this._paddlePred || (this._paddlePred = {});
     const incoming = this.ball.live && this.ball.v.z > 0.4 && this.ball.lastHitBy === -1;
-    if (incoming && this.frame % 4 === 0) {
+    const readClock = this.paddleReadClock || (this.paddleReadClock = new PaddleReadClock());
+    if (readClock.advance(dt, incoming, this.shotId)) {
       predict(V3.clone(this.ball.p), V3.clone(this.ball.v), V3.clone(this.ball.w),
         { dt: PHYS_DT, maxT: 1.6, stopZ: pad.pos.z, stopDir: 1, out: o });
       if (!o.reach && o.landed && o.landed.z > 0) {
@@ -11104,6 +11492,20 @@ class Game {
     let tx = t.tx + anticipationOffset.x;
     let ty = t.ty + anticipationOffset.y;
     let tz = t.tz + anticipationOffset.z;
+    // Position follow-through uses the SAME smoothed/clamped target path.
+    // A squared-sine envelope has zero velocity at both ends; never write
+    // an independent visual position over the simulation after its update.
+    const ft = this.followThrough;
+    if (ft && ft.active) {
+      if (this.playerStrokeIntent(this.state === GS.SERVE_TOSS)) ft.active = false;
+      else {
+        const progress = clamp(ft.t / ft.duration, 0, 1);
+        const reach = (ft.amplitude || .14) * Math.sin(progress * Math.PI) ** 2;
+        tx += ft.swingDir.x * reach;
+        ty += ft.swingDir.y * reach;
+        tz += ft.swingDir.z * reach;
+      }
+    }
 
     /* On a new point the bat goes HOME first, and while that window is open
      * the cursor is deliberately not obeyed. Without this the reset is
@@ -11188,24 +11590,35 @@ class Game {
     const intent = this.playerStrokeIntent(this.state === GS.SERVE_TOSS);
     const servingNow = this.state === GS.SERVE_TOSS && this.server === 1;
     const fine = this.pointerFine !== false;
-    const eta = incoming && o.reachT ? o.reachT : undefined;
+    const eta = incoming && Number.isFinite(o.reachT) ? Math.max(0, o.reachT - readClock.age) : undefined;
     const spdIn = incoming ? V3.len(this.ball.v) : 0;
     this._prep = expSmooth(this._prep || 0, (this.pointerDown && !intent) ? 1 : 0, 14, dt);
 
     let aimYaw = 0, aimPitch = 0;
     if (fine && !intent) {
       const trail = this.mouseTrail;
-      if (trail && trail.length >= 2) {
+      if (trail && trail.length >= 2 && this.time - trail[trail.length - 1].t < .18) {
         const a = trail[Math.max(0, trail.length - 6)], b = trail[trail.length - 1];
         const tdt = Math.max(1e-3, b.t - a.t);
-        aimYaw = clamp((b.x - a.x) / tdt * 0.12, -0.10, 0.10);
-        aimPitch = clamp(-(b.y - a.y) / tdt * 0.14, -0.12, 0.12);
+        const freshness = Math.exp(-Math.max(0, this.time - b.t) * 30);
+        aimYaw = clamp((b.x - a.x) / tdt * 0.12, -0.10, 0.10) * freshness;
+        aimPitch = clamp(-(b.y - a.y) / tdt * 0.14, -0.12, 0.12) * freshness;
       }
     }
 
+    pad.forehand = paddleForehand(pad.pos.x, this.settings.hand, pad.forehand);
+    // Recognize the CURRENT gesture, never last frame's liveStroke.
+    const intentType = intent ? classifyStroke(intent, {
+      ball: { y: pad.pos.y, z: pad.pos.z }, isServe: servingNow,
+      incomingTop: this.ball.w.x, ballSpeed: V3.len(this.ball.v),
+    }, clamp(Math.max(intent.releaseSpeed, intent.peakSpeed * .78) / 4.2, 0, 1.45)).id : null;
+    if (intent && this.followThrough) this.followThrough.active = false;
     const wrist = playerWristPose(pad.pos, pad.vel, this.settings.hand, {
+      grip: this.settings.grip,
+      forehand: pad.forehand,
+      stroke: intentType || 'DRIVE',
       preparation: this._prep,
-      follow: this.settings.followThrough ? pad.swing : 0,
+      follow: 0,
       // Stance depth freezes during a swipe; wrist flexion must not freeze.
       gesturePitch: intent ? clamp(intent.dy * 1.6, -0.35, 0.35) : 0,
       gestureYaw: intent ? clamp((intent.right || 0) * 0.22 + (intent.curl || 0) * 0.07, -0.32, 0.32) : 0,
@@ -11219,7 +11632,7 @@ class Game {
       compact: incoming ? clamp((spdIn - 8) / 10, 0, 1) * clamp(1 - (Number.isFinite(eta) ? eta : 0.5) / 0.28, 0, 1) : 0,
       snap: intent ? clamp((intent.releaseSpeed || 0) / 5.5, 0, 1) * clamp(intent.up || 0, -1, 1) : 0,
       attackLean: intent ? clamp(0.30 + (intent.up || 0) * 0.55, 0, 1)
-        : (this.settings.followThrough ? (pad.swing || 0) * 0.55 : 0),
+        : 0,
       aimYaw, aimPitch,
       stepIn: pad.stepIn || 0,
       serving: servingNow,
@@ -11227,16 +11640,14 @@ class Game {
     /* Mouse is a precise 2-D pointer: catch up fast on a big read.
        A finger is a noisy 60 Hz sample — slower follow hides jitter
        without changing the pose the physics will actually strike. */
-    const catchUp = (cur, target, base) => {
-      const err = Math.abs(target - cur);
-      return expSmooth(cur, target, base + err * 24, dt);
-    };
+    const catchUp = (cur, target, base, maxSpeed = 14, wrap = false) =>
+      stepPaddleAngle(cur, target, base, dt, maxSpeed, wrap);
     const yawRate = fine ? 17 : 10;
     const pitchRate = fine ? 16 : 9;
     const rollRate = fine ? 17 : 11;
     this.padYaw = catchUp(this.padYaw || 0, wrist.yaw, yawRate);
     this.padPitch = catchUp(this.padPitch || 0, wrist.pitch, pitchRate);
-    this.padRoll = catchUp(this.padRoll || 0, wrist.roll, rollRate);
+    this.padRoll = paddleAngleDelta(0, catchUp(this.padRoll || 0, wrist.roll, rollRate, 10, true));
     pad.yaw = this.padYaw; pad.pitch = this.padPitch; pad.roll = this.padRoll;
 
     // orientation follows the live gesture so you SEE the face angle
@@ -11246,13 +11657,13 @@ class Game {
     faceFromWrist(rest, this.padYaw, this.padPitch, 1);
     if (m) {
       const ctx = {
-        side: 1, isServe: this.isServeBall, ball: { y: pad.pos.y, z: pad.pos.z },
+        side: 1, grip: this.settings.grip, forehand: pad.forehand, isServe: servingNow, ball: { y: pad.pos.y, z: pad.pos.z },
         ballSpin: this.ball.w, ballSpeed: V3.len(this.ball.v), moveYaw: this.padYaw, movePitch: this.padPitch,
       };
       const st = deriveStroke(m, ctx);
       /* First ~45 ms keep the ready face so the bat does not pop onto
          the archetype the frame a finger twitches. */
-      const k = clamp((m.dur || 0) / 0.045, 0, 1);
+      const k = smoothstep(0, 0.045, m.dur || 0);
       want.x = lerp(rest.x, st.normal.x, k);
       want.y = lerp(rest.y, st.normal.y, k);
       want.z = lerp(rest.z, st.normal.z, k);
@@ -11262,50 +11673,66 @@ class Game {
       this.liveStroke = null;
     }
     V3.norm(want, want);
-    const nRate = fine ? 24 : 15;
-    pad.normal.x = catchUp(pad.normal.x, want.x, nRate);
-    pad.normal.y = catchUp(pad.normal.y, want.y, nRate);
-    pad.normal.z = catchUp(pad.normal.z, want.z, nRate);
-    V3.norm(pad.normal, pad.normal);
+    if (m || this._settlePaddleFace) {
+      const current = paddleFaceAngles(pad.normal), target = paddleFaceAngles(want);
+      faceFromWrist(pad.normal,
+        catchUp(current.yaw, target.yaw, fine ? 28 : 22, 18, true),
+        catchUp(current.pitch, target.pitch, fine ? 28 : 22, 18), 1);
+      if (V3.dist(pad.normal, want) < 1e-4) this._settlePaddleFace = false;
+    } else {
+      // No second low-pass on an already smoothed ready wrist.
+      V3.copy(pad.normal, rest);
+    }
+    const motion = this.paddleMotion || (this.paddleMotion = new PaddleStrokeMotion());
+    const strokePose = motion.sample(dt, { yaw: this.padYaw, pitch: this.padPitch, roll: this.padRoll }, !!intent);
+    if (strokePose) {
+      faceFromWrist(pad.normal, strokePose.yaw, strokePose.pitch, 1);
+      pad.roll = paddleAngleDelta(0, strokePose.roll);
+      this.padRoll = pad.roll;
+    }
+    const face = paddleFaceAngles(pad.normal);
+    pad.pitch = face.pitch; pad.yaw = face.yaw;
+    pad.motionStage = strokePose ? strokePose.stage : intent ? 'swing' : this._prep > .02 ? 'prepare' : 'ready';
+    const lifted = keepPaddleAboveTable(pad.pos, pad.normal, pad.roll, PH.TABLE_Y, PH.T_HALF_WID, PH.T_HALF_LEN);
+    if (lifted) pad.vel.y = (pad.pos.y - pad.prevPos.y) / Math.max(dt, 1e-4);
     pad.swing = Math.max(0, pad.swing - dt * 4.5);
-    pad.hitRadius = lerp(0.080, 0.165, A) * (this.state === GS.SERVE_TOSS ? 1.5 : 1)
-      * (zNear < PADDLE_LIMITS.zNear ? 1.12 : 1);
+    pad.hitRadius = MATCH_RULES.sweetRadius;
   }
 
   /**
-   * The single most important piece of coaching in the whole game: WHEN do
-   * I swipe. We predict the intercept, then expose a 0..1 "readiness" the
-   * HUD renders as a ring that closes on the ball.
+   * Time and legal/spatial availability, not a rendered capture radius.
+   * Predict an intercept on a time-based clock; the HUD stays on the ball.
    */
   updateStrikeWindow(dt) {
-    const w = this._strike || (this._strike = { on: false, t: 9, k: 0, x: 0, y: 0, z: 0, ready: 0, kind: '' });
-    const b = this.ball;
-    w.on = false;
-    if (this.state === GS.SERVE_READY && this.server === 1) {
-      w.on = true; w.kind = 'serve'; w.t = 0; w.ready = 1;
-      w.x = this.player.pos.x; w.y = this.player.pos.y; w.z = this.player.pos.z;
-    } else if (this.state === GS.SERVE_TOSS && this.server === 1 && b.lastHitBy === 0) {
-      // contact happens on the way down, a little above the table
-      const dy = b.p.y - (PH.TABLE_Y + 0.14);
-      w.on = true; w.kind = 'serve'; w.x = b.p.x; w.y = b.p.y; w.z = b.p.z;
-      w.t = b.v.y > 0 ? 0.6 : clamp(dy / 2.2, 0, 0.6);
-      w.ready = b.v.y < 0 ? 1 : 0.35;
-    } else if (this.state === GS.RALLY && b.live && b.lastHitBy === -1 && b.v.z > 0.2) {
-      const o = this._strikePred || (this._strikePred = {});
-      if (this.frame % 3 === 0) {
-        predict(V3.clone(b.p), V3.clone(b.v), V3.clone(b.w),
-          { dt: 1 / 200, maxT: 1.8, stopZ: this.player.pos.z, stopDir: 1, stopAtPlane: true, out: o });
+    const w = this._strike || (this._strike = { on: false, t: 9, k: 0, ready: 0 });
+    const b = this.ball, pad = this.player;
+    w.on = false; w.ready = 0; w.contactable = false; w.kind = 'none';
+    const clock = this.strikeReadClock || (this.strikeReadClock = new PaddleReadClock());
+    const incoming = this.state === GS.RALLY && b.live && b.lastHitBy === -1 && b.v.z > .2;
+    const read = clock.advance(dt, incoming, this.shotId);
+    if (this.paused || (this.replayer && this.replayer.on)) { w.k = 0; return; }
+    if (this.state === GS.SERVE_TOSS && this.server === 1 && b.live && b.lastHitBy === 0) {
+      // No ready circle on the paddle and no "hit now" while the toss rises.
+      if (b.v.y < 0 && this.tossApex - PH.TABLE_Y > .10) {
+        w.on = true; w.kind = 'serve'; w.t = 0;
+        w.contactable = playerInCaptureRange(b.p, pad.pos, true);
+        w.ready = w.contactable ? 1 : .4;
       }
-      if (o.reach) {
-        w.on = true; w.kind = 'rally';
-        w.x = o.reach.x; w.y = o.reach.y; w.z = o.reach.z !== undefined ? o.reach.z : this.player.pos.z;
-        w.t = o.reachT;
-        // ready ramps up over the last ~0.32 s: swipe inside it and the
-        // gesture lands on the ball instead of in front of it
-        w.ready = clamp(1 - (o.reachT - 0.10) / 0.34, 0, 1);
+    } else if (incoming && this.rallyBounces.some(side => side > 0)) {
+      const o = this._strikePred || (this._strikePred = {});
+      if (read) predict(V3.clone(b.p), V3.clone(b.v), V3.clone(b.w),
+        { dt: 1 / 200, maxT: 1.8, stopZ: pad.pos.z, stopDir: 1, stopAtPlane: true, out: o });
+      w.contactable = playerInCaptureRange(b.p, pad.pos);
+      const eta = o.reach && Number.isFinite(o.reachT) ? Math.max(0, o.reachT - clock.age) : Infinity;
+      if (w.contactable || eta <= MATCH_RULES.timingHorizon) {
+        w.on = true; w.kind = 'rally'; w.t = w.contactable ? 0 : eta;
+        w.ready = w.contactable ? 1 : Math.min(.65, clamp(1 - (eta - .1) / .34, 0, 1));
       }
     }
-    w.k = expSmooth(w.k === undefined ? 0 : w.k, w.on ? 1 : 0, 14, dt);
+    // The marker is anchored to the actual ball, never a predicted phantom
+    // ball or the bat. Radius expresses time, not physical capture size.
+    w.x = b.p.x; w.y = b.p.y; w.z = b.p.z;
+    w.k = expSmooth(Number.isFinite(w.k) ? w.k : 0, w.on ? 1 : 0, 14, dt);
   }
 
   /** World -> normalised screen space, so the 2D layer can point at things
@@ -11466,18 +11893,9 @@ class Game {
       this.pointer = { x: curX, y: curY };
       this.pointerDown = true;
       this.swipe.move(curX, curY, this.time);
-      if (this._lastPointSwipe) {
-        this._lastPointSwipe.samples.push({ x: curX, y: curY, t: this.time });
-      }
 
       if (progress >= 1) {
         this.swipe.up(g.x1, g.y1, this.time);
-        if (this._lastPointSwipe) {
-          this._lastPointSwipe.endT = this.time;
-          this._lastPointSwipe.ex = g.x1;
-          this._lastPointSwipe.ey = g.y1;
-          this._lastPointSwipe.dist = Math.hypot(g.x1 - g.x0, g.y1 - g.y0);
-        }
         this.pointerDown = false;
         this.swipeReleasedAt = this.time;
         this.lastSwipeT = this.time;
@@ -11566,11 +11984,6 @@ class Game {
     this.pointer = { x: x0, y: y0 };
     this.pointerDown = true;
     this.swipe.down(x0, y0, this.time);
-    this._lastPointSwipe = {
-      startT: this.time, sx: x0, sy: y0,
-      samples: [{ x: x0, y: y0, t: this.time }],
-      stroke: { name: 'ТОПСПИН', short: 'ТОП', col: '#4ee39a' }
-    };
     this._demoGesture = {
       x0, y0, x1, y1,
       t: 0,
@@ -11609,6 +12022,8 @@ class Game {
     if (this.demoMode && !this.paused) {
       this.updateDemoPlayer(dtReal);
     }
+
+    this.updateShotDiagnostics();
 
     // state machine
     switch (this.state) {
@@ -11719,36 +12134,11 @@ class Game {
     while (this.messages.length && this.messages[0].t > this.messages[0].dur) this.messages.shift();
     this.hitFlash = Math.max(0, this.hitFlash - dtReal * 3.2);
 
-    // Update follow-through
-    if (this.settings.followThrough) {
-      if (this.followThrough.active) {
-        this.followThrough.t += dtReal;
-        const progress = this.followThrough.t / this.followThrough.duration;
-        if (progress >= 1) {
-          this.followThrough.active = false;
-        } else {
-          // Smoothstep for natural deceleration
-          const smoothProgress = progress * progress * (3 - 2 * progress);
-          const decay = 1 - smoothProgress;
-
-          // Visual position — continues in swing direction, then decelerates
-          const ftOffset = V3.mul(V3.new(), this.followThrough.swingDir,
-            (1 - decay) * 0.22);
-          V3.copy(this.followThrough.visualPos, this.followThrough.startPos);
-          V3.add(this.followThrough.visualPos, this.followThrough.visualPos, ftOffset);
-
-          // Keep closing the face (lean the head into the table). Adding the
-          // swing vector used to OPEN a loop after contact — the opposite.
-          V3.copy(this.followThrough.visualNormal, this.followThrough.startNormal);
-          this.followThrough.visualNormal.y -= (1 - decay) * 0.28;
-          V3.norm(this.followThrough.visualNormal, this.followThrough.visualNormal);
-
-          // Apply to player for rendering (physics already used the contact face)
-          V3.copy(this.player.pos, this.followThrough.visualPos);
-          V3.lerp(this.player.normal, this.player.normal, this.followThrough.visualNormal, (1 - decay) * 0.70);
-          V3.norm(this.player.normal, this.player.normal);
-        }
-      }
+    // Only the timer advances here. Position and orientation each have one
+    // owner in updatePlayerPaddle / PaddleStrokeMotion, before rendering.
+    if (this.followThrough.active) {
+      this.followThrough.t += dtReal;
+      if (this.followThrough.t >= this.followThrough.duration) this.followThrough.active = false;
     }
 
     // Update anticipation
@@ -11825,14 +12215,6 @@ class Game {
       if (this.network.isHost) this.network.sendGameState();
       else this.network.sendInput();
     }
-    // career: net-safe perk lifts the ball over the tape
-    if (this.career.active && this._careerNetSafe && this.ball.live && this.ball.lastHitBy === 1) {
-      const nearNet = Math.abs(this.ball.p.z) < 0.15;
-      if (nearNet && this.ball.p.y < PH.NET_TOP + PH.R * 2 && this.ball.v.z < 0) {
-        this.ball.v.y += 0.8;
-      }
-    }
-
     // fps
     this._fpsN++; this._fpsT += dtReal;
     if (this._fpsT > 0.5) { this.fps = this._fpsN / this._fpsT; this._fpsT = 0; this._fpsN = 0; }
@@ -12091,9 +12473,8 @@ function hexToRgb(h) {
 /* =====================================================================
  *  UI — HUD, menus, the 2D coaching layer.
  *
- *  Design rule for this file: the screen must never explain with text what
- *  it can show with a shape. One transient badge, one score, and the
- *  strike ring drawn straight onto the ball.
+ *  One evidence-based shot badge in the reading band, one score, and
+ *  timing brackets on the actual ball. No competing input marker.
  * ===================================================================== */
 
 const $ = (s) => document.querySelector(s);
@@ -12107,7 +12488,7 @@ class UI {
     this.shotTimer = 0;
     this.noteTimer = 0;
     this.ripples = [];
-    this.ghostT = 0;
+    this.captureDebug = false;
 
     // UI Animation system (99-level polish)
     this.uiAnim = new UIAnimation();
@@ -12125,7 +12506,6 @@ class UI {
     }
     this._pv = {};
     this._pv2 = {};
-    this._cur = '';
     this.inputMode = detectInputMode();
     this.hasFinePointer = this.inputMode === 'mouse';
     document.addEventListener('pointerdown', e => this.setInputMode(e.pointerType), { capture: true, passive: true });
@@ -12136,6 +12516,7 @@ class UI {
     if (this.dialogObserver) this.dialogObserver.observe(document.body, { subtree: true, attributes: true, attributeFilter: ['class'] });
     document.addEventListener('keydown', (event) => {
       if (event.key === 'Tab') this.trapDialogFocus(event);
+      if (event.key === 'Escape' && $('#shotLab').classList.contains('on')) { event.preventDefault(); this.closeShotLab(); }
     }, true);
   }
   attach(game) {
@@ -12348,7 +12729,10 @@ class UI {
     }));
     $$('.opt[data-set]').forEach((b) => b.addEventListener('click', () => {
       const k = b.dataset.set, v = b.dataset.val;
-      $$(`.opt[data-set="${k}"]`).forEach((x) => x.classList.remove('sel'));
+      $$(`.opt[data-set="${k}"]`).forEach((x) => {
+        x.classList.remove('sel'); x.setAttribute('aria-pressed', 'false');
+      });
+      b.setAttribute('aria-pressed', 'true');
       b.classList.add('sel');
       this.applySetting(k, v);
     }));
@@ -12376,12 +12760,8 @@ class UI {
     $('#tdPlay').addEventListener('click', startMatch);
     $('#train0').addEventListener('click', startTrain);
     $('#tdAgain').addEventListener('click', startTrain);
-    $('#trSkip').addEventListener('click', () => { const t = this.game.training; if (t) { t.skip(); this.game.audio.ui('click'); } });
-    $('#trExit').addEventListener('click', () => {
-      this.game.stopTraining();
-      document.body.classList.remove('is-playing');
-      $('#menu').classList.add('on');
-    });
+    $('#trSkip').addEventListener('click', () => { const t = this.game.training; if (t && this.game.paused) { t.skip(); this.game.setPaused(false); this.game.audio.ui('click'); } });
+    $('#trExit').addEventListener('click', () => { if (this.game.paused) this.showMainMenu(); });
     /* --- workshop / shop / daily --- */
     const wsOpen = (tab) => {
       this.game.audio.ui('click');
@@ -12432,61 +12812,15 @@ class UI {
       e.stopPropagation();
       this.game.stopDemo();
     });
-    const bDbgMisses = $('#btnDebugMisses');
-    if (bDbgMisses) bDbgMisses.addEventListener('click', () => this.showDebugMissesList());
-    const pDbgMisses = $('#pauseDebugMisses');
-    if (pDbgMisses) pDbgMisses.addEventListener('click', (e) => {
-      e.stopPropagation();
-      this.showDebugMissesList();
+    for (const id of ['#shotLabPause', '#shotLabResults']) $(id).addEventListener('click', e => { e.stopPropagation(); this.openShotLab(); });
+    $('#shotLabClose').addEventListener('click', () => this.closeShotLab());
+    $('#shotLabExport').addEventListener('click', () => this.exportShotLab());
+    for (const id of ['#captureDebugPause', '#captureDebugLab']) $(id).addEventListener('change', event => {
+      this.captureDebug = event.target.checked;
+      for (const selector of ['#captureDebugPause', '#captureDebugLab']) $(selector).checked = this.captureDebug;
+      this.syncNativeCursor();
     });
-    const bDbgClose = $('#debugMissesClose');
-    if (bDbgClose) bDbgClose.addEventListener('click', () => $('#debugMissesModal').classList.remove('on'));
 
-    // Debug replay HUD controls
-    const dbgPrev = $('#dbgPrev');
-    if (dbgPrev) dbgPrev.addEventListener('click', () => {
-      const g = this.game;
-      if (g && g.missedRallies && g.missedRallies.length) {
-        g.watchMiss(Math.max(0, (g.currentMissIndex || 0) - 1));
-      }
-    });
-    const dbgNext = $('#dbgNext');
-    if (dbgNext) dbgNext.addEventListener('click', () => {
-      const g = this.game;
-      if (g && g.missedRallies && g.missedRallies.length) {
-        g.watchMiss(Math.min(g.missedRallies.length - 1, (g.currentMissIndex || 0) + 1));
-      }
-    });
-    const dbgRestart = $('#dbgRestart');
-    if (dbgRestart) dbgRestart.addEventListener('click', () => {
-      const g = this.game;
-      if (g && g.replayer) { g.replayer.i = 0; g.replayer.hold = 0; g.replayer.on = true; }
-    });
-    const dbgPause = $('#dbgPause');
-    let dbgPaused = false;
-    if (dbgPause) dbgPause.addEventListener('click', () => {
-      const g = this.game;
-      if (!g || !g.replayer) return;
-      dbgPaused = !dbgPaused;
-      if (dbgPaused) { g._savedReplaySpeed = g.replayer.speed; g.replayer.speed = 0.0001; dbgPause.textContent = 'ВОСПРОИЗВЕСТИ'; }
-      else { g.replayer.speed = g._savedReplaySpeed || 0.20; dbgPause.textContent = 'ПАУЗА'; }
-    });
-    const dbgSpeed = $('#dbgSpeed');
-    const speeds = [0.15, 0.25, 0.40];
-    let spIdx = 0;
-    if (dbgSpeed) dbgSpeed.addEventListener('click', () => {
-      const g = this.game;
-      spIdx = (spIdx + 1) % speeds.length;
-      const sp = speeds[spIdx];
-      if (g && g.replayer) g.replayer.speed = sp;
-      dbgSpeed.textContent = `СКОРОСТЬ ${sp.toFixed(2)}×`;
-    });
-    const dbgExit = $('#dbgExit');
-    if (dbgExit) dbgExit.addEventListener('click', () => {
-      const g = this.game;
-      if (g) g.endReplay();
-      this.showDebugMissesList();
-    });
     const pResume = $('#pauseResume'), pMenu = $('#pauseToMenu');
     if (pResume) pResume.addEventListener('click', (e) => { e.stopPropagation(); this.game.setPaused(false); });
     if (pMenu) pMenu.addEventListener('click', (e) => {
@@ -12526,6 +12860,7 @@ class UI {
       if (e.key === 'Shift' || e.key === ' ') this.game && this.game.setSlowmoHold(false);
     });
     window.addEventListener('keydown', (e) => {
+      if ($('#shotLab').classList.contains('on')) return;
       if ((e.key === 'Shift' || e.key === ' ') && !e.repeat && this.game && this.game.replayer.on) {
         this.game.skipReplay(); e.preventDefault(); return;
       }
@@ -12601,44 +12936,6 @@ class UI {
       g.watchMoment(g.moments.kept[+b.dataset.i], true);
     }));
     $('#reels').classList.add('on');
-  }
-
-  debugReplayShow(on, miss, index, total) {
-    const hud = $('#debugReplayHud');
-    if (!hud) return;
-    hud.style.display = on ? 'block' : 'none';
-    if (!on || !miss) return;
-    const tEl = $('#dbgReplayTitle'), vEl = $('#dbgReplayVerdict'), mEl = $('#dbgReplayMetrics');
-    if (tEl) tEl.textContent = `ПОВТОР ПРОМАХА #${(index || 0) + 1} ИЗ ${total || 1}`;
-    if (vEl) vEl.textContent = miss.verdict || miss.reason;
-    if (mEl) mEl.textContent = `Дистанция: ${(miss.minDist || 0).toFixed(2)} м (радиус: ${(miss.hitRadius || 0.22).toFixed(2)} м) · Свайп: ${miss.strokeName || 'НЕТ'} · Счёт: ${miss.score ? miss.score.join(':') : '0:0'}`;
-  }
-
-  showDebugMissesList() {
-    const g = this.game; if (!g) return;
-    const list = $('#debugMissList');
-    if (!list) return;
-    const misses = g.missedRallies || [];
-    if (!misses.length) {
-      list.innerHTML = `<div style="padding:24px;text-align:center;color:var(--dim);font-size:13px">В этом матче пока нет не отбитых мячей.<br>Сыграйте несколько очков против бота, и здесь появятся все ваши промахи для замедленного разбора.</div>`;
-    } else {
-      list.innerHTML = misses.map((m, i) => {
-        const col = m.isReachIssue ? '#ff4d6d' : '#39c6ff';
-        return `<button class="mrow" data-miss="${i}" style="border-left:3px solid ${col};margin-bottom:8px">
-          <span class="num">${i + 1}</span>
-          <span class="d">
-            <b style="color:#fff">${m.reason} · Счёт ${m.score[0]}:${m.score[1]}</b>
-            <small style="color:${col}">${m.verdict}</small>
-          </span>
-          <span class="go" style="color:#39c6ff;font-weight:800">0.20× SLO-MO \u203a</span>
-        </button>`;
-      }).join('');
-      Array.from(list.querySelectorAll('.mrow')).forEach((b) => b.addEventListener('click', () => {
-        $('#debugMissesModal').classList.remove('on');
-        g.watchMiss(+b.dataset.miss, 0.20);
-      }));
-    }
-    $('#debugMissesModal').classList.add('on');
   }
 
   /* --------------------- workshop · shop · daily ------------------- */
@@ -12867,29 +13164,14 @@ class UI {
     const g = this.game; if (!g) return;
     const s = g.settings;
     switch (k) {
-      case 'hitZone':
-        s.hitZone = v / 100;
-        const hzEl = $('#vHitZone'), hzRange = $('#rHitZone');
-        if (hzEl) hzEl.textContent = v + '%';
-        if (hzRange) hzRange.setAttribute('aria-valuetext', v + ' процентов');
-        break;
-      case 'assist':
-        s.assist = v / 100;
-        const astEl = $('#vAssist'), astRange = $('#rAssist');
-        if (astEl) astEl.textContent = v + '%';
-        if (astRange) astRange.setAttribute('aria-valuetext', v + ' процентов');
-        break;
-      case 'posAssist':
-        s.posAssist = v / 100;
-        break;
-      case 'sens': s.sensitivity = v / 100; break;
+      // Gameplay assistance is an authored rule, not a player preference.
+      case 'hitZone': case 'assist': case 'posAssist': case 'sens': case 'zone': return;
       case 'vol': s.volume = v / 100; g.audio.setVolume(v / 100); break;
       case 'cam': s.camera = v; break;
       case 'quality': s.quality = v; g.R.quality = v; g.resize(); break;
-      case 'hand': s.hand = v; break;
+      case 'hand': case 'grip': g.changePaddlePreference(k, v); break;
       case 'trail': s.showTrail = v === 'on'; break;
       case 'predict': s.showPredict = v === 'on'; break;
-      case 'zone': s.showZone = v === 'on'; break;
       case 'tele': s.showTele = v === 'on'; $('#spin').classList.toggle('on', s.showTele); break;
       case 'coach': s.coach = v === 'on'; if (!s.coach) this.hideNote(); break;
       case 'adaptive':
@@ -12918,15 +13200,13 @@ class UI {
 
   syncSettings() {
     const s = this.game.settings;
-    const hzVal = Math.round((s.hitZone !== undefined ? s.hitZone : 0.85) * 100);
-    const rHz = $('#rHitZone'), vHz = $('#vHitZone');
-    if (rHz) { rHz.value = hzVal; rHz.setAttribute('aria-valuetext', hzVal + ' процентов'); }
-    if (vHz) vHz.textContent = hzVal + '%';
-
-    const astVal = Math.round((s.assist !== undefined ? s.assist : 0.85) * 100);
-    const rAst = $('#rAssist'), vAst = $('#vAssist');
-    if (rAst) { rAst.value = astVal; rAst.setAttribute('aria-valuetext', astVal + ' процентов'); }
-    if (vAst) vAst.textContent = astVal + '%';
+    for (const k of ['hand', 'grip']) {
+      $$(`.opt[data-set="${k}"]`).forEach(b => {
+        const selected = b.dataset.val === s[k];
+        b.classList.toggle('sel', selected);
+        b.setAttribute('aria-pressed', String(selected));
+      });
+    }
     this.syncCameraControls();
   }
   syncCameraControls() {
@@ -12961,20 +13241,65 @@ class UI {
     $('#oppName').textContent = g.ai.L.name;
   }
 
-  showShot(info) {
+  showShot() { this.syncShotFeedback(); }
+  syncShotFeedback() {
+    const entry = this.game && this.game.shotJournal && this.game.shotJournal.latest;
+    if (!entry) { this._shotEntry = null; $('#shot').classList.remove('on'); return; }
+    if (entry === this._shotEntry && entry.revision === this._shotRevision) return;
+    this._shotEntry = entry; this._shotRevision = entry.revision;
+    const view = shotHudView(entry);
+    if (!view) return;
     const el = $('#shot');
-    el.classList.add('on');
-    this.shotTimer = 1.5;
-    const n = $('#shotName');
-    n.textContent = info.stroke.short || info.stroke.name;
-    n.style.color = info.stroke.col;
-    /* The timing verdict is part of the badge: it is the one thing the player
-       can act on next time, and it belongs in the top band with the rest of
-       the text, never floating over the table. */
-    const extra = info.timing ? ` · ${info.timing}` : '';
-    $('#shotMeta').textContent = `${info.speed.toFixed(0)} км/ч · ${info.spin.toFixed(0)} об/с${extra}`;
-    const meta = $('#shotMeta');
-    if (meta) meta.style.color = info.rim ? 'var(--warn)' : '';
+    $('#shotName').textContent = view.title;
+    $('#shotStatus').textContent = view.status;
+    $('#shotMeta').textContent = view.metrics;
+    el.dataset.tone = view.tone; el.classList.add('on');
+    this.shotTimer = 7;
+  }
+  openShotLab() {
+    this._labWasPaused = this.game.paused;
+    this.game.setPaused(true);
+    $('#shotLab').classList.add('on');
+    this.renderShotLab();
+  }
+  closeShotLab() {
+    this._labCancelled = true;
+    $('#shotLab').classList.remove('on');
+    if (!this._labWasPaused) this.game.setPaused(false);
+  }
+  renderShotLab() {
+    const root = $('#shotLabRecords'); root.replaceChildren();
+    const summary=$('#captureCalibrationSummary');summary.replaceChildren();
+    for(const serving of [false,true]) {
+      const attempts=this.game.shotJournal.records.filter(e=>e.pressZone && e.pressZone.serving===serving);
+      const hits=attempts.filter(e=>e.contact), block=document.createElement('div');block.className='lab-entry';
+      const add=text=>{const p=document.createElement('p');p.textContent=text;block.append(p);};
+      const title=document.createElement('b');title.textContent=`${serving?'Подача':'Приём'} · радиус ${MATCH_RULES.pressRadiusPx} px`;block.append(title);
+      add(`Нажатий: ${attempts.length} · вне зоны: ${attempts.filter(e=>!e.pressZone.accepted).length} · ударов: ${hits.length}`);
+      for(const scale of [.9,.8,.7]) add(`Радиус ${Math.round(MATCH_RULES.pressRadiusPx*scale)} px: заблокировал бы ${hits.filter(e=>e.pressZone.distancePx>e.pressZone.radius*scale).length} из ${hits.length} записанных ударов.`);
+      summary.append(block);
+    }
+    const entries = this.game.shotJournal.records.slice().reverse();
+    if (!entries.length) { root.textContent = 'Пока нет попыток. Сделайте свайп во время игры.'; return; }
+    for (const entry of entries) {
+      const view = shotFeedbackView(entry), card = document.createElement('div'); card.className = 'lab-entry';
+      const title = document.createElement('b'); title.textContent = `#${entry.id} · ${view.title} · ${view.status}`; card.append(title);
+      const add = text => { const p = document.createElement('p'); p.textContent = text; card.append(p); };
+      if (view.metrics) add(view.metrics);
+
+      if (entry.pressZone) add(`Нажатие: ${entry.pressZone.accepted?'внутри':'снаружи'} · расстояние ${Number.isFinite(entry.pressZone.distancePx)?entry.pressZone.distancePx.toFixed(0):'не измерено'} px из ${entry.pressZone.radius} px.`);
+      root.append(card);
+    }
+  }
+  exportShotLab() {
+    const data = this.game.shotJournal.exportData();
+    data.pressCalibration = { radiusPx: MATCH_RULES.pressRadiusPx, attempts: this.game.shotJournal.records.filter(e=>e.pressZone).map(e=>({ id:e.id, press:e.pressZone, contacted:!!e.contact })) };
+    data.preferences = { grip: this.game.settings.grip, hand: this.game.settings.hand, spinBias: this.game.settings.spinBias };
+    data.equipment = JSON.parse(JSON.stringify(this.game.equip));
+    data.career = { active: this.game.career.active, speed: this.game._careerSpeedBoost, spin: this.game._careerSpinBoost };
+    const url = URL.createObjectURL(new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' }));
+    const link = document.createElement('a'); link.href = url; link.download = 'topspin-shot-diagnostics.json'; link.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
   }
   showAiShot() { /* the opponent's choice is readable from the ball itself */ }
 
@@ -12993,21 +13318,19 @@ class UI {
   hideNote() { this.noteTimer = 0; const el = $('#note'); el && el.classList.remove('on'); }
 
   /* --------------------------- coach panel ------------------------ */
-  trainShow() { $('#train').classList.add('on'); $('#score').style.opacity = '0'; }
-  trainHide() { $('#train').classList.remove('on'); $('#score').style.opacity = ''; $('#tdone').classList.remove('on'); }
+  trainShow() { $('#train').classList.add('on'); $('#score').style.opacity = '0'; $('#trainingActions').hidden = false; }
+  trainHide() { $('#trainingActions').hidden = true; $('#train').classList.remove('on'); $('#score').style.opacity = ''; $('#tdone').classList.remove('on'); }
   trainSync(t) {
-    const S = t.S;
-    $('#trStep').textContent = (t.step + 1) + ' / ' + TRAIN_STEPS.length;
+    const S = t.S, feedback = t.phase === 'ok' || t.phase === 'fail';
+    $('#trStep').textContent = `${t.step + 1}/${TRAIN_STEPS.length}`;
     $('#trTitle').textContent = S.title;
-    $('#trTip').textContent = trainingTip(S, this.inputMode);
-    const m = $('#trMsg');
-    m.textContent = t.msg || '';
-    m.style.color = t.msgCol || 'var(--good)';
-    let pips = '';
-    for (let i = 0; i < S.need; i++) pips += `<i class="${i < t.done ? 'on' : ''}"></i>`;
-    $('#trPips').innerHTML = pips;
+    $('#trProgress').textContent = `${t.done}/${S.need}`;
+    $('#trTip').textContent = feedback ? '' : S.goal;
+    $('#trainPauseTip').textContent = trainingTip(S, this.inputMode);
+    $('#trMsg').textContent = feedback ? t.msg : '';
+    $('#trMsg').style.color = t.msgCol || 'var(--good)';
   }
-  trainDone() { $('#train').classList.remove('on'); $('#tdone').classList.add('on'); }
+  trainDone() { $('#train').classList.remove('on'); $('#trainingActions').hidden = true; $('#tdone').classList.add('on'); }
 
   showMatchEnd(won) {
     const g = this.game, s = g.stats;
@@ -13024,8 +13347,7 @@ class UI {
     $('#stRally').textContent = g.bestRally;
     const top = Object.entries(s.byStroke).sort((a, b) => b[1] - a[1])[0];
     $('#stFav').textContent = top ? (STROKES[top[0]] ? STROKES[top[0]].short : top[0]) + ' ×' + top[1] : '—';
-    // the match is over, so lead with the thing worth remembering: the
-    // best rally, played back before the numbers
+    // Results are immediate; normal best moments remain an explicit choice.
     const row = $('#overMoments');
     row.innerHTML = '';
     /* what the match paid, in one line, next to the score */
@@ -13039,7 +13361,6 @@ class UI {
       row.appendChild(line);
       g.lastReward = null;
     }
-    const best = g.moments.best;
     const kept = g.moments.kept.slice(0, 3);
     if (kept.length) {
       const b = document.createElement('button');
@@ -13048,23 +13369,6 @@ class UI {
       b.addEventListener('click', () => this.showMoments());
       row.appendChild(b);
     }
-    // User requested: "сделай просто в конце матча вместо повтора сразу чтобы подряд шли все мои удары, в которых я промахнулся (потом я верну на место повтор лучшего момента)"
-    if (g.missedRallies && g.missedRallies.length && !this.suppressCinema) {
-      this.suppressCinema = true;
-      setTimeout(() => { this.suppressCinema = false; }, 400);   // one auto-play per match
-      $$('.screen').forEach((s) => s.classList.remove('on'));
-      g.playAllMissesSequential(() => {
-        $('#over').classList.add('on');
-      });
-      return;
-    } else if (best && !this.suppressCinema && (!g.missedRallies || !g.missedRallies.length)) {
-      this.suppressCinema = true;
-      setTimeout(() => { this.suppressCinema = false; }, 400);
-      $$('.screen').forEach((s) => s.classList.remove('on'));
-      g.watchMoment(best, true, () => { $('#over').classList.add('on'); });
-      return;
-    }
-    this.suppressCinema = false;
     $('#over').classList.add('on');
   }
 
@@ -13072,162 +13376,57 @@ class UI {
    *  2D coaching layer
    * ================================================================== */
 
-  /** The strike ring: a circle that closes onto the ball and flashes
-   *  white at the exact moment the swipe should leave your finger. */
+  /** Timing brackets belong to the ball. They are NOT a capture radius. */
   drawStrikeRing(c, W, H, d) {
     const g = this.game;
-    const w = g._strike;
-    if (!w || !w.on || w.k < 0.02) return;
-    if (!g.settings.showZone) return;
-    const p = g.project({ x: w.x, y: w.y, z: w.z }, this._pv);
-    if (!p.ok) return;
-    const x = p.x * W, y = p.y * H;
-    const r0 = 15 * d;                       // closed radius
-    const tt = clamp(w.t, 0, 0.85);
-    const R = r0 + tt * 150 * d;
-    const hot = w.ready;                     // 0..1 — inside the window
-    const a = w.k * (0.30 + 0.60 * hot);
-    const col = hot > 0.82 ? [255, 236, 140] : hot > 0.4 ? [120, 222, 255] : [110, 150, 190];
-    c.save();
-    c.globalAlpha = a;
-    c.strokeStyle = `rgb(${col[0]},${col[1]},${col[2]})`;
-    c.lineWidth = (1.6 + 2.0 * hot) * d;
-    c.beginPath(); c.arc(x, y, R, 0, TAU); c.stroke();
-    // the fixed target ring you are closing onto
-    c.globalAlpha = a * 0.55;
-    c.lineWidth = 1.2 * d;
-    c.setLineDash([5 * d, 6 * d]);
-    c.beginPath(); c.arc(x, y, r0, 0, TAU); c.stroke();
-    c.setLineDash([]);
-    c.restore();
+    if (g.paused || (g.replayer && g.replayer.on)) return;
+    const cue = strikeCueModel(g._strike);
+    if (!cue) return;
+    const p = g.project(g.ball.p, this._pv);
+    if (!p.ok || !Number.isFinite(p.x) || !Number.isFinite(p.y) || p.x < 0 || p.x > 1 || p.y < 0 || p.y > 1) return;
+    const x = p.x * W, y = p.y * H, r = cue.radius * d, arm = 4 * d;
+    c.save(); c.globalAlpha = cue.alpha;
+    c.strokeStyle = cue.hot ? '#ffe699' : '#8ea5b8';
+    c.lineWidth = (cue.hot ? 2 : 1.3) * d;
+    c.setLineDash(cue.dashed ? [3 * d, 3 * d] : []);
+    // Four L brackets: leave the white ball unobscured and avoid a circular
+    // "hitbox" metaphor. No pulsating radius or extra motion in reduced mode.
+    c.beginPath();
+    for (const sx of [-1, 1]) for (const sy of [-1, 1]) {
+      c.moveTo(x + sx * (r - arm), y + sy * r);
+      c.lineTo(x + sx * r, y + sy * r);
+      c.lineTo(x + sx * r, y + sy * (r - arm));
+    }
+    c.stroke(); c.restore();
   }
 
-  /** The ghost gesture: an animated finger path drawn where the player's
-   *  hand actually has to move. Worth a thousand words of cheat-sheet.
-   *  Everything is stroked twice — dark outline first — so it stays legible
-   *  over the bright table as well as over the dark floor. */
-  drawGhost(c, W, H, d, pts, speed, col) {
-    const CYCLE = 2.0;
-    const T = this.reducedMotion ? 0 : (this.ghostT * speed) % CYCLE;
-    const play = clamp(T / 0.95, 0, 1);
-    const fade = this.reducedMotion ? 0.9
-      : T > 1.40 ? clamp((CYCLE - T) / 0.42, 0, 1) : clamp(T / 0.12, 0, 1);
-    if (fade <= 0.01) return;
-
-    let P = pts.map((q) => [q[0] * W, q[1] * H]);
-    if (P.length > 2) {                       // Catmull-Rom: no dog-legs
-      const sm = [];
-      for (let i = 0; i < P.length - 1; i++) {
-        const p0 = P[Math.max(0, i - 1)], p1 = P[i], p2 = P[i + 1], p3 = P[Math.min(P.length - 1, i + 2)];
-        for (let k = 0; k < 12; k++) {
-          const t = k / 12, t2 = t * t, t3 = t2 * t;
-          sm.push([
-            0.5 * ((2 * p1[0]) + (-p0[0] + p2[0]) * t + (2 * p0[0] - 5 * p1[0] + 4 * p2[0] - p3[0]) * t2 + (-p0[0] + 3 * p1[0] - 3 * p2[0] + p3[0]) * t3),
-            0.5 * ((2 * p1[1]) + (-p0[1] + p2[1]) * t + (2 * p0[1] - 5 * p1[1] + 4 * p2[1] - p3[1]) * t2 + (-p0[1] + 3 * p1[1] - 3 * p2[1] + p3[1]) * t3),
-          ]);
-        }
-      }
-      sm.push(P[P.length - 1]);
-      P = sm;
-    }
-    const seg = [];
-    let total = 0;
-    for (let i = 1; i < P.length; i++) {
-      const l = Math.hypot(P[i][0] - P[i - 1][0], P[i][1] - P[i - 1][1]);
-      seg.push(l); total += l;
-    }
-    const at = (u) => {
-      let want = u * total, i = 0;
-      while (i < seg.length - 1 && want > seg[i]) { want -= seg[i]; i++; }
-      const f = seg[i] ? clamp(want / seg[i], 0, 1) : 0;
-      return [lerp(P[i][0], P[i + 1][0], f), lerp(P[i][1], P[i + 1][1], f)];
-    };
-    const trace = () => {
-      c.beginPath();
-      for (let i = 0; i <= 48; i++) { const q = at(i / 48); i ? c.lineTo(q[0], q[1]) : c.moveTo(q[0], q[1]); }
-    };
-
-    c.save();
-    c.lineCap = 'round'; c.lineJoin = 'round';
-
-    // 1. the whole route: dark halo + dashed bright line
-    c.globalAlpha = 0.38 * fade; c.strokeStyle = '#040a12'; c.lineWidth = 11 * d;
-    trace(); c.stroke();
-    c.globalAlpha = 0.50 * fade; c.strokeStyle = col; c.lineWidth = 3.4 * d;
-    c.setLineDash([9 * d, 9 * d]); trace(); c.stroke(); c.setLineDash([]);
-
-    // 2. the part the finger has already covered, solid and bright
-    c.globalAlpha = 0.95 * fade; c.strokeStyle = col; c.lineWidth = 6 * d;
-    c.beginPath();
-    const n = Math.max(2, Math.round(play * 40));
-    for (let i = 0; i < n; i++) { const q = at((i / (n - 1)) * play); i ? c.lineTo(q[0], q[1]) : c.moveTo(q[0], q[1]); }
-    c.stroke();
-
-    // 3. the finger
-    const h = at(play), hb = at(Math.max(0, play - 0.07));
-    c.globalAlpha = fade;
-    const rg = c.createRadialGradient(h[0], h[1], 0, h[0], h[1], 30 * d);
-    rg.addColorStop(0, 'rgba(255,255,255,.95)');
-    rg.addColorStop(0.3, col + 'cc'); rg.addColorStop(1, col + '00');
-    c.fillStyle = rg; c.beginPath(); c.arc(h[0], h[1], 30 * d, 0, TAU); c.fill();
-    c.fillStyle = '#fff'; c.beginPath(); c.arc(h[0], h[1], 7 * d, 0, TAU); c.fill();
-
-    // 4. arrow head pointing the way out, at the end of the route
-    const e = at(1), eb = at(0.86);
-    const ang = Math.atan2(e[1] - eb[1], e[0] - eb[0]);
-    const ah = 16 * d;
-    const tip = [e[0] + Math.cos(ang) * ah * 0.5, e[1] + Math.sin(ang) * ah * 0.5];
-    c.globalAlpha = fade * (0.45 + 0.45 * play);
-    c.fillStyle = col;
-    c.beginPath();
-    c.moveTo(tip[0], tip[1]);
-    c.lineTo(tip[0] - Math.cos(ang - 0.42) * ah, tip[1] - Math.sin(ang - 0.42) * ah);
-    c.lineTo(tip[0] - Math.cos(ang + 0.42) * ah, tip[1] - Math.sin(ang + 0.42) * ah);
-    c.closePath(); c.fill();
-
-    // 5. where the finger starts
-    const s0 = at(0);
-    c.globalAlpha = fade * 0.75; c.strokeStyle = col; c.lineWidth = 2.4 * d;
-    c.beginPath(); c.arc(s0[0], s0[1], 15 * d, 0, TAU); c.stroke();
-    c.globalAlpha = fade * 0.30; c.fillStyle = col;
-    c.beginPath(); c.arc(s0[0], s0[1], 15 * d, 0, TAU); c.fill();
-    c.restore();
+  /** Only the racket is visible over live play; dialogs retain their cursor. */
+  syncNativeCursor() {
+    const g = this.game, canvas = g && g.canvas;
+    if (!canvas) return;
+    const playing = [GS.SERVE_READY, GS.SERVE_TOSS, GS.RALLY, GS.POINT].includes(g.state);
+    const dialog = typeof document !== 'undefined' && document.querySelector('.screen.on');
+    const cursor = playing && !this.captureDebug && !g.paused && !(g.replayer && g.replayer.on) && !dialog ? 'none' : 'default';
+    if (canvas.style.cursor !== cursor) canvas.style.cursor = cursor;
   }
 
-  /** Tie the two things that used to float apart: the OS cursor (which draws
-   *  your SWIPE) and the 3D bat (which auto-steps to the ball). While you are
-   *  playing we hide the stray arrow and draw one clear hand-reticle under the
-   *  pointer, a marker on the real bat, and a dashed tether between them, so it
-   *  is obvious: aim/time by the ball + ring, the bat follows on its own. */
-  drawHand(c, W, H, d) {
-    const g = this.game;
-    const st = g.state;
-    const play = st === 'RALLY' || st === 'SERVE_READY' || st === 'SERVE_TOSS';
-    if (g.canvas) {
-      const want = (this.hasFinePointer && play) ? 'none' : '';
-      if (this._cur !== want) { g.canvas.style.cursor = want; this._cur = want; }
+  drawCaptureDebug(c, W, H, d) {
+    const g=this.game;
+    if (!this.captureDebug || !g || g.paused || (g.replayer && g.replayer.on) ||
+        ![GS.SERVE_READY,GS.SERVE_TOSS,GS.RALLY].includes(g.state)) return;
+    const rect=g.canvas.getBoundingClientRect ? g.canvas.getBoundingClientRect() : {width:W/d,height:H/d};
+    const saved=g.swipe && g.swipe.pressZone;
+    const serving=[GS.SERVE_READY,GS.SERVE_TOSS].includes(g.state) && g.server===1;
+    const locked=saved && (g.swipe.active || (typeof g.playerStrokeIntent==='function' && g.playerStrokeIntent(serving)));
+    const zone=locked ? saved : pressHitZone(g.project(g.ball.p),g.pointer,rect.width,rect.height);
+    if (!zone || ![zone.x,zone.y,zone.radius].every(Number.isFinite)) return;
+    const sx=W/rect.width,sy=H/rect.height;
+    c.save();c.setLineDash([]);c.globalAlpha=.9;c.lineWidth=2*d;c.strokeStyle=zone.accepted?'#6ee7a8':'#ffb066';
+    c.beginPath();c.arc(zone.x*sx,zone.y*sy,zone.radius*sx,0,TAU);c.stroke();
+    // The dot is the actual sampled pointer, only in this explicit debug mode.
+    if (g.pointer && Number.isFinite(g.pointer.x) && Number.isFinite(g.pointer.y)) {
+      c.fillStyle=c.strokeStyle;c.beginPath();c.arc(locked ? zone.pointerX*sx : g.pointer.x*W,locked ? zone.pointerY*sy : g.pointer.y*H,3*d,0,TAU);c.fill();
     }
-    if (!play || !this.hasFinePointer || !g.pointer) return;
-
-    // Only ONE unified, clean reticle directly under the pointer
-    const hx = g.pointer.x * W, hy = g.pointer.y * H;
-
-    c.save();
-    c.globalAlpha = 0.90;
-    c.strokeStyle = 'rgba(57,198,255,.95)';
-    c.lineWidth = 2 * d;
-    c.beginPath(); c.arc(hx, hy, 11 * d, 0, TAU); c.stroke();
-    // Subtle crosshair ticks on the single reticle
-    c.beginPath();
-    c.moveTo(hx - 16 * d, hy); c.lineTo(hx - 12 * d, hy);
-    c.moveTo(hx + 12 * d, hy); c.lineTo(hx + 16 * d, hy);
-    c.moveTo(hx, hy - 16 * d); c.lineTo(hx, hy - 12 * d);
-    c.moveTo(hx, hy + 12 * d); c.lineTo(hx, hy + 16 * d);
-    c.stroke();
-    c.globalAlpha = 0.35;
-    c.beginPath(); c.arc(hx, hy, 18 * d, 0, TAU); c.stroke();
-    c.globalAlpha = 1; c.fillStyle = 'rgba(57,198,255,.95)';
-    c.beginPath(); c.arc(hx, hy, 2.5 * d, 0, TAU); c.fill();
     c.restore();
   }
 
@@ -13235,131 +13434,16 @@ class UI {
     const g = this.game, c = this.fxg, W = this.fx.width, H = this.fx.height, d = this.dpr;
     c.clearRect(0, 0, W, H);
     if (!g) return;
-    this.ghostT += dt;
 
-    this.drawStrikeRing(c, W, H, d);
-    this.drawHand(c, W, H, d);
+    if (!this.captureDebug) this.drawStrikeRing(c, W, H, d);
+    this.drawCaptureDebug(c, W, H, d);
+    this.syncNativeCursor();
 
-    // Replay analysis: Player Click Point & Swipe Direction
-    if (g.replayer && g.replayer.on) {
-      const mo = g.replayer.moment;
-      const swd = mo ? mo.swipeData : null;
-
-      if (swd) {
-        const cx = swd.sx * W, cy = swd.sy * H;
-        const ex = swd.ex * W, ey = swd.ey * H;
-        const dx = ex - cx, dy = ey - cy;
-        const distPx = Math.hypot(dx, dy);
-
-        c.save();
-
-        // 1. If there was a swipe movement (distPx > 10 * d): draw glowing line and directional arrow
-        if (distPx > 10 * d) {
-          const col = (swd.stroke && swd.stroke.col) || '#39c6ff';
-          const angle = Math.atan2(dy, dx);
-
-          // Glowing trail line
-          c.shadowBlur = 14 * d;
-          c.shadowColor = col;
-          c.strokeStyle = col;
-          c.lineWidth = 5 * d;
-          c.lineCap = 'round';
-          c.beginPath();
-          c.moveTo(cx, cy);
-          c.lineTo(ex, ey);
-          c.stroke();
-
-          // Arrow head at end point
-          const arrowLen = 18 * d;
-          c.fillStyle = col;
-          c.beginPath();
-          c.moveTo(ex, ey);
-          c.lineTo(ex - arrowLen * Math.cos(angle - Math.PI / 6), ey - arrowLen * Math.sin(angle - Math.PI / 6));
-          c.lineTo(ex - (arrowLen * 0.6) * Math.cos(angle), ey - (arrowLen * 0.6) * Math.sin(angle));
-          c.lineTo(ex - arrowLen * Math.cos(angle + Math.PI / 6), ey - arrowLen * Math.sin(angle + Math.PI / 6));
-          c.closePath();
-          c.fill();
-          c.shadowBlur = 0;
-
-          // Direction label at the end of the swipe
-          const lblX = clamp(ex + 22 * d * Math.cos(angle), 90 * d, W - 90 * d);
-          const lblY = clamp(ey + 22 * d * Math.sin(angle), 40 * d, H - 35 * d);
-          c.font = `800 ${12 * d}px ${CSSFONT}`;
-          c.textAlign = 'center';
-          c.textBaseline = 'middle';
-          const text = `${swd.arrow} ${swd.dirName}`;
-          const tw = c.measureText(text).width + 18 * d;
-          c.fillStyle = 'rgba(6, 12, 24, 0.90)';
-          c.fillRect(lblX - tw * 0.5, lblY - 12 * d, tw, 24 * d);
-          c.strokeStyle = col;
-          c.lineWidth = 1.5 * d;
-          c.strokeRect(lblX - tw * 0.5, lblY - 12 * d, tw, 24 * d);
-          c.fillStyle = '#ffffff';
-          c.fillText(text, lblX, lblY);
-        }
-
-        // 2. Point of click: pulsating glowing target ring & label
-        const pulse = this.reducedMotion ? 1 : 1 + 0.12 * Math.sin(Date.now() * 0.007);
-        c.shadowBlur = 16 * d;
-        c.shadowColor = '#00ffcc';
-        c.strokeStyle = '#00ffcc';
-        c.lineWidth = 3 * d;
-        c.beginPath();
-        c.arc(cx, cy, 14 * d * pulse, 0, TAU);
-        c.stroke();
-        c.fillStyle = '#ffffff';
-        c.beginPath();
-        c.arc(cx, cy, 5 * d, 0, TAU);
-        c.fill();
-        c.shadowBlur = 0;
-
-        // Click label badge
-        const badgeY = cy > 55 * d ? cy - 26 * d : cy + 28 * d;
-        c.font = `800 ${11 * d}px ${CSSFONT}`;
-        c.textAlign = 'center';
-        c.textBaseline = 'middle';
-         const clkText = 'МЕСТО КАСАНИЯ';
-        const ctw = c.measureText(clkText).width + 16 * d;
-        c.fillStyle = 'rgba(4, 18, 28, 0.92)';
-        c.fillRect(cx - ctw * 0.5, badgeY - 11 * d, ctw, 22 * d);
-        c.strokeStyle = '#00ffcc';
-        c.lineWidth = 1.5 * d;
-        c.strokeRect(cx - ctw * 0.5, badgeY - 11 * d, ctw, 22 * d);
-        c.fillStyle = '#00ffcc';
-        c.fillText(clkText, cx, badgeY);
-
-        c.restore();
-      } else if (mo && (!mo.hadSwipe || !mo.swipeData)) {
-        // No click was made in this point
-        c.save();
-        c.font = `800 ${13 * d}px ${CSSFONT}`;
-        c.textAlign = 'center';
-        c.textBaseline = 'middle';
-        const msg = 'НЕТ СВАЙПА — ПРОПУСК МЯЧА В ЭТОМ РОЗЫГРЫШЕ';
-        const mw = c.measureText(msg).width + 24 * d;
-        c.fillStyle = 'rgba(25, 10, 15, 0.90)';
-        c.fillRect(W * 0.5 - mw * 0.5, H * 0.82 - 14 * d, mw, 28 * d);
-        c.strokeStyle = '#ff4d6d';
-        c.lineWidth = 1.5 * d;
-        c.strokeRect(W * 0.5 - mw * 0.5, H * 0.82 - 14 * d, mw, 28 * d);
-        c.fillStyle = '#ff758f';
-        c.fillText(msg, W * 0.5, H * 0.82);
-        c.restore();
-      }
-    }
-
-    // coach's ghost gesture, only while the drill is waiting for you
-    const tr = g.training;
-    if (tr && tr.phase !== 'done') {
-      const S = tr.S;
-      const show = tr.phase === 'intro' || tr.phase === 'wait' ||
-        (tr.phase === 'live' && !(g.swipe && g.swipe.active));
-      if (show && S.gesture) this.drawGhost(c, W, H, d, S.gesture, S.speed || 1, '#39c6ff');
-    }
-
+    // Calibration shows evidence only, not a decorative swipe or glow.
+    if (this.captureDebug) { this._lastRibbon = null; this.ripples.length = 0; }
     // live swipe ribbon
     const sw = g.swipe;
-    if (sw.active && sw.samples.length > 1) {
+    if (!this.captureDebug && sw.active && sw.samples.length > 1) {
       const pts = sw.samples;
       const n = pts.length;
       c.lineCap = 'round'; c.lineJoin = 'round';
@@ -13444,21 +13528,15 @@ class UI {
     let statusText = '';
     if (g.state === GS.POINT && g.stateT < 0.95)
       statusText = g.lastPoint ? (g.lastPoint.who > 0 ? 'Очко ваше' : 'Очко сопернику') : 'Переигровка';
-    else if (g.state === GS.SERVE_READY || g.state === GS.SERVE_TOSS)
-      statusText = g.server === 1 ? (this.inputMode === 'touch' ? 'Свайп — подача' : 'ЛКМ + вверх — подача') : 'Подаёт соперник';
 
     if (g.training || g.demoMode || g.paused) statusText = '';
     status.textContent = statusText;
     status.hidden = !statusText;
 
     const timing = $('#timingCue'), gesture = $('#gestureCue');
-    const strike = g._strike;
-    const hot = strike && strike.on && strike.ready > 0.82 && strike.k > 0.1;
-    timing.classList.toggle('on', !!hot && !g.training);
-    if (hot) timing.textContent = strike.kind === 'serve' ? 'Подача · свайп вверх' : 'Мяч в зоне · бейте';
-    const live = g.swipe.active && g.liveStroke && g.swipe.m.dist > 0.045;
-    gesture.classList.toggle('on', !!live);
-    if (live) gesture.textContent = 'Удар · ' + (g.liveStroke.stroke.short || g.liveStroke.stroke.name);
+    timing.classList.remove('on');
+    timing.textContent = ''; // No instructional text during normal play.
+    gesture.classList.remove('on'); // ShotJournal is the single source of recognition feedback.
     const box = $('#msgs');
     const bDemo = $('#btnDemoExit');
     if (bDemo) bDemo.style.display = (g.demoMode && g.state !== 'MENU' && g.state !== 'MATCH_END') ? 'block' : 'none';
@@ -13485,7 +13563,10 @@ class UI {
     // Adapt typography to the free space BELOW the table; no guessed pixels.
     const band = $('#playband');
     if (band) {
-      band.classList.toggle('training-compact', !!g.training && window.innerHeight <= 520);
+      if (g.training) {
+        const controls = $('#topright').getBoundingClientRect();
+        $('#train').style.maxWidth = Math.max(100, controls.left - 28) + 'px';
+      }
       const bandSig = `${g.hudBandY}|${window.innerWidth}|${window.innerHeight}|${!!g.training}`;
       if (this._bandH === undefined || this._bandSig !== bandSig) {
         this._bandSig = bandSig;
@@ -13512,6 +13593,7 @@ class UI {
       $('#slowFill').style.height = (sl.energy * 100).toFixed(0) + '%';
       document.body.classList.toggle('is-slow', sl.active);
     }
+    this.syncShotFeedback();
     if (this.shotTimer > 0) { this.shotTimer -= dt; if (this.shotTimer <= 0) $('#shot').classList.remove('on'); }
     if (this.noteTimer > 0) { this.noteTimer -= dt; if (this.noteTimer <= 0) this.hideNote(); }
 
@@ -13842,6 +13924,6 @@ const ICON = {
 })();
 
 </script>
-<!-- TOPSPIN ARENA · self-contained build 2026-10-18 · no external assets, no network required -->
+<!-- TOPSPIN ARENA · self-contained build 2026-10-19 · no external assets, no network required -->
 </body>
 </html>
