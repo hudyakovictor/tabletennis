@@ -699,6 +699,7 @@ class UI {
       case 'cam': s.camera = v; break;
       case 'quality': s.quality = v; g.R.quality = v; g.resize(); break;
       case 'hand': case 'grip': g.changePaddlePreference(k, v); break;
+      case 'gestures': s.gestureProfile = v === 'safe' ? 'safe' : 'classic'; break;
       case 'trail': s.showTrail = v === 'on'; break;
       case 'predict': s.showPredict = v === 'on'; break;
       case 'tele': s.showTele = v === 'on'; $('#spin').classList.toggle('on', s.showTele); break;
@@ -729,9 +730,9 @@ class UI {
 
   syncSettings() {
     const s = this.game.settings;
-    for (const k of ['hand', 'grip']) {
+    for (const [k, key] of [['hand', 'hand'], ['grip', 'grip'], ['gestures', 'gestureProfile']]) {
       $$(`.opt[data-set="${k}"]`).forEach(b => {
-        const selected = b.dataset.val === s[k];
+        const selected = b.dataset.val === s[key];
         b.classList.toggle('sel', selected);
         b.setAttribute('aria-pressed', String(selected));
       });
@@ -855,7 +856,8 @@ class UI {
     $('#trTitle').textContent = S.title;
     $('#trProgress').textContent = `${t.done}/${S.need}`;
     $('#trTip').textContent = feedback ? '' : S.goal;
-    $('#trainPauseTip').textContent = trainingTip(S, this.inputMode);
+    $('#trainPauseTip').textContent = trainingTip(S, this.inputMode,
+      this.game && this.game.settings && this.game.settings.gestureProfile === 'safe');
     $('#trMsg').textContent = feedback ? t.msg : '';
     $('#trMsg').style.color = t.msgCol || 'var(--good)';
   }

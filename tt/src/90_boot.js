@@ -3,8 +3,54 @@
  * ===================================================================== */
 'use strict';
 
+/* ---------------------------------------------------------------------
+ *  TELEGRAM HOST. Inside a mini app a downward drag is not a stroke — it
+ *  is the host's "close the app" gesture, and it fires in the middle of a
+ *  rally. The official bridge can turn that off (disableVerticalSwipes);
+ *  this is the ONLY external script the game ever loads, and only when it
+ *  is actually running inside Telegram. Standalone builds stay offline.
+ *  If the bridge is unavailable, the 'safe' gesture profile still plays
+ *  (no stroke needs a downward drag).
+ * ------------------------------------------------------------------- */
+function initTelegramHost() {
+  const win = typeof window !== 'undefined' ? window : null;
+  if (!win || !document) return;
+  let tg = win.Telegram && win.Telegram.WebApp;
+  const params = String(win.location ? (win.location.search + win.location.hash) : '');
+  const inTg = !!tg || /[?&#]tgWebApp/.test(params) ||
+    /Telegram/i.test((win.navigator && win.navigator.userAgent) || '');
+  if (!inTg) return;
+  win.__tgWebApp = true;                 // read by defaultGestureProfile()
+  const configure = () => {
+    const api = win.Telegram && win.Telegram.WebApp;
+    if (!api) return;
+    try {
+      api.ready();
+      api.expand();
+      if (typeof api.disableVerticalSwipes === 'function') api.disableVerticalSwipes();
+      if (api.setHeaderColor) api.setHeaderColor('#05070c');
+      if (api.setBackgroundColor) api.setBackgroundColor('#05070c');
+    } catch (e) { /* an old client without the API — the gesture profile covers it */ }
+    try {
+      const sa = api.safeAreaInset || {}, csa = api.contentSafeAreaInset || {};
+      const top = Math.max(sa.top || 0, csa.top || 0);
+      const bottom = Math.max(sa.bottom || 0, csa.bottom || 0);
+      const root = document.documentElement.style;
+      if (top > 0) root.setProperty('--sa-top', top + 'px');
+      if (bottom > 0) root.setProperty('--sa-bottom', bottom + 'px');
+    } catch (e) { /* no safe-area info: env() insets still apply */ }
+  };
+  if (tg) { configure(); return; }
+  const s = document.createElement('script');
+  s.src = 'https://telegram.org/js/telegram-web-app.js';
+  s.onload = configure;
+  s.onerror = () => { /* no bridge: the safe profile plays without it */ };
+  document.head.appendChild(s);
+}
+
 (function boot() {
   const start = () => {
+    initTelegramHost();
     const canvas = document.getElementById('gl');
     let ui, game;
     try {

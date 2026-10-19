@@ -14,6 +14,21 @@ const GS = {
 
 const PHYS_DT = PH.SIM_DT;        // 600 Hz — and the same step every solver verdicts on
 
+/* Gesture vocabulary default. 'classic' plays backspin with a downward
+ * swipe; 'safe' never needs one (see classifyStroke) because a downward
+ * drag belongs to the host app — Telegram collapses the whole mini app on
+ * swipe-down, and system gestures fight it elsewhere. Coarse pointers and
+ * embedded apps start in 'safe'; a saved choice always wins. */
+function defaultGestureProfile() {
+  try {
+    if (typeof window !== 'undefined' && window.__tgWebApp) return 'safe';
+  } catch (e) { /* headless */ }
+  try {
+    return (typeof detectInputMode === 'function' ? detectInputMode() : 'mouse') === 'touch'
+      ? 'safe' : 'classic';
+  } catch (e) { return 'classic'; }
+}
+
 /* --------------------------- particles ----------------------------- */
 class Particles {
   constructor(max = 260) {
@@ -108,6 +123,7 @@ class Game {
       slowmoPlayer: true,
       targetScore: 11,
       spinBias: 'norm',
+      gestureProfile: defaultGestureProfile(),   // 'classic' | 'safe'
       // NEW: Enhanced gameplay settings
       showSpinIndicator: true,
       followThrough: true,
@@ -979,7 +995,7 @@ class Game {
       showTrail: s.showTrail, showPredict: s.showPredict,
       showTele: s.showTele, haptics: s.haptics, coach: s.coach, adaptive: s.adaptive,
       slowmoPlayer: s.slowmoPlayer, targetScore: s.targetScore,
-      spinBias: s.spinBias,
+      spinBias: s.spinBias, gestureProfile: s.gestureProfile,
     };
     if (this.career && this.career.active && this.career._baseSettings)
       this.profile.data.settings.difficulty = this.career._baseSettings.difficulty;
@@ -999,7 +1015,8 @@ class Game {
     }
     s.difficulty = Math.round(s.difficulty);
     for (const [k, values] of Object.entries({ quality: ['low', 'medium', 'high'],
-      camera: CAMERA_ORDER, hand: ['left', 'right'], grip: ['shakehand', 'penhold'], spinBias: ['low', 'norm', 'high'], targetScore: [5, 11, 21] })) {
+      camera: CAMERA_ORDER, hand: ['left', 'right'], grip: ['shakehand', 'penhold'], spinBias: ['low', 'norm', 'high'],
+      gestureProfile: ['classic', 'safe'], targetScore: [5, 11, 21] })) {
       if (values.includes(raw[k])) s[k] = raw[k];
     }
     if (this.settings.volume !== undefined) this.audio.setVolume(this.settings.volume);
@@ -1261,7 +1278,8 @@ class Game {
     const serving = this.state === GS.SERVE_TOSS || this.state === GS.SERVE_READY;
     const forehand = (this.player.pos.x * (this.settings.hand === 'left' ? -1 : 1)) >= -.05;
     const ctx = { side: 1, isServe: serving, ball: this.ball.p, ballSpin: this.ball.w,
-      grip: this.settings.grip, forehand, ballSpeed: this.ball.speed || V3.len(this.ball.v), movePitch: -.15 };
+      grip: this.settings.grip, forehand, ballSpeed: this.ball.speed || V3.len(this.ball.v), movePitch: -.15,
+      safeGestures: this.settings.gestureProfile === 'safe' };
     const r = isRealStroke(m, serving) ? deriveStroke(m, ctx) : null;
     const lastSample = sw.samples[sw.samples.length - 1];
     journal.observe(sw.gestureId, m, { time: this.time, isServe: serving, active: sw.active,
@@ -1469,7 +1487,8 @@ class Game {
         powerScale: 1,
         moveYaw: this.padYaw || 0, movePitch: this.padPitch || 0,
         equip: sideParams,
-        spinBias: 'norm',
+        spinBias: this.settings.spinBias || 'norm',
+        safeGestures: this.settings.gestureProfile === 'safe',
       };
       racket = deriveStroke(m, ctx);
       racket.vmag *= this.equip.vmagK;
@@ -1728,7 +1747,8 @@ class Game {
      * instead, where it cannot take a catchable ball out of the capture
      * volume. */
     const t = paddleTargetFromPointer(pt.x, pt.y, depthY, sens,
-      this._ptTarget || (this._ptTarget = { tx: 0, ty: 0, tz: 0 }), { zNear });
+      this._ptTarget || (this._ptTarget = { tx: 0, ty: 0, tz: 0 }),
+      { zNear, vp: this.camVPReady ? this.camVP : null });
     let tx = t.tx;
     let ty = t.ty;
     let tz = t.tz;
@@ -1793,23 +1813,43 @@ class Game {
     if (A > 0.01 && canReachShort && this.recenterT <= 0 && (this.swipe.active || this.playerStrokeIntent())) {
       if (o.reach) {
         // Footwork assist, not a magnet: a swipe on the far wing must not
-        // teleport the bat onto a ball it was never near.
+        // teleport the bat onto a ball it was never near. The gate widened
+        // 0.42 -> 0.52: on a phone the press lands where the ball is GOING,
+        // and the pre-press bat can be a third of a metre from the crossing
+        // point — outside the old gate meant no assist at all, which is
+        // exactly the "only balls over the table are returnable" report.
         const near = Math.hypot(pad.pos.x - o.reach.x, pad.pos.y - o.reach.y)
-          < 0.42 + 0.28 * A;
+          < 0.52 + 0.28 * A;
         if (near) {
           const k = A * clamp(1.3 - o.reachT * 1.0, 0.30, 1);
           tx = lerp(tx, clamp(o.reach.x, -PADDLE_LIMITS.x, PADDLE_LIMITS.x), k);
           ty = lerp(ty, clamp(o.reach.y, PH.TABLE_Y + PADDLE_LIMITS.yLo, PH.TABLE_Y + PADDLE_LIMITS.yHi), k * 0.95);
-          /* THE STEP-IN ITSELF. `o.reach.z` is where the ball crosses the
-           * bat's own plane, so it can never ask the bat to move: the old
-           * line was a no-op, and the bat stayed at z 1.44 while a short ball
-           * died at 1.05 in front of it. For a ball that is genuinely short
-           * (already in the front half of the table) the reach depth is the
-           * BALL's depth, and the bat leans in to meet it — the one motion
-           * this whole branch exists for. */
+          /* Depth follows the intercept BOTH ways. The old line only stepped
+           * IN, so a ball met past the end line left the stance frozen at
+           * z 1.4 — a depth gap of 0.35-0.40 m failed the capture box by
+           * itself, before any timing error. For a genuinely short ball
+           * (front half of the table) the reach depth is the BALL's depth and
+           * the bat leans in; for a deep one it now backs off to meet it. */
           const deepZ = shortBall ? Math.min(o.reach.z, this.ball.p.z) : o.reach.z;
-          if (deepZ < tz) tz = Math.max(zNear, Math.min(tz, lerp(tz, deepZ - 0.02, clamp(A * 0.75, 0, 1))));
+          const wantZ = clamp(deepZ - 0.02, zNear, PADDLE_LIMITS.zFar);
+          tz = clamp(lerp(tz, wantZ, clamp(A * 0.75, 0, 1)), zNear, PADDLE_LIMITS.zFar);
         }
+      }
+    } else if (A > 0.01 && canReachShort && this.recenterT <= 0 &&
+        !this.pointerFine && !this.swipe.active && !this.playerStrokeIntent() && o.reach) {
+      /* TOUCH PRE-AIM. A mouse has hover: the hand is already near the ball
+       * when the button goes down. A finger has none — the bat froze where
+       * the last swipe ended and every return depended on the press-time
+       * jump alone. While the ball is incoming the game now leads the bat
+       * toward the predicted crossing point, gently (a lead, not a magnet:
+       * the fresh gesture still has to meet the ball). */
+      const near = Math.hypot(pad.pos.x - o.reach.x, pad.pos.y - o.reach.y) < 0.85;
+      if (near) {
+        const k = A * 0.55 * clamp(1.15 - (o.reachT || 0.6) * 0.7, 0.18, 0.55);
+        tx = lerp(tx, clamp(o.reach.x, -PADDLE_LIMITS.x, PADDLE_LIMITS.x), k);
+        ty = lerp(ty, clamp(o.reach.y, PH.TABLE_Y + PADDLE_LIMITS.yLo, PH.TABLE_Y + PADDLE_LIMITS.yHi), k);
+        const wantZ = clamp(o.reach.z, zNear, PADDLE_LIMITS.zFar);
+        tz = clamp(lerp(tz, wantZ, k * 0.8), zNear, PADDLE_LIMITS.zFar);
       }
     }
     /* Neither the cursor nor the assist may ever park the bat outside the
@@ -1911,6 +1951,7 @@ class Game {
       const ctx = {
         side: 1, grip: this.settings.grip, forehand: pad.forehand, isServe: servingNow, ball: { y: pad.pos.y, z: pad.pos.z },
         ballSpin: this.ball.w, ballSpeed: V3.len(this.ball.v), moveYaw: this.padYaw, movePitch: this.padPitch,
+        safeGestures: this.settings.gestureProfile === 'safe',
       };
       const st = deriveStroke(m, ctx);
       /* First ~45 ms keep the ready face so the bat does not pop onto

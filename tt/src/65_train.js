@@ -12,7 +12,10 @@ function detectInputMode(win = window, nav = navigator) {
   const matches = query => !!(win.matchMedia && win.matchMedia(query).matches);
   return matches('(pointer: coarse)') || ((nav.maxTouchPoints || 0) > 0 && !matches('(pointer: fine)')) ? 'touch' : 'mouse';
 }
-function trainingTip(step, mode) { return mode === 'touch' ? step.tip : step.mouseTip; }
+function trainingTip(step, mode, safe) {
+  if (mode === 'touch') return (safe && step.safeTip) ? step.safeTip : step.tip;
+  return (safe && (step.safeMouseTip || step.safeTip)) ? (step.safeMouseTip || step.safeTip) : step.mouseTip;
+}
 
 const TRAIN_STEPS = [
   {
@@ -30,6 +33,8 @@ const TRAIN_STEPS = [
   {
     id: 'PUSH', goal: 'Нижнее вращение на стол', title: 'ПОДРЕЗКА', need: 2,
     tip: 'Мягкий свайп вниз.', mouseTip: 'ЛКМ + мягкое движение вниз.',
+    safeTip: 'Зажмите палец и мягко ведите вверх.',
+    safeMouseTip: 'Зажмите ЛКМ и мягко ведите вверх.',
     feed: { kind: 'normal', spin: 40, speed: 5.2 },
     check: (g, s) => s.topspin < -30,
     failHint: 'Ведите вниз.',
