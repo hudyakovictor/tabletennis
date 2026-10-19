@@ -240,11 +240,23 @@ class UI {
 
   resize() {
     const d = Math.min(window.devicePixelRatio || 1, 2);
-    this.fx.width = Math.floor(window.innerWidth * d);
-    this.fx.height = Math.floor(window.innerHeight * d);
-    this.fx.style.width = window.innerWidth + 'px';
-    this.fx.style.height = window.innerHeight + 'px';
+    /* Size the overlay against the same rect the pointer is normalised
+     * against in Game.bindInput (the #gl box). window.innerWidth disagrees
+     * with it in embedded frames, which slides every projected cue away
+     * from the 3D scene it is supposed to mark. */
+    const gl = document.getElementById('gl');
+    const r = gl ? gl.getBoundingClientRect() : null;
+    const w = (r && r.width) || window.innerWidth;
+    const h = (r && r.height) || window.innerHeight;
+    const pw = Math.floor(w * d), ph = Math.floor(h * d);
+    if (this.fx.width !== pw || this.fx.height !== ph) {
+      this.fx.width = pw;
+      this.fx.height = ph;
+    }
+    this.fx.style.width = w + 'px';
+    this.fx.style.height = h + 'px';
     this.dpr = d;
+    this.fxw = w; this.fyh = h;
   }
 
   /* ------------------------------ menu ---------------------------- */
@@ -978,7 +990,7 @@ class UI {
 
   /* --------------------------- coach panel ------------------------ */
   trainShow() { $('#train').classList.add('on'); $('#score').style.opacity = '0'; $('#trainingActions').hidden = false; }
-  trainHide() { $('#trainingActions').hidden = true; $('#train').classList.remove('on'); $('#score').style.opacity = ''; $('#tdone').classList.remove('on'); }
+  trainHide() { this.trainDemo = null; this._trainDemoStep = null; $('#trainingActions').hidden = true; $('#train').classList.remove('on'); $('#score').style.opacity = ''; $('#tdone').classList.remove('on'); }
   trainSync(t) {
     const S = t.S, feedback = t.phase === 'ok' || t.phase === 'fail';
     $('#trStep').textContent = `${t.step + 1}/${TRAIN_STEPS.length}`;
@@ -990,7 +1002,7 @@ class UI {
     $('#trMsg').textContent = feedback ? t.msg : '';
     $('#trMsg').style.color = t.msgCol || 'var(--good)';
   }
-  trainDone() { $('#train').classList.remove('on'); $('#trainingActions').hidden = true; $('#tdone').classList.add('on'); }
+  trainDone() { this.trainDemo = null; this._trainDemoStep = null; $('#train').classList.remove('on'); $('#trainingActions').hidden = true; $('#tdone').classList.add('on'); }
 
   showMatchEnd(won) {
     const g = this.game, s = g.stats;
@@ -1089,29 +1101,6 @@ class UI {
     c.restore();
   }
 
-  /** The bat is clamped to a reachable band (PADDLE_LIMITS.yLo..yHi around the
-   *  table). The native cursor can wander outside it, which reads as "the click
-   *  is on the cursor, not on the racket". Drawing the lane the bat actually
-   *  lives in — with the top and bottom limits marked — makes the racket, not
-   *  the phantom cursor, the visual focus. Purely a guide, no physics. */
-  drawRacketLane(c, W, H, d) {
-    const g = this.game;
-    if (g.paused || (g.replayer && g.replayer.on) || this.captureDebug) return;
-    if (![GS.SERVE_READY, GS.SERVE_TOSS, GS.RALLY].includes(g.state)) return;
-    const pad = g.player; if (!pad || !pad.pos) return;
-    const ty = PH.TABLE_Y, bx = pad.pos.x, bz = pad.pos.z;
-    const top = g.project({ x: bx, y: ty + PADDLE_LIMITS.yHi, z: bz }, this._laneT || (this._laneT = {}));
-    const bot = g.project({ x: bx, y: ty + PADDLE_LIMITS.yLo, z: bz }, this._laneB || (this._laneB = {}));
-    if (!top || !top.ok || !bot || !bot.ok || !Number.isFinite(top.x) || !Number.isFinite(bot.x)) return;
-    const x = top.x * W, yT = top.y * H, yB = bot.y * H;
-    c.save(); c.setLineDash([]); c.lineCap = 'round';
-    c.strokeStyle = '#39c6ff'; c.globalAlpha = 0.13; c.lineWidth = 30 * d;
-    c.beginPath(); c.moveTo(x, yT); c.lineTo(x, yB); c.stroke();
-    c.globalAlpha = 0.55; c.lineWidth = 1.6 * d;
-    for (const y of [yT, yB]) { c.beginPath(); c.moveTo(x - 20 * d, y); c.lineTo(x + 20 * d, y); c.stroke(); }
-    c.restore();
-  }
-
   /** A small live diagram inside the settings panel. It draws the reach window
    *  (capScale) and the admission press-circle (zoneScale, doubled on serve)
    *  as concentric rings so dragging a slider instantly shows the shape change
@@ -1144,6 +1133,31 @@ class UI {
     c.restore();
   }
 
+  /** Gesture points for a guide shape around (x, y); also returns the
+   *  per-segment lengths and the total path length. Shared by the looping
+   *  guide and the one-shot drill demo. */
+  trainGuidePath(shape, x, y, L) {
+    const pts = [];
+    if (shape === 'up') pts.push([x, y + L * 0.55], [x, y - L * 0.55]);
+    else if (shape === 'down') pts.push([x, y - L * 0.55], [x, y + L * 0.55]);
+    else if (shape === 'side') pts.push([x - L * 0.62, y], [x + L * 0.62, y]);
+    else { const a0 = [-L * 0.6, L * 0.12], ctrl = [0, -L * 0.42], a1 = [L * 0.6, L * 0.12];
+      for (let i = 0; i <= 20; i++) { const t = i / 20, mt = 1 - t;
+        pts.push([x + (mt * mt * a0[0] + 2 * mt * t * ctrl[0] + t * t * a1[0]), y + (mt * mt * a0[1] + 2 * mt * t * ctrl[1] + t * t * a1[1])]); } }
+    const seg = []; let total = 0;
+    for (let i = 1; i < pts.length; i++) { const l = Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]); seg.push(l); total += l; }
+    return { pts, seg, total };
+  }
+
+  /** Point at fraction f (0..1) along a guide path. */
+  trainGuideAt(path, f) {
+    const { pts, seg, total } = path;
+    let dist = clamp(f, 0, 1) * total, di = 0;
+    while (di < seg.length - 1 && dist > seg[di]) { dist -= seg[di]; di++; }
+    const s0 = pts[di], s1 = pts[di + 1] || pts[di], f2 = seg[di] > 0 ? clamp(dist / seg[di], 0, 1) : 0;
+    return [s0[0] + (s1[0] - s0[0]) * f2, s0[1] + (s1[1] - s0[1]) * f2];
+  }
+
   /** Training: paint how to make the stroke. Each drill carries a `guide`
    *  gesture shape; we trace it as a groove with a travelling highlight and an
    *  arrowhead, anchored on the live ball (or the bat) so the pupil sees where
@@ -1164,15 +1178,7 @@ class UI {
       if (p && p.ok && Number.isFinite(p.x) && Number.isFinite(p.y)) { ax = clamp(p.x, 0.16, 0.84); ay = clamp(p.y, 0.28, 0.9); }
     }
     const x = ax * W, y = ay * H, L = 96 * d;
-    const pts = [];
-    if (shape === 'up') pts.push([x, y + L * 0.55], [x, y - L * 0.55]);
-    else if (shape === 'down') pts.push([x, y - L * 0.55], [x, y + L * 0.55]);
-    else if (shape === 'side') pts.push([x - L * 0.62, y], [x + L * 0.62, y]);
-    else { const a0 = [-L * 0.6, L * 0.12], ctrl = [0, -L * 0.42], a1 = [L * 0.6, L * 0.12];
-      for (let i = 0; i <= 20; i++) { const t = i / 20, mt = 1 - t;
-        pts.push([x + (mt * mt * a0[0] + 2 * mt * t * ctrl[0] + t * t * a1[0]), y + (mt * mt * a0[1] + 2 * mt * t * ctrl[1] + t * t * a1[1])]); } }
-    const seg = []; let total = 0;
-    for (let i = 1; i < pts.length; i++) { const l = Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]); seg.push(l); total += l; }
+    const { pts, seg, total } = this.trainGuidePath(shape, x, y, L);
     const col = '#39c6ff';
     c.save(); c.lineCap = 'round'; c.lineJoin = 'round';
     c.strokeStyle = col; c.globalAlpha = 0.22; c.lineWidth = 11 * d;
@@ -1184,14 +1190,71 @@ class UI {
     c.lineTo(e[0] - Math.cos(ang + 0.5) * 16 * d, e[1] - Math.sin(ang + 0.5) * 16 * d);
     c.closePath(); c.fill();
     let dotT = this.reducedMotion ? 1 : ((g.time % 1.15) / 1.15);
-    let dist = dotT * total, di = 0;
-    while (di < seg.length - 1 && dist > seg[di]) { dist -= seg[di]; di++; }
-    const s0 = pts[di], s1 = pts[di + 1], f = seg[di] > 0 ? clamp(dist / seg[di], 0, 1) : 0;
-    const dxp = s0[0] + (s1[0] - s0[0]) * f, dyp = s0[1] + (s1[1] - s0[1]) * f;
+    const [dxp, dyp] = this.trainGuideAt({ pts, seg, total }, dotT);
     const rg = c.createRadialGradient(dxp, dyp, 0, dxp, dyp, 20 * d);
     rg.addColorStop(0, col + 'ee'); rg.addColorStop(1, col + '00');
     c.globalAlpha = 1; c.fillStyle = rg; c.beginPath(); c.arc(dxp, dyp, 20 * d, 0, TAU); c.fill();
     c.fillStyle = '#eaf7ff'; c.beginPath(); c.arc(dxp, dyp, 5 * d, 0, TAU); c.fill();
+    c.restore();
+  }
+
+  /** Training: a compact one-shot demo of the drill gesture, played once when
+   *  the exercise starts. It sits just above the far edge of the table — clear
+   *  of the resting racket below and of the cue card on the left — so the
+   *  pupil reads the motion without it ever being painted over the blade.
+   *  Deliberately larger and slower than a live hint, and it never repeats. */
+  drawTrainDemo(c, W, H, d, dt) {
+    const dm = this.trainDemo;
+    const tr = this.game.training;
+    if (!dm || !tr) { this.trainDemo = null; return; }
+    if (this.game.paused) return;                      // frozen, not consumed
+    dm.t += dt;
+    const DRAW = 1.6, HOLD = 0.6, OUT = 0.5, DUR = DRAW + HOLD + OUT;
+    if (dm.t >= DUR) { this.trainDemo = null; return; }
+    let shape = tr.S && tr.S.guide;
+    if (!shape) return;
+    if (shape === 'down' && this.game.settings.gestureProfile === 'safe') shape = 'up';
+    // just above the far edge of the table, horizontally centred, then nudged
+    // 400 CSS px lower (fx space is device px, hence *d) so it reads over the
+    // play surface rather than in the empty void above it; clamped to stay on
+    // screen on short viewports.
+    const x = W * 0.5, y = Math.min(H * 0.17 + 400 * d, H * 0.82), L = 132 * d;
+    const path = this.trainGuidePath(shape, x, y, L);
+    const prog = this.reducedMotion ? 1 : Math.min(dm.t / DRAW, 1);
+    const ease = 1 - Math.pow(1 - prog, 3);
+    const fade = dm.t < DRAW + HOLD ? 1 : 1 - (dm.t - DRAW - HOLD) / OUT;
+    const col = '#39c6ff';
+    c.save(); c.globalAlpha = 0.85 * fade; c.lineCap = 'round'; c.lineJoin = 'round';
+    // groove: the full path stays readable as the hint of "where" to swipe
+    c.strokeStyle = col; c.globalAlpha = 0.18 * fade; c.lineWidth = 7 * d;
+    c.beginPath(); c.moveTo(path.pts[0][0], path.pts[0][1]);
+    for (let i = 1; i < path.pts.length; i++) c.lineTo(path.pts[i][0], path.pts[i][1]);
+    c.stroke();
+    // the drawn stroke up to the current progress
+    c.strokeStyle = col; c.globalAlpha = 0.8 * fade; c.lineWidth = 3.2 * d;
+    c.beginPath(); c.moveTo(path.pts[0][0], path.pts[0][1]);
+    const steps = 24;
+    for (let i = 1; i <= steps; i++) {
+      const [px, py] = this.trainGuideAt(path, (i / steps) * ease);
+      c.lineTo(px, py);
+    }
+    c.stroke();
+    // the "finger"
+    const [hx, hy] = this.trainGuideAt(path, ease);
+    const rg = c.createRadialGradient(hx, hy, 0, hx, hy, 13 * d);
+    rg.addColorStop(0, col + 'dd'); rg.addColorStop(1, col + '00');
+    c.globalAlpha = fade; c.fillStyle = rg;
+    c.beginPath(); c.arc(hx, hy, 13 * d, 0, TAU); c.fill();
+    c.fillStyle = '#eaf7ff'; c.beginPath(); c.arc(hx, hy, 3.6 * d, 0, TAU); c.fill();
+    // arrowhead at the end of the path, so the direction is unambiguous
+    const e = path.pts[path.pts.length - 1], pv = path.pts[path.pts.length - 2] || e;
+    const ang = Math.atan2(e[1] - pv[1], e[0] - pv[0]);
+    c.globalAlpha = 0.75 * fade * (ease > 0.85 ? 1 : 0.35); c.fillStyle = col;
+    c.beginPath();
+    c.moveTo(e[0], e[1]);
+    c.lineTo(e[0] - Math.cos(ang - 0.5) * 11 * d, e[1] - Math.sin(ang - 0.5) * 11 * d);
+    c.lineTo(e[0] - Math.cos(ang + 0.5) * 11 * d, e[1] - Math.sin(ang + 0.5) * 11 * d);
+    c.closePath(); c.fill();
     c.restore();
   }
 
@@ -1251,9 +1314,11 @@ class UI {
     if (!g) return;
 
     if (!this.captureDebug) this.drawStrikeRing(c, W, H, d);
-    this.drawRacketLane(c, W, H, d);
     this.drawAimReticle(c, W, H, d);
-    this.drawTrainGuide(c, W, H, d);
+    // The looping racket-anchored guide is retired: the pupil asked for a single
+    // one-shot demo above the table (drawTrainDemo), not a groove painted over
+    // the blade for the whole drill.
+    this.drawTrainDemo(c, W, H, d, dt);
     this.drawCaptureDebug(c, W, H, d);
     this.syncNativeCursor();
 
@@ -1354,6 +1419,11 @@ class UI {
   /* ------------------------------ tick ----------------------------- */
   tick(dt) {
     const g = this.game; if (!g) return;
+    // The overlay backing store must follow the #gl rect even when the
+    // embedder resizes the frame without firing window `resize`.
+    const gr = document.getElementById('gl').getBoundingClientRect();
+    if (gr.width && gr.height &&
+        (Math.abs(gr.width - (this.fxw || 0)) > 0.5 || Math.abs(gr.height - (this.fyh || 0)) > 0.5)) this.resize();
     this.syncPauseControl();
     this.drawOverlay(dt);
     // A single short status, never a stack of messages/telemetry/hints.
@@ -1421,6 +1491,11 @@ class UI {
 
     if (g.training && g.training._uiStamp !== g.training.phase + g.training.done + g.training.step + g.training.msg) {
       g.training._uiStamp = g.training.phase + g.training.done + g.training.step + g.training.msg;
+      // A new exercise: show its gesture once, above the table, then never again.
+      if (this._trainDemoStep !== g.training.step) {
+        this._trainDemoStep = g.training.step;
+        this.trainDemo = { t: 0 };
+      }
       this.trainSync(g.training);
     }
 

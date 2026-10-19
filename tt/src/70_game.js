@@ -531,10 +531,27 @@ class Game {
 
   resize() {
     const dpr = Math.min(window.devicePixelRatio || 1, this.settings.quality === 'low' ? 1.25 : 2);
-    const w = this.canvas.clientWidth || window.innerWidth;
-    const h = this.canvas.clientHeight || window.innerHeight;
+    /* getBoundingClientRect is fractional and survives a not-yet-laid-out
+     * canvas better than clientWidth; window.innerWidth is the last-resort
+     * fallback only — in an embedded frame it can disagree with the CSS box
+     * the canvas is actually stretched to, which skews the whole projection. */
+    const r = this.canvas.getBoundingClientRect();
+    const w = r.width || this.canvas.clientWidth || window.innerWidth;
+    const h = r.height || this.canvas.clientHeight || window.innerHeight;
     this.R.resize(w, h, dpr);
     this.vw = w; this.vh = h;
+  }
+
+  /* The GL buffer must track the canvas' on-screen rect exactly: the 2D fx
+   * overlay is normalised against that rect, and any drift (an embedder that
+   * resizes the iframe without firing window `resize`, a boot-time layout that
+   * settles after the first resize()) stretches the 3D projection away from
+   * the cursor, the reticle and the strike ring. `resize()` early-exits inside
+   * GL when nothing changed, so polling a fractional rect per frame is cheap. */
+  syncSize() {
+    const r = this.canvas.getBoundingClientRect();
+    if (!r.width || !r.height) return;
+    if (Math.abs(r.width - this.vw) > 0.5 || Math.abs(r.height - this.vh) > 0.5) this.resize();
   }
 
   /* --------------------------- match flow -------------------------- */
@@ -1246,6 +1263,20 @@ class Game {
     integrateBall(b.p, b.v, b.w, dt);
     Q.integrate(b.q, b.q, b.w, dt);
     b.speed = V3.len(b.v);
+
+    /* --- SERVE HANG TIME ---
+     * The ITTF strike band is only about `serveTossMinRise` tall (the ball
+     * must be falling AND still >= that much above the toss start). At full
+     * gravity the toss crosses that band in ~0.1 s, which no human can hit —
+     * the serve felt "impossible" even though the capture radius and the
+     * toss-riding bat were never the limiter. While the player's own toss has
+     * NOT yet been struck and is falling inside the legal band, cap its descent
+     * so the ball floats through the strike window. The falling rule and the
+     * minimum rise still hold, so pressZoneForBall and the toss tests stay green. */
+    if (this.state === GS.SERVE_TOSS && this.server === 1 && b.lastHitBy === 0 &&
+      this.tossRiseNow() > MATCH_RULES.serveTossMinRise && b.v.y < -0.75) {
+      b.v.y = -0.75;
+    }
 
     /* --- table --- */
     /* tableContact() is the same function predict() runs: it rejects a ball
@@ -1991,13 +2022,20 @@ class Game {
      * re-centred, worst 0.234 m off, because the toss slide ran on top of the
      * re-centring window. Half a second of glide first, then the slide. */
     if (this.state === GS.SERVE_TOSS && this.server === 1 && this.ball.lastHitBy === 0 && this.recenterT <= 0) {
-      const k = 0.55 + 0.45 * A;
+      /* Serving must never be "pixel-hunt a 40 mm sphere" (the authored intent
+       * above). The bat RIDES the toss: it is pulled hard onto the ball on every
+       * axis, both on the way up and on the way down, independent of the
+       * footAssist slider. When footAssist was low, k=0.55+0.45*A and the
+       * rising-phase ty assist (0.45*A) left the blade well away from the toss,
+       * so a perfectly-timed flick met empty air while the pointer-centred cue
+       * still burned green — the exact "I hit the circle but can't serve" trap.
+       * The stroke you choose still decides WHERE the ball goes; this only
+       * guarantees the blade is actually there to make it. */
+      const k = 0.95;
       tx = lerp(tx, this.ball.p.x, k);
       tz = lerp(tz, this.ball.p.z + 0.02, k);
-      /* Stay under the toss even while the serve swipe goes up the screen —
-         that flick is the STROKE, not a command to lift the bat off the ball. */
       const under = this.ball.p.y - 0.04;
-      ty = lerp(ty, under, this.ball.v.y < 0 ? k : 0.45 * A);
+      ty = lerp(ty, under, k);
     }
     /* Footwork follows INTENT, not swipe length. It used to require a
      * completed "real stroke", so a player who pressed and ran in at a short
@@ -3004,6 +3042,7 @@ class Game {
 
   render() {
     const R = this.R;
+    this.syncSize();
     if (R.beginShadow()) {
       this.scene.drawStatic(R, true);
       this.drawDynamic(true);
