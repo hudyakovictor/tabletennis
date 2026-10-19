@@ -78,6 +78,16 @@ class ShotJournal {
     if (!valid && !context.active && entry.outcome !== 'rejected') { entry.outcome = 'rejected'; entry.revision++; }
     return entry;
   }
+  /** A press that started outside the ball's instantaneous 48 px window can
+   *  still be admitted while the gesture lives (the ball travels into it, or
+   *  the finger landed on the bat). Keep the journal's copy of the gate in
+   *  sync or every such stroke is reported as "outside" forever. */
+  acceptPress(gestureId, how) {
+    const e = this.records.find(r => r.gestureId === gestureId && !r.contact);
+    if (!e || !e.pressZone || e.pressZone.accepted) return;
+    e.pressZone.accepted = true; e.pressZone.via = how || 'path';
+    if (e.outcome === 'outside') { e.outcome = 'pending'; e.revision++; }
+  }
   expire(time) {
     for (const entry of this.records) {
       if (!entry.contact && entry.outcome === 'pending' && time > entry.deadline) {
@@ -100,7 +110,9 @@ class ShotJournal {
     entry.contact = { time, speedKmh: V3.len(ball.v) * 3.6, spin: measureShotSpin(ball.w, ball.v),
       quality: clamp(Number.isFinite(racket.quality) ? racket.quality : 0, 0, 1),
       incoming: input, outgoing, normal: shotVec(racket.normal), racketVelocity: shotVec(racket.vR),
-      raw: racket.unassisted || null, assist: { elevation: racket.dElev || 0, azimuth: racket.dAz || 0, wrist: racket.dWrist || 0 },
+      raw: racket.unassisted || null, assist: { elevation: racket.dElev || 0, azimuth: racket.dAz || 0, wrist: racket.dWrist || 0,
+        scale: racket.scale === undefined ? 1 : racket.scale, damp: racket.damp === undefined ? 1 : racket.damp,
+        valid: racket.valid === undefined ? null : !!racket.valid, solved: racket.solved || null },
       grip: extra.grip || 'shakehand', hand: extra.hand || 'right', shotId: extra.shotId };
     if (input && input.w) {
       entry.contact.spinChangeRps = Math.hypot(ball.w.x - input.w.x, ball.w.y - input.w.y, ball.w.z - input.w.z) / TAU;
