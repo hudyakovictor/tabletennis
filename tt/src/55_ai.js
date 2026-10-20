@@ -481,7 +481,11 @@ class OpponentAI {
       ballSpin: ball.w, ballSpeed: V3.len(ball.v),
       powerScale: 1,
       moveYaw: 0,
-      equip: game.equip.forSide(-1),
+      /* The racket falls back to the base rubber when the game has no
+         equipment layer (a test harness, a bench, a failed shop init). An AI
+         serve must never be the thing that throws. */
+      equip: game && game.equip && typeof game.equip.forSide === 'function'
+        ? game.equip.forSide(-1) : undefined,
       spinBias: 'norm',
     };
 

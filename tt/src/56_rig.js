@@ -34,7 +34,7 @@
  *  20. aimYaw/Pitch  desktop hover micro-aim (touch leaves these 0)
  *  21. attackLean    drive/loop: close the face, tip the head toward the net
  *
- * Extra drivers are zero when omitted, so a rest pose at x=0, z=1.44 is
+ * Extra drivers are zero when omitted, so a rest pose at x=0, z=1.78 is
  * bit-identical to the ready grip. Animation limits, not full IK.
  */
 function playerWristPose(pos, vel, hand, phase = {}) {
@@ -62,7 +62,11 @@ function playerWristPose(pos, vel, hand, phase = {}) {
   /* Height. Prefer the predicted contact if the caller has one — that is
      where a real player sets the angle, not where the bat currently sits.
      Missing y is home so x/z-only callers keep the old rest pitch. */
-  const HOME_Y = 1.01;
+  /* Neutral reference for the ready face — the SAME pose the camera and the
+     pointer map use as home (PADDLE_HOME in 57_camera.js): 42 cm above the
+     playing surface, on the authored stance plane. It is duplicated as a
+     literal because this module is also loaded on its own by the rig tests. */
+  const HOME_Y = 1.18;
   const hy = Number.isFinite(phase.contactY) ? phase.contactY
     : Number.isFinite(pos.y) ? pos.y : HOME_Y;
   /* Stretched arm cannot close as hard as a compact smash in front. */
@@ -71,8 +75,8 @@ function playerWristPose(pos, vel, hand, phase = {}) {
 
   /* Depth. Over the table you get under the ball (open); off the end you
      close for a loop. Velocity still tips the blade into a lunge. */
-  const pz = Number.isFinite(pos.z) ? pos.z : 1.44;
-  const depthPitch = -(pz - 1.44) * 0.22;
+  const pz = Number.isFinite(pos.z) ? pos.z : 1.78;
+  const depthPitch = -(pz - 1.78) * 0.22;
 
   const gestureYaw = clamp(phase.gestureYaw || 0, -0.32, 0.32);
   const gesturePitch = phase.gesturePitch || 0;

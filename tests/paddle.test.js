@@ -217,7 +217,8 @@ test('grip ready angles and handle orientation are distinct and mirrored', () =>
   const { playerWristPose: pose, faceFromWrist } = load(['10_math.js', '56_rig.js'], ['playerWristPose', 'faceFromWrist']);
   const { rig, Q, V3, M4 } = rigFixture();
   for (const grip of ['shakehand', 'penhold']) {
-    const r = pose({ x: 0, y: 1.01, z: 1.44 }, V3.new(), 'right', { grip });
+    // neutral pose = the camera's PADDLE_HOME (42 cm up, stance plane)
+    const r = pose({ x: 0, y: 1.18, z: 1.78 }, V3.new(), 'right', { grip });
     assert.ok(Math.abs(-r.pitch * 180 / Math.PI - (grip === 'penhold' ? 5 : 15)) < 1e-8);
     for (const x of [-.7, -.1, 0, .4, .7]) {
       const a = pose({ x, y: 1, z: 1.4 }, V3.new(1, .2, -.4), 'right', { grip, preparation: .7, follow: .2, stroke: 'LOOP' });

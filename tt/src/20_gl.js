@@ -694,16 +694,10 @@ class Renderer {
 
   setCamera(eye, target, up, fovDeg, near, far, shiftY = 0) {
     const aspect = this._w / this._h;
-    // The authored FOV is a VERTICAL one tuned for a 16:9 frame. On narrow
-    // or portrait screens a fixed vertical FOV would zoom in brutally, so
-    // below 16:9 we lock the HORIZONTAL field of view instead.
-    const REF = 16 / 9;
-    let vf = fovDeg * DEG;
-    if (aspect < REF) {
-      const hf = 2 * Math.atan(Math.tan(vf / 2) * REF);        // the authored width
-      const need = 2 * Math.atan(Math.tan(hf / 2) / Math.max(aspect, 0.30));
-      vf = Math.min(need, vf * 1.55, 84 * DEG);                // never fish-eye
-    }
+    /* The aspect rule belongs to 57_camera: the fit, the pointer map and the
+       GPU must all use the same field of view, or the camera promises screen
+       fractions it does not deliver. */
+    const vf = lensFovDeg(fovDeg, aspect) * DEG;
     M4.perspective(this.proj, vf, aspect, near, far);
     this.proj[9] = 2 * shiftY;
     M4.lookAt(this.view, eye, target, up);
