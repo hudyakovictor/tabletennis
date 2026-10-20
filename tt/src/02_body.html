@@ -49,203 +49,291 @@
     </div>
 
     <div id="pauseInd" class="pe" role="dialog" aria-modal="true" aria-label="Пауза">
-      <b>ПАУЗА</b>
-      <small>Нажмите, чтобы продолжить · P</small>
-      <div class="pause-actions">
-        <button id="pauseResume" class="tbt">ПРОДОЛЖИТЬ</button>
-        <button id="pauseSettings" class="tbt"><span class="ui-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></span>НАСТРОЙКИ</button>
-        <label class="capture-debug-toggle"><input type="checkbox" id="captureDebugPause"> Зона нажатия</label>
-        <button id="shotLabPause" class="tbt">КАЛИБРОВКА ПОПАДАНИЯ</button>
-        <button id="inputLogPause" class="tbt">СОХРАНИТЬ ПОСЛЕДНИЕ 30 С</button>
-        <div id="trainingActions" hidden>
-          <p id="trainPauseTip"></p>
-          <button class="tbt" id="trSkip">ПРОПУСТИТЬ УПРАЖНЕНИЕ</button>
-          <button class="tbt" id="trExit">ЗАКОНЧИТЬ ОБУЧЕНИЕ</button>
+      <div class="pause-card">
+        <b>ПАУЗА</b>
+        <small>Нажмите, чтобы продолжить · P</small>
+        <div class="pause-actions">
+          <button id="pauseResume" class="tbt primary">ПРОДОЛЖИТЬ</button>
+          <button id="pauseSettings" class="tbt"><span class="ui-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a-1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></span>НАСТРОЙКИ</button>
+          <button id="shotLabPause" class="tbt">КАЛИБРОВКА ПОПАДАНИЯ</button>
+          <button id="inputLogPause" class="tbt">СОХРАНИТЬ ПОСЛЕДНИЕ 30 С</button>
+          <label class="capture-debug-toggle"><input type="checkbox" id="captureDebugPause"> Зона нажатия</label>
+          <div id="trainingActions" hidden>
+            <p id="trainPauseTip"></p>
+            <button class="tbt" id="trSkip">ПРОПУСТИТЬ УПРАЖНЕНИЕ</button>
+            <button class="tbt" id="trExit">ЗАКОНЧИТЬ ОБУЧЕНИЕ</button>
+          </div>
+          <button id="pauseToMenu" class="tbt danger">В МЕНЮ</button>
         </div>
-        <button id="pauseToMenu" class="tbt">В МЕНЮ</button>
       </div>
     </div>
   </div>
 
-  <!-- ============================ MENU ============================ -->
+  <!-- ============================ MENU HUB ============================
+       One home for everything: a rail with the sections, one panel at a
+       time in the main column. During a live match the same shell opens
+       "detached": rail hidden, settings only, one way back — to the pause. -->
   <div class="screen on" id="menu" role="dialog" aria-modal="true" aria-label="Главное меню">
-    <div class="card">
-      <div class="menu-brand">
-        <div class="brand-menu"><img class="brand-logo" src="{{BRAND_LOGO}}" alt="Table Tennis Ultimate" width="556" height="422"></div>
-        <div class="sub">Настольный теннис · 3D-физика · управление свайпом</div>
-        <div class="menu-utility" role="group" aria-label="Быстрые настройки">
-          <button class="ic" id="menuFullscreen" title="Полный экран (F)" aria-label="Полный экран" aria-pressed="false"></button>
-          <button class="ic" id="menuSound" title="Выключить звук" aria-label="Выключить звук" aria-pressed="true"></button>
+    <div class="hub">
+      <aside class="hub-rail">
+        <div class="hub-brand">
+          <img class="brand-logo" src="{{BRAND_LOGO}}" alt="Table Tennis Ultimate" width="556" height="422">
+          <div class="hub-slogan">Настольный теннис · 3D-физика · управление свайпом</div>
         </div>
-      </div>
-
-      <div class="menu-play">
-        <h3 class="sec">Соперник</h3>
-        <div class="row menu-difficulty" role="group" aria-label="Сложность соперника">
-          <button class="opt" data-diff="0" aria-pressed="false"><b>НОВИЧОК</b><small>лёгкий</small></button>
-          <button class="opt" data-diff="1" aria-pressed="false"><b>ЛЮБИТЕЛЬ</b><small>средний</small></button>
-          <button class="opt sel" data-diff="2" aria-pressed="true"><b>ПРО</b><small>опытный</small></button>
-          <button class="opt" data-diff="3" aria-pressed="false"><b>МАСТЕР</b><small>сложный</small></button>
-          <button class="opt" data-diff="4" aria-pressed="false"><b>ЛЕГЕНДА</b><small>максимум</small></button>
+        <nav class="hub-nav" aria-label="Разделы меню">
+          <button class="hub-link on" data-hub="play" aria-current="page">
+            <span class="ui-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="10" cy="10" r="6.5"/><path d="m14.8 14.8 6 6"/><circle cx="19" cy="6" r="1.6"/></svg></span>
+            <span class="hl-d">МАТЧ</span>
+          </button>
+          <button class="hub-link" data-hub="career" id="careerStart">
+            <span class="ui-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M8 21h8m-4-4v4m-5-15h10v5a5 5 0 0 1-10 0V6Zm0 2H4v2a4 4 0 0 0 4 4m8-6h4v2a4 4 0 0 1-4 4"/></svg></span>
+            <span class="hl-d">КАРЬЕРА</span>
+          </button>
+          <button class="hub-link" data-hub="online" id="onlineStart">
+            <span class="ui-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a15 15 0 0 1 0 18M12 3a15 15 0 0 0 0 18"/></svg></span>
+            <span class="hl-d">ОНЛАЙН</span>
+          </button>
+          <button class="hub-link" data-hub="workshop" data-wstab="racket">
+            <span class="ui-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg></span>
+            <span class="hl-d">МАСТЕРСКАЯ<small id="wsCoins">0 монет</small></span>
+          </button>
+          <button class="hub-link" data-hub="workshop" data-wstab="daily">
+            <span class="ui-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M9 6h12M9 12h12M9 18h12"/><path d="m3 6 1.2 1.2L6.6 4.8M3 12l1.2 1.2 2.4-2.4M3 18l1.2 1.2 2.4-2.4"/></svg></span>
+            <span class="hl-d">ЗАДАНИЯ<small id="wsStreak">серия 1</small></span>
+          </button>
+          <button class="hub-link" data-hub="moments">
+            <span class="ui-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="3"/><path d="M10 9.2v5.6l4.8-2.8z"/></svg></span>
+            <span class="hl-d">МОМЕНТЫ</span>
+          </button>
+          <button class="hub-link" data-hub="settings">
+            <span class="ui-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a-1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></span>
+            <span class="hl-d">НАСТРОЙКИ</span>
+          </button>
+        </nav>
+        <div class="hub-foot">
+          <button class="tbt hub-back" id="hubReturn" hidden>ВЕРНУТЬСЯ К МАТЧУ</button>
+          <div class="hub-season" id="hubSeason" aria-label="Сезонный прогресс"></div>
+          <div class="hub-utility" role="group" aria-label="Быстрые настройки">
+            <button class="ic" id="menuFullscreen" title="Полный экран (F)" aria-label="Полный экран" aria-pressed="false"></button>
+            <button class="ic" id="menuSound" title="Выключить звук" aria-label="Выключить звук" aria-pressed="true"></button>
+          </div>
         </div>
-        <button class="btn" id="play">НАЧАТЬ МАТЧ</button>
-      </div>
+      </aside>
 
-      <div class="menu-actions row">
-        <button class="btn ghost" id="menuOpenSettings"><span class="ui-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></span>НАСТРОЙКИ</button>
-        <button class="btn ghost" id="train0"><span class="ui-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="m2 9 10-5 10 5-10 5L2 9Z"/><path d="M6 11.2v4.4c3.5 2.3 8.5 2.3 12 0v-4.4M22 9v6"/></svg></span>ОБУЧЕНИЕ</button>
-      </div>
+      <div class="hub-mainwrap">
+        <div class="hub-main" id="hubMain">
 
-      <div class="menu-modes">
-        <h3 class="sec">Режимы</h3>
-        <div class="row menu-mode-actions">
-          <button class="btn ghost" id="careerStart"><span class="ui-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M8 21h8m-4-4v4m-5-15h10v5a5 5 0 0 1-10 0V6Zm0 2H4v2a4 4 0 0 0 4 4m8-6h4v2a4 4 0 0 1-4 4"/></svg></span>КАРЬЕРА</button>
-          <button class="btn ghost" id="onlineStart"><span class="ui-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a15 15 0 0 1 0 18M12 3a15 15 0 0 0 0 18"/></svg></span>ОНЛАЙН</button>
-          <button class="btn ghost" id="zoneCalMenu"><b>КАЛИБРОВКА ЗОНЫ</b></button>
-          <button class="btn ghost" id="demoStart"><span class="ui-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><rect x="5" y="7" width="14" height="13" rx="3"/><path d="M12 3v4m-3 5h.01M15 12h.01M9 16h6M3 11H5m14 0h2"/></svg></span>ДЕМО</button>
+          <!-- ------------------------- MATCH ------------------------- -->
+          <section class="hub-panel on" data-panel="play" aria-label="Быстрый матч">
+            <header class="panel-head">
+              <span class="overline">Быстрый матч</span>
+              <h2 class="panel-title">Выбери соперника</h2>
+              <p class="panel-sub">Матч начнётся сразу — счёт до 11, подача по правилам ITTF.</p>
+            </header>
+            <div class="diff-grid" role="group" aria-label="Сложность соперника">
+              <button class="diff" data-diff="0" aria-pressed="false"><span class="dl" aria-hidden="true"><i class="f"></i><i></i><i></i><i></i><i></i></span><b>НОВИЧОК</b><small>лёгкий</small></button>
+              <button class="diff" data-diff="1" aria-pressed="false"><span class="dl" aria-hidden="true"><i class="f"></i><i class="f"></i><i></i><i></i><i></i></span><b>ЛЮБИТЕЛЬ</b><small>средний</small></button>
+              <button class="diff sel" data-diff="2" aria-pressed="true"><span class="dl" aria-hidden="true"><i class="f"></i><i class="f"></i><i class="f"></i><i></i><i></i></span><b>ПРО</b><small>опытный</small></button>
+              <button class="diff" data-diff="3" aria-pressed="false"><span class="dl" aria-hidden="true"><i class="f"></i><i class="f"></i><i class="f"></i><i class="f"></i><i></i></span><b>МАСТЕР</b><small>сложный</small></button>
+              <button class="diff" data-diff="4" aria-pressed="false"><span class="dl" aria-hidden="true"><i class="f"></i><i class="f"></i><i class="f"></i><i class="f"></i><i class="f"></i></span><b>ЛЕГЕНДА</b><small>максимум</small></button>
+            </div>
+            <button class="btn cta" id="play" data-autofocus>НАЧАТЬ МАТЧ</button>
+            <div class="tile-row">
+              <button class="tile" id="train0">
+                <span class="ui-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="m2 9 10-5 10 5-10 5L2 9Z"/><path d="M6 11.2v4.4c3.5 2.3 8.5 2.3 12 0v-4.4M22 9v6"/></svg></span>
+                <span class="td"><b>ОБУЧЕНИЕ</b><small>шесть ударов с тренером</small></span>
+              </button>
+              <button class="tile" id="demoStart">
+                <span class="ui-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><rect x="5" y="7" width="14" height="13" rx="3"/><path d="M12 3v4m-3 5h.01M15 12h.01M9 16h6M3 11h2m14 0h2"/></svg></span>
+                <span class="td"><b>ДЕМО</b><small>бот против бота</small></span>
+              </button>
+              <button class="tile" id="zoneCalMenu">
+                <span class="ui-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="7"/><path d="M12 2v4m0 12v4M2 12h4m12 0h4"/></svg></span>
+                <span class="td"><b>КАЛИБРОВКА ЗОНЫ</b><small>замеры попадания</small></span>
+              </button>
+            </div>
+            <h3 class="sec">Управление свайпом</h3>
+            <div class="swipe-map">
+              <div class="mi"><i style="background:#4ee39a"></i><div><b>Вверх</b><small>топспин: мяч ныряет в стол</small></div></div>
+              <div class="mi"><i style="background:#39c6ff"></i><div><b>Вниз</b><small>подрезка: низко и медленно</small></div></div>
+              <div class="mi"><i style="background:#ffd34d"></i><div><b>Дугой вбок</b><small>боковое: мяч уходит вбок</small></div></div>
+              <div class="mi"><i style="background:#9aa7b8"></i><div><b>Коротко</b><small>блок: гасит чужую скорость</small></div></div>
+              <div class="mi"><i style="background:#ff7a2f"></i><div><b>Быстро и плоско</b><small>смеш по высокому мячу</small></div></div>
+              <div class="mi"><i style="background:#ff5d6e"></i><div><b>Момент</b><small>бей, когда кольцо сомкнулось</small></div></div>
+            </div>
+          </section>
+
+          <!-- ------------------------ CAREER ------------------------- -->
+          <section class="hub-panel" data-panel="career" aria-label="Карьера">
+            <div class="career-sub on" id="careerIntro">
+              <header class="panel-head head-mark">
+                <span class="career-mark" id="crTournMark" aria-hidden="true">01</span>
+                <div>
+                  <span class="overline">Карьера · турнир</span>
+                  <h2 class="panel-title" id="crTournName">КАРЬЕРА</h2>
+                  <p class="panel-sub" id="crTournPlace"></p>
+                </div>
+              </header>
+              <div class="chip-note" id="crTournInfo"></div>
+              <div class="tourn-path" id="crPath" aria-label="Дорожка турниров"></div>
+              <div class="opp-list" id="crOppList"></div>
+              <button class="btn" id="crReady" data-autofocus>ВПЕРЁД</button>
+            </div>
+            <div class="career-sub" id="careerPerk">
+              <header class="panel-head">
+                <span class="overline">Карьера · награда за раунд</span>
+                <h2 class="panel-title">ВЫБЕРИ ПЕРК</h2>
+                <p class="panel-sub">Улучшение для следующих матчей</p>
+              </header>
+              <div class="perk-list" id="crPerkList"></div>
+            </div>
+            <div class="career-sub" id="careerEnd">
+              <header class="panel-head center">
+                <span class="overline">Карьера · итог забега</span>
+                <h2 class="panel-title xl" id="crEndTitle">КАРЬЕРА</h2>
+                <p class="panel-sub" id="crEndSub"></p>
+              </header>
+              <div id="crEndStats"></div>
+              <button class="btn" id="crEndRestart">НАЧАТЬ ЗАНОВО</button>
+              <button class="btn ghost" id="crEndMenu">В МЕНЮ</button>
+            </div>
+          </section>
+
+          <!-- ------------------------ ONLINE ------------------------- -->
+          <section class="hub-panel" data-panel="online" aria-label="Онлайн лобби">
+            <header class="panel-head">
+              <span class="overline">Сетка</span>
+              <h2 class="panel-title">ОНЛАЙН МАТЧ</h2>
+              <p class="panel-sub" id="netStatus" role="status" aria-live="polite">Подключение...</p>
+            </header>
+            <div class="room-code" id="netRoomCode" style="display:none" aria-label="Код комнаты"></div>
+            <div class="net-actions">
+              <button class="btn" id="netCreate">СОЗДАТЬ КОМНАТУ</button>
+              <button class="btn ghost" id="netJoin">ПРИСОЕДИНИТЬСЯ ПО КОДУ</button>
+            </div>
+            <p class="note legal">Экспериментальный режим: синхронизация игрового процесса ещё не завершена. Для тестирования комнат укажите свой relay через ?net=wss://… в адресе страницы.</p>
+            <button class="btn ghost" id="netClose">ЗАКРЫТЬ</button>
+          </section>
+
+          <!-- ----------------------- WORKSHOP ------------------------ -->
+          <section class="hub-panel wide" data-panel="workshop" id="workshop" aria-label="Мастерская, магазин и задания">
+            <div class="wtop">
+              <header class="panel-head">
+                <span class="overline">Инвентарь и прогресс</span>
+                <h2 class="panel-title">МАСТЕРСКАЯ</h2>
+              </header>
+              <div class="wallet" aria-label="Кошелёк">
+                <span class="wmon"><i></i><b id="wsBal">0</b></span>
+                <span class="wcr"><i></i><b id="wsCry">0</b></span>
+              </div>
+            </div>
+            <div class="tabs" role="tablist" aria-label="Разделы мастерской">
+              <button class="tab on" data-tab="racket" aria-pressed="true">РАКЕТКА</button>
+              <button class="tab" data-tab="shop" aria-pressed="false">МАГАЗИН</button>
+              <button class="tab" data-tab="daily" aria-pressed="false">ЗАДАНИЯ</button>
+            </div>
+
+            <div class="pane on" id="paneRacket">
+              <div class="rack">
+                <div class="rcol"><h4>ОСНОВАНИЕ</h4><div class="ilist" id="listBlade"></div></div>
+                <div class="rcol"><h4>СПРАВА</h4><div class="ilist" id="listFh"></div></div>
+                <div class="rcol"><h4>СЛЕВА</h4><div class="ilist" id="listBh"></div></div>
+              </div>
+              <div class="card2">
+                <div class="statcard" id="statCard"></div>
+                <div class="snote" id="statNote"></div>
+                <div class="ws-actions">
+                  <button class="btn" id="wsEquip">ПОСТАВИТЬ В ИГРУ</button>
+                  <button class="btn ghost" id="wsBuyCry" style="display:none">КУПИТЬ ЗА КРИСТАЛЛЫ</button>
+                </div>
+                <div class="snote">Характер определяет только профиль удара, а не силу: сумма четырёх параметров
+                у всех предметов одинаковая, и ни один не лучше другого во всём.</div>
+              </div>
+            </div>
+
+            <div class="pane" id="paneShop">
+              <h4 class="shopH">РАКЕТКИ ЗА МОНЕТЫ</h4>
+              <div class="sgrid" id="shopRackets"></div>
+              <h4 class="shopH">ВНЕШНИЙ ВИД</h4>
+              <div class="sgrid" id="shopCosmetics"></div>
+              <div id="shopIapWrap">
+                <h4 class="shopH">ПОДДЕРЖКА ИГРЫ</h4>
+                <div class="sgrid" id="shopIap"></div>
+                <div class="snote legal">Покупки не дают преимущества на столе. Реклама — только по вашему вызову.</div>
+              </div>
+              <h4 class="shopH">СЕЗОН</h4>
+              <div class="season" id="seasonBox"></div>
+            </div>
+
+            <div class="pane" id="paneDaily">
+              <div class="snote daily-head" id="dailyHead"></div>
+              <div class="tlist" id="taskList"></div>
+              <button class="btn ghost" id="adCoins">СМОТРЕТЬ РЕКЛАМУ · +120 МОНЕТ</button>
+              <div class="snote legal">Реклама всегда необязательна и никогда не прерывает матч.</div>
+            </div>
+
+            <button class="btn ghost ws-close" id="wsClose">ЗАКРЫТЬ</button>
+          </section>
+
+          <!-- ----------------------- MOMENTS ------------------------- -->
+          <section class="hub-panel" data-panel="moments" aria-label="Лучшие моменты">
+            <header class="panel-head">
+              <span class="overline">Библиотека реплеев</span>
+              <h2 class="panel-title">ЛУЧШИЕ МОМЕНТЫ</h2>
+              <p class="panel-sub">Игра запоминает только то, что стоит пересматривать</p>
+            </header>
+            <div id="hubMomentList" class="mlist"></div>
+            <div class="empty-state" id="hubMomentEmpty">Пока пусто. Моменты появятся после ярких розыгрышей —
+              длинные ралли, смешы и матчболы игра сохраняет сама.</div>
+          </section>
+
+          <!-- ----------------------- SETTINGS ------------------------ -->
+          <section class="hub-panel" data-panel="settings" id="settings" aria-label="Настройки">
+            <header class="panel-head">
+              <span class="overline">Личные предпочтения</span>
+              <h2 class="panel-title">НАСТРОЙКИ</h2>
+              <p class="panel-sub">Единые правила игры</p>
+            </header>
+            <p class="note legal">Допуски попадания и помощь настроены одинаково для всех — без ползунков. Мяч отбивается ракеткой. Мышь или палец управляют её движением, свайп задаёт удар. Скобки у мяча подсказывают время: пунктир — приближение, сплошные — окно для свайпа. Сам по себе маркер мяч не отбивает.</p>
+            <div class="set-card">
+              <h3 class="sec">ХВАТ И ВЕДУЩАЯ РУКА</h3>
+              <div class="row" role="group" aria-label="Хват ракетки">
+                <button class="opt" data-set="grip" data-val="shakehand" aria-pressed="true"><b>SHAKEHAND</b></button>
+                <button class="opt" data-set="grip" data-val="penhold" aria-pressed="false"><b>PENHOLD · ПЕРО</b></button>
+              </div>
+              <div class="row" role="group" aria-label="Ведущая рука">
+                <button class="opt" data-set="hand" data-val="right" aria-pressed="true"><b>ПРАВША</b></button>
+                <button class="opt" data-set="hand" data-val="left" aria-pressed="false"><b>ЛЕВША</b></button>
+              </div>
+              <p class="note">Shakehand: лёгкий наклон вперёд. Перо: почти вертикально, рукоятка вверх. Поза зеркалится; направление свайпа остаётся экранным.</p>
+            </div>
+            <div class="set-card">
+              <h3 class="sec">КАМЕРА</h3>
+              <div class="row" id="cameraViews" role="group" aria-label="Вид камеры">
+                <button class="opt" data-camera="BROADCAST"><b>ИГРА</b></button>
+                <button class="opt" data-camera="DYNAMIC"><b>ОБЗОР</b></button>
+                <button class="opt" data-camera="LOW"><b>БЛИЖЕ</b></button>
+              </div>
+              <p class="note" id="cameraHelp"></p>
+              <button class="tbt" id="camReset">СБРОСИТЬ ВИД</button>
+            </div>
+            <button class="btn" id="setClose">СОХРАНИТЬ И ЗАКРЫТЬ</button>
+          </section>
+
         </div>
-        <div class="row menu-meta-actions">
-          <button class="opt" id="wsOpen"><b>МАСТЕРСКАЯ</b><small id="wsCoins">0 монет</small></button>
-          <button class="opt" id="dailyOpen"><b>ЗАДАНИЯ</b><small id="wsStreak">серия 1</small></button>
-        </div>
+        <div class="hub-fade" aria-hidden="true"></div>
       </div>
-    </div>
-  </div>
-
-  <!-- ========================== CAREER ============================ -->
-  <div class="screen" id="careerIntro" role="dialog" aria-modal="true" aria-label="Карьера, вводная">
-    <div class="card">
-      <div class="career-heading"><span class="career-mark" id="crTournMark" aria-hidden="true">01</span><div class="logo" id="crTournName">КАРЬЕРА</div></div>
-      <div class="sub" id="crTournPlace"></div>
-      <div class="note" id="crTournInfo"></div>
-      <div class="row" id="crOppList" style="margin-top:12px"></div>
-      <button class="btn" id="crReady">ВПЕРЁД</button>
-    </div>
-  </div>
-  <div class="screen" id="careerPerk" role="dialog" aria-modal="true" aria-label="Выбор перка">
-    <div class="card">
-      <div class="logo" style="font-size:20px">ВЫБЕРИ ПЕРК</div>
-      <div class="sub">Улучшение для следующих матчей</div>
-      <div class="row" id="crPerkList" style="margin-top:12px"></div>
-    </div>
-  </div>
-  <div class="screen" id="careerEnd" role="dialog" aria-modal="true" aria-label="Итоги карьеры">
-    <div class="card">
-       <div class="logo" id="crEndTitle">КАРЬЕРА</div>
-      <div class="sub" id="crEndSub"></div>
-      <div id="crEndStats" style="margin-top:10px"></div>
-      <button class="btn" id="crEndRestart">НАЧАТЬ ЗАНОВО</button>
-      <button class="btn ghost" id="crEndMenu">В МЕНЮ</button>
-    </div>
-  </div>
-
-  <!-- ========================== ONLINE ============================ -->
-  <div class="screen" id="onlineLobby" role="dialog" aria-modal="true" aria-label="Онлайн лобби">
-    <div class="card">
-       <div class="logo">ОНЛАЙН МАТЧ</div>
-      <div class="sub" id="netStatus">Подключение...</div>
-      <div id="netRoomCode" style="font-family:var(--mono);font-size:28px;letter-spacing:.2em;color:var(--acc);text-align:center;margin:12px 0;display:none"></div>
-      <button class="btn" id="netCreate">СОЗДАТЬ КОМНАТУ</button>
-      <button class="btn ghost" id="netJoin" style="margin-top:8px">ПРИСОЕДИНИТЬСЯ ПО КОДУ</button>
-      <div class="note" id="netNote">Экспериментальный режим: синхронизация игрового процесса ещё не завершена. Для тестирования комнат укажите свой relay через ?net=wss://… в адресе страницы.</div>
-      <button class="btn ghost" id="netClose" style="margin-top:12px">ЗАКРЫТЬ</button>
-    </div>
-  </div>
-
-  <!-- ========================== SETTINGS ========================== -->
-  <div class="screen" id="settings" role="dialog" aria-modal="true" aria-label="Настройки">
-    <div class="card settings-card">
-      <div class="logo" style="font-size:24px">НАСТРОЙКИ</div>
-      <div class="sub">Личные предпочтения · единые правила игры</div>
-
-      <p class="note">Допуски попадания и помощь настроены одинаково для всех — без ползунков. Мяч отбивается ракеткой. Мышь или палец управляют её движением, свайп задаёт удар. Скобки у мяча подсказывают время: пунктир — приближение, сплошные — окно для свайпа. Сам по себе маркер мяч не отбивает.</p>
-
-      <h3 class="sec">ХВАТ И ВЕДУЩАЯ РУКА</h3>
-      <div class="row" role="group" aria-label="Хват ракетки">
-        <button class="opt" data-set="grip" data-val="shakehand" aria-pressed="true"><b>SHAKEHAND</b></button>
-        <button class="opt" data-set="grip" data-val="penhold" aria-pressed="false"><b>PENHOLD · ПЕРО</b></button>
-      </div>
-      <div class="row" role="group" aria-label="Ведущая рука">
-        <button class="opt" data-set="hand" data-val="right" aria-pressed="true"><b>ПРАВША</b></button>
-        <button class="opt" data-set="hand" data-val="left" aria-pressed="false"><b>ЛЕВША</b></button>
-      </div>
-      <p class="note">Shakehand: лёгкий наклон вперёд. Перо: почти вертикально, рукоятка вверх. Поза зеркалится; направление свайпа остаётся экранным.</p>
-
-      <h3 class="sec">КАМЕРА</h3>
-      <div class="row" id="cameraViews" role="group" aria-label="Вид камеры">
-        <button class="opt" data-camera="BROADCAST"><b>ИГРА</b></button>
-        <button class="opt" data-camera="DYNAMIC"><b>ОБЗОР</b></button>
-        <button class="opt" data-camera="LOW"><b>БЛИЖЕ</b></button>
-      </div>
-      <p class="note" id="cameraHelp"></p>
-      <button class="tbt" id="camReset">СБРОСИТЬ ВИД</button>
-
-      <button class="btn" id="setClose">СОХРАНИТЬ И ЗАКРЫТЬ</button>
-    </div>
-  </div>
-
-  <!-- ==================== WORKSHOP · SHOP · DAILY ================== -->
-  <div class="screen" id="workshop" role="dialog" aria-modal="true" aria-label="Мастерская, магазин и задания">
-    <div class="card wide">
-      <div class="wtop">
-        <div class="logo" style="font-size:26px">МАСТЕРСКАЯ</div>
-        <div class="wallet">
-          <span class="wmon"><i></i><b id="wsBal">0</b></span>
-          <span class="wcr"><i></i><b id="wsCry">0</b></span>
-        </div>
-      </div>
-      <div class="tabs">
-        <button class="tab on" data-tab="racket">РАКЕТКА</button>
-        <button class="tab" data-tab="shop">МАГАЗИН</button>
-        <button class="tab" data-tab="daily">ЗАДАНИЯ</button>
-      </div>
-
-      <div class="pane on" id="paneRacket">
-        <div class="rack">
-          <div class="rcol"><h4>ОСНОВАНИЕ</h4><div class="ilist" id="listBlade"></div></div>
-          <div class="rcol"><h4>СПРАВА</h4><div class="ilist" id="listFh"></div></div>
-          <div class="rcol"><h4>СЛЕВА</h4><div class="ilist" id="listBh"></div></div>
-        </div>
-        <div class="card2">
-          <div class="statcard" id="statCard"></div>
-          <div class="snote" id="statNote"></div>
-          <button class="btn" id="wsEquip">ПОСТАВИТЬ В ИГРУ</button>
-          <button class="btn ghost" id="wsBuyCry" style="display:none">КУПИТЬ ЗА КРИСТАЛЛЫ</button>
-          <div class="snote">Характер определяет только профиль удара, а не силу: сумма четырёх параметров
-          у всех предметов одинаковая, и ни один не лучше другого во всём.</div>
-        </div>
-      </div>
-
-      <div class="pane" id="paneShop">
-        <h4 class="shopH">РАКЕТКИ ЗА МОНЕТЫ</h4>
-        <div class="sgrid" id="shopRackets"></div>
-        <h4 class="shopH">ВНЕШНИЙ ВИД</h4>
-        <div class="sgrid" id="shopCosmetics"></div>
-        <div id="shopIapWrap">
-          <h4 class="shopH">ПОДДЕРЖКА ИГРЫ</h4>
-          <div class="sgrid" id="shopIap"></div>
-          <div class="snote">Покупки не дают преимущества на столе. Реклама — только по вашему вызову.</div>
-        </div>
-        <h4 class="shopH">СЕЗОН</h4>
-        <div class="season" id="seasonBox"></div>
-      </div>
-
-      <div class="pane" id="paneDaily">
-        <div class="snote" id="dailyHead"></div>
-        <div class="tlist" id="taskList"></div>
-        <button class="btn ghost" id="adCoins">СМОТРЕТЬ РЕКЛАМУ · +120 МОНЕТ</button>
-        <div class="snote">Реклама всегда необязательна и никогда не прерывает матч.</div>
-      </div>
-
-      <button class="btn ghost" id="wsClose">ЗАКРЫТЬ</button>
     </div>
   </div>
 
   <!-- ====================== TRAINING COMPLETE ===================== -->
   <div class="screen" id="tdone" role="dialog" aria-modal="true" aria-label="Обучение пройдено">
     <div class="card">
-      <div class="logo" style="font-size:30px;">ОБУЧЕНИЕ ПРОЙДЕНО</div>
-      <div class="sub">Шесть ударов в руках. Дальше — матч</div>
+      <header class="panel-head center">
+        <span class="overline">Тренер</span>
+        <h2 class="panel-title xl">ОБУЧЕНИЕ ПРОЙДЕНО</h2>
+        <p class="panel-sub">Шесть ударов в руках. Дальше — матч</p>
+      </header>
       <div class="recap">
         <div class="rc"><i style="background:#4ee39a"></i><b>Вверх</b><small>топспин: мяч ныряет в стол</small></div>
         <div class="rc"><i style="background:#39c6ff"></i><b>Вниз</b><small>подрезка: низко и медленно</small></div>
@@ -261,9 +349,11 @@
 
   <!-- ========================= MATCH END ========================== -->
   <div class="screen" id="over" role="dialog" aria-modal="true" aria-label="Итоги матча">
-    <div class="card">
-      <div class="logo" id="overTitle" style="font-size:34px">ПОБЕДА</div>
-      <div class="sub" id="overScore" style="font-size:22px;letter-spacing:.1em;color:var(--txt)">0 : 0</div>
+    <div class="card over-card">
+      <div class="over-hero">
+        <div class="over-title" id="overTitle">ПОБЕДА</div>
+        <div class="over-score" id="overScore">0 : 0</div>
+      </div>
       <h3 class="sec">Статистика матча</h3>
       <div class="stats">
         <div class="st"><small>Ударов</small><b id="stShots">0</b></div>
@@ -274,9 +364,11 @@
         <div class="st"><small>Любимый удар</small><b id="stFav">—</b></div>
       </div>
       <div id="overMoments" class="omrow"></div>
-      <button class="btn ghost" id="shotLabResults">КАЛИБРОВКА ПОПАДАНИЯ</button>
-      <button class="btn" id="again">РЕВАНШ</button>
-      <button class="btn ghost" id="backMenu">В МЕНЮ</button>
+      <div class="over-actions">
+        <button class="btn" id="again">РЕВАНШ</button>
+        <button class="btn ghost" id="backMenu">В МЕНЮ</button>
+        <button class="btn ghost" id="shotLabResults">КАЛИБРОВКА ПОПАДАНИЯ</button>
+      </div>
     </div>
   </div>
 
@@ -304,8 +396,11 @@
   <!-- ====================== MOMENT LIBRARY ======================= -->
   <div class="screen" id="reels" role="dialog" aria-modal="true" aria-label="Лучшие моменты матча">
     <div class="card">
-      <div class="logo" style="font-size:30px">ЛУЧШИЕ МОМЕНТЫ</div>
-      <div class="sub">Игра запоминает только то, что стоит пересматривать</div>
+      <header class="panel-head center">
+        <span class="overline">Библиотека реплеев</span>
+        <h2 class="panel-title">ЛУЧШИЕ МОМЕНТЫ</h2>
+        <p class="panel-sub">Игра запоминает только то, что стоит пересматривать</p>
+      </header>
       <div id="momentList" class="mlist"></div>
       <button class="btn ghost" id="reelsClose">ЗАКРЫТЬ</button>
     </div>

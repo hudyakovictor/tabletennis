@@ -106,7 +106,8 @@ class UI {
     if (!this._dialogReturnFocus) this._dialogReturnFocus = document.activeElement;
     requestAnimationFrame(() => {
       if (this.activeDialog() !== dialog) return;
-      const target = dialog.id === 'menu' ? $('#play') : this.dialogFocusables(dialog)[0];
+      const auto = dialog.querySelector('[data-autofocus]');
+      const target = auto && auto.getClientRects().length ? auto : this.dialogFocusables(dialog)[0];
       if (target) target.focus({ preventScroll: true });
       else {
         if (!dialog.hasAttribute('tabindex')) dialog.setAttribute('tabindex', '-1');
@@ -146,10 +147,16 @@ class UI {
     this.syncSettings();
     this._settingsWasPaused = this.game.paused;
     this.game.setPaused(true);
-    $('#settings').classList.add('on');
+    const hub = $('#menu');
+    this._settingsReturn = hub.classList.contains('on') ? (this._hubSection || 'play') : 'play';
+    /* Over a live match the hub opens "detached": settings only, rail hidden,
+       one clear way back — to the pause. From the menu it is a normal panel. */
+    if (this.game.state !== GS.MENU) { hub.classList.add('detached'); $('#hubReturn').hidden = false; }
+    this.showHub('settings');
   }
   closeSettings() {
-    $('#settings').classList.remove('on');
+    if (this.game.state === GS.MENU) this.showHub(this._settingsReturn || 'play');
+    else this.hideHub();
     if (!this._settingsWasPaused) this.game.setPaused(false);
     this.game.profile.save(true);
   }
@@ -213,23 +220,62 @@ class UI {
   showMainMenu() {
     clearTimeout(this._careerTimer);
     this.game.returnToMenu();
-    $$('.screen').forEach(s => s.classList.remove('on'));
-    $('#menu').classList.add('on');
+    this.showHub('play');
     this.refreshMenuBits();
+  }
+
+  /* --------------------------- hub router ---------------------------
+     The menu is one shell: a rail of sections, one panel at a time.
+     Every former card-screen (career, online, workshop, settings,
+     moments) is a panel inside it, so nothing is ever "buried". */
+  showHub(section, opts = {}) {
+    const hub = $('#menu');
+    $$('.screen').forEach(s => s.classList.remove('on'));
+    hub.classList.add('on');
+    if (hub.classList.contains('detached') && section !== 'settings') {
+      hub.classList.remove('detached');
+      $('#hubReturn').hidden = true;
+    }
+    const panel = hub.classList.contains('detached') ? 'settings' : section;
+    this._hubSection = panel;
+    if (panel === 'workshop') this._wsTab = opts.tab || this._wsTab || 'racket';
+    $$('#menu .hub-panel').forEach(p => p.classList.toggle('on', p.dataset.panel === panel));
+    this.syncHubNav();
+    if (panel === 'workshop') this.showWorkshop(this._wsTab);
+    if (panel === 'moments') this.renderMomentsPanel();
     this.syncMenuScrollHint();
+  }
+  syncHubNav() {
+    const panel = this._hubSection;
+    $$('#menu .hub-link').forEach(b => {
+      const active = b.dataset.hub === panel &&
+        (panel !== 'workshop' || (b.dataset.wstab || 'racket') === this._wsTab);
+      b.classList.toggle('on', active);
+      if (active) b.setAttribute('aria-current', 'page');
+      else b.removeAttribute('aria-current');
+    });
+  }
+  hideHub() {
+    const hub = $('#menu');
+    hub.classList.remove('on', 'detached');
+    $$('#menu .hub-panel').forEach(p => p.classList.remove('on'));
+    $('#hubReturn').hidden = true;
+    this.syncDialogFocus();
   }
 
   syncMenuScrollHint() {
-    const card = $('#menu .card');
-    if (!card) return;
+    const el = $('#hubMain');
+    if (!el) return;
     const update = () => {
-      const needed = card.scrollHeight > card.clientHeight + 2;
-      card.classList.toggle('scroll-needed', needed);
-      card.classList.toggle('scroll-start', needed && card.scrollTop < 24);
+      const wrap = el.parentElement;
+      if (!wrap) return;
+      const needed = el.scrollHeight > el.clientHeight + 2;
+      wrap.classList.toggle('scroll-needed', needed);
+      wrap.classList.toggle('scroll-start', needed && el.scrollTop < 24);
     };
-    if (!card.dataset.scrollHintBound) {
-      card.dataset.scrollHintBound = 'true';
-      card.addEventListener('scroll', update, { passive: true });
+    if (!el.dataset.scrollHintBound) {
+      el.dataset.scrollHintBound = 'true';
+      el.addEventListener('scroll', update, { passive: true });
     }
     update();
   }
@@ -245,8 +291,8 @@ class UI {
 
   /* ------------------------------ menu ---------------------------- */
   bindMenu() {
-    $$('#menu .opt[data-diff]').forEach((b) => b.addEventListener('click', () => {
-      $$('#menu .opt[data-diff]').forEach((x) => {
+    $$('#menu .diff[data-diff]').forEach((b) => b.addEventListener('click', () => {
+      $$('#menu .diff[data-diff]').forEach((x) => {
         const selected = x === b;
         x.classList.toggle('sel', selected);
         x.setAttribute('aria-pressed', String(selected));
@@ -254,6 +300,26 @@ class UI {
       this.pendingDiff = +b.dataset.diff;
       if (this.game) this.game.audio.ui('click');
     }));
+    /* hub rail: one home for every section */
+    $$('#menu .hub-link').forEach((b) => b.addEventListener('click', () => {
+      if (this.game) this.game.audio.ui('click');
+      const sec = b.dataset.hub;
+      /* career and online own their opening ritual (audio unlock, saved run,
+         relay connect) — their dedicated handlers below do the work. */
+      if (sec === 'career' || sec === 'online') return;
+      if (sec === 'workshop') {
+        this.pick = null;                     // a fresh visit starts from what is fitted
+        this.game.analytics && this.game.analytics.send('ui:workshop', { tab: b.dataset.wstab || 'racket' });
+        this.showHub('workshop', { tab: b.dataset.wstab || 'racket' });
+      } else this.showHub(sec);
+    }));
+    const hubBack = $('#hubReturn');
+    if (hubBack) hubBack.addEventListener('click', () => {
+      if (this.game) this.game.audio.ui('click');
+      this.hideHub();
+    });
+    const pauseCard = document.querySelector('.pause-card');
+    if (pauseCard) pauseCard.addEventListener('click', (e) => e.stopPropagation());
     $$('.opt[data-set]').forEach((b) => b.addEventListener('click', () => {
       const k = b.dataset.set, v = b.dataset.val;
       $$(`.opt[data-set="${k}"]`).forEach((x) => {
@@ -289,26 +355,23 @@ class UI {
     $('#tdAgain').addEventListener('click', startTrain);
     $('#trSkip').addEventListener('click', () => { const t = this.game.training; if (t && this.game.paused) { t.skip(); this.game.setPaused(false); this.game.audio.ui('click'); } });
     $('#trExit').addEventListener('click', () => { if (this.game.paused) this.showMainMenu(); });
-    /* --- workshop / shop / daily --- */
-    const wsOpen = (tab) => {
-      this.game.audio.ui('click');
-      this.game.analytics && this.game.analytics.send('ui:workshop', { tab: tab || 'racket' });
-      $$('.screen').forEach((x) => x.classList.remove('on'));
-      this.pick = null;                       // a fresh visit starts from what is fitted
-      this.showWorkshop(tab || 'racket');
-    };
-    $('#wsOpen').addEventListener('click', () => wsOpen('racket'));
-    $('#dailyOpen').addEventListener('click', () => wsOpen('daily'));
+    /* --- workshop / shop / daily: panels of the hub --- */
     $('#wsClose').addEventListener('click', () => {
-      $('#workshop').classList.remove('on');
-      $('#menu').classList.add('on');
+      this.showHub('play');
       this.game.audio.ui('click');
     });
-    $$('#workshop .tab').forEach((b) => b.addEventListener('click', () => this.showWorkshop(b.dataset.tab)));
+    $$('#workshop .tab').forEach((b) => b.addEventListener('click', () => {
+      this._wsTab = b.dataset.tab;
+      this.showWorkshop(b.dataset.tab);
+      this.syncHubNav();
+    }));
     $('#wsEquip').addEventListener('click', () => this.equipSelection());
     $('#wsBuyCry').addEventListener('click', () => this.buySelectionCrystals());
     $('#adCoins').addEventListener('click', () => this.watchAd());
-    $('#btnSettings').addEventListener('click', () => $('#settings').classList.contains('on') ? this.closeSettings() : this.openSettings());
+    $('#btnSettings').addEventListener('click', () => {
+      const open = $('#menu').classList.contains('on') && this._hubSection === 'settings';
+      if (open) this.closeSettings(); else this.openSettings();
+    });
     const btnMenuSet = $('#menuOpenSettings');
     if (btnMenuSet) btnMenuSet.addEventListener('click', () => this.openSettings());
     const btnPauseSet = $('#pauseSettings');
@@ -436,12 +499,8 @@ class UI {
   }
 
   /** The library: three best rallies of the match, newest score first. */
-  showMoments() {
-    const g = this.game; if (!g) return;
-    const kept = g.moments.kept.slice(0, 3);
-    if (!kept.length) return;
-    const list = $('#momentList');
-    list.innerHTML = kept.map((m, i) => {
+  momentsHTML(kept) {
+    return kept.map((m, i) => {
       const bars = Math.round(clamp(m.score / 0.85, 0, 1) * 5);
       const st = Array.from({ length: 5 }, (_, k) => `<i class="${k < bars ? 'f' : ''}"></i>`).join('');
       const names = { SMASH: 'смеш', LOOP: 'топспин', COUNTER: 'контратака', DRIVE: 'накат', FLICK: 'флик',
@@ -453,10 +512,30 @@ class UI {
         <small>${Math.round(m.speed)} км/ч · ${Math.round(m.spin)} об/с · ${why}</small></span>
         <span class="st">${st}</span><span class="go">СМОТРЕТЬ \u203a</span></button>`;
     }).join('');
+  }
+  bindMomentRows(list, beforeWatch) {
     Array.from(list.querySelectorAll('.mrow')).forEach((b) => b.addEventListener('click', () => {
-      $('#reels').classList.remove('on');
-      g.watchMoment(g.moments.kept[+b.dataset.i], true);
+      beforeWatch();
+      this.game.watchMoment(this.game.moments.kept[+b.dataset.i], true);
     }));
+  }
+  /** Hub panel: the same library, with an honest empty state. */
+  renderMomentsPanel() {
+    const g = this.game;
+    const kept = g && g.moments ? g.moments.kept.slice(0, 3) : [];
+    const empty = $('#hubMomentEmpty');
+    if (empty) empty.hidden = kept.length > 0;
+    const list = $('#hubMomentList');
+    list.innerHTML = this.momentsHTML(kept);
+    this.bindMomentRows(list, () => $$('.screen').forEach((s) => s.classList.remove('on')));
+  }
+  showMoments() {
+    const g = this.game; if (!g) return;
+    const kept = g.moments.kept.slice(0, 3);
+    if (!kept.length) return;
+    const list = $('#momentList');
+    list.innerHTML = this.momentsHTML(kept);
+    this.bindMomentRows(list, () => $('#reels').classList.remove('on'));
     $('#reels').classList.add('on');
   }
 
@@ -465,6 +544,7 @@ class UI {
   showWorkshop(tab) {
     const g = this.game, p = g.profile;
     if (!p) return;
+    this._wsTab = tab;
     $$('#workshop .tab').forEach((b) => {
       const selected = b.dataset.tab === tab;
       b.classList.toggle('on', selected);
@@ -481,7 +561,6 @@ class UI {
     this.drawStatCard();
     this.drawShop();
     this.drawDaily();
-    $('#workshop').classList.add('on');
   }
 
   drawItemList(sel, kind, current) {
@@ -671,6 +750,8 @@ class UI {
     const p = this.game.profile; if (!p) return;
     $('#wsCoins').textContent = p.data.coins + ' монет';
     $('#wsStreak').textContent = 'серия ' + p.data.streak + ' · ' + p.data.daily.done.length + '/6';
+    const season = $('#hubSeason');
+    if (season) season.innerHTML = `СЕЗОН ${p.data.season.n + 1} · УР. <b>${p.seasonLevel()}</b>/60`;
   }
 
   toast(text) {
@@ -1284,21 +1365,32 @@ class UI {
     });
   }
 
+  setCareerSub(id) {
+    $$('#menu .career-sub').forEach(s => s.classList.toggle('on', s.id === id));
+  }
+
   showCareerIntro(career) {
     const t = career.currentTournamentInfo;
-    $$('.screen').forEach(s => s.classList.remove('on'));
+    this.showHub('career');
+    this.setCareerSub('careerIntro');
     $('#crOppList').replaceChildren();
     $('#crReady').hidden = false;
     $('#crTournName').textContent = t.name;
     $('#crTournMark').textContent = String(t.id + 1).padStart(2, '0');
     $('#crTournPlace').textContent = t.place;
     $('#crTournInfo').textContent = `Раундов: ${t.rounds} · ELO ${t.eloMin}–${t.eloMax} · Побед: ${career.totalWins}`;
-    $('#careerIntro').classList.add('on');
+    /* the road to the Hall of Fame: where this run stands among the 12 */
+    const pathEl = $('#crPath');
+    if (pathEl) pathEl.innerHTML = TOURNAMENTS.map((tr, i) => {
+      const cls = i < career.currentTournament ? 'done' : i === career.currentTournament ? 'now' : '';
+      return `<span class="tp ${cls}"><i></i>${String(i + 1).padStart(2, '0')} · ${tr.name}</span>`;
+    }).join('');
   }
 
   showCareerOpponentSelect(career) {
     const g = this.game;
-    $$('.screen').forEach(s => s.classList.remove('on'));
+    this.showHub('career');
+    this.setCareerSub('careerIntro');
     const t = career.currentTournamentInfo;
     $('#crTournName').textContent = t.name;
     $('#crTournMark').textContent = String(t.id + 1).padStart(2, '0');
@@ -1321,14 +1413,13 @@ class UI {
     const status = document.createElement('div');
     status.className = 'note';
     status.textContent = `Раунд ${career.currentRound + 1} из ${career.currentTournamentInfo.rounds} · Перков: ${career.perks.length}`;
-    status.style.marginTop = '10px';
     list.appendChild(status);
-    $('#careerIntro').classList.add('on');
   }
 
   showCareerPerks(career) {
     const g = this.game;
-    $$('.screen').forEach(s => s.classList.remove('on'));
+    this.showHub('career');
+    this.setCareerSub('careerPerk');
     const list = $('#crPerkList');
     list.innerHTML = '';
     career.pendingPerks.forEach((perk, i) => {
@@ -1340,12 +1431,10 @@ class UI {
       btn.addEventListener('click', () => {
         g.audio.ui('click');
         career.selectPerk(i);
-        $$('.screen').forEach(s => s.classList.remove('on'));
         this.showCareerOpponentSelect(career);
       });
       list.appendChild(btn);
     });
-    $('#careerPerk').classList.add('on');
   }
 
   showCareerTournamentEnd(career) {
@@ -1364,7 +1453,8 @@ class UI {
   }
 
   showCareerRunEnd(career) {
-    $$('.screen').forEach(s => s.classList.remove('on'));
+    this.showHub('career');
+    this.setCareerSub('careerEnd');
     const t = TOURNAMENTS[Math.min(career.currentTournament, TOURNAMENTS.length - 1)] || TOURNAMENTS[0];
     const isVictory = career.currentTournament >= TOURNAMENTS.length;
     $('#crEndTitle').textContent = isVictory ? 'ЧЕМПИОН МИРА!' : t.name;
@@ -1383,7 +1473,6 @@ class UI {
     `;
     career.stop();
     try { localStorage.removeItem('topspin_career'); } catch(e) {}
-    $('#careerEnd').classList.add('on');
   }
 
   /* ================================================================
@@ -1395,10 +1484,9 @@ class UI {
     $('#onlineStart').addEventListener('click', () => {
       g.returnToMenu();
       g.audio.init(); g.audio.resume(); g.audio.ui('click');
-      $$('.screen').forEach(s => s.classList.remove('on'));
+      this.showHub('online');
       $('#netStatus').textContent = 'Подключение...';
       $('#netRoomCode').style.display = 'none';
-      $('#onlineLobby').classList.add('on');
       net.connect();
     });
     net.on('connected', () => {
