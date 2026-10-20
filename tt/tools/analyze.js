@@ -26,8 +26,8 @@ const SRC = path.join(__dirname, '..', 'src');
 const MODULES = [
   '10_math.js', '12_match_rules.js', '20_gl.js', '25_career.js', '27_network.js', '30_physics.js',
   '38_paddle_motion.js', '40_swipe.js', '42_shot_diagnostics.js', '50_audio.js', '55_ai.js', '56_rig.js', '57_camera.js',
-  '58_coach.js', '59_replay.js', '60_scene.js', '65_train.js', '84_racket.js',
-  '86_meta.js', '70_game.js', '80_ui.js',
+  '58_coach.js', '59_replay.js', '60_scene.js', '65_train.js', '75_feedback.js', '75_music.js',
+  '76_emotion.js', '81_uiAnim.js', '84_racket.js', '86_meta.js', '70_game.js', '80_ui.js',
 ];
 
 /* ------------------------------------------------------------------ *
@@ -160,11 +160,25 @@ const sandbox = {
   },
   navigator: { userAgent: 'node', vibrate: null, maxTouchPoints: 0 },
   requestAnimationFrame: noop,
+  /* The HUD watches the score elements for text changes. A headless run has
+   * no layout and no observers, and `new MutationObserver` used to abort
+   * ui.attach() — which is why the whole smoke suite reported 0 matches. */
+  MutationObserver: class MutationObserverStub {
+    constructor(cb) { this.cb = cb; }
+    observe() {} disconnect() {} takeRecords() { return []; }
+  },
+  ResizeObserver: class ResizeObserverStub {
+    constructor(cb) { this.cb = cb; }
+    observe() {} disconnect() {} unobserve() {}
+  },
+  OfflineAudioContext: null,
 };
 sandbox.window.localStorage = sandbox.localStorage;
 sandbox.window.setTimeout = sandbox.setTimeout;
 sandbox.window.clearTimeout = sandbox.clearTimeout;
 sandbox.window.performance = sandbox.performance;
+sandbox.window.MutationObserver = sandbox.MutationObserver;
+sandbox.window.ResizeObserver = sandbox.ResizeObserver;
 sandbox.globalThis = sandbox;
 sandbox.__DBG = (...a) => { if (process.env.DBGSOLVE) console.log('   [solve]', ...a); };
 sandbox.self = sandbox;
@@ -181,10 +195,11 @@ const EXPORTS = ['TAU', 'DEG', 'clamp', 'lerp', 'smoothstep', 'sign', 'rnd', 'rn
   'bounceNet', 'clipTape', 'predict', 'solveLaunch', 'SPIN_CAP',
   'SwipeTracker', 'STROKES', 'ARCH', 'classifyStroke', 'deriveStroke', 'refineRacket', 'strokeFrame',
   'solveServeStroke', 'shotReport', 'anglesFromNormal', 'solveBlockNormal', 'strokeFrame', 'AI_LEVELS', 'AI_TACTICS', 'AI_BACKSWING', 'OpponentAI', 'makeRacket',
-  'PaddleRig', 'CAMERA_PRESETS', 'CAMERA_ORDER', 'PADDLE_LIMITS', 'effectiveFov', 'rigViewProj',
+  'PaddleRig', 'CAMERA_PRESETS', 'CAMERA_ORDER', 'PADDLE_LIMITS', 'PADDLE_STANCE_Z', 'PLAY_RECT',
+  'PLAY_BAND_Y', 'reachFor', 'lensFovDeg', 'effectiveFov', 'rigViewProj', 'unprojectToPlane',
   'projectPoint', 'rigMargin', 'fitRig', 'cameraRigFor', 'tableTopScreenY', 'paddleTargetFromPointer',
-  'clampPaddleToFrustum', 'paddleVisibleOk', 'MomentRecorder', 'BLADES', 'RUBBERS', 'Equipment', 'GS',
-  'PHYS_DT', 'Game', 'UI', 'ICON', 'Renderer', 'Scene', 'AudioEngine', 'Particles',
+  'clampPaddleToFrustum', 'paddleVisibleOk', 'paddleLimitsFor', 'depthForPointer', 'MomentRecorder', 'BLADES', 'RUBBERS', 'Equipment', 'GS',
+  'PHYS_DT', 'MATCH_RULES', 'Game', 'UI', 'UIAnimation', 'ICON', 'Renderer', 'Scene', 'AudioEngine', 'Particles',
   'Platform', 'Analytics', 'Profile', 'Shop', 'MomentPlayer', 'MomentRecorder',
   'RallyRecorder', 'PointAnalyst', 'MatchDirector', 'Trainer', 'Career', 'NetworkManager', 'GS'];
 let bundle = '';
@@ -206,8 +221,12 @@ const { predict, impactRacket, integrateBall, bounceTable, aeroAccel, solveLaunc
 const { deriveStroke, refineRacket, classifyStroke, ARCH, STROKES, SwipeTracker, anglesFromNormal,
   solveBlockNormal, strokeFrame } = X;
 const { OpponentAI, AI_LEVELS, makeRacket } = X;
-const { CAMERA_PRESETS, cameraRigFor, rigViewProj, projectPoint } = X;
-const { paddleTargetFromPointer, PADDLE_LIMITS, paddleVisibleOk, clampPaddleToFrustum } = X;
+const { CAMERA_PRESETS, cameraRigFor, rigViewProj, projectPoint, MATCH_RULES } = X;
+const pdClamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
+const { paddleTargetFromPointer, PADDLE_LIMITS, PADDLE_STANCE_Z, PADDLE_HOME, PLAY_RECT, PLAY_BAND_Y,
+  reachFor, lensFovDeg, paddleVisibleOk, clampPaddleToFrustum, rigMargin, tableScreenBounds,
+  tabletopBounds, opponentScreenTop, CAMERA_HEADROOM, unprojectToPlane,
+  paddleLimitsFor, depthForPointer } = X;
 const { Equipment } = X;
 const DEG = Math.PI / 180;
 /* experiment hook: MU=0.25 node analyze.js --suite rally */
@@ -609,11 +628,24 @@ function suiteCamera() {
         for (const sx of [-1, 1]) for (const sz of [-1, 1]) pts.push({ x: sx * PH.T_HALF_WID, y: PH.TABLE_Y, z: sz * PH.T_HALF_LEN, k: 'corner' });
         pts.push({ x: -PH.NET_HALF_WID, y: PH.NET_TOP, z: 0, k: 'netW' });
         pts.push({ x: PH.NET_HALF_WID, y: PH.NET_TOP, z: 0, k: 'netE' });
-        // 2. the whole volume the paddle can occupy must be on screen
-        for (const px of [-PADDLE_LIMITS.x, PADDLE_LIMITS.x])
-          for (const py of [PH.TABLE_Y + PADDLE_LIMITS.yLo, PH.TABLE_Y + PADDLE_LIMITS.yHi])
-            for (const pz of [PADDLE_LIMITS.zStepIn, PADDLE_LIMITS.zNear, PADDLE_LIMITS.zFar])
-              pts.push({ x: px, y: py, z: pz, k: pz === PADDLE_LIMITS.zStepIn ? 'step' : 'paddle' });
+        /* 2. The paddle volume that this camera actually offers. The declared
+         * PADDLE_LIMITS are a ceiling, not a promise: the reach is derived
+         * per camera from PLAY_RECT so the blade can never be painted
+         * outside the frame. Measure the derived box, on every plane the bat
+         * can stand on — and the promise is that it is on screen. */
+        for (const pz of [PADDLE_LIMITS.zStepIn, PADDLE_STANCE_Z, PADDLE_LIMITS.zNear, PADDLE_LIMITS.zFar]) {
+          const rb = reachFor(rig, A.a, pz);
+          /* The reachable set is the SCREEN rectangle: the blade's centre is
+           * the inverse projection of the cursor, so the promise is "every
+           * pixel inside this rectangle maps to a blade position inside the
+           * play rectangle". The world box is only the safety clamp — a
+           * rectangle in the world cannot equal a perspective trapezoid, so
+           * its corners legitimately sit outside the frame. */
+          for (const sx of [rb.sx0, rb.sx1]) for (const sy of [rb.sy0, rb.sy1]) {
+            const w = unprojectToPlane(rig, A.a, sx, sy, pz, {});
+            if (w) pts.push({ x: w.x, y: w.y, z: pz, k: pz === PADDLE_LIMITS.zStepIn ? 'step' : 'paddle' });
+          }
+        }
         let worst = 1e9, worstK = '', offTable = 0, offPaddle = 0, offStep = 0, nStep = 0;
         for (const p of pts) {
           const s = projectPoint(vp, p);
@@ -655,7 +687,7 @@ function suitePointer(n) {
      there"). Swept over sensitivity, rig, aspect ratio and pointer position,
      including pointers outside the window, which is how the old code ended up
      parked off-frame for good. */
-  const out = { cases: 0, offscreen: 0, worstOff: 0, rawOff: 0, rows: [], home: [] };
+  const out = { cases: 0, offscreen: 0, worstOff: 0, rawOff: 0, exactWorst: 0, rows: [], home: [] };
   const modes = Object.keys(CAMERA_PRESETS);
   for (const a of ASPECTS) {
     for (const mode of modes) {
@@ -671,24 +703,40 @@ function suitePointer(n) {
       out.home.push({ mode, aspect: a.name, homeMargin: homeWorst });
 
       for (const sens of [0.5, 1.0, 1.4, 1.8]) {
-        let off = 0, raw = 0, tot = 0, maxOut = 0;
+        let off = 0, raw = 0, tot = 0, maxOut = 0, exactWorst = 0;
         for (let i = 0; i < n; i++) {
           // deliberately wider than the window: a stuck or dragged-off cursor
           const pt = { x: srnd(-0.35, 1.35), y: srnd(-0.35, 1.35) };
-          const t = paddleTargetFromPointer(pt.x, pt.y, pt.y, sens, {}, {});
-          const rig = cameraRigFor(mode, { x: t.tx, y: t.ty, z: 0.4 }, a.a);
-          const vp = rigViewProj(rig, a.a);
+          const t = paddleTargetFromPointer(pt.x, pt.y, pt.y, sens, {}, { rig: rig0, aspect: a.a, z: PADDLE_STANCE_Z });
+          const vp = rigViewProj(rig0, a.a);
           const before = projectPoint(vp, { x: t.tx, y: t.ty, z: t.tz }, {});
           if (before.ok && Math.max(-before.x, before.x - 1, -before.y, before.y - 1) > 0.005) raw++;
           clampPaddleToFrustum(vp, t, 0.05);
           const sp = projectPoint(vp, { x: t.tx, y: t.ty, z: t.tz }, {});
           const outside = sp.ok ? Math.max(0.05 - sp.x, sp.x - 0.95, 0.05 - sp.y, sp.y - 0.95) : 9;
           if (outside > 0.002) { off++; if (outside > maxOut) maxOut = outside; }
+          /* THE CONTRACT: inside the reach rectangle the blade is drawn ON
+           * the cursor. Same rig the game passes in, same sensitivity. */
+          const cx = Math.min(1, Math.max(0, pt.x)), cy = Math.min(1, Math.max(0, pt.y));
+          const t2 = paddleTargetFromPointer(cx, cy, 0, sens, {}, { rig: rig0, aspect: a.a, z: PADDLE_STANCE_Z });
+          const s2 = projectPoint(vp, { x: t2.tx, y: t2.ty, z: t2.tz }, {});
+          const rb0 = reachFor(rig0, a.a, PADDLE_STANCE_Z);
+          if (s2.ok && cx >= rb0.sx0 && cx <= rb0.sx1 && cy >= rb0.sy0 && cy <= rb0.sy1) {
+            const err = Math.hypot(s2.x - cx, s2.y - cy);
+            // sensitivity scales the pointer before the inverse projection
+            const k = clamp(sens, 0.55, 2.0);
+            const px = clamp(0.5 + (cx - 0.5) * k, 0, 1), py = clamp(0.5 + (cy - 0.5) * k, 0, 1);
+            const t3 = paddleTargetFromPointer(px, py, 0, 1, {}, { rig: rig0, aspect: a.a, z: PADDLE_STANCE_Z });
+            const s3 = projectPoint(vp, { x: t3.tx, y: t3.ty, z: t3.tz }, {});
+            if (s3.ok && px >= rb0.sx0 && px <= rb0.sx1 && py >= rb0.sy0 && py <= rb0.sy1)
+              exactWorst = Math.max(exactWorst, Math.hypot(s3.x - px, s3.y - py));
+          }
           tot++; out.cases++;
         }
-        out.rows.push({ sens, mode, aspect: a.name, rawOff: raw / tot, offscreen: off / tot, worst: maxOut });
+        out.rows.push({ sens, mode, aspect: a.name, rawOff: raw / tot, offscreen: off / tot, worst: maxOut, exact: exactWorst });
         out.offscreen += off; out.rawOff += raw;
         out.worstOff = Math.max(out.worstOff, maxOut);
+        out.exactWorst = Math.max(out.exactWorst || 0, exactWorst);
       }
     }
   }
@@ -920,9 +968,13 @@ function suiteAiReturn(n) {
       ai.tactic = X.AI_TACTICS.BUILD;
       ai.plan = { x: bp.x, y: bp.y, z: bp.z, t: 0, speed: V3.len(bvv), short: false, wide: false };
       ai.commit = null;
-      const archId = ai.pickStroke({ ball: { w: w2, p: bp, v: bvv }, player: { pos: { x: srndSym(0.5) } }, time: 0 }, ai.plan);
-      const tgt = ai.pickTarget({ player: { pos: { x: srndSym(0.5) } } }, ai.plan, archId);
-      ai.commit = { arch: archId, tgt, vmag: ai.pickPace(archId, ai.plan), at: 0, windup: 0.2, bs: null };
+      /* The committed plan IS the plan, enriched with the stroke archetype
+         and the target — exactly what think() builds (55_ai.js). swing()
+         reads plan.archId and plan.aim; anything else is a stale bench. */
+      ai.plan.archId = ai.pickStroke({ ball: { w: w2, p: bp, v: bvv }, player: { pos: { x: srndSym(0.5) } }, time: 0 }, ai.plan);
+      ai.plan.aim = ai.pickTarget({ player: { pos: { x: srndSym(0.5) } } }, ai.plan, ai.plan.archId);
+      ai.commit = ai.plan;
+      ai.swingAt = 0;
       const t0 = process.hrtime.bigint();
       const rk = ai.swing({ ball: { p: bp, v: bvv, w: w2, lastHitBy: 1 }, time: 0, shotId: i });
       ms.push(Number(process.hrtime.bigint() - t0) / 1e6);
@@ -1031,15 +1083,25 @@ function suiteFuzz(n) {
  *  actually cover, given the pointer mapping and the paddle limits?
  * ------------------------------------------------------------------ */
 function suiteReach() {
+  /* Can the blade MEET a ball at (x, z) on the player's half? The old bench
+   * asked `z >= PADDLE_LIMITS.zNear`, a rule from the affine era that no
+   * longer exists; it reported 0 % coverage for the whole short game and
+   * 100 % at z 1.30, i.e. the opposite of what the code now does. The real
+   * question has three parts: can the blade stand close enough to the plane
+   * (the step-in), can it be at that lateral offset, and is the contact
+   * inside the capture radius. */
+  const CAP = MATCH_RULES.captureRadius;
   const out = { cases: 0, rows: [], uncoveredShort: 0, grid: 0 };
-  const rig = cameraRigFor('BROADCAST', { x: 0, y: PH.TABLE_Y + 0.3, z: 0 }, 16 / 9);
+  const rig = cameraRigFor('BROADCAST', null, 16 / 9);
   const vp = rigViewProj(rig, 16 / 9);
   for (let z = 0.10; z <= 1.37; z += 0.05) {
     let cover = 0, tot = 0;
+    const plane = pdClamp(z, PADDLE_LIMITS.zStepIn, PADDLE_LIMITS.zFar);
+    const depthOk = Math.abs(plane - z) <= CAP;
+    const box = reachFor(rig, 16 / 9, plane);
     for (let x = -PH.T_HALF_WID; x <= PH.T_HALF_WID; x += 0.05) {
       tot++; out.cases++;
-      // can the paddle be at (x, z) at all?
-      const ok = Math.abs(x) <= PADDLE_LIMITS.x && z >= PADDLE_LIMITS.zNear - 0.001;
+      const ok = depthOk && Math.abs(x) <= box.xMax + CAP;
       if (ok) cover++;
     }
     out.rows.push({ z: +z.toFixed(2), coverage: cover / tot });
@@ -1342,7 +1404,7 @@ function suiteSmoke(matches, frames) {
     } catch (e) { out.throws.push({ where: 'awardHook', msg: String(e && e.message || e) }); }
     let swipeT = 0, serveWait = 0, lastState = '', serveAge = 0, serveMin = 9;
     let gestF = -1, gestX = 0.5, gestY = 0.5, gestUp = 0.05;
-    let rcOpen = false, rcAge = 0, rcMin = 9, rcTrace = [];
+    let rcOpen = false, rcStarted = false, rcAge = 0, rcMin = 9, rcTrace = [];
     let curShot = null, curShotT = -1;
     for (let f = 0; f < frames; f++) {
       const dt = 1 / 60;
@@ -1430,9 +1492,13 @@ function suiteSmoke(matches, frames) {
       const fin = (o) => Number.isFinite(o.x) && Number.isFinite(o.y) && Number.isFinite(o.z);
       if (!fin(pad.pos) || !fin(b.p) || (b.live && !fin(b.v)) ||
         !Number.isFinite(game.camPos.x) || !Number.isFinite(game.fov)) out.nonFinite++;
+      /* The volume is a function of the depth the blade stands at (a leaned-in
+       * blade may dip lower and reach wider), so the check asks the camera
+       * module for the envelope of THIS frame rather than the stance box. */
       const L = X.PADDLE_LIMITS;
-      if (Math.abs(pad.pos.x) > L.x + 1e-3 || pad.pos.z < L.zStepIn - 1e-3 || pad.pos.z > L.zFar + 1e-3 ||
-        pad.pos.y < PH.TABLE_Y + L.yLo - 1e-3 || pad.pos.y > PH.TABLE_Y + L.yHi + 1e-3) out.limitBreak++;
+      const LE = X.paddleLimitsFor(pad.pos.z);
+      if (Math.abs(pad.pos.x) > LE.x + 1e-3 || pad.pos.z < L.zStepIn - 1e-3 || pad.pos.z > L.zFar + 1e-3 ||
+        pad.pos.y < PH.TABLE_Y + LE.yLo - 1e-3 || pad.pos.y > PH.TABLE_Y + LE.yHi + 1e-3) out.limitBreak++;
       if (game.camVPReady && game.state !== GSX.MENU) {
         const sp = X.projectPoint(game.camVP, pad.pos, {});
         if (sp.ok) {
@@ -1468,10 +1534,16 @@ function suiteSmoke(matches, frames) {
          * ball (the toss assist). Judging "did it pass through the centre" on a
          * fixed slice of SERVE_READY either missed the serves that were started
          * on the first frame or, worse, counted the toss slide as a failure. */
-        if (game.state === GSX.POINT || game.state === GSX.REPLAY) { rcOpen = true; rcAge = 0; rcMin = 9; }
+        if (game.state === GSX.POINT || game.state === GSX.REPLAY) { rcOpen = true; rcStarted = false; rcAge = 0; rcMin = 9; }
         lastState = game.state;
       }
-      if (rcOpen) {
+      /* The measurement starts when the glide actually starts. Between the
+       * point ending and `prepServe` the bat is still finishing its
+       * follow-through — that is the rally leaving the bat, not a failure to
+       * come home — and judging those frames made a bot that serves within
+       * 0.4 s of the point look like a bug. */
+      if (rcOpen && !rcStarted && (game.recenterT || 0) > 0) rcStarted = true;
+      if (rcOpen && rcStarted) {
         rcAge += dt;
         rcMin = Math.min(rcMin, Math.abs(pad.pos.x));
         if (rcTrace.length < 400) rcTrace.push({ age: +rcAge.toFixed(2), st: game.state,
@@ -1486,20 +1558,25 @@ function suiteSmoke(matches, frames) {
         const live = !(game.replayer && game.replayer.on) &&
           game.state !== GSX.POINT && game.state !== GSX.REPLAY;
         const struck = live && game.ball.lastHitBy !== 0;
-        if (struck) {
+        if (struck && !rcStarted) {
+          /* Served before `prepServe` could start the glide: there was no
+           * re-centring window to judge, so it is neither a pass nor a fail. */
+          out.rcNoGlide = (out.rcNoGlide || 0) + 1;
+          rcOpen = false; rcMin = 9; rcTrace = [];
+        } else if (struck) {
           out.recentreX.push(rcMin);
           if (rcMin > 0.08) {
             out.resetsOffCentre++;
             if (out.rcFails.length < 3) out.rcFails.push({ min: +rcMin.toFixed(3), trace: rcTrace.slice(-26) });
           }
-          rcOpen = false; rcMin = 9; rcTrace = [];
+          rcOpen = false; rcStarted = false; rcMin = 9; rcTrace = [];
         } else if (rcAge > 5) {
           /* No serve followed inside 5 s: the match ended, or a replay ran
            * long. That is not a serve, so it is not a re-centring failure —
            * counting it here is what made the metric read 18/43 while the bat
            * was in fact going home on every real serve. */
           out.rcNoServe++;
-          rcOpen = false; rcMin = 9; rcTrace = [];
+          rcOpen = false; rcStarted = false; rcMin = 9; rcTrace = [];
         }
       }
       /* The window is "from the new point until the serve is struck", not
@@ -1561,20 +1638,31 @@ console.log('TOPSPIN ARENA — analysis bench');
 console.log('modules: ' + MODULES.join(', '));
 console.log('');
 
-if (want('physics')) RESULTS.physics = suitePhysics();
-if (want('serve')) RESULTS.serve = suiteServe(+arg('--n', 120));
-if (want('pserve')) RESULTS.pserve = suitePlayerServe(+arg('--pn', 400));
-if (want('rally')) RESULTS.rally = suiteRally(+arg('--rn', 60));
-if (want('camera')) RESULTS.camera = suiteCamera();
-if (want('pointer')) RESULTS.pointer = suitePointer(+arg('--qn', 140));
-if (want('passive')) RESULTS.passive = suitePassive();
-if (want('aireturn')) RESULTS.aireturn = suiteAiReturn(+arg('--an', 60));
-if (want('miss')) RESULTS.miss = suiteMiss(+arg('--mn', 24));
-if (want('fuzz')) RESULTS.fuzz = suiteFuzz(+arg('--fn', 900));
-if (want('reach')) RESULTS.reach = suiteReach();
-if (want('bounce')) RESULTS.bounce = suiteBounce();
-if (want('cork')) RESULTS.cork = suiteCork();
-if (want('smoke')) RESULTS.smoke = suiteSmoke(+arg('--sn', 6), +arg('--frames', 5400));
+/* A bench is a measuring instrument, not a shipped feature: one stale suite
+   (an API that moved on) must never take the other dozen measurements down
+   with it. Failures are reported, and the run continues. */
+const SUITES = {
+  physics: () => suitePhysics(),
+  serve: () => suiteServe(+arg('--n', 120)),
+  pserve: () => suitePlayerServe(+arg('--pn', 400)),
+  rally: () => suiteRally(+arg('--rn', 60)),
+  camera: () => suiteCamera(),
+  pointer: () => suitePointer(+arg('--qn', 140)),
+  passive: () => suitePassive(),
+  aireturn: () => suiteAiReturn(+arg('--an', 60)),
+  miss: () => suiteMiss(+arg('--mn', 24)),
+  fuzz: () => suiteFuzz(+arg('--fn', 900)),
+  reach: () => suiteReach(),
+  bounce: () => suiteBounce(),
+  cork: () => suiteCork(),
+  smoke: () => suiteSmoke(+arg('--sn', 6), +arg('--frames', 5400)),
+};
+const BROKEN = [];
+for (const [name, run] of Object.entries(SUITES)) {
+  if (!want(name)) continue;
+  try { RESULTS[name] = run(); }
+  catch (e) { BROKEN.push(name + ': ' + (e && e.message || e)); }
+}
 
 CASES = Object.values(RESULTS).reduce((s, r) => s + (r.cases || 0), 0);
 
@@ -1653,26 +1741,29 @@ if (RESULTS.camera) {
 if (RESULTS.pointer) {
   hr('6. POINTER → PADDLE  (' + RESULTS.pointer.cases + ' cases · 4 rigs × 8 aspects × 4 sensitivities)');
   console.log('  Pointer positions are sampled from -0.35..1.35 of the window, i.e. including');
-  console.log('  a cursor dragged off the edge. "raw" is what the pointer map asks for before');
-  console.log('  the clamp, "on screen" is what the player actually sees. Both are the shipped path.');
+  console.log('  a cursor dragged off the edge, and the blade is placed by inverting the exact');
+  console.log('  projection the frame is drawn with. "exact" is the worst distance between the');
+  console.log('  drawn blade and the cursor inside the reach rectangle (0 = it is under the mouse).');
   console.log('');
-  console.log('  rig          sens   raw off-frame   AFTER CLAMP off-frame   worst overshoot');
+  console.log('  rig          sens   raw off-frame   AFTER CLAMP off-frame   worst overshoot   exact');
   const P = RESULTS.pointer;
   const agg = {};
   for (const r of P.rows) {
     const k = r.mode + '|' + r.sens;
-    const a = agg[k] || (agg[k] = { mode: r.mode, sens: r.sens, raw: 0, off: 0, n: 0, worst: 0 });
+    const a = agg[k] || (agg[k] = { mode: r.mode, sens: r.sens, raw: 0, off: 0, n: 0, worst: 0, exact: 0 });
     a.raw += r.rawOff; a.off += r.offscreen; a.n++; a.worst = Math.max(a.worst, r.worst);
+    a.exact = Math.max(a.exact, r.exact || 0);
   }
   for (const k of Object.keys(agg)) {
     const a = agg[k];
     console.log(`  ${a.mode.padEnd(12)} ${a.sens.toFixed(1)}   ${(a.raw / a.n * 100).toFixed(1).padStart(8)} %   ` +
-      `${(a.off / a.n * 100).toFixed(2).padStart(16)} %   ${f2(a.worst)}`);
+      `${(a.off / a.n * 100).toFixed(2).padStart(16)} %   ${f2(a.worst).padStart(15)}   ${a.exact.toExponential(1)}`);
   }
   const homeBad = P.home.filter((h) => h.homeMargin < 0.05);
   console.log(`\n  TOTAL after clamp: ${P.offscreen} / ${P.cases} off-frame (before clamp: ${(P.rawOff / P.cases * 100).toFixed(1)} %)   worst ${f2(P.worstOff)}`);
   console.log(`  clamp anchor (centred bat) margin < 5 % of screen in ${homeBad.length} / ${P.home.length} rig×aspect cells` +
     (homeBad.length ? ': ' + homeBad.map((h) => h.mode + '@' + h.aspect).join(', ') : ' — the anchor is always usable'));
+  console.log(`  pointer → blade exactness (worst error inside the reach rect): ${(P.exactWorst || 0).toExponential(2)} of a screen` + ((P.exactWorst || 0) < 1e-3 ? '  PASS — the blade is under the cursor' : '  FAIL'));
 }
 
 if (RESULTS.passive) {
@@ -1820,7 +1911,7 @@ if (RESULTS.smoke) {
   const rx = k.recentreX.slice().sort((a, b) => a - b);
   if (rx.length) console.log(`     closest approach to the centre before the strike: med ${rx[Math.floor(rx.length / 2)].toFixed(3)} m, p90 ${rx[Math.floor(rx.length * 0.9)].toFixed(3)} m`);
   const rxD = k.recentreX.slice().sort((a, b) => b - a);
-  console.log(`  bat returns to the centre on a new point   -> ${k.recentreX.length - k.resetsOffCentre} / ${k.recentreX.length} windows (from the point ending to the serve being struck; ${k.resets} SERVE_READY entries, ${k.rcNoServe} windows where no serve followed)` +
+  console.log(`  bat returns to the centre on a new point   -> ${k.recentreX.length - k.resetsOffCentre} / ${k.recentreX.length} windows (from the point ending to the serve being struck; ${k.resets} SERVE_READY entries, ${k.rcNoServe} where no serve followed, ${k.rcNoGlide || 0} struck before the glide began)` +
     (rxD.length ? `   worst closest-approach ${rxD[0].toFixed(3)} m of a 1.02 m half-width` : ''));
   console.log(`  player contacts ${k.contacts}   edge balls ${k.edgeBalls}   frames stepping in for a short ball ${k.stepInFrames}`);
   if (k.sweet.length) {
@@ -1866,6 +1957,10 @@ if (RESULTS.reach) {
   console.log(`  centred paddle projects to screen (${f2(RESULTS.reach.paddleScreen.x)}, ${f2(RESULTS.reach.paddleScreen.y)})`);
 }
 
+if (BROKEN.length) {
+  hr('SUITES THAT COULD NOT RUN');
+  for (const b of BROKEN) console.log('  ' + b);
+}
 hr('TOTAL: ' + CASES + ' analysis cases in ' + ((Date.now() - t00) / 1000).toFixed(1) + ' s');
 
 const j = arg('--json', null);
