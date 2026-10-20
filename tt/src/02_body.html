@@ -33,10 +33,14 @@
       <div id="playStatus" role="status" aria-live="polite"></div>
     </div>
 
-    <!-- Read-only objective; the entire gesture area stays free of controls. -->
-    <div id="train" role="status" aria-live="polite" aria-atomic="true">
-      <div class="th"><span id="trStep"></span><b id="trTitle"></b><span id="trProgress"></span></div>
-      <div id="trTip"></div><div id="trMsg"></div>
+    <!-- Read-only objective, plus the ONE control training may take: the
+         preview is started by this button, never by itself. -->
+    <div id="train" role="group" aria-label="Обучение">
+      <div id="trText" role="status" aria-live="polite" aria-atomic="true">
+        <div class="th"><span id="trStep"></span><b id="trTitle"></b><span id="trProgress"></span></div>
+        <div id="trTip"></div><div id="trMsg"></div>
+      </div>
+      <button id="trDemo" class="tbt" type="button" aria-pressed="false">ПОКАЗАТЬ, КАК ИГРАТЬ</button>
     </div>
 
     <div id="dbg"></div>
@@ -158,7 +162,7 @@
       <div class="logo" style="font-size:24px">НАСТРОЙКИ</div>
       <div class="sub">Личные предпочтения · единые правила игры</div>
 
-      <p class="note">Допуски попадания и помощь настроены одинаково для всех — без ползунков. Мяч отбивается ракеткой. Мышь или палец управляют её движением, свайп задаёт удар. Скобки у мяча подсказывают время: пунктир — приближение, сплошные — окно для свайпа. Сам по себе маркер мяч не отбивает.</p>
+      <p class="note">Допуски попадания и помощь настроены одинаково для всех. Мяч отбивается ракеткой. Мышь или палец управляют её движением, свайп задаёт удар. Скобки у мяча подсказывают время: пунктир — приближение, сплошные — окно для свайпа. Сам по себе маркер мяч не отбивает.</p>
 
       <h3 class="sec">ХВАТ И ВЕДУЩАЯ РУКА</h3>
       <div class="row" role="group" aria-label="Хват ракетки">
@@ -171,6 +175,13 @@
       </div>
       <p class="note">Shakehand: лёгкий наклон вперёд. Перо: почти вертикально, рукоятка вверх. Поза зеркалится; направление свайпа остаётся экранным.</p>
 
+      <h3 class="sec">ЖЕСТЫ</h3>
+      <div class="row" role="group" aria-label="Профиль жестов">
+        <button class="opt" data-set="gestures" data-val="classic" aria-pressed="false"><b>КЛАССИКА</b><small>подрезка свайпом вниз</small></button>
+        <button class="opt" data-set="gestures" data-val="safe" aria-pressed="true"><b>БЕЗ СВАЙПА ВНИЗ</b><small>удержание = подрезка</small></button>
+      </div>
+      <p class="note">Профиль «Без свайпа вниз» нужен там, где вертикальный свайп сворачивает приложение (Telegram, системные жесты). Подрезка: зажмите палец и мягко ведите вверх — или медленный короткий свайп. В «Классике» подрезка — свайп вниз.</p>
+
       <h3 class="sec">КАМЕРА</h3>
       <div class="row" id="cameraViews" role="group" aria-label="Вид камеры">
         <button class="opt" data-camera="BROADCAST"><b>ИГРА</b></button>
@@ -179,6 +190,54 @@
       </div>
       <p class="note" id="cameraHelp"></p>
       <button class="tbt" id="camReset">СБРОСИТЬ ВИД</button>
+
+      <h3 class="sec">ОТОБРАЖЕНИЕ</h3>
+      <div class="row" role="group" aria-label="Видимость ракетки">
+        <button class="opt" data-set="paddle" data-val="show" aria-pressed="true"><b>РАКЕТКА ВИДНА</b></button>
+        <button class="opt" data-set="paddle" data-val="hide" aria-pressed="false"><b>СКРЫТЬ РАКЕТКУ</b><small>только наведение</small></button>
+      </div>
+      <p class="note">Скрытая ракетка не меняет физику: удар по-прежнему наносит её тело и зона захвата. Вместо ракетки на экране остаётся прицел-перекрестие в её точке и маркер у мяча.</p>
+
+      <h3 class="sec">ПОДАЧА</h3>
+      <div class="sl">
+        <label for="serveToss">ВЫСОТА ПОДБРОСА<small>насколько высоко взлетает мяч</small></label>
+        <input type="range" id="serveToss" data-set="serveToss" min="0.8" max="2.2" step="0.05" value="1.2" aria-label="Высота подброса мяча при подаче">
+        <span class="v" id="serveTossVal">37 см</span>
+      </div>
+      <p class="note">Выше подброс — больше времени на замах и более пологий, длинный удар; ниже — быстрее, короче. Подброс всегда остаётся законным (не ниже минимума). Влияет только на вашу подачу.</p>
+
+      <h3 class="sec">УПРАВЛЕНИЕ · ПОМОЩЬ</h3>
+      <div class="sl">
+        <label for="capScale">ОКНО ЗАХВАТА<small>насколько близко нужно подвести ракетку к мячу</small></label>
+        <input type="range" id="capScale" data-set="capScale" min="0.8" max="2.5" step="0.05" value="1" aria-label="Размер окна захвата мяча">
+        <span class="v" id="capScaleVal">100%</span>
+      </div>
+      <div class="sl">
+        <label for="zoneScale">ЗОНА НАЖАТИЯ<small>как далеко от мяча засчитывается свайп</small></label>
+        <input type="range" id="zoneScale" data-set="zoneScale" min="0.8" max="2.5" step="0.05" value="1" aria-label="Размер зоны нажатия">
+        <span class="v" id="zoneScaleVal">100%</span>
+      </div>
+      <div class="sl">
+        <label for="aimAssist">ПОМОЩЬ ПРИЦЕЛА<small>авто-коррекция полёта, чтобы мяч шёл на стол</small></label>
+        <input type="range" id="aimAssist" data-set="aimAssist" min="0.5" max="1" step="0.05" value="0.85" aria-label="Помощь прицела">
+        <span class="v" id="aimAssistVal">85%</span>
+      </div>
+      <div class="sl">
+        <label for="footAssist">ПОДХОД ЗА МЯЧОМ<small>ракетка сама тянется к предсказанной точке</small></label>
+        <input type="range" id="footAssist" data-set="footAssist" min="0" max="1" step="0.05" value="0.85" aria-label="Ассист подвода ракетки">
+        <span class="v" id="footAssistVal">85%</span>
+      </div>
+      <div class="sl">
+        <label for="batSens">ЧУВСТВИТЕЛЬНОСТЬ<small>усиление движения курсора или пальца</small></label>
+        <input type="range" id="batSens" data-set="batSens" min="0.4" max="2.2" step="0.05" value="1" aria-label="Чувствительность ракетки">
+        <span class="v" id="batSensVal">1.00×</span>
+      </div>
+      <div class="zp">
+        <canvas id="zonePreview" width="240" height="160" aria-hidden="true"></canvas>
+        <small>Живой предпросмотр: <b style="color:#39c6ff">синее</b> — окно захвата (ракетка), <b style="color:#6ee7a8">зелёное</b> — зона нажатия (мяч). Двигайте ползунки — круги меняются сразу. При подаче зона нажатия автоматически ×2.</small>
+      </div>
+      <p class="note">Работает только на вашу ракетку — на соперника не влияет. «Окно захвата» и «зона нажатия» выше — прощают неточность, легче попасть по мячу. «Подход за мячом» и «помощь прицела» авто-доводят ракетку и полёт. По умолчанию стоят авторские значения (100% / 85%).</p>
+
 
       <button class="btn" id="setClose">СОХРАНИТЬ И ЗАКРЫТЬ</button>
     </div>
@@ -248,7 +307,7 @@
       <div class="sub">Шесть ударов в руках. Дальше — матч</div>
       <div class="recap">
         <div class="rc"><i style="background:#4ee39a"></i><b>Вверх</b><small>топспин: мяч ныряет в стол</small></div>
-        <div class="rc"><i style="background:#39c6ff"></i><b>Вниз</b><small>подрезка: низко и медленно</small></div>
+        <div class="rc"><i style="background:#39c6ff"></i><b>Мягко</b><small>подрезка: вниз или с удержанием вверх</small></div>
         <div class="rc"><i style="background:#ffd34d"></i><b>Дугой вбок</b><small>боковое: мяч уходит вбок</small></div>
         <div class="rc"><i style="background:#9aa7b8"></i><b>Коротко</b><small>блок: гасит чужую скорость</small></div>
         <div class="rc"><i style="background:#ff7a2f"></i><b>Быстро и плоско</b><small>смеш по высокому мячу</small></div>

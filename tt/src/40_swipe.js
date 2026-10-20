@@ -30,7 +30,7 @@ class SwipeTracker {
       dist: 0, pathLen: 0, straightness: 1,
       speed: 0, peakSpeed: 0, releaseSpeed: 0, accel: 0,
       angle: 0, angleDeg: 0, up: 0, right: 0,
-      curl: 0, dur: 0, samples: 0, jerk: 0, smooth: 1,
+      curl: 0, dur: 0, samples: 0, jerk: 0, smooth: 1, holdT: 0,
     };
   }
   down(x, y, t) {
@@ -43,11 +43,25 @@ class SwipeTracker {
     this.samples.push({ x, y, t });
     this.m = this.blankMetrics();
     this.m.sx = x; this.m.sy = y; this.m.x = x; this.m.y = y;
+    /* How long the finger sat still BEFORE the stroke began. Tracked live
+     * (not from the sample window, which truncates) so a deliberate hold is
+     * readable even after a long jittery press. */
+    this._pathAcc = 0; this._movedT = null;
   }
   move(x, y, t) {
     if (!this.active) return;
     const s = this.samples, last = s[s.length - 1];
-    if (last && t - last.t < 0.0025) { last.x = x; last.y = y; return; }
+    if (this._movedT === null && last) {
+      this._pathAcc += Math.hypot(x - last.x, y - last.y);
+      if (this._pathAcc > 0.012) this._movedT = t;
+    }
+    // Never coalesce into pointerdown: multiple events can arrive between
+    // two RAF ticks and must not erase the origin of the stroke.
+    if (s.length > 1 && last && t - last.t < 0.0025) {
+      last.x = x; last.y = y; last.t = Math.max(last.t, t);
+      this.compute(t);
+      return;
+    }
     s.push({ x, y, t });
     if (s.length > this.maxSamples) s.shift();
     this.compute(t);
@@ -97,6 +111,7 @@ class SwipeTracker {
       }
     }
     m.pathLen = pl;
+    m.holdT = clamp((this._movedT ?? b.t) - this.startT, 0, 3);
     m.straightness = pl > 1e-5 ? clamp(m.dist / pl, 0, 1) : 1;
     m.curl = clamp(curl, -3.2, 3.2);          // total signed turning [rad]
     m.jerk = speedChanges ? jerkAcc / speedChanges : 0;
@@ -189,12 +204,19 @@ const ARCH = {
 /** A click, a 2-pixel twitch or hover jitter is not a stroke.
  *  The bat may only fire if the pointer actually travelled.
  *  A serve is a shorter, slower flick (often down+up with one move) — the
- *  rally gate would reject a legal toss strike. */
+ *  rally gate would reject a legal toss strike.
+ *  The rally gate is calibrated on a DELIBERATE but soft stroke, because the
+ *  push/chop drill asks for exactly that in words (“мягкое движение вниз”).
+ *  Measured on the drill: a 35 px downward drag at ~250 px/s produced
+ *  pathLen .044 / dist .044 / peakSpeed .31 and was dropped as a non-stroke,
+ *  so the gesture never reached the ball at all (the trainer only ever said
+ *  “Нет контакта”). 0.040 / 0.034 / 0.20 still rejects a click (0.002) and a
+ *  2 % twitch (0.028) with a margin, and admits the soft push. */
 function isRealStroke(m, serving) {
   if (!m || !Number.isFinite(m.samples) || m.samples < (serving ? 2 : 3)) return false;
-  const minPath = serving ? 0.022 : 0.052;
-  const minDist = serving ? 0.016 : 0.040;
-  const minSp = serving ? 0.14 : 0.38;
+  const minPath = serving ? 0.022 : 0.040;
+  const minDist = serving ? 0.016 : 0.034;
+  const minSp = serving ? 0.14 : 0.20;
   if (!Number.isFinite(m.pathLen) || m.pathLen < minPath) return false;
   if (!Number.isFinite(m.dist) || m.dist < minDist) return false;
   if (!Number.isFinite(m.peakSpeed) || m.peakSpeed < minSp) return false;
@@ -213,11 +235,23 @@ function classifyStroke(m, ctx, sp01) {
   const overTable = depth < PH.T_HALF_LEN - 0.02;
   const incomingTop = ctx.incomingTop || 0;
   const incSpeed = ctx.ballSpeed || 6;
+  /* SAFE GESTURE PROFILE (Telegram mini-apps, phones). A downward drag is
+   * owned by the host app — Telegram collapses the whole mini app on
+   * swipe-down — so a stroke must not REQUIRE one. Two honest substitutes:
+   *   · hold the press, then move = explicit "open racket / defence" intent
+   *     (rallies only: on a serve the press-and-hold IS the toss ritual);
+   *   · a slow short stroke = soft hands = push/chop family.
+   * Classic downward gestures keep working wherever the platform passes
+   * them, so no player loses a shot they already had. */
+  const safe = !!ctx.safeGestures;
+  const holdDef = safe && !ctx.isServe && (m.holdT || 0) >= 0.18;
 
   if (ctx.isServe) {
     if (veryFast && Math.abs(u) < 0.45) return STROKES.SERVE_FAST;
     if (latMag > 0.70 || curly) return STROKES.SERVE_SIDE;
     if (u < -0.18) return STROKES.SERVE_BACK;
+    // soft serve without a down-swipe: gentle = backspin serve
+    if (safe && slow && m.dist < 0.24) return STROKES.SERVE_BACK;
     return STROKES.SERVE_TOP;
   }
   // tiny gesture = touch play
@@ -232,16 +266,22 @@ function classifyStroke(m, ctx, sp01) {
    * assist then rotated the swing up until the chop "landed", and a 1.9 m/s
    * ball came back at 25 m/s off a hand that never swung forward. The
    * boundary is the same -0.28 the backspin family uses, so the two rules
-   * cannot overlap. */
-  if (hAboveNet > 0.14 && sp01 > 0.52 && u > -0.28 && u < 0.52) return STROKES.SMASH;
-  // downward gestures = backspin family
-  if (u < -0.28) {
+   * cannot overlap. A held press is defence intent and skips the smash too. */
+  if (hAboveNet > 0.14 && sp01 > 0.52 && u > -0.28 && u < 0.52 && !holdDef) return STROKES.SMASH;
+  // downward gestures (or a held press in the safe profile) = backspin family
+  if (u < -0.28 || holdDef) {
     if (depth > PH.T_HALF_LEN + 0.40 || (fast && m.dist > 0.20)) return STROKES.CHOP;
     if (sp01 < 0.22 && overTable && hAboveTable < 0.35) return STROKES.DROP;
     return STROKES.PUSH;
   }
   // a clearly curved sideways gesture = sidespin
   if (latMag > 0.58 && curly) return (r > 0) ? STROKES.HOOK : STROKES.FADE;
+  /* Safe profile: soft hands without a hold — a slow, short, unhurried
+   * stroke is a push, never a drive. Fast short strokes stay flicks. */
+  if (safe && slow && m.dist < 0.16) {
+    if (sp01 < 0.22 && overTable && hAboveTable < 0.35) return STROKES.DROP;
+    return STROKES.PUSH;
+  }
   // upward gestures = topspin family
   if (u > 0.70) {
     if (slow && hAboveTable < 0.55) {
@@ -283,6 +323,7 @@ function deriveStroke(m, ctx) {
     m.curl = sane(m.curl, -6, 6, 0);
     m.smooth = sane(m.smooth, 0.15, 1, 0.6);
     m.straightness = sane(m.straightness, 0, 1, 1);
+    m.holdT = sane(m.holdT, 0, 3, 0);
     m.samples = Number.isFinite(m.samples) ? m.samples : 0;
     m.x = sane(m.x, -2, 3, 0.5);
     m.y = sane(m.y, -2, 3, 0.5);
@@ -414,6 +455,19 @@ function deriveStroke(m, ctx) {
     case 'CHOP': depth01 = 0.58; break;
     default: depth01 = clamp(0.34 + sp01 * 0.44 + m.dist * 0.26, 0.2, 0.96);
   }
+
+  /* A serve's DEPTH is driven by the swing, not silently averaged away. Before
+   * this, every archetype fell through the default branch above and the serve
+   * solver then pulled it to a safe mid-length, so a tap and a hard whip felt
+   * identical. Here the player's effort maps straight onto how deep the ball is
+   * asked to land: a soft flick sits short, a strong drive reaches the far
+   * line. solveServeStroke keeps the requested landing legal (on the table),
+   * so this changes WHERE a good serve goes without turning power into a
+   * coin-flip fault. The wider the power, the deeper and faster the serve. */
+  if (ctx.isServe) {
+    depth01 = clamp(0.18 + sp01 * 0.60 + Math.max(0, m.dist) * 0.16, 0.12, 0.98);
+  }
+
   const aimZ = -side * lerp(0.16, PH.T_HALF_LEN - 0.07, depth01);
 
   /* ---- 7. execution quality --------------------------------------- */
@@ -569,7 +623,28 @@ function ownFor(aim, side) {
   return { x: aim.x * 0.35, z: side * (0.78 + Math.abs(aim.z) * 0.16) };
 }
 
-function solveServeStroke(ballP, racket, evalStroke, side, assist) {
+// The live solver has a single call-wide ceiling, including every fallback
+// and fine confirmation. Offline calibration keeps the exhaustive reference.
+// A private sentinel unwinds nested searches without swallowing real errors.
+function solveServeStroke(ballP, racket, evalStroke, side, assist, realtime = false) {
+  if (!realtime) return searchServeStroke(ballP, racket, evalStroke, side, assist);
+  const work = { limit: 128, flights: 0, best: null };
+  try {
+    const result = searchServeStroke(ballP, racket, evalStroke, side, assist, work);
+    return { ...(result.ok ? result : work.best || result), flights: work.flights, budgeted: true };
+  }
+  catch (stop) {
+    if (stop !== work) throw stop;
+    const result = work.accepted || work.best || { dE: 0, dA: 0, sc: 1, dmp: 1, ok: false, target: racket.aim };
+    if (result.ok) {
+      const key = serveWarmKey(side, racket);
+      if (SERVE_WARM.size >= 96 && !SERVE_WARM.has(key)) SERVE_WARM.delete(SERVE_WARM.keys().next().value);
+      SERVE_WARM.set(key, result);
+    }
+    return { ...result, flights: work.flights, budgeted: true };
+  }
+}
+function searchServeStroke(ballP, racket, evalStroke, side, assist, work = null) {
   const aimReq = racket.aim || { x: 0, z: -side * 0.95 };
   const v = V3.new(), w = V3.new();
   let legal = false, why = 'none';
@@ -606,7 +681,9 @@ function solveServeStroke(ballP, racket, evalStroke, side, assist) {
    * -128 rad/s, delivered -16). */
   const SPIN_W = 7.0;
   const spinWant = racket.spinWant || 0;
-  /* Hard ceiling on the work one serve may do. The search is a heuristic and
+  /* Reference-search recovery cutoff, NOT a call-wide ceiling. The live
+   * wrapper above enforces the actual 128-flight cap in score() itself.
+   * The search is a heuristic and
    * a pathological gesture (a 6-sample tap) used to walk every ladder, every
    * recovery sweep and then be solved a second time by the caller: measured
    * 730 ms, i.e. 44 dropped frames, on a ball that was never going to be a
@@ -632,7 +709,9 @@ function solveServeStroke(ballP, racket, evalStroke, side, assist) {
   };
 
   const score = (own, aim, dE, dA, sc, dmp, fine) => {
+    if (work && work.flights >= work.limit) throw work;
     flights++;
+    if (work) work.flights++;
     evalStroke(dE, dA, sc, dmp, v, w);
     legal = false; why = 'none';
     const pc0 = paceCost(sc, aim);
@@ -694,7 +773,23 @@ function solveServeStroke(ballP, racket, evalStroke, side, assist) {
     const aimDeep = clamp((Math.abs(aim.z) - SERVE_MIN_PAST_NET) / 0.50, 0, 1);
     const dead = (pastNet < SERVE_MIN_PAST_NET && aimDeep > 0)
       ? (SERVE_MIN_PAST_NET - pastNet) * 5.0 * aimDeep : 0;
-    return Math.hypot(r.b2.x - aim.x, r.b2.z - aim.z) + d1 * 0.22 + pc0 + dead + spinCost;
+    const error = Math.hypot(r.b2.x - aim.x, r.b2.z - aim.z);
+    const cost = error + d1 * .22 + pc0 + dead + spinCost;
+    if (work) {
+      if (fine && (!work.best || cost < work.best.cost))
+        work.best = { dE, dA, sc, dmp, ok: true, target: { ...aim }, cost };
+      // A live contact needs a good legal answer, not every local optimum.
+      // Production-step confirmation is mandatory before the early exit.
+      const playable = Math.abs(aim.z) < SERVE_MIN_PAST_NET || pastNet >= SERVE_MIN_PAST_NET;
+      if (playable && error <= .24 && pc0 + spinCost < .45) {
+        if (!fine) score(own, aim, dE, dA, sc, dmp, true);
+        else {
+          work.accepted = { dE, dA, sc, dmp, ok: true, target: { ...aim }, cost };
+          throw work;
+        }
+      }
+    }
+    return cost;
   };
 
   const SC = [0.30, 0.45, 0.65, 0.88, 1.15, 1.45];
@@ -724,6 +819,20 @@ function solveServeStroke(ballP, racket, evalStroke, side, assist) {
   }
 
   const aimBase = aimReq;
+
+  // Live geometric seeds: express the face in world space, not as a guessed
+  // correction to one particular swipe. These are only starting points;
+  // every accepted answer still passes the actual impulse + two-bounce sim.
+  if (work && !solvedLegal && ['SERVE_TOP', 'SERVE_BACK'].includes(racket.stroke && racket.stroke.id)) {
+    const back = racket.stroke.id === 'SERVE_BACK';
+    const faces = back ? [.05, -.10, .20] : [-.55, -.70, -.40];
+    const az = clamp(Math.atan2(aimReq.x - ballP.x, side * (ballP.z - aimReq.z)) - racket.azFace, -1, 1);
+    const speed = (back ? 4 : 2.8) + racket.vmag * .30;
+    const seedScale = clamp(speed / Math.max(1.2, racket.vmag), .20, 3);
+    for (const face of faces) for (const factor of [1, .85, 1.15]) {
+      score(ownFor(aimReq, side), aimReq, face - racket.faceElev, az, seedScale * factor, 1, false);
+    }
+  }
 
   if (!solvedLegal) {
   // A hard topspin serve simply cannot be aimed at the very back line and
@@ -1089,7 +1198,7 @@ function resolvedRacketFrame(racket, normal, swing, extra) {
     azSwing: Math.atan2(v.x, v.z * fwd), vmag: speed / absorb };
 }
 
-function refineRacket(ballP, ballV, ballW, racket, assist, quality) {
+function refineRacket(ballP, ballV, ballW, racket, assist, quality, realtime = false) {
   const fwd = -racket.side;
   const rubber = Object.assign({}, racket.rubber || {});
   const q = quality !== undefined ? quality : racket.quality;
@@ -1119,7 +1228,7 @@ function refineRacket(ballP, ballV, ballW, racket, assist, quality) {
    *  A single-landing solver cannot express that, so serves get their own
    *  search that scores the WHOLE flight, two bounces included.        */
   if (racket.isServe) {
-    const srv = solveServeStroke(ballP, racket, evalStroke, side, assist);
+    const srv = solveServeStroke(ballP, racket, evalStroke, side, assist, realtime);
     strokeFrame(racket, srv.dE, srv.dA, srv.sc, _rs, _rn);
     /* Last line of defence: whatever the search settled on, a serve never
        leaves the bat faster than SERVE_VMAX. */
@@ -1129,7 +1238,7 @@ function refineRacket(ballP, ballV, ballW, racket, assist, quality) {
     return resolvedRacketFrame(racket, _rn, _rs, {
       rubber,
       dElev: srv.dE, dAz: srv.dA, scale: srv.sc, damp: srv.dmp,
-      solved: true, valid: srv.ok, target: srv.target,
+      solved: true, valid: srv.ok, target: srv.target, solveFlights: srv.flights || null,
     });
   }
 
@@ -1172,7 +1281,7 @@ function refineRacket(ballP, ballV, ballW, racket, assist, quality) {
 
   /* ---- 3. converge the stroke rotation onto that target ----------- */
   let dE = 0, dA = 0, sc = 1, dmp = 1, sol = null, converged = false;
-  for (let outer = 0; outer < 3; outer++) {
+  for (let outer = 0; outer < (realtime ? 1 : 3); outer++) {
     sol = solveLaunch(ballP, target, _rw, {
       speed: V3.len(_rv),
       netClear: racket.netClear,
@@ -1238,7 +1347,9 @@ function refineRacket(ballP, ballV, ballW, racket, assist, quality) {
    *        How hard it tries is itself a function of the assist, so a
    *        low setting really does let the ball go into the net.       */
   const chk = {};
+  let validationFlights = 0;
   const validate = (e_, a_, s_, d_, fine) => {
+    validationFlights++;
     evalStroke(e_, a_, s_, d_, _rv, _rw);
     /* The confirmation runs at the PRODUCTION step (PH.SIM_DT), the same
      * integration the live ball gets, and demands a little clearance over
@@ -1301,6 +1412,7 @@ function refineRacket(ballP, ballV, ballW, racket, assist, quality) {
     for (const face of [envelope[1], (envelope[0] + envelope[1]) * .5, envelope[0]]) {
       for (const arm of [35, 50, 20, 65]) {
         for (const scale of [Math.min(1, maxScale), Math.min(.75, maxScale), maxScale]) {
+          if (realtime && validationFlights >= 42) continue; // reserve six fine confirmations
           const de = arm * DEG - racket.elev * DEG;
           wristCorrection = face * DEG - (racket.faceElev + de);
           if (validate(de, aimAz, scale, 1, false) !== 0) continue;
@@ -1324,6 +1436,11 @@ function refineRacket(ballP, ballV, ballW, racket, assist, quality) {
   strokeFrame(racket, dE, dA, sc, swing, normal, wristCorrection);
   rubber.damp = dmp;
   return resolvedRacketFrame(racket, normal, swing, { rubber, dElev: dE, dAz: dA, dWrist: wristCorrection, scale: sc, damp: dmp, solved: sol, target, valid: verdict === 0 });
+}
+
+/** Live contacts use bounded search; calibration remains exhaustive. */
+function refineRacketRealtime(ballP, ballV, ballW, racket, assist, quality) {
+  return refineRacket(ballP, ballV, ballW, racket, assist, quality, true);
 }
 
 /** Cheap post-hoc report of where a struck ball will actually go. */

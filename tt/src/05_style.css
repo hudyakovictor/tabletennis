@@ -18,7 +18,7 @@ canvas{display:block;width:100%;height:100%}
 .pe{pointer-events:auto}
 
 /* ============================ scoreboard ============================ */
-#score{position:absolute;top:max(12px,env(safe-area-inset-top));left:max(12px,env(safe-area-inset-left));
+#score{position:absolute;top:max(12px,env(safe-area-inset-top),var(--sa-top,0px));left:max(12px,env(safe-area-inset-left));
   display:flex;align-items:stretch;gap:0;background:var(--glass2);border:1px solid var(--line);
   border-radius:14px;overflow:hidden;backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);
   box-shadow:0 10px 40px rgba(0,0,0,.55)}
@@ -37,7 +37,7 @@ canvas{display:block;width:100%;height:100%}
 
 /* ======================== lower play reading area =================== */
 #playband{position:absolute;left:max(16px,env(safe-area-inset-left));right:max(16px,env(safe-area-inset-right));
-  top:calc(var(--table-bottom,.70) * 100% + 16px);bottom:max(16px,env(safe-area-inset-bottom));
+  top:calc(var(--table-bottom,.70) * 100% + 16px);bottom:max(16px,env(safe-area-inset-bottom),var(--sa-bottom,0px));
   display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;
   min-height:0;overflow:hidden;pointer-events:none;z-index:4;
   --play-size:clamp(12px,1.2vw,15px);--play-weight:650}
@@ -106,6 +106,9 @@ h3.sec::after{content:"";flex:1;height:1px;background:var(--line)}
   background:#fff;cursor:pointer;box-shadow:0 2px 9px rgba(0,0,0,.6)}
 .sl input[type=range]::-moz-range-thumb{width:22px;height:22px;border:0;border-radius:50%;background:#fff;cursor:pointer}
 .sl .v{font-family:var(--mono);font-size:12px;color:var(--acc);width:50px;text-align:right}
+.zp{display:flex;flex-direction:column;align-items:center;gap:7px;margin:12px 0 4px;padding:10px;border:1px solid var(--line);border-radius:12px;background:rgba(57,198,255,.05)}
+.zp canvas{width:100%;max-width:240px;height:160px;display:block;border-radius:8px}
+.zp small{font-size:10.5px;line-height:1.45;color:var(--dim);text-align:center;max-width:340px}
 #settings.on{z-index:20}
 .btn{display:block;width:100%;margin-top:18px;padding:14px;border:0;border-radius:12px;cursor:pointer;
   font-family:inherit;font-size:14px;font-weight:800;letter-spacing:.14em;color:#04121c;
@@ -138,7 +141,7 @@ h3.sec::after{content:"";flex:1;height:1px;background:var(--line)}
 .st b{font-family:var(--mono);font-size:18px;font-weight:700}
 
 /* ============================ misc ================================= */
-#topright{position:absolute;top:max(12px,env(safe-area-inset-top));right:max(12px,env(safe-area-inset-right));
+#topright{position:absolute;top:max(12px,env(safe-area-inset-top),var(--sa-top,0px));right:max(12px,env(safe-area-inset-right));
   display:flex;align-items:flex-start;gap:7px;z-index:7}
 .ic{width:34px;height:34px;border-radius:10px;border:1px solid var(--line);background:var(--glass);
   display:grid;place-items:center;cursor:pointer;backdrop-filter:blur(10px);transition:.16s;color:var(--dim);
@@ -582,7 +585,7 @@ body:not(.is-playing) #topright{visibility:hidden;pointer-events:none}
 #playband:has(#shot.on) #playStatus{display:none}
 
 /* Training has no bottom panel, hit targets, or automatic gesture animation. */
-#train{display:none;position:absolute;top:max(14px,env(safe-area-inset-top));left:max(16px,env(safe-area-inset-left));
+#train{display:none;position:absolute;top:max(14px,env(safe-area-inset-top),var(--sa-top,0px));left:max(16px,env(safe-area-inset-left));
   width:440px;max-width:calc(100% - 180px);pointer-events:none;z-index:4;color:var(--txt)}
 #train.on{display:block}#train,#train *{pointer-events:none!important}
 #train .th{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-bottom:5px}
@@ -596,6 +599,17 @@ body:not(.is-playing) #topright{visibility:hidden;pointer-events:none}
 #trainingActions[hidden]{display:none!important}
 #trainingActions .tbt{min-height:44px;margin:4px}
 #trainPauseTip{font:500 16px/1.5 var(--ui);color:var(--dim);margin:8px 0}
+
+/* The preview is a button, never an automatic takeover. It is the only thing
+   in the coaching panel that takes pointer events — the gesture area stays
+   free, and the bot cannot start playing on its own. */
+#trText{display:block}
+#train #trDemo{pointer-events:auto!important;display:block;width:100%;margin-top:9px;min-height:40px;
+  padding:8px 12px;font:800 13px/1.35 var(--ui);letter-spacing:.05em;
+  background:rgba(8,13,22,.72);border-color:rgba(57,198,255,.55);color:#bfeaff}
+#train #trDemo:hover{background:rgba(57,198,255,.16)}
+#train #trDemo[aria-pressed="true"]{border-color:rgba(255,211,77,.6);color:#ffe9a8;
+  background:rgba(8,13,22,.82)}
 
 .capture-debug-toggle{display:flex;align-items:center;gap:10px;min-height:44px;padding:8px 10px;font:600 15px/1.4 var(--ui);color:var(--txt);cursor:pointer}
 .capture-debug-toggle input{width:20px;height:20px;accent-color:#39c6ff;cursor:pointer}

@@ -149,6 +149,7 @@ class UI {
     this._settingsWasPaused = this.game.paused;
     this.game.setPaused(true);
     $('#settings').classList.add('on');
+    this.renderZonePreview();   // draw now that the panel has a real size
   }
   closeSettings() {
     $('#settings').classList.remove('on');
@@ -217,6 +218,7 @@ class UI {
     this.game.returnToMenu();
     $$('.screen').forEach(s => s.classList.remove('on'));
     $('#menu').classList.add('on');
+    this.game.audio.menuMusic(true);
     this.refreshMenuBits();
     this.syncMenuScrollHint();
   }
@@ -238,11 +240,23 @@ class UI {
 
   resize() {
     const d = Math.min(window.devicePixelRatio || 1, 2);
-    this.fx.width = Math.floor(window.innerWidth * d);
-    this.fx.height = Math.floor(window.innerHeight * d);
-    this.fx.style.width = window.innerWidth + 'px';
-    this.fx.style.height = window.innerHeight + 'px';
+    /* Size the overlay against the same rect the pointer is normalised
+     * against in Game.bindInput (the #gl box). window.innerWidth disagrees
+     * with it in embedded frames, which slides every projected cue away
+     * from the 3D scene it is supposed to mark. */
+    const gl = document.getElementById('gl');
+    const r = gl ? gl.getBoundingClientRect() : null;
+    const w = (r && r.width) || window.innerWidth;
+    const h = (r && r.height) || window.innerHeight;
+    const pw = Math.floor(w * d), ph = Math.floor(h * d);
+    if (this.fx.width !== pw || this.fx.height !== ph) {
+      this.fx.width = pw;
+      this.fx.height = ph;
+    }
+    this.fx.style.width = w + 'px';
+    this.fx.style.height = h + 'px';
     this.dpr = d;
+    this.fxw = w; this.fyh = h;
   }
 
   /* ------------------------------ menu ---------------------------- */
@@ -271,6 +285,7 @@ class UI {
     const startMatch = () => {
       const d = this.pendingDiff !== undefined ? this.pendingDiff : 2;
       $$('.screen').forEach((s) => s.classList.remove('on'));
+      this.game.audio.menuMusic(false);
       document.body.classList.add('is-playing');
       this.trainHide();
       this.game.training = null;
@@ -281,6 +296,7 @@ class UI {
     };
     const startTrain = () => {
       $$('.screen').forEach((s) => s.classList.remove('on'));
+      this.game.audio.menuMusic(false);
       document.body.classList.add('is-playing');
       this.game.analytics && this.game.analytics.send('tutorial:start', {});
       this.game.startTraining();
@@ -291,9 +307,21 @@ class UI {
     $('#tdAgain').addEventListener('click', startTrain);
     $('#trSkip').addEventListener('click', () => { const t = this.game.training; if (t && this.game.paused) { t.skip(); this.game.setPaused(false); this.game.audio.ui('click'); } });
     $('#trExit').addEventListener('click', () => { if (this.game.paused) this.showMainMenu(); });
+    /* The preview is opt-in: this button shows the lesson on a loop and the
+     * same button takes it back. Nothing starts it on its own, so the racket
+     * is never pulled out of a pupil's hand. */
+    const trDemoBtn = $('#trDemo');
+    if (trDemoBtn) trDemoBtn.addEventListener('click', (e) => {
+      e.preventDefault(); e.stopPropagation();
+      const t = this.game.training;
+      if (!t) return;
+      this.game.audio.init(); this.game.audio.resume(); this.game.audio.ui('click');
+      if (t.isDemo()) t.exitDemo(); else t.playDemo();
+    });
     /* --- workshop / shop / daily --- */
     const wsOpen = (tab) => {
       this.game.audio.ui('click');
+      this.game.audio.menuMusic(false);
       this.game.analytics && this.game.analytics.send('ui:workshop', { tab: tab || 'racket' });
       $$('.screen').forEach((x) => x.classList.remove('on'));
       this.pick = null;                       // a fresh visit starts from what is fitted
@@ -694,6 +722,7 @@ class UI {
       case 'cam': s.camera = v; break;
       case 'quality': s.quality = v; g.R.quality = v; g.resize(); break;
       case 'hand': case 'grip': g.changePaddlePreference(k, v); break;
+      case 'gestures': s.gestureProfile = v === 'safe' ? 'safe' : 'classic'; break;
       case 'trail': s.showTrail = v === 'on'; break;
       case 'predict': s.showPredict = v === 'on'; break;
       case 'tele': s.showTele = v === 'on'; $('#spin').classList.toggle('on', s.showTele); break;
@@ -704,6 +733,13 @@ class UI {
         break;
       case 'haptics': s.haptics = v === 'on'; if (s.haptics) g.buzz(12); break;
         break;
+      case 'paddle': s.showPlayerPaddle = v !== 'hide'; break;
+      case 'serveToss': s.serveToss = clamp(+v, 0.8, 2.2); this.syncServeToss(); break;
+      case 'capScale': s.capScale = clamp(+v, 0.8, 2.5); this.syncGameplaySliders(); break;
+      case 'zoneScale': s.zoneScale = clamp(+v, 0.8, 2.5); this.syncGameplaySliders(); break;
+      case 'aimAssist': s.aimAssist = clamp(+v, 0.5, 1); this.syncGameplaySliders(); break;
+      case 'footAssist': s.footAssist = clamp(+v, 0, 1); this.syncGameplaySliders(); break;
+      case 'batSens': s.batSens = clamp(+v, 0.4, 2.2); this.syncGameplaySliders(); break;
       case 'target': s.targetScore = +v; $('#toWin').textContent = v; break;
       default: break;
     }
@@ -720,15 +756,53 @@ class UI {
 
   syncSettings() {
     const s = this.game.settings;
-    for (const k of ['hand', 'grip']) {
+    for (const [k, key] of [['hand', 'hand'], ['grip', 'grip'], ['gestures', 'gestureProfile']]) {
       $$(`.opt[data-set="${k}"]`).forEach(b => {
-        const selected = b.dataset.val === s[k];
+        const selected = b.dataset.val === s[key];
         b.classList.toggle('sel', selected);
         b.setAttribute('aria-pressed', String(selected));
       });
     }
     this.syncCameraControls();
+    // showPlayerPaddle is a boolean, the generic string-valued loop above
+    // cannot match it — sync the visibility row explicitly.
+    $$('.opt[data-set="paddle"]').forEach(b => {
+      const selected = (b.dataset.val === 'show') === (s.showPlayerPaddle !== false);
+      b.classList.toggle('sel', selected);
+      b.setAttribute('aria-pressed', String(selected));
+    });
+    this.syncServeToss();
+    this.syncGameplaySliders();
   }
+  /** The serve-toss height slider reflects settings.serveToss as a cm rise. */
+  syncServeToss() {
+    const s = this.game.settings;
+    const el = $('#serveToss'); if (!el) return;
+    const mul = clamp(Number.isFinite(s.serveToss) ? s.serveToss : 1, 0.8, 2.2);
+    el.value = String(mul);
+    const riseCm = Math.round(30.6 * mul);
+    const lab = $('#serveTossVal'); if (lab) lab.textContent = riseCm + ' см';
+  }
+  /** Reflect the optional human-help sliders (capture, zone, assists, gain). */
+  syncGameplaySliders() {
+    const s = this.game.settings;
+    const set = (id, val, labId, text) => {
+      const el = $('#' + id); if (el) el.value = String(val);
+      const lab = $('#' + labId); if (lab) lab.textContent = text;
+    };
+    const cap = clamp(Number.isFinite(s.capScale) ? s.capScale : 1, 0.8, 2.5);
+    set('capScale', cap, 'capScaleVal', Math.round(cap * 100) + '%');
+    const zone = clamp(Number.isFinite(s.zoneScale) ? s.zoneScale : 1, 0.8, 2.5);
+    set('zoneScale', zone, 'zoneScaleVal', Math.round(zone * 100) + '%');
+    const aim = clamp(Number.isFinite(s.aimAssist) ? s.aimAssist : 0.85, 0.5, 1);
+    set('aimAssist', aim, 'aimAssistVal', Math.round(aim * 100) + '%');
+    const foot = clamp(Number.isFinite(s.footAssist) ? s.footAssist : 0.85, 0, 1);
+    set('footAssist', foot, 'footAssistVal', Math.round(foot * 100) + '%');
+    const sens = clamp(Number.isFinite(s.batSens) ? s.batSens : 1, 0.4, 2.2);
+    set('batSens', sens, 'batSensVal', sens.toFixed(2) + '\u00d7');
+    this.renderZonePreview();
+  }
+
   syncCameraControls() {
     const g = this.game;
     $$('#cameraViews [data-camera]').forEach(b => {
@@ -930,13 +1004,27 @@ class UI {
   trainHide() { $('#trainingActions').hidden = true; $('#train').classList.remove('on'); $('#score').style.opacity = ''; $('#tdone').classList.remove('on'); }
   trainSync(t) {
     const S = t.S, feedback = t.phase === 'ok' || t.phase === 'fail';
+    const preview = t.phase === 'demo';
+    const tip = trainingTip(S, this.inputMode,
+      this.game && this.game.settings && this.game.settings.gestureProfile === 'safe');
     $('#trStep').textContent = `${t.step + 1}/${TRAIN_STEPS.length}`;
     $('#trTitle').textContent = S.title;
     $('#trProgress').textContent = `${t.done}/${S.need}`;
-    $('#trTip').textContent = feedback ? '' : S.goal;
-    $('#trainPauseTip').textContent = trainingTip(S, this.inputMode);
-    $('#trMsg').textContent = feedback ? t.msg : '';
-    $('#trMsg').style.color = t.msgCol || 'var(--good)';
+    $('#trTip').textContent = feedback ? '' : (preview ? 'Смотрите: бот выполняет приём.' : S.goal);
+    $('#trainPauseTip').textContent = tip;
+    /* The gesture itself is written UNDER the goal at all times: the preview
+     * used to be the only place it was shown, so with the preview now opt-in
+     * the pupil would have to open the pause menu to learn the swipe. */
+    $('#trMsg').textContent = feedback ? t.msg
+      : preview ? 'Клик по столу — и вы играете сами.' : tip;
+    $('#trMsg').style.color = feedback ? (t.msgCol || 'var(--good)') : 'var(--acc)';
+    /* The control says what the NEXT press does, so it reads as a button and
+     * not as another badge over the table. */
+    const demoBtn = $('#trDemo');
+    if (demoBtn) {
+      demoBtn.textContent = preview ? 'ХВАТИТ, ИГРАЮ САМ' : 'ПОКАЗАТЬ, КАК ИГРАТЬ';
+      demoBtn.setAttribute('aria-pressed', preview ? 'true' : 'false');
+    }
   }
   trainDone() { $('#train').classList.remove('on'); $('#trainingActions').hidden = true; $('#tdone').classList.add('on'); }
 
@@ -1008,6 +1096,219 @@ class UI {
     c.stroke(); c.restore();
   }
 
+  /** Where the bat lives when the player chose to hide it. The paddle still
+   *  strikes and still follows the cursor — only its mesh is off — so without
+   *  this marker there would be no visual reference for the aim point. A quiet
+   *  crosshair on the bat's own world position, never a physics object. */
+  drawAimReticle(c, W, H, d) {
+    const g = this.game;
+    if (g.settings.showPlayerPaddle !== false) return;      // only in hide-racket mode
+    if (g.paused || (g.replayer && g.replayer.on)) return;
+    if (![GS.SERVE_READY, GS.SERVE_TOSS, GS.RALLY, GS.POINT].includes(g.state)) return;
+    const pad = g.player; if (!pad || !pad.pos) return;
+    const p = g.project(pad.pos, this._rp || (this._rp = {}));
+    if (!p.ok || !Number.isFinite(p.x) || !Number.isFinite(p.y) || p.x < 0 || p.x > 1 || p.y < 0 || p.y > 1) return;
+    const x = p.x * W, y = p.y * H, R = 16 * d, gap = 6 * d;
+    c.save();
+    c.strokeStyle = '#39c6ff'; c.lineWidth = 2 * d; c.lineCap = 'round';
+    c.globalAlpha = 0.85;
+    c.beginPath();
+    c.moveTo(x - R, y); c.lineTo(x - gap, y);
+    c.moveTo(x + gap, y); c.lineTo(x + R, y);
+    c.moveTo(x, y - R); c.lineTo(x, y - gap);
+    c.moveTo(x, y + gap); c.lineTo(x, y + R);
+    c.stroke();
+    c.globalAlpha = 0.4;
+    c.beginPath(); c.arc(x, y, R * 0.6, 0, TAU); c.stroke();
+    c.globalAlpha = 0.95; c.fillStyle = '#39c6ff';
+    c.beginPath(); c.arc(x, y, 2 * d, 0, TAU); c.fill();
+    c.restore();
+  }
+
+  /** A small live diagram inside the settings panel. It draws the reach window
+   *  (capScale) and the admission press-circle (zoneScale, doubled on serve)
+   *  as concentric rings so dragging a slider instantly shows the shape change
+   *  instead of an abstract percentage. Rendered into its own canvas element so
+   *  it is never hidden behind the modal backdrop. Purely illustrative. */
+  renderZonePreview() {
+    const cv = (typeof document !== 'undefined') ? document.querySelector('#zonePreview') : null;
+    if (!cv || !cv.getContext) return;
+    const g = this.game; if (!g) return;
+    const cs = clamp(Number.isFinite(g.settings.capScale) ? g.settings.capScale : 1, 0.8, 2.5);
+    const zs = clamp(Number.isFinite(g.settings.zoneScale) ? g.settings.zoneScale : 1, 0.8, 2.5);
+    const serving = g.server === 1 && [GS.SERVE_READY, GS.SERVE_TOSS].includes(g.state);
+    const dpr = Math.min(2, (typeof devicePixelRatio === 'number' && devicePixelRatio) || 1);
+    const w = cv.clientWidth || cv.width || 240, h = cv.clientHeight || cv.height || 160;
+    if (cv.width !== Math.round(w * dpr) || cv.height !== Math.round(h * dpr)) {
+      cv.width = Math.round(w * dpr); cv.height = Math.round(h * dpr);
+    }
+    const c = cv.getContext('2d'); if (!c) return;
+    c.setTransform(dpr, 0, 0, dpr, 0, 0); c.clearRect(0, 0, w, h);
+    const cx = w * 0.5, cy = h * 0.56, unit = Math.min(w, h) * 0.24;
+    const zoneR = unit * zs * (serving ? 2 : 1);   // green admission press-circle
+    const reachR = unit * 0.62 * cs;               // blue physical reach ring
+    c.save(); c.lineWidth = 2; c.setLineDash([]);
+    c.fillStyle = 'rgba(57,198,255,0.10)'; c.beginPath(); c.arc(cx, cy, reachR, 0, TAU); c.fill();
+    c.strokeStyle = '#6ee7a8'; c.globalAlpha = 0.9; c.beginPath(); c.arc(cx, cy, zoneR, 0, TAU); c.stroke();
+    c.strokeStyle = '#39c6ff'; c.globalAlpha = 0.95; c.beginPath(); c.arc(cx, cy, reachR, 0, TAU); c.stroke();
+    c.fillStyle = '#39c6ff'; c.beginPath(); c.arc(cx, cy, 3, 0, TAU); c.fill();
+    c.fillStyle = '#9fb4c6'; c.globalAlpha = 0.95; c.font = '11px system-ui, sans-serif'; c.textAlign = 'center';
+    c.fillText('reach \u00d7' + cs.toFixed(2) + '   \u00b7   zone \u00d7' + (zs * (serving ? 2 : 1)).toFixed(2) + (serving ? ' \u2192 \u043f\u043e\u0434\u0430\u0447\u0430' : ''), cx, h - 8);
+    c.restore();
+  }
+
+  /** Gesture points for a guide shape around (x, y); also returns the
+   *  per-segment lengths and the total path length. Shared by the looping
+   *  guide and the one-shot drill demo. */
+  trainGuidePath(shape, x, y, L) {
+    const pts = [];
+    if (shape === 'up') pts.push([x, y + L * 0.55], [x, y - L * 0.55]);
+    else if (shape === 'down') pts.push([x, y - L * 0.55], [x, y + L * 0.55]);
+    else if (shape === 'side') pts.push([x - L * 0.62, y], [x + L * 0.62, y]);
+    else { const a0 = [-L * 0.6, L * 0.12], ctrl = [0, -L * 0.42], a1 = [L * 0.6, L * 0.12];
+      for (let i = 0; i <= 20; i++) { const t = i / 20, mt = 1 - t;
+        pts.push([x + (mt * mt * a0[0] + 2 * mt * t * ctrl[0] + t * t * a1[0]), y + (mt * mt * a0[1] + 2 * mt * t * ctrl[1] + t * t * a1[1])]); } }
+    const seg = []; let total = 0;
+    for (let i = 1; i < pts.length; i++) { const l = Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]); seg.push(l); total += l; }
+    return { pts, seg, total };
+  }
+
+  /** Point at fraction f (0..1) along a guide path. */
+  trainGuideAt(path, f) {
+    const { pts, seg, total } = path;
+    let dist = clamp(f, 0, 1) * total, di = 0;
+    while (di < seg.length - 1 && dist > seg[di]) { dist -= seg[di]; di++; }
+    const s0 = pts[di], s1 = pts[di + 1] || pts[di], f2 = seg[di] > 0 ? clamp(dist / seg[di], 0, 1) : 0;
+    return [s0[0] + (s1[0] - s0[0]) * f2, s0[1] + (s1[1] - s0[1]) * f2];
+  }
+
+  /** Training: paint how to make the stroke. Each drill carries a `guide`
+   *  gesture shape; we trace it as a groove with a travelling highlight and an
+   *  arrowhead, anchored on the live ball (or the bat) so the pupil sees where
+   *  and which way to swipe. Purely instructional — never a physics object. */
+  drawTrainGuide(c, W, H, d) {
+    const g = this.game;
+    const tr = g.training;
+    if (!tr || !tr.S || g.paused || (g.replayer && g.replayer.on)) return;
+    if (['ok', 'fail', 'done'].includes(tr.phase)) return;
+    let shape = tr.S.guide;
+    if (!shape) return;
+    if (shape === 'down' && g.settings.gestureProfile === 'safe') shape = 'up';
+    // anchor on the live ball, else the bat, else a lower-centre default
+    let ax = 0.5, ay = 0.7;
+    const src = (g.ball && g.ball.live) ? g.ball.p : (g.player && g.player.pos);
+    if (src) {
+      const p = g.project(src, this._tg || (this._tg = {}));
+      if (p && p.ok && Number.isFinite(p.x) && Number.isFinite(p.y)) { ax = clamp(p.x, 0.16, 0.84); ay = clamp(p.y, 0.28, 0.9); }
+    }
+    const x = ax * W, y = ay * H, L = 96 * d;
+    const { pts, seg, total } = this.trainGuidePath(shape, x, y, L);
+    const col = '#39c6ff';
+    c.save(); c.lineCap = 'round'; c.lineJoin = 'round';
+    c.strokeStyle = col; c.globalAlpha = 0.22; c.lineWidth = 11 * d;
+    c.beginPath(); c.moveTo(pts[0][0], pts[0][1]); for (let i = 1; i < pts.length; i++) c.lineTo(pts[i][0], pts[i][1]); c.stroke();
+    const e = pts[pts.length - 1], pv = pts[pts.length - 2], ang = Math.atan2(e[1] - pv[1], e[0] - pv[0]);
+    c.globalAlpha = 0.6; c.fillStyle = col; c.beginPath();
+    c.moveTo(e[0], e[1]);
+    c.lineTo(e[0] - Math.cos(ang - 0.5) * 16 * d, e[1] - Math.sin(ang - 0.5) * 16 * d);
+    c.lineTo(e[0] - Math.cos(ang + 0.5) * 16 * d, e[1] - Math.sin(ang + 0.5) * 16 * d);
+    c.closePath(); c.fill();
+    let dotT = this.reducedMotion ? 1 : ((g.time % 1.15) / 1.15);
+    const [dxp, dyp] = this.trainGuideAt({ pts, seg, total }, dotT);
+    const rg = c.createRadialGradient(dxp, dyp, 0, dxp, dyp, 20 * d);
+    rg.addColorStop(0, col + 'ee'); rg.addColorStop(1, col + '00');
+    c.globalAlpha = 1; c.fillStyle = rg; c.beginPath(); c.arc(dxp, dyp, 20 * d, 0, TAU); c.fill();
+    c.fillStyle = '#eaf7ff'; c.beginPath(); c.arc(dxp, dyp, 5 * d, 0, TAU); c.fill();
+    c.restore();
+  }
+
+  /** Training preview: the bot plays the drill so the pupil can SEE the two
+   *  things a cue card cannot say — where the cursor must stand, and which way
+   *  it travels. Everything is read from the demo driver in 65_train.js, which
+   *  moves a REAL pointer through the real press oval, so the ring below is the
+   *  point the pupil's own cursor has to occupy, not a decoration. */
+  drawTrainDemo(c, W, H, d) {
+    const g = this.game, tr = g.training, dm = tr && tr.demo;
+    if (!dm || dm.stopped || g.paused || (g.replayer && g.replayer.on)) return;
+    if (['ok', 'fail', 'done'].includes(tr.phase)) return;
+    const col = '#39c6ff';
+    /* The words are drawn LAST (see section 4): the ghost hand and its ring
+     * stand exactly on top of them while the bot is still travelling. */
+    let label = null;
+    c.save();
+    c.lineCap = 'round'; c.lineJoin = 'round';
+
+    /* 1. The target: where the ball will meet the bat, i.e. where the cursor
+     *    has to wait. The halo closes as the ball arrives — that is the press
+     *    cue, and it is the same moment the bot presses. */
+    if (dm.state === 'seek') {
+      const tx = dm.tgt.x * W, ty = dm.tgt.y * H;
+      const near = clamp(dm.near || 0, 0, 1);
+      const R = (30 - 9 * near) * d;
+      c.globalAlpha = 0.30 + 0.45 * near;
+      c.strokeStyle = col; c.lineWidth = 1.6 * d;
+      c.setLineDash([5 * d, 6 * d]);
+      c.beginPath(); c.arc(tx, ty, R, 0, TAU); c.stroke();
+      c.setLineDash([]);
+      c.beginPath();
+      for (const sx of [-1, 1]) for (const sy of [-1, 1]) {
+        c.moveTo(tx + sx * (R + 3 * d), ty + sy * R);
+        c.lineTo(tx + sx * (R + 8 * d), ty + sy * R);
+      }
+      c.stroke();
+      c.globalAlpha = 0.14 + 0.30 * near;
+      c.beginPath(); c.arc(tx, ty, R + (1 - near) * 46 * d, 0, TAU); c.stroke();
+      label = { x: tx, y: ty - (R + 16 * d) };
+    }
+
+    /* 2. The bot's hand: the exact screen point the pupil must bring their own
+     *    pointer to. It is the real synthetic pointer that drives the racket. */
+    const gx = dm.pos.x * W, gy = dm.pos.y * H;
+    const pressed = dm.state !== 'seek';
+    const rg = c.createRadialGradient(gx, gy, 0, gx, gy, 26 * d);
+    rg.addColorStop(0, col + 'aa'); rg.addColorStop(1, col + '00');
+    c.globalAlpha = 0.95; c.fillStyle = rg;
+    c.beginPath(); c.arc(gx, gy, 26 * d, 0, TAU); c.fill();
+    c.strokeStyle = '#eaf7ff'; c.lineWidth = 2 * d;
+    c.beginPath(); c.arc(gx, gy, 13 * d, 0, TAU); c.stroke();
+    c.globalAlpha = 0.45;
+    c.beginPath(); c.arc(gx, gy, 20 * d, 0, TAU); c.stroke();
+    c.globalAlpha = 1; c.fillStyle = '#eaf7ff';
+    c.beginPath(); c.arc(gx, gy, (pressed ? 5.5 : 3.4) * d, 0, TAU); c.fill();
+
+    /* 3. How to swipe: the arrow leaves the cursor along the drill's own
+     *    gesture. During the swing the live ribbon takes over by itself. */
+    if (dm.state === 'seek' || dm.state === 'press') {
+      const dx = dm.dir.x, dy = dm.dir.y;
+      const L0 = 18 * d, L1 = 82 * d;
+      c.globalAlpha = 0.55; c.strokeStyle = col; c.lineWidth = 3 * d;
+      c.beginPath();
+      c.moveTo(gx + dx * L0, gy + dy * L0);
+      c.lineTo(gx + dx * L1, gy + dy * L1);
+      c.stroke();
+      const ax = gx + dx * L1, ay = gy + dy * L1, ang = Math.atan2(dy, dx);
+      c.fillStyle = col;
+      c.beginPath();
+      c.moveTo(ax + Math.cos(ang) * 11 * d, ay + Math.sin(ang) * 11 * d);
+      c.lineTo(ax + Math.cos(ang + 2.5) * 12 * d, ay + Math.sin(ang + 2.5) * 12 * d);
+      c.lineTo(ax + Math.cos(ang - 2.5) * 12 * d, ay + Math.sin(ang - 2.5) * 12 * d);
+      c.closePath(); c.fill();
+    }
+    /* 4. The one instruction that answers “куда вести курсор” — on a dark
+     *    plate, above every other mark, so no ring or arrow can eat it. */
+    if (label) {
+      c.font = `700 ${12 * d}px system-ui,sans-serif`;
+      c.textAlign = 'center';
+      const half = c.measureText('КУРСОР СЮДА').width / 2 + 7 * d;
+      c.globalAlpha = 0.76; c.fillStyle = 'rgba(4,10,18,.86)';
+      roundRect(c, label.x - half, label.y - 10 * d, half * 2, 17 * d, 5 * d);
+      c.fill();
+      c.globalAlpha = 0.96; c.fillStyle = col;
+      c.fillText('КУРСОР СЮДА', label.x, label.y);
+    }
+    c.restore();
+  }
+
   /** Only the racket is visible over live play; dialogs retain their cursor. */
   syncNativeCursor() {
     const g = this.game, canvas = g && g.canvas;
@@ -1016,6 +1317,10 @@ class UI {
     const dialog = typeof document !== 'undefined' && document.querySelector('.screen.on');
     const cursor = playing && !this.captureDebug && !g.paused && !(g.replayer && g.replayer.on) && !dialog ? 'none' : 'default';
     if (canvas.style.cursor !== cursor) canvas.style.cursor = cursor;
+    /* The fx canvas sits above the play surface; force its cursor too so the
+     * native arrow can never flash over the table mid-rally, and keep the
+     * whole stage pointer-free while the ball is live. */
+    if (this.fx && this.fx.style && this.fx.style.cursor !== cursor) this.fx.style.cursor = cursor;
   }
 
   drawCaptureDebug(c, W, H, d) {
@@ -1026,12 +1331,15 @@ class UI {
     const saved=g.swipe && g.swipe.pressZone;
     const serving=[GS.SERVE_READY,GS.SERVE_TOSS].includes(g.state) && g.server===1;
     const locked=saved && (g.swipe.active || (typeof g.playerStrokeIntent==='function' && g.playerStrokeIntent(serving)));
-    const zone=locked ? saved : pressZoneForBall(g.ball,g.pointer,rect.width,rect.height,{
-      project:(point,out)=>g.project(point,out||{}), pointerType:g.pointerFine===false?'touch':'mouse',
-      referenceWorld:g.player&&g.player.pos,
-      kind:serving&&g.state===GS.SERVE_TOSS?'serve':'rally',
-      tossApex:g.tossApex,tossStartY:g.tossStartY,tableY:PH.TABLE_Y});
+    const zone=locked ? saved : g.measurePressZone(g.pointer,g.pointerFine===false?'touch':'mouse');
     if (!zone || ![zone.x,zone.y,zone.radius].every(Number.isFinite)) return;
+    if (zone.via==='serve-init' && g.state===GS.SERVE_READY) {
+      // Ready accepts a toss command on the play surface, not just within
+      // an oval at the old ball position. Do not display a fake hit region.
+      c.save();c.fillStyle='#6ee7a8';c.font=`${12*d}px sans-serif`;c.textAlign='center';
+      c.fillText('ПОДБРОС: НАЖМИТЕ В ИГРОВОМ ПОЛЕ',W*.5,H*.90);c.restore();
+      return;
+    }
     const sx=W/rect.width,sy=H/rect.height;
     c.save();c.setLineDash([]);c.globalAlpha=.9;c.lineWidth=2*d;c.strokeStyle=zone.accepted?'#6ee7a8':'#ffb066';
     c.beginPath();
@@ -1060,6 +1368,11 @@ class UI {
     if (!g) return;
 
     if (!this.captureDebug) this.drawStrikeRing(c, W, H, d);
+    this.drawAimReticle(c, W, H, d);
+    // The looping racket-anchored guide is retired: the pupil asked for a single
+    // one-shot demo above the table (drawTrainDemo), not a groove painted over
+    // the blade for the whole drill.
+    this.drawTrainDemo(c, W, H, d, dt);
     this.drawCaptureDebug(c, W, H, d);
     this.syncNativeCursor();
 
@@ -1073,24 +1386,39 @@ class UI {
       c.lineCap = 'round'; c.lineJoin = 'round';
       const st = g.liveStroke;
       const col = st ? st.stroke.col : '#39c6ff';
+      /* The trail is the raw pointer path, but the bat lives in a clamped,
+       * smoothed world pose — near the screen edges they diverge and the
+       * stroke reads as "somewhere far from the racket". Anchor the ribbon on
+       * the bat's own projected position (shift the whole shape so its head
+       * lands on the bat) so the swing always visibly belongs to the racket. */
+      let ox = 0, oy = 0;
+      const pad = g.player;
+      if (pad && pad.pos) {
+        const bp = g.project(pad.pos, this._rb || (this._rb = {}));
+        if (bp && bp.ok && Number.isFinite(bp.x) && Number.isFinite(bp.y)) {
+          ox = bp.x * W - pts[n - 1].x * W;
+          oy = bp.y * H - pts[n - 1].y * H;
+        }
+      }
+      const nox = ox / W, noy = oy / H;
       for (let i = 1; i < n; i++) {
         const t = i / (n - 1);
         c.strokeStyle = col;
         c.globalAlpha = 0.07 + t * 0.5;
         c.lineWidth = (1.5 + t * 11) * d;
         c.beginPath();
-        c.moveTo(pts[i - 1].x * W, pts[i - 1].y * H);
-        c.lineTo(pts[i].x * W, pts[i].y * H);
+        c.moveTo((pts[i - 1].x + nox) * W, (pts[i - 1].y + noy) * H);
+        c.lineTo((pts[i].x + nox) * W, (pts[i].y + noy) * H);
         c.stroke();
       }
       c.globalAlpha = 1;
-      const hx = pts[n - 1].x * W, hy = pts[n - 1].y * H;
+      const hx = pts[n - 1].x * W + ox, hy = pts[n - 1].y * H + oy;
       const rg = c.createRadialGradient(hx, hy, 0, hx, hy, 34 * d);
       rg.addColorStop(0, col + 'cc'); rg.addColorStop(1, col + '00');
       c.fillStyle = rg; c.beginPath(); c.arc(hx, hy, 34 * d, 0, TAU); c.fill();
 
       this._lastRibbon = {
-        pts: sw.samples.map((p) => ({ x: p.x, y: p.y })),
+        pts: sw.samples.map((p) => ({ x: p.x + nox, y: p.y + noy })),
         col,
         label: (st && sw.m.dist > 0.045) ? (st.stroke.short || st.stroke.name) : '',
         fade: 1.0,
@@ -1145,6 +1473,11 @@ class UI {
   /* ------------------------------ tick ----------------------------- */
   tick(dt) {
     const g = this.game; if (!g) return;
+    // The overlay backing store must follow the #gl rect even when the
+    // embedder resizes the frame without firing window `resize`.
+    const gr = document.getElementById('gl').getBoundingClientRect();
+    if (gr.width && gr.height &&
+        (Math.abs(gr.width - (this.fxw || 0)) > 0.5 || Math.abs(gr.height - (this.fyh || 0)) > 0.5)) this.resize();
     this.syncPauseControl();
     this.drawOverlay(dt);
     // A single short status, never a stack of messages/telemetry/hints.
@@ -1239,7 +1572,7 @@ class UI {
       const a = aeroAccel(V3.new(), b.v, b.w);
       const magn = Math.hypot(a.x, a.y + PH.G, a.z) / PH.G;
       dbg.innerHTML =
-        `<b>FPS</b> ${g.fps.toFixed(0)}  <b>DC</b> ${g.R.drawCalls}  <b>TRI</b> ${(g.R.tris / 1000).toFixed(1)}k\n` +
+        `<b>FPS</b> ${g.fps.toFixed(0)}  <b>PEAK</b> ${(g.peakMs || 0).toFixed(0)}ms  <b>DC</b> ${g.R.drawCalls}  <b>TRI</b> ${(g.R.tris / 1000).toFixed(1)}k\n` +
         `<b>GL</b> ${g.R.isGL2 ? 'WebGL2' : 'WebGL1'}\n` +
         `<b>state</b> ${g.state}  <b>ts</b> ${g.timeScale.toFixed(2)}\n` +
         `<b>ball</b> p(${b.p.x.toFixed(2)},${b.p.y.toFixed(2)},${b.p.z.toFixed(2)})\n` +

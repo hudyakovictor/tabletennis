@@ -48,6 +48,30 @@ function effectiveFov(fovDeg, aspect) {
   return vf / DEG;
 }
 
+/* ------------------------------------------------------------------ *
+ *  PHONE VS DESKTOP FRAMING
+ *  A portrait screen is tall and narrow: the table fills the width long
+ *  before it fills the height, so the vertical bands (opponent raise,
+ *  reading room, dead margins) decide how much of the screen is empty.
+ *  Phones get a tighter fit margin and tighter bands, so the table reads
+ *  as big as its width allows and the spare space goes to the game, not
+ *  to the frame. Desktop keeps the authored roomy contract.
+ * ------------------------------------------------------------------ */
+function phoneFactor(aspect) {
+  return 1 - smoothstep(0.85, 1.3, aspect);
+}
+function frameMargin(aspect) {
+  return lerp(0.055, 0.012, phoneFactor(aspect));
+}
+/** Dead air above the opponent's raised bat: the readability headroom. */
+function cameraHeadroom(aspect) {
+  return lerp(CAMERA_HEADROOM, 0.055, phoneFactor(aspect));
+}
+/** Lowest screen fraction the table feet may reach (HUD room below). */
+function frameBottomRoom(aspect) {
+  return lerp(0.901, 0.955, phoneFactor(aspect));
+}
+
 /** view·proj for a rig — the same matrices the renderer builds. */
 function rigViewProj(rig, aspect, out) {
   const vf = effectiveFov(rig.fov, aspect) * DEG;
@@ -149,7 +173,7 @@ function fitRig(P, aspect) {
   const key = P.id + '|' + Math.round(aspect * 1000);
   const hit = _fitCache.get(key);
   if (hit) return hit;
-  const phone = 1 - smoothstep(0.85, 1.3, aspect);
+  const phone = phoneFactor(aspect);
   const pitch = P.pitch * DEG; // Identical angle on phone and desktop.
   /* Mobile (portrait) fix: start much closer so the table fills the screen.
    * The old eye.z=3.2 + fitTablePresentation pushed the camera back until
@@ -162,9 +186,13 @@ function fitRig(P, aspect) {
   const rig = { eye: { x: 0, y: eyeY, z: eyeZ },
     look: { x: 0, y: PH.TABLE_Y, z: -0.12 }, fov, mode: P.id };
   // No automatic lift or ball-following: the chosen view stays predictable.
-  // On phones use much tighter margins so the table is big.
-  fitTablePresentation(rig, aspect, P.height, phone > 0.5 ? 0.015 : 0.055,
-    phone > 0.5 ? 0.82 : 0.76);
+  /* maxPlayHeight caps the on-screen span from the opponent's raised bat down
+   * to the near table edge. Pulling it in makes the rig dolly back a little, so
+   * the whole play volume shrinks and tableFrameShift can lift the table off
+   * the bottom edge — the "more room at the bottom" the player asked for.
+   * Uniform scaling of eye↔look, so the viewing tilt is unchanged. */
+  fitTablePresentation(rig, aspect, lerp(P.height, 0.80, phone),
+    frameMargin(aspect), lerp(0.66, 0.82, phone));
   _fitCache.set(key, rig);
   return rig;
 }
@@ -200,7 +228,15 @@ function cameraRigFor(mode, ball, aspect, out, controls) {
     o.eye.x = o.look.x + (o.eye.x - o.look.x) * zoom;
     o.eye.y = o.look.y + (o.eye.y - o.look.y) * zoom;
     o.eye.z = o.look.z + (o.eye.z - o.look.z) * zoom;
-    if (zoom !== 1 || height !== 0) fitTablePresentation(o, aspect, 0.72, 0.025, 0.80);
+    if (zoom !== 1 || height !== 0) {
+      const phone = phoneFactor(aspect);
+      /* The manual dolly may enlarge the table past the base framing, but
+       * never past the frame: the play span stops at 0.88 so the shift can
+       * still give the opponent its headroom AND leave the lower reading
+       * room for the shot breakdown. */
+      fitTablePresentation(o, aspect, lerp(0.72, 0.78, phone),
+        Math.min(frameMargin(aspect), 0.025), lerp(0.80, 0.88, phone));
+    }
   }
   return o;
 }
@@ -226,9 +262,12 @@ function tableScreenBounds(vp, out = {}) {
 // AI think() allows bat centres up to TABLE_Y + .70 and z -2.45..-1.16.
 // Include the whole blade/handle, plus a small margin for the serve toss.
 // This is a fixed volume: no camera bobbing as the ball or racket moves.
+// The padding is deliberately snug (blade top ~+0.82, wings ~±1.25, deep
+// reach ~-2.5): every centimetre trimmed here is a centimetre of headroom
+// that tableFrameShift can then hand to the player's side at the bottom.
 const OPPONENT_FRAME_POINTS = [];
-for (const x of [-1.4, 0, 1.4]) for (const z of [-2.65, -1.0])
-  OPPONENT_FRAME_POINTS.push({ x, y: PH.TABLE_Y + 0.90, z });
+for (const x of [-1.25, 0, 1.25]) for (const z of [-2.5, -1.0])
+  OPPONENT_FRAME_POINTS.push({ x, y: PH.TABLE_Y + 0.82, z });
 const CAMERA_HEADROOM = 0.10;
 function opponentScreenTop(vp) {
   let top = 1;
@@ -257,10 +296,12 @@ function fitTablePresentation(rig, aspect, maxHeight = 0.60, margin = 0.05, maxP
 function tableFrameShift(rig, aspect) {
   const vp = rigViewProj({ ...rig, shiftY: 0 }, aspect, _frameBuffer);
   const b = tableScreenBounds(vp, _frameBounds);
-  // Prefer the old lower reading room, but never crop the opponent to keep
-  // an exact 1:3 ratio. Move the complete play volume down into the frame.
-  const preferred = (1 - b.bottom - 3 * b.top) / 4;
-  return Math.max(preferred, CAMERA_HEADROOM - opponentScreenTop(vp));
+  // Bias the framing toward the player's side: reserve roughly 4× more empty
+  // room below the table than above it, so the bat and the incoming ball have
+  // somewhere to live. The opponent-headroom guard below still caps how far up
+  // the table may slide, so this never crops the opponent's serve toss.
+  const preferred = (1 - b.bottom - 4 * b.top) / 5;
+  return Math.max(preferred, cameraHeadroom(aspect) - opponentScreenTop(vp));
 }
 
 /** Highest pixel the table itself occupies (0..1, y down). The HUD text
@@ -281,12 +322,47 @@ function tableTopScreenY(mode, aspect, vpOut) {
  *  frame (which is how it used to get lost off-screen and stay there).
  * ------------------------------------------------------------------ */
 const _ptOut = { tx: 0, ty: 0, tz: 0 };
+const _ptRayPt = { x: 0, y: 0, z: 0 }, _ptAnchorPt = { x: 0, y: 0, z: 0 };
+
+const _fpInv = M4.create(), _fpNa = { x: 0, y: 0, z: 0 }, _fpNb = { x: 0, y: 0, z: 0 };
+/**
+ * World point under a normalised screen point on the plane z = depth.
+ * Perspective-exact: the blade lands WHERE THE POINTER LOOKS at its own
+ * depth. The old linear screen→metre map drifted 0.2–0.4 m from the finger
+ * on the wings and at deep, high balls — outside the capture box before any
+ * timing error was added, which is why on a phone returns worked only over
+ * the middle of the table.
+ */
+function pointerPlanePoint(vp, px, py, depth, out) {
+  if (!vp || !out || !Number.isFinite(px) || !Number.isFinite(py) || !Number.isFinite(depth)) return null;
+  if (!M4.invert(_fpInv, vp)) return null;
+  const nx = px * 2 - 1, ny = 1 - py * 2;
+  const un = (ndcZ, o) => {
+    const x = _fpInv[0] * nx + _fpInv[4] * ny + _fpInv[8] * ndcZ + _fpInv[12];
+    const y = _fpInv[1] * nx + _fpInv[5] * ny + _fpInv[9] * ndcZ + _fpInv[13];
+    const z = _fpInv[2] * nx + _fpInv[6] * ny + _fpInv[10] * ndcZ + _fpInv[14];
+    const w = _fpInv[3] * nx + _fpInv[7] * ny + _fpInv[11] * ndcZ + _fpInv[15];
+    if (Math.abs(w) < 1e-9) return false;
+    o.x = x / w; o.y = y / w; o.z = z / w;
+    return Number.isFinite(o.x) && Number.isFinite(o.y) && Number.isFinite(o.z);
+  };
+  if (!un(-1, _fpNa) || !un(1, _fpNb)) return null;
+  const dz = _fpNb.z - _fpNa.z;
+  if (Math.abs(dz) < 1e-6) return null;
+  const t = (depth - _fpNa.z) / dz;
+  if (!(t > 0)) return null;
+  out.x = _fpNa.x + (_fpNb.x - _fpNa.x) * t;
+  out.y = _fpNa.y + (_fpNb.y - _fpNa.y) * t;
+  out.z = depth;
+  return out;
+}
 
 /**
  * @param px,py   pointer in normalised screen space (0..1, y down)
  * @param stanceY the y the hand landed at — it sets how deep you stand,
  *                so flicking the wrist upward cannot lunge you over the table
  * @param sens    the player's sensitivity multiplier
+ * @param opts.vp current view·proj: enables the perspective-correct map
  */
 function paddleTargetFromPointer(px, py, stanceY, sens, out, opts) {
   const o = out || _ptOut;
@@ -299,14 +375,28 @@ function paddleTargetFromPointer(px, py, stanceY, sens, out, opts) {
   // 0.5 on screen is the centre line; the reachable half-width is the
   // authored limit, so the mapping is exact and independent of sensitivity
   // at the centre and only the *gain* changes with the slider.
-  // Mobile: expand vertical range so the paddle can reach both high lobs
-  // and low chops from a portrait screen where the swipe is shorter.
+  // Depth is anchored at PADDLE_HOME (the realistic stance main moved us to)
+  // and spans it by ±0.43 m — sy 0.21 lands at zNear 1.45, sy 0.655 at the
+  // deepest back swing. The perspective map needs the exact same contract as
+  // the linear fallback, or the two paths disagree about where the bat lives.
+  const tz = clamp(1.78 + clamp(sy - 0.55, -0.34, 0.45) * 0.96 * (0.6 + 0.4 * s),
+    zNear, PADDLE_LIMITS.zFar);
+  const vp = opts && opts.vp;
+  const _pp = _ptRayPt, _pa = _ptAnchorPt;
+  if (vp && pointerPlanePoint(vp, x, y, tz, _pp) && pointerPlanePoint(vp, 0.5, 0.5, tz, _pa)) {
+    o.tx = clamp(_pa.x + (_pp.x - _pa.x) * s, -PADDLE_LIMITS.x, PADDLE_LIMITS.x);
+    o.ty = clamp(_pa.y + (_pp.y - _pa.y) * s,
+      PH.TABLE_Y + PADDLE_LIMITS.yLo, PH.TABLE_Y + PADDLE_LIMITS.yHi);
+    o.tz = tz; o.zNear = zNear;
+    return o;
+  }
+  // Mobile fallback: the expanded vertical range from main keeps high lobs
+  // and low chops reachable even when the view matrix isn't ready yet.
   o.tx = (x - 0.5) * 2 * PADDLE_LIMITS.x * s;
   o.ty = PH.TABLE_Y + 0.62 - (y - 0.18) * 1.10 * s;
-  o.tz = 1.78 + clamp(sy - 0.55, -0.34, 0.45) * 0.96 * (0.6 + 0.4 * s);
+  o.tz = tz;
   o.tx = clamp(o.tx, -PADDLE_LIMITS.x, PADDLE_LIMITS.x);
   o.ty = clamp(o.ty, PH.TABLE_Y + PADDLE_LIMITS.yLo, PH.TABLE_Y + PADDLE_LIMITS.yHi);
-  o.tz = clamp(o.tz, zNear, PADDLE_LIMITS.zFar);
   o.zNear = zNear;
   return o;
 }

@@ -74,9 +74,9 @@ const { root } = require('./helpers.cjs');
           const ok=!g.ui.captureDebug && !document.querySelector('#captureDebugLab').checked && getComputedStyle(g.canvas).cursor==='none';
           g.returnToMenu();document.querySelector('#menu').classList.add('on');return ok;
         });
-        check('gameplay sliders are removed rather than merely hidden', () => {
+        check('legacy gameplay overrides stay removed; only serve-toss and the human-help sliders remain', () => {
           return !document.querySelector('#rHitZone,#rAssist,#vHitZone,#vAssist') &&
-            !document.querySelector('#settings input[type=range]') &&
+            ![...document.querySelectorAll('#settings input[type=range]')].some(r=>!['serveToss','capScale','zoneScale','aimAssist','footAssist','batSens'].includes(r.dataset.set)) &&
             !document.querySelector('#settings [data-set=assist],#settings [data-set=hitZone]');
         });
         check('shared controls survive old writes and are absent from new saves', () => {
@@ -162,7 +162,7 @@ const { root } = require('./helpers.cjs');
           }
           g.settings.hand='right';g.returnToMenu();return true;
         });
-        check('physical impact face survives the full update and rendering on both grips', () => {
+        check('exact physical impact renders once, then advances without hit-stop on both grips', () => {
           for (const grip of ['shakehand', 'penhold']) {
             g.settings.grip=grip;g.settings.hand='right';g.startMatch(2);
             g.demoMode=false;g.server=1;g.isServeBall=true;g.setState(GS.SERVE_TOSS);
@@ -172,6 +172,8 @@ const { root } = require('./helpers.cjs');
             g.ball.live=true;g.ball.lastHitBy=0;
             g.swipe.down(.5,.5,g.time-.1);g.swipe.move(.52,.55,g.time-.05);g.swipe.up(.54,.65,g.time);
             g.swipeReleasedAt=g.time;
+            g.anticipation.active=true;
+            V3.set(g.anticipation.visualOffset,.015,0,.03);
             let impactNormal=null;
             const apply=g.applyHit;
             g.applyHit=function(by,racket,...rest) {
@@ -187,10 +189,15 @@ const { root } = require('./helpers.cjs');
             g.ui.renderShotLab();
             if(!document.querySelector('#captureCalibrationSummary'))return false;
             if(Math.abs(shot.contact.spin.totalRps-V3.len(g.ball.w)/TAU)>1e-9)return false;
-            g.update(1/60);
             if(V3.dist(g.player.normal,impactNormal)>1e-8 || g.player.motionStage!=='contact')return false;
             const before=JSON.stringify(g.player);g.render();
             if(JSON.stringify(g.player)!==before)return false;
+            if(g.anticipation.active || V3.len(g.anticipation.visualOffset)>1e-10 ||
+              V3.dist(g._drawPadPos,g.player.pos)>1e-10)return false;
+            g.update(1/60);
+            if(V3.dist(g.player.normal,impactNormal)<1e-6 || g.player.motionStage!=='follow')return false;
+            const advanced=JSON.stringify(g.player);g.render();
+            if(JSON.stringify(g.player)!==advanced)return false;
           }
           g.settings.grip='shakehand';g.returnToMenu();return true;
         });
@@ -263,12 +270,16 @@ const { root } = require('./helpers.cjs');
           }
           g.returnToMenu();return true;
         });
-        check('training keeps the swipe area empty; controls exist only inside pause', () => {
+        check('training keeps the swipe area empty; the only control is the on-demand preview', () => {
           document.querySelectorAll('.screen.on').forEach(el=>el.classList.remove('on'));
           g.startTraining();g.setPaused(false);g.ui.tick(0);
           const header=document.querySelector('#train'),controls=document.querySelector('#topright');
           const rect=header.getBoundingClientRect(),top=controls.getBoundingClientRect();
-          const clear=!header.querySelector('button') && getComputedStyle(header).pointerEvents==='none' &&
+          const demo=document.querySelector('#trDemo'),buttons=header.querySelectorAll('button');
+          const clear=buttons.length===1 && buttons[0]===demo &&
+            getComputedStyle(header).pointerEvents==='none' &&
+            getComputedStyle(document.querySelector('#trText')).pointerEvents==='none' &&
+            getComputedStyle(demo).pointerEvents==='auto' &&
             getComputedStyle(document.querySelector('#playband')).visibility==='hidden' &&
             !document.querySelector('#trSkip').getClientRects().length && !document.querySelector('#trExit').getClientRects().length &&
             rect.right<=top.left-8 && rect.bottom<tableScreenBounds(g.camVP).top*innerHeight && typeof g.ui.drawGhost==='undefined';
@@ -278,6 +289,19 @@ const { root } = require('./helpers.cjs');
           const advanced=g.training.step===1 && !g.paused;
           g.returnToMenu();document.querySelector('#menu').classList.add('on');
           return clear && paused && advanced;
+        });
+        check('the bot never starts the preview by itself; the panel button does', () => {
+          document.querySelectorAll('.screen.on').forEach(el=>el.classList.remove('on'));
+          g.startTraining();g.setPaused(false);
+          for(let i=0;i<150;i++)g.training.update(1/60);      // intro + wait: a ball, not a demo
+          const idle=g.training.phase==='live' && !g.training.demo;
+          const started=g.training.playDemo()===true && g.training.isDemo() && !!g.training.demo;
+          for(let i=0;i<40;i++)g.training.update(1/60);
+          const looping=g.training.phase==='demo' && !!g.training.demo;
+          g.training.exitDemo();
+          const back=!g.training.demo && g.training.phase==='live' && !g.pointerDown;
+          g.returnToMenu();document.querySelector('#menu').classList.add('on');
+          return idle && started && looping && back;
         });
         check('touch event switches copy immediately on a hybrid device', () => {
           g.ui.setInputMode('mouse');
@@ -378,8 +402,11 @@ const { root } = require('./helpers.cjs');
         });
         check('full table and opponent swing volume have safe headroom', () => {
           for(let i=0;i<80;i++)g.updateCamera(.1);
-          const b=tableScreenBounds(g.R.viewProj);
-          return b.top>0 && b.bottom<.91 && opponentScreenTop(g.R.viewProj)>=CAMERA_HEADROOM-.001;
+          const b=tableScreenBounds(g.R.viewProj), a=g.R.aspect();
+          // Aspect-aware framing contract: the readability headroom is 10% on
+          // wide screens and 5.5% on portrait phones (see cameraHeadroom).
+          return b.top>0 && b.bottom<frameBottomRoom(a)+.01 &&
+            opponentScreenTop(g.R.viewProj)>=cameraHeadroom(a)-.001;
         });
         check('replay skip is a visible touch target only during replay and returns focus safely', () => {
           const skip=document.getElementById('reelSkip'),reel=document.getElementById('reel');
@@ -599,9 +626,12 @@ const { root } = require('./helpers.cjs');
       });
       for (const r of results) { console.log(`${r.ok ? 'PASS' : 'FAIL'} ${width}x${height}: ${r.name}${r.error ? ' — '+r.error : ''}`); count++; }
       assert.deepEqual(results.filter(r => !r.ok), []);
+      // Focus is a precondition of this real-time RAF test: blur correctly
+      // pauses gameplay, so an unfocused page is not evidence of a stall.
+      await page.bringToFront();
       const frameBefore = await page.evaluate(() => {
         const g=window.__game;
-        g.startDemo(2);g.ball.live=false;g.setState(GS.RALLY);
+        g.startDemo(2);g.ball.live=false;g.setState(GS.RALLY);g.setPaused(false);
         g.lastShotInfo={speed:100};g.emotion.lastBigMoment=g.time-3;
         return g.frame;
       });

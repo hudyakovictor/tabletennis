@@ -420,7 +420,7 @@ class OpponentAI {
 
     // Solve on copies. The game applies the returned impact exactly once.
     strokeFrame(racket, 0, 0, 1, racket.vR, racket.normal);
-    racket = refineRacket(ball.p, ball.v, ball.w, racket, L.skill, racket.quality);
+    racket = refineRacketRealtime(ball.p, ball.v, ball.w, racket, L.skill, racket.quality);
     V3.copy(this.faceNormal, racket.normal);
     this.lastStrokeId = archId;
     this.phase = 'SWING';
@@ -515,13 +515,9 @@ class OpponentAI {
     racketFromStroke.isServe = true;
 
     // Use refineRacket for legal serve
-    let finalRacket = refineRacket(ball.p, ball.v, ball.w, racketFromStroke,
+    let finalRacket = refineRacketRealtime(ball.p, ball.v, ball.w, racketFromStroke,
       this.handicap, racket.quality);
 
-    if (!finalRacket.valid && this.handicap < 0.999) {
-      finalRacket = refineRacket(ball.p, ball.v, ball.w, racketFromStroke,
-        1, racket.quality);
-    }
 
     return finalRacket;
   }
