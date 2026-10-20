@@ -89,7 +89,9 @@ class Game {
     this.replayer = new MomentPlayer();
 
     this.settings = {
-      difficulty: 0,
+      /* ПРО by default: the menu shows it as the authored starting point,
+         and the first match should be the one the splash advertises. */
+      difficulty: 2,
       quality: 'high',
       sound: true,
       volume: 0.9,
@@ -107,6 +109,9 @@ class Game {
       slowmoOnBigShots: true,
       targetScore: 11,
       spinBias: 'norm',
+      /* Height of the serve toss in CENTIMETRES. ITTF asks for at least
+         16 cm; the slider lives between 28 and 46 and the default is 37. */
+      serveToss: 37,
       // NEW: Enhanced gameplay settings
       showSpinIndicator: true,
       followThrough: true,
@@ -662,7 +667,10 @@ class Game {
     // ITTF requires a near-vertical toss of at least 16 cm; we throw ~30 cm
     V3.set(b.p, pad.pos.x,
       PH.TABLE_Y + 0.14, clamp(pad.pos.z - 0.04, PH.T_HALF_LEN + 0.04, 2.0));
-    V3.set(b.v, rndSym(0.03), 2.45 + rnd(0, 0.2), rndSym(0.03));
+    /* The toss is a real throw: v = sqrt(2 g h). 2.45 m/s is the old fixed
+       30 cm; it now follows the player's chosen height (28–46 cm). */
+    const tossRise = clamp((Number(this.settings.serveToss) || 37) / 100, 0.28, 0.46);
+    V3.set(b.v, rndSym(0.03), Math.sqrt(2 * PH.G * tossRise) + rnd(0, 0.05), rndSym(0.03));
     this.tossStartY = b.p.y;
     this.tossApex = b.p.y;
     V3.zero(b.w);
@@ -1001,6 +1009,7 @@ class Game {
       showTele: s.showTele, haptics: s.haptics, coach: s.coach, adaptive: s.adaptive,
       targetScore: s.targetScore,
       spinBias: s.spinBias,
+      serveToss: s.serveToss,
     };
     if (this.career && this.career.active && this.career._baseSettings)
       this.profile.data.settings.difficulty = this.career._baseSettings.difficulty;
@@ -1014,7 +1023,7 @@ class Game {
     for (const k of Object.keys(s)) {
       if (typeof s[k] === 'boolean' && typeof raw[k] === 'boolean') s[k] = raw[k];
     }
-    const ranges = { difficulty: [0, 4], volume: [0, 1] };
+    const ranges = { difficulty: [0, 4], volume: [0, 1], serveToss: [28, 46] };
     for (const [k, [lo, hi]] of Object.entries(ranges)) {
       if (Number.isFinite(raw[k])) s[k] = clamp(raw[k], lo, hi);
     }
