@@ -40,8 +40,49 @@ function installUnifiedControls(settings) {
   }
   return settings;
 }
+
+/* Личная подстройка помощи.
+ * Правило игры одно для всех, поэтому ползунок может только УЖИМАТЬ
+ * помощь: верхняя граница равна авторскому значению. Никто не получает
+ * преимущества — наоборот, игрок может потребовать от себя большего.
+ * Значения по умолчанию совпадают с авторскими, поэтому игра
+ * для нового игрока остаётся ровно той же. */
+const PLAYER_TUNING = {
+  capture: 1,                              // окно захвата (ракетка)
+  press: 1,                                // зона нажатия (мяч)
+  aim: MATCH_RULES.trajectoryAssist,        // помощь прицела
+  approach: MATCH_RULES.positionAssist,     // подход за мячом
+  sens: 1,                                 // чувствительность курсора/пальца
+};
+const PLAYER_TUNING_LIMITS = Object.freeze({
+  capture: [0.7, 1],
+  press: [0.7, 1],
+  aim: [0.5, MATCH_RULES.trajectoryAssist],
+  approach: [0.5, MATCH_RULES.positionAssist],
+  sens: [0.7, 1.3],
+});
+/** Записать личную настройку с зажимом по границам. Возвращает итог. */
+function setPlayerTuning(key, value) {
+  if (!Object.prototype.hasOwnProperty.call(PLAYER_TUNING_LIMITS, key)) return null;
+  const lim = PLAYER_TUNING_LIMITS[key];
+  let v = Number(value);
+  if (!Number.isFinite(v)) return PLAYER_TUNING[key];
+  v = Math.max(lim[0], Math.min(lim[1], v));
+  PLAYER_TUNING[key] = v;
+  return v;
+}
+/** Сбросить личные настройки к авторским значениям. */
+function resetPlayerTuning() {
+  PLAYER_TUNING.capture = 1;
+  PLAYER_TUNING.press = 1;
+  PLAYER_TUNING.aim = MATCH_RULES.trajectoryAssist;
+  PLAYER_TUNING.approach = MATCH_RULES.positionAssist;
+  PLAYER_TUNING.sens = 1;
+  return PLAYER_TUNING;
+}
 function playerCaptureLimits(isServe) {
-  return { radius: isServe ? MATCH_RULES.serveCaptureRadius : MATCH_RULES.captureRadius,
+  const scale = PLAYER_TUNING.capture;
+  return { radius: (isServe ? MATCH_RULES.serveCaptureRadius : MATCH_RULES.captureRadius) * scale,
     depth: MATCH_RULES.depthTolerance, sweet: MATCH_RULES.sweetRadius };
 }
 /** Endpoint capture used by impact AND the timing cue. CCD remains the
@@ -51,8 +92,9 @@ function playerCaptureLimits(isServe) {
 function playerInCaptureRange(ball, paddle, isServe = false) {
   if (!ball || !paddle || ![ball.x, ball.y, ball.z, paddle.x, paddle.y, paddle.z].every(Number.isFinite)) return false;
   const dx = ball.x - paddle.x, dy = ball.y - paddle.y, dz = ball.z - paddle.z;
-  return isServe ? Math.hypot(dx, dy, dz) <= MATCH_RULES.serveCaptureRadius
-    : Math.hypot(dx, dy) <= MATCH_RULES.captureRadius && Math.abs(dz) <= MATCH_RULES.depthTolerance;
+  const limits = playerCaptureLimits(isServe);
+  return isServe ? Math.hypot(dx, dy, dz) <= limits.radius
+    : Math.hypot(dx, dy) <= limits.radius && Math.abs(dz) <= limits.depth;
 }
 /** Pure overlay model: cue follows the ball; no fake area-of-effect circle.
  * A warm solid bracket means an available time/position window, never an
@@ -120,10 +162,11 @@ const PRESS_REJECTION_REASONS = Object.freeze([
 function pressHitZone(ballScreen, pointer, width, height, radius = MATCH_RULES.pressRadiusPx) {
   if (!ballScreen || !ballScreen.ok || !pointer || ![ballScreen.x,ballScreen.y,pointer.x,pointer.y,width,height,radius].every(Number.isFinite) || width<=0 || height<=0 || radius<=0) return null;
   const x=ballScreen.x*width,y=ballScreen.y*height;
+  const scaled = radius * PLAYER_TUNING.press;
   const distancePx=Math.hypot(pointer.x*width-x,pointer.y*height-y);
-  const accepted=distancePx<=radius;
-  return { x,y,radius,distancePx,pointerX:pointer.x*width,pointerY:pointer.y*height,accepted,
-    shape:'circle', score:distancePx/radius, along:null, across:null,
+  const accepted=distancePx<=scaled;
+  return { x,y,radius:scaled,distancePx,pointerX:pointer.x*width,pointerY:pointer.y*height,accepted,
+    shape:'circle', score:distancePx/scaled, along:null, across:null,
     reason:accepted?null:'OUTSIDE_ZONE' };
 }
 
@@ -204,12 +247,13 @@ function pressOvalBlendAxis(reference, velocityAxis, blend) {
 function pressHitZoneOval(ball, pointer, width, height, opts = {}) {
   if (!ball || !pointer || ![pointer.x, pointer.y, width, height].every(Number.isFinite) || width <= 0 || height <= 0) return null;
   const lead = Number.isFinite(opts.leadSec) && opts.leadSec > 0 ? opts.leadSec : MATCH_RULES.ovalLeadSec;
-  const fwdPx = Number.isFinite(opts.fwdPx) && opts.fwdPx > 0 ? opts.fwdPx : MATCH_RULES.ovalForwardPx;
-  const forwardMaxPx = Number.isFinite(opts.forwardMaxPx) && opts.forwardMaxPx > 0
-    ? opts.forwardMaxPx : MATCH_RULES.ovalForwardMaxPx;
-  const backPx = Number.isFinite(opts.backPx) && opts.backPx > 0 ? opts.backPx : MATCH_RULES.ovalBackPx;
+  const pressScale = PLAYER_TUNING.press;
+  const fwdPx = (Number.isFinite(opts.fwdPx) && opts.fwdPx > 0 ? opts.fwdPx : MATCH_RULES.ovalForwardPx) * pressScale;
+  const forwardMaxPx = (Number.isFinite(opts.forwardMaxPx) && opts.forwardMaxPx > 0
+    ? opts.forwardMaxPx : MATCH_RULES.ovalForwardMaxPx) * pressScale;
+  const backPx = (Number.isFinite(opts.backPx) && opts.backPx > 0 ? opts.backPx : MATCH_RULES.ovalBackPx) * pressScale;
   const pointerType = opts.pointerType || opts.inputType || 'touch';
-  const sidePx = pressOvalSidePx(pointerType, opts);
+  const sidePx = pressOvalSidePx(pointerType, opts) * pressScale;
   if (!(lead > 0) || !(fwdPx > 0) || !(forwardMaxPx > 0) || !(backPx > 0) || !(sidePx > 0)) return null;
 
   let center = null, screenVx = 0, screenVy = 0, worldVelocity = null;

@@ -38,6 +38,10 @@ class UI {
     this._pv2 = {};
     this.inputMode = detectInputMode();
     this.hasFinePointer = this.inputMode === 'mouse';
+    /* Единое меню: оболочка, навигация и motion-система живут отдельно от
+       игровых экранов, но знают о них всё, что нужно. */
+    this.hub = new MenuHub(this);
+    this.tuneAnim = { serve: 0, control: 0 };
     document.addEventListener('pointerdown', e => this.setInputMode(e.pointerType), { capture: true, passive: true });
     this.bindMenu();
     this.resize();
@@ -46,7 +50,21 @@ class UI {
     if (this.dialogObserver) this.dialogObserver.observe(document.body, { subtree: true, attributes: true, attributeFilter: ['class'] });
     document.addEventListener('keydown', (event) => {
       if (event.key === 'Tab') this.trapDialogFocus(event);
-      if (event.key === 'Escape' && $('#shotLab').classList.contains('on')) { event.preventDefault(); this.closeShotLab(); }
+      if (event.key !== 'Escape') return;
+      /* Escape всегда закрывает верхний экран: сначала лаборатория, потом
+         шторка, потом текущий раздел хаба — и никогда не оставляет игру
+         в состоянии «меню поверх матча». */
+      if ($('#shotLab').classList.contains('on')) { event.preventDefault(); this.closeShotLab(); return; }
+      const hub = this.hub;
+      if (!hub) return;
+      if (hub.drawerOpen) { event.preventDefault(); hub.toggleDrawer(false); return; }
+      const id = hub.activeId;
+      if (!id || id === 'menu' || id === 'over' || id === 'tdone') return;
+      if (!hub.root.classList.contains('on')) return;
+      event.preventDefault();
+      if (id === 'settings') { this.closeSettings(); return; }
+      if (id === 'tuneServe' || id === 'tuneControl') { if (this.closeTune) this.closeTune(); return; }
+      hub.go('menu');
     }, true);
   }
   attach(game) {
@@ -60,6 +78,7 @@ class UI {
     this.syncPauseControl();
     this.refreshMenuBits();
     this.syncMenuScrollHint();
+    if (this.hub) { this.hub.attach(game); this.hub.sync(); }
 
     // Setup UI animations
     if (this.uiAnim) {
@@ -142,14 +161,33 @@ class UI {
     if (this.game && this.game.training) this.trainSync(this.game.training);
   }
 
+  /** Показать ровно один экран хаба: остальные закрываются. */
+  showScreen(id) {
+    $$('.screen').forEach((x) => { if (x.id !== id) x.classList.remove('on'); });
+    const el = document.getElementById(id);
+    if (el) el.classList.add('on');
+    if (this.hub) this.hub.sync();
+    return el;
+  }
+
   openSettings() {
     this.syncSettings();
     this._settingsWasPaused = this.game.paused;
+    /* Из какого экрана хаба пришли — туда и вернёмся по «Сохранить и закрыть».
+       Если хаб был закрыт (настройки из HUD во время матча), возврата нет:
+       закрытие просто убирает экран, и матч продолжается. */
+    const active = this.hub && this.hub.activeId;
+    this._settingsReturn = (active && active !== 'settings') ? active : null;
     this.game.setPaused(true);
-    $('#settings').classList.add('on');
+    this.showScreen('settings');
   }
   closeSettings() {
-    $('#settings').classList.remove('on');
+    const back = this._settingsReturn || null;
+    if (back) this.showScreen(back);
+    else {
+      $('#settings').classList.remove('on');
+      if (this.hub) this.hub.sync();
+    }
     if (!this._settingsWasPaused) this.game.setPaused(false);
     this.game.profile.save(true);
   }
@@ -217,19 +255,21 @@ class UI {
     $('#menu').classList.add('on');
     this.refreshMenuBits();
     this.syncMenuScrollHint();
+    if (this.hub) this.hub.sync();
   }
 
+  /** Подсказка прокрутки: теперь прокручивается сцена хаба, а не карточка. */
   syncMenuScrollHint() {
-    const card = $('#menu .card');
-    if (!card) return;
+    const view = $('#menu');
+    if (!view) return;
     const update = () => {
-      const needed = card.scrollHeight > card.clientHeight + 2;
-      card.classList.toggle('scroll-needed', needed);
-      card.classList.toggle('scroll-start', needed && card.scrollTop < 24);
+      const needed = view.scrollHeight > view.clientHeight + 4;
+      view.classList.toggle('scroll-needed', needed);
+      view.classList.toggle('scroll-start', needed && view.scrollTop < 24);
     };
-    if (!card.dataset.scrollHintBound) {
-      card.dataset.scrollHintBound = 'true';
-      card.addEventListener('scroll', update, { passive: true });
+    if (!view.dataset.scrollHintBound) {
+      view.dataset.scrollHintBound = 'true';
+      view.addEventListener('scroll', update, { passive: true });
     }
     update();
   }
@@ -277,12 +317,7 @@ class UI {
       this.game.network.disconnect();
       this.game.startMatch(d);
     };
-    const startTrain = () => {
-      $$('.screen').forEach((s) => s.classList.remove('on'));
-      document.body.classList.add('is-playing');
-      this.game.analytics && this.game.analytics.send('tutorial:start', {});
-      this.game.startTraining();
-    };
+    const startTrain = () => this.startTraining();
     $('#play').addEventListener('click', startMatch);
     $('#tdPlay').addEventListener('click', startMatch);
     $('#train0').addEventListener('click', startTrain);
@@ -290,19 +325,14 @@ class UI {
     $('#trSkip').addEventListener('click', () => { const t = this.game.training; if (t && this.game.paused) { t.skip(); this.game.setPaused(false); this.game.audio.ui('click'); } });
     $('#trExit').addEventListener('click', () => { if (this.game.paused) this.showMainMenu(); });
     /* --- workshop / shop / daily --- */
-    const wsOpen = (tab) => {
-      this.game.audio.ui('click');
-      this.game.analytics && this.game.analytics.send('ui:workshop', { tab: tab || 'racket' });
-      $$('.screen').forEach((x) => x.classList.remove('on'));
-      this.pick = null;                       // a fresh visit starts from what is fitted
-      this.showWorkshop(tab || 'racket');
-    };
+    const wsOpen = (tab) => this.openWorkshop(tab);
     $('#wsOpen').addEventListener('click', () => wsOpen('racket'));
     $('#dailyOpen').addEventListener('click', () => wsOpen('daily'));
     $('#wsClose').addEventListener('click', () => {
       $('#workshop').classList.remove('on');
       $('#menu').classList.add('on');
       this.game.audio.ui('click');
+      if (this.hub) this.hub.sync();
     });
     $$('#workshop .tab').forEach((b) => b.addEventListener('click', () => this.showWorkshop(b.dataset.tab)));
     $('#wsEquip').addEventListener('click', () => this.equipSelection());
@@ -323,15 +353,7 @@ class UI {
     });
     $('#menuFullscreen').addEventListener('click', () => this.toggleFullscreen());
     $('#menuSound').addEventListener('click', () => this.toggleSound());
-    const startDemo = () => {
-      $$('.screen').forEach((s) => s.classList.remove('on'));
-      document.body.classList.add('is-playing');
-      this.trainHide();
-      this.game.training = null;
-      this.game.career.stop();
-      this.game.network.disconnect();
-      this.game.startDemo(2);
-    };
+    const startDemo = () => this.startDemo();
     const bDemo = $('#demoStart');
     if (bDemo) bDemo.addEventListener('click', startDemo);
     const bDemoExit = $('#btnDemoExit');
@@ -393,6 +415,117 @@ class UI {
     $('#reelsClose').addEventListener('click', () => { $('#reels').classList.remove('on'); this.game && this.game.audio.ui('click'); });
     $('#again').addEventListener('click', () => { $('#over').classList.remove('on'); this.game.restart(); });
     $('#backMenu').addEventListener('click', () => this.showMainMenu());
+
+    /* ---------------- единый хаб: шапка, шторка, точная настройка -------- */
+    const hubSettings = $('#hubSettings');
+    if (hubSettings) {
+      hubSettings.innerHTML = ICON.gear;
+      hubSettings.addEventListener('click', () => this.openSettings());
+    }
+    const coinChip = $('#hubCoinChip'), cryChip = $('#hubCrystalChip');
+    if (coinChip) coinChip.addEventListener('click', () => this.openWorkshop('racket'));
+    if (cryChip) cryChip.addEventListener('click', () => this.openWorkshop('shop'));
+    const openTune = (id) => {
+      const active = this.hub && this.hub.activeId;
+      this._tuneReturn = (active && active !== id) ? active : 'settings';
+      $$('#hubStage .screen').forEach((s) => s.classList.remove('on'));
+      const view = document.getElementById(id);
+      if (view) view.classList.add('on');
+      this.syncTuning();
+      if (this.hub) this.hub.sync();
+    };
+    const closeTune = () => {
+      const back = this._tuneReturn || 'settings';
+      $$('#hubStage .screen').forEach((s) => s.classList.remove('on'));
+      const view = document.getElementById(back);
+      if (view) view.classList.add('on');
+      if (this.hub) this.hub.sync();
+    };
+    this.closeTune = closeTune;
+    const tuneServeOpen = $('#tuneServeOpen'), tuneControlOpen = $('#tuneControlOpen');
+    if (tuneServeOpen) tuneServeOpen.addEventListener('click', () => openTune('tuneServe'));
+    if (tuneControlOpen) tuneControlOpen.addEventListener('click', () => openTune('tuneControl'));
+    const tuneServeClose = $('#tuneServeClose'), tuneControlClose = $('#tuneControlClose');
+    if (tuneServeClose) tuneServeClose.addEventListener('click', closeTune);
+    if (tuneControlClose) tuneControlClose.addEventListener('click', closeTune);
+    $$('input[data-tune]').forEach((r) => r.addEventListener('input', () => {
+      const key = r.dataset.tune;
+      const value = +r.value;
+      if (key === 'serveTossCm') this.applySetting('serveTossCm', value);
+      else {
+        setPlayerTuning(key, value / 100);
+        this.game.saveSettings();
+        this.syncTuning();
+        this.game.audio.ui('click');
+      }
+    }));
+  }
+
+  /* --------------------- единый хаб: точки входа --------------------- */
+
+  /** Мастерская: кошелёк, магазин, задания. */
+  openWorkshop(tab) {
+    const g = this.game; if (!g) return;
+    g.audio.ui('click');
+    g.analytics && g.analytics.send('ui:workshop', { tab: tab || 'racket' });
+    $$('.screen').forEach((x) => x.classList.remove('on'));
+    this.pick = null;                       // a fresh visit starts from what is fitted
+    this.showWorkshop(tab || 'racket');
+    if (this.hub) this.hub.sync();
+  }
+
+  /** Онлайн-лобби: одна область статусов, комната по коду. */
+  openOnline() {
+    const g = this.game; if (!g) return;
+    g.returnToMenu();
+    g.audio.init(); g.audio.resume(); g.audio.ui('click');
+    $$('.screen').forEach(s => s.classList.remove('on'));
+    $('#netStatus').textContent = 'Подключение...';
+    $('#netRoomCode').style.display = 'none';
+    $('#onlineLobby').classList.add('on');
+    g.network.connect();
+    if (this.hub) this.hub.sync();
+  }
+
+  /** Карьера: вход из меню и из дока хаба. */
+  openCareer() {
+    const g = this.game; if (!g) return;
+    g.audio.ui('click');
+    g.analytics && g.analytics.send('ui:career', {});
+    $$('.screen').forEach((s) => s.classList.remove('on'));
+    g.career.start();
+    this.showCareerIntro(g.career);
+    if (this.hub) this.hub.sync();
+  }
+
+  /** Recap обучения: шесть ударов в руках. */
+  showTrainingRecap() {
+    const g = this.game; if (!g) return;
+    g.audio.ui('click');
+    this.showScreen('tdone');
+  }
+
+  /** Обучение: вход из меню и из шторки. */
+  startTraining() {
+    const g = this.game; if (!g) return;
+    $$('.screen').forEach((s) => s.classList.remove('on'));
+    document.body.classList.add('is-playing');
+    g.analytics && g.analytics.send('tutorial:start', {});
+    g.startTraining();
+    if (this.hub) this.hub.sync();
+  }
+
+  /** Демо-режим: бот против бота, плашка возврата управления. */
+  startDemo() {
+    const g = this.game; if (!g) return;
+    $$('.screen').forEach((s) => s.classList.remove('on'));
+    document.body.classList.add('is-playing');
+    this.trainHide();
+    g.training = null;
+    g.career.stop();
+    g.network.disconnect();
+    g.startDemo(2);
+    if (this.hub) this.hub.sync();
   }
 
   /* -------------------------- best moments ------------------------- */
@@ -457,7 +590,7 @@ class UI {
       $('#reels').classList.remove('on');
       g.watchMoment(g.moments.kept[+b.dataset.i], true);
     }));
-    $('#reels').classList.add('on');
+    this.showScreen('reels');
   }
 
   /* --------------------- workshop · shop · daily ------------------- */
@@ -671,9 +804,18 @@ class UI {
     const p = this.game.profile; if (!p) return;
     $('#wsCoins').textContent = p.data.coins + ' монет';
     $('#wsStreak').textContent = 'серия ' + p.data.streak + ' · ' + p.data.daily.done.length + '/6';
+    if (this.hub) {
+      this.hub.setNumber($('#hubCoins'), p.data.coins);
+      this.hub.setNumber($('#hubCrystals'), p.data.crystals);
+    }
   }
 
   toast(text) {
+    /* Внутри хаба тост живёт в оболочке, в матче — в игровой полосе. */
+    if (this.hub && this.hub.root && this.hub.root.classList.contains('on')) {
+      this.hub.toast(text);
+      return;
+    }
     const t = $('#mnToast');
     if (!t) return;
     t.textContent = text;
@@ -682,12 +824,148 @@ class UI {
     this._tT = setTimeout(() => t.classList.remove('on'), 1500);
   }
 
+  /* ------------------- живые превью точной настройки ------------------- */
+
+  /** Подброс: высота, время до вершины, длина замаха. */
+  drawServePreview(dt) {
+    const canvas = $('#tuneServeCanvas');
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    const W = canvas.width, H = canvas.height;
+    const cm = Math.round((this.game && this.game.settings.serveTossCm) || 37);
+    const g = 9.81;
+    const v0 = Math.sqrt(2 * g * (cm / 100));
+    const tApex = v0 / g;
+    const period = tApex * 2;
+    this.tuneAnim.serve = (this.tuneAnim.serve + dt) % period;
+    const t = this.tuneAnim.serve;
+    const y = v0 * t - 0.5 * g * t * t;
+    const base = H - 42, top = 26;
+    const scale = (base - top) / Math.max(0.16, cm / 100);
+    const py = base - y * scale;
+    ctx.clearRect(0, 0, W, H);
+    /* сетка и высота */
+    ctx.strokeStyle = 'rgba(160,200,240,.16)';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    for (let i = 1; i < 6; i++) { const x = W * i / 6; ctx.moveTo(x, 14); ctx.lineTo(x, base); }
+    ctx.stroke();
+    ctx.strokeStyle = 'rgba(57,198,255,.45)';
+    ctx.setLineDash([4, 5]);
+    ctx.beginPath(); ctx.moveTo(0, top); ctx.lineTo(W, top); ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.strokeStyle = 'rgba(255,255,255,.14)';
+    ctx.beginPath(); ctx.moveTo(0, base); ctx.lineTo(W, base); ctx.stroke();
+    /* мяч */
+    const px = W * 0.5;
+    const grad = ctx.createRadialGradient(px - 4, py - 4, 1, px, py, 16);
+    grad.addColorStop(0, '#ffffff'); grad.addColorStop(1, '#9fb0c2');
+    ctx.fillStyle = grad;
+    ctx.beginPath(); ctx.arc(px, py, 11, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = 'rgba(0,0,0,.35)';
+    ctx.beginPath(); ctx.ellipse(px, base + 4, 13, 4, 0, 0, Math.PI * 2); ctx.fill();
+    /* подписи */
+    ctx.fillStyle = '#8fa3b8';
+    ctx.font = '600 13px ui-monospace, monospace';
+    ctx.textAlign = 'left';
+    ctx.fillText(cm + ' см', 14, top - 8);
+    ctx.textAlign = 'right';
+    ctx.fillText('до вершины ' + tApex.toFixed(2) + ' с', W - 14, base - 10);
+    ctx.textAlign = 'center';
+    ctx.fillStyle = '#e8eef7';
+    ctx.font = '700 15px ui-monospace, monospace';
+    ctx.fillText((y * 100).toFixed(0) + ' см', px + 42, py);
+  }
+
+  /** Окно захвата (синее) и зона нажатия (зелёная) — как в игре. */
+  drawControlPreview(dt) {
+    const canvas = $('#tuneControlCanvas');
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    const W = canvas.width, H = canvas.height;
+    const t = PLAYER_TUNING;
+    this.tuneAnim.control = (this.tuneAnim.control + dt) % 3.2;
+    const p = this.tuneAnim.control / 3.2;
+    const bx = W * (0.30 + 0.30 * p);
+    const by = H * 0.44;
+    const vx = 1, vy = 0;
+    ctx.clearRect(0, 0, W, H);
+    /* стол-подсказка */
+    ctx.strokeStyle = 'rgba(160,200,240,.14)';
+    ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.moveTo(20, H - 46); ctx.lineTo(W - 20, H - 46); ctx.stroke();
+    /* прицел ракетки */
+    const rx = W * 0.62, ry = H * 0.62;
+    const capR = 46 * t.capture;
+    const grad = ctx.createRadialGradient(rx, ry, capR * 0.2, rx, ry, capR);
+    grad.addColorStop(0, 'rgba(57,198,255,.20)');
+    grad.addColorStop(1, 'rgba(57,198,255,.04)');
+    ctx.fillStyle = grad;
+    ctx.beginPath(); ctx.arc(rx, ry, capR, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = 'rgba(57,198,255,.75)';
+    ctx.lineWidth = 2;
+    ctx.setLineDash([5, 5]);
+    ctx.beginPath(); ctx.arc(rx, ry, capR, 0, Math.PI * 2); ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.strokeStyle = '#39c6ff';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(rx - 11, ry); ctx.lineTo(rx + 11, ry);
+    ctx.moveTo(rx, ry - 11); ctx.lineTo(rx, ry + 11);
+    ctx.stroke();
+    /* зона нажатия у мяча */
+    const side = 30 * t.press, fwd = 52 * t.press, back = 22 * t.press;
+    ctx.fillStyle = 'rgba(78,227,154,.16)';
+    ctx.strokeStyle = 'rgba(78,227,154,.8)';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.ellipse(bx + vx * (fwd - back) / 2, by, (fwd + back) / 2, side, 0, 0, Math.PI * 2);
+    ctx.fill(); ctx.stroke();
+    /* мяч */
+    const g2 = ctx.createRadialGradient(bx - 3, by - 3, 1, bx, by, 12);
+    g2.addColorStop(0, '#ffffff'); g2.addColorStop(1, '#a9b8c9');
+    ctx.fillStyle = g2;
+    ctx.beginPath(); ctx.arc(bx, by, 9, 0, Math.PI * 2); ctx.fill();
+    /* подписи */
+    ctx.font = '600 12px ui-monospace, monospace';
+    ctx.textAlign = 'left';
+    ctx.fillStyle = '#39c6ff';
+    ctx.fillText('окно захвата ' + Math.round(t.capture * 100) + '%', 16, 26);
+    ctx.fillStyle = '#4ee39a';
+    ctx.fillText('зона нажатия ' + Math.round(t.press * 100) + '%', 16, 44);
+    ctx.textAlign = 'right';
+    ctx.fillStyle = '#8fa3b8';
+    ctx.fillText('прицел ' + Math.round(t.aim * 100) + '% · подход ' + Math.round(t.approach * 100) + '%', W - 16, 26);
+    ctx.fillText('чувствительность ' + t.sens.toFixed(2) + '×', W - 16, 44);
+  }
+
   applySetting(k, v) {
     const g = this.game; if (!g) return;
     const s = g.settings;
     switch (k) {
       // Gameplay assistance is an authored rule, not a player preference.
       case 'hitZone': case 'assist': case 'posAssist': case 'sens': case 'zone': return;
+      /* Профиль жестов: в «Без свайпа вниз» подрезка делается удержанием. */
+      case 'gestureProfile':
+        s.gestureProfile = (v === 'hold') ? 'hold' : 'classic';
+        setGestureProfile(s.gestureProfile);
+        g.saveSettings();
+        g.audio.ui('click');
+        this.syncSettings();
+        return;
+      /* Видимость ракетки: физика не меняется, исчезает только тело ракетки. */
+      case 'paddleView':
+        s.showPlayerPaddle = (v !== 'hidden');
+        g.saveSettings();
+        g.audio.ui('click');
+        this.syncSettings();
+        return;
+      /* Высота подброса: влияет только на вашу подачу. */
+      case 'serveTossCm':
+        s.serveTossCm = Math.round(Math.max(24, Math.min(52, +v || 37)));
+        g.saveSettings();
+        this.syncTuning();
+        return;
       case 'vol': s.volume = v / 100; g.audio.setVolume(v / 100); break;
       case 'cam': s.camera = v; break;
       case 'quality': s.quality = v; g.R.quality = v; g.resize(); break;
@@ -725,7 +1003,47 @@ class UI {
         b.setAttribute('aria-pressed', String(selected));
       });
     }
+    /* Профиль жестов и видимость ракетки — переключатели, не ползунки. */
+    const gesture = s.gestureProfile === 'hold' ? 'hold' : 'classic';
+    $$(`.opt[data-set="gestureProfile"]`).forEach(b => {
+      const selected = b.dataset.val === gesture;
+      b.classList.toggle('sel', selected);
+      b.setAttribute('aria-pressed', String(selected));
+    });
+    const paddle = s.showPlayerPaddle === false ? 'hidden' : 'visible';
+    $$(`.opt[data-set="paddleView"]`).forEach(b => {
+      const selected = b.dataset.val === paddle;
+      b.classList.toggle('sel', selected);
+      b.setAttribute('aria-pressed', String(selected));
+    });
+    this.syncTuning();
     this.syncCameraControls();
+  }
+
+  /* Точная настройка: значения ползунков + живые превью. */
+  syncTuning() {
+    const s = this.game.settings;
+    const cm = Math.round(s.serveTossCm || 37);
+    const serveRange = $('#tuneServeRange'), serveOut = $('#tuneServeOut'), serveVal = $('#tuneServeVal');
+    if (serveRange) serveRange.value = String(cm);
+    if (serveOut) serveOut.textContent = cm + ' см';
+    if (serveVal) serveVal.textContent = cm + ' см';
+    const t = PLAYER_TUNING;
+    const pairs = [
+      ['#tuneCapture', '#tuneCaptureOut', 'capture', (v) => Math.round(v * 100) + '%'],
+      ['#tunePress', '#tunePressOut', 'press', (v) => Math.round(v * 100) + '%'],
+      ['#tuneAim', '#tuneAimOut', 'aim', (v) => Math.round(v * 100) + '%'],
+      ['#tuneApproach', '#tuneApproachOut', 'approach', (v) => Math.round(v * 100) + '%'],
+      ['#tuneSens', '#tuneSensOut', 'sens', (v) => v.toFixed(2) + '×'],
+    ];
+    for (const [rangeSel, outSel, key, fmt] of pairs) {
+      const range = $(rangeSel), out = $(outSel);
+      if (range) range.value = String(Math.round(t[key] * (key === 'sens' ? 100 : 1)));
+      if (out) out.textContent = fmt(t[key]);
+    }
+    const summary = $('#tuneControlVal');
+    if (summary) summary.textContent = Math.round(t.capture * 100) + '% · ' + Math.round(t.press * 100)
+      + '% · ' + Math.round(t.aim * 100) + '%';
   }
   syncCameraControls() {
     const g = this.game;
@@ -777,7 +1095,7 @@ class UI {
   openShotLab() {
     this._labWasPaused = this.game.paused;
     this.game.setPaused(true);
-    $('#shotLab').classList.add('on');
+    this.showScreen('shotLab');
     this.renderShotLab();
   }
   closeShotLab() {
@@ -957,6 +1275,7 @@ class UI {
     const row = $('#overMoments');
     row.innerHTML = '';
     /* what the match paid, in one line, next to the score */
+    const reward = g.lastReward;
     if (g.lastReward) {
       const r = g.lastReward;
       const line = document.createElement('div');
@@ -975,7 +1294,18 @@ class UI {
       b.addEventListener('click', () => this.showMoments());
       row.appendChild(b);
     }
-    $('#over').classList.add('on');
+    this.showScreen('over');
+    /* Награда приходит движением: искры из счёта и монетки в кошелёк. */
+    if (reward && this.hub) {
+      const anchor = $('#overTitle');
+      setTimeout(() => {
+        this.hub.burst(anchor, { count: won ? 30 : 12 });
+        if (won) this.hub.coinFly(anchor, 5);
+        this.refreshMenuBits();
+        this.hub.sync();
+        this.hub.announce('Начислено ' + reward.coins + ' монет и ' + reward.xp + ' опыта');
+      }, 240);
+    }
   }
 
   /* ==================================================================
@@ -1145,6 +1475,10 @@ class UI {
     const g = this.game; if (!g) return;
     this.syncPauseControl();
     this.drawOverlay(dt);
+    /* Живые превью работают только пока открыт их экран. */
+    const serveView = $('#tuneServe'), ctrlView = $('#tuneControl');
+    if (serveView && serveView.classList.contains('on')) this.drawServePreview(dt);
+    if (ctrlView && ctrlView.classList.contains('on')) this.drawControlPreview(dt);
     // A single short status, never a stack of messages/telemetry/hints.
     const status = $('#playStatus');
     let statusText = '';
@@ -1255,17 +1589,7 @@ class UI {
    * ================================================================ */
   bindCareer() {
     const g = this.game;
-    $('#careerStart').addEventListener('click', () => {
-      g.audio.init(); g.audio.resume(); g.audio.ui('click');
-      if (g.career.load()) {
-        if (g.career.state === 'PERK_SELECT') this.showCareerPerks(g.career);
-        else if (g.career.state === 'TOURNAMENT_END') this.showCareerTournamentEnd(g.career);
-        else this.showCareerIntro(g.career);
-      } else {
-        g.career.start();
-        this.showCareerIntro(g.career);
-      }
-    });
+    $('#careerStart').addEventListener('click', () => this.openCareer());
     $('#crReady').addEventListener('click', () => {
       g.audio.ui('click');
       const c = g.career;
@@ -1392,15 +1716,7 @@ class UI {
   bindOnline() {
     const g = this.game;
     const net = g.network;
-    $('#onlineStart').addEventListener('click', () => {
-      g.returnToMenu();
-      g.audio.init(); g.audio.resume(); g.audio.ui('click');
-      $$('.screen').forEach(s => s.classList.remove('on'));
-      $('#netStatus').textContent = 'Подключение...';
-      $('#netRoomCode').style.display = 'none';
-      $('#onlineLobby').classList.add('on');
-      net.connect();
-    });
+    $('#onlineStart').addEventListener('click', () => this.openOnline());
     net.on('connected', () => {
       $('#netStatus').textContent = 'Подключено! Создайте комнату.';
       $('#netRoomCode').style.display = 'none';
