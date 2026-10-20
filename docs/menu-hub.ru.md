@@ -120,7 +120,11 @@ npm run test:browser   # реальный Chromium: десктоп 1280×760 и 
 npm run analyze:menu   # 2 раунда × 100 симуляций → docs/menu-motion-analysis.*
 npm run shots:menu     # снимки экранов + коллаж docs/menu-collage.png
 node tt/tools/menu_shots.cjs --desktop   # десктопные снимки
+npm run audit:motion   # аудит motion: 50 проверок, 15 категорий → docs/project-audit.*
 ```
+
+Аудит читает исходники (`tt/src/*`) и собранный HTML, поэтому запускать его надо
+после `npm run build` и `npm test`.
 
 ## 7. Юридические оговорки
 
@@ -129,3 +133,76 @@ node tt/tools/menu_shots.cjs --desktop   # десктопные снимки
 * покупки не дают преимущества на столе;
 * реклама всегда необязательна и никогда не прерывает матч;
 * онлайн-комнаты — экспериментальный режим, relay задаётся через `?net=wss://…`.
+
+## 8. Motion-словарь и аудит по 15 категориям
+
+### 8.1 Словарь кривых и длительностей
+
+Один набор токенов на весь интерфейс (`tt/src/05_style.css`, блок `:root`):
+
+| токен | значение | где применяется |
+|---|---|---|
+| `--ease-out` | `cubic-bezier(.23,1,.32,1)` | входы и появления: `.screen`, карточки, тосты |
+| `--ease-in-out` | `cubic-bezier(.77,0,.175,1)` | возврат, дрейф фона, «мигание» подсказки |
+| `--ease-drawer` | `cubic-bezier(.32,.72,0,1)` | шторка «ЕЩЁ» — «ящик» с лёгким перелётом |
+| `--ease-pop` | `cubic-bezier(.34,1.56,.64,1)` | редкие праздники: `hub-pop`, иконка дока |
+| `--ease-fly` | `cubic-bezier(.5,0,.3,1)` | летящая монетка в счётчик |
+| `--ease-linear` | `linear` | бесконечные вращения (спиннер, луч) |
+| `--dur-fast` | `140ms` | отклик на нажатие |
+| `--dur-base` | `200ms` | обычное действие |
+| `--dur-slow` | `280ms` | крупный экран, шторка |
+
+Правила: вход — всегда ease-out; уход — ease-in-out; длительность UI ≤ 300 мс,
+шторка/модалка ≤ 500 мс; анимируются только `transform` и `opacity`.
+
+### 8.2 Что изменилось по итогам аудита (80 → 100)
+
+| было | стало |
+|---|---|
+| инлайн-кривые в 4 местах, «разнобой» | единый словарь токенов, инлайн-кривых не осталось |
+| `#reel .bar` — переход по `height` | `transform: scaleY()` от края |
+| `.sbar .gr i`, `.diff-bar::after` — переход по `width` | `scaleX(var(--w))`, ширина задаётся переменной |
+| `champion-reveal` — `filter: brightness()` | только `opacity` и `scale` |
+| прожектор писал `--hub-x/--hub-y` в корне (пересчёт стилей потомков) | отдельный слой `.hub-spot`, ему двигают `transform` |
+| счётчик чисел нельзя было прервать | `cancelAnimationFrame` + старт от текущего значения |
+| `:hover` работал и на тач-устройствах | все 18 правил внутри `@media (hover:hover) and (pointer:fine)` |
+| у части кнопок не было отклика на нажатие | `:active` для `.btn/.opt/.mrow/.tab` и карточек хаба |
+| счётчик кошелька «прыгал» по ширине | `font-variant-numeric: tabular-nums` |
+| reduced-motion не покрывал игровые «поп» | добавлены точечные правила |
+
+### 8.3 Аудит: 50 проверок, 15 категорий
+
+`tt/tools/project_audit.cjs` → `docs/project-audit.ru.md` и `docs/project-audit.json`.
+
+Категории: craft motion-кода, easing и кривые, длительности и бюджеты,
+прерываемость и пружины, GPU-only и стоимость motion, reduced motion,
+hover/focus гейтинг, обратная связь, согласованность, структура меню,
+доступность, производительность игры, честность правил, тесты, документация.
+
+Аудит не формальность: контрольная регрессия (временный `transition:all`,
+`scale(0)`, `ease-in` и layout-переход) роняет оценку со 100 до 90 и возвращает
+эти пункты в план.
+
+### 8.4 Skills, по которым делалась работа
+
+Четыре skill установлены локально и применены к проекту, а не «по памяти»:
+
+```bash
+npx skills add heygen-com/hyperframes --skill hyperframes-animation --agent '*' -y
+npx skills add emilkowalski/skills --skill find-animation-opportunities --agent '*' -y
+npx skills add emilkowalski/skills --skill animation-vocabulary --agent '*' -y
+npx skills add emilkowalski/skills --skill review-animations --agent '*' -y
+```
+
+Состав и версии зафиксированы в `skills-lock.json`; сами skill-каталоги
+(`.agents/skills/`) — рабочее окружение агента, в репозиторий не кладутся.
+
+* `review-animations` (STANDARDS.md) — «негotiable»-стандарты: только
+  `transform`/`opacity`, длительности, interruptibility, `prefers-reduced-motion`,
+  гейт hover.
+* `find-animation-opportunities` — гейт частоты/цели/скорости/функции: анимация
+  нужна только там, где она объясняет причинно-следственную связь.
+* `animation-vocabulary` — термины и таблицы easing/duration, отсюда имена
+  токенов словаря.
+* `hyperframes-animation` — атомарность motion: seek-safe, без `Math.random` и
+  `Date.now` в композициях, stagger ≤ ~0.5 с.

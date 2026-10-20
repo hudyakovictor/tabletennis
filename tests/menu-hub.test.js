@@ -157,3 +157,39 @@ test('сборка совпадает с опубликованным HTML', () 
   assert.equal(built.length, play.length, 'play/index.html должен совпадать со сборкой');
   assert.ok(built.includes('MenuHub'), 'в сборке нет motion-системы хаба');
 });
+
+/* ----------------------- motion-словарь и гейты ---------------------- */
+test('токены кривых определены и не самоссылаются', () => {
+  const css = src('05_style.css');
+  const defs = new Map();
+  for (const m of css.matchAll(/(--[\w-]+)\s*:\s*([^;}]*)/g)) if (!defs.has(m[1])) defs.set(m[1], m[2].trim());
+  const used = new Set([...css.matchAll(/var\((--ease-[\w-]+)\)/g)].map((m) => m[1]));
+  assert.ok(used.size >= 4, 'в словаре должно быть минимум четыре кривые: ' + used.size);
+  for (const t of used) {
+    assert.ok(defs.has(t), 'токен ' + t + ' не определён');
+    assert.doesNotMatch(defs.get(t), new RegExp('var\\(\\s*' + t + '\\s*[,)]'),
+      'токен ' + t + ' ссылается сам на себя — весь transition станет невалидным');
+    assert.match(defs.get(t), /^(cubic-bezier|linear|var\(--ease)/, 'токен ' + t + ' не кривая');
+  }
+  for (const t of ['--dur-fast', '--dur-base', '--dur-slow']) assert.ok(defs.has(t), 'нет токена ' + t);
+});
+
+test('все :hover-правила закрыты pointer-гейтом, transition не общий', () => {
+  const css = src('05_style.css');
+  assert.doesNotMatch(css, /transition\s*:\s*all\b/, 'transition:all ломает анимации');
+  /* правила вне @media-блоков */
+  const flat = css.replace(/@media[^{]*\{[\s\S]*?\n\}/g, '');
+  const stray = [...flat.matchAll(/([^{}]+:hover[^{}]*)\{/g)].map((m) => m[1].trim());
+  assert.equal(stray.length, 0, 'hover-правила вне гейта: ' + stray.join(' | '));
+  assert.match(css, /@media \(hover:hover\) and \(pointer:fine\)/, 'нет pointer-гейта');
+});
+
+test('отчёт motion-аудита согласован с чек-листом', () => {
+  const rep = JSON.parse(fs.readFileSync(path.join(root, 'docs/project-audit.json'), 'utf8'));
+  assert.equal(rep.totalChecks, 50, 'в аудите должно быть ровно 50 проверок');
+  assert.equal(rep.categories.length, 15, 'в аудите должно быть 15 категорий');
+  assert.ok(rep.overall >= 95, 'оценка упала: ' + rep.overall);
+  const ids = new Set(rep.results.map((r) => r.id));
+  assert.equal(ids.size, rep.results.length, 'id проверок должны быть уникальными');
+  assert.equal(rep.plan.length, 0, 'план не выполнен: ' + rep.plan.map((f) => f.id).join(', '));
+});

@@ -673,7 +673,7 @@ class UI {
     const rows = STAT_KEYS.map((k) => {
       const v = t[k];
       const d = v - cur.stats[k];
-      return `<div class="sbar"><small>${STAT_RU[k]}</small><span class="gr"><i style="width:${v}%"></i></span>
+      return `<div class="sbar"><small>${STAT_RU[k]}</small><span class="gr"><i style="--w:${v}%"></i></span>
         <b style="color:${d > 0 ? 'var(--good)' : d < 0 ? 'var(--bad)' : 'var(--dim2)'}">${v}${d ? (d > 0 ? ' ▲' : ' ▼') : ''}</b></div>`;
     }).join('');
     $('#statCard').innerHTML = rows;

@@ -427,46 +427,61 @@ class MenuHub {
     }, { passive: true });
   }
 
-  /** Прожектор: подсветка следует за пальцем. */
+  /** Прожектор: мягкий свет следует за пальцем.
+   *  Свет — это отдельный слой, которому двигают transform: так он
+   *  остаётся на GPU и не заставляет пересчитывать стили потомков. */
   bindSpotlight() {
     const root = document.getElementById('hub');
-    if (!root) return;
-    let raf = 0, px = 0, py = 0, lx = 0, ly = 0;
+    const spot = document.getElementById('hubSpot');
+    if (!root || !spot) return;
+    let raf = 0, px = 0, py = 0, lx = 0, ly = 0, on = false;
     const loop = () => {
       lx += (px - lx) * 0.18;
       ly += (py - ly) * 0.18;
-      root.style.setProperty('--hub-x', lx.toFixed(1) + 'px');
-      root.style.setProperty('--hub-y', ly.toFixed(1) + 'px');
+      spot.style.transform = 'translate3d(' + lx.toFixed(1) + 'px,' + ly.toFixed(1) + 'px,0)';
       raf = Math.abs(px - lx) > 0.4 || Math.abs(py - ly) > 0.4 ? requestAnimationFrame(loop) : 0;
     };
     root.addEventListener('pointermove', (e) => {
       if (this.reduced) return;
       const r = root.getBoundingClientRect();
       px = e.clientX - r.left; py = e.clientY - r.top;
+      if (!on) { spot.classList.add('on'); on = true; }
       if (!raf) raf = requestAnimationFrame(loop);
+    }, { passive: true });
+    root.addEventListener('pointerleave', () => {
+      spot.classList.remove('on');
+      on = false;
     }, { passive: true });
   }
 
   /* ------------------------ счётчики и текст ---------------------- */
 
-  /** Числовой счётчик: монеты, кристаллы, опыт. */
+  /** Числовой счётчик: монеты, кристаллы, опыт.
+   *  Прерываемый: новое значение продолжает движение от текущего,
+   *  а не начинает заново — иначе два вызова спорят за один текст. */
   setNumber(el, value, opts = {}) {
     if (!el) return;
-    const from = Number(el.dataset.v || 0);
     const to = Number(value) || 0;
+    const fmt = opts.format || ((v) => String(Math.round(v)));
+    /* гасим предыдущую петлю этого элемента */
+    const prev = el._hubRaf;
+    if (prev) { cancelAnimationFrame(prev); el._hubRaf = 0; }
+    /* старт — из того, что сейчас на экране, а не из прошлого значения */
+    const from = this.reduced ? to : (el._hubFrom !== undefined ? el._hubFrom : Number(el.dataset.v || 0));
     el.dataset.v = String(to);
-    if (this.reduced || from === to) { el.textContent = opts.format ? opts.format(to) : String(to); return; }
+    if (this.reduced || from === to) { el.textContent = fmt(to); el._hubFrom = to; return; }
     const dur = opts.duration || 520;
     const start = performance.now();
-    const fmt = opts.format || ((v) => String(Math.round(v)));
     const step = (now) => {
       const t = Math.min(1, (now - start) / dur);
       const e = hubEaseOut(t);
-      el.textContent = fmt(hubLerp(from, to, e));
-      if (t < 1) requestAnimationFrame(step);
-      else el.textContent = fmt(to);
+      const v = hubLerp(from, to, e);
+      el.textContent = fmt(v);
+      el._hubFrom = v;
+      if (t < 1) el._hubRaf = requestAnimationFrame(step);
+      else { el.textContent = fmt(to); el._hubFrom = to; el._hubRaf = 0; }
     };
-    requestAnimationFrame(step);
+    el._hubRaf = requestAnimationFrame(step);
   }
 
   /** «Дешифратор» заголовка: буквы собираются из шума. */

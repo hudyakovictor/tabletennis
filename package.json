@@ -14,7 +14,8 @@
     "analyze:log": "node tt/tools/analyze_input_log.cjs",
     "bench:log": "node tt/tools/benchmark_input_log.cjs",
     "analyze:menu": "node tt/tools/menu_motion_sim.cjs",
-    "shots:menu": "node tt/tools/menu_shots.cjs"
+    "shots:menu": "node tt/tools/menu_shots.cjs",
+    "audit:motion": "node tt/tools/project_audit.cjs"
   },
   "dependencies": {
     "ws": "^8.18.3"
