@@ -201,6 +201,17 @@ function isRealStroke(m, serving) {
   return true;
 }
 
+/* Профиль жестов. «Классика»: подрезка — свайп вниз. «Без свайпа вниз»:
+   подрезка делается удержанием с мягким движением вверх (или медленным
+   коротким свайпом) — для Telegram и системных жестов, где свайп вниз
+   закрывает приложение. Профиль меняет только распознавание, не физику. */
+let GESTURE_PROFILE = 'classic';
+function setGestureProfile(profile) {
+  GESTURE_PROFILE = (profile === 'hold') ? 'hold' : 'classic';
+  return GESTURE_PROFILE;
+}
+function gestureProfile() { return GESTURE_PROFILE; }
+
 function classifyStroke(m, ctx, sp01) {
   const r = m.right, u = m.up;
   const latMag = Math.abs(r);
@@ -224,6 +235,16 @@ function classifyStroke(m, ctx, sp01) {
   if (m.dist < 0.050 && sp01 < 0.45) {
     if (incSpeed > 7.0 || incomingTop > 220) return STROKES.BLOCK;
     return (overTable && hAboveTable < 0.34) ? STROKES.DROP : STROKES.BLOCK;
+  }
+  /* Профиль «Без свайпа вниз»: удержание ведёт вверх — это подрезка,
+     свайп вниз подрезкой больше не считается. */
+  if (GESTURE_PROFILE === 'hold') {
+    const heldUp = u > 0.25 && m.dist > 0.04 && (m.dur >= 0.20 || (slow && m.dist < 0.16));
+    if (heldUp) return STROKES.CHOP;
+    if (u < -0.28) {
+      if (slow && overTable && hAboveTable < 0.35) return STROKES.DROP;
+      return STROKES.PUSH;
+    }
   }
   /* Finishing a high ball always beats everything else — but only if the
    * hand is actually going forward/up. A fast DOWNWARD gesture was caught

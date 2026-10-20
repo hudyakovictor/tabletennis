@@ -2,3 +2,8 @@ node_modules/
 .cache/
 test-results/
 __pycache__/
+
+# локально установленные skills агента (npx skills add), в репозиторий не нужны
+.agents/
+agent/
+.claude/

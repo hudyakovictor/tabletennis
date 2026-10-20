@@ -787,6 +787,72 @@ const { root } = require('./helpers.cjs');
           document.getElementById('btnSound').getAttribute('aria-pressed')===String(!before),soundBefore),true);
         count++;console.log(`PASS ${width}x${height}: real touch pauses, opens settings safely, resumes, exits, and toggles sound`);
       }
+      /* ---------------- единый меню-хаб ---------------- */
+      await page.evaluate(() => { const g = window.__game; g.returnToMenu(); g.ui.showMainMenu(); });
+      await new Promise((r) => setTimeout(r, 120));
+      const hubState = await page.evaluate(() => {
+        const on = Array.from(document.querySelectorAll('#hubStage .screen.on')).map((s) => s.id);
+        const hub = document.getElementById('hub');
+        return {
+          on, hubOn: hub.classList.contains('on'), aria: hub.getAttribute('aria-hidden'),
+          dock: hub.querySelectorAll('#hubDock .dock-btn').length,
+          pill: !!document.getElementById('dockPill'), live: !!document.getElementById('hubLive'),
+        };
+      });
+      assert.equal(hubState.on.length, 1, true, 'в хабе открыт не один экран: ' + hubState.on.join(','));
+      assert.equal(hubState.on[0], 'menu', true, 'по умолчанию открыт главный экран');
+      assert.equal(hubState.hubOn, true, true);
+      assert.equal(hubState.aria, 'false', true, 'оболочка должна быть видна скринридеру');
+      assert.equal(hubState.dock >= 5, true, true, 'в доке должны быть разделы');
+      assert.equal(hubState.pill, true, true, 'нет индикатора дока');
+      assert.equal(hubState.live, true, true, 'нет живой области для объявлений');
+      count++; console.log(`PASS ${width}x${height}: the hub keeps one screen open, exposes the dock and the live region`);
+
+      /* Шторка открывается, закрывается по Escape и не оставляет двух экранов. */
+      await page.evaluate(() => window.__game.ui.hub.toggleDrawer(true));
+      assert.equal(await page.evaluate(() => document.getElementById('hubDrawer').classList.contains('on')), true);
+      await page.keyboard.press('Escape');
+      await new Promise((r) => setTimeout(r, 120));
+      assert.equal(await page.evaluate(() => !document.getElementById('hubDrawer').classList.contains('on')), true,
+        'Escape не закрыл шторку');
+      count++; console.log(`PASS ${width}x${height}: Escape closes the hub drawer`);
+
+      /* Переход между разделами: ровно один экран, пилюля дока едет. */
+      await page.evaluate(() => { document.querySelector('#hubDrawer [data-view="settings"]').click(); });
+      await new Promise((r) => setTimeout(r, 200));
+      const switched = await page.evaluate(() => {
+        const on = Array.from(document.querySelectorAll('#hubStage .screen.on')).map((s) => s.id);
+        const pill = document.getElementById('dockPill');
+        const r = pill.getBoundingClientRect();
+        return { on, pillX: r.left, pillW: r.width, drawer: document.getElementById('hubDrawer').classList.contains('on'),
+          current: document.querySelector('#hubDock .dock-btn[aria-current="page"]') ? true : false };
+      });
+      assert.equal(switched.on.length, 1, true, 'после перехода открыто несколько экранов');
+      assert.equal(switched.on[0], 'settings', true, 'открыт не тот раздел');
+      assert.equal(switched.drawer, false, true, 'шторка должна закрыться');
+      assert.equal(switched.pillW > 0, true, true, 'пилюля дока не получила размер');
+      assert.equal(switched.current, true, true, 'активный раздел не отмечен в доке');
+      count++; console.log(`PASS ${width}x${height}: hub switches sections through the dock, one screen at a time`);
+
+      /* Escape возвращает в главный экран хаба. */
+      await page.keyboard.press('Escape');
+      await new Promise((r) => setTimeout(r, 200));
+      assert.equal(await page.evaluate(() => {
+        const on = Array.from(document.querySelectorAll('#hubStage .screen.on')).map((s) => s.id);
+        return on.length === 1 && on[0] === 'menu';
+      }), true, 'Escape не вернул в главный экран хаба');
+      count++; console.log(`PASS ${width}x${height}: Escape returns the hub to its home screen`);
+
+      /* Во время матча хаб закрыт и скринридеру не мешает. */
+      await page.evaluate(() => { const g = window.__game; g.startMatch(2); });
+      await new Promise((r) => setTimeout(r, 150));
+      assert.equal(await page.evaluate(() => {
+        const hub = document.getElementById('hub');
+        return !hub.classList.contains('on') && hub.getAttribute('aria-hidden') === 'true'
+          && document.querySelectorAll('#hubStage .screen.on').length === 0;
+      }), true, 'хаб остался открытым во время матча');
+      count++; console.log(`PASS ${width}x${height}: the hub is closed and hidden from assistive tech during a match`);
+
       const audioRender = await page.evaluate(async () => {
         const context = new OfflineAudioContext(2, 44100 * 4, 44100);
         const a = new AudioEngine(); a.ctx=context;a.ok=true;a.muted=false;

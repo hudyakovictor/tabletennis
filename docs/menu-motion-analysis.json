@@ -1,0 +1,1694 @@
+{
+  "runs": 100,
+  "rounds": 2,
+  "criteria": [
+    {
+      "id": "readability",
+      "name": "Читаемость",
+      "note": "экран остаётся читаемым во время анимации"
+    },
+    {
+      "id": "feedback",
+      "name": "Отклик",
+      "note": "действие пользователя подтверждается мгновенно"
+    },
+    {
+      "id": "juice",
+      "name": "Характер",
+      "note": "узнаваемый почерк игры, а не украшательство"
+    },
+    {
+      "id": "perf",
+      "name": "Производительность",
+      "note": "60 fps на телефоне без просадок"
+    },
+    {
+      "id": "a11y",
+      "name": "Доступность",
+      "note": "клавиатура, aria, prefers-reduced-motion"
+    },
+    {
+      "id": "mobile",
+      "name": "Мобильность",
+      "note": "палец, скролл, Telegram Mini App"
+    }
+  ],
+  "weights": {
+    "readability": 0.24,
+    "feedback": 0.2,
+    "juice": 0.18,
+    "perf": 0.16,
+    "a11y": 0.12,
+    "mobile": 0.1
+  },
+  "priority": {
+    "readability": 1.25,
+    "feedback": 1.2,
+    "mobile": 1.15,
+    "perf": 1.05,
+    "a11y": 1,
+    "juice": 0.95
+  },
+  "gates": {
+    "a11y": 0.58,
+    "readability": 0.62,
+    "maxDev": 3
+  },
+  "budget": {
+    "idle": 4,
+    "enter": 2,
+    "event": 6
+  },
+  "spent": {
+    "idle": 4,
+    "enter": 0,
+    "event": 3
+  },
+  "chosen": [
+    {
+      "id": "dock-morph",
+      "name": "Морфинг индикатора дока (пилюля едет по пружине)",
+      "impl": "82_hub.js · movePill",
+      "cls": "idle",
+      "cost": 0,
+      "stability": 0.79,
+      "mean": 0.8914826716678067
+    },
+    {
+      "id": "ticker",
+      "name": "Счётчик чисел (монеты, кристаллы, опыт)",
+      "impl": "82_hub.js · setNumber",
+      "cls": "idle",
+      "cost": 0,
+      "stability": 0.67,
+      "mean": 0.8820097315385965
+    },
+    {
+      "id": "bento",
+      "name": "Бенто-сетка разделов",
+      "impl": "02_body.html · .bento",
+      "cls": "idle",
+      "cost": 0,
+      "stability": 0.55,
+      "mean": 0.8718335221851368
+    },
+    {
+      "id": "spring",
+      "name": "Пружина вместо easing-кривых",
+      "impl": "82_hub.js · HubSpring",
+      "cls": "idle",
+      "cost": 0,
+      "stability": 0.53,
+      "mean": 0.87696660484924
+    },
+    {
+      "id": "toast",
+      "name": "Тосты с въездом",
+      "impl": "82_hub.js · toast",
+      "cls": "event",
+      "cost": 0,
+      "stability": 0.51,
+      "mean": 0.8683352782214652
+    },
+    {
+      "id": "ripple",
+      "name": "Рипл от точки нажатия",
+      "impl": "82_hub.js · bindRipples",
+      "cls": "event",
+      "cost": 0,
+      "stability": 0.49,
+      "mean": 0.8678716342964979
+    },
+    {
+      "id": "label-underline",
+      "name": "Подчёркивание-метка на выбранном пункте",
+      "impl": "05_style.css · .opt.sel",
+      "cls": "idle",
+      "cost": 0,
+      "stability": 0.44,
+      "mean": 0.8617718812708353
+    },
+    {
+      "id": "progress-ring",
+      "name": "Кольцо прогресса и стрика",
+      "impl": "05_style.css · .season .track",
+      "cls": "idle",
+      "cost": 0,
+      "stability": 0.43,
+      "mean": 0.8618946244237459
+    },
+    {
+      "id": "dock-magnify",
+      "name": "Док с увеличением активного пункта",
+      "impl": "05_style.css · .dock-btn.on",
+      "cls": "idle",
+      "cost": 0,
+      "stability": 0.36,
+      "mean": 0.8537860227279443
+    },
+    {
+      "id": "view-transition",
+      "name": "Смена экрана: сдвиг + масштаб + прозрачность",
+      "impl": "05_style.css · .screen",
+      "cls": "enter",
+      "cost": 0,
+      "stability": 0.33,
+      "mean": 0.8527699734792259
+    },
+    {
+      "id": "border-beam",
+      "name": "Блик по кромке главной кнопки",
+      "impl": "05_style.css · .btn-hero",
+      "cls": "idle",
+      "cost": 0,
+      "stability": 0.26,
+      "mean": 0.8379595614174457
+    },
+    {
+      "id": "focus-ring",
+      "name": "Яркое кольцо фокуса на клавиатуре",
+      "impl": "05_style.css · :focus-visible",
+      "cls": "idle",
+      "cost": 0,
+      "stability": 0.17,
+      "mean": 0.829459253828866
+    },
+    {
+      "id": "live-preview",
+      "name": "Живой предпросмотр в настройках",
+      "impl": "80_ui.js · drawServePreview / drawControlPreview",
+      "cls": "event",
+      "cost": 1,
+      "stability": 0.17,
+      "mean": 0.8270570898933589
+    },
+    {
+      "id": "stagger",
+      "name": "Каскад появления блоков",
+      "impl": "05_style.css · .hub-enter",
+      "cls": "enter",
+      "cost": 0,
+      "stability": 0.14,
+      "mean": 0.8237903295380002
+    },
+    {
+      "id": "coin-fly",
+      "name": "Монетки летят в кошелёк",
+      "impl": "82_hub.js · coinFly",
+      "cls": "event",
+      "cost": 1,
+      "stability": 0.09,
+      "mean": 0.81073092639185
+    },
+    {
+      "id": "spotlight",
+      "name": "Прожектор под пальцем",
+      "impl": "82_hub.js · bindSpotlight",
+      "cls": "event",
+      "cost": 0,
+      "stability": 0.06,
+      "mean": 0.8067689483929915
+    },
+    {
+      "id": "glass",
+      "name": "Стеклянные панели и док",
+      "impl": "05_style.css · .hub-dock",
+      "cls": "idle",
+      "cost": 1,
+      "stability": 0.01,
+      "mean": 0.7820526409948135
+    },
+    {
+      "id": "scramble",
+      "name": "Дешифратор заголовка",
+      "impl": "82_hub.js · scramble",
+      "cls": "enter",
+      "cost": 0,
+      "stability": 0,
+      "mean": 0.7528007995859193
+    },
+    {
+      "id": "confetti",
+      "name": "Конфетти и искры победы",
+      "impl": "82_hub.js · burst",
+      "cls": "event",
+      "cost": 1,
+      "stability": 0,
+      "mean": 0.7329147606778044
+    },
+    {
+      "id": "light-rays",
+      "name": "Луч по верхней кромке оболочки",
+      "impl": "05_style.css · .hub-beam",
+      "cls": "idle",
+      "cost": 1,
+      "stability": 0,
+      "mean": 0.6975894779566855
+    },
+    {
+      "id": "aurora-bg",
+      "name": "Аврора-фон (мягкие пятна света)",
+      "impl": "05_style.css · .hub-orb",
+      "cls": "idle",
+      "cost": 2,
+      "stability": 0,
+      "mean": 0.6640734829462537
+    }
+  ],
+  "rejected": [
+    {
+      "id": "skeleton",
+      "name": "Скелетоны загрузки",
+      "impl": "не внедрён",
+      "why": "нет состояния загрузки — нечего показывать"
+    },
+    {
+      "id": "tilt-3d",
+      "name": "3D-тилт плитки под пальцем",
+      "impl": "не внедрён",
+      "why": "a11y 0.44 < 0.58"
+    },
+    {
+      "id": "chromatic",
+      "name": "Хроматический сбой заголовка",
+      "impl": "не внедрён",
+      "why": "a11y 0.46 < 0.58"
+    },
+    {
+      "id": "carousel",
+      "name": "Арочная карусель разделов",
+      "impl": "не внедрён",
+      "why": "вторая модель навигации (док уже выбран)"
+    },
+    {
+      "id": "ink-ribbon",
+      "name": "Лента следов от пальца",
+      "impl": "не внедрён",
+      "why": "a11y 0.40 < 0.58; читаемость 0.60 < 0.62"
+    },
+    {
+      "id": "radial-menu",
+      "name": "Радиальное меню действий",
+      "impl": "не внедрён",
+      "why": "a11y 0.40 < 0.58; читаемость 0.60 < 0.62; вторая модель навигации (док уже выбран)"
+    },
+    {
+      "id": "morph-dialog",
+      "name": "Морфинг-диалог (общий элемент между экранами)",
+      "impl": "не внедрён",
+      "why": "a11y 0.56 < 0.58; трудоёмкость 4 > 3; вторая модель навигации (док уже выбран)"
+    }
+  ],
+  "combos": [
+    {
+      "id": "fast",
+      "name": "«Быстрый доступ»",
+      "score": 0.8230124276658486,
+      "members": [
+        {
+          "id": "spring",
+          "name": "Пружина вместо easing-кривых",
+          "src": [
+            57,
+            15
+          ],
+          "cls": "idle",
+          "cost": 0,
+          "dev": 3,
+          "impl": "82_hub.js · HubSpring",
+          "fix": "критическое демпфирование: пружина останавливается без пролёта",
+          "q": {
+            "readability": 0.86,
+            "feedback": 0.95,
+            "juice": 0.9,
+            "perf": 0.93,
+            "a11y": 0.84,
+            "mobile": 0.88
+          },
+          "mean": 0.87696660484924,
+          "sigma": 0.0394171674907201,
+          "meanRank": 6.12,
+          "top6": 0.53,
+          "top12": 0.96
+        },
+        {
+          "id": "dock-morph",
+          "name": "Морфинг индикатора дока (пилюля едет по пружине)",
+          "src": [
+            28,
+            50
+          ],
+          "cls": "idle",
+          "cost": 0,
+          "dev": 2,
+          "impl": "82_hub.js · movePill",
+          "fix": "пилюля переезжает по X и по ширине двумя пружинами",
+          "q": {
+            "readability": 0.9,
+            "feedback": 0.94,
+            "juice": 0.88,
+            "perf": 0.95,
+            "a11y": 0.84,
+            "mobile": 0.92
+          },
+          "mean": 0.8914826716678067,
+          "sigma": 0.03643202826148482,
+          "meanRank": 4.46,
+          "top6": 0.79,
+          "top12": 0.97
+        },
+        {
+          "id": "ripple",
+          "name": "Рипл от точки нажатия",
+          "src": [
+            54,
+            82
+          ],
+          "cls": "event",
+          "cost": 0,
+          "dev": 1,
+          "impl": "82_hub.js · bindRipples",
+          "fix": "рипл рисуется от реальной точки касания, без захвата события",
+          "q": {
+            "readability": 0.86,
+            "feedback": 0.95,
+            "juice": 0.8,
+            "perf": 0.92,
+            "a11y": 0.74,
+            "mobile": 0.94
+          },
+          "mean": 0.8678716342964979,
+          "sigma": 0.03682785285899974,
+          "meanRank": 6.9,
+          "top6": 0.49,
+          "top12": 0.88
+        },
+        {
+          "id": "toast",
+          "name": "Тосты с въездом",
+          "src": [
+            54
+          ],
+          "cls": "event",
+          "cost": 0,
+          "dev": 1,
+          "impl": "82_hub.js · toast",
+          "fix": "тост живёт в оболочке хаба и не перекрывает док",
+          "q": {
+            "readability": 0.92,
+            "feedback": 0.92,
+            "juice": 0.64,
+            "perf": 0.97,
+            "a11y": 0.9,
+            "mobile": 0.92
+          },
+          "mean": 0.8683352782214652,
+          "sigma": 0.03439542961431976,
+          "meanRank": 6.9,
+          "top6": 0.51,
+          "top12": 0.91
+        },
+        {
+          "id": "ticker",
+          "name": "Счётчик чисел (монеты, кристаллы, опыт)",
+          "src": [
+            47,
+            25,
+            123
+          ],
+          "cls": "idle",
+          "cost": 0,
+          "dev": 1,
+          "impl": "82_hub.js · setNumber",
+          "fix": "счётчик едет к новому значению, а не перескакивает",
+          "q": {
+            "readability": 0.92,
+            "feedback": 0.9,
+            "juice": 0.82,
+            "perf": 0.96,
+            "a11y": 0.86,
+            "mobile": 0.88
+          },
+          "mean": 0.8820097315385965,
+          "sigma": 0.03259752683471005,
+          "meanRank": 5.36,
+          "top6": 0.67,
+          "top12": 0.94
+        }
+      ],
+      "note": "то, что нужно в первую секунду"
+    },
+    {
+      "id": "quiet",
+      "name": "«Тихий спорт»",
+      "score": 0.8048886945829622,
+      "members": [
+        {
+          "id": "spring",
+          "name": "Пружина вместо easing-кривых",
+          "src": [
+            57,
+            15
+          ],
+          "cls": "idle",
+          "cost": 0,
+          "dev": 3,
+          "impl": "82_hub.js · HubSpring",
+          "fix": "критическое демпфирование: пружина останавливается без пролёта",
+          "q": {
+            "readability": 0.86,
+            "feedback": 0.95,
+            "juice": 0.9,
+            "perf": 0.93,
+            "a11y": 0.84,
+            "mobile": 0.88
+          },
+          "mean": 0.87696660484924,
+          "sigma": 0.0394171674907201,
+          "meanRank": 6.12,
+          "top6": 0.53,
+          "top12": 0.96
+        },
+        {
+          "id": "view-transition",
+          "name": "Смена экрана: сдвиг + масштаб + прозрачность",
+          "src": [
+            78,
+            92
+          ],
+          "cls": "enter",
+          "cost": 0,
+          "dev": 1,
+          "impl": "05_style.css · .screen",
+          "fix": "переход сокращён до .24s/.30s, visibility перестала наследоваться",
+          "q": {
+            "readability": 0.84,
+            "feedback": 0.86,
+            "juice": 0.8,
+            "perf": 0.96,
+            "a11y": 0.84,
+            "mobile": 0.86
+          },
+          "mean": 0.8527699734792259,
+          "sigma": 0.04025005295510118,
+          "meanRank": 8.57,
+          "top6": 0.33,
+          "top12": 0.77
+        },
+        {
+          "id": "stagger",
+          "name": "Каскад появления блоков",
+          "src": [
+            81,
+            57
+          ],
+          "cls": "enter",
+          "cost": 0,
+          "dev": 1,
+          "impl": "05_style.css · .hub-enter",
+          "fix": "карточка едет целиком, дети только проявляются — иначе тап уходил мимо",
+          "q": {
+            "readability": 0.8,
+            "feedback": 0.78,
+            "juice": 0.88,
+            "perf": 0.94,
+            "a11y": 0.78,
+            "mobile": 0.84
+          },
+          "mean": 0.8237903295380002,
+          "sigma": 0.03900576491116061,
+          "meanRank": 12.07,
+          "top6": 0.14,
+          "top12": 0.5
+        },
+        {
+          "id": "focus-ring",
+          "name": "Яркое кольцо фокуса на клавиатуре",
+          "src": [
+            87
+          ],
+          "cls": "idle",
+          "cost": 0,
+          "dev": 1,
+          "impl": "05_style.css · :focus-visible",
+          "fix": "кольцо фокуса и ловушка фокуса в модальных экранах",
+          "q": {
+            "readability": 0.94,
+            "feedback": 0.84,
+            "juice": 0.54,
+            "perf": 0.98,
+            "a11y": 0.99,
+            "mobile": 0.72
+          },
+          "mean": 0.829459253828866,
+          "sigma": 0.0415010102111088,
+          "meanRank": 11.19,
+          "top6": 0.17,
+          "top12": 0.56
+        },
+        {
+          "id": "label-underline",
+          "name": "Подчёркивание-метка на выбранном пункте",
+          "src": [
+            57
+          ],
+          "cls": "idle",
+          "cost": 0,
+          "dev": 1,
+          "impl": "05_style.css · .opt.sel",
+          "fix": "выбранный пункт подсвечен рамкой и заливкой, а не только цветом",
+          "q": {
+            "readability": 0.92,
+            "feedback": 0.9,
+            "juice": 0.62,
+            "perf": 0.97,
+            "a11y": 0.92,
+            "mobile": 0.92
+          },
+          "mean": 0.8617718812708353,
+          "sigma": 0.03723196873316422,
+          "meanRank": 7.7,
+          "top6": 0.44,
+          "top12": 0.79
+        }
+      ],
+      "note": "минимум украшений, максимум читаемости"
+    },
+    {
+      "id": "instrument",
+      "name": "«Прибор»",
+      "score": 0.7730254482018042,
+      "members": [
+        {
+          "id": "spring",
+          "name": "Пружина вместо easing-кривых",
+          "src": [
+            57,
+            15
+          ],
+          "cls": "idle",
+          "cost": 0,
+          "dev": 3,
+          "impl": "82_hub.js · HubSpring",
+          "fix": "критическое демпфирование: пружина останавливается без пролёта",
+          "q": {
+            "readability": 0.86,
+            "feedback": 0.95,
+            "juice": 0.9,
+            "perf": 0.93,
+            "a11y": 0.84,
+            "mobile": 0.88
+          },
+          "mean": 0.87696660484924,
+          "sigma": 0.0394171674907201,
+          "meanRank": 6.12,
+          "top6": 0.53,
+          "top12": 0.96
+        },
+        {
+          "id": "view-transition",
+          "name": "Смена экрана: сдвиг + масштаб + прозрачность",
+          "src": [
+            78,
+            92
+          ],
+          "cls": "enter",
+          "cost": 0,
+          "dev": 1,
+          "impl": "05_style.css · .screen",
+          "fix": "переход сокращён до .24s/.30s, visibility перестала наследоваться",
+          "q": {
+            "readability": 0.84,
+            "feedback": 0.86,
+            "juice": 0.8,
+            "perf": 0.96,
+            "a11y": 0.84,
+            "mobile": 0.86
+          },
+          "mean": 0.8527699734792259,
+          "sigma": 0.04025005295510118,
+          "meanRank": 8.57,
+          "top6": 0.33,
+          "top12": 0.77
+        },
+        {
+          "id": "live-preview",
+          "name": "Живой предпросмотр в настройках",
+          "src": [
+            47,
+            109
+          ],
+          "cls": "event",
+          "cost": 1,
+          "dev": 2,
+          "impl": "80_ui.js · drawServePreview / drawControlPreview",
+          "fix": "траектория подачи и рамка захвата рисуются в реальном времени",
+          "q": {
+            "readability": 0.92,
+            "feedback": 0.92,
+            "juice": 0.8,
+            "perf": 0.84,
+            "a11y": 0.88,
+            "mobile": 0.8
+          },
+          "mean": 0.8270570898933589,
+          "sigma": 0.03967942153757202,
+          "meanRank": 11.64,
+          "top6": 0.17,
+          "top12": 0.59
+        },
+        {
+          "id": "progress-ring",
+          "name": "Кольцо прогресса и стрика",
+          "src": [
+            104,
+            117
+          ],
+          "cls": "idle",
+          "cost": 0,
+          "dev": 1,
+          "impl": "05_style.css · .season .track",
+          "fix": "полоса сезона и дневной серии",
+          "q": {
+            "readability": 0.9,
+            "feedback": 0.86,
+            "juice": 0.78,
+            "perf": 0.95,
+            "a11y": 0.86,
+            "mobile": 0.88
+          },
+          "mean": 0.8618946244237459,
+          "sigma": 0.03863308064268868,
+          "meanRank": 7.7,
+          "top6": 0.43,
+          "top12": 0.84
+        },
+        {
+          "id": "ticker",
+          "name": "Счётчик чисел (монеты, кристаллы, опыт)",
+          "src": [
+            47,
+            25,
+            123
+          ],
+          "cls": "idle",
+          "cost": 0,
+          "dev": 1,
+          "impl": "82_hub.js · setNumber",
+          "fix": "счётчик едет к новому значению, а не перескакивает",
+          "q": {
+            "readability": 0.92,
+            "feedback": 0.9,
+            "juice": 0.82,
+            "perf": 0.96,
+            "a11y": 0.86,
+            "mobile": 0.88
+          },
+          "mean": 0.8820097315385965,
+          "sigma": 0.03259752683471005,
+          "meanRank": 5.36,
+          "top6": 0.67,
+          "top12": 0.94
+        },
+        {
+          "id": "label-underline",
+          "name": "Подчёркивание-метка на выбранном пункте",
+          "src": [
+            57
+          ],
+          "cls": "idle",
+          "cost": 0,
+          "dev": 1,
+          "impl": "05_style.css · .opt.sel",
+          "fix": "выбранный пункт подсвечен рамкой и заливкой, а не только цветом",
+          "q": {
+            "readability": 0.92,
+            "feedback": 0.9,
+            "juice": 0.62,
+            "perf": 0.97,
+            "a11y": 0.92,
+            "mobile": 0.92
+          },
+          "mean": 0.8617718812708353,
+          "sigma": 0.03723196873316422,
+          "meanRank": 7.7,
+          "top6": 0.44,
+          "top12": 0.79
+        },
+        {
+          "id": "focus-ring",
+          "name": "Яркое кольцо фокуса на клавиатуре",
+          "src": [
+            87
+          ],
+          "cls": "idle",
+          "cost": 0,
+          "dev": 1,
+          "impl": "05_style.css · :focus-visible",
+          "fix": "кольцо фокуса и ловушка фокуса в модальных экранах",
+          "q": {
+            "readability": 0.94,
+            "feedback": 0.84,
+            "juice": 0.54,
+            "perf": 0.98,
+            "a11y": 0.99,
+            "mobile": 0.72
+          },
+          "mean": 0.829459253828866,
+          "sigma": 0.0415010102111088,
+          "meanRank": 11.19,
+          "top6": 0.17,
+          "top12": 0.56
+        }
+      ],
+      "note": "настройки, калибровка, мастерская"
+    },
+    {
+      "id": "hub",
+      "name": "«Живой хаб»",
+      "score": 0.7589552324673137,
+      "members": [
+        {
+          "id": "spring",
+          "name": "Пружина вместо easing-кривых",
+          "src": [
+            57,
+            15
+          ],
+          "cls": "idle",
+          "cost": 0,
+          "dev": 3,
+          "impl": "82_hub.js · HubSpring",
+          "fix": "критическое демпфирование: пружина останавливается без пролёта",
+          "q": {
+            "readability": 0.86,
+            "feedback": 0.95,
+            "juice": 0.9,
+            "perf": 0.93,
+            "a11y": 0.84,
+            "mobile": 0.88
+          },
+          "mean": 0.87696660484924,
+          "sigma": 0.0394171674907201,
+          "meanRank": 6.12,
+          "top6": 0.53,
+          "top12": 0.96
+        },
+        {
+          "id": "view-transition",
+          "name": "Смена экрана: сдвиг + масштаб + прозрачность",
+          "src": [
+            78,
+            92
+          ],
+          "cls": "enter",
+          "cost": 0,
+          "dev": 1,
+          "impl": "05_style.css · .screen",
+          "fix": "переход сокращён до .24s/.30s, visibility перестала наследоваться",
+          "q": {
+            "readability": 0.84,
+            "feedback": 0.86,
+            "juice": 0.8,
+            "perf": 0.96,
+            "a11y": 0.84,
+            "mobile": 0.86
+          },
+          "mean": 0.8527699734792259,
+          "sigma": 0.04025005295510118,
+          "meanRank": 8.57,
+          "top6": 0.33,
+          "top12": 0.77
+        },
+        {
+          "id": "stagger",
+          "name": "Каскад появления блоков",
+          "src": [
+            81,
+            57
+          ],
+          "cls": "enter",
+          "cost": 0,
+          "dev": 1,
+          "impl": "05_style.css · .hub-enter",
+          "fix": "карточка едет целиком, дети только проявляются — иначе тап уходил мимо",
+          "q": {
+            "readability": 0.8,
+            "feedback": 0.78,
+            "juice": 0.88,
+            "perf": 0.94,
+            "a11y": 0.78,
+            "mobile": 0.84
+          },
+          "mean": 0.8237903295380002,
+          "sigma": 0.03900576491116061,
+          "meanRank": 12.07,
+          "top6": 0.14,
+          "top12": 0.5
+        },
+        {
+          "id": "dock-morph",
+          "name": "Морфинг индикатора дока (пилюля едет по пружине)",
+          "src": [
+            28,
+            50
+          ],
+          "cls": "idle",
+          "cost": 0,
+          "dev": 2,
+          "impl": "82_hub.js · movePill",
+          "fix": "пилюля переезжает по X и по ширине двумя пружинами",
+          "q": {
+            "readability": 0.9,
+            "feedback": 0.94,
+            "juice": 0.88,
+            "perf": 0.95,
+            "a11y": 0.84,
+            "mobile": 0.92
+          },
+          "mean": 0.8914826716678067,
+          "sigma": 0.03643202826148482,
+          "meanRank": 4.46,
+          "top6": 0.79,
+          "top12": 0.97
+        },
+        {
+          "id": "dock-magnify",
+          "name": "Док с увеличением активного пункта",
+          "src": [
+            50,
+            43
+          ],
+          "cls": "idle",
+          "cost": 0,
+          "dev": 1,
+          "impl": "05_style.css · .dock-btn.on",
+          "fix": "увеличение активной кнопки дока",
+          "q": {
+            "readability": 0.84,
+            "feedback": 0.88,
+            "juice": 0.84,
+            "perf": 0.92,
+            "a11y": 0.8,
+            "mobile": 0.86
+          },
+          "mean": 0.8537860227279443,
+          "sigma": 0.03616428560584821,
+          "meanRank": 8.44,
+          "top6": 0.36,
+          "top12": 0.8
+        },
+        {
+          "id": "spotlight",
+          "name": "Прожектор под пальцем",
+          "src": [
+            39,
+            125
+          ],
+          "cls": "event",
+          "cost": 0,
+          "dev": 2,
+          "impl": "82_hub.js · bindSpotlight",
+          "fix": "свет гаснет, когда палец ушёл, и не рисуется в свёрнутом хабе",
+          "q": {
+            "readability": 0.78,
+            "feedback": 0.84,
+            "juice": 0.84,
+            "perf": 0.86,
+            "a11y": 0.7,
+            "mobile": 0.9
+          },
+          "mean": 0.8067689483929915,
+          "sigma": 0.04051950839518963,
+          "meanRank": 13.93,
+          "top6": 0.06,
+          "top12": 0.3
+        },
+        {
+          "id": "ticker",
+          "name": "Счётчик чисел (монеты, кристаллы, опыт)",
+          "src": [
+            47,
+            25,
+            123
+          ],
+          "cls": "idle",
+          "cost": 0,
+          "dev": 1,
+          "impl": "82_hub.js · setNumber",
+          "fix": "счётчик едет к новому значению, а не перескакивает",
+          "q": {
+            "readability": 0.92,
+            "feedback": 0.9,
+            "juice": 0.82,
+            "perf": 0.96,
+            "a11y": 0.86,
+            "mobile": 0.88
+          },
+          "mean": 0.8820097315385965,
+          "sigma": 0.03259752683471005,
+          "meanRank": 5.36,
+          "top6": 0.67,
+          "top12": 0.94
+        },
+        {
+          "id": "toast",
+          "name": "Тосты с въездом",
+          "src": [
+            54
+          ],
+          "cls": "event",
+          "cost": 0,
+          "dev": 1,
+          "impl": "82_hub.js · toast",
+          "fix": "тост живёт в оболочке хаба и не перекрывает док",
+          "q": {
+            "readability": 0.92,
+            "feedback": 0.92,
+            "juice": 0.64,
+            "perf": 0.97,
+            "a11y": 0.9,
+            "mobile": 0.92
+          },
+          "mean": 0.8683352782214652,
+          "sigma": 0.03439542961431976,
+          "meanRank": 6.9,
+          "top6": 0.51,
+          "top12": 0.91
+        },
+        {
+          "id": "ripple",
+          "name": "Рипл от точки нажатия",
+          "src": [
+            54,
+            82
+          ],
+          "cls": "event",
+          "cost": 0,
+          "dev": 1,
+          "impl": "82_hub.js · bindRipples",
+          "fix": "рипл рисуется от реальной точки касания, без захвата события",
+          "q": {
+            "readability": 0.86,
+            "feedback": 0.95,
+            "juice": 0.8,
+            "perf": 0.92,
+            "a11y": 0.74,
+            "mobile": 0.94
+          },
+          "mean": 0.8678716342964979,
+          "sigma": 0.03682785285899974,
+          "meanRank": 6.9,
+          "top6": 0.49,
+          "top12": 0.88
+        },
+        {
+          "id": "bento",
+          "name": "Бенто-сетка разделов",
+          "src": [
+            39,
+            97
+          ],
+          "cls": "idle",
+          "cost": 0,
+          "dev": 2,
+          "impl": "02_body.html · .bento",
+          "fix": "плитки разделов в бенто-сетке на главном экране",
+          "q": {
+            "readability": 0.9,
+            "feedback": 0.88,
+            "juice": 0.76,
+            "perf": 0.96,
+            "a11y": 0.88,
+            "mobile": 0.92
+          },
+          "mean": 0.8718335221851368,
+          "sigma": 0.03375955816768149,
+          "meanRank": 6.34,
+          "top6": 0.55,
+          "top12": 0.93
+        },
+        {
+          "id": "focus-ring",
+          "name": "Яркое кольцо фокуса на клавиатуре",
+          "src": [
+            87
+          ],
+          "cls": "idle",
+          "cost": 0,
+          "dev": 1,
+          "impl": "05_style.css · :focus-visible",
+          "fix": "кольцо фокуса и ловушка фокуса в модальных экранах",
+          "q": {
+            "readability": 0.94,
+            "feedback": 0.84,
+            "juice": 0.54,
+            "perf": 0.98,
+            "a11y": 0.99,
+            "mobile": 0.72
+          },
+          "mean": 0.829459253828866,
+          "sigma": 0.0415010102111088,
+          "meanRank": 11.19,
+          "top6": 0.17,
+          "top12": 0.56
+        }
+      ],
+      "note": "основной почерк хаба"
+    },
+    {
+      "id": "cinema",
+      "name": "«Кино»",
+      "score": 0.6130376854234318,
+      "members": [
+        {
+          "id": "spring",
+          "name": "Пружина вместо easing-кривых",
+          "src": [
+            57,
+            15
+          ],
+          "cls": "idle",
+          "cost": 0,
+          "dev": 3,
+          "impl": "82_hub.js · HubSpring",
+          "fix": "критическое демпфирование: пружина останавливается без пролёта",
+          "q": {
+            "readability": 0.86,
+            "feedback": 0.95,
+            "juice": 0.9,
+            "perf": 0.93,
+            "a11y": 0.84,
+            "mobile": 0.88
+          },
+          "mean": 0.87696660484924,
+          "sigma": 0.0394171674907201,
+          "meanRank": 6.12,
+          "top6": 0.53,
+          "top12": 0.96
+        },
+        {
+          "id": "view-transition",
+          "name": "Смена экрана: сдвиг + масштаб + прозрачность",
+          "src": [
+            78,
+            92
+          ],
+          "cls": "enter",
+          "cost": 0,
+          "dev": 1,
+          "impl": "05_style.css · .screen",
+          "fix": "переход сокращён до .24s/.30s, visibility перестала наследоваться",
+          "q": {
+            "readability": 0.84,
+            "feedback": 0.86,
+            "juice": 0.8,
+            "perf": 0.96,
+            "a11y": 0.84,
+            "mobile": 0.86
+          },
+          "mean": 0.8527699734792259,
+          "sigma": 0.04025005295510118,
+          "meanRank": 8.57,
+          "top6": 0.33,
+          "top12": 0.77
+        },
+        {
+          "id": "aurora-bg",
+          "name": "Аврора-фон (мягкие пятна света)",
+          "src": [
+            96,
+            59
+          ],
+          "cls": "idle",
+          "cost": 2,
+          "dev": 2,
+          "impl": "05_style.css · .hub-orb",
+          "fix": "убран filter:blur(46px), анимация выключена вне хаба (#hub:not(.on) *{animation:none})",
+          "q": {
+            "readability": 0.78,
+            "feedback": 0.56,
+            "juice": 0.9,
+            "perf": 0.76,
+            "a11y": 0.72,
+            "mobile": 0.78
+          },
+          "mean": 0.6640734829462537,
+          "sigma": 0.044491182118238944,
+          "meanRank": 24.93,
+          "top6": 0,
+          "top12": 0
+        },
+        {
+          "id": "light-rays",
+          "name": "Луч по верхней кромке оболочки",
+          "src": [
+            125,
+            41
+          ],
+          "cls": "idle",
+          "cost": 1,
+          "dev": 1,
+          "impl": "05_style.css · .hub-beam",
+          "fix": "луч рисуется без тяжёлого contain и гаснет вместе с хабом",
+          "q": {
+            "readability": 0.82,
+            "feedback": 0.54,
+            "juice": 0.84,
+            "perf": 0.74,
+            "a11y": 0.7,
+            "mobile": 0.76
+          },
+          "mean": 0.6975894779566855,
+          "sigma": 0.03667214668476776,
+          "meanRank": 22.75,
+          "top6": 0,
+          "top12": 0
+        },
+        {
+          "id": "glass",
+          "name": "Стеклянные панели и док",
+          "src": [
+            77,
+            78
+          ],
+          "cls": "idle",
+          "cost": 1,
+          "dev": 1,
+          "impl": "05_style.css · .hub-dock",
+          "fix": "backdrop-filter только у шапки и дока, не на всей сцене",
+          "q": {
+            "readability": 0.88,
+            "feedback": 0.74,
+            "juice": 0.78,
+            "perf": 0.86,
+            "a11y": 0.82,
+            "mobile": 0.86
+          },
+          "mean": 0.7820526409948135,
+          "sigma": 0.04632697205319162,
+          "meanRank": 16.06,
+          "top6": 0.01,
+          "top12": 0.21
+        },
+        {
+          "id": "confetti",
+          "name": "Конфетти и искры победы",
+          "src": [
+            120,
+            25
+          ],
+          "cls": "event",
+          "cost": 1,
+          "dev": 1,
+          "impl": "82_hub.js · burst",
+          "fix": "частицы живут 0.9–1.2 с и снимаются с DOM",
+          "q": {
+            "readability": 0.74,
+            "feedback": 0.84,
+            "juice": 0.92,
+            "perf": 0.74,
+            "a11y": 0.62,
+            "mobile": 0.72
+          },
+          "mean": 0.7329147606778044,
+          "sigma": 0.036148965178290034,
+          "meanRank": 20.1,
+          "top6": 0,
+          "top12": 0
+        },
+        {
+          "id": "coin-fly",
+          "name": "Монетки летят в кошелёк",
+          "src": [
+            25,
+            123
+          ],
+          "cls": "event",
+          "cost": 1,
+          "dev": 1,
+          "impl": "82_hub.js · coinFly",
+          "fix": "монетки летят в счётчик кошелька, счётчик тут же пересчитывается",
+          "q": {
+            "readability": 0.86,
+            "feedback": 0.96,
+            "juice": 0.9,
+            "perf": 0.8,
+            "a11y": 0.68,
+            "mobile": 0.84
+          },
+          "mean": 0.81073092639185,
+          "sigma": 0.03630026893516254,
+          "meanRank": 13.24,
+          "top6": 0.09,
+          "top12": 0.34
+        },
+        {
+          "id": "border-beam",
+          "name": "Блик по кромке главной кнопки",
+          "src": [
+            41,
+            127
+          ],
+          "cls": "idle",
+          "cost": 0,
+          "dev": 1,
+          "impl": "05_style.css · .btn-hero",
+          "fix": "тонкий луч вместо размытой засветки",
+          "q": {
+            "readability": 0.88,
+            "feedback": 0.76,
+            "juice": 0.86,
+            "perf": 0.92,
+            "a11y": 0.78,
+            "mobile": 0.86
+          },
+          "mean": 0.8379595614174457,
+          "sigma": 0.04225884184441728,
+          "meanRank": 10.32,
+          "top6": 0.26,
+          "top12": 0.64
+        }
+      ],
+      "note": "события: победа, награда, кубок"
+    },
+    {
+      "id": "heavy",
+      "name": "«Тяжёлый»",
+      "score": 0.43540608352314975,
+      "members": [
+        {
+          "id": "tilt-3d",
+          "name": "3D-тилт плитки под пальцем",
+          "src": [
+            1
+          ],
+          "cls": "event",
+          "cost": 1,
+          "dev": 2,
+          "impl": "не внедрён",
+          "fix": "не внедрён",
+          "q": {
+            "readability": 0.74,
+            "feedback": 0.9,
+            "juice": 0.88,
+            "perf": 0.7,
+            "a11y": 0.44,
+            "mobile": 0.8
+          },
+          "mean": 0.718950305154926,
+          "sigma": 0.04263698450339404,
+          "meanRank": 21.09,
+          "top6": 0,
+          "top12": 0.01
+        },
+        {
+          "id": "radial-menu",
+          "name": "Радиальное меню действий",
+          "src": [
+            77
+          ],
+          "cls": "event",
+          "cost": 1,
+          "dev": 3,
+          "impl": "не внедрён",
+          "fix": "не внедрён",
+          "q": {
+            "readability": 0.6,
+            "feedback": 0.8,
+            "juice": 0.9,
+            "perf": 0.8,
+            "a11y": 0.4,
+            "mobile": 0.68
+          },
+          "mean": 0.6608453451957027,
+          "sigma": 0.04447707776226603,
+          "meanRank": 24.9,
+          "top6": 0,
+          "top12": 0
+        },
+        {
+          "id": "carousel",
+          "name": "Арочная карусель разделов",
+          "src": [
+            92
+          ],
+          "cls": "enter",
+          "cost": 1,
+          "dev": 3,
+          "impl": "не внедрён",
+          "fix": "не внедрён",
+          "q": {
+            "readability": 0.66,
+            "feedback": 0.74,
+            "juice": 0.86,
+            "perf": 0.8,
+            "a11y": 0.58,
+            "mobile": 0.7
+          },
+          "mean": 0.6767741540110523,
+          "sigma": 0.04145547005958403,
+          "meanRank": 24.02,
+          "top6": 0,
+          "top12": 0
+        },
+        {
+          "id": "ink-ribbon",
+          "name": "Лента следов от пальца",
+          "src": [
+            122
+          ],
+          "cls": "event",
+          "cost": 1,
+          "dev": 2,
+          "impl": "не внедрён",
+          "fix": "не внедрён",
+          "q": {
+            "readability": 0.6,
+            "feedback": 0.86,
+            "juice": 0.88,
+            "perf": 0.72,
+            "a11y": 0.4,
+            "mobile": 0.76
+          },
+          "mean": 0.6657420708772629,
+          "sigma": 0.04686972275518417,
+          "meanRank": 24.72,
+          "top6": 0,
+          "top12": 0
+        },
+        {
+          "id": "morph-dialog",
+          "name": "Морфинг-диалог (общий элемент между экранами)",
+          "src": [
+            78,
+            92
+          ],
+          "cls": "enter",
+          "cost": 2,
+          "dev": 4,
+          "impl": "не внедрён",
+          "fix": "не внедрён",
+          "q": {
+            "readability": 0.72,
+            "feedback": 0.78,
+            "juice": 0.9,
+            "perf": 0.62,
+            "a11y": 0.56,
+            "mobile": 0.68
+          },
+          "mean": 0.6412200013348799,
+          "sigma": 0.03909565824117837,
+          "meanRank": 26.2,
+          "top6": 0,
+          "top12": 0
+        }
+      ],
+      "note": "эффекты ради эффектов"
+    }
+  ],
+  "round1": [
+    {
+      "id": "dock-morph",
+      "top6": 0.76,
+      "mean": 0.874708890862052
+    },
+    {
+      "id": "ticker",
+      "top6": 0.72,
+      "mean": 0.8617701492306854
+    },
+    {
+      "id": "spring",
+      "top6": 0.59,
+      "mean": 0.8533606243170924
+    },
+    {
+      "id": "ripple",
+      "top6": 0.55,
+      "mean": 0.8504401812396146
+    },
+    {
+      "id": "bento",
+      "top6": 0.54,
+      "mean": 0.849636567026376
+    },
+    {
+      "id": "label-underline",
+      "top6": 0.52,
+      "mean": 0.8473422223752282
+    },
+    {
+      "id": "toast",
+      "top6": 0.49,
+      "mean": 0.8451965957507981
+    },
+    {
+      "id": "progress-ring",
+      "top6": 0.45,
+      "mean": 0.8443217308034534
+    },
+    {
+      "id": "dock-magnify",
+      "top6": 0.4,
+      "mean": 0.8294900408584693
+    },
+    {
+      "id": "view-transition",
+      "top6": 0.26,
+      "mean": 0.818439004590206
+    },
+    {
+      "id": "border-beam",
+      "top6": 0.22,
+      "mean": 0.8168859741386859
+    },
+    {
+      "id": "focus-ring",
+      "top6": 0.2,
+      "mean": 0.8087571783081735
+    },
+    {
+      "id": "live-preview",
+      "top6": 0.11,
+      "mean": 0.8009232366492608
+    },
+    {
+      "id": "coin-fly",
+      "top6": 0.06,
+      "mean": 0.7728140436572406
+    },
+    {
+      "id": "spotlight",
+      "top6": 0.05,
+      "mean": 0.7755603073960121
+    },
+    {
+      "id": "stagger",
+      "top6": 0.05,
+      "mean": 0.767232750339109
+    },
+    {
+      "id": "skeleton",
+      "top6": 0.02,
+      "mean": 0.7578054381142385
+    },
+    {
+      "id": "glass",
+      "top6": 0.01,
+      "mean": 0.7454942619092949
+    },
+    {
+      "id": "tilt-3d",
+      "top6": 0,
+      "mean": 0.7198809093307231
+    },
+    {
+      "id": "scramble",
+      "top6": 0,
+      "mean": 0.7015256271375482
+    },
+    {
+      "id": "carousel",
+      "top6": 0,
+      "mean": 0.6841011218721674
+    },
+    {
+      "id": "confetti",
+      "top6": 0,
+      "mean": 0.6815408321047904
+    },
+    {
+      "id": "chromatic",
+      "top6": 0,
+      "mean": 0.6717469851401714
+    },
+    {
+      "id": "ink-ribbon",
+      "top6": 0,
+      "mean": 0.6656773496933199
+    },
+    {
+      "id": "radial-menu",
+      "top6": 0,
+      "mean": 0.6609981889619087
+    },
+    {
+      "id": "light-rays",
+      "top6": 0,
+      "mean": 0.6597186288487671
+    },
+    {
+      "id": "morph-dialog",
+      "top6": 0,
+      "mean": 0.633676581763604
+    },
+    {
+      "id": "aurora-bg",
+      "top6": 0,
+      "mean": 0.600015009274884
+    }
+  ],
+  "round2": [
+    {
+      "id": "dock-morph",
+      "top6": 0.79,
+      "mean": 0.8914826716678067
+    },
+    {
+      "id": "ticker",
+      "top6": 0.67,
+      "mean": 0.8820097315385965
+    },
+    {
+      "id": "bento",
+      "top6": 0.55,
+      "mean": 0.8718335221851368
+    },
+    {
+      "id": "spring",
+      "top6": 0.53,
+      "mean": 0.87696660484924
+    },
+    {
+      "id": "toast",
+      "top6": 0.51,
+      "mean": 0.8683352782214652
+    },
+    {
+      "id": "ripple",
+      "top6": 0.49,
+      "mean": 0.8678716342964979
+    },
+    {
+      "id": "label-underline",
+      "top6": 0.44,
+      "mean": 0.8617718812708353
+    },
+    {
+      "id": "progress-ring",
+      "top6": 0.43,
+      "mean": 0.8618946244237459
+    },
+    {
+      "id": "dock-magnify",
+      "top6": 0.36,
+      "mean": 0.8537860227279443
+    },
+    {
+      "id": "view-transition",
+      "top6": 0.33,
+      "mean": 0.8527699734792259
+    },
+    {
+      "id": "border-beam",
+      "top6": 0.26,
+      "mean": 0.8379595614174457
+    },
+    {
+      "id": "focus-ring",
+      "top6": 0.17,
+      "mean": 0.829459253828866
+    },
+    {
+      "id": "live-preview",
+      "top6": 0.17,
+      "mean": 0.8270570898933589
+    },
+    {
+      "id": "stagger",
+      "top6": 0.14,
+      "mean": 0.8237903295380002
+    },
+    {
+      "id": "coin-fly",
+      "top6": 0.09,
+      "mean": 0.81073092639185
+    },
+    {
+      "id": "spotlight",
+      "top6": 0.06,
+      "mean": 0.8067689483929915
+    },
+    {
+      "id": "glass",
+      "top6": 0.01,
+      "mean": 0.7820526409948135
+    },
+    {
+      "id": "skeleton",
+      "top6": 0,
+      "mean": 0.7611061132492988
+    },
+    {
+      "id": "scramble",
+      "top6": 0,
+      "mean": 0.7528007995859193
+    },
+    {
+      "id": "confetti",
+      "top6": 0,
+      "mean": 0.7329147606778044
+    },
+    {
+      "id": "tilt-3d",
+      "top6": 0,
+      "mean": 0.718950305154926
+    },
+    {
+      "id": "light-rays",
+      "top6": 0,
+      "mean": 0.6975894779566855
+    },
+    {
+      "id": "chromatic",
+      "top6": 0,
+      "mean": 0.6818707371960813
+    },
+    {
+      "id": "carousel",
+      "top6": 0,
+      "mean": 0.6767741540110523
+    },
+    {
+      "id": "ink-ribbon",
+      "top6": 0,
+      "mean": 0.6657420708772629
+    },
+    {
+      "id": "aurora-bg",
+      "top6": 0,
+      "mean": 0.6640734829462537
+    },
+    {
+      "id": "radial-menu",
+      "top6": 0,
+      "mean": 0.6608453451957027
+    },
+    {
+      "id": "morph-dialog",
+      "top6": 0,
+      "mean": 0.6412200013348799
+    }
+  ]
+}

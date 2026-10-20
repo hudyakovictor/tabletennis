@@ -1,0 +1,659 @@
+{
+  "overall": 100,
+  "baseline": {
+    "overall": 80,
+    "categories": [
+      {
+        "id": "craft",
+        "score": 67
+      },
+      {
+        "id": "easing",
+        "score": 67
+      },
+      {
+        "id": "duration",
+        "score": 75
+      },
+      {
+        "id": "interrupt",
+        "score": 75
+      },
+      {
+        "id": "gpu",
+        "score": 25
+      },
+      {
+        "id": "reduced",
+        "score": 67
+      },
+      {
+        "id": "gating",
+        "score": 50
+      },
+      {
+        "id": "feedback",
+        "score": 67
+      },
+      {
+        "id": "cohesion",
+        "score": 100
+      },
+      {
+        "id": "ia",
+        "score": 100
+      },
+      {
+        "id": "a11y",
+        "score": 100
+      },
+      {
+        "id": "perf",
+        "score": 100
+      },
+      {
+        "id": "honesty",
+        "score": 100
+      },
+      {
+        "id": "tests",
+        "score": 67
+      },
+      {
+        "id": "docs",
+        "score": 100
+      }
+    ]
+  },
+  "totalChecks": 50,
+  "categories": [
+    {
+      "id": "craft",
+      "name": "Craft motion-кода",
+      "weight": 1.2,
+      "checks": 6,
+      "max": 6,
+      "got": 6,
+      "score": 100
+    },
+    {
+      "id": "easing",
+      "name": "Easing и кривые",
+      "weight": 0.9,
+      "checks": 3,
+      "max": 3,
+      "got": 3,
+      "score": 100
+    },
+    {
+      "id": "duration",
+      "name": "Длительности и бюджеты",
+      "weight": 0.9,
+      "checks": 4,
+      "max": 4,
+      "got": 4,
+      "score": 100
+    },
+    {
+      "id": "interrupt",
+      "name": "Прерываемость и пружины",
+      "weight": 1,
+      "checks": 4,
+      "max": 4,
+      "got": 4,
+      "score": 100
+    },
+    {
+      "id": "gpu",
+      "name": "GPU-only и стоимость motion",
+      "weight": 1.1,
+      "checks": 4,
+      "max": 4,
+      "got": 4,
+      "score": 100
+    },
+    {
+      "id": "reduced",
+      "name": "Reduced motion",
+      "weight": 0.8,
+      "checks": 3,
+      "max": 3,
+      "got": 3,
+      "score": 100
+    },
+    {
+      "id": "gating",
+      "name": "Hover/focus гейтинг",
+      "weight": 0.6,
+      "checks": 2,
+      "max": 2,
+      "got": 2,
+      "score": 100
+    },
+    {
+      "id": "feedback",
+      "name": "Обратная связь (press/tap)",
+      "weight": 0.9,
+      "checks": 3,
+      "max": 3,
+      "got": 3,
+      "score": 100
+    },
+    {
+      "id": "cohesion",
+      "name": "Согласованность и общий язык",
+      "weight": 1,
+      "checks": 3,
+      "max": 3,
+      "got": 3,
+      "score": 100
+    },
+    {
+      "id": "ia",
+      "name": "Структура меню и навигация",
+      "weight": 1,
+      "checks": 3,
+      "max": 3,
+      "got": 3,
+      "score": 100
+    },
+    {
+      "id": "a11y",
+      "name": "Доступность интерфейса",
+      "weight": 1.2,
+      "checks": 4,
+      "max": 4,
+      "got": 4,
+      "score": 100
+    },
+    {
+      "id": "perf",
+      "name": "Производительность игры",
+      "weight": 1,
+      "checks": 3,
+      "max": 3,
+      "got": 3,
+      "score": 100
+    },
+    {
+      "id": "honesty",
+      "name": "Честность правил",
+      "weight": 1,
+      "checks": 3,
+      "max": 3,
+      "got": 3,
+      "score": 100
+    },
+    {
+      "id": "tests",
+      "name": "Тесты и покрытие",
+      "weight": 1.1,
+      "checks": 3,
+      "max": 3,
+      "got": 3,
+      "score": 100
+    },
+    {
+      "id": "docs",
+      "name": "Документация и артефакты",
+      "weight": 0.7,
+      "checks": 2,
+      "max": 2,
+      "got": 2,
+      "score": 100
+    }
+  ],
+  "results": [
+    {
+      "id": "C01",
+      "cat": "craft",
+      "title": "Нет `transition: all` — свойства перечислены явно",
+      "weight": 1,
+      "pass": 1,
+      "detail": "не найдено",
+      "points": 1
+    },
+    {
+      "id": "C02",
+      "cat": "craft",
+      "title": "Нет `scale(0)` во входах (не из ничего)",
+      "weight": 1,
+      "pass": 1,
+      "detail": "нет",
+      "points": 1
+    },
+    {
+      "id": "C03",
+      "cat": "craft",
+      "title": "Нет `ease-in` на UI (только ease-out/ease-in-out)",
+      "weight": 1,
+      "pass": 1,
+      "detail": "нет",
+      "points": 1
+    },
+    {
+      "id": "C04",
+      "cat": "craft",
+      "title": "Входы анимируют transform/opacity, а не filter/размеры",
+      "weight": 1,
+      "pass": 1,
+      "detail": "чисто",
+      "points": 1
+    },
+    {
+      "id": "C05",
+      "cat": "craft",
+      "title": "Тосты и переключатели — на transition, а не на keyframes",
+      "weight": 1,
+      "pass": 1,
+      "detail": "transition:true keyframes:false",
+      "points": 1
+    },
+    {
+      "id": "C06",
+      "cat": "craft",
+      "title": "Есть общий словарь easing (CSS-токены)",
+      "weight": 1,
+      "pass": 1,
+      "detail": "токенов 3, инлайн-кривых 5",
+      "points": 1
+    },
+    {
+      "id": "E01",
+      "cat": "easing",
+      "title": "UI-кривые — кастомные cubic-bezier, а токены кривых разрешаются",
+      "weight": 1,
+      "pass": 1,
+      "detail": "все — cubic-bezier, токены разрешаются",
+      "points": 1
+    },
+    {
+      "id": "E02",
+      "cat": "easing",
+      "title": "Вход/выход используют ease-out-подобную кривую",
+      "weight": 1,
+      "pass": 1,
+      "detail": "--ease-out → cubic-bezier(.23,1,.32,1) — сильный ease-out",
+      "points": 1
+    },
+    {
+      "id": "E03",
+      "cat": "easing",
+      "title": "Spring-физика используется там, где нужен interruptible",
+      "weight": 1,
+      "pass": 1,
+      "detail": "класс:true использование:true ретаргет:true",
+      "points": 1
+    },
+    {
+      "id": "D01",
+      "cat": "duration",
+      "title": "UI-переходы ≤ 300ms (кроме шторок/модалок ≤ 500ms)",
+      "weight": 1,
+      "pass": 1,
+      "detail": "все ≤ 300ms",
+      "points": 1
+    },
+    {
+      "id": "D02",
+      "cat": "duration",
+      "title": "Никаких переходов длиннее 500ms",
+      "weight": 1,
+      "pass": 1,
+      "detail": "нет",
+      "points": 1
+    },
+    {
+      "id": "D03",
+      "cat": "duration",
+      "title": "Press-feedback ≤ 160ms",
+      "weight": 1,
+      "pass": 1,
+      "detail": "нажатий с откликом: 10",
+      "points": 1
+    },
+    {
+      "id": "D04",
+      "cat": "duration",
+      "title": "Каскад: задержка между элементами ≤ 80ms, сумма ≤ 500ms",
+      "weight": 1,
+      "pass": 1,
+      "detail": "шаг —, макс. inline-delay 26ms",
+      "points": 1
+    },
+    {
+      "id": "I01",
+      "cat": "interrupt",
+      "title": "Счётчик чисел прерываем (новый вызов гасит прошлый)",
+      "weight": 1,
+      "pass": 1,
+      "detail": "отмена есть",
+      "points": 1
+    },
+    {
+      "id": "I02",
+      "cat": "interrupt",
+      "title": "Пружина ретаргетится из текущего состояния",
+      "weight": 1,
+      "pass": 1,
+      "detail": "to:true set:true",
+      "points": 1
+    },
+    {
+      "id": "I03",
+      "cat": "interrupt",
+      "title": "Тост переигрывается без перезапуска keyframes",
+      "weight": 1,
+      "pass": 1,
+      "detail": "класс .on:true keyframes:false",
+      "points": 1
+    },
+    {
+      "id": "I04",
+      "cat": "interrupt",
+      "title": "Каскад перезапускается корректно (reflow + класс)",
+      "weight": 1,
+      "pass": 1,
+      "detail": "offsetWidth перед повтором",
+      "points": 1
+    },
+    {
+      "id": "G01",
+      "cat": "gpu",
+      "title": "Не анимируются layout-свойства (width/height/top/left)",
+      "weight": 1,
+      "pass": 1,
+      "detail": "только transform/opacity",
+      "points": 1
+    },
+    {
+      "id": "G02",
+      "cat": "gpu",
+      "title": "Нет тяжёлого filter в анимируемом (блюр/свечение)",
+      "weight": 1,
+      "pass": 1,
+      "detail": "нет",
+      "points": 1
+    },
+    {
+      "id": "G03",
+      "cat": "gpu",
+      "title": "CSS-переменная родителя не рулит трансформом детей",
+      "weight": 1,
+      "pass": 1,
+      "detail": "переменные родителя используются корректно",
+      "points": 1
+    },
+    {
+      "id": "G04",
+      "cat": "gpu",
+      "title": "will-change используется экономно (≤ 5) и не «навсегда»",
+      "weight": 1,
+      "pass": 1,
+      "detail": "вхождений 4",
+      "points": 1
+    },
+    {
+      "id": "R01",
+      "cat": "reduced",
+      "title": "Есть reduced-motion блок для хаба",
+      "weight": 1,
+      "pass": 1,
+      "detail": "блок найден",
+      "points": 1
+    },
+    {
+      "id": "R02",
+      "cat": "reduced",
+      "title": "Reduced motion не обнуляет логику (счётчики, экраны)",
+      "weight": 1,
+      "pass": 1,
+      "detail": "счётчик мгновенный:true логика сохранена:true",
+      "points": 1
+    },
+    {
+      "id": "R03",
+      "cat": "reduced",
+      "title": "Reduced motion покрывает игровые поп-анимации",
+      "weight": 1,
+      "pass": 1,
+      "detail": "универсальное правило + точечные",
+      "points": 1
+    },
+    {
+      "id": "H01",
+      "cat": "gating",
+      "title": "`:hover`-стили под `@media (hover:hover) and (pointer:fine)`",
+      "weight": 1,
+      "pass": 1,
+      "detail": "загейчено 18 правил в 17 блок(ах)",
+      "points": 1
+    },
+    {
+      "id": "H02",
+      "cat": "gating",
+      "title": "Есть видимое кольцо фокуса (:focus-visible)",
+      "weight": 1,
+      "pass": 1,
+      "detail": "кольцо есть",
+      "points": 1
+    },
+    {
+      "id": "F01",
+      "cat": "feedback",
+      "title": "У кнопок хаба есть press-feedback (:active)",
+      "weight": 1,
+      "pass": 1,
+      "detail": "5/5: .btn, .opt, .bento-card, .meta-card, .dock-btn",
+      "points": 1
+    },
+    {
+      "id": "F02",
+      "cat": "feedback",
+      "title": "Нажатие в хабе озвучивается",
+      "weight": 1,
+      "pass": 1,
+      "detail": "вызовов audio.ui('click'): 24",
+      "points": 1
+    },
+    {
+      "id": "F03",
+      "cat": "feedback",
+      "title": "Есть тактильный отклик от точки нажатия (ripple)",
+      "weight": 1,
+      "pass": 1,
+      "detail": "рипл от реальной точки",
+      "points": 1
+    },
+    {
+      "id": "N01",
+      "cat": "cohesion",
+      "title": "Один общий переход между экранами (единый .screen)",
+      "weight": 1,
+      "pass": 1,
+      "detail": "правил .screen с transition: 1",
+      "points": 1
+    },
+    {
+      "id": "N02",
+      "cat": "cohesion",
+      "title": "Карточка едет целиком, содержимое только проявляется",
+      "weight": 1,
+      "pass": 1,
+      "detail": "карточка:true дети opacity:true трансформ детей:false",
+      "points": 1
+    },
+    {
+      "id": "N03",
+      "cat": "cohesion",
+      "title": "Все разделы меню используют одну карточку .card",
+      "weight": 1,
+      "pass": 1,
+      "detail": "экранов 13, карточек 14",
+      "points": 1
+    },
+    {
+      "id": "M01",
+      "cat": "ia",
+      "title": "Открыт ровно один экран (showScreen)",
+      "weight": 1,
+      "pass": 1,
+      "detail": "вызовов showScreen: 7",
+      "points": 1
+    },
+    {
+      "id": "M02",
+      "cat": "ia",
+      "title": "Все разделы достижимы из хаба",
+      "weight": 1,
+      "pass": 1,
+      "detail": "все разделы на месте",
+      "points": 1
+    },
+    {
+      "id": "M03",
+      "cat": "ia",
+      "title": "Escape закрывает верхний экран по цепочке",
+      "weight": 1,
+      "pass": 1,
+      "detail": "escape:true цепочка:true",
+      "points": 1
+    },
+    {
+      "id": "A01",
+      "cat": "a11y",
+      "title": "Модальные экраны: aria-modal + русский aria-label",
+      "weight": 1,
+      "pass": 1,
+      "detail": "экранов 13, aria-modal 14, подписей 40",
+      "points": 1
+    },
+    {
+      "id": "A02",
+      "cat": "a11y",
+      "title": "Живые области для счёта и статусов (aria-live)",
+      "weight": 1,
+      "pass": 1,
+      "detail": "aria-live: 8, hubLive: true",
+      "points": 1
+    },
+    {
+      "id": "A03",
+      "cat": "a11y",
+      "title": "Ловушка фокуса и возврат фокуса",
+      "weight": 1,
+      "pass": 1,
+      "detail": "trap:true возврат:true",
+      "points": 1
+    },
+    {
+      "id": "A04",
+      "cat": "a11y",
+      "title": "Иконки: декоративные скрыты, кнопки подписаны",
+      "weight": 1,
+      "pass": 1,
+      "detail": "aria-hidden 32, aria-label 40",
+      "points": 1
+    },
+    {
+      "id": "P01",
+      "cat": "perf",
+      "title": "В игровом цикле нет аллокаций и тяжёлых фильтров",
+      "weight": 1,
+      "pass": 1,
+      "detail": "чисто",
+      "points": 1
+    },
+    {
+      "id": "P02",
+      "cat": "perf",
+      "title": "Анимации хаба выключены, когда хаб закрыт",
+      "weight": 1,
+      "pass": 1,
+      "detail": "правило есть",
+      "points": 1
+    },
+    {
+      "id": "P03",
+      "cat": "perf",
+      "title": "Игровой HUD и меню не пересекаются по z-index",
+      "weight": 1,
+      "pass": 1,
+      "detail": "hub z=40, hud z=3",
+      "points": 1
+    },
+    {
+      "id": "Q01",
+      "cat": "honesty",
+      "title": "Общие допуски не настраиваются игроком",
+      "weight": 1,
+      "pass": 1,
+      "detail": "PLAYER_TUNING:true общих слайдеров нет:true",
+      "points": 1
+    },
+    {
+      "id": "Q02",
+      "cat": "honesty",
+      "title": "Личные настройки только ужимают (верх = авторское)",
+      "weight": 1,
+      "pass": 1,
+      "detail": "лимиты:true зажим:true",
+      "points": 1
+    },
+    {
+      "id": "Q03",
+      "cat": "honesty",
+      "title": "Юридические оговорки есть в меню",
+      "weight": 1,
+      "pass": 1,
+      "detail": "покупки:true реклама:true онлайн:true",
+      "points": 1
+    },
+    {
+      "id": "T01",
+      "cat": "tests",
+      "title": "Node-тесты проходят (зелёные, ≥ 100 кейсов)",
+      "weight": 1,
+      "pass": 1,
+      "detail": "pass 188, fail 0",
+      "points": 1
+    },
+    {
+      "id": "T02",
+      "cat": "tests",
+      "title": "Браузерные тесты покрывают десктоп и мобильный",
+      "weight": 1,
+      "pass": 1,
+      "detail": "~86 проверок на viewport, ~172 всего, оба viewport: true",
+      "points": 1
+    },
+    {
+      "id": "T03",
+      "cat": "tests",
+      "title": "Есть тесты motion-математики и соответствия отчёта коду",
+      "weight": 1,
+      "pass": 1,
+      "detail": "motion:true отчёт:true",
+      "points": 1
+    },
+    {
+      "id": "C10",
+      "cat": "docs",
+      "title": "Есть отчёт по анализам (md + json)",
+      "weight": 1,
+      "pass": 1,
+      "detail": "md:true json:true",
+      "points": 1
+    },
+    {
+      "id": "C11",
+      "cat": "docs",
+      "title": "Есть коллаж экранов меню и design-doc",
+      "weight": 1,
+      "pass": 1,
+      "detail": "коллаж:true doc:true",
+      "points": 1
+    }
+  ],
+  "plan": []
+}

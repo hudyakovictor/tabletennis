@@ -105,6 +105,8 @@ class Game {
       showDebug: false,
       showPlayerPaddle: true,
       slowmoOnBigShots: true,
+      gestureProfile: 'classic',   // 'classic' | 'hold' (без свайпа вниз)
+      serveTossCm: 37,            // высота подброса вашей подачи, см
       targetScore: 11,
       spinBias: 'norm',
       // NEW: Enhanced gameplay settings
@@ -609,6 +611,11 @@ class Game {
     if (typeof document !== 'undefined' && document.body) {
       document.body.classList.toggle('is-playing', s !== GS.MENU && s !== GS.MATCH_END);
     }
+    /* Меню-хаб живёт поверх сцены: как только началась игра, оболочка
+       должна закрыться, даже если матч запустили мимо UI. */
+    if (s !== GS.MENU && s !== GS.MATCH_END && this.ui && this.ui.hub) {
+      this.ui.hub.close();
+    }
   }
 
   /* Pause only makes sense during a live rally or serve prep; leaving the play
@@ -662,7 +669,11 @@ class Game {
     // ITTF requires a near-vertical toss of at least 16 cm; we throw ~30 cm
     V3.set(b.p, pad.pos.x,
       PH.TABLE_Y + 0.14, clamp(pad.pos.z - 0.04, PH.T_HALF_LEN + 0.04, 2.0));
-    V3.set(b.v, rndSym(0.03), 2.45 + rnd(0, 0.2), rndSym(0.03));
+    /* Высота подброса — настройка игрока: она задаёт вертикальную
+       скорость мяча (v = sqrt(2gh)). Меняет только вашу подачу. */
+    const tossCm = clamp(Number(this.settings.serveTossCm) || 37, 24, 52);
+    const tossV = Math.sqrt(2 * PH.G * (tossCm / 100));
+    V3.set(b.v, rndSym(0.03), tossV * (0.995 + rnd(0, 0.01)), rndSym(0.03));
     this.tossStartY = b.p.y;
     this.tossApex = b.p.y;
     V3.zero(b.w);
@@ -1001,6 +1012,13 @@ class Game {
       showTele: s.showTele, haptics: s.haptics, coach: s.coach, adaptive: s.adaptive,
       targetScore: s.targetScore,
       spinBias: s.spinBias,
+      showPlayerPaddle: s.showPlayerPaddle,
+      gestureProfile: s.gestureProfile,
+      serveTossCm: s.serveTossCm,
+      tune: {
+        capture: PLAYER_TUNING.capture, press: PLAYER_TUNING.press,
+        aim: PLAYER_TUNING.aim, approach: PLAYER_TUNING.approach, sens: PLAYER_TUNING.sens,
+      },
     };
     if (this.career && this.career.active && this.career._baseSettings)
       this.profile.data.settings.difficulty = this.career._baseSettings.difficulty;
@@ -1020,8 +1038,19 @@ class Game {
     }
     s.difficulty = Math.round(s.difficulty);
     for (const [k, values] of Object.entries({ quality: ['low', 'medium', 'high'],
-      camera: CAMERA_ORDER, hand: ['left', 'right'], grip: ['shakehand', 'penhold'], spinBias: ['low', 'norm', 'high'], targetScore: [5, 11, 21] })) {
+      camera: CAMERA_ORDER, hand: ['left', 'right'], grip: ['shakehand', 'penhold'], spinBias: ['low', 'norm', 'high'], targetScore: [5, 11, 21],
+      gestureProfile: ['classic', 'hold'] })) {
       if (values.includes(raw[k])) s[k] = raw[k];
+    }
+    if (Number.isFinite(raw.serveTossCm)) s.serveTossCm = Math.round(clamp(raw.serveTossCm, 24, 52));
+    /* Профиль жестов живёт в настройках игрока, но распознаёт его свип. */
+    setGestureProfile(s.gestureProfile);
+    /* Личная подстройка помощи живёт отдельно от общих правил: её можно
+       только ужимать, и она никогда не делает игру легче. */
+    if (raw.tune && typeof raw.tune === 'object') {
+      for (const k of Object.keys(PLAYER_TUNING_LIMITS)) {
+        if (Number.isFinite(raw.tune[k])) setPlayerTuning(k, raw.tune[k]);
+      }
     }
     if (this.settings.volume !== undefined) this.audio.setVolume(this.settings.volume);
     if (this.settings.sound === false) this.audio.setMuted(true);
@@ -1602,8 +1631,9 @@ class Game {
       }
       quality = clamp(racket.quality * (0.60 + 0.40 * sweet) * (0.70 + 0.30 * timing) * tq, 0.25, 1);
       racket.quality = quality;
-      // One authored trajectory assist level, shared by every player.
-      const assistLvl = MATCH_RULES.trajectoryAssist;
+      /* Помощь прицела: авторское значение по умолчанию, личное значение
+         может только ужимать его (см. PLAYER_TUNING). */
+      const assistLvl = PLAYER_TUNING.aim;
       const rawSwing = V3.new(), rawNormal = V3.new();
       strokeFrame(racket, 0, 0, 1, rawSwing, rawNormal);
       const rawShotFrame = { normal: shotVec(rawNormal), vR: shotVec(rawSwing),
@@ -1820,7 +1850,7 @@ class Game {
      * cannot break the pointer contract, and it is the one piece of footwork
      * the player is not asked to perform with a mouse. */
     let zNear = PADDLE_LIMITS.zNear;
-    const A = MATCH_RULES.positionAssist;
+    const A = PLAYER_TUNING.approach;
     const o = this._paddlePred || (this._paddlePred = {});
     const incoming = this.ball.live && this.ball.v.z > 0.4 && this.ball.lastHitBy === -1;
     /* A ball that has already bounced and died short is not "not incoming":
@@ -1866,7 +1896,7 @@ class Game {
      * drawn under the cursor — always, at every preset and aspect ratio.
      * `sens` is the player's sensitivity setting: it scales how far the bat
      * travels per pixel of cursor travel (1 = the exact map). */
-    const sens = clamp(Number.isFinite(MATCH_RULES.sensitivity) ? MATCH_RULES.sensitivity : 1, 0.55, 2.0);
+    const sens = clamp(Number.isFinite(PLAYER_TUNING.sens) ? PLAYER_TUNING.sens : 1, 0.55, 2.0);
     const px = clamp(0.5 + (pt.x - 0.5) * sens, 0, 1);
     const py = clamp(0.5 + (pt.y - 0.5) * sens, 0, 1);
     /* Depth plane. Standing still the bat lives at the authored stance; a
