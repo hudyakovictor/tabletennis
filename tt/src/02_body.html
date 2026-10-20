@@ -1,6 +1,7 @@
 <div id="app" role="application" aria-label="TOPSPIN ARENA — настольный теннис, управление свайпом">
   <canvas id="gl" tabindex="0" aria-label="Игровое поле. Свайп или зажатая кнопка мыши задаёт удар. Клавиши 1, 2, 3 переключают готовый вид камеры."></canvas>
   <canvas id="fx"></canvas>
+  <div id="fxLayer" aria-hidden="true"></div>
 
   <div id="hud">
     <!-- scoreboard -->
@@ -67,46 +68,52 @@
     </div>
   </div>
 
-  <!-- ============================ MENU ============================ -->
+  <!-- ============================ MENU HUB ============================
+       Единый хаб «ARENA HUB 2026»: голо-бренд, статус-полоса с одометром,
+       сегмент соперников с морфинг-пилюлей, CTA с лучом, Bento-режимы. -->
   <div class="screen on" id="menu" role="dialog" aria-modal="true" aria-label="Главное меню">
     <div class="card">
-      <div class="menu-brand">
-        <div class="brand-menu"><img class="brand-logo" src="{{BRAND_LOGO}}" alt="Table Tennis Ultimate" width="556" height="422"></div>
-        <div class="sub">Настольный теннис · 3D-физика · управление свайпом</div>
-        <div class="menu-utility" role="group" aria-label="Быстрые настройки">
-          <button class="ic" id="menuFullscreen" title="Полный экран (F)" aria-label="Полный экран" aria-pressed="false"></button>
-          <button class="ic" id="menuSound" title="Выключить звук" aria-label="Выключить звук" aria-pressed="true"></button>
+      <div class="hub">
+        <div class="menu-brand rise">
+          <div class="holo-stage">
+            <div class="brand-menu holo" id="brandHolo"><img class="brand-logo" src="{{BRAND_LOGO}}" alt="Table Tennis Ultimate" width="556" height="422"><span class="foil" aria-hidden="true"></span><span class="glare" aria-hidden="true"></span></div>
+          </div>
+          <div class="sub">Настольный теннис · 3D-физика · управление свайпом</div>
+          <div class="menu-utility" role="group" aria-label="Быстрые настройки">
+            <button class="ic" id="menuFullscreen" title="Полный экран (F)" aria-label="Полный экран" aria-pressed="false"></button>
+            <button class="ic" id="menuSound" title="Выключить звук" aria-label="Выключить звук" aria-pressed="true"></button>
+          </div>
         </div>
-      </div>
 
-      <div class="menu-play">
-        <h3 class="sec">Соперник</h3>
-        <div class="row menu-difficulty" role="group" aria-label="Сложность соперника">
-          <button class="opt" data-diff="0" aria-pressed="false"><b>НОВИЧОК</b><small>лёгкий</small></button>
-          <button class="opt" data-diff="1" aria-pressed="false"><b>ЛЮБИТЕЛЬ</b><small>средний</small></button>
-          <button class="opt sel" data-diff="2" aria-pressed="true"><b>ПРО</b><small>опытный</small></button>
-          <button class="opt" data-diff="3" aria-pressed="false"><b>МАСТЕР</b><small>сложный</small></button>
-          <button class="opt" data-diff="4" aria-pressed="false"><b>ЛЕГЕНДА</b><small>максимум</small></button>
+        <div class="hub-status rise" aria-label="Прогресс игрока">
+          <div class="hstat coin" id="hubCoins"><i aria-hidden="true"></i><div class="d"><b id="hubCoinsVal">0</b><small>монет</small></div></div>
+          <div class="hstat" id="hubDaily"><div class="d"><b id="hubStreakVal">серия 1</b><small>задания дня</small></div><span class="bar" aria-hidden="true"><i id="hubDailyBar"></i></span></div>
         </div>
-        <button class="btn" id="play">НАЧАТЬ МАТЧ</button>
-      </div>
 
-      <div class="menu-actions row">
-        <button class="btn ghost" id="menuOpenSettings"><span class="ui-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></span>НАСТРОЙКИ</button>
-        <button class="btn ghost" id="train0"><span class="ui-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="m2 9 10-5 10 5-10 5L2 9Z"/><path d="M6 11.2v4.4c3.5 2.3 8.5 2.3 12 0v-4.4M22 9v6"/></svg></span>ОБУЧЕНИЕ</button>
-      </div>
-
-      <div class="menu-modes">
-        <h3 class="sec">Режимы</h3>
-        <div class="row menu-mode-actions">
-          <button class="btn ghost" id="careerStart"><span class="ui-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M8 21h8m-4-4v4m-5-15h10v5a5 5 0 0 1-10 0V6Zm0 2H4v2a4 4 0 0 0 4 4m8-6h4v2a4 4 0 0 1-4 4"/></svg></span>КАРЬЕРА</button>
-          <button class="btn ghost" id="onlineStart"><span class="ui-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a15 15 0 0 1 0 18M12 3a15 15 0 0 0 0 18"/></svg></span>ОНЛАЙН</button>
-          <button class="btn ghost" id="zoneCalMenu"><b>КАЛИБРОВКА ЗОНЫ</b></button>
-          <button class="btn ghost" id="demoStart"><span class="ui-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><rect x="5" y="7" width="14" height="13" rx="3"/><path d="M12 3v4m-3 5h.01M15 12h.01M9 16h6M3 11H5m14 0h2"/></svg></span>ДЕМО</button>
+        <div class="menu-play rise">
+          <h3 class="sec">Соперник</h3>
+          <div class="row menu-difficulty" role="group" aria-label="Сложность соперника">
+            <button class="opt" data-diff="0" aria-pressed="false"><b>НОВИЧОК</b><small>лёгкий</small><span class="pips" aria-hidden="true"><i class="f"></i><i></i><i></i><i></i><i></i></span></button>
+            <button class="opt" data-diff="1" aria-pressed="false"><b>ЛЮБИТЕЛЬ</b><small>средний</small><span class="pips" aria-hidden="true"><i class="f"></i><i class="f"></i><i></i><i></i><i></i></span></button>
+            <button class="opt sel" data-diff="2" aria-pressed="true"><b>ПРО</b><small>опытный</small><span class="pips" aria-hidden="true"><i class="f"></i><i class="f"></i><i class="f"></i><i></i><i></i></span></button>
+            <button class="opt" data-diff="3" aria-pressed="false"><b>МАСТЕР</b><small>сложный</small><span class="pips" aria-hidden="true"><i class="f"></i><i class="f"></i><i class="f"></i><i class="f"></i><i></i></span></button>
+            <button class="opt" data-diff="4" aria-pressed="false"><b>ЛЕГЕНДА</b><small>максимум</small><span class="pips" aria-hidden="true"><i class="f"></i><i class="f"></i><i class="f"></i><i class="f"></i><i class="f"></i></span></button>
+          </div>
+          <button class="btn" id="play">НАЧАТЬ МАТЧ</button>
         </div>
-        <div class="row menu-meta-actions">
-          <button class="opt" id="wsOpen"><b>МАСТЕРСКАЯ</b><small id="wsCoins">0 монет</small></button>
-          <button class="opt" id="dailyOpen"><b>ЗАДАНИЯ</b><small id="wsStreak">серия 1</small></button>
+
+        <div class="menu-modes rise">
+          <h3 class="sec">Режимы и клуб</h3>
+          <div class="bento">
+            <button class="btile wide" id="careerStart" data-accent="gold"><span class="bic"><span class="ui-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M8 21h8m-4-4v4m-5-15h10v5a5 5 0 0 1-10 0V6Zm0 2H4v2a4 4 0 0 0 4 4m8-6h4v2a4 4 0 0 1-4 4"/></svg></span></span><span class="d"><b>КАРЬЕРА</b><small>12 турниров · от гаража до Зала Славы</small></span><span class="go" aria-hidden="true">›</span></button>
+            <button class="btile" id="onlineStart" data-accent="green"><span class="bic"><span class="ui-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a15 15 0 0 1 0 18M12 3a15 15 0 0 0 0 18"/></svg></span></span><b>ОНЛАЙН</b><small>Матч с живым соперником по коду комнаты</small></button>
+            <button class="btile" id="train0" data-accent="cyan"><span class="bic"><span class="ui-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="m2 9 10-5 10 5-10 5L2 9Z"/><path d="M6 11.2v4.4c3.5 2.3 8.5 2.3 12 0v-4.4M22 9v6"/></svg></span></span><b>ОБУЧЕНИЕ</b><small>Шесть ударов — от топспина до смеша</small></button>
+            <button class="btile" id="wsOpen" data-accent="orange"><span class="bic"><span class="ui-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M14.5 6.5a4.5 4.5 0 0 0-6 6L3 18l3 3 5.5-5.5a4.5 4.5 0 0 0 6-6l-3 3-2.5-.5-.5-2.5 3-3Z"/></svg></span></span><b>МАСТЕРСКАЯ</b><small class="live" id="wsCoins">0 монет</small></button>
+            <button class="btile" id="dailyOpen" data-accent="vio"><span class="bic"><span class="ui-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M9 11l3 3 8-8M20 12v6a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h9"/></svg></span></span><b>ЗАДАНИЯ</b><small class="live" id="wsStreak">серия 1</small></button>
+            <button class="btile" id="menuOpenSettings" data-accent="cyan"><span class="bic"><span class="ui-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></span></span><b>НАСТРОЙКИ</b><small>Хват, рука и вид камеры</small></button>
+            <button class="btile" id="demoStart" data-accent="vio"><span class="bic"><span class="ui-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><rect x="5" y="7" width="14" height="13" rx="3"/><path d="M12 3v4m-3 5h.01M15 12h.01M9 16h6M3 11H5m14 0h2"/></svg></span></span><b>ДЕМО</b><small>Бот против бота — режим наблюдения</small></button>
+            <button class="btile wide" id="zoneCalMenu" data-accent="cyan"><span class="bic"><span class="ui-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="3"/><path d="M12 2v4m0 12v4M2 12h4m12 0h4"/></svg></span></span><span class="d"><b>КАЛИБРОВКА ЗОНЫ</b><small>Технический экран зоны попадания</small></span><span class="go" aria-hidden="true">›</span></button>
+          </div>
         </div>
       </div>
     </div>
@@ -124,8 +131,8 @@
   </div>
   <div class="screen" id="careerPerk" role="dialog" aria-modal="true" aria-label="Выбор перка">
     <div class="card">
-      <div class="logo" style="font-size:20px">ВЫБЕРИ ПЕРК</div>
-      <div class="sub">Улучшение для следующих матчей</div>
+      <div class="sheet-head"><span class="sheet-num" aria-hidden="true">04</span><div class="tt"><div class="logo" style="font-size:20px">ВЫБЕРИ ПЕРК</div><p>Улучшение для следующих матчей</p></div></div>
+      <div class="sub" id="crPerkStatus"></div>
       <div class="row" id="crPerkList" style="margin-top:12px"></div>
     </div>
   </div>
@@ -142,8 +149,8 @@
   <!-- ========================== ONLINE ============================ -->
   <div class="screen" id="onlineLobby" role="dialog" aria-modal="true" aria-label="Онлайн лобби">
     <div class="card">
-       <div class="logo">ОНЛАЙН МАТЧ</div>
-      <div class="sub" id="netStatus">Подключение...</div>
+      <div class="sheet-head"><span class="sheet-num" aria-hidden="true">05</span><div class="tt"><div class="logo">ОНЛАЙН МАТЧ</div><p>Комната по коду · матч с живым соперником</p></div></div>
+      <div class="net-state" id="netState" data-state="wait" role="status" aria-live="polite"><span class="dotled" aria-hidden="true"></span><div class="sub" id="netStatus">Подключение...</div></div>
       <div id="netRoomCode" style="font-family:var(--mono);font-size:28px;letter-spacing:.2em;color:var(--acc);text-align:center;margin:12px 0;display:none"></div>
       <button class="btn" id="netCreate">СОЗДАТЬ КОМНАТУ</button>
       <button class="btn ghost" id="netJoin" style="margin-top:8px">ПРИСОЕДИНИТЬСЯ ПО КОДУ</button>
@@ -155,8 +162,7 @@
   <!-- ========================== SETTINGS ========================== -->
   <div class="screen" id="settings" role="dialog" aria-modal="true" aria-label="Настройки">
     <div class="card settings-card">
-      <div class="logo" style="font-size:24px">НАСТРОЙКИ</div>
-      <div class="sub">Личные предпочтения · единые правила игры</div>
+      <div class="sheet-head"><span class="sheet-num" aria-hidden="true">03</span><div class="tt"><div class="logo" style="font-size:24px">НАСТРОЙКИ</div><p>Личные предпочтения · единые правила игры</p></div></div>
 
       <p class="note">Допуски попадания и помощь настроены одинаково для всех — без ползунков. Мяч отбивается ракеткой. Мышь или палец управляют её движением, свайп задаёт удар. Скобки у мяча подсказывают время: пунктир — приближение, сплошные — окно для свайпа. Сам по себе маркер мяч не отбивает.</p>
 
@@ -188,7 +194,7 @@
   <div class="screen" id="workshop" role="dialog" aria-modal="true" aria-label="Мастерская, магазин и задания">
     <div class="card wide">
       <div class="wtop">
-        <div class="logo" style="font-size:26px">МАСТЕРСКАЯ</div>
+        <div class="sheet-head" style="margin:0"><span class="sheet-num" aria-hidden="true">06</span><div class="tt"><div class="logo" style="font-size:24px">МАСТЕРСКАЯ</div><p>Ракетка · магазин · задания</p></div></div>
         <div class="wallet">
           <span class="wmon"><i></i><b id="wsBal">0</b></span>
           <span class="wcr"><i></i><b id="wsCry">0</b></span>
@@ -244,8 +250,7 @@
   <!-- ====================== TRAINING COMPLETE ===================== -->
   <div class="screen" id="tdone" role="dialog" aria-modal="true" aria-label="Обучение пройдено">
     <div class="card">
-      <div class="logo" style="font-size:30px;">ОБУЧЕНИЕ ПРОЙДЕНО</div>
-      <div class="sub">Шесть ударов в руках. Дальше — матч</div>
+      <div class="sheet-head"><span class="sheet-num" aria-hidden="true">07</span><div class="tt"><div class="logo" style="font-size:26px;">ОБУЧЕНИЕ ПРОЙДЕНО</div><p>Шесть ударов в руках. Дальше — матч</p></div></div>
       <div class="recap">
         <div class="rc"><i style="background:#4ee39a"></i><b>Вверх</b><small>топспин: мяч ныряет в стол</small></div>
         <div class="rc"><i style="background:#39c6ff"></i><b>Вниз</b><small>подрезка: низко и медленно</small></div>
@@ -304,8 +309,7 @@
   <!-- ====================== MOMENT LIBRARY ======================= -->
   <div class="screen" id="reels" role="dialog" aria-modal="true" aria-label="Лучшие моменты матча">
     <div class="card">
-      <div class="logo" style="font-size:30px">ЛУЧШИЕ МОМЕНТЫ</div>
-      <div class="sub">Игра запоминает только то, что стоит пересматривать</div>
+      <div class="sheet-head"><span class="sheet-num" aria-hidden="true">09</span><div class="tt"><div class="logo" style="font-size:26px">ЛУЧШИЕ МОМЕНТЫ</div><p>Игра запоминает только то, что стоит пересматривать</p></div></div>
       <div id="momentList" class="mlist"></div>
       <button class="btn ghost" id="reelsClose">ЗАКРЫТЬ</button>
     </div>

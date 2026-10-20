@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="ru"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>TOPSPIN ARENA — коллаж меню «ARENA HUB 2026»</title>
+<style>
+:root{--bg:#05070c;--surface:#0b0f14;--surface2:#0d1117;--line:#1c2430;--line2:#2a3441;--ink:#e6edf3;--dim:#9fb0c2;--dim2:#6e7d8f;--acc:#39c6ff;--gold:#ffd166}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg);color:var(--ink);font:14px/1.5 -apple-system,"Segoe UI",Roboto,sans-serif;-webkit-font-smoothing:antialiased}
+.hero{padding:34px 16px 10px;max-width:1240px;margin:0 auto;position:relative;overflow:hidden}
+.hero::before{content:"";position:absolute;inset:0;background:radial-gradient(620px 260px at 12% -30%,rgba(57,198,255,.20),transparent 62%),radial-gradient(520px 230px at 88% -22%,rgba(167,139,250,.16),transparent 60%);pointer-events:none}
+h1{font-size:clamp(24px,4vw,40px);letter-spacing:-.02em;font-weight:900;position:relative}
+h1 b{background:linear-gradient(92deg,#66b8ff,#7ff0c0);-webkit-background-clip:text;background-clip:text;color:transparent}
+.hero p{color:var(--dim);max-width:46em;margin-top:8px;position:relative}
+.kpis{display:flex;gap:8px;flex-wrap:wrap;margin-top:16px;position:relative}
+.kpi{background:var(--surface2);border:1px solid var(--line);border-radius:12px;padding:9px 12px}
+.kpi b{display:block;font-size:18px;line-height:1.1}.kpi span{color:var(--dim2);font-size:9.5px;text-transform:uppercase;letter-spacing:.08em}
+.grid{display:grid;gap:16px;padding:20px 16px 40px;max-width:1240px;margin:0 auto;grid-template-columns:repeat(auto-fill,minmax(280px,1fr))}
+.fig{background:var(--surface);border:1px solid var(--line);border-radius:22px;overflow:hidden}
+.fig h3{font-size:14.5px;padding:14px 16px 2px}
+.fig p{color:var(--dim2);font-size:12px;padding:2px 16px 12px;line-height:1.45}
+.phone{margin:0 12px 14px;border:1px solid var(--line2);border-radius:26px;overflow:hidden;background:#05070c;box-shadow:0 18px 50px rgba(0,0,0,.5)}
+.phone img{display:block;width:100%;height:auto}
+foot{display:block;max-width:1240px;margin:0 auto;padding:0 16px 34px;color:var(--dim2);font-size:12px}
+</style></head><body>
+<header class="hero">
+<h1>TOPSPIN ARENA — <b>ARENA HUB 2026</b></h1>
+<p>Коллаж всех основных экранов меню мобильной игры после полного перепроектирования: единый меню-хаб вместо россыпи карточек. Дизайн-паттерны перенесены из каталога Signal Arena (160 ассетов), отобраны через 100 анализов по гейту «частота × цель × сдержанность» (Emil Kowalski). Скриншоты — живая игра, вьюпорт телефона 390×844.</p>
+<div class="kpis">
+<div class="kpi"><b>13</b><span>экранов в одном языке</span></div>
+<div class="kpi"><b>160 → 21</b><span>ассетов шаблона → перенесено паттернов</span></div>
+<div class="kpi"><b>174/174</b><span>тестов зелёные</span></div>
+<div class="kpi"><b>0</b><span>внешних ресурсов</span></div>
+</div></header>
+<main class="grid">
+<figure class="fig"><h3>01 · Хаб — единое меню</h3><p>Голо-логотип с 3D-тилтом, статус-полоса с одометром монет, сегмент соперников с морфинг-пилюлей, CTA с бегущим лучом, Bento-режимы со spotlight.</p><div class="phone"><img src="collage/01-hub.png" alt="01 · Хаб — единое меню"></div></figure>
+<figure class="fig"><h3>02 · Настройки</h3><p>Шит арены: номер раздела, шапка, дисклеймер единых правил, хват/рука/камера.</p><div class="phone"><img src="collage/02-settings.png" alt="02 · Настройки"></div></figure>
+<figure class="fig"><h3>03 · Мастерская — ракетка</h3><p>Кошелёк-одометр, морфинг-вкладки, три слота, стат-бары.</p><div class="phone"><img src="collage/03-workshop-racket.png" alt="03 · Мастерская — ракетка"></div></figure>
+<figure class="fig"><h3>04 · Мастерская — магазин</h3><p>Карточки со spotlight, цены, сезонный прогресс. Дисклеймеры сохранены.</p><div class="phone"><img src="collage/04-workshop-shop.png" alt="04 · Мастерская — магазин"></div></figure>
+<figure class="fig"><h3>05 · Мастерская — задания</h3><p>Прогресс-бары 6 ежедневных заданий, каскадный вход строк.</p><div class="phone"><img src="collage/05-workshop-daily.png" alt="05 · Мастерская — задания"></div></figure>
+<figure class="fig"><h3>06 · Онлайн-лобби</h3><p>LED-индикатор состояния подключения, код комнаты, дисклеймер эксперимента.</p><div class="phone"><img src="collage/06-online.png" alt="06 · Онлайн-лобби"></div></figure>
+<figure class="fig"><h3>07 · Карьера — турнир</h3><p>Значок номера турнира, ELO-строка, список соперников каскадом.</p><div class="phone"><img src="collage/07-career-intro.png" alt="07 · Карьера — турнир"></div></figure>
+<figure class="fig"><h3>08 · Карьера — перк</h3><p>Карты редкости: обычный / редкий / эпический, лучи и теги.</p><div class="phone"><img src="collage/08-career-perk.png" alt="08 · Карьера — перк"></div></figure>
+<figure class="fig"><h3>09 · Обучение пройдено</h3><p>Recap шести ударов карточками.</p><div class="phone"><img src="collage/09-training-done.png" alt="09 · Обучение пройдено"></div></figure>
+<figure class="fig"><h3>10 · Итоги матча</h3><p>KPI-статистика с одометром чисел, конфетти победы, реванш.</p><div class="phone"><img src="collage/10-match-over.png" alt="10 · Итоги матча"></div></figure>
+<figure class="fig"><h3>11 · Лучшие моменты</h3><p>Библиотека реплеев.</p><div class="phone"><img src="collage/11-moments.png" alt="11 · Лучшие моменты"></div></figure>
+<figure class="fig"><h3>12 · Калибровка попадания</h3><p>Технический экран в том же языке шитов.</p><div class="phone"><img src="collage/12-shotlab.png" alt="12 · Калибровка попадания"></div></figure>
+<figure class="fig"><h3>13 · Пауза в матче</h3><p>Продолжить / настройки / калибровка / в меню поверх замороженной сцены.</p><div class="phone"><img src="collage/13-pause.png" alt="13 · Пауза в матче"></div></figure>
+</main>
+<foot>Собрано автоматически: <code>node tt/tools/collage.cjs</code> · Карта переноса паттернов и обоснование 100 анализов — в <code>docs/menu-redesign-2026.md</code>.</foot>
+</body></html>

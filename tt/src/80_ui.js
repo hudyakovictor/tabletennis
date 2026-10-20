@@ -1308,6 +1308,7 @@ class UI {
     career.opponents.forEach((opp, i) => {
       const btn = document.createElement('button');
       btn.className = 'opt';
+      btn.style.setProperty('--i', i);
       const name = document.createElement('b'), detail = document.createElement('s');
       name.textContent = opp.name; detail.textContent = `${opp.style} · ELO ${opp.elo}`;
       btn.append(name, detail);
@@ -1331,12 +1332,17 @@ class UI {
     $$('.screen').forEach(s => s.classList.remove('on'));
     const list = $('#crPerkList');
     list.innerHTML = '';
+    const statusEl = $('#crPerkStatus');
+    if (statusEl) statusEl.textContent = `Раунд ${career.currentRound + 1} из ${career.currentTournamentInfo.rounds} · Перков: ${career.perks.length}`;
     career.pendingPerks.forEach((perk, i) => {
       const btn = document.createElement('button');
       btn.className = 'opt';
       const colors = { green: '#4ee39a', blue: '#39c6ff', gold: '#ffd34d' };
-      btn.style.borderColor = colors[perk.rarity] || '#39c6ff';
-      btn.innerHTML = `<b style="color:${colors[perk.rarity]}">${perk.name}</b><small>${perk.desc}</small>`;
+      const rMap = { green: 'common', blue: 'rare', gold: 'epic' };
+      const rRu = { green: 'ОБЫЧНЫЙ', blue: 'РЕДКИЙ', gold: 'ЭПИЧЕСКИЙ' };
+      btn.dataset.rarity = rMap[perk.rarity] || 'common';
+      btn.style.setProperty('--i', i);
+      btn.innerHTML = `<span class="rtag">${rRu[perk.rarity] || 'ОБЫЧНЫЙ'}</span><b style="color:${colors[perk.rarity]}">${perk.name}</b><small>${perk.desc}</small>`;
       btn.addEventListener('click', () => {
         g.audio.ui('click');
         career.selectPerk(i);
