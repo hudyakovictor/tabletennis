@@ -7,7 +7,7 @@ OUT = sys.argv[1] if len(sys.argv) > 1 else os.path.join(os.path.dirname(SRC), '
 JS_ORDER = ['10_math.js','12_match_rules.js','20_gl.js','25_career.js','27_network.js','30_physics.js','38_paddle_motion.js','40_swipe.js','42_shot_diagnostics.js','43_input_telemetry.js','50_audio.js',
             '55_ai.js','56_rig.js','57_camera.js','58_coach.js','59_replay.js','60_scene.js',
             '65_train.js','75_feedback.js','75_music.js','76_emotion.js','81_uiAnim.js','84_racket.js',
-            '86_meta.js','70_game.js','80_ui.js','90_boot.js']
+            '86_meta.js','70_game.js','80_ui.js','82_hub.js','90_boot.js']
 
 # Every module in src/ MUST be in JS_ORDER: a file that is present on disk
 # but missing here builds a bundle that throws on boot and shows "WebGL
@@ -18,7 +18,11 @@ if _missing or _extra:
     raise SystemExit('build.py: JS_ORDER out of sync — missing: %s, unknown: %s'
                      % (_missing, _extra))
 
-css  = open(os.path.join(SRC,'05_style.css'),encoding='utf-8').read()
+CSS_FILES = ['05_style.css', '06_hub.css']
+_css_missing = sorted(set(f for f in os.listdir(SRC) if f.endswith('.css')) - set(CSS_FILES))
+if _css_missing:
+    raise SystemExit('build.py: CSS_FILES out of sync — missing: %s' % _css_missing)
+css = '\n'.join(open(os.path.join(SRC, f), encoding='utf-8').read() for f in CSS_FILES)
 body = open(os.path.join(SRC,'02_body.html'),encoding='utf-8').read()
 with open(os.path.join(os.path.dirname(SRC), 'assets', 'table-tennis-ultimate.png'), 'rb') as asset:
     logo = 'data:image/png;base64,' + base64.b64encode(asset.read()).decode('ascii')

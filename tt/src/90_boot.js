@@ -13,6 +13,10 @@
       ui.attach(game);
       ui.bindCareer();
       ui.bindOnline();
+      /* The menu hub is a presentation layer: if it fails, the game must
+         still boot instead of falling into the WebGL error card. */
+      try { ui.hub = new Hub(game); ui.hub.enter(); }
+      catch (hubErr) { console.error('hub:', hubErr); }
     } catch (err) {
       console.error(err);
       const loading = document.getElementById('loading');

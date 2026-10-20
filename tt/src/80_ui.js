@@ -215,6 +215,7 @@ class UI {
     this.game.returnToMenu();
     $$('.screen').forEach(s => s.classList.remove('on'));
     $('#menu').classList.add('on');
+    if (this.hub) this.hub.enter();
     this.refreshMenuBits();
     this.syncMenuScrollHint();
   }
@@ -293,15 +294,14 @@ class UI {
     const wsOpen = (tab) => {
       this.game.audio.ui('click');
       this.game.analytics && this.game.analytics.send('ui:workshop', { tab: tab || 'racket' });
-      $$('.screen').forEach((x) => x.classList.remove('on'));
       this.pick = null;                       // a fresh visit starts from what is fitted
       this.showWorkshop(tab || 'racket');
     };
     $('#wsOpen').addEventListener('click', () => wsOpen('racket'));
     $('#dailyOpen').addEventListener('click', () => wsOpen('daily'));
     $('#wsClose').addEventListener('click', () => {
-      $('#workshop').classList.remove('on');
-      $('#menu').classList.add('on');
+      if (this.hub) this.hub.setView('play');
+      else $('#menu').classList.add('on');
       this.game.audio.ui('click');
     });
     $$('#workshop .tab').forEach((b) => b.addEventListener('click', () => this.showWorkshop(b.dataset.tab)));
@@ -439,7 +439,18 @@ class UI {
   showMoments() {
     const g = this.game; if (!g) return;
     const kept = g.moments.kept.slice(0, 3);
-    if (!kept.length) return;
+    const empty = $('#momentEmpty');
+    if (!kept.length) {
+      /* The library is a real place even before the first rally: opening it
+         with nothing inside explains what will appear, instead of doing
+         nothing at all when the player taps ЛУЧШИЕ МОМЕНТЫ. */
+      const list = $('#momentList');
+      if (list) list.innerHTML = '';
+      if (empty) empty.hidden = false;
+      $('#reels').classList.add('on');
+      return;
+    }
+    if (empty) empty.hidden = true;
     const list = $('#momentList');
     list.innerHTML = kept.map((m, i) => {
       const bars = Math.round(clamp(m.score / 0.85, 0, 1) * 5);
@@ -462,13 +473,23 @@ class UI {
 
   /* --------------------- workshop · shop · daily ------------------- */
 
+  /** Open the workshop through the hub shell (or the legacy overlay). */
   showWorkshop(tab) {
+    if (this.hub) { this.hub.openWorkshop(tab); return; }
+    this.renderWorkshop(tab);
+    $('#workshop').classList.add('on');
+  }
+
+  /** Populate the workshop panes. Presentation lives in the hub. */
+  renderWorkshop(tab) {
     const g = this.game, p = g.profile;
     if (!p) return;
+    tab = tab || (this.hub && this.hub.wsTab) || 'racket';
     $$('#workshop .tab').forEach((b) => {
       const selected = b.dataset.tab === tab;
       b.classList.toggle('on', selected);
       b.setAttribute('aria-pressed', String(selected));
+      b.setAttribute('aria-selected', String(selected));
     });
     $$('#workshop .pane').forEach((x) => x.classList.remove('on'));
     $('#pane' + (tab === 'racket' ? 'Racket' : tab === 'shop' ? 'Shop' : 'Daily')).classList.add('on');
@@ -481,7 +502,7 @@ class UI {
     this.drawStatCard();
     this.drawShop();
     this.drawDaily();
-    $('#workshop').classList.add('on');
+    this.refreshMenuBits();
   }
 
   drawItemList(sel, kind, current) {
@@ -671,9 +692,16 @@ class UI {
     const p = this.game.profile; if (!p) return;
     $('#wsCoins').textContent = p.data.coins + ' монет';
     $('#wsStreak').textContent = 'серия ' + p.data.streak + ' · ' + p.data.daily.done.length + '/6';
+    /* The header wallet is the same money: keep it in step with every
+       purchase, reward and claim without a reload. */
+    if (this.hub) this.hub.refresh();
   }
 
+  /** Fleeting feedback. Inside the menu it belongs to the hub toast: the
+   *  HUD band is hidden there, so a shop or workshop message written to it
+   *  would be invisible exactly when it matters. */
   toast(text) {
+    if (this.hub && this.hub.isOpen()) { this.hub.toast(text); return; }
     const t = $('#mnToast');
     if (!t) return;
     t.textContent = text;
@@ -1152,6 +1180,10 @@ class UI {
       statusText = g.lastPoint ? (g.lastPoint.who > 0 ? 'Очко ваше' : 'Очко сопернику') : 'Переигровка';
 
     if (g.training || g.demoMode || g.paused) statusText = '';
+    /* Observation mode says what it is. The message stack is deliberately
+       quiet during play, so the one-line status is the honest place for it. */
+    if (g.demoMode && !g.paused && g.state !== 'MENU' && g.state !== 'MATCH_END')
+      statusText = 'РЕЖИМ НАБЛЮДЕНИЯ · БОТ ПРОТИВ БОТА';
     status.textContent = statusText;
     status.hidden = !statusText;
 
@@ -1280,7 +1312,12 @@ class UI {
     });
     $('#crEndMenu').addEventListener('click', () => {
       g.audio.ui('click');
+      /* "В меню" means the hub, on the career page: the end card is the
+         last thing a run shows, and it should hand back to the road map
+         rather than to the quick-match hero. */
+      $('#careerEnd').classList.remove('on');
       this.showMainMenu();
+      if (this.hub) this.hub.setView('career');
     });
   }
 
@@ -1318,11 +1355,12 @@ class UI {
       });
       list.appendChild(btn);
     });
-    const status = document.createElement('div');
-    status.className = 'note';
-    status.textContent = `Раунд ${career.currentRound + 1} из ${career.currentTournamentInfo.rounds} · Перков: ${career.perks.length}`;
-    status.style.marginTop = '10px';
-    list.appendChild(status);
+    /* The round line belongs to the tournament header, not to the opponent
+       grid: as a grid child it sat beside the last card and read like a
+       fourth opponent. */
+    const info = $('#crTournInfo');
+    if (info) info.textContent = `Раунд ${career.currentRound + 1} из ${career.currentTournamentInfo.rounds}`
+      + ` · ELO ${t.eloMin}–${t.eloMax} · Побед: ${career.totalWins} · Перков: ${career.perks.length}`;
     $('#careerIntro').classList.add('on');
   }
 
@@ -1392,36 +1430,59 @@ class UI {
   bindOnline() {
     const g = this.game;
     const net = g.network;
+    /* The lobby is a place you can sit in while the relay is unreachable:
+       a dropped socket is reported IN the panel, not by throwing the player
+       back to the home screen (that is what an offline build does). */
+    const lobbyOpen = () => $('#onlineLobby').classList.contains('on');
+    const setNetStatus = (text, state) => {
+      const el = $('#netStatus');
+      if (el) {
+        el.textContent = text;
+        el.dataset.state = state || '';
+      }
+      const steps = $$('.net-steps span');
+      const step = state === 'error' ? 0 : state === 'ready' ? 2 : state === 'lobby' ? 1 : 0;
+      steps.forEach((s, i) => s.classList.toggle('on', i <= step));
+    };
+    const setRoomCode = (code) => {
+      const el = $('#netRoomCode');
+      if (!el) return;
+      if (!code) { el.style.display = 'none'; el.textContent = ''; return; }
+      el.innerHTML = '<span>КОД КОМНАТЫ</span><b>' + String(code).toUpperCase().slice(0, 6) + '</b>';
+      el.style.display = '';
+    };
     $('#onlineStart').addEventListener('click', () => {
       g.returnToMenu();
       g.audio.init(); g.audio.resume(); g.audio.ui('click');
       $$('.screen').forEach(s => s.classList.remove('on'));
-      $('#netStatus').textContent = 'Подключение...';
-      $('#netRoomCode').style.display = 'none';
+      setNetStatus('Подключение…', 'connecting');
+      setRoomCode(null);
       $('#onlineLobby').classList.add('on');
       net.connect();
     });
     net.on('connected', () => {
-      $('#netStatus').textContent = 'Подключено! Создайте комнату.';
-      $('#netRoomCode').style.display = 'none';
+      setNetStatus('Подключено. Создайте комнату или войдите по коду.', 'lobby');
+      setRoomCode(null);
     });
     net.on('assigned', (msg) => {
-      $('#netRoomCode').textContent = msg.room;
-      $('#netRoomCode').style.display = 'block';
-      $('#netStatus').textContent = msg.side === 1
-        ? 'Вы хост. Ждём соперника...'
-        : 'Подключены к комнате.';
+      setRoomCode(msg.room);
+      setNetStatus(msg.side === 1 ? 'Вы хост. Ждём соперника…' : 'Вы подключены к комнате.', 'lobby');
     });
     net.on('matchStart', () => {
       $$('.screen').forEach(s => s.classList.remove('on'));
       g.startMatch();
     });
     net.on('disconnected', () => {
-      this.showMainMenu();
-      this.toast('СОЕДИНЕНИЕ ПРЕРВАНО');
+      if (lobbyOpen()) {
+        setNetStatus('Нет соединения с relay. Проверьте сеть или ?net=wss://…', 'error');
+        setRoomCode(null);
+      } else if (g.state === GS.MENU) {
+        this.toast('СОЕДИНЕНИЕ ПРЕРВАНО');
+      }
     });
     net.on('error', (msg) => {
-      $('#netStatus').textContent = `Ошибка: ${msg}`;
+      this._netError = msg;
+      setNetStatus('Ошибка: ' + msg, 'error');
     });
     net.on('peerLeft', () => {
       this.showMainMenu();
@@ -1429,15 +1490,28 @@ class UI {
     });
     $('#netCreate').addEventListener('click', () => {
       g.audio.ui('click');
+      if (!net.connected) { setNetStatus('Нет соединения: сначала нужен relay', 'error'); return; }
       net.joinRoom();
     });
     $('#netJoin').addEventListener('click', () => {
       g.audio.ui('click');
-      const code = prompt('Введите код комнаты:');
-      if (code) net.joinRoom(code.toUpperCase().trim());
+      if (!net.connected) { setNetStatus('Нет соединения: сначала нужен relay', 'error'); return; }
+      const field = $('#netCodeInput');
+      const code = (field && field.value || '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 6);
+      if (code.length < 4) {
+        setNetStatus('Введите код комнаты из 6 символов', 'error');
+        if (field) field.focus();
+        return;
+      }
+      net.joinRoom(code);
+    });
+    const codeField = $('#netCodeInput');
+    if (codeField) codeField.addEventListener('input', () => {
+      codeField.value = codeField.value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 6);
     });
     $('#netClose').addEventListener('click', () => {
       g.audio.ui('click');
+      net.disconnect();
       this.showMainMenu();
     });
   }

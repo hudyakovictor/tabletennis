@@ -156,9 +156,10 @@ h3.sec::after{content:"";flex:1;height:1px;background:var(--line)}
   align-items:center;justify-content:center;gap:10px;
   background:radial-gradient(ellipse at 50% 45%,rgba(6,10,18,.34),rgba(3,5,9,.74));
   backdrop-filter:blur(2px);-webkit-backdrop-filter:blur(2px);cursor:pointer}
-#pauseInd b{font-size:clamp(30px,8vw,52px);font-weight:900;letter-spacing:.24em;color:#fff;
+/* Scope the big pause title to its own heading: `#pauseInd b` used to hit
+   every button label inside the card and blow them up to 52px. */
+#pauseInd > .pause-card > .pause-head > b{font-size:clamp(30px,8vw,52px);font-weight:900;letter-spacing:.24em;color:#fff;
   text-shadow:0 6px 40px rgba(0,0,0,.85)}
-#pauseInd small{text-decoration:none;font-size:11.5px;letter-spacing:.14em;color:var(--dim);text-transform:uppercase}
 body.is-paused #pauseInd{display:flex}
 
 /* ====================== ball telemetry panel ======================= */
@@ -187,10 +188,8 @@ body.is-paused #pauseInd{display:flex}
 .splash-progress i{display:block;width:100%;height:100%;background:#ff263e;transform-origin:left;animation:splash-load 1.6s ease-out both}
 .splash-hint{margin-top:18px;color:var(--dim2);font:550 10px/1.5 var(--ui);letter-spacing:.08em}
 @keyframes splash-load{from{transform:scaleX(0)}to{transform:scaleX(1)}}
-.brand-menu{display:flex;justify-content:center;margin:-4px 0 10px}
 .brand-logo{display:block;width:190px;height:140px;object-fit:contain;filter:drop-shadow(0 8px 18px #0006)}
-#menu .sub{text-align:center;letter-spacing:.12em;line-height:1.5;margin-bottom:12px}
-@media(max-height:650px){.brand-logo{width:155px;height:100px}.brand-menu{margin-bottom:5px}}
+@media(max-height:650px){.brand-logo{width:155px;height:100px}}
 @media(prefers-reduced-motion:reduce){.splash-progress i{animation:none}}
 #loading.off{opacity:0;pointer-events:none}
 .spinner{width:52px;height:52px;border-radius:50%;border:2px solid rgba(255,255,255,.12);
@@ -382,70 +381,16 @@ button[hidden],.ic[hidden]{display:none!important}
 #btnSound[aria-pressed="false"],#menuSound[aria-pressed="false"]{color:var(--bad)}
 
 #pauseInd{cursor:default}
-#pauseInd small{font-size:13px;letter-spacing:.08em;text-align:center;line-height:1.45}
+#pauseInd > .pause-card > .pause-head > small{font-size:13px;letter-spacing:.08em;text-align:center;line-height:1.45}
 .pause-actions{display:flex;flex-wrap:wrap;justify-content:center;gap:8px;margin-top:8px;max-width:min(560px,92vw)}
 .tbt{min-height:40px;padding:8px 13px;font-size:12px}
 #pauseSettings,#pauseDebugMisses{background:rgba(255,255,255,.06)}
 #pauseDebugMisses{border-color:rgba(255,122,47,.55);color:#ffd3bd}
 #pauseDebugMisses .ui-icon{width:16px;height:16px}
 
-/* Main-menu controls are a real safe area: audio/fullscreen stay usable above dialogs. */
-.menu-brand{display:flex;flex-direction:column;align-items:center;text-align:center}
-.menu-brand .sub{margin:7px 0 7px;line-height:1.45}
-.menu-utility{display:flex;align-items:center;justify-content:center;gap:8px;margin:0 auto 5px}
-.menu-utility .ic{width:40px;height:40px}
-#menu .menu-actions{gap:8px;margin-top:2px}
-#menu .menu-actions .btn{flex:1;margin-top:0;padding:12px 10px;letter-spacing:.10em}
-#menu .menu-mode-actions{gap:8px}
-#menu .menu-mode-actions .btn{flex:1;margin-top:0;padding:12px 8px;letter-spacing:.09em}
-#menu .menu-mode-actions #careerStart{border-color:rgba(255,122,47,.62);color:#ffd34d}
-#menu .menu-mode-actions #onlineStart{border-color:rgba(57,198,255,.62);color:#7ff0c0}
-#menu .menu-mode-actions #demoStart{border-color:rgba(155,81,224,.66);color:#cf99ff}
-#menu .menu-mode-actions .ui-icon{width:16px;height:16px;margin-right:4px}
-#menu .menu-meta-actions{margin-top:8px}
-#menu .menu-meta-actions .opt{padding:9px 7px}
-#menu .menu-meta-actions small{margin-top:2px}
-#menu .menu-play #play{margin-top:14px}
-#menu .brand-logo{max-width:100%}
-
-/* Short landscape windows used to force the whole menu into a scroll box. */
-@media (max-height:520px) and (min-width:621px){
-  .screen{padding:8px}
-  #menu .card{width:min(920px,100%);max-height:calc(100vh - 16px);padding:14px 18px;
-    display:grid;grid-template-columns:minmax(180px,.72fr) minmax(0,1.65fr);
-    grid-template-areas:"brand play" "brand actions" "modes modes";align-content:center;column-gap:18px;row-gap:5px}
-  @supports (height:100dvh){#menu .card{max-height:calc(100dvh - 16px)}}
-  #menu .menu-brand{grid-area:brand;justify-content:center;align-self:stretch}
-  #menu .menu-play{grid-area:play}
-  #menu .menu-actions{grid-area:actions}
-  #menu .menu-modes{grid-area:modes}
-  #menu .brand-logo{width:min(150px,18vw);height:auto}
-  #menu .brand-menu{margin:0 0 3px}
-  #menu .menu-brand .sub{font-size:10.5px;letter-spacing:.08em;margin:0 0 4px}
-  #menu .menu-utility{margin:0}
-  #menu .menu-utility .ic{width:38px;height:38px}
-  #menu h3.sec{margin:5px 0 5px;font-size:10px}
-  #menu .row{gap:6px}
-  #menu .opt{min-width:0;padding:7px 4px}
-  #menu .opt b{font-size:11.5px}
-  #menu .opt small{font-size:10px}
-  #menu .menu-play #play{margin-top:7px;padding:10px}
-  #menu .menu-actions .btn,#menu .menu-mode-actions .btn{padding:9px 6px;font-size:12px}
-  #menu .menu-meta-actions{margin-top:5px}
-}
-@media (max-height:650px) and (max-width:620px){
-  #menu .card{padding:15px 14px 14px}
-  #menu .brand-logo{width:142px;height:108px}
-  #menu .brand-menu{margin:-2px 0 2px}
-  #menu .menu-brand .sub{font-size:10px;letter-spacing:.08em;margin:2px 0 4px}
-  #menu .menu-utility{gap:6px;margin-bottom:3px}
-  #menu .menu-utility .ic{width:36px;height:36px}
-  #menu h3.sec{margin:10px 0 6px}
-  #menu .menu-play #play{margin-top:10px;padding:12px}
-  #menu .menu-actions .btn,#menu .menu-mode-actions .btn{padding:10px 6px}
-  #menu .menu-meta-actions{margin-top:6px}
-}
-
+/* The old card-based main menu is gone: the hub (06_hub.css, 82_hub.js)
+   owns the menu surface, and leaving its rules here only made short-window
+   media queries fight the new grid. */
 
 /* Shop and modal typography no longer relies on 8–10 px captions. */
 .sl .v{min-width:42px}
@@ -481,7 +426,6 @@ button[hidden],.ic[hidden]{display:none!important}
 @media (pointer:coarse){
   .ic{width:40px;height:42px;border-radius:12px}
   .tbt,.tab,.opt,.btn{min-height:44px}
-  .menu-utility .ic{width:44px;height:44px}
   .sitem button,.trow button{min-height:44px;min-width:68px}
   .sl input[type=range]{height:44px}
   .sl input[type=range]::-webkit-slider-thumb{width:24px;height:24px;margin-top:-9px}
@@ -506,7 +450,6 @@ button[hidden],.ic[hidden]{display:none!important}
   .sb-mid span{font-size:12px}
   #topright{display:grid;grid-template-columns:repeat(2,40px);grid-auto-rows:40px;gap:4px;width:84px}
   #topright .ic{width:40px;height:40px}
-  #menu .menu-actions .btn,#menu .menu-mode-actions .btn{letter-spacing:.06em;font-size:12px}
   #cameraViews .opt{min-width:0;padding-inline:4px}
 }
 @media(max-width:340px){
@@ -515,7 +458,7 @@ button[hidden],.ic[hidden]{display:none!important}
 }
 @media(prefers-reduced-motion:reduce){
   .screen.on .card,#over.won .card,#over.won #overTitle,#score .sb-side.scored::after{animation:none!important}
-  #playband #train,#menu .brand-logo{backdrop-filter:none;-webkit-backdrop-filter:none}
+  #playband #train{backdrop-filter:none;-webkit-backdrop-filter:none}
 }
 
 /* A compact corner grid keeps the score and controls from fighting on phones. */
@@ -542,15 +485,6 @@ body:not(.is-playing) #topright{visibility:hidden;pointer-events:none}
    * that also leaves the score block its room. */
   #topright{display:grid;grid-template-columns:repeat(2,44px);grid-auto-rows:44px;gap:4px;width:92px}
   #topright .ic{width:44px;height:44px}
-}
-@media(max-width:620px) and (max-height:650px){
-  #menu .card.scroll-needed{scrollbar-width:thin;scrollbar-color:rgba(180,205,235,.45) transparent}
-  #menu .card.scroll-start .menu-utility::after{content:"ЕЩЁ ВНИЗ ↓";color:var(--dim);font-size:9px;font-weight:800;
-    letter-spacing:.08em;white-space:nowrap;pointer-events:none}
-}
-@media (pointer:coarse) and (max-width:620px){#menu .menu-utility .ic{width:44px;height:44px}}
-@media (pointer:coarse) and (max-height:520px) and (min-width:621px){
-  #menu .menu-utility .ic{width:44px;height:44px}
 }
 @media(prefers-reduced-motion:reduce){
   *,*::before,*::after{animation-duration:.001ms!important;animation-iteration-count:1!important;
