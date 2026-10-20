@@ -1,56 +1,164 @@
 /* =====================================================================
- * CAMERA — stable elevated presets + independent height and dolly.
- * Headroom includes the opponent racket and serve toss, not just the table.
- * Renderer and all hit-test/HUD matrices share the same framing shift.
+ *  CAMERA — three fixed views, one composition rule, exact pointer → bat.
+ *
+ *  Design contract
+ *  ---------------
+ *  1. There is NO zoom and NO manual height. Three authored presets differ
+ *     only in pitch (and slightly in scale). Nothing the player does with
+ *     the wheel, a right-drag or a pinch changes the projection, so a
+ *     preset looks the same on every device of the same aspect ratio.
+ *  2. The vertical composition is written in SCREEN FRACTIONS, not metres:
+ *     the near edge of the playing surface always lands on `nearY` and the
+ *     reading band always starts at `PLAY_BAND_Y`. That is what makes two
+ *     different phones agree.
+ *  3. The table is deliberately NOT centred. The lower part of the screen
+ *     is the player's own end: the bat lives there, the thumb lives there
+ *     on a phone, and the reading band sits at the very bottom.
+ *  4. The pointer → bat map is the exact inverse of the projection the
+ *     renderer uses (same fov, same lens shift, same aspect). Put the
+ *     cursor on a pixel inside the reach rectangle and the blade's centre
+ *     is drawn on that pixel. The old affine map was measured up to 0.28
+ *     screen-heights away from the cursor on a tablet.
+ *  5. The blade's travel is bounded by a world box (the reach) that is
+ *     derived FROM the camera, so its projection can never leave the frame,
+ *     and it always covers the whole table.
  * ===================================================================== */
 'use strict';
 
-// Stable front-facing views. Legacy IDs keep existing saves compatible.
+/* Stable front-facing views. Legacy IDs keep existing saves compatible. */
 const CAMERA_PRESETS = {
   BROADCAST: { id: 'BROADCAST', ru: 'ИГРОВАЯ', short: 'ИГРА',
-    desc: 'Весь стол и обе половины', pitch: 25, height: 0.63,
-    eye: { x: 0, y: 2.25, z: 3.2 }, look: { x: 0, y: 0.76, z: 0 }, fov: 43, follow: { y: 0, z: 0 } },
+    desc: 'Весь стол и обе половины', pitch: 24, vfov: 48, nearY: 0.620, topMin: 0.155 },
   DYNAMIC: { id: 'DYNAMIC', ru: 'ОБЗОР', short: 'ОБЗОР',
-    desc: 'Выше: легче читать отскок', pitch: 33, height: 0.63,
-    eye: { x: 0, y: 2.85, z: 3.2 }, look: { x: 0, y: 0.76, z: 0 }, fov: 43, follow: { y: 0, z: 0 } },
+    desc: 'Выше: легче читать отскок', pitch: 30, vfov: 52, nearY: 0.625, topMin: 0.150 },
   LOW: { id: 'LOW', ru: 'БЛИЖЕ', short: 'БЛИЖЕ',
-    desc: 'Крупнее, без вида из-под стола', pitch: 22, height: 0.69,
-    eye: { x: 0, y: 2.05, z: 3.2 }, look: { x: 0, y: 0.76, z: 0 }, fov: 40, follow: { y: 0, z: 0 } },
+    desc: 'Низкий и близкий — взгляд почти с уровня сетки', pitch: 15, vfov: 52, nearY: 0.560, topMin: 0.130 },
 };
 const CAMERA_ORDER = ['BROADCAST', 'DYNAMIC', 'LOW'];
 
-/* The box your bat is allowed to occupy. One source of truth: the game
-   clamps to it, the camera fits around it, the bench measures it. */
+/* The rectangle the blade's centre may occupy, in screen fractions. The
+   bottom edge is the reading band: nothing of the game is drawn below it
+   except text, so the bat never hides under a caption. The top edge is
+   above the net, which is what lets the blade reach a high ball. */
+const PLAY_RECT = Object.freeze({ left: 0.040, right: 0.960, top: 0.300, bottom: 0.855 });
+/* Reading band: where DOM text lives. Fixed, not derived from the table. */
+const PLAY_BAND_Y = 0.872;
+
+/* World reach, metres. The per-camera limits are derived from PLAY_RECT and
+   then clamped to these absolute bounds, so a contact never depends on the
+   phone model by more than the capture radius already allows. */
 const PADDLE_LIMITS = {
-  x: 1.02,                 // |x| of the bat, metres from the centre line
-  yLo: -0.28, yHi: 1.00,   // bat height relative to the playing surface (expanded for mobile)
-  /* Realistic stance: the player stands 40-110 cm behind the end line,
-   * not hovering right over the table edge. zNear = just behind end line,
-   * zFar = a full metre back. zStepIn allows leaning over the table for
-   * very short balls (net-cord dribblers). */
-  zNear: 1.45, zFar: 2.50, // bat depth: from end line to well behind it
-  zStepIn: 0.80,           // lean over the table for a short ball
+  /* 1.75, not 1.25: the pointer promise is "the blade is under the cursor",
+   * and on a 16:9 screen 1.25 m cuts the last 4 % of the play rectangle off at
+   * the sides — the blade then parks at the limit while the cursor keeps
+   * going. The limit now sits outside the projected play rectangle on every
+   * landscape viewport (the widest measured demand is 1.83 m at 1280x760),
+   * so the SCREEN is the only boundary the player ever meets. */
+  x: 2.00,                 // |x| of the bat, metres from the centre line
+  yLo: -0.50, yHi: 1.50,   // bat height relative to the playing surface
+  zNear: 1.30, zFar: 2.35, // bat depth: from near the end line to a step back
+  /* The step-in depth is bounded from below by the POINTER, not by taste.
+   * The blade's height limits project to a screen rectangle, and the closer
+   * the blade stands the shorter that rectangle gets: at 0.78 it covers only
+   * the top third of the play area. That is acceptable ONLY because
+   * `depthForPointer` lets the pointer push the blade back out when it aims
+   * lower, so the map stays exact instead of clamping — the blade leans in
+   * for a short ball, yet a low cursor still moves it. */
+  zStepIn: 0.78,           // lean over the table for a short ball
 };
+/* The stance the camera is authored around: the bat stays in one plane
+   unless the footwork assist steps it in or the follow-through carries it. */
+const PADDLE_STANCE_Z = 1.78;
 
-const _cp = { eye: { x: 0, y: 0, z: 0 }, look: { x: 0, y: 0, z: 0 }, fov: 42, mode: 'BROADCAST' };
+/* One centimetre is two hundred times finer than any parallax the screen can
+ * show, and quantising the working depth means the reach box, the blade's
+ * legal volume and the plane the pointer is inverted on can never disagree
+ * about which plane they are talking about. */
+function quantizeDepth(z) {
+  return Math.round(clamp(Number.isFinite(z) ? z : PADDLE_STANCE_Z,
+    PADDLE_LIMITS.zStepIn, PADDLE_LIMITS.zFar) * 100) / 100;
+}
 
-/** Replicates Renderer.setCamera's narrow-screen rule: below 16:9 the
- *  HORIZONTAL field of view is locked, so portrait phones zoom out
- *  instead of cropping the table. */
-function effectiveFov(fovDeg, aspect) {
-  const REF = 16 / 9;
-  let vf = fovDeg * DEG;
-  if (aspect < REF) {
-    const hf = 2 * Math.atan(Math.tan(vf / 2) * REF);
-    const need = 2 * Math.atan(Math.tan(hf / 2) / Math.max(aspect, 0.30));
-    vf = Math.min(need, vf * 1.55, 84 * DEG);
-  }
-  return vf / DEG;
+/**
+ * Physical envelope of the blade at depth `z`.
+ *
+ * The stance values are the authored box. When the footwork assist leans the
+ * blade in over the table, the arm is closer to the ball and can — and in the
+ * picture must — dip lower and reach wider. This is not a fudge: it is what
+ * keeps the POINTER EXACT. A fixed box projected from a nearer plane covers a
+ * smaller piece of the screen, so the cursor would run into a limit that the
+ * picture does not show and the blade would park short of it. The envelope is
+ * a function of DEPTH only — never of the viewport — so every device gives the
+ * blade the same physical volume.
+ */
+function paddleLimitsFor(z) {
+  const zq = quantizeDepth(z);
+  const t = clamp((PADDLE_STANCE_Z - zq) / (PADDLE_STANCE_Z - PADDLE_LIMITS.zStepIn), 0, 1);
+  const openLo = PADDLE_LIMITS.yLo - 0.14 * t;
+  /* The blade may not pass through the playing surface — but only while it
+   * hangs OVER the table. Behind the near edge it may dip as low as it likes,
+   * which is what makes the bottom of the pointer area real once you stand
+   * back. The floor therefore RAMPS from the surface clearance at the table
+   * edge to the open limit at the stance, instead of switching at one depth:
+   * a step here is a half-metre jump in the reachable screen for a one
+   * centimetre move of the blade, and the pointer map would visibly snap. */
+  const over = smoothstep(PH.T_HALF_LEN + 0.24, PADDLE_STANCE_Z, zq);
+  return {
+    x: PADDLE_LIMITS.x + 0.16 * t,
+    yLo: lerp(0.18, openLo, over),
+    yHi: PADDLE_LIMITS.yHi + 0.10 * t,
+  };
+}
+/* Ready pose: 42 cm above the playing surface, mid-depth. */
+const PADDLE_HOME = { x: 0, y: PH.TABLE_Y + 0.42, z: PADDLE_STANCE_Z };
+
+const _cp = { eye: { x: 0, y: 0, z: 0 }, look: { x: 0, y: 0, z: 0 }, fov: 42,
+  shiftY: 0, mode: 'BROADCAST', aspect: 16 / 9 };
+
+/* ------------------------------------------------------------------ *
+ *  Projection. HORIZONTAL field of view is capped at 70° so a wide
+ *  monitor never turns into a fisheye; the vertical angle is the authored
+ *  one and a portrait screen simply keeps it (27° horizontal on a phone
+ *  would crop the table, so the fit dollies back instead — see below).
+ * ------------------------------------------------------------------ */
+/* The lens. ONE rule, shared by the renderer, the fit and the pointer map:
+ * above 16:9 the authored vertical angle is used as-is; below it the
+ * horizontal angle is locked instead, so a portrait phone widens the lens
+ * rather than cropping the table. It used to live inside setCamera only,
+ * which meant the fit solved for one field of view and the GPU drew
+ * another — every screen-fraction the camera promised was off by up to
+ * 20 % on a phone. */
+/* Tuning hook for the analysis benches (tests/tools), never for the player:
+   pin the dolly (.forceD), the stance floor (.dMin), the field of view
+   (.forceFov) or the widest the portrait lens may get (.lensMax). */
+const CAMERA_TUNING = { dMin: 0, forceD: 0, forceFov: 0, lensMax: 1.55 };
+if (typeof window !== 'undefined') window.CAMERA_TUNING = CAMERA_TUNING;
+
+const CAMERA_REF_ASPECT = 16 / 9;
+function lensFovDeg(vfovDeg, aspect) {
+  const a = Math.max(aspect, 0.30);
+  if (a >= CAMERA_REF_ASPECT) return vfovDeg;
+  const hf = 2 * Math.atan(Math.tan(vfovDeg * DEG / 2) * CAMERA_REF_ASPECT);
+  const need = 2 * Math.atan(Math.tan(hf / 2) / a) / DEG;
+  return Math.min(need, vfovDeg * (CAMERA_TUNING.lensMax || 1.55), CAMERA_TUNING.vMax || 84);
+}
+/** The vertical field of view the frame is actually drawn with. */
+function verticalFovDeg(vfovDeg, aspect) {
+  return lensFovDeg(vfovDeg, aspect);
+}
+/** Horizontal fov that results — used by the benches. */
+function horizontalFovDeg(vfovDeg, aspect) {
+  return 2 * Math.atan(Math.tan(lensFovDeg(vfovDeg, aspect) * DEG / 2) * Math.max(aspect, 0.2)) / DEG;
+}
+/** Compatible name for older benches: the vertical fov actually used. */
+function effectiveFov(vfovDeg, aspect) {
+  return typeof vfovDeg === 'object' && vfovDeg
+    ? verticalFovDeg(vfovDeg.vfov || 44, aspect) : verticalFovDeg(vfovDeg, aspect);
 }
 
 /** view·proj for a rig — the same matrices the renderer builds. */
 function rigViewProj(rig, aspect, out) {
-  const vf = effectiveFov(rig.fov, aspect) * DEG;
+  const vf = lensFovDeg(rig.fov, aspect) * DEG;
   const proj = M4.perspective((out && out.proj) || M4.create(), vf, aspect, 0.05, 60);
   proj[9] = 2 * (rig.shiftY || 0);
   const view = M4.lookAt((out && out.view) || M4.create(), rig.eye, rig.look, { x: 0, y: 1, z: 0 });
@@ -69,140 +177,84 @@ function projectPoint(vp, p, out) {
 }
 
 /* ------------------------------------------------------------------ *
- *  Framing test used by the fit below and by the analysis bench.
- *
- *  Two point sets, because they are not the same problem:
- *    HARD — the table, the net and the volume the ball can occupy. These
- *           decide how far the rig is pushed back. If a corner of the
- *           table is out of frame the game is unplayable.
- *    SOFT — the box your bat can occupy. This is *reported*, not fitted:
- *           `clampPaddleToFrustum()` guarantees the bat itself is never
- *           left off-screen, and fitting the camera to the bat's most
- *           extreme pose (raised above the head, two metres back) would
- *           push the table so far away that the ball becomes a speck.
+ *  Camera basis. Mirrors M4.lookAt exactly:
+ *    back = normalise(eye − look), right = normalise(up × back),
+ *    up' = back × right, and the view looks down −back.
  * ------------------------------------------------------------------ */
-const FRAME_POINTS = [];
-for (const sx of [-1, 1]) for (const sz of [-1, 1]) {
-  FRAME_POINTS.push({ x: sx * PH.T_HALF_WID, y: PH.TABLE_Y, z: sz * PH.T_HALF_LEN, w: 1 });
-}
-FRAME_POINTS.push({ x: -PH.NET_HALF_WID, y: PH.NET_TOP, z: 0, w: 1 });
-FRAME_POINTS.push({ x: PH.NET_HALF_WID, y: PH.NET_TOP, z: 0, w: 1 });
-FRAME_POINTS.push({ x: 0, y: PH.TABLE_Y + 1.10, z: 0, w: 1 });            // a high lob
-FRAME_POINTS.push({ x: 0, y: PH.TABLE_Y + 0.50, z: -PH.T_HALF_LEN - 0.35, w: 1 });  // deep behind the bot
-FRAME_POINTS.push({ x: 0, y: PH.TABLE_Y + 0.35, z: PH.T_HALF_LEN + 0.15, w: 1 });   // short in front of you
-
-const PADDLE_POINTS = [];
-for (const sx of [-1, 1]) {
-  for (const sz of [PADDLE_LIMITS.zStepIn, PADDLE_LIMITS.zNear, PADDLE_LIMITS.zFar]) {
-    PADDLE_POINTS.push({ x: sx * PADDLE_LIMITS.x, y: PH.TABLE_Y + PADDLE_LIMITS.yLo, z: sz });
-    PADDLE_POINTS.push({ x: sx * PADDLE_LIMITS.x, y: PH.TABLE_Y + 0.55, z: sz });
-    PADDLE_POINTS.push({ x: sx * PADDLE_LIMITS.x, y: PH.TABLE_Y + PADDLE_LIMITS.yHi, z: sz });
-  }
-}
-
-/* Fairness set: contact poses kept in frame */
-const REACH_POSES = [
-  [0.85, 0.10, 0.80],       // reaching over the table for a net-cord dribbler
-  [0.85, 0.25, 1.45],       // at the end line
-  [0.85, 0.28, 1.37],       // wide, at the end line
-  [0.85, 0.15, 1.78],       // wide and low, normal stance
-];
-const REACH_POINTS = [];
-for (const sx of [-1, 1]) {
-  for (const [x, y, z] of REACH_POSES) {
-    REACH_POINTS.push({ x: sx * x, y: PH.TABLE_Y + y, z: z, w: 1 });
-  }
-}
-const _fitVp = M4.create(), _fitS = {};
-function _marginOver(vp, pts, weighted) {
-  let worst = 1e9;
-  for (const p of pts) {
-    projectPoint(vp, p, _fitS);
-    let m = Math.min(_fitS.x, 1 - _fitS.x, _fitS.y, 1 - _fitS.y);
-    if (!_fitS.ok) m = -1;
-    if (weighted && p.w) m /= p.w;
-    if (m < worst) worst = m;
-  }
-  return worst;
-}
-function rigMargin(rig, aspect) {
-  rigViewProj(rig, aspect, { vp: _fitVp });
-  return Math.min(_marginOver(_fitVp, FRAME_POINTS, true), _marginOver(_fitVp, REACH_POINTS, false));
-}
-/** How much of the bat's volume this rig keeps on screen (0..1). */
-function paddleVolumeVisible(rig, aspect) {
-  rigViewProj(rig, aspect, { vp: _fitVp });
-  let ok = 0;
-  for (const p of PADDLE_POINTS) {
-    projectPoint(_fitVp, p, _fitS);
-    if (_fitS.ok && _fitS.x > 0.02 && _fitS.x < 0.98 && _fitS.y > 0.02 && _fitS.y < 0.98) ok++;
-  }
-  return ok / PADDLE_POINTS.length;
-}
-
-/* The push-back solve is a property of (mode, aspect) only, so it is
-   cached — one solve per resolution change, not per frame. */
-const _fitCache = new Map();
-const FIT_MARGIN = 0.035;              // 3.5 % of the screen, all around
-
-function fitRig(P, aspect) {
-  const key = P.id + '|' + Math.round(aspect * 1000);
-  const hit = _fitCache.get(key);
-  if (hit) return hit;
-  const phone = 1 - smoothstep(0.85, 1.3, aspect);
-  const pitch = P.pitch * DEG; // Identical angle on phone and desktop.
-  /* Mobile (portrait) fix: start much closer so the table fills the screen.
-   * The old eye.z=3.2 + fitTablePresentation pushed the camera back until
-   * the whole hall was visible on a narrow phone — the table became a stamp.
-   * Now: bring the eye ~30% closer on phones and allow tighter margins so
-   * the fit solver doesn't undo the closeness. */
-  const eyeZ = lerp(3.2, 2.1, phone);
-  const eyeY = PH.TABLE_Y + Math.tan(pitch) * eyeZ;
-  const fov = lerp(P.fov, 30, phone);
-  const rig = { eye: { x: 0, y: eyeY, z: eyeZ },
-    look: { x: 0, y: PH.TABLE_Y, z: -0.12 }, fov, mode: P.id };
-  // No automatic lift or ball-following: the chosen view stays predictable.
-  // On phones use much tighter margins so the table is big.
-  fitTablePresentation(rig, aspect, P.height, phone > 0.5 ? 0.015 : 0.055,
-    phone > 0.5 ? 0.82 : 0.76);
-  _fitCache.set(key, rig);
-  return rig;
+const _basis = { fx: 0, fy: 0, fz: 0, rx: 0, ry: 0, rz: 0, ux: 0, uy: 0, uz: 0 };
+function rigBasis(rig, out) {
+  const o = out || _basis;
+  const dx = rig.look.x - rig.eye.x, dy = rig.look.y - rig.eye.y, dz = rig.look.z - rig.eye.z;
+  const l = Math.hypot(dx, dy, dz) || 1e-9;
+  const fx = dx / l, fy = dy / l, fz = dz / l;
+  const ax = -fz, az = fx, al = Math.hypot(ax, az) || 1e-9;
+  const rx = ax / al, rz = az / al;
+  o.fx = fx; o.fy = fy; o.fz = fz;
+  o.rx = rx; o.ry = 0; o.rz = rz;
+  o.ux = -fy * rz + fz * o.ry;
+  o.uy = -fz * rx + fx * rz;
+  o.uz = -fx * o.ry + fy * rx;
+  return o;
 }
 
 /**
- * The camera for this frame. Pure: mode + ball + aspect in, rig out.
- * The returned object is reused, so never hold on to it.
+ * Screen point → world point on the plane z = planeZ, using exactly the
+ * projection `rigViewProj` produces (vertical fov + lens shift). Returns
+ * false when the ray runs parallel to the plane or points away from it.
+ *
+ * Derivation: with proj[9] = 2·shift the shifted NDC y is
+ *   ndcY = f·y_v/(−z_v) − 2·shift,
+ * so a screen row py corresponds to ndcY₀ = (1 − 2py) + 2·shift and the
+ * unshifted view offset is ndcY₀·tan(vfov/2).
  */
-function cameraRigFor(mode, ball, aspect, out, controls) {
-  const P = CAMERA_PRESETS[mode] || CAMERA_PRESETS.BROADCAST;
-  const base = fitRig(P, aspect);
-  const o = out || _cp;
-  const f = P.follow;
-  let fy = 0, fz = 0;
-  if (f.y || f.z) {
-    // ride the ball's height/depth a few centimetres — a pure translation
-    const h = clamp(((ball ? ball.y : PH.TABLE_Y) - PH.TABLE_Y) / 1.4, 0, 1);
-    const d = clamp(((ball ? ball.z : 0) + 0.6) / 2.2, 0, 1);
-    fy = h * f.y; fz = d * f.z;
+function unprojectToPlane(rig, aspect, px, py, planeZ, out) {
+  const o = out || {};
+  const b = rigBasis(rig, _basis);
+  const halfH = Math.tan(lensFovDeg(rig.fov, aspect) * DEG / 2), halfW = halfH * aspect;
+  const ndcX = 2 * px - 1;
+  const ndcY = (1 - 2 * py) + 2 * (rig.shiftY || 0);
+  const ox = ndcX * halfW, oy = ndcY * halfH;
+  const dx = b.fx + b.rx * ox + b.ux * oy;
+  const dy = b.fy + b.ry * ox + b.uy * oy;
+  const dz = b.fz + b.rz * ox + b.uz * oy;
+  if (!(Math.abs(dz) > 1e-6)) return false;
+  const t = (planeZ - rig.eye.z) / dz;
+  if (!(t > 0)) return false;
+  o.x = rig.eye.x + dx * t;
+  o.y = rig.eye.y + dy * t;
+  o.z = rig.eye.z + dz * t;
+  o.t = t;
+  return true;
+}
+
+/* ------------------------------------------------------------------ *
+ *  Framing points.
+ * ------------------------------------------------------------------ */
+const TABLETOP_POINTS = [];
+for (const sx of [-1, 1]) for (const sz of [-1, 1])
+  TABLETOP_POINTS.push({ x: sx * PH.T_HALF_WID, y: PH.TABLE_Y, z: sz * PH.T_HALF_LEN });
+
+const FRAME_POINTS = [];
+for (const sx of [-1, 1]) for (const sz of [-1, 1])
+  FRAME_POINTS.push({ x: sx * PH.T_HALF_WID, y: PH.TABLE_Y, z: sz * PH.T_HALF_LEN, w: 1 });
+FRAME_POINTS.push({ x: -PH.NET_HALF_WID, y: PH.NET_TOP, z: 0, w: 1 });
+FRAME_POINTS.push({ x: PH.NET_HALF_WID, y: PH.NET_TOP, z: 0, w: 1 });
+FRAME_POINTS.push({ x: 0, y: PH.TABLE_Y + 0.72, z: 0, w: 1 });            // a loop at the net
+FRAME_POINTS.push({ x: 0, y: PH.TABLE_Y + 0.50, z: -PH.T_HALF_LEN - 0.35, w: 1 });
+FRAME_POINTS.push({ x: 0, y: PH.TABLE_Y + 0.35, z: PH.T_HALF_LEN + 0.15, w: 1 });
+
+const _fitVpBuf = { vp: M4.create(), proj: M4.create(), view: M4.create() }, _fitS = {};
+const _boundsOut = { top: 1, bottom: 0, left: 1, right: 0 };
+/** Screen bounds of the playing surface only (no legs, no net). */
+function tabletopBounds(vp, out = _boundsOut) {
+  out.top = 1; out.bottom = 0; out.left = 1; out.right = 0;
+  for (const pt of TABLETOP_POINTS) {
+    projectPoint(vp, pt, _fitS);
+    if (!_fitS.ok) continue;
+    out.top = Math.min(out.top, _fitS.y); out.bottom = Math.max(out.bottom, _fitS.y);
+    out.left = Math.min(out.left, _fitS.x); out.right = Math.max(out.right, _fitS.x);
   }
-  o.mode = P.id;
-  o.eye.x = base.eye.x; o.eye.y = base.eye.y + fy; o.eye.z = base.eye.z + fz;
-  o.look.x = base.look.x; o.look.y = base.look.y + fy; o.look.z = base.look.z + fz;
-  o.fov = base.fov;
-  o.shiftY = 0;
-  if (controls) {
-    // Height is independent of zoom: RMB raises the eye, wheel dollies.
-    const height = clamp(Number.isFinite(controls.height) ? controls.height : 0, -1, 2.5);
-    const depth = Math.hypot(o.eye.x - o.look.x, o.eye.z - o.look.z);
-    o.eye.y = o.look.y + clamp(o.eye.y - o.look.y + height,
-      Math.tan(18 * DEG) * depth, Math.tan(42 * DEG) * depth);
-    const zoom = clamp(Number.isFinite(controls.zoom) ? controls.zoom : 1, 0.72, 1.6);
-    o.eye.x = o.look.x + (o.eye.x - o.look.x) * zoom;
-    o.eye.y = o.look.y + (o.eye.y - o.look.y) * zoom;
-    o.eye.z = o.look.z + (o.eye.z - o.look.z) * zoom;
-    if (zoom !== 1 || height !== 0) fitTablePresentation(o, aspect, 0.72, 0.025, 0.80);
-  }
-  return o;
+  return out;
 }
 
 // Full table silhouette, including the feet: text must not cover its legs.
@@ -223,13 +275,16 @@ function tableScreenBounds(vp, out = {}) {
   }
   return out;
 }
-// AI think() allows bat centres up to TABLE_Y + .70 and z -2.45..-1.16.
-// Include the whole blade/handle, plus a small margin for the serve toss.
-// This is a fixed volume: no camera bobbing as the ball or racket moves.
+/* The opponent's CONTACT envelope: where its bat actually meets the ball
+ * (OpponentAI plans |z| in 1.0..2.15 and y up to +0.80, and the blade is what
+ * has to be readable, not the top of its follow-through). The ball itself is
+ * allowed to leave the top of the frame on a lob, exactly as it does on a
+ * broadcast camera; what must never happen is a contact the player cannot
+ * see coming. */
 const OPPONENT_FRAME_POINTS = [];
-for (const x of [-1.4, 0, 1.4]) for (const z of [-2.65, -1.0])
-  OPPONENT_FRAME_POINTS.push({ x, y: PH.TABLE_Y + 0.90, z });
-const CAMERA_HEADROOM = 0.10;
+for (const x of [-1.10, 0, 1.10]) for (const z of [-2.00, -1.00])
+  OPPONENT_FRAME_POINTS.push({ x, y: PH.TABLE_Y + 0.50, z });
+const CAMERA_HEADROOM = 0.015;
 function opponentScreenTop(vp) {
   let top = 1;
   const p = {};
@@ -240,175 +295,357 @@ function opponentScreenTop(vp) {
   }
   return top;
 }
-const _frameBuffer = { vp: M4.create(), proj: M4.create(), view: M4.create() }, _frameBounds = {};
-function fitTablePresentation(rig, aspect, maxHeight = 0.60, margin = 0.05, maxPlayHeight = 0.76) {
-  // Leave usable reading room below the feet, not just below the tabletop.
-  for (let i = 0; i < 50; i++) {
-    const vp = rigViewProj(rig, aspect, _frameBuffer);
-    const b = tableScreenBounds(vp, _frameBounds);
-    const playTop = Math.min(b.top, opponentScreenTop(vp));
-    if (b.bottom - b.top <= maxHeight && b.bottom - playTop <= maxPlayHeight &&
-        b.left >= margin && b.right <= 1 - margin) break;
-    rig.eye.x = rig.look.x + (rig.eye.x - rig.look.x) * 1.025;
-    rig.eye.y = rig.look.y + (rig.eye.y - rig.look.y) * 1.025;
-    rig.eye.z = rig.look.z + (rig.eye.z - rig.look.z) * 1.025;
-  }
+
+/* ------------------------------------------------------------------ *
+ *  FIT — one solve per (preset, aspect), cached.
+ *
+ *  The pitch and the vertical field of view come from the preset. The
+ *  camera dollies until the playing surface is as wide as the vertical
+ *  budget allows, and a LENS SHIFT (not a rotation) drops the near edge
+ *  onto `nearY`. The width budget is what keeps the table from crawling up
+ *  under the scoreboard on a tall phone, and it is the only thing in the
+ *  whole pipeline that looks at the aspect ratio.
+ * ------------------------------------------------------------------ */
+const _fitCache = new Map();
+const _frameBuffer = { vp: M4.create(), proj: M4.create(), view: M4.create() };
+
+function _rigAt(P, aspect, d, fov) {
+  const pitch = P.pitch * DEG;
+  const look = { x: 0, y: PH.TABLE_Y, z: 0 };
+  return { eye: { x: 0, y: look.y + Math.sin(pitch) * d, z: look.z + Math.cos(pitch) * d },
+    look, fov, shiftY: 0, mode: P.id, aspect };
 }
-function tableFrameShift(rig, aspect) {
-  const vp = rigViewProj({ ...rig, shiftY: 0 }, aspect, _frameBuffer);
-  const b = tableScreenBounds(vp, _frameBounds);
-  // Prefer the old lower reading room, but never crop the opponent to keep
-  // an exact 1:3 ratio. Move the complete play volume down into the frame.
-  const preferred = (1 - b.bottom - 3 * b.top) / 4;
-  return Math.max(preferred, CAMERA_HEADROOM - opponentScreenTop(vp));
+function _dollyFor(P, aspect, fov, widthFrac) {
+  let lo = 1.0, hi = 30;
+  for (let i = 0; i < 44; i++) {
+    const d = Math.sqrt(lo * hi);
+    const b = tabletopBounds(rigViewProj(_rigAt(P, aspect, d, fov), aspect, _frameBuffer));
+    if (b.right - b.left > widthFrac) lo = d; else hi = d;
+  }
+  return Math.sqrt(lo * hi);
+}
+/** Table height / width in SCREEN fractions — the shape is scale-invariant. */
+function _shapeRatio(P, aspect, fov) {
+  const b = tabletopBounds(rigViewProj(_rigAt(P, aspect, 4, fov), aspect, _frameBuffer));
+  return Math.max(0.05, (b.bottom - b.top) / Math.max(1e-6, b.right - b.left));
 }
 
-/** Highest pixel the table itself occupies (0..1, y down). The HUD text
- *  band must stay above this, or messages land on the playing surface. */
+if (typeof window !== 'undefined') window.CAMERA_TUNING = CAMERA_TUNING;
+
+function _stanceDistance(P) {
+  return CAMERA_TUNING.dMin || (PADDLE_STANCE_Z + 1.25) / Math.cos(P.pitch * DEG);
+}
+
+function fitPreset(P, aspect) {
+  const key = P.id + '|' + Math.round(aspect * 1000) + '|' +
+    Math.round(_stanceDistance(P) * 100) + '|' + CAMERA_TUNING.forceD + '|' +
+    CAMERA_TUNING.forceFov + '|' + CAMERA_TUNING.lensMax;
+  const hit = _fitCache.get(key);
+  if (hit) return hit;
+  const a = Math.max(0.2, aspect);
+  const fov = CAMERA_TUNING.forceFov || lensFovDeg(P.vfov, a);
+  const r = _shapeRatio(P, a, fov);
+  let widthFrac = clamp((P.nearY - P.topMin) / r, 0.30, 0.94) * (P.scale || 1);
+  const dMin = _stanceDistance(P);
+  let rig = _rigAt(P, a, _dollyFor(P, a, fov, widthFrac), fov);
+  let shift = 0, b = tabletopBounds(rigViewProj(rig, a, _frameBuffer));
+  // The shape ratio is measured at one distance; perspective bends it a
+  // little. Shrink until the shifted tabletop really fits under the
+  // scoreboard. Each pass removes ~6 % of the height and the loop is
+  // bounded, so this converges for every aspect that exists.
+  for (let pass = 0; pass < 8; pass++) {
+    shift = P.nearY - b.bottom;
+    const dNow = Math.hypot(rig.eye.y - rig.look.y, rig.eye.z - rig.look.z);
+    if (((b.top + shift) >= P.topMin && dNow >= dMin) || widthFrac <= 0.22) break;
+    if (dNow >= dMin) widthFrac *= 0.94;
+    rig = _rigAt(P, a, CAMERA_TUNING.forceD || _dollyFor(P, a, fov, widthFrac), fov);
+    b = tabletopBounds(rigViewProj(rig, a, _frameBuffer));
+  }
+  /* A camera has to stand somewhere. Without this floor the fit happily
+   * solved a 4:3 tablet at 2.2 m from the centre — 40 cm in front of the
+   * player's own bat — and the blade was painted a third of the screen
+   * tall. The stance is physical: at least 1.25 m behind the bat plane. */
+  const dFinal = Math.max(dMin, Math.min(30,
+    CAMERA_TUNING.forceD || Math.hypot(rig.eye.y - rig.look.y, rig.eye.z - rig.look.z)));
+  if (dFinal > Math.hypot(rig.eye.y - rig.look.y, rig.eye.z - rig.look.z) + 1e-6) {
+    rig = _rigAt(P, a, dFinal, fov);
+    b = tabletopBounds(rigViewProj(rig, a, _frameBuffer));
+  }
+  rig.shiftY = P.nearY - b.bottom;
+  rig.widthFrac = widthFrac;
+  rig.aspect = a;
+  rig.hfov = horizontalFovDeg(P.vfov, a);
+  _fitCache.set(key, rig);
+  return rig;
+}
+/** Drop every cached fit. Benches and tests change the presets/limits at
+ *  runtime; the game itself never needs this. */
+function resetCameraCache() { _fitCache.clear(); _reachCache.clear(); }
+
+/** Backwards-compatible alias: the fit already carries its own shift. */
+function fitRig(P, aspect) {
+  return fitPreset(typeof P === 'string' ? (CAMERA_PRESETS[P] || CAMERA_PRESETS.BROADCAST) : P, aspect);
+}
+
+/**
+ * The camera for this frame. Pure: mode + aspect in, rig out. The returned
+ * object is reused, so never hold on to it. There is no ball follow and no
+ * manual adjustment: a fixed view is what makes the pointer map exact and
+ * the framing identical on every device.
+ */
+function cameraRigFor(mode, ball, aspect, out) {
+  const P = CAMERA_PRESETS[mode] || CAMERA_PRESETS.BROADCAST;
+  const base = fitPreset(P, aspect);
+  const o = out || _cp;
+  o.mode = P.id;
+  o.aspect = aspect;
+  o.eye.x = base.eye.x; o.eye.y = base.eye.y; o.eye.z = base.eye.z;
+  o.look.x = base.look.x; o.look.y = base.look.y; o.look.z = base.look.z;
+  o.fov = base.fov;
+  o.shiftY = base.shiftY;
+  o.widthFrac = base.widthFrac;
+  return o;
+}
+
+/** Highest pixel the table itself occupies (0..1, y down). */
 function tableTopScreenY(mode, aspect, vpOut) {
-  const rig = cameraRigFor(mode, { x: 0, y: PH.TABLE_Y, z: 0 }, aspect);
+  const rig = cameraRigFor(mode, null, aspect);
   const vp = rigViewProj(rig, aspect, vpOut || { vp: M4.create() });
   const a = projectPoint(vp, { x: -PH.T_HALF_WID, y: PH.TABLE_Y, z: -PH.T_HALF_LEN }, {});
   const b = projectPoint(vp, { x: PH.T_HALF_WID, y: PH.TABLE_Y, z: -PH.T_HALF_LEN }, {});
   const c = projectPoint(vp, { x: 0, y: PH.NET_TOP, z: 0 }, {});
-  return Math.max(0.05, Math.min(a.y, b.y, c.y));
+  return Math.max(0.02, Math.min(a.y, b.y, c.y));
+}
+
+/* Legacy hooks kept for the benches: the fit is baked into the rig now. */
+function tableFrameShift(rig) { return rig && Number.isFinite(rig.shiftY) ? rig.shiftY : 0; }
+function fitTablePresentation() { /* deliberately empty — solved at fit time */ }
+function tableScreenY(mode, aspect) {
+  return tableScreenBounds(rigViewProj(cameraRigFor(mode, null, aspect), aspect)).bottom;
 }
 
 /* ------------------------------------------------------------------ *
  *  POINTER → BAT
- *  One function, used by the game and measured by the bench: the bat is
- *  where the cursor is, always, and it can never be pushed outside the
- *  frame (which is how it used to get lost off-screen and stay there).
+ *
+ *  The blade's centre is the inverse projection of the cursor onto the
+ *  stance plane. Inside the reach rectangle that is EXACT: move the cursor
+ *  one pixel and the blade moves one pixel. Outside it the cursor is
+ *  clamped to the rectangle first, so the blade stops where a human arm
+ *  would stop instead of flying off screen.
  * ------------------------------------------------------------------ */
-const _ptOut = { tx: 0, ty: 0, tz: 0 };
+const _reachCache = new Map();
+const _reachPoint = { x: 0, y: 0, z: 0 };
 
 /**
- * @param px,py   pointer in normalised screen space (0..1, y down)
- * @param stanceY the y the hand landed at — it sets how deep you stand,
- *                so flicking the wrist upward cannot lunge you over the table
- * @param sens    the player's sensitivity multiplier
+ * World box the blade's centre may occupy, plus the screen rectangle that
+ * box projects to. Derived from PLAY_RECT and clamped to the absolute
+ * limits, so the bat can always cover the table and never leaves the frame.
+ */
+function reachFor(rig, aspect, planeZ) {
+  /* Quantise the depth: the step-in moves the plane continuously, and an
+   * unquantised cache key would grow a box per millimetre of travel. 1 cm is
+   * two hundred times finer than any parallax the screen can show. */
+  const zq = quantizeDepth(planeZ);
+  planeZ = zq;
+  const key = rig.mode + '|' + Math.round(aspect * 1000) + '|' + zq.toFixed(2) +
+    '|' + Math.round((rig.shiftY || 0) * 1000) + '|' + Math.round((rig.fov || 0) * 100);
+  const hit = _reachCache.get(key);
+  if (hit) return hit;
+  let xMax = 0, yLo = Infinity, yHi = -Infinity;
+  for (const sx of [PLAY_RECT.left, PLAY_RECT.right]) {
+    for (const sy of [PLAY_RECT.top, PLAY_RECT.bottom]) {
+      if (!unprojectToPlane(rig, aspect, sx, sy, planeZ, _reachPoint)) continue;
+      xMax = Math.max(xMax, Math.abs(_reachPoint.x));
+      yLo = Math.min(yLo, _reachPoint.y);
+      yHi = Math.max(yHi, _reachPoint.y);
+    }
+  }
+  /* Shrink to the paddle limits, never expand: a clamp that pulls the box
+   * outward would promise reach the screen does not contain, and the blade
+   * would then be painted outside the play rectangle it was measured from. */
+  const lim = paddleLimitsFor(planeZ);
+  xMax = Math.min(xMax, lim.x);
+  yLo = Math.max(yLo, PH.TABLE_Y + lim.yLo);
+  yHi = Math.min(yHi, PH.TABLE_Y + lim.yHi);
+  /* Every plane the bat can stand on must leave a usable vertical range.
+   * Keeping the CENTRE of the visible range and widening it symmetrically is
+   * the only expansion that cannot leave the projected quad: it stays on the
+   * same screen rows. */
+  if (!(yHi - yLo > 0.30)) {
+    const mid = (yLo + yHi) / 2;
+    yLo = mid - 0.15; yHi = mid + 0.15;
+    /* Widening is symmetric, but the table's clearance is not negotiable:
+     * without this the knife-edge band at the step-in plane reached 0.13 m
+     * BELOW the playing surface and the blade could be drawn through it. */
+    yLo = Math.max(yLo, PH.TABLE_Y + lim.yLo);
+  }
+  /* The screen rectangle must be INSCRIBED in the projected quad, not its
+   * bounding box: a box is a superset, and clamping the cursor into it would
+   * hand `paddleTargetFromPointer` a point outside the reach — the blade
+   * would stop short of the cursor by exactly the corner error (measured
+   * 0.06 of the screen at 16:9 before this fix). Because the camera looks
+   * straight down −z with no roll, a line of constant y on a z-plane
+   * projects to a horizontal line, and the left/right edges project to
+   * straight lines that are monotone in y. So the largest inset rectangle
+   * is: exact y extents, and the x extents taken at their WORST y. */
+  const vp = rigViewProj(rig, aspect, _fitVpBuf);
+  const corner = (x, y, out) => {
+    _reachPoint.x = x; _reachPoint.y = y; _reachPoint.z = planeZ;
+    return projectPoint(vp, _reachPoint, out);
+  };
+  const bl = corner(-xMax, yLo, {}), br = corner(xMax, yLo, {});
+  const tl = corner(-xMax, yHi, {}), tr = corner(xMax, yHi, {});
+  const box = { xMax, yLo, yHi, z: planeZ,
+    sx0: 0, sx1: 1, sy0: 0, sy1: 1 };
+  if (bl.ok && br.ok && tl.ok && tr.ok) {
+    box.sy0 = Math.min(tl.y, tr.y);
+    box.sy1 = Math.max(bl.y, br.y);
+    box.sx0 = Math.max(tl.x, bl.x);
+    box.sx1 = Math.min(tr.x, br.x);
+    /* Inside the frame and inside the design rectangle. Shrinking a clamp
+     * region never breaks the exactness guarantee — it only means the blade
+     * stops a pixel earlier — while growing it would. */
+    box.sx0 = clamp(Math.max(box.sx0, PLAY_RECT.left), 0, 1);
+    box.sx1 = clamp(Math.min(box.sx1, PLAY_RECT.right), 0, 1);
+    box.sy0 = clamp(Math.max(box.sy0, PLAY_RECT.top), 0, 1);
+    box.sy1 = clamp(Math.min(box.sy1, PLAY_RECT.bottom), 0, 1);
+    /* No "widen it back out if it got small" fallback. A leaned-in blade
+     * really can occupy only a narrow band, and widening the rectangle would
+     * advertise rows the blade cannot reach — the clamp would then stop it
+     * short of the cursor. The band's size is the depth search's business;
+     * the rectangle's job is to be true. Only ordering is guaranteed here. */
+    if (box.sx0 > box.sx1) { const m = (box.sx0 + box.sx1) / 2; box.sx0 = m - 0.01; box.sx1 = m + 0.01; }
+    if (box.sy0 > box.sy1) { const m = (box.sy0 + box.sy1) / 2; box.sy0 = m - 0.01; box.sy1 = m + 0.01; }
+  }
+  if (_reachCache.size > 400) _reachCache.clear();
+  _reachCache.set(key, box);
+  return box;
+}
+
+const _ptOut = { tx: 0, ty: 0, tz: 0 };
+const _ptWorld = { x: 0, y: 0, z: 0 };
+
+/**
+ * @param px,py  pointer in normalised screen space (0..1, y down)
+ * @param opts   { rig, aspect, z } — the camera the frame is drawn with and
+ *               the depth plane the bat currently stands on.
+ * `stanceY` and `sens` are accepted for source compatibility with the old
+ * affine map; the map is the exact inverse now, so neither changes geometry.
  */
 function paddleTargetFromPointer(px, py, stanceY, sens, out, opts) {
   const o = out || _ptOut;
-  const s = clamp(Number.isFinite(sens) ? sens : 1, 0.4, 2.2);
-  const zNear = (opts && Number.isFinite(opts.zNear))
-    ? clamp(opts.zNear, PADDLE_LIMITS.zStepIn, PADDLE_LIMITS.zFar) : PADDLE_LIMITS.zNear;
+  const aspect = opts && Number.isFinite(opts.aspect) ? opts.aspect : 16 / 9;
+  const rig = (opts && opts.rig) || cameraRigFor((opts && opts.mode) || 'BROADCAST', null, aspect);
+  const z = clamp((opts && Number.isFinite(opts.z)) ? opts.z : PADDLE_STANCE_Z,
+    PADDLE_LIMITS.zStepIn, PADDLE_LIMITS.zFar);
+  const box = reachFor(rig, aspect, z);
   let x = Number.isFinite(px) ? clamp(px, 0, 1) : 0.5;
-  let y = Number.isFinite(py) ? clamp(py, 0, 1) : 0.55;
-  let sy = Number.isFinite(stanceY) ? clamp(stanceY, 0, 1) : y;
-  // 0.5 on screen is the centre line; the reachable half-width is the
-  // authored limit, so the mapping is exact and independent of sensitivity
-  // at the centre and only the *gain* changes with the slider.
-  // Mobile: expand vertical range so the paddle can reach both high lobs
-  // and low chops from a portrait screen where the swipe is shorter.
-  o.tx = (x - 0.5) * 2 * PADDLE_LIMITS.x * s;
-  o.ty = PH.TABLE_Y + 0.62 - (y - 0.18) * 1.10 * s;
-  o.tz = 1.78 + clamp(sy - 0.55, -0.34, 0.45) * 0.96 * (0.6 + 0.4 * s);
-  o.tx = clamp(o.tx, -PADDLE_LIMITS.x, PADDLE_LIMITS.x);
-  o.ty = clamp(o.ty, PH.TABLE_Y + PADDLE_LIMITS.yLo, PH.TABLE_Y + PADDLE_LIMITS.yHi);
-  o.tz = clamp(o.tz, zNear, PADDLE_LIMITS.zFar);
-  o.zNear = zNear;
+  let y = Number.isFinite(py) ? clamp(py, 0, 1) : 0.62;
+  /* The box can be skipped by `depthForPointer` before it ever gets here, so
+   * clamping is a last resort for a caller that pins a plane by hand. Order
+   * the edges so a degenerate box still yields a finite point. */
+  x = clamp(x, Math.min(box.sx0, box.sx1), Math.max(box.sx0, box.sx1));
+  y = clamp(y, Math.min(box.sy0, box.sy1), Math.max(box.sy0, box.sy1));
+  if (!unprojectToPlane(rig, aspect, x, y, z, _ptWorld)) {
+    o.tx = PADDLE_HOME.x; o.ty = PADDLE_HOME.y; o.tz = z; o.zNear = z; return o;
+  }
+  o.tx = clamp(_ptWorld.x, -box.xMax, box.xMax);
+  o.ty = clamp(_ptWorld.y, box.yLo, box.yHi);
+  o.tz = z;
+  o.zNear = z;
   return o;
 }
 
-const _clampS = {}, _clampA = {}, _clampP = { x: 0, y: 0, z: 0 };
-/* The pose the rig is authored around: dead centre, bat height, mid-depth.
-   Every rig keeps it on screen with margin to spare (verified in the
-   camera suite), which is what makes it a usable anchor for the clamp. */
-/* How long the bat owns the new point before the cursor gets it back. Shared
- * by resetPaddle() and the home blend in updatePlayerPaddle(). */
-const RECENTER_S = 0.34;
+/**
+ * The shallowest depth at which `px,py` can actually be a blade position.
+ *
+ * Standing at the stance plane the whole play rectangle is reachable, so every
+ * pointer has an exact answer there. Leaning in shrinks that rectangle — the
+ * blade may not sink through the table — and a pointer that asks for a row the
+ * leaned-in blade cannot occupy would otherwise be clamped and the blade would
+ * park somewhere the cursor is not. The assist therefore yields to the pointer:
+ * the shallower the blade stands, the higher up the screen you have to aim.
+ *
+ * Coverage grows monotonically with depth (measured across all presets and
+ * aspects), so a bisection over 6 steps is enough and the result is cached per
+ * quantised pointer cell by `reachFor` itself.
+ */
+function depthForPointer(rig, aspect, px, py, zShallow) {
+  const zDeep = PADDLE_STANCE_Z;
+  const z0 = clamp(Number.isFinite(zShallow) ? zShallow : zDeep, PADDLE_LIMITS.zStepIn, zDeep);
+  if (z0 >= zDeep) return zDeep;
+  const inside = (z) => {
+    const b = reachFor(rig, aspect, z);
+    return px >= b.sx0 && px <= b.sx1 && py >= b.sy0 && py <= b.sy1;
+  };
+  if (inside(z0)) return z0;
+  if (!inside(zDeep)) return zDeep;      // nothing is better than the stance
+  let lo = z0, hi = zDeep;
+  for (let i = 0; i < 12; i++) {
+    const mid = (lo + hi) / 2;
+    if (inside(mid)) hi = mid; else lo = mid;
+  }
+  /* Land on a whole centimetre, and only on one that really covers the
+   * cursor: the box is quantised, so the bisection's answer can sit a hair
+   * inside the boundary and then round onto the wrong side of it. */
+  let z = quantizeDepth(hi);
+  for (let i = 0; i < 40 && !inside(z) && z < zDeep; i++) z = quantizeDepth(z + 0.01);
+  return z;
+}
 
-const PADDLE_HOME = { x: 0, y: PH.TABLE_Y + 0.62, z: 1.78 };
+/** Screen position of the bat's home pose — the pointer's resting point. */
+function homeScreenPoint(rig, aspect) {
+  const vp = rigViewProj(rig, aspect, _fitVpBuf);
+  const s = projectPoint(vp, PADDLE_HOME, _fitS);
+  return s.ok ? { x: s.x, y: s.y } : { x: 0.5, y: 0.62 };
+}
+
+const RECENTER_S = 0.30;
 
 function insideFrame(s, m) {
   return s.ok && s.x > m && s.x < 1 - m && s.y > m && s.y < 1 - m;
 }
+const _clampS = {}, _clampA = {}, _clampP = { x: 0, y: 0, z: 0 };
 
 /** Largest k in [0,1] with lerp(a,b,k) still inside the frame, given that a
  *  is inside and b is not. The visible part of a perspective frustum is a
- *  convex set, so the segment crosses the edge exactly once and bisection
- *  converges monotonically — no gain to tune, no overshoot, no rig-specific
- *  behaviour. 12 steps resolve the boundary to 1/4096 of the segment. */
+ *  convex set, so bisection converges monotonically. */
 function bisectIntoFrame(vp, m, ax, ay, az, bx, by, bz) {
   let lo = 0, hi = 1;
   for (let i = 0; i < 12; i++) {
     const k = 0.5 * (lo + hi);
-    _clampP.x = ax + (bx - ax) * k;
-    _clampP.y = ay + (by - ay) * k;
-    _clampP.z = az + (bz - az) * k;
+    _clampP.x = ax + (bx - ax) * k; _clampP.y = ay + (by - ay) * k; _clampP.z = az + (bz - az) * k;
     if (insideFrame(projectPoint(vp, _clampP, _clampS), m)) lo = k; else hi = k;
   }
   return lo;
 }
 
 /**
- * Pull the bat back inside the frame. Called after the pointer map and after
- * every assist, so neither the cursor nor the intercept solver can park the
- * racket somewhere the player cannot see it — the original complaint behind
- * "the racket drifts off screen and stays there".
- *
- * The previous version nudged tx/ty by a fixed gain (3.1 / 2.2 per unit of
- * overshoot) twice and then re-clamped to the authored limits, which could
- * push it straight back out. Measured: 22 % of samples off-frame at
- * sensitivity 1.0 and 51 % at 1.8. It also fought the player's intent — a
- * horizontal overshoot dragged the bat's height with it.
+ * Last-resort guard for the replay camera and for a preset change while the
+ * bat is in flight: pull it back inside the frame if the projection on
+ * screen no longer contains it. With the exact map this is a no-op during
+ * normal play — it exists so a cinematic camera can never strand the blade.
  */
 function clampPaddleToFrustum(vp, t, margin) {
-  const m = margin === undefined ? 0.045 : margin;
+  const m = margin === undefined ? 0.02 : margin;
   const s = projectPoint(vp, { x: t.tx, y: t.ty, z: t.tz }, _clampS);
-  /* Behind the camera no pull on any axis can help, and returning the pose
-   * untouched is exactly how the bat used to end up stranded off screen. Home
-   * is on screen by construction — bench suite 6 checks that anchor for every
-   * rig x aspect — so that is where the bat goes. */
   if (!s.ok) { t.tx = PADDLE_HOME.x; t.ty = PADDLE_HOME.y; t.tz = PADDLE_HOME.z; return t; }
   const outX = s.x < m || s.x > 1 - m;
   const outY = s.y < m || s.y > 1 - m;
   if (!outX && !outY) return t;
-
-  /* Offend on one axis only? Pull on that axis and leave the other alone, so
-     the height you chose survives a horizontal correction. Otherwise fall
-     back to the home pose, which is on screen by construction. */
   const tries = outX !== outY
-    ? [[outX ? PADDLE_HOME.x : t.tx, outX ? t.ty : PADDLE_HOME.y, t.tz], [PADDLE_HOME.x, PADDLE_HOME.y, t.tz]]
+    ? [[outX ? PADDLE_HOME.x : t.tx, outX ? t.ty : PADDLE_HOME.y, t.tz]]
     : [[PADDLE_HOME.x, PADDLE_HOME.y, t.tz]];
-  for (let i = 0; i < tries.length; i++) {
-    const ax = tries[i][0], ay = tries[i][1], az = tries[i][2];
+  for (const [ax, ay, az] of tries) {
     if (!insideFrame(projectPoint(vp, { x: ax, y: ay, z: az }, _clampA), m)) continue;
     const k = bisectIntoFrame(vp, m, ax, ay, az, t.tx, t.ty, t.tz);
     t.tx = ax + (t.tx - ax) * k;
     t.ty = ay + (t.ty - ay) * k;
-    break;
+    return t;
   }
-  /* If even the home pose cannot be shown at the depth that was asked for,
-   * then the DEPTH is the problem: a bat leaning over the table toward the net
-   * leaves the frame on rigs that were fitted for a body standing behind the
-   * end line. Walk the depth back toward the body until the pose fits, and
-   * report the depth settled on — the caller has to take t.tz back or the
-   * correction is silently thrown away. Measured cost of not doing it: 402 of
-   * 19 447 headless match frames with the bat off screen (worst 9 % of the
-   * viewport) after the step-in reach was deepened 0.86 -> 0.46. */
-  if (!insideFrame(projectPoint(vp, { x: t.tx, y: t.ty, z: t.tz }, _clampA), m)) {
-    for (let k = 1; k <= 4; k++) {
-      const f = k / 4;
-      const az = lerp(t.tz, PADDLE_LIMITS.zNear, f);
-      const ax = lerp(t.tx, PADDLE_HOME.x, f * 0.5), ay = lerp(t.ty, PADDLE_HOME.y, f * 0.5);
-      if (!insideFrame(projectPoint(vp, { x: ax, y: ay, z: az }, _clampA), m)) continue;
-      const kk = bisectIntoFrame(vp, m, ax, ay, az, t.tx, t.ty, az);
-      t.tx = ax + (t.tx - ax) * kk;
-      t.ty = ay + (t.ty - ay) * kk;
-      t.tz = az;
-      break;
-    }
-  }
-  /* Last resort, and the whole reason this function exists: if no depth shows
-   * the pose, the bat goes home instead of staying invisible. */
   if (!insideFrame(projectPoint(vp, { x: t.tx, y: t.ty, z: t.tz }, _clampA), m)) {
     t.tx = PADDLE_HOME.x; t.ty = PADDLE_HOME.y; t.tz = PADDLE_HOME.z;
   }
-  t.tx = clamp(t.tx, -PADDLE_LIMITS.x, PADDLE_LIMITS.x);
-  t.ty = clamp(t.ty, PH.TABLE_Y + PADDLE_LIMITS.yLo, PH.TABLE_Y + PADDLE_LIMITS.yHi);
-  t.tz = clamp(t.tz, PADDLE_LIMITS.zStepIn, PADDLE_LIMITS.zFar);
   return t;
 }
 
@@ -417,4 +654,43 @@ function paddleVisibleOk(vp, t, margin) {
   if (!_clampS.ok) return false;
   const m = margin === undefined ? 0.0 : margin;
   return _clampS.x > m && _clampS.x < 1 - m && _clampS.y > m && _clampS.y < 1 - m;
+}
+
+/* ------------------------------------------------------------------ *
+ *  Diagnostics for the analysis benches.
+ * ------------------------------------------------------------------ */
+const PADDLE_POINTS = [];
+for (const sx of [-1, 1]) {
+  for (const sz of [PADDLE_LIMITS.zStepIn, PADDLE_STANCE_Z, PADDLE_LIMITS.zFar]) {
+    PADDLE_POINTS.push({ x: sx * PADDLE_LIMITS.x, y: PH.TABLE_Y + PADDLE_LIMITS.yLo, z: sz });
+    PADDLE_POINTS.push({ x: sx * PADDLE_LIMITS.x, y: PH.TABLE_Y + 0.55, z: sz });
+    PADDLE_POINTS.push({ x: sx * PADDLE_LIMITS.x, y: PH.TABLE_Y + PADDLE_LIMITS.yHi, z: sz });
+  }
+}
+function paddleVolumeVisible(rig, aspect) {
+  const vp = rigViewProj(rig, aspect, _fitVpBuf);
+  let ok = 0;
+  for (const p of PADDLE_POINTS) {
+    projectPoint(vp, p, _fitS);
+    if (_fitS.ok && _fitS.x > 0.02 && _fitS.x < 0.98 && _fitS.y > 0.02 && _fitS.y < 0.98) ok++;
+  }
+  return ok / PADDLE_POINTS.length;
+}
+const REACH_POINTS = [];
+for (const sx of [-1, 1]) for (const [x, y, z] of [[0.85, 0.10, 0.80], [0.85, 0.25, 1.30], [0.85, 0.28, 1.45], [0.85, 0.15, 1.78]])
+  REACH_POINTS.push({ x: sx * x, y: PH.TABLE_Y + y, z, w: 1 });
+function _marginOver(vp, pts, weighted) {
+  let worst = 1e9;
+  for (const p of pts) {
+    projectPoint(vp, p, _fitS);
+    let m = Math.min(_fitS.x, 1 - _fitS.x, _fitS.y, 1 - _fitS.y);
+    if (!_fitS.ok) m = -1;
+    if (weighted && p.w) m /= p.w;
+    if (m < worst) worst = m;
+  }
+  return worst;
+}
+function rigMargin(rig, aspect) {
+  const vp = rigViewProj(rig, aspect, _fitVpBuf);
+  return Math.min(_marginOver(vp, FRAME_POINTS, true), _marginOver(vp, REACH_POINTS, false));
 }

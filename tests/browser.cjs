@@ -282,27 +282,40 @@ const { root } = require('./helpers.cjs');
         check('touch event switches copy immediately on a hybrid device', () => {
           g.ui.setInputMode('mouse');
           document.dispatchEvent(new PointerEvent('pointerdown',{pointerType:'touch'}));
-          const touch=g.ui.inputMode==='touch' && !g.ui.hasFinePointer && !/Колесо|ПКМ/.test(document.getElementById('cameraHelp').textContent);
+          const help=document.getElementById('cameraHelp').textContent;
+          const touch=g.ui.inputMode==='touch' && !g.ui.hasFinePointer && !/Колесо|ПКМ|высот/i.test(help);
           document.dispatchEvent(new PointerEvent('pointerdown',{pointerType:'mouse'}));
-          return touch && g.ui.inputMode==='mouse' && document.getElementById('cameraHelp').textContent.includes('высота');
+          return touch && g.ui.inputMode==='mouse' && /вид/i.test(help) && /вид/i.test(document.getElementById('cameraHelp').textContent);
         });
         check('only fixed camera presets are available in settings, no camera sliders', () => {
           g.ui.openSettings();document.querySelector('[data-camera="DYNAMIC"]').click();
           const selected=g.settings.camera==='DYNAMIC' && !document.getElementById('rCameraHeight');
+          // the preset takes effect on the next frame and is then exact
+          g.updateCamera(0);
+          const once=JSON.stringify(g.camRig);
+          g.updateCamera(0);
+          const applied=g.camRig.mode==='DYNAMIC' && JSON.stringify(g.camRig)===once;
           document.getElementById('camReset').click();g.ui.closeSettings();
-          return selected && g.settings.camera==='BROADCAST' && g.cameraControls.height===0 && g.cameraControls.zoom===1;
+          return selected && applied && g.settings.camera==='BROADCAST' && !('cameraControls' in g);
         });
-        check('touch play cannot adjust the camera, including two fingers', () => {
+        check('touch play cannot move the camera: no drag, no wheel, no two fingers', () => {
           g.startMatch(2);g.server=-1;g.prepServe();
-          g.ui.setInputMode('mouse');g.cameraControls.height=1;g.cameraControls.zoom=.8;
+          g.updateCamera(1/60);
+          const before={eye:{...g.camPos},look:{...g.camLook},fov:g.fov,shift:g.camShiftY};
           g.ui.setInputMode('touch');
           // Use the real input handlers, but synthetic pointer IDs cannot be captured.
           const capture=g.canvas.setPointerCapture;g.canvas.setPointerCapture=()=>{};
           try {
             for(const id of [71,72])g.canvas.dispatchEvent(new PointerEvent('pointerdown',{pointerId:id,pointerType:'touch',button:0,clientX:180,clientY:400}));
             for(const id of [71,72])g.canvas.dispatchEvent(new PointerEvent('pointermove',{pointerId:id,pointerType:'touch',buttons:1,clientX:230,clientY:180}));
+            // a right-button drag (desktop height control) and a wheel event on touch
+            g.canvas.dispatchEvent(new PointerEvent('pointerdown',{pointerId:73,pointerType:'mouse',button:2,clientX:200,clientY:400}));
+            g.canvas.dispatchEvent(new PointerEvent('pointermove',{pointerId:73,pointerType:'mouse',buttons:2,clientX:200,clientY:120}));
+            g.canvas.dispatchEvent(new PointerEvent('pointerup',{pointerId:73,pointerType:'mouse',button:2,clientX:200,clientY:120}));
+            g.canvas.dispatchEvent(new WheelEvent('wheel',{deltaY:-240,bubbles:true,cancelable:true}));
             for(const id of [71,72])g.canvas.dispatchEvent(new PointerEvent('pointerup',{pointerId:id,pointerType:'touch',button:0,clientX:230,clientY:180}));
-            return g.cameraControls.height===0 && g.cameraControls.zoom===1;
+            g.updateCamera(1/60);
+            return g.camPos.y===before.eye.y && g.camPos.z===before.eye.z && g.fov===before.fov && g.camShiftY===before.shift;
           } finally {g.canvas.setPointerCapture=capture;g.cancelInput();g.returnToMenu();}
         });
         const incomingBall = () => {
@@ -702,27 +715,51 @@ const { root } = require('./helpers.cjs');
       count++;console.log(`PASS ${width}x${height}: actual mouse press boundary rejects outside starts and stationary clicks, accepts an inside stroke`);
 
       await page.evaluate(() => {
-        const g=window.__game; g.server=1; g.prepServe(); g.camReset();
+        const g=window.__game; g.server=1; g.prepServe(); g.camReset(); g.updateCamera(0);
       });
+      const camBefore=await page.evaluate(()=>({y:window.__game.camPos.y,z:window.__game.camPos.z,
+        fov:window.__game.fov,shift:window.__game.camShiftY}));
       await page.mouse.move(width*.5,height*.45);
-      await page.mouse.wheel({deltaY:-120});
-      await page.waitForFunction(()=>window.__game.cameraControls.zoom<1);
-      assert.equal(await page.evaluate(()=>window.__game.swipe.active),false);
-      count++; console.log(`PASS ${width}x${height}: real mouse wheel zooms without a stroke`);
-      const zoomBeforeHeight=await page.evaluate(()=>window.__game.cameraControls.zoom);
+      await page.mouse.wheel({deltaY:-240});
+      await page.mouse.wheel({deltaY:240});
       await page.mouse.down({button:'right'});
       await page.mouse.move(width*.5,height*.45-35,{steps:4});
-      assert.equal(await page.evaluate(zoom=>window.__game.cameraControls.zoom===zoom && window.__game.cameraControls.height>.4 && !window.__game.swipe.active,zoomBeforeHeight),true);
-      count++; console.log(`PASS ${width}x${height}: right vertical drag raises height independently of wheel zoom`);
       await page.mouse.move(width*.5+35,height*.45-35,{steps:4});
       await page.mouse.up({button:'right'});
-      assert.equal(await page.evaluate(()=>window.__game.cameraControls.yaw===undefined && !window.__game.pointerDown && !window.__game.swipe.active),true);
-      count++; console.log(`PASS ${width}x${height}: right horizontal drag does not rotate camera and releases cleanly`);
+      assert.equal(await page.evaluate(before=>{
+        const g=window.__game;g.updateCamera(0);
+        return !g.swipe.active && !g.pointerDown && !('cameraControls' in g) &&
+          Math.abs(g.camPos.y-before.y)<1e-9 && Math.abs(g.camPos.z-before.z)<1e-9 &&
+          g.fov===before.fov && g.camShiftY===before.shift;
+      },camBefore),true,'wheel or right-drag moved the camera');
+      count++; console.log(`PASS ${width}x${height}: wheel and right-drag cannot zoom, tilt or stroke`);
+      await page.evaluate(()=>{window.__game.setCameraPreset('DYNAMIC');window.__game.updateCamera(0);});
       await page.keyboard.press('c');
-      assert.equal(await page.evaluate(()=>{
-        const c=window.__game.cameraControls;return c.zoom===1 && c.height===0;
-      }),true);
+      await page.evaluate(()=>window.__game.updateCamera(0));
+      assert.equal(await page.evaluate(()=>window.__game.settings.camera===CAMERA_ORDER[0] &&
+        window.__game.camRig.mode==='BROADCAST'),true);
       count++; console.log(`PASS ${width}x${height}: C restores the default framing`);
+
+      /* A serve is one click. During the 0.3 s glide home the click used to
+       * be queued and then thrown away because the button was already up by
+       * the next frame — the player pressed and nothing happened. */
+      if (width >= 600) {
+        await page.evaluate(() => {
+          const g = window.__game; g.replayer.stop(); g.recenterT = 0.30;
+          g.server = 1; g.prepServe();
+        });
+        await page.mouse.move(width * .5, height * .55);
+        await page.mouse.click(width * .5, height * .55);
+        /* The glide is 0.3 s of GAME time; a headless, non-focused tab runs
+         * the clock several times slower than the wall, so poll the state
+         * instead of guessing a sleep. */
+        const tossed = await page.waitForFunction(
+          () => window.__game.state === GS.SERVE_TOSS && window.__game.ball.live,
+          { timeout: 8000 }).then(() => true).catch(() => false);
+        assert.equal(tossed, true, 'a single click during the glide home did not start the toss');
+        count++; console.log(`PASS ${width}x${height}: one quick click serves, even during the glide home`);
+        await page.evaluate(() => { const g = window.__game; g.ball.live = false; g.server = 1; g.prepServe(); });
+      }
       if(width<600) {
         const tap=async selector=>{
           const pt=await page.$eval(selector,el=>{el.scrollIntoView({block:'center'});const r=el.getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2};});
