@@ -38,9 +38,14 @@ class AudioEngine {
      * runtime synth. Decoded lazily into AudioBuffers once the context exists. */
     this._samples = {}; this._sampleDecoded = false;
     this._menuSrc = null; this._menuWanted = false; this._tileFlip = 0;
+    /* Debug bisect switch (?cut=audio): the context is never created, so every
+     * playback entry point sees ok === false and returns without touching the
+     * audio thread. Nothing else in the game changes. */
+    this.disabled = false;
   }
   init() {
     if (this.ok) return true;
+    if (this.disabled) return false;
     const AC = window.AudioContext || window.webkitAudioContext;
     if (!AC) return false;
     try { this.ctx = new AC({ latencyHint: 'interactive' }); } catch (e) { return false; }

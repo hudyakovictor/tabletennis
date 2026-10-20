@@ -25,6 +25,7 @@ function canvasFixture() {
     c[method] = (...args) => ops.push({ method, args });
   const u = Object.create(lib.UI.prototype), g = fixture();
   g.project = () => ({ x: .4, y: .5, ok: true });
+  g.canvas.getBoundingClientRect = () => ({ width: 1000, height: 500, left: 0, top: 0 });
   Object.assign(u, { game: g, hasFinePointer: true, _cur: '', _pv: {} });
   return { g, u, c, ops };
 }
@@ -265,4 +266,20 @@ test('outside press blocks all physical capture and CCD before assistance can re
   const g=fixture();g.swipe={pressZone:{accepted:false}};
   const before=JSON.stringify(g.ball);g.sweepPaddle=()=>{throw Error('must not reach CCD');};
   g.tryPlayerHit(V3.new());assert.equal(JSON.stringify(g.ball),before);
+});
+
+test('endpoint fallback waits for closest approach and accepts a just-passed ball', () => {
+  for (const [z, expectedCandidates] of [[1.4, 0], [1.6, 1]]) {
+    const g = fixture();
+    g.time = 1; g.swipe = { gestureId: 1, pressZone: { accepted: true } };
+    g.player.normal = V3.new(0,0,-1); g.player.prevPos = V3.clone(g.player.pos);
+    V3.set(g.ball.p, 0, 1, z); V3.set(g.ball.v, 0, 0, 6);
+    g.playerStrokeIntent = () => ({ dx: 0, dy: -.1 });
+    g.sweepPaddle = () => null; // isolate endpoint fallback from physical CCD
+    g.logNoContactReason = () => {};
+    let candidates = 0;
+    g.validatePressDirection = () => { candidates++; return false; }; // stop before solving
+    g.tryPlayerHit(V3.new(0,1,z-.01));
+    assert.equal(candidates, expectedCandidates, `ball z=${z}`);
+  }
 });

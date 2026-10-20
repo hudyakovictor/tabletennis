@@ -600,5 +600,16 @@ body:not(.is-playing) #topright{visibility:hidden;pointer-events:none}
 #trainingActions .tbt{min-height:44px;margin:4px}
 #trainPauseTip{font:500 16px/1.5 var(--ui);color:var(--dim);margin:8px 0}
 
+/* The preview is a button, never an automatic takeover. It is the only thing
+   in the coaching panel that takes pointer events — the gesture area stays
+   free, and the bot cannot start playing on its own. */
+#trText{display:block}
+#train #trDemo{pointer-events:auto!important;display:block;width:100%;margin-top:9px;min-height:40px;
+  padding:8px 12px;font:800 13px/1.35 var(--ui);letter-spacing:.05em;
+  background:rgba(8,13,22,.72);border-color:rgba(57,198,255,.55);color:#bfeaff}
+#train #trDemo:hover{background:rgba(57,198,255,.16)}
+#train #trDemo[aria-pressed="true"]{border-color:rgba(255,211,77,.6);color:#ffe9a8;
+  background:rgba(8,13,22,.82)}
+
 .capture-debug-toggle{display:flex;align-items:center;gap:10px;min-height:44px;padding:8px 10px;font:600 15px/1.4 var(--ui);color:var(--txt);cursor:pointer}
 .capture-debug-toggle input{width:20px;height:20px;accent-color:#39c6ff;cursor:pointer}

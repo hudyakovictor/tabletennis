@@ -1,0 +1,19 @@
+// Deterministic gesture fixtures, not forced stroke identifiers.
+module.exports=[
+ ['DRIVE',{up:.2,speed:2.2,y:1,z:1.65}],
+ ['LOOP',{up:.8,speed:2.8,y:1,z:1.65}],
+ ['COUNTER',{up:.8,speed:3.2,y:1,z:1.65,spin:300}],
+ ['SMASH',{up:.1,speed:4,y:1.3,z:1.65}],
+ ['FLICK',{up:.8,speed:2.2,dist:.10,y:.98,z:1.1}],
+ ['PUSH',{up:-.6,speed:1.4,dist:.12,y:.98,z:1.3}],
+ ['CHOP',{up:-.8,speed:3.2,dist:.28,y:1.1,z:1.8}],
+ ['BLOCK',{up:.1,speed:.7,dist:.035,y:1,z:1.5,inc:14,spin:250}],
+ ['LOB',{up:.9,speed:.9,dist:.3,y:1.1,z:1.65,inc:5}],
+ ['HOOK',{right:.9,curl:.8,up:.2,speed:2.8,y:1,z:1.65}],
+ ['FADE',{right:-.9,curl:-.8,up:.2,speed:2.8,y:1,z:1.65}],
+ ['DROP',{up:-.8,speed:.6,dist:.09,y:.9,z:1.15}],
+ ['SERVE_TOP',{up:.8,speed:2.4,dist:.18,y:1.12,z:1.65,serve:true}],
+ ['SERVE_BACK',{up:-.8,speed:1.8,dist:.16,y:1.12,z:1.65,serve:true}],
+ ['SERVE_SIDE',{right:.95,curl:.8,up:.1,speed:2.8,y:1.12,z:1.65,serve:true}],
+ ['SERVE_FAST',{up:.05,speed:4.5,y:1.12,z:1.65,serve:true}],
+];

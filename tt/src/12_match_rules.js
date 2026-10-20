@@ -290,7 +290,10 @@ function pressHitZoneOval(ball, pointer, width, height, opts = {}) {
       if (accepted && !directionOk) { accepted = false; reason = 'WRONG_DIRECTION'; }
     }
   }
-  if (opts.kind === 'serve' && accepted) {
+  // Input admission and contact timing are separate decisions. Live input
+  // may start a flick while the toss rises; tryPlayerHit enforces the legal
+  // descent/rise at contact. Diagnostic callers retain the strict default.
+  if (opts.kind === 'serve' && accepted && !opts.deferServeTiming) {
     const falling = typeof opts.falling === 'boolean' ? opts.falling
       : worldVelocity ? worldVelocity.y < 0 : screenVy > 0;
     const rise = Number.isFinite(opts.tossRise) ? opts.tossRise

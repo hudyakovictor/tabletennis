@@ -1,0 +1,1345 @@
+diff --git a/CONTACT-FLOW-v2.ru.md b/CONTACT-FLOW-v2.ru.md
+new file mode 100644
+index 0000000..3de947b
+--- /dev/null
++++ b/CONTACT-FLOW-v2.ru.md
+@@ -0,0 +1,69 @@
++# TOPSPIN ARENA — v2 Contact Flow
++
++Дата: 20 октября 2026, локальное время пользователя. Основа — проверенная v1 с исправлениями ввода. Это новая игровая сборка, не макет и не только рекомендации.
++
++## Что изменено
++
++### Контакт → проводка → восстановление
++
++- Удалены удержание контактной позы 25 мс и пропуск первого временного шага. Физическая поза выставляется в кадре столкновения; любой следующий положительный dt продолжает движение.
++- Вместо синусоидальной прибавки к курсору с повторным сглаживанием введена траектория от точки контакта. У неё ненулевая скорость выхода; перемещение указателя добавляется и во время проводки. Новая попытка удара прерывает восстановление.
++- Проводка и ориентация обновляются по реальному времени. Протестированы 30/60/120/144 Гц. Ограничения экрана и опора ракетки над столом сохранены.
++- Smash, hook, fade и lob больше не используют одинаковую анимацию drive. Отличаются размах, боковой поворот, ролл и длительность; форхенд/бэкхенд зеркалят боковое движение, не знак верхнего вращения. Учтены обе руки и оба хвата.
++- Завершение замаха теперь происходит в момент контакта. Визуальное оттягивание ракетки назад не продолжается после уже состоявшегося физического удара. При reduced-motion оно отключено.
++- Сильный удар больше не включает автоматическое замедление. Ручное замедление в обучении и скорость реплея не удалены.
++
++### Горячий путь физики
++
++- Для живой игры игрок и ИИ используют `refineRacketRealtime`. Полный поиск оставлен для калибровки и сравнения.
++- Верхняя/нижняя подачи получают геометрические начальные решения. Это не готовая подмена скорости мяча: каждый кандидат проходит настоящий `impactRacket` и проверку двух отскоков.
++- У подачи один жёсткий предел: 128 кандидатов на весь вызов, включая резервные ветви и точные проверки. Удалён повторный полный поиск подачи в том же кадре.
++- Для розыгрыша сокращён внешний поиск; резерв проверки контакта ограничен. Регрессионный тест требует не более 73 полётных симуляций на контакт розыгрыша.
++- Ускоренный ответ принимается только после проверки шагом 1/600 с. Сохраняются реальная нормаль, скорость ракетки, импульс, лимиты скорости и вращение. Радиусы захвата и зоны нажатия не увеличивались ради статистики.
++- Кеш подачи ограничен 96 записями и перепроверяет сохранённый кандидат для текущего мяча. Служебная остановка поиска не скрывает настоящие ошибки физики.
++
++### Ощущение удара
++
++- Единственная отправка эффектов из `applyHit`: один звук контакта, один пакет частиц, один вибропаттерн. Удалены параллельные старые импульсы камеры/вибрации.
++- Исправлены проверка готовности аудио (`ok`, а не отсутствующий `initialized`), единицы скорости для звука, обработка качества 0 и знак верхнего/нижнего вращения в цветах эффектов.
++- Блок, подача и силовой удар имеют разный виброотклик. Блоки/мягкие касания дают меньше частиц и встряски; максимум — 24 короткоживущие частицы.
++- Нет накопления FOV от ударов. Эффекты соблюдают reduced-motion и настройку вибрации; удар соперника не вибрирует в руке игрока.
++
++## Проверки
++
++Команды выполняются последовательно: браузерные наборы не следует запускать параллельно, иначе фокус/blur может штатно поставить игру на паузу. RAF-тест явно возвращает фокус перед ожиданием кадров; проверки паузы/blur при этом сохранены.
++
++- `npm test`: 208/208 модульных проверок, включая бюджет патологических подач, непрерывность движения, зеркалирование, звук и физику.
++- `npm run test:browser`: 169/169 проверок smoke/regression на 1280×760 и 390×844, реальные кадры, настройки, матчи и реплеи.
++- `npm run test:input`: 63 проверки ввода, включая browser-owned мышь/CDP touch и захват указателя; три ориентации экрана.
++- `npm run test:contact`: 147 проверок: 144 контакта через DOM-ввод (3 экрана × 4 частоты × 2 хвата × 2 руки × 3 позиции), плюс отсутствие исключений. Проверяется продолжение движения на следующем кадре, отсутствие автозамедления, свободный ввод и отсутствие мутации физики рендером.
++- Базовая физическая матрица: 192/192 допустимых траекторий. Это 16 типов ударов, включая четыре подачи; проверены реальные знаки вращения, а не только названия жестов.
++- Стресс-матрица: 279/288 допустимых траекторий; у прежнего решателя также 279/288. Регрессий и ложных `valid: true` не обнаружено. Оставшиеся девять сложных случаев не объявляются исправленными: низкий луп и крайние боковые удары остаются ограничениями техники/помощи.
++- Дополнительно: по 100 подач ИИ на уровнях 0, 2, 4; в проверенном наборе 300/300 допустимы, разнообразие размещения сохранено.
++
++Точные итоговые статусы и сырые результаты находятся в `test-results/evidence/v2/` и в JSON-файлах `contact-*`. Наборы и замеры воспроизводимы из исходников. Скриншоты — QA-подтверждение кадрирования, не измерение плавности.
++
++## Замеры вычисления удара
++
++Парный A/B в одном Chromium: 96 одинаковых сочетаний × 3 замеренных повтора = по 288 измерений на алгоритм. Первый прогрев исключён, порядок чередуется, кеш перед каждым контактом очищается. Reference — прежний полный поиск, live — новый ограниченный. Обе версии дали 288/288 допустимых траекторий в каждом режиме. Нулевые отсчёты округлены точностью браузерного таймера; это не нулевые затраты.
++
++| Режим | Алгоритм | Медиана, мс | p95, мс | Наблюдавшийся максимум, мс | Макс. симуляций полёта |
++| --- | --- | ---: | ---: | ---: | ---: |
++| Обычный CPU | Прежний поиск | 0.6 | 3.8 | 12.3 | 116 |
++| Обычный CPU | Новый live-поиск | 0.4 | 2.8 | 26.1 | 75 |
++| CPU ×6 медленнее | Прежний поиск | 4.0 | 25.0 | 99.1 | 116 |
++| CPU ×6 медленнее | Новый live-поиск | 2.7 | 20.6 | 113.1 | 75 |
++
++Медиана и p95 уменьшились, но наблюдавшиеся максимумы в этом прогоне не улучшились. Редкие пики остаются: нельзя обещать отсутствие любых фризов или 60 FPS на слабом телефоне. CPU×6 — синтетическое замедление, не замер конкретной модели телефона. Таблица измеряет только вычисление траектории, не input-to-photon, звук или полный GPU-кадр. Весь хвост распределения сохранён в JSON; худшие значения не исключались.
++
++## Что не заявляется
++
++- Секундная пауза на устройстве пользователя не была напрямую измерена. Устранены обнаруженные программные удержания, конфликт замаха и неограниченные ветви расчёта; это не доказательство отсутствия каждого возможного браузерного/устройственного фриза.
++- Это не оценка «100/100», не человеческий плейтест и не гарантия award-winning качества. Не менялись арт, прогрессия, сетевой протокол и монетизация.
++- Нужен короткий плейтест на реальном телефоне: подачи вверх/вниз/вбок, серия возвратов слева/справа и быстрый новый жест во время восстановления. Модель устройства, браузер и видеозапись помогут отделить нагрузку GPU/WebView от механики.
++
++## Запуск и разработка
++
++См. `START-HERE-v2.ru.md`. Полный архив уже собран; `node_modules` не требуется для игры. Для разработки — `npm ci`, затем `npm run build`. Отдельный HTML и `play/index.html` самодостаточны и одинаковы.
++
++`PATCH-v1-to-v2.diff` рассчитан на предыдущую исправленную v1, не на самый первый ZIP. При сомнении используйте весь проект v2 в отдельной папке. Откат — открыть сохранённую v1; сохранения зависят от адреса страницы/браузера.
+diff --git a/README.md b/README.md
+index 700fbde..6baf594 100644
+--- a/README.md
++++ b/README.md
+@@ -2,6 +2,12 @@
+ 
+ Самодостаточная WebGL-игра в настольный теннис. Исходники — `tt/src/`, готовые страницы — `table-tennis-topspin.html` и `play/index.html`.
+ 
++## v2 Contact Flow — без искусственной паузы на контакте
++
++Новая сборка: непрерывная проводка от точки удара, отдельные профили атак/защиты, ограниченный live-поиск подачи, один канал звука/вибрации/частиц. Автозамедление сильного удара отключено; визуальный замах завершается при контакте.
++
++Начните с [START-HERE-v2.ru.md](START-HERE-v2.ru.md). Изменения, тесты и честные ограничения: [CONTACT-FLOW-v2.ru.md](CONTACT-FLOW-v2.ru.md). `PATCH-v1-to-v2.diff` применяется к предыдущей исправленной v1; для первой установки используйте полный архив.
++
+ ## Исправления управления — 2026-10-20
+ 
+ Подробный отчёт: [FIXES-2026-10-20.ru.md](FIXES-2026-10-20.ru.md).
+diff --git a/START-HERE-v2.ru.md b/START-HERE-v2.ru.md
+new file mode 100644
+index 0000000..d108c65
+--- /dev/null
++++ b/START-HERE-v2.ru.md
+@@ -0,0 +1,43 @@
++# Быстрый запуск — v2 Contact Flow
++
++1. Распакуйте весь ZIP в новую папку. Предыдущую версию оставьте для отката.
++2. Откройте `table-tennis-topspin.html` или `play/index.html` в браузере с WebGL. Либо используйте приложенный отдельно HTML v2.
++3. Если мобильный просмотрщик файлов не исполняет HTML/WebGL, разместите `play/index.html` на статическом HTTPS-хостинге и откройте ссылку в браузере. Вложения чата иногда показывают только предварительный просмотр.
++4. На старом адресе сайта после обновления выполните полную перезагрузку/закройте старую вкладку, чтобы не играть в прежней копии.
++
++## Управление
++
++- Мышь: курсор перемещает ракетку; удерживайте левую кнопку и проведите для удара. Неподвижный клик сам не отбивает мяч.
++- Телефон: нажмите и сделайте свайп; второй палец отменяет жест.
++- Подача: первое нажатие по игровому полю запускает подброс. Можно сразу провести и отпустить — жест дождётся разрешённого контакта на падении. Либо отдельно запустить подброс и затем ударить свайпом рядом с мячом.
++- Вверх — верхнее вращение; вниз — нижнее; выраженная боковая дуга — боковое. Высота мяча, скорость и длина движения определяют конкретный удар. В безопасном профиле короткое мягкое движение/удержание также доступны для защиты.
++- Форхенд/бэкхенд определяется стороной позиции с учётом ведущей руки. Смена хвата/руки — в настройках.
++
++## Для разработчика
++
++```sh
++npm ci
++npm run build
++npm test
++npm run test:browser
++npm run test:input
++npm run test:contact
++npm run stress:contact
++npm run bench:contact
++```
++
++Запускайте браузерные тесты по очереди. Для синтетического CPU-теста в Linux/macOS:
++
++```sh
++CPU_SLOWDOWN=6 CONTACT_REPORT=test-results/evidence/contact-ab-cpu6.json npm run bench:contact
++```
++
++Исходники: `tt/src/`. Главные изменения: `38_paddle_motion.js`, `40_swipe.js`, `55_ai.js`, `70_game.js`, `75_feedback.js`. Подробности, ограничения и методика замеров — в `CONTACT-FLOW-v2.ru.md`.
++
++Для локального сервера:
++
++```sh
++python3 -m http.server 8000 --directory play
++```
++
++Открыть `http://localhost:8000`. Сервер на вашем компьютере не публикует игру в интернете сам по себе.
+diff --git a/package.json b/package.json
+index 740521f..4ea3b11 100644
+--- a/package.json
++++ b/package.json
+@@ -13,7 +13,10 @@
+     "noise": "node tt/tools/noise_zone_sim.cjs",
+     "ai:serves": "node tt/tools/ai_serve_map.cjs",
+     "analyze:log": "node tt/tools/analyze_input_log.cjs",
+-    "bench:log": "node tt/tools/benchmark_input_log.cjs"
++    "bench:log": "node tt/tools/benchmark_input_log.cjs",
++    "test:contact": "node tests/contact-browser.cjs",
++    "bench:contact": "node tests/contact-bench.cjs",
++    "stress:contact": "node tests/contact-stress.cjs"
+   },
+   "dependencies": {
+     "ws": "^8.18.3"
+diff --git a/tests/browser.cjs b/tests/browser.cjs
+index 6da61e5..1ea3f7d 100644
+--- a/tests/browser.cjs
++++ b/tests/browser.cjs
+@@ -162,7 +162,7 @@ const { root } = require('./helpers.cjs');
+           }
+           g.settings.hand='right';g.returnToMenu();return true;
+         });
+-        check('physical impact face survives the full update and rendering on both grips', () => {
++        check('exact physical impact renders once, then advances without hit-stop on both grips', () => {
+           for (const grip of ['shakehand', 'penhold']) {
+             g.settings.grip=grip;g.settings.hand='right';g.startMatch(2);
+             g.demoMode=false;g.server=1;g.isServeBall=true;g.setState(GS.SERVE_TOSS);
+@@ -172,6 +172,8 @@ const { root } = require('./helpers.cjs');
+             g.ball.live=true;g.ball.lastHitBy=0;
+             g.swipe.down(.5,.5,g.time-.1);g.swipe.move(.52,.55,g.time-.05);g.swipe.up(.54,.65,g.time);
+             g.swipeReleasedAt=g.time;
++            g.anticipation.active=true;
++            V3.set(g.anticipation.visualOffset,.015,0,.03);
+             let impactNormal=null;
+             const apply=g.applyHit;
+             g.applyHit=function(by,racket,...rest) {
+@@ -187,10 +189,15 @@ const { root } = require('./helpers.cjs');
+             g.ui.renderShotLab();
+             if(!document.querySelector('#captureCalibrationSummary'))return false;
+             if(Math.abs(shot.contact.spin.totalRps-V3.len(g.ball.w)/TAU)>1e-9)return false;
+-            g.update(1/60);
+             if(V3.dist(g.player.normal,impactNormal)>1e-8 || g.player.motionStage!=='contact')return false;
+             const before=JSON.stringify(g.player);g.render();
+             if(JSON.stringify(g.player)!==before)return false;
++            if(g.anticipation.active || V3.len(g.anticipation.visualOffset)>1e-10 ||
++              V3.dist(g._drawPadPos,g.player.pos)>1e-10)return false;
++            g.update(1/60);
++            if(V3.dist(g.player.normal,impactNormal)<1e-6 || g.player.motionStage!=='follow')return false;
++            const advanced=JSON.stringify(g.player);g.render();
++            if(JSON.stringify(g.player)!==advanced)return false;
+           }
+           g.settings.grip='shakehand';g.returnToMenu();return true;
+         });
+@@ -602,9 +609,12 @@ const { root } = require('./helpers.cjs');
+       });
+       for (const r of results) { console.log(`${r.ok ? 'PASS' : 'FAIL'} ${width}x${height}: ${r.name}${r.error ? ' — '+r.error : ''}`); count++; }
+       assert.deepEqual(results.filter(r => !r.ok), []);
++      // Focus is a precondition of this real-time RAF test: blur correctly
++      // pauses gameplay, so an unfocused page is not evidence of a stall.
++      await page.bringToFront();
+       const frameBefore = await page.evaluate(() => {
+         const g=window.__game;
+-        g.startDemo(2);g.ball.live=false;g.setState(GS.RALLY);
++        g.startDemo(2);g.ball.live=false;g.setState(GS.RALLY);g.setPaused(false);
+         g.lastShotInfo={speed:100};g.emotion.lastBigMoment=g.time-3;
+         return g.frame;
+       });
+diff --git a/tests/contact-bench.cjs b/tests/contact-bench.cjs
+new file mode 100644
+index 0000000..bb74952
+--- /dev/null
++++ b/tests/contact-bench.cjs
+@@ -0,0 +1,42 @@
++/* Paired A/B: same input/physics/browser, one warmup then repeated cold-cache
++ * contacts. CPU throttling is synthetic, not a substitute for phone testing. */
++const fs=require('node:fs'),path=require('node:path'),os=require('node:os'),zlib=require('node:zlib');
++const{execFileSync}=require('node:child_process'),{pathToFileURL}=require('node:url');
++const puppeteer=require('puppeteer-core'),chromium=require('@sparticuz/chromium');
++(async()=>{
++ const libs=path.join(os.tmpdir(),'topspin-browser-libs');fs.mkdirSync(libs,{recursive:true});
++ if(process.platform==='linux'){const a=path.join(path.dirname(require.resolve('@sparticuz/chromium')),'../../bin/al2023.tar.br');if(fs.existsSync(a))execFileSync('tar',['xf','-','-C',libs],{input:zlib.brotliDecompressSync(fs.readFileSync(a))});}
++ const browser=await puppeteer.launch({executablePath:process.env.CHROME_BIN||await chromium.executablePath(),headless:true,args:chromium.args,env:{...process.env,LD_LIBRARY_PATH:[path.join(libs,'lib'),process.env.LD_LIBRARY_PATH].filter(Boolean).join(':')}});
++ try{
++ const page=await browser.newPage();await page.goto(pathToFileURL(path.resolve(__dirname,'../play/index.html')).href);await page.waitForFunction(()=>window.__game&&window.__game.R.drawCalls>0);await page.evaluate(()=>window.__game.paused=true);
++ if(process.env.CPU_SLOWDOWN)await(await page.createCDPSession()).send('Emulation.setCPUThrottlingRate',{rate:+process.env.CPU_SLOWDOWN});
++ const data=await page.evaluate(({fixtures,repeats})=>{
++  const integrate0=integrateBall,predict0=predict;let steps=0,flights=0;
++  integrateBall=(...a)=>{steps++;return integrate0(...a);};predict=(...a)=>{flights++;return predict0(...a);};
++  const rows=[];
++  try{
++  for(let pass=-1;pass<repeats;pass++)for(const grip of ['shakehand','penhold'])for(const x of [-.62,0,.62])for(const [id,s] of fixtures){
++   const p=V3.new(x,s.y,s.z),v=V3.new(.2,-1,s.serve?0:s.inc||6),w=V3.new(s.spin||120,30,0);
++   const m={right:s.right??.12,up:s.up,dist:s.dist??.24,curl:s.curl||0,releaseSpeed:s.speed,peakSpeed:s.speed,speed:s.speed,smooth:.95,straightness:.95,holdT:0,samples:8,x:.52,y:.5,sx:.5,sy:.7,dx:.02,dy:-s.up*.2,pathLen:s.dist??.24,dur:.12};
++   const raw=deriveStroke(m,{side:1,grip,forehand:paddleForehand(x,'right'),isServe:!!s.serve,ball:p,ballSpin:w,ballSpeed:V3.len(v)});
++   for(const algorithm of (pass%2?['reference','live']:['live','reference'])){
++    SERVE_WARM.clear();steps=0;flights=0;
++    const t=performance.now(),out=(algorithm==='live'?refineRacketRealtime:refineRacket)(p,v,w,{...raw},.85,.85),ms=performance.now()-t;
++    const cost={steps,flights};const bv=V3.clone(v),bw=V3.clone(w),info=impactRacket(bv,bw,out.normal,out.vR,.85,out.rubber||{});
++    const bp=V3.clone(p);V3.addScaled(bp,bp,out.normal,PH.R*1.05);
++    const report=predict0(bp,bv,bw,{dt:PH.SIM_DT,maxT:2.6,stopOnFirstBounce:!s.serve,stopAfterBounces:s.serve?2:undefined,out:{}});
++    const landing=report.b2||report.landed;
++    if(pass>=0)rows.push({pass,algorithm,grip,x,id,stroke:raw.stroke.id,ms,...cost,valid:out.valid,
++     legal:!!info&&!report.hitNet&&!!report.landed&&(s.serve?report.landed.z>0&&!!report.b2&&report.b2.z<0:report.landed.z<0),
++     speed:V3.len(bv),spin:{...bw},aimErrorM:landing?Math.hypot(landing.x-raw.aim.x,landing.z-raw.aim.z):null});
++   }
++  }
++  }finally{integrateBall=integrate0;predict=predict0;}
++  return rows;
++ },{fixtures:require('./contact-fixtures.cjs'),repeats:+process.env.BENCH_REPEATS||3});
++ const summary={cpuSlowdown:+process.env.CPU_SLOWDOWN||1,algorithms:{}};
++ for(const algorithm of ['reference','live']){const r=data.filter(r=>r.algorithm===algorithm),times=r.map(r=>r.ms).sort((a,b)=>a-b);summary.algorithms[algorithm]={cases:r.length,legal:r.filter(r=>r.legal).length,medianMs:times[Math.floor(times.length*.5)],p95Ms:times[Math.floor(times.length*.95)],maxMs:times.at(-1),maxFlights:Math.max(...r.map(r=>r.flights)),maxSteps:Math.max(...r.map(r=>r.steps)),meanAimErrorM:r.reduce((a,b)=>a+(b.aimErrorM||0),0)/r.length};}
++ const out=process.env.CONTACT_REPORT||path.resolve(__dirname,'../test-results/evidence/contact-bench.json');fs.mkdirSync(path.dirname(out),{recursive:true});fs.writeFileSync(out,JSON.stringify({summary,data},null,2));console.log(JSON.stringify({...summary,report:out},null,2));
++ if(summary.algorithms.live.legal<summary.algorithms.reference.legal)throw Error('trajectory regression');
++ }finally{await browser.close();}
++})().catch(e=>{console.error(e);process.exitCode=1;});
+diff --git a/tests/contact-browser.cjs b/tests/contact-browser.cjs
+new file mode 100644
+index 0000000..927ac48
+--- /dev/null
++++ b/tests/contact-browser.cjs
+@@ -0,0 +1,58 @@
++/* DOM-input -> fixed-step simulation -> render: contact must keep moving.
++ * Synthetic pointers cover the matrix. Browser-owned capture is covered by
++ * test:input's separate trusted mouse / CDP touch scenarios. */
++const fs=require('node:fs'),path=require('node:path'),os=require('node:os'),zlib=require('node:zlib');const assert=require('node:assert/strict');
++const {execFileSync}=require('node:child_process'),{pathToFileURL}=require('node:url');
++const puppeteer=require('puppeteer-core'),chromium=require('@sparticuz/chromium');
++(async()=>{
++ const libs=path.join(os.tmpdir(),'topspin-browser-libs');fs.mkdirSync(libs,{recursive:true});
++ const archive=path.join(path.dirname(require.resolve('@sparticuz/chromium')),'../../bin/al2023.tar.br');if(process.platform==='linux'&&fs.existsSync(archive))execFileSync('tar',['xf','-','-C',libs],{input:zlib.brotliDecompressSync(fs.readFileSync(archive))});
++ const browser=await puppeteer.launch({executablePath:process.env.CHROME_BIN||await chromium.executablePath(),headless:true,args:chromium.args,env:{...process.env,LD_LIBRARY_PATH:[path.join(libs,'lib'),process.env.LD_LIBRARY_PATH].filter(Boolean).join(':')}});
++ const rows=[];try{
++ for(const [width,height,type] of [[1280,760,'mouse'],[390,844,'touch'],[844,390,'touch']]){
++ const page=await browser.newPage();await page.setViewport({width,height,isMobile:type==='touch',hasTouch:type==='touch'});const errors=[];page.on('pageerror',e=>errors.push(e.message));
++ await page.goto(pathToFileURL(path.resolve(__dirname,'../play/index.html')).href);await page.waitForFunction(()=>window.__game&&window.__game.R.drawCalls>0);
++ const report=await page.evaluate(({width,height,type})=>{
++ const g=window.__game,results=[];g.paused=true;
++ document.querySelectorAll('.screen.on').forEach(e=>e.classList.remove('on'));document.querySelector('#loading').classList.add('off');
++ const capture=g.canvas.setPointerCapture;g.canvas.setPointerCapture=()=>{};
++ const check=(v,m)=>{if(!v)throw Error(m);};
++ const event=(name,x,y)=>g.canvas.dispatchEvent(new PointerEvent(name,{bubbles:true,cancelable:true,pointerType:type,pointerId:31,isPrimary:true,button:0,buttons:name==='pointerup'?0:1,clientX:x*width,clientY:y*height}));
++ for(const fps of [30,60,120,144])for(const grip of ['shakehand','penhold'])for(const hand of ['right','left'])for(const x of [-.6,0,.6]){
++ try{
++ g.startMatch(2);g.paused=true;g.server=1;g.prepServe();for(let i=0;i<70;i++)g.update(1/60);
++ g.settings.grip=grip;g.settings.hand=hand;g.recenterT=0;g.server=-1;g.setState(GS.RALLY);g.isServeBall=false;g.rallyBounces=[1];
++ g.ai.think=()=>{};g.tryAiHit=()=>{};g.settings.slowmoPlayer=1;g.settings.slowmoOnBigShots=true;g.reducedMotion=true;
++ V3.set(g.ball.p,x,1.05,1.5);V3.set(g.ball.v,0,.1,4);V3.zero(g.ball.w);g.ball.live=true;g.ball.lastHitBy=-1;
++ V3.copy(g.player.pos,g.ball.p);V3.copy(g.player.prevPos,g.ball.p);g.player.lastHitT=g.time-1;
++ g.paused=false;const sid=g.shotId,p=g.project(g.ball.p,{}),tick=()=>g.update(1/fps);let peakMs=0;
++ event('pointerdown',p.x,p.y);tick();event('pointermove',p.x,p.y-.04);tick();event('pointermove',p.x+.01,p.y-.09);event('pointerup',p.x+.01,p.y-.09);
++ for(let i=0;i<40&&g.ball.lastHitBy!==1&&g.state!==GS.POINT;i++){const t=performance.now();tick();peakMs=Math.max(peakMs,performance.now()-t);}
++ check(g.ball.lastHitBy===1,'no contact');check(g.shotId-sid===1,'double contact');
++ check(g.player.motionStage==='contact','impact pose not installed');
++ check(!g.anticipation.active&&V3.len(g.anticipation.visualOffset)===0,'wind-up still pulls bat back after impact');
++ const before={p:{...g.player.pos},n:{...g.player.normal}};tick();
++ const displacement=V3.dist(before.p,g.player.pos),faceDelta=V3.dist(before.n,g.player.normal);
++ check(displacement>.0001||faceDelta>.0001,'first post-impact frame frozen');
++ check(g.player.motionStage!=='contact','intentional contact hold remains');
++ check(g.targetTimeScale===1,'hit enabled automatic slow motion');
++ // Raw movement after contact remains actionable without waiting for recovery.
++ const pointerX=g.pointer.x,dir=pointerX>.6?-1:1;
++ g.canvas.dispatchEvent(new PointerEvent('pointermove',{pointerType:type,pointerId:31,isPrimary:true,buttons:0,clientX:(pointerX+dir*.08)*width,clientY:g.pointer.y*height}));
++ if(type==='mouse'){check(Math.abs(g.pointer.x-pointerX)>.07,'mouse target locked');tick();}
++ const pose={...g.player.pos};g.render();g.render();check(V3.dist(pose,g.player.pos)===0,'render mutated physics');
++ check(Object.values(g.player.pos).every(Number.isFinite),'non-finite position');
++ results.push({ok:true,fps,grip,hand,x,displacement,faceDelta,peakUpdateMs:peakMs});
++ }catch(e){results.push({ok:false,fps,grip,hand,x,error:e.message});}
++ finally{g.cancelInput();g.paused=true;}
++ }
++ g.canvas.setPointerCapture=capture;return results;
++ },{width,height,type});
++ rows.push(...report.map(r=>({viewport:`${width}x${height}`,type,...r})));rows.push({viewport:`${width}x${height}`,ok:errors.length===0,name:'browser exceptions',errors});
++ await page.screenshot({path:path.resolve(__dirname,`../test-results/evidence/contact-${width}x${height}.png`)});await page.close();
++ }
++ }finally{await browser.close();}
++ const out=path.resolve(__dirname,'../test-results/evidence/contact-browser.json');fs.mkdirSync(path.dirname(out),{recursive:true});fs.writeFileSync(out,JSON.stringify(rows,null,2));
++ for(const r of rows.filter(r=>!r.ok))console.log('FAIL',JSON.stringify(r));
++ console.log(JSON.stringify({checks:rows.length,passed:rows.filter(r=>r.ok).length,maxContactUpdateMs:Math.max(...rows.map(r=>r.peakUpdateMs||0)),report:out}));assert.equal(rows.filter(r=>!r.ok).length,0);
++})().catch(e=>{console.error(e);process.exitCode=1;});
+diff --git a/tests/contact-feedback.test.js b/tests/contact-feedback.test.js
+new file mode 100644
+index 0000000..709797d
+--- /dev/null
++++ b/tests/contact-feedback.test.js
+@@ -0,0 +1,46 @@
++const {test}=require('node:test');const assert=require('node:assert/strict');const {load}=require('./helpers.cjs');
++function fixture(){
++ const L=load(['10_math.js','30_physics.js','75_feedback.js','70_game.js'],['HitFeedbackSystem','Game','V3']);
++ const calls={sound:[],burst:[],buzz:[],slowmo:0,whoosh:[]};
++ const game=Object.assign(Object.create(L.Game.prototype),{
++  time:0,reducedMotion:false,settings:{haptics:true,slowmoOnBigShots:true,showPredict:false},shake:0,shakeDir:L.V3.new(),hitFlash:0,camFov:48,
++  emitParticles(...a){calls.burst.push(a);},buzz(a){calls.buzz.push(a);},punchSlowmo(){calls.slowmo++;},
++  audio:{ok:true,hitRacket(...a){calls.sound.push(a);},whoosh(a){calls.whoosh.push(a);},onRallyHit(){}},
++  career:{active:false},ball:{v:L.V3.new(0,1,-24),w:L.V3.new(-220,20,0),p:L.V3.new(0,1,1.6)},
++  shotId:0,rallyBounces:[],isServeBall:true,stats:{shots:0,totalSpin:0,maxSpeed:0,maxSpin:0,byStroke:{}},
++  lastSweet:.9,lastTiming:'ТОЧНО',recorder:{addShot(){}},moments:{addContact(){}},matchTasks:{topspin:0,smash:0,serves:0},
++ });game.hitFeedback=new L.HitFeedbackSystem(game);return{...L,game,calls};
++}
++test('one physical hit = one sound, one burst and one haptic; no automatic hit slowmo',()=>{
++ const {game,calls,V3}=fixture();
++ game.applyHit(1,{stroke:{id:'SMASH'},arch:{},normal:V3.new(0,0,-1),power:.9},V3.new(0,1,1.6),.9,{contactSlip:7});
++ assert.equal(calls.sound.length,1);assert.equal(calls.burst.length,1);assert.equal(calls.buzz.length,1);assert.equal(calls.slowmo,0);
++ assert.equal(calls.sound[0][0],Math.hypot(1,24),'audio receives m/s, not km/h');
++ assert.equal(calls.sound[0][1],7);assert.equal(game.camFov,48,'smashes never accumulate FOV drift');
++ assert.ok(calls.burst[0][3]<=24);assert.ok(calls.whoosh.length<=1);
++});
++test('reduced-motion skips all impact motion/particles, not the physical contact sound',()=>{
++ const {game,calls,V3}=fixture();game.reducedMotion=true;game.settings.haptics=false;
++ game.applyHit(1,{stroke:{id:'LOOP'},arch:{},normal:V3.new(0,0,-1)},V3.new(0,1,1.6),.9,{contactSlip:10});
++ assert.equal(calls.sound.length,1);assert.equal(calls.burst.length,0);assert.equal(calls.buzz.length,0);assert.equal(game.shake,0);assert.equal(game.hitFlash,0);
++});
++test('feedback honours zero quality, opponent side, reset clock and spin convention',()=>{
++ const {game,calls,V3}=fixture();let quality;
++ const visual=game.hitFeedback.visual;game.hitFeedback.visual=function(q,...a){quality=q;return visual.call(this,q,...a);};
++ const ctx={quality:0,speed:10,spin:V3.new(-200,0,0),side:-1,contactPoint:V3.new(),contactNormal:V3.new(0,0,-1)};
++ game.hitFeedback.execute(ctx);assert.equal(quality,0);assert.equal(calls.buzz.length,0);
++ assert.equal(game.hitFeedback.determineSpinType(V3.new(-200,0,0)),'topspin');
++ assert.equal(game.hitFeedback.determineSpinType(V3.new(200,0,0)),'backspin');
++ game.time=100;game.hitFeedback.execute(ctx);game.time=0;game.hitFeedback.execute(ctx);
++ assert.equal(calls.sound.length,3,'clock reset must not mute subsequent games');
++});
++
++test('block, serve and hard attack have distinct single haptic patterns',()=>{
++ const {game,calls,V3}=fixture();
++ const ctx={quality:.95,speed:20,side:1,spin:V3.new(-200,0,0),contactPoint:V3.new(),contactNormal:V3.new(0,0,-1)};
++ for(const kind of ['BLOCK','SERVE_TOP','SMASH']){
++  game.time+=1;game.hitFeedback.execute({...ctx,stroke:kind,isServeStroke:kind==='SERVE_TOP'});
++ }
++ assert.equal(calls.buzz.length,3);assert.equal(new Set(calls.buzz.map(JSON.stringify)).size,3);
++ assert.ok(calls.burst[0][3]<calls.burst[2][3],'block must not look like an explosive smash');
++});
+diff --git a/tests/contact-fixtures.cjs b/tests/contact-fixtures.cjs
+new file mode 100644
+index 0000000..79e7c3a
+--- /dev/null
++++ b/tests/contact-fixtures.cjs
+@@ -0,0 +1,19 @@
++// Deterministic gesture fixtures, not forced stroke identifiers.
++module.exports=[
++ ['DRIVE',{up:.2,speed:2.2,y:1,z:1.65}],
++ ['LOOP',{up:.8,speed:2.8,y:1,z:1.65}],
++ ['COUNTER',{up:.8,speed:3.2,y:1,z:1.65,spin:300}],
++ ['SMASH',{up:.1,speed:4,y:1.3,z:1.65}],
++ ['FLICK',{up:.8,speed:2.2,dist:.10,y:.98,z:1.1}],
++ ['PUSH',{up:-.6,speed:1.4,dist:.12,y:.98,z:1.3}],
++ ['CHOP',{up:-.8,speed:3.2,dist:.28,y:1.1,z:1.8}],
++ ['BLOCK',{up:.1,speed:.7,dist:.035,y:1,z:1.5,inc:14,spin:250}],
++ ['LOB',{up:.9,speed:.9,dist:.3,y:1.1,z:1.65,inc:5}],
++ ['HOOK',{right:.9,curl:.8,up:.2,speed:2.8,y:1,z:1.65}],
++ ['FADE',{right:-.9,curl:-.8,up:.2,speed:2.8,y:1,z:1.65}],
++ ['DROP',{up:-.8,speed:.6,dist:.09,y:.9,z:1.15}],
++ ['SERVE_TOP',{up:.8,speed:2.4,dist:.18,y:1.12,z:1.65,serve:true}],
++ ['SERVE_BACK',{up:-.8,speed:1.8,dist:.16,y:1.12,z:1.65,serve:true}],
++ ['SERVE_SIDE',{right:.95,curl:.8,up:.1,speed:2.8,y:1.12,z:1.65,serve:true}],
++ ['SERVE_FAST',{up:.05,speed:4.5,y:1.12,z:1.65,serve:true}],
++];
+diff --git a/tests/contact-realtime.test.js b/tests/contact-realtime.test.js
+new file mode 100644
+index 0000000..7adc3b3
+--- /dev/null
++++ b/tests/contact-realtime.test.js
+@@ -0,0 +1,61 @@
++const {test}=require('node:test');
++const assert=require('node:assert/strict');
++const vm=require('node:vm');
++const fs=require('node:fs'),path=require('node:path');
++const {load}=require('./helpers.cjs');
++const lib=load(['10_math.js','30_physics.js','38_paddle_motion.js','40_swipe.js'],['V3','PH','deriveStroke','refineRacket','refineRacketRealtime','impactRacket','predict','paddleForehand','SERVE_WARM','solveServeStroke']);
++vm.runInContext('globalThis.flightCount=0; const predictReference=predict;predict=(...args)=>{globalThis.flightCount++;return predictReference(...args);}',lib.context);
++const {V3,PH}=lib;
++const fixtures=require('./contact-fixtures.cjs');
++const rows=[];
++for (const [id,s] of fixtures) test(`live ${id}: left/centre/right, both grips and both hands`,()=>{
++ const failures=[];
++ for(const grip of ['shakehand','penhold'])for(const hand of ['right','left'])for(const x of [-.62,0,.62]){
++  const p=V3.new(x,s.y,s.z), v=V3.new(.2,-1,s.serve?0:s.inc||6),w=V3.new(s.spin||120,30,0);
++  const m={right:s.right??.12,up:s.up,dist:s.dist??.24,curl:s.curl||0,releaseSpeed:s.speed,peakSpeed:s.speed,speed:s.speed,smooth:.95,straightness:.95,holdT:0,samples:8,x:.52,y:.5,sx:.5,sy:.7,dx:.02,dy:-s.up*.2,pathLen:s.dist??.24,dur:.12};
++  const raw=lib.deriveStroke(m,{side:1,grip,forehand:lib.paddleForehand(x,hand),isServe:!!s.serve,ball:p,ballSpin:w,ballSpeed:V3.len(v)});
++  assert.equal(raw.stroke.id,id,`fixture classified as ${raw.stroke.id}`);
++  const evaluate=(r)=>{
++   const bv=V3.clone(v),bw=V3.clone(w),info=lib.impactRacket(bv,bw,r.normal,r.vR,.85,r.rubber||{});
++   const bp=V3.clone(p);V3.addScaled(bp,bp,r.normal,PH.R*1.05);
++   const report=lib.predict(bp,bv,bw,{dt:PH.SIM_DT,maxT:2.6,stopOnFirstBounce:!s.serve,stopAfterBounces:s.serve?2:undefined,out:{}});
++   const legal=!!info&&!report.hitNet&&!!report.landed&&(s.serve?report.landed.z>0&&!!report.b2&&report.b2.z<0:report.landed.z<0);
++   return {legal,speed:V3.len(bv),spin:{...bw},landing:report.b2||report.landed};
++  };
++  lib.SERVE_WARM.clear();lib.context.flightCount=0;
++  const result=lib.refineRacketRealtime(p,v,w,{...raw},.85,.85);
++  const flights=lib.context.flightCount,actual=evaluate(result);
++  lib.SERVE_WARM.clear();const reference=evaluate(lib.refineRacket(p,v,w,{...raw},.85,.85));
++  const row={id,grip,hand,x,flights,valid:result.valid,actual,reference};rows.push(row);
++  assert.ok([result.normal,result.vR].every(vec=>Object.values(vec).every(Number.isFinite)));
++  assert.ok(V3.len(result.vR)<=(s.serve?12.5:19.5)+1e-6);
++  assert.ok(flights<=(s.serve?128:73),`unbounded ${flights} flights`);
++  if (['LOOP','COUNTER','SERVE_TOP'].includes(id)) assert.ok(actual.spin.x<0, `${id} lost topspin`);
++  if (['CHOP','PUSH','SERVE_BACK'].includes(id)) assert.ok(actual.spin.x>0, `${id} lost backspin`);
++  if (id==='HOOK') assert.ok(actual.spin.y>0,'hook lost positive sidespin');
++  if (id==='FADE') assert.ok(actual.spin.y<0,'fade lost negative sidespin');
++  if(result.valid===true&&!actual.legal)failures.push(`${grip}/${hand}/${x}: false valid`);
++  if(reference.legal&&!actual.legal)failures.push(`${grip}/${hand}/${x}: reference legal, live illegal`);
++ }
++ assert.deepEqual(failures,[]);
++});
++test('save full production-physics matrix',()=>{
++ const out=path.resolve(__dirname,'../test-results/evidence/contact-matrix.json');fs.mkdirSync(path.dirname(out),{recursive:true});fs.writeFileSync(out,JSON.stringify(rows,null,2));
++ console.log(JSON.stringify({cases:rows.length,liveLegal:rows.filter(r=>r.actual.legal).length,referenceLegal:rows.filter(r=>r.reference.legal).length,maxFlights:Math.max(...rows.map(r=>r.flights))}));
++});
++
++test('pathological serves cannot escape the shared 128-candidate live budget',()=>{
++ for(const grip of ['shakehand','penhold'])for(const up of [-1.4,0,1.4])for(const speed of [0,.1,2,15])for(const x of [-.7,.7]){
++  const p=V3.new(x,.94,1.9),v=V3.new(.4,-2,0),w=V3.new();
++  const raw=lib.deriveStroke({right:.9,up,dist:.02,curl:1.2,releaseSpeed:speed,peakSpeed:speed,smooth:.7,straightness:.6,samples:3,x:.9,y:.5},
++    {side:1,grip,isServe:true,ball:p,ballSpin:w,ballSpeed:2});
++  lib.SERVE_WARM.clear();lib.context.flightCount=0;
++  const r=lib.refineRacketRealtime(p,v,w,raw,.85,.6);
++  assert.ok(lib.context.flightCount<=128,`serve escaped budget: ${lib.context.flightCount}`);
++  assert.ok([r.normal,r.vR].every(vec=>Object.values(vec).every(Number.isFinite)));
++ }
++});
++
++test('budget control never catches unrelated physics errors',()=>{
++ assert.throws(()=>lib.solveServeStroke(V3.new(0,1.1,1.6),{aim:{x:0,z:-1}},()=>{throw Error('physics fault');},1,.85,true),/physics fault/);
++});
+diff --git a/tests/contact-stress.cjs b/tests/contact-stress.cjs
+new file mode 100644
+index 0000000..825d44a
+--- /dev/null
++++ b/tests/contact-stress.cjs
+@@ -0,0 +1,22 @@
++/* Deliberately harder contacts: off-centre placement, low/high contacts,
++ * incoming flat/top/back spin and imperfect quality. Not a success-rate
++ * forecast for humans. Reports regressions against the reference solver. */
++const {load}=require('./helpers.cjs');const fs=require('node:fs');const fixtures=require('./contact-fixtures.cjs');
++const L=load(['10_math.js','30_physics.js','40_swipe.js'],['V3','PH','deriveStroke','refineRacket','refineRacketRealtime','impactRacket','predict','paddleForehand','SERVE_WARM']);
++const {V3,PH}=L, rows=[];
++for(const [id,s] of fixtures)for(const grip of ['shakehand','penhold'])for(const k of [-1,0,1])for(const variation of [0,1,2]){
++ const x=k*.64,y=s.y+[0,-.07,.12][variation],z=s.z+[0,.18,-.16][variation];
++ const p=V3.new(x,y,z),v=V3.new([0,.8,-.6][variation],s.serve?-1:-.8,s.serve?0:s.inc||[6,10,4][variation]);
++ const w=V3.new(s.spin||[120,0,-180][variation],variation===2?-100:30,0);
++ const speed=s.speed*[1,.82,1.1][variation], dist=s.dist??.24;
++ const m={right:s.right??.12,up:s.up,dist,curl:s.curl||0,releaseSpeed:speed,peakSpeed:speed,speed,smooth:.9,straightness:.9,samples:8,holdT:0,x:.5+k*.3,y:.5,dx:.02,dy:-s.up*.2,dur:.12};
++ const ctx={side:1,grip,forehand:L.paddleForehand(x,'right'),isServe:!!s.serve,ball:p,ballSpin:w,ballSpeed:V3.len(v)};
++ const raw=L.deriveStroke(m,ctx),quality=[.85,.65,.95][variation];
++ function run(fn){L.SERVE_WARM.clear();const r=fn(p,v,w,{...raw},.85,quality);const bv=V3.clone(v),bw=V3.clone(w);const info=L.impactRacket(bv,bw,r.normal,r.vR,quality,r.rubber||{});const bp=V3.clone(p);V3.addScaled(bp,bp,r.normal,PH.R*1.05);const o=L.predict(bp,bv,bw,{dt:PH.SIM_DT,maxT:2.6,stopOnFirstBounce:!s.serve,stopAfterBounces:s.serve?2:undefined,out:{}});
++ return{valid:r.valid,legal:!!info&&!o.hitNet&&!!o.landed&&(s.serve?o.landed.z>0&&!!o.b2&&o.b2.z<0:o.landed.z<0),landing:o.b2||o.landed,speed:V3.len(bv),spin:{...bw}};}
++ rows.push({id,classified:raw.stroke.id,grip,x,y,z,variation,live:run(L.refineRacketRealtime),reference:run(L.refineRacket)});
++}
++fs.mkdirSync('test-results/evidence',{recursive:true});fs.writeFileSync('test-results/evidence/contact-stress.json',JSON.stringify(rows,null,2));
++const regressions=rows.filter(r=>r.reference.legal&&!r.live.legal),falseValid=rows.filter(r=>r.live.valid===true&&!r.live.legal);
++console.log(JSON.stringify({cases:rows.length,liveLegal:rows.filter(r=>r.live.legal).length,referenceLegal:rows.filter(r=>r.reference.legal).length,regressions:regressions.map(r=>({id:r.id,grip:r.grip,x:r.x,variation:r.variation})),falseValid: falseValid.length},null,2));
++if(falseValid.length)process.exitCode=1;
+diff --git a/tests/paddle-motion.test.js b/tests/paddle-motion.test.js
+index 4baa8b7..156221d 100644
+--- a/tests/paddle-motion.test.js
++++ b/tests/paddle-motion.test.js
+@@ -2,7 +2,7 @@ const { test } = require('node:test');
+ const assert = require('node:assert/strict');
+ const { load } = require('./helpers.cjs');
+ const lib = load(['10_math.js', '30_physics.js', '38_paddle_motion.js', '40_swipe.js', '56_rig.js'],
+-  ['PaddleStrokeMotion', 'PaddleReadClock', 'PaddleRig', 'paddleGripProfile', 'paddleContactRange',
++  ['paddleFollowPosition', 'PaddleStrokeMotion', 'PaddleReadClock', 'PaddleRig', 'paddleGripProfile', 'paddleContactRange',
+     'paddleForehand', 'stepPaddleAngle', 'paddleAngleDelta', 'paddleBottomExtent', 'keepPaddleAboveTable',
+     'faceFromWrist', 'paddleFaceAngles', 'playerWristPose', 'deriveStroke', 'refineRacket', 'classifyStroke',
+     'strokeFrame', 'resolvedRacketFrame', 'SwipeTracker', 'impactRacket', 'predict', 'PH', 'V3', 'Q', 'M4', 'DEG']);
+@@ -11,7 +11,7 @@ const near = (a, b, eps = 1e-9) => assert.ok(Math.abs(a - b) < eps, `${a} != ${b
+ 
+ for (const grip of ['shakehand', 'penhold']) for (const hand of ['right', 'left']) {
+   test(`${grip}/${hand}: exact physical contact, correct stroke-specific follow, complete recovery`, () => {
+-    for (const stroke of ['DRIVE', 'LOOP', 'CHOP', 'PUSH', 'BLOCK', 'SERVE_TOP']) {
++    for (const stroke of ['DRIVE', 'LOOP', 'CHOP', 'PUSH', 'BLOCK', 'SMASH', 'HOOK', 'FADE', 'LOB', 'SERVE_TOP', 'SERVE_BACK', 'SERVE_SIDE', 'SERVE_FAST']) {
+       for (const forehand of [true, false]) {
+         const profile = lib.paddleGripProfile(grip, stroke, forehand);
+         const ready = { yaw: 0, pitch: -profile.ready * DEG, roll: hand === 'left' ? -.3 : .3 };
+@@ -19,12 +19,14 @@ for (const grip of ['shakehand', 'penhold']) for (const hand of ['right', 'left'
+         const normal = faceFromWrist(V3.new(), yaw, pitch, 1);
+         const motion = new PaddleStrokeMotion();
+         motion.contact(normal, ready.roll, stroke, grip, hand, forehand);
+-        const start = motion.sample(1 / 30, ready);
++        const start = motion.sample(0, ready);
+         near(start.pitch, pitch); near(start.yaw, yaw);
+         assert.equal(start.stage, 'contact');
+-        const hold = motion.sample(.02, ready);
+-        near(hold.pitch, pitch); assert.equal(hold.stage, 'contact');
+-        const follow = motion.sample(.005 + profile.followTime * .7, ready);
++        const next = motion.sample(1 / 144, ready);
++        assert.equal(next.stage, 'follow');
++        assert.ok(Math.abs(next.pitch - pitch) + Math.abs(next.roll - ready.roll) > 1e-5,
++          'the first positive frame must advance, never hold the contact pose');
++        const follow = motion.sample(profile.followTime * .6, ready);
+         assert.equal(follow.stage, 'follow');
+         if (profile.follow > profile.contact) assert.ok(follow.pitch < pitch);
+         else if (profile.follow < profile.contact) assert.ok(follow.pitch > pitch);
+@@ -46,9 +48,9 @@ test('motion at equal timestamps is identical at 30, 60, 120 and 144 FPS', () =>
+       m.contact(faceFromWrist(V3.new(), -.25, .3, 1), .4, stroke, grip, 'right');
+       m.sample(0, ready);
+       let elapsed = 0, value;
+-      // Stop at exactly .2 seconds, including a fractional final frame.
+-      while (elapsed < .2 - 1e-10) {
+-        const dt = Math.min(1 / fps, .2 - elapsed);
++      // Stop at exactly .15 seconds, including a fractional final frame.
++      while (elapsed < .15 - 1e-10) {
++        const dt = Math.min(1 / fps, .15 - elapsed);
+         value = m.sample(dt, ready); elapsed += dt;
+       }
+       outputs.push(value);
+@@ -63,7 +65,7 @@ test('motion at equal timestamps is identical at 30, 60, 120 and 144 FPS', () =>
+ test('contact remains visible without follow-through and a new stroke interrupts recovery', () => {
+   const m = new PaddleStrokeMotion(), ready = { yaw: 0, pitch: -.2, roll: .3 };
+   m.contact(faceFromWrist(V3.new(), 0, .4, 1), .3, 'CHOP', 'shakehand', 'right', true, false);
+-  near(m.sample(.05, ready).pitch, .4);
++  near(m.sample(0, ready).pitch, .4);
+   const recovery = m.sample(.06, ready);
+   assert.equal(recovery.stage, 'recover'); assert.ok(recovery.pitch <= .4);
+   assert.equal(m.sample(.01, ready, true), null);
+@@ -259,7 +261,7 @@ test('penhold follow-through reverses local roll, not the physical contact face'
+       const ready = { yaw: 0, pitch: -.3, roll: grip === 'penhold' ? sign * (Math.PI - .052) : sign * .28 };
+       const motion = new PaddleStrokeMotion(); motion.contact(normal, ready.roll, 'LOOP', grip, hand, forehand);
+       const first = motion.sample(0, ready); near(first.pitch, -.3); near(first.roll, ready.roll);
+-      const follow = motion.sample(.025 + motion.profile.followTime * .8, ready);
++      const follow = motion.sample(motion.profile.followTime * .8, ready);
+       assert.equal(Math.sign(follow.roll - ready.roll), sign * (grip === 'penhold' ? -1 : 1));
+     }
+   }
+@@ -325,3 +327,40 @@ test('a block may open its face for a ball the spin does not lift', () => {
+   assert.ok(flat[1] >= 15, `flat-ball block face capped at ${flat[1]}°`);
+   assert.equal(top[1], 0, 'topspin keeps the classic closed block');
+ });
++
++for (const fps of [30, 60, 120, 144]) test(`contact path at ${fps} Hz: immediate exit, live input, exact recovery`, () => {
++  const p = lib.paddleGripProfile('shakehand', 'LOOP', true);
++  const ft = { active: true, t: 0, anchor: V3.new(.2, 1.1, 1.6), base: null,
++    swingDir: V3.new(.25, .4, -.8), amplitude: p.travel, followTime: p.followTime, recoverTime: p.recoverTime };
++  const target = {tx:.1,ty:1,tz:1.7};
++  lib.paddleFollowPosition(ft, target, 0);
++  near(target.tx, .2); near(target.ty, 1.1); near(target.tz, 1.6);
++  const next = {tx:.1,ty:1,tz:1.7}; lib.paddleFollowPosition(ft, next, 1/fps);
++  assert.ok(next.tz < 1.6 && next.ty > 1.1, 'bat exits contact on the very next frame');
++  const a = {...ft, anchor:{...ft.anchor},base:{...ft.base}}, b = {...a,anchor:{...a.anchor},base:{...a.base}};
++  const t1={tx:.1,ty:1,tz:1.7}, t2={tx:.15,ty:1,tz:1.7};
++  lib.paddleFollowPosition(a,t1,1/fps);lib.paddleFollowPosition(b,t2,1/fps);
++  near(t2.tx-t1.tx,.05,1e-8); // no animation lock or second positional low-pass
++  for(let i=0;i<fps;i++){const t={tx:.1,ty:1,tz:1.7};lib.paddleFollowPosition(ft,t,1/fps);
++    assert.ok(Object.values(t).every(Number.isFinite));
++    if(!ft.active){near(t.tx,.1);near(t.ty,1);near(t.tz,1.7);return;}}
++  assert.fail('recovery did not finish');
++});
++
++test('new gesture interrupts every authored stroke on the first frame', () => {
++  for (const stroke of ['LOOP','CHOP','BLOCK','SMASH','HOOK','FADE','SERVE_TOP']) {
++    const m=new PaddleStrokeMotion(), ready={yaw:0,pitch:0,roll:0};
++    m.contact(V3.new(0,0,-1),0,stroke,'shakehand','right');
++    m.sample(.04,ready);assert.equal(m.sample(1/144,ready,true),null);
++    assert.equal(m.active,false);
++  }
++});
++
++test('forehand/backhand yaw mirrors without reversing vertical spin technique', () => {
++  for (const grip of ['shakehand','penhold']) {
++    const fh=lib.paddleGripProfile(grip,'LOOP',true),bh=lib.paddleGripProfile(grip,'LOOP',false);
++    assert.ok(fh.yawTravel*bh.yawTravel<0);assert.ok(fh.follow>fh.contact&&bh.follow>bh.contact);
++    assert.notEqual(lib.paddleGripProfile(grip,'SMASH').travel,lib.paddleGripProfile(grip,'BLOCK').travel);
++    assert.ok(lib.paddleGripProfile(grip,'HOOK').roll*lib.paddleGripProfile(grip,'FADE').roll<0);
++  }
++});
+diff --git a/tt/src/38_paddle_motion.js b/tt/src/38_paddle_motion.js
+index dcd47a9..c1a9a82 100644
+--- a/tt/src/38_paddle_motion.js
++++ b/tt/src/38_paddle_motion.js
+@@ -9,6 +9,10 @@ const PADDLE_PROFILES = Object.freeze({
+   PUSH: Object.freeze({ keys: Object.freeze([15, -10, -25, -30]), range: Object.freeze([15, 40]), roll: -.10, follow: .10, recover: .17 }),
+   FLICK: Object.freeze({ keys: Object.freeze([15, 0, 20, 28]), range: Object.freeze([-30, -5]), roll: .20, follow: .09, recover: .16 }),
+   BLOCK: Object.freeze({ keys: Object.freeze([15, 8, 8, 10]), range: Object.freeze([-15, 0]), roll: .03, follow: .06, recover: .13 }),
++  SMASH: Object.freeze({ keys: Object.freeze([15, 2, 18, 38]), range: Object.freeze([-35, 5]), roll: .13, follow: .08, recover: .16 }),
++  HOOK: Object.freeze({ keys: Object.freeze([15, 8, 22, 30]), range: Object.freeze([-45, 30]), roll: .34, follow: .11, recover: .17 }),
++  FADE: Object.freeze({ keys: Object.freeze([15, 8, 22, 30]), range: Object.freeze([-45, 30]), roll: -.34, follow: .11, recover: .17 }),
++  LOB: Object.freeze({ keys: Object.freeze([15, -15, -5, 12]), range: Object.freeze([-45, 45]), roll: .08, follow: .16, recover: .20 }),
+   SERVE: Object.freeze({ keys: Object.freeze([15, -20, 0, 25]), range: Object.freeze([-45, 45]), roll: .20, follow: .12, recover: .20 }),
+ });
+ function paddleStrokeFamily(stroke) {
+@@ -23,11 +27,18 @@ function paddleGripProfile(grip, stroke, forehand = true) {
+   const pen = grip === 'penhold', k = base.keys;
+   const loop = pen && family === 'LOOP';
+   const contact = loop ? (forehand ? 25 : 30) : k[2];
++  const travel = { DRIVE: .13, LOOP: .18, CHOP: .15, PUSH: .055, FLICK: .09,
++    BLOCK: .025, SMASH: .20, HOOK: .14, FADE: .14, LOB: .17, SERVE: .12 };
++  const serveBack = stroke === 'SERVE_BACK';
++  const sideRoll = stroke === 'SERVE_SIDE' ? .34 : base.roll;
+   return { family, ready: pen ? 5 : k[0], prepare: k[1], contact,
+     follow: loop ? contact + (forehand ? 7 : 12) : k[3],
+     // Reverse-penhold backhand needs more wrist travel than the forehand.
+-    roll: base.roll * (pen ? (forehand ? 1.15 : 1.45) : 1),
++    roll: (serveBack ? -.18 : sideRoll) * (pen ? (forehand ? 1.15 : 1.45) : 1),
+     followTime: base.follow, recoverTime: base.recover,
++    travel: travel[family] * (pen ? .85 : 1),
++    yawTravel: (family === 'HOOK' ? .23 : family === 'FADE' ? -.23
++      : family === 'BLOCK' ? .015 : .07) * (forehand ? 1 : -1),
+     range: loop ? (forehand ? [-30, -10] : [-40, -15]) : base.range };
+ }
+ // A narrow dead band prevents tiny touch noise flipping the FH/BH grip.
+@@ -99,9 +110,10 @@ function paddleFaceAngles(normal) {
+   return { yaw: -Math.atan2(normal.x, -normal.z), pitch: Math.asin(clamp(normal.y / length, -1, 1)) };
+ }
+ 
+-/** Physical impact -> contact hold -> authored follow -> recovery.
+- * The first sample is EXACTLY the assisted impact normal, even when physics
+- * and drawing happen in the same render frame. No frame-counted timers. */
++/** Physical impact -> immediate follow -> recovery.
++ * contact() installs the exact impact pose in Game before rendering.
++ * sample(0) reads it; the very next positive dt MUST advance. There is no
++ * contact hold, skipped first frame, hit-stop or second angular low-pass. */
+ class PaddleStrokeMotion {
+   constructor() { this.reset(); }
+   reset() { this.active = false; this.stage = 'ready'; this.elapsed = 0; this.fresh = false; }
+@@ -111,35 +123,55 @@ class PaddleStrokeMotion {
+     this.hand = hand === 'left' ? -1 : 1;
+     this.rollDirection = this.hand * (grip === 'penhold' ? -1 : 1);
+     this.followEnabled = followEnabled;
+-    this.elapsed = 0; this.fresh = true; this.active = true; this.stage = 'contact';
++    this.elapsed = 0; this.fresh = false; this.active = true; this.stage = 'contact';
+   }
+   sample(dt, ready, interrupt = false) {
+     if (interrupt) this.reset();
+     if (!this.active) return null;
+-    if (this.fresh) this.fresh = false;
+-    else if (Number.isFinite(dt) && dt > 0) this.elapsed += dt;
+-    const p = this.profile, hold = .025;
++    if (Number.isFinite(dt) && dt > 0) this.elapsed += dt;
++    const p = this.profile;
+     const follow = this.followEnabled ? p.followTime : 0;
+-    const end = hold + follow + p.recoverTime;
++    const end = follow + p.recoverTime;
+     if (this.elapsed >= end) { this.reset(); return null; }
+     const delta = this.followEnabled ? -(p.follow - p.contact) * DEG : 0;
+     const followPitch = clamp(this.start.pitch + delta, -1.15, 1.05);
+     const followRoll = this.start.roll + (this.followEnabled ? this.rollDirection * p.roll : 0);
+-    if (this.elapsed <= hold) { this.stage = 'contact'; return { ...this.start, stage: this.stage }; }
+-    if (follow && this.elapsed < hold + follow) {
++    if (this.elapsed === 0) { this.stage = 'contact'; return { ...this.start, stage: this.stage }; }
++    const followYaw = this.start.yaw + (this.followEnabled ? this.hand * p.yawTravel : 0);
++    if (follow && this.elapsed < follow) {
+       this.stage = 'follow';
+-      const t = smoothstep(0, 1, (this.elapsed - hold) / follow);
+-      return { yaw: this.start.yaw, pitch: lerp(this.start.pitch, followPitch, t),
++      // Non-zero exit velocity at contact; zero velocity at full extension.
++      const u = clamp(this.elapsed / follow, 0, 1), t = 1 - (1 - u) ** 2;
++      return { yaw: lerp(this.start.yaw, followYaw, t), pitch: lerp(this.start.pitch, followPitch, t),
+         roll: lerp(this.start.roll, followRoll, t), stage: this.stage };
+     }
+     this.stage = 'recover';
+-    const t = smoothstep(0, 1, (this.elapsed - hold - follow) / p.recoverTime);
+-    return { yaw: this.start.yaw + paddleAngleDelta(this.start.yaw, ready.yaw) * t,
++    const t = smoothstep(0, 1, (this.elapsed - follow) / p.recoverTime);
++    return { yaw: followYaw + paddleAngleDelta(followYaw, ready.yaw) * t,
+       pitch: lerp(followPitch, ready.pitch, t),
+       roll: followRoll + paddleAngleDelta(followRoll, ready.roll) * t, stage: this.stage };
+   }
+ }
+ 
++/** Contact-anchored positional path, in real seconds. The input target delta
++ * is additive even during follow-through: animation never locks the mouse.
++ * Called once per update, BEFORE the normal limits/table support. */
++function paddleFollowPosition(ft, target, dt) {
++  if (!ft || !ft.active) return false;
++  if (!ft.base) ft.base = { ...target };
++  if (Number.isFinite(dt) && dt > 0) ft.t += dt;
++  const follow = ft.followTime, recover = ft.recoverTime;
++  const u = clamp(ft.t / Math.max(follow, 1e-6), 0, 1);
++  const reach = ft.amplitude * (1 - (1 - u) ** 2);
++  const blend = smoothstep(0, 1, (ft.t - follow) / Math.max(recover, 1e-6));
++  for (const [key, axis] of [['tx', 'x'], ['ty', 'y'], ['tz', 'z']]) {
++    const path = ft.anchor[axis] + ft.swingDir[axis] * reach + target[key] - ft.base[key];
++    target[key] = lerp(path, target[key], blend);
++  }
++  if (ft.t >= follow + recover) ft.active = false;
++  return true;
++}
++
+ /** Exact vertical support of the meshes in 60_scene / 56_rig. Includes
+  * both rubber layers and the offset rectangular handle (metres).
+  * Y projection of a lookRotation basis depends only on normal.y and roll. */
+diff --git a/tt/src/40_swipe.js b/tt/src/40_swipe.js
+index cbb09b0..da3fb83 100644
+--- a/tt/src/40_swipe.js
++++ b/tt/src/40_swipe.js
+@@ -616,7 +616,28 @@ function ownFor(aim, side) {
+   return { x: aim.x * 0.35, z: side * (0.78 + Math.abs(aim.z) * 0.16) };
+ }
+ 
+-function solveServeStroke(ballP, racket, evalStroke, side, assist) {
++// The live solver has a single call-wide ceiling, including every fallback
++// and fine confirmation. Offline calibration keeps the exhaustive reference.
++// A private sentinel unwinds nested searches without swallowing real errors.
++function solveServeStroke(ballP, racket, evalStroke, side, assist, realtime = false) {
++  if (!realtime) return searchServeStroke(ballP, racket, evalStroke, side, assist);
++  const work = { limit: 128, flights: 0, best: null };
++  try {
++    const result = searchServeStroke(ballP, racket, evalStroke, side, assist, work);
++    return { ...(result.ok ? result : work.best || result), flights: work.flights, budgeted: true };
++  }
++  catch (stop) {
++    if (stop !== work) throw stop;
++    const result = work.accepted || work.best || { dE: 0, dA: 0, sc: 1, dmp: 1, ok: false, target: racket.aim };
++    if (result.ok) {
++      const key = serveWarmKey(side, racket);
++      if (SERVE_WARM.size >= 96 && !SERVE_WARM.has(key)) SERVE_WARM.delete(SERVE_WARM.keys().next().value);
++      SERVE_WARM.set(key, result);
++    }
++    return { ...result, flights: work.flights, budgeted: true };
++  }
++}
++function searchServeStroke(ballP, racket, evalStroke, side, assist, work = null) {
+   const aimReq = racket.aim || { x: 0, z: -side * 0.95 };
+   const v = V3.new(), w = V3.new();
+   let legal = false, why = 'none';
+@@ -653,7 +674,9 @@ function solveServeStroke(ballP, racket, evalStroke, side, assist) {
+    * -128 rad/s, delivered -16). */
+   const SPIN_W = 7.0;
+   const spinWant = racket.spinWant || 0;
+-  /* Hard ceiling on the work one serve may do. The search is a heuristic and
++  /* Reference-search recovery cutoff, NOT a call-wide ceiling. The live
++   * wrapper above enforces the actual 128-flight cap in score() itself.
++   * The search is a heuristic and
+    * a pathological gesture (a 6-sample tap) used to walk every ladder, every
+    * recovery sweep and then be solved a second time by the caller: measured
+    * 730 ms, i.e. 44 dropped frames, on a ball that was never going to be a
+@@ -679,7 +702,9 @@ function solveServeStroke(ballP, racket, evalStroke, side, assist) {
+   };
+ 
+   const score = (own, aim, dE, dA, sc, dmp, fine) => {
++    if (work && work.flights >= work.limit) throw work;
+     flights++;
++    if (work) work.flights++;
+     evalStroke(dE, dA, sc, dmp, v, w);
+     legal = false; why = 'none';
+     const pc0 = paceCost(sc, aim);
+@@ -741,7 +766,23 @@ function solveServeStroke(ballP, racket, evalStroke, side, assist) {
+     const aimDeep = clamp((Math.abs(aim.z) - SERVE_MIN_PAST_NET) / 0.50, 0, 1);
+     const dead = (pastNet < SERVE_MIN_PAST_NET && aimDeep > 0)
+       ? (SERVE_MIN_PAST_NET - pastNet) * 5.0 * aimDeep : 0;
+-    return Math.hypot(r.b2.x - aim.x, r.b2.z - aim.z) + d1 * 0.22 + pc0 + dead + spinCost;
++    const error = Math.hypot(r.b2.x - aim.x, r.b2.z - aim.z);
++    const cost = error + d1 * .22 + pc0 + dead + spinCost;
++    if (work) {
++      if (fine && (!work.best || cost < work.best.cost))
++        work.best = { dE, dA, sc, dmp, ok: true, target: { ...aim }, cost };
++      // A live contact needs a good legal answer, not every local optimum.
++      // Production-step confirmation is mandatory before the early exit.
++      const playable = Math.abs(aim.z) < SERVE_MIN_PAST_NET || pastNet >= SERVE_MIN_PAST_NET;
++      if (playable && error <= .24 && pc0 + spinCost < .45) {
++        if (!fine) score(own, aim, dE, dA, sc, dmp, true);
++        else {
++          work.accepted = { dE, dA, sc, dmp, ok: true, target: { ...aim }, cost };
++          throw work;
++        }
++      }
++    }
++    return cost;
+   };
+ 
+   const SC = [0.30, 0.45, 0.65, 0.88, 1.15, 1.45];
+@@ -772,6 +813,20 @@ function solveServeStroke(ballP, racket, evalStroke, side, assist) {
+ 
+   const aimBase = aimReq;
+ 
++  // Live geometric seeds: express the face in world space, not as a guessed
++  // correction to one particular swipe. These are only starting points;
++  // every accepted answer still passes the actual impulse + two-bounce sim.
++  if (work && !solvedLegal && ['SERVE_TOP', 'SERVE_BACK'].includes(racket.stroke && racket.stroke.id)) {
++    const back = racket.stroke.id === 'SERVE_BACK';
++    const faces = back ? [.05, -.10, .20] : [-.55, -.70, -.40];
++    const az = clamp(Math.atan2(aimReq.x - ballP.x, side * (ballP.z - aimReq.z)) - racket.azFace, -1, 1);
++    const speed = (back ? 4 : 2.8) + racket.vmag * .30;
++    const seedScale = clamp(speed / Math.max(1.2, racket.vmag), .20, 3);
++    for (const face of faces) for (const factor of [1, .85, 1.15]) {
++      score(ownFor(aimReq, side), aimReq, face - racket.faceElev, az, seedScale * factor, 1, false);
++    }
++  }
++
+   if (!solvedLegal) {
+   // A hard topspin serve simply cannot be aimed at the very back line and
+   // stay legal on a bad toss, so shorten the target until it works — but in
+@@ -1136,7 +1191,7 @@ function resolvedRacketFrame(racket, normal, swing, extra) {
+     azSwing: Math.atan2(v.x, v.z * fwd), vmag: speed / absorb };
+ }
+ 
+-function refineRacket(ballP, ballV, ballW, racket, assist, quality) {
++function refineRacket(ballP, ballV, ballW, racket, assist, quality, realtime = false) {
+   const fwd = -racket.side;
+   const rubber = Object.assign({}, racket.rubber || {});
+   const q = quality !== undefined ? quality : racket.quality;
+@@ -1166,7 +1221,7 @@ function refineRacket(ballP, ballV, ballW, racket, assist, quality) {
+    *  A single-landing solver cannot express that, so serves get their own
+    *  search that scores the WHOLE flight, two bounces included.        */
+   if (racket.isServe) {
+-    const srv = solveServeStroke(ballP, racket, evalStroke, side, assist);
++    const srv = solveServeStroke(ballP, racket, evalStroke, side, assist, realtime);
+     strokeFrame(racket, srv.dE, srv.dA, srv.sc, _rs, _rn);
+     /* Last line of defence: whatever the search settled on, a serve never
+        leaves the bat faster than SERVE_VMAX. */
+@@ -1176,7 +1231,7 @@ function refineRacket(ballP, ballV, ballW, racket, assist, quality) {
+     return resolvedRacketFrame(racket, _rn, _rs, {
+       rubber,
+       dElev: srv.dE, dAz: srv.dA, scale: srv.sc, damp: srv.dmp,
+-      solved: true, valid: srv.ok, target: srv.target,
++      solved: true, valid: srv.ok, target: srv.target, solveFlights: srv.flights || null,
+     });
+   }
+ 
+@@ -1219,7 +1274,7 @@ function refineRacket(ballP, ballV, ballW, racket, assist, quality) {
+ 
+   /* ---- 3. converge the stroke rotation onto that target ----------- */
+   let dE = 0, dA = 0, sc = 1, dmp = 1, sol = null, converged = false;
+-  for (let outer = 0; outer < 3; outer++) {
++  for (let outer = 0; outer < (realtime ? 1 : 3); outer++) {
+     sol = solveLaunch(ballP, target, _rw, {
+       speed: V3.len(_rv),
+       netClear: racket.netClear,
+@@ -1285,7 +1340,9 @@ function refineRacket(ballP, ballV, ballW, racket, assist, quality) {
+    *        How hard it tries is itself a function of the assist, so a
+    *        low setting really does let the ball go into the net.       */
+   const chk = {};
++  let validationFlights = 0;
+   const validate = (e_, a_, s_, d_, fine) => {
++    validationFlights++;
+     evalStroke(e_, a_, s_, d_, _rv, _rw);
+     /* The confirmation runs at the PRODUCTION step (PH.SIM_DT), the same
+      * integration the live ball gets, and demands a little clearance over
+@@ -1348,6 +1405,7 @@ function refineRacket(ballP, ballV, ballW, racket, assist, quality) {
+     for (const face of [envelope[1], (envelope[0] + envelope[1]) * .5, envelope[0]]) {
+       for (const arm of [35, 50, 20, 65]) {
+         for (const scale of [Math.min(1, maxScale), Math.min(.75, maxScale), maxScale]) {
++          if (realtime && validationFlights >= 42) continue; // reserve six fine confirmations
+           const de = arm * DEG - racket.elev * DEG;
+           wristCorrection = face * DEG - (racket.faceElev + de);
+           if (validate(de, aimAz, scale, 1, false) !== 0) continue;
+@@ -1373,6 +1431,11 @@ function refineRacket(ballP, ballV, ballW, racket, assist, quality) {
+   return resolvedRacketFrame(racket, normal, swing, { rubber, dElev: dE, dAz: dA, dWrist: wristCorrection, scale: sc, damp: dmp, solved: sol, target, valid: verdict === 0 });
+ }
+ 
++/** Live contacts use bounded search; calibration remains exhaustive. */
++function refineRacketRealtime(ballP, ballV, ballW, racket, assist, quality) {
++  return refineRacket(ballP, ballV, ballW, racket, assist, quality, true);
++}
++
+ /** Cheap post-hoc report of where a struck ball will actually go. */
+ function shotReport(p, v, w, out) {
+   return predict(V3.clone(p), V3.clone(v), V3.clone(w),
+diff --git a/tt/src/55_ai.js b/tt/src/55_ai.js
+index 293c722..0662ea6 100644
+--- a/tt/src/55_ai.js
++++ b/tt/src/55_ai.js
+@@ -420,7 +420,7 @@ class OpponentAI {
+ 
+     // Solve on copies. The game applies the returned impact exactly once.
+     strokeFrame(racket, 0, 0, 1, racket.vR, racket.normal);
+-    racket = refineRacket(ball.p, ball.v, ball.w, racket, L.skill, racket.quality);
++    racket = refineRacketRealtime(ball.p, ball.v, ball.w, racket, L.skill, racket.quality);
+     V3.copy(this.faceNormal, racket.normal);
+     this.lastStrokeId = archId;
+     this.phase = 'SWING';
+@@ -515,13 +515,9 @@ class OpponentAI {
+     racketFromStroke.isServe = true;
+ 
+     // Use refineRacket for legal serve
+-    let finalRacket = refineRacket(ball.p, ball.v, ball.w, racketFromStroke,
++    let finalRacket = refineRacketRealtime(ball.p, ball.v, ball.w, racketFromStroke,
+       this.handicap, racket.quality);
+ 
+-    if (!finalRacket.valid && this.handicap < 0.999) {
+-      finalRacket = refineRacket(ball.p, ball.v, ball.w, racketFromStroke,
+-        1, racket.quality);
+-    }
+ 
+     return finalRacket;
+   }
+diff --git a/tt/src/70_game.js b/tt/src/70_game.js
+index fb1639b..1b7c46c 100644
+--- a/tt/src/70_game.js
++++ b/tt/src/70_game.js
+@@ -128,7 +128,7 @@ class Game {
+       aimAssist: 0.85,       // trajectory correction (authored .85)
+       footAssist: 0.85,      // footwork auto-approach (authored .85)
+       batSens: 1,            // cursor gain (authored 1)
+-      slowmoOnBigShots: true,
++      slowmoOnBigShots: false, // no automatic hit-stop; explicit slowmo remains available
+       targetScore: 11,
+       spinBias: 'norm',
+       gestureProfile: defaultGestureProfile(),   // 'classic' | 'safe'
+@@ -397,7 +397,7 @@ class Game {
+       // ---- ANTICIPATION TRIGGER ----
+       // Before a swipe, pull the paddle back slightly to telegraph
+       // the upcoming stroke. This is critical for game feel.
+-      if (this.settings.anticipationHint && !this.anticipation.active) {
++      if (this.settings.anticipationHint && !this.reducedMotion && !this.anticipation.active) {
+         const centerX = 0.5;
+         const dx = n.x - centerX;
+         const dy = n.y - 0.55;
+@@ -995,17 +995,20 @@ class Game {
+     const name = racket.stroke ? racket.stroke.id : 'DRIVE';
+     this.stats.byStroke[name] = (this.stats.byStroke[name] || 0) + 1;
+ 
+-    /* an off-centre contact sounds like wood, not like rubber */
+-    const softHit = !!(racket.arch && racket.arch.soft) || (side > 0 && this.lastSweet !== undefined && this.lastSweet < 0.38);
+-    this.audio.hitRacket(speed, info ? info.contactSlip : 0, softHit);
+-    if (side > 0 && this.lastSweet !== undefined && this.lastSweet < 0.30) this.buzz(16);
+-    const col = racket.stroke ? hexToRgb(racket.stroke.col) : [1, 1, 1];
+-    this.emitParticles(contactP.x, contactP.y, contactP.z,
+-      side > 0 ? 14 : 9, 0.7 + speed * 0.05, 0.32, 0.019, col[0], col[1], col[2],
+-      { x: -racket.normal.x * 0.6, y: -racket.normal.y * 0.6, z: -racket.normal.z * 0.6 });
++    // Dispatch once, after final physical/equipment velocity is known.
++    // No duplicate sound, vibration, particle burst or camera impulse.
++    if (this.hitFeedback) {
++      this.hitFeedback.execute({ quality, speed, spin: b.w, contactPoint: contactP,
++        contactNormal: racket.normal, stroke: name, side,
++        isServeStroke: !!racket.isServe, contactSlip: info ? info.contactSlip : 0,
++        softHit: !!(racket.arch && racket.arch.soft) ||
++          (side > 0 && this.lastSweet !== undefined && this.lastSweet < .38) });
++    } else {
++      this.audio.hitRacket(speed, info ? info.contactSlip : 0, !!(racket.arch && racket.arch.soft));
++    }
+ 
+     if (side > 0) {
+-      this.hitFlash = 1;
++      if (!this.reducedMotion) this.hitFlash = Math.max(this.hitFlash, .35);
+       this.lastShotInfo = {
+         stroke: racket.stroke, speed: speed * 3.6, spin: spin / TAU,
+         topspin: -b.w.x * side, sidespin: b.w.y, quality,
+@@ -1030,16 +1033,14 @@ class Game {
+       if (sid === 'LOOP' || sid === 'COUNTER') this.matchTasks.topspin++;
+       else if (sid === 'SMASH') this.matchTasks.smash++;
+       else if (sid === 'SERVE_TOP' || sid === 'SERVE_SIDE' || sid === 'SERVE_FAST' || sid === 'SERVE_BACK') this.matchTasks.serves++;
+-      this.buzz(Math.round(lerp(8, 26, clamp(speed / 90, 0, 1))));
+-      this.shakeIt(clamp(speed / 55, 0.03, 0.38), V3.new(rndSym(0.4), 0.5, 1));
+-      if (this.settings.slowmoOnBigShots && speed * 3.6 > 78) this.punchSlowmo(0.42, 0.26);
++      // Live hits never change simulation time. Manual training slowmo and
++      // replay speed are independent, explicit player choices.
+       // refresh the landing preview
+       if (this.settings.showPredict) {
+         predict(V3.clone(b.p), V3.clone(b.v), V3.clone(b.w),
+           { dt: 1 / 240, maxT: 2.4, stopOnFirstBounce: true, out: this.predictOut, path: this.predictPath });
+       }
+     } else {
+-      this.shakeIt(clamp(speed / 90, 0.02, 0.18), V3.new(rndSym(0.4), 0.4, -1));
+       this.recorder.addShot(-1, {
+         stroke: racket.stroke, speed: speed * 3.6, spin: spin / TAU,
+         topspin: b.w.x, sidespin: b.w.y, quality, t: this.time,
+@@ -1773,10 +1774,7 @@ class Game {
+       const rawShotFrame = { normal: shotVec(rawNormal), vR: shotVec(rawSwing),
+         faceElev: racket.faceElev, swingElevation: racket.elev, swingAzimuth: racket.azSwing,
+         faceAzimuth: racket.azFace, speed: racket.vmag, rubber: { ...racket.rubber } };
+-      racket = refineRacket(contact, b.v, b.w, racket, assistLvl, quality);
+-      if (isServeStroke && racket.valid === false && clamp(assistLvl, 0, 1) < 0.999) {
+-        racket = refineRacket(contact, b.v, b.w, racket, 1, quality);
+-      }
++      racket = refineRacketRealtime(contact, b.v, b.w, racket, assistLvl, quality);
+       racket.sweet = sweet; racket.timing = timing;
+       racket.unassisted = rawShotFrame;
+     }
+@@ -1790,6 +1788,12 @@ class Game {
+      * null impact is how a ball that never touched the rubber still counted as
+      * returned — and why the next, real attempt was ignored. */
+     if (!info) return;
++    // A wind-up must end at impact, not pull the DRAWN blade backwards
++    // while the physical ball has already left the rubber.
++    if (this.anticipation) {
++      this.anticipation.active = false;
++      if (this.anticipation.visualOffset) V3.zero(this.anticipation.visualOffset);
++    }
+     {
+       const bp = this.R && this.R.viewProj ? this.project(b.p, {}) : null;
+       const pp = this.R && this.R.viewProj ? this.project(pad.pos, {}) : null;
+@@ -1821,30 +1825,15 @@ class Game {
+       const ft = this.followThrough;
+       ft.active = true;
+       ft.t = 0;
+-      ft.duration = .025 + motion.profile.followTime + motion.profile.recoverTime * .5;
+-      ft.amplitude = (motion.profile.family === 'BLOCK' ? .025 : motion.profile.family === 'PUSH' ? .055 : .14)
+-        * (this.settings.grip === 'penhold' ? .85 : 1);
++      ft.followTime = motion.profile.followTime;
++      ft.recoverTime = motion.profile.recoverTime;
++      ft.duration = ft.followTime + ft.recoverTime;
++      ft.amplitude = motion.profile.travel;
++      ft.anchor = V3.clone(contact); ft.base = null;
+       const spd = V3.len(racket.vR) || 1;
+       V3.set(ft.swingDir, racket.vR.x / spd, racket.vR.y / spd, racket.vR.z / spd);
+     }
+ 
+-    // Multi-sensory hit feedback (99-level)
+-    if (this.hitFeedback) {
+-      this.hitFeedback.execute({
+-        quality,
+-        speed: V3.len(b.v) || 0,
+-        spin: b.w,
+-        contactPoint: contact,
+-        contactNormal: racket.normal,
+-        stroke: racket.stroke ? racket.stroke.id : 'DRIVE',
+-        power: racket.power,
+-        isServeStroke,
+-        isNetCord: this.netTouched,
+-        isEdge: info && info.edge > 0.25,
+-        side: 1,
+-      });
+-    }
+-
+     if (isServeStroke) { this.serveBounces = 0; this.rallyBounces.length = 0; }
+     else this.isServeBall = false;
+     this.applyHit(1, racket, contact, quality, info);
+@@ -2027,20 +2016,8 @@ class Game {
+     let tx = t.tx;
+     let ty = t.ty;
+     let tz = t.tz;
+-    // Position follow-through uses the SAME smoothed/clamped target path.
+-    // A squared-sine envelope has zero velocity at both ends; never write
+-    // an independent visual position over the simulation after its update.
+     const ft = this.followThrough;
+-    if (ft && ft.active) {
+-      if (this.playerStrokeIntent(this.state === GS.SERVE_TOSS)) ft.active = false;
+-      else {
+-        const progress = clamp(ft.t / ft.duration, 0, 1);
+-        const reach = (ft.amplitude || .14) * Math.sin(progress * Math.PI) ** 2;
+-        tx += ft.swingDir.x * reach;
+-        ty += ft.swingDir.y * reach;
+-        tz += ft.swingDir.z * reach;
+-      }
+-    }
++    if (ft && ft.active && this.playerStrokeIntent(this.state === GS.SERVE_TOSS)) ft.active = false;
+ 
+     /* On a new point the bat goes HOME first, and while that window is open
+      * the cursor is deliberately not obeyed. Without this the reset is
+@@ -2156,6 +2133,11 @@ class Game {
+     } else {
+       this._reachF = 0;
+     }
++    // One positional owner: authored contact path, with live pointer deltas.
++    // Apply after stance/footwork, before all spatial safety constraints.
++    t.tx = tx; t.ty = ty; t.tz = tz;
++    const contactPath = paddleFollowPosition(ft, t, dt);
++    tx = t.tx; ty = t.ty; tz = t.tz;
+     /* Neither the cursor nor the assist may ever park the bat outside the
+      * frame — that is the bug that used to leave it stranded off-screen. */
+     if (this.camVPReady) {
+@@ -2175,9 +2157,9 @@ class Game {
+      * serve, or "the bat returns to the centre" is only true for people who
+      * wait. Still visibly a glide (0.2-0.3 s), not a teleport. */
+     const rate = this.recenterT > 0 ? 20 : 26;
+-    pad.pos.x = expSmooth(pad.pos.x, tx, rate, dt);
+-    pad.pos.y = expSmooth(pad.pos.y, ty, rate, dt);
+-    pad.pos.z = expSmooth(pad.pos.z, tz, rate * 0.7, dt);
++    pad.pos.x = contactPath ? tx : expSmooth(pad.pos.x, tx, rate, dt);
++    pad.pos.y = contactPath ? ty : expSmooth(pad.pos.y, ty, rate, dt);
++    pad.pos.z = contactPath ? tz : expSmooth(pad.pos.z, tz, rate * 0.7, dt);
+     V3.sub(pad.vel, pad.pos, pad.prevPos);
+     V3.mul(pad.vel, pad.vel, 1 / Math.max(dt, 1e-4));
+ 
+@@ -2685,7 +2667,7 @@ class Game {
+           // whose skill is already 1.0 has been solved at full assist, and
+           // re-solving the same problem is pure frame time
+           if (racket.valid === false && clamp(this.ai.L.skill, 0, 1) < 0.999) {
+-            racket = refineRacket(this.ball.p, this.ball.v, this.ball.w, racket, 1, racket.quality);
++            racket = refineRacketRealtime(this.ball.p, this.ball.v, this.ball.w, racket, 1, racket.quality);
+           }
+           const contact = V3.clone(this.ball.p);
+           const info = impactRacket(this.ball.v, this.ball.w, racket.normal, racket.vR, racket.quality, racket.rubber || {});
+@@ -2771,13 +2753,6 @@ class Game {
+     while (this.messages.length && this.messages[0].t > this.messages[0].dur) this.messages.shift();
+     this.hitFlash = Math.max(0, this.hitFlash - dtReal * 3.2);
+ 
+-    // Only the timer advances here. Position and orientation each have one
+-    // owner in updatePlayerPaddle / PaddleStrokeMotion, before rendering.
+-    if (this.followThrough.active) {
+-      this.followThrough.t += dtReal;
+-      if (this.followThrough.t >= this.followThrough.duration) this.followThrough.active = false;
+-    }
+-
+     // Update anticipation
+     if (this.settings.anticipationHint) {
+       if (this.anticipation.active) {
+@@ -2944,7 +2919,7 @@ class Game {
+       const pp = this.player;
+       /* The telegraph lives here and only here: the simulation keeps the
+        * blade on the ball, the drawing pulls it back for the wind-up. */
+-      const ao = this.anticipation.active ? this.anticipation.visualOffset : null;
++      const ao = !this.reducedMotion && this.anticipation.active ? this.anticipation.visualOffset : null;
+       const dpos = this._drawPadPos || (this._drawPadPos = V3.new());
+       if (ao && (ao.x || ao.y || ao.z)) V3.set(dpos, pp.pos.x + ao.x, pp.pos.y + ao.y, pp.pos.z + ao.z);
+       else V3.copy(dpos, pp.pos);
+diff --git a/tt/src/75_feedback.js b/tt/src/75_feedback.js
+index e3bface..ddc9698 100644
+--- a/tt/src/75_feedback.js
++++ b/tt/src/75_feedback.js
+@@ -16,11 +16,11 @@ const HIT_FEEDBACK = {
+   // Particle system tuning
+   PARTICLES: {
+     baseCount: 8,
+-    qualityMultiplier: 22,
++    qualityMultiplier: 10,
+     speedMultiplier: 0.6,
+-    maxCount: 60,
+-    minSize: 0.008,
+-    maxSize: 0.035,
++    maxCount: 24,
++    minSize: 0.004,
++    maxSize: 0.012,
+   },
+ 
+   // Camera shake tuning
+@@ -63,7 +63,7 @@ class HitFeedbackSystem {
+     this._audio = game.audio;
+     this._camera = game;
+     this._hapticEnabled = true;
+-    this._lastHitTime = 0;
++    this._lastHitTime = -Infinity;
+     this._cooldown = 0.05;  // prevent feedback spamming
+   }
+ 
+@@ -83,16 +83,16 @@ class HitFeedbackSystem {
+    */
+   execute(ctx) {
+     const now = this.game.time;
+-    if (now - this._lastHitTime < this._cooldown) return;
++    if (now >= this._lastHitTime && now - this._lastHitTime < this._cooldown) return;
+     this._lastHitTime = now;
+ 
+     // Determine spin characteristics
+     const spin = ctx.spin || V3.new();
+     const spinMag = V3.len(spin);
+-    const spinType = this.determineSpinType(spin);
++    const spinType = this.determineSpinType({ ...spin, x: spin.x * (ctx.side || 1) });
+ 
+     // Quality-based scaling
+-    const quality = clamp(ctx.quality || 1, 0, 1);
++    const quality = clamp(Number.isFinite(ctx.quality) ? ctx.quality : 1, 0, 1);
+     const speed = ctx.speed || 0;
+ 
+     // ---- VISUAL FEEDBACK ----
+@@ -110,7 +110,7 @@ class HitFeedbackSystem {
+ 
+   /**
+    * Determine spin type from spin vector.
+-   * Convention: +w.x = topspin (ball top moves forward)
++   * Convention for the near player: -w.x = topspin; mirror for far side
+    */
+   determineSpinType(spin) {
+     const w = spin;
+@@ -119,7 +119,7 @@ class HitFeedbackSystem {
+     const slice = Math.abs(w.z);
+ 
+     if (top > side * 1.5 && top > slice * 1.5) {
+-      return w.x > 0 ? 'topspin' : 'backspin';
++      return w.x < 0 ? 'topspin' : 'backspin';
+     }
+     if (side > top * 1.2 && side > slice * 1.2) {
+       return w.y > 0 ? 'sidespin-right' : 'sidespin-left';
+@@ -132,14 +132,15 @@ class HitFeedbackSystem {
+    */
+   visual(quality, speed, spinType, spinMag, ctx) {
+     const game = this.game;
++    if (game.reducedMotion) return;
+ 
+     // ---- Particle burst ----
+     const baseCount = HIT_FEEDBACK.PARTICLES.baseCount;
+-    const count = Math.min(
+-      HIT_FEEDBACK.PARTICLES.maxCount,
+-      Math.floor(baseCount + quality * HIT_FEEDBACK.PARTICLES.qualityMultiplier
+-        + speed * HIT_FEEDBACK.PARTICLES.speedMultiplier)
+-    );
++    const compact = ['BLOCK', 'PUSH', 'DROP'].includes(ctx.stroke);
++    const weight = compact ? .45 : ctx.isServeStroke ? .70 : 1;
++    const count = Math.min(HIT_FEEDBACK.PARTICLES.maxCount,
++      Math.floor((baseCount + quality * HIT_FEEDBACK.PARTICLES.qualityMultiplier
++        + speed * HIT_FEEDBACK.PARTICLES.speedMultiplier) * weight));
+ 
+     // Particle colors based on spin type
+     let colors;
+@@ -170,11 +171,11 @@ class HitFeedbackSystem {
+ 
+     // Burst particles
+     const contactP = ctx.contactPoint || game.ball.p;
+-    this._particles.burst(
++    game.emitParticles(
+       contactP.x, contactP.y, contactP.z,
+       count,
+       0.8 + speed * 0.04,
+-      0.25 + quality * 0.15,
++      0.10 + quality * 0.12,
+       sizeBase + sizeRange * quality,
+       colors.r, colors.g, colors.b,
+       { x: -dir.x * 0.5, y: -dir.y * 0.5, z: -dir.z * 0.5 }
+@@ -199,39 +200,17 @@ class HitFeedbackSystem {
+    */
+   audio(quality, speed, spinType, spinMag, ctx) {
+     const audio = this._audio;
+-    if (!audio || !audio.initialized) return;
+-
+-    // ---- Layer 1: Wood impact (body sound) ----
+-    // Quality determines wood vs rubber ratio
+-    const woodVolume = HIT_FEEDBACK.AUDIO.woodHitBase * (1 - quality * 0.4);
+-    // Higher quality = more wood, less rubber
+-    const woodPitch = 0.9 + quality * 0.2 + speed * 0.005;
++    if (!audio || !audio.ok) return;
+ 
++    // Body and rubber brush share one correctly-scaled impulse sound.
+     if (audio.hitRacket) {
+-      audio.hitRacket(speed * 3.6, 0, quality < 0.4);
++      audio.hitRacket(speed, ctx.contactSlip || 0, !!ctx.softHit || quality < 0.4);
+     }
+ 
+-    // ---- Layer 2: Rubber friction (spin sound) ----
+-    if (spinMag > 30) {
+-      const frictionVolume = HIT_FEEDBACK.AUDIO.rubberFrictionBase
+-        * (spinMag / 100) * HIT_FEEDBACK.AUDIO.spinVolumeMultiplier;
+-      // Higher spin = more friction sound
+-      const frictionPitch = 0.8 + spinMag / 500;
+-      // Play friction sound (whoosh-like)
+-      if (audio.whoosh) {
+-        audio.whoosh(clamp(spinMag / 80, 0, 1));
+-      }
+-    }
+-
+-    // ---- Layer 3: Air whoosh (speed sound) ----
+-    if (speed > 8) {
+-      const whooshVolume = HIT_FEEDBACK.AUDIO.whooshBase
+-        * ((speed - 8) / 20) * (1 + quality * 0.2);
+-      // Whoosh is already handled in swipe, but reinforce on hit
+-      if (audio.whoosh) {
+-        audio.whoosh(clamp((speed - 8) / 25, 0, 0.6));
+-      }
+-    }
++    // One optional air layer, never two overlapping whooshes. Rubber
++    // brush is already proportional to contactSlip inside hitRacket().
++    if (audio.whoosh && speed > 12 && !ctx.isServeStroke)
++      audio.whoosh(clamp((speed - 12) / 24, 0, .4));
+ 
+     // ---- Layer 4: Special event sounds ----
+     if (ctx.isNetCord) {
+@@ -250,8 +229,7 @@ class HitFeedbackSystem {
+    * Haptic feedback: variable vibration patterns.
+    */
+   haptic(quality, speed, spinType, ctx) {
+-    if (!this._hapticEnabled) return;
+-    if (!navigator.vibrate) return;
++    if (!this._hapticEnabled || ctx.side < 0 || !this.game.settings.haptics) return;
+ 
+     // Quality-based pattern selection
+     let pattern;
+@@ -262,6 +240,10 @@ class HitFeedbackSystem {
+       pattern = HIT_FEEDBACK.HAPTIC.EDGE_BALL;
+     } else if (ctx.isWinner && ctx.side > 0) {
+       pattern = HIT_FEEDBACK.HAPTIC.WINNER;
++    } else if (ctx.isServeStroke) {
++      pattern = HIT_FEEDBACK.HAPTIC.SERVE;
++    } else if (['BLOCK', 'PUSH', 'DROP'].includes(ctx.stroke)) {
++      pattern = HIT_FEEDBACK.HAPTIC.BLOCK;
+     } else if (quality > 0.8 && speed > 15) {
+       // Big hit — sharp
+       pattern = HIT_FEEDBACK.HAPTIC.HIT.map(v => Math.floor(v * 1.3));
+@@ -280,12 +262,7 @@ class HitFeedbackSystem {
+       pattern[0] = Math.floor(pattern[0] * (0.5 + speed * 0.05));
+     }
+ 
+-    // Execute
+-    try {
+-      navigator.vibrate(pattern);
+-    } catch (e) {
+-      // Ignore — device may not support
+-    }
++    this.game.buzz(pattern);
+   }
+ 
+   /**
+@@ -293,12 +270,15 @@ class HitFeedbackSystem {
+    */
+   camera(quality, speed, ctx) {
+     const game = this.game;
++    if (game.reducedMotion) return;
+ 
+     // Layer 1: Micro shake on impact
+     const shakeBase = HIT_FEEDBACK.CAMERA.shakeBase;
+     const shakeSpeed = speed * HIT_FEEDBACK.CAMERA.shakeSpeedMultiplier;
+     const shakeQuality = quality * HIT_FEEDBACK.CAMERA.shakeQualityMultiplier;
+     let shakeAmount = shakeBase + shakeSpeed + shakeQuality;
++    const compact = ['BLOCK', 'PUSH', 'DROP'].includes(ctx.stroke);
++    shakeAmount *= ctx.side < 0 ? .35 : compact ? .40 : 1;
+     shakeAmount = Math.min(HIT_FEEDBACK.CAMERA.maxShake, shakeAmount);
+ 
+     if (shakeAmount > 0.005) {
+@@ -308,13 +288,8 @@ class HitFeedbackSystem {
+       game.shakeDir = V3.norm(V3.new(dirX, 0.3, dirZ), V3.new(dirX, 0.3, dirZ));
+     }
+ 
+-    // Layer 2: Speed-based FOV pulse on big hits
+-    if (speed > 20 && quality > 0.6) {
+-      const fovPulse = (speed - 20) * 0.02;
+-      if (game.camFov !== undefined) {
+-        game.camFov = (game.camFov || 48) + fovPulse;
+-      }
+-    }
++    // No permanent FOV mutation on impact: the camera must not drift
++    // further away on every smash.
+ 
+     // Layer 3: Judgement line flash on perfect shots
+     if (quality > 0.9 && speed > 15) {

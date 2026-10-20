@@ -75,3 +75,27 @@ test('a held-but-tiny gesture is still a block/tap, not defence', () => {
   const safe = ctx({ safeGestures: true, ballSpeed: 9 });
   assert.equal(lib.classifyStroke(M({ dist: .03, holdT: .4, peakSpeed: .2, releaseSpeed: .2, speed: .2 }), safe, .1).id, 'BLOCK');
 });
+
+test('moves in one RAF preserve pointerdown and recompute coalesced metrics', () => {
+  const sw = new lib.SwipeTracker();
+  sw.down(.5, .75, 0);
+  sw.move(.51, .72, 0);
+  sw.move(.53, .66, 0);
+  assert.deepEqual(JSON.parse(JSON.stringify(sw.samples[0])), { x: .5, y: .75, t: 0 });
+  assert.equal(sw.m.sy, .75);
+  assert.ok(sw.m.dist > .09);
+  sw.up(.53, .66, .02);
+  assert.equal(lib.isRealStroke(sw.lastReleased, true), true);
+  assert.equal(sw.lastReleased.holdT, 0, 'motion at time zero is not a hold');
+});
+
+test('coalescing a high-frequency move keeps hold time and live metrics current', () => {
+  const sw = new lib.SwipeTracker();
+  sw.down(.5, .75, 1);
+  sw.move(.501, .749, 1.01);
+  sw.move(.53, .69, 1.011);
+  assert.ok(sw.m.dist > .06);
+  assert.ok(sw.m.holdT < .02);
+  assert.equal(sw.m.x, .53);
+  assert.ok(Number.isFinite(sw.m.speed));
+});

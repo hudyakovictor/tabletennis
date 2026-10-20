@@ -2,7 +2,7 @@ const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const { load } = require('./helpers.cjs');
 const lib = load(['10_math.js', '30_physics.js', '38_paddle_motion.js', '40_swipe.js', '56_rig.js'],
-  ['PaddleStrokeMotion', 'PaddleReadClock', 'PaddleRig', 'paddleGripProfile', 'paddleContactRange',
+  ['paddleFollowPosition', 'PaddleStrokeMotion', 'PaddleReadClock', 'PaddleRig', 'paddleGripProfile', 'paddleContactRange',
     'paddleForehand', 'stepPaddleAngle', 'paddleAngleDelta', 'paddleBottomExtent', 'keepPaddleAboveTable',
     'faceFromWrist', 'paddleFaceAngles', 'playerWristPose', 'deriveStroke', 'refineRacket', 'classifyStroke',
     'strokeFrame', 'resolvedRacketFrame', 'SwipeTracker', 'impactRacket', 'predict', 'PH', 'V3', 'Q', 'M4', 'DEG']);
@@ -11,7 +11,7 @@ const near = (a, b, eps = 1e-9) => assert.ok(Math.abs(a - b) < eps, `${a} != ${b
 
 for (const grip of ['shakehand', 'penhold']) for (const hand of ['right', 'left']) {
   test(`${grip}/${hand}: exact physical contact, correct stroke-specific follow, complete recovery`, () => {
-    for (const stroke of ['DRIVE', 'LOOP', 'CHOP', 'PUSH', 'BLOCK', 'SERVE_TOP']) {
+    for (const stroke of ['DRIVE', 'LOOP', 'CHOP', 'PUSH', 'BLOCK', 'SMASH', 'HOOK', 'FADE', 'LOB', 'SERVE_TOP', 'SERVE_BACK', 'SERVE_SIDE', 'SERVE_FAST']) {
       for (const forehand of [true, false]) {
         const profile = lib.paddleGripProfile(grip, stroke, forehand);
         const ready = { yaw: 0, pitch: -profile.ready * DEG, roll: hand === 'left' ? -.3 : .3 };
@@ -19,12 +19,14 @@ for (const grip of ['shakehand', 'penhold']) for (const hand of ['right', 'left'
         const normal = faceFromWrist(V3.new(), yaw, pitch, 1);
         const motion = new PaddleStrokeMotion();
         motion.contact(normal, ready.roll, stroke, grip, hand, forehand);
-        const start = motion.sample(1 / 30, ready);
+        const start = motion.sample(0, ready);
         near(start.pitch, pitch); near(start.yaw, yaw);
         assert.equal(start.stage, 'contact');
-        const hold = motion.sample(.02, ready);
-        near(hold.pitch, pitch); assert.equal(hold.stage, 'contact');
-        const follow = motion.sample(.005 + profile.followTime * .7, ready);
+        const next = motion.sample(1 / 144, ready);
+        assert.equal(next.stage, 'follow');
+        assert.ok(Math.abs(next.pitch - pitch) + Math.abs(next.roll - ready.roll) > 1e-5,
+          'the first positive frame must advance, never hold the contact pose');
+        const follow = motion.sample(profile.followTime * .6, ready);
         assert.equal(follow.stage, 'follow');
         if (profile.follow > profile.contact) assert.ok(follow.pitch < pitch);
         else if (profile.follow < profile.contact) assert.ok(follow.pitch > pitch);
@@ -46,9 +48,9 @@ test('motion at equal timestamps is identical at 30, 60, 120 and 144 FPS', () =>
       m.contact(faceFromWrist(V3.new(), -.25, .3, 1), .4, stroke, grip, 'right');
       m.sample(0, ready);
       let elapsed = 0, value;
-      // Stop at exactly .2 seconds, including a fractional final frame.
-      while (elapsed < .2 - 1e-10) {
-        const dt = Math.min(1 / fps, .2 - elapsed);
+      // Stop at exactly .15 seconds, including a fractional final frame.
+      while (elapsed < .15 - 1e-10) {
+        const dt = Math.min(1 / fps, .15 - elapsed);
         value = m.sample(dt, ready); elapsed += dt;
       }
       outputs.push(value);
@@ -63,7 +65,7 @@ test('motion at equal timestamps is identical at 30, 60, 120 and 144 FPS', () =>
 test('contact remains visible without follow-through and a new stroke interrupts recovery', () => {
   const m = new PaddleStrokeMotion(), ready = { yaw: 0, pitch: -.2, roll: .3 };
   m.contact(faceFromWrist(V3.new(), 0, .4, 1), .3, 'CHOP', 'shakehand', 'right', true, false);
-  near(m.sample(.05, ready).pitch, .4);
+  near(m.sample(0, ready).pitch, .4);
   const recovery = m.sample(.06, ready);
   assert.equal(recovery.stage, 'recover'); assert.ok(recovery.pitch <= .4);
   assert.equal(m.sample(.01, ready, true), null);
@@ -259,7 +261,7 @@ test('penhold follow-through reverses local roll, not the physical contact face'
       const ready = { yaw: 0, pitch: -.3, roll: grip === 'penhold' ? sign * (Math.PI - .052) : sign * .28 };
       const motion = new PaddleStrokeMotion(); motion.contact(normal, ready.roll, 'LOOP', grip, hand, forehand);
       const first = motion.sample(0, ready); near(first.pitch, -.3); near(first.roll, ready.roll);
-      const follow = motion.sample(.025 + motion.profile.followTime * .8, ready);
+      const follow = motion.sample(motion.profile.followTime * .8, ready);
       assert.equal(Math.sign(follow.roll - ready.roll), sign * (grip === 'penhold' ? -1 : 1));
     }
   }
@@ -324,4 +326,41 @@ test('a block may open its face for a ball the spin does not lift', () => {
   const top = lib.paddleContactRange('shakehand', 'BLOCK', true, false, { incomingTop: 300 });
   assert.ok(flat[1] >= 15, `flat-ball block face capped at ${flat[1]}°`);
   assert.equal(top[1], 0, 'topspin keeps the classic closed block');
+});
+
+for (const fps of [30, 60, 120, 144]) test(`contact path at ${fps} Hz: immediate exit, live input, exact recovery`, () => {
+  const p = lib.paddleGripProfile('shakehand', 'LOOP', true);
+  const ft = { active: true, t: 0, anchor: V3.new(.2, 1.1, 1.6), base: null,
+    swingDir: V3.new(.25, .4, -.8), amplitude: p.travel, followTime: p.followTime, recoverTime: p.recoverTime };
+  const target = {tx:.1,ty:1,tz:1.7};
+  lib.paddleFollowPosition(ft, target, 0);
+  near(target.tx, .2); near(target.ty, 1.1); near(target.tz, 1.6);
+  const next = {tx:.1,ty:1,tz:1.7}; lib.paddleFollowPosition(ft, next, 1/fps);
+  assert.ok(next.tz < 1.6 && next.ty > 1.1, 'bat exits contact on the very next frame');
+  const a = {...ft, anchor:{...ft.anchor},base:{...ft.base}}, b = {...a,anchor:{...a.anchor},base:{...a.base}};
+  const t1={tx:.1,ty:1,tz:1.7}, t2={tx:.15,ty:1,tz:1.7};
+  lib.paddleFollowPosition(a,t1,1/fps);lib.paddleFollowPosition(b,t2,1/fps);
+  near(t2.tx-t1.tx,.05,1e-8); // no animation lock or second positional low-pass
+  for(let i=0;i<fps;i++){const t={tx:.1,ty:1,tz:1.7};lib.paddleFollowPosition(ft,t,1/fps);
+    assert.ok(Object.values(t).every(Number.isFinite));
+    if(!ft.active){near(t.tx,.1);near(t.ty,1);near(t.tz,1.7);return;}}
+  assert.fail('recovery did not finish');
+});
+
+test('new gesture interrupts every authored stroke on the first frame', () => {
+  for (const stroke of ['LOOP','CHOP','BLOCK','SMASH','HOOK','FADE','SERVE_TOP']) {
+    const m=new PaddleStrokeMotion(), ready={yaw:0,pitch:0,roll:0};
+    m.contact(V3.new(0,0,-1),0,stroke,'shakehand','right');
+    m.sample(.04,ready);assert.equal(m.sample(1/144,ready,true),null);
+    assert.equal(m.active,false);
+  }
+});
+
+test('forehand/backhand yaw mirrors without reversing vertical spin technique', () => {
+  for (const grip of ['shakehand','penhold']) {
+    const fh=lib.paddleGripProfile(grip,'LOOP',true),bh=lib.paddleGripProfile(grip,'LOOP',false);
+    assert.ok(fh.yawTravel*bh.yawTravel<0);assert.ok(fh.follow>fh.contact&&bh.follow>bh.contact);
+    assert.notEqual(lib.paddleGripProfile(grip,'SMASH').travel,lib.paddleGripProfile(grip,'BLOCK').travel);
+    assert.ok(lib.paddleGripProfile(grip,'HOOK').roll*lib.paddleGripProfile(grip,'FADE').roll<0);
+  }
 });

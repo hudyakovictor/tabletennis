@@ -73,6 +73,24 @@ function initTelegramHost() {
     }
     window.__game = game;
 
+    /* ?cut=… debug switches (see Game.cut): show which group is disabled and,
+     * for `hud`, take the whole overlay off the screen so a match can be played
+     * with nothing redrawing above the canvas. */
+    const cuts = Object.keys(game.cut || {}).filter(k => game.cut[k]);
+    if (game.cut && game.cut.hud) {
+      const hud = document.getElementById('hud');
+      if (hud) hud.style.display = 'none';
+    }
+    if (cuts.length) {
+      const tag = document.createElement('div');
+      tag.textContent = 'CUT ' + cuts.join('+');
+      tag.style.cssText = 'position:fixed;right:12px;bottom:12px;z-index:9999;pointer-events:none;' +
+        'font:700 11px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:.08em;' +
+        'color:#ffd34d;background:rgba(0,0,0,.62);border:1px solid rgba(255,211,77,.35);' +
+        'padding:3px 8px;border-radius:6px';
+      document.body.appendChild(tag);
+    }
+
     /* The menu is the landing screen, so ask for its soundtrack now. The
      * request is remembered by the engine and only actually starts once a
      * gesture has unlocked WebAudio (see dismissSplash) and the sample has
@@ -93,8 +111,64 @@ function initTelegramHost() {
     // main loop
     let last = performance.now();
     let acc = 0;
+    /* ?diag=1: record every frame for 45 s together with the hit and point
+     * events, then download the report. Reading frame times on the machine that
+     * actually stutters beats any amount of guessing from here. */
+    const diag = game.diagMode ? { t0: performance.now(), frames: [], events: [], done: false,
+      env: { ua: navigator.userAgent, dpr: devicePixelRatio || 1, w: innerWidth, h: innerHeight,
+        screen: [screen.width, screen.height], hz: 0 } } : null;
+    if (diag) {
+      window.__diag = diag;
+      const tag = document.createElement('div');
+      tag.style.cssText = 'position:fixed;left:12px;top:12px;z-index:9999;pointer-events:none;' +
+        'font:700 12px/1.6 ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:.06em;' +
+        'color:#7ff0c0;background:rgba(0,0,0,.68);border:1px solid rgba(127,240,192,.35);' +
+        'padding:4px 10px;border-radius:6px';
+      document.body.appendChild(tag);
+      const started = performance.now();
+      const saved = () => {
+        const url = URL.createObjectURL(new Blob([JSON.stringify(diag)], { type: 'application/json' }));
+        const a = document.createElement('a');
+        a.href = url; a.download = 'topspin-diag.json'; a.click();
+        setTimeout(() => URL.revokeObjectURL(url), 3000);
+      };
+      const finish = () => {
+        if (diag.done) return;
+        diag.done = true;
+        if (performance.memory) diag.env.heapMB = Math.round(performance.memory.usedJSHeapSize / 1048576);
+        /* Display rate from the median of the early steady frames, not from the
+         * first one — the very first gap after load is always a long startup. */
+        const dts = [];
+        for (let i = 1; i < Math.min(diag.frames.length, 400); i += 2) dts.push(diag.frames[i]);
+        dts.sort((a, b) => a - b);
+        if (dts.length) diag.env.hz = Math.round(1000 / dts[Math.floor(dts.length / 2)]);
+        /* Chrome occasionally swallows a programmatic download, so the badge
+         * becomes the retry button — one click and the file is there. */
+        tag.textContent = 'DIAG saved — клик, если файла нет';
+        tag.style.color = '#ffd34d';
+        tag.style.pointerEvents = 'auto';
+        tag.style.cursor = 'pointer';
+        tag.onclick = saved;
+        saved();
+      };
+      const tick = () => {
+        if (diag.done) return;
+        const left = 45 - (performance.now() - started) / 1000;
+        tag.textContent = 'DIAG ' + Math.max(0, left).toFixed(0) + 's  ' +
+          diag.frames.length + 'f  peak ' + game.peakMs.toFixed(0) + 'ms';
+        if (left <= 0) finish(); else requestAnimationFrame(tick);
+      };
+      requestAnimationFrame(tick);
+      document.addEventListener('visibilitychange', () => diag.events.push({
+        t: Math.round(performance.now() - diag.t0), k: document.hidden ? 'hide' : 'show' }));
+    }
     function frame(now) {
-      const dt = Math.min((now - last) / 1000, 0.1);
+      const ms = now - last;
+      if (game.noteFrame && !document.hidden) game.noteFrame(ms);
+      if (diag && !diag.done) {
+        diag.frames.push(Math.round(now - diag.t0), Math.round(ms * 10) / 10);
+      }
+      const dt = Math.min(ms / 1000, 0.1);
       last = now;
       if (!game.paused) game.update(dt);
       game.render();
@@ -105,18 +179,32 @@ function initTelegramHost() {
 
     // A real brand splash, dismissible immediately once the game is ready.
     const splash = document.getElementById('loading');
-    const dismissSplash = () => {
-      splash.classList.add('off');
-      window.removeEventListener('keydown', splashKey);
-      // The splash tap is the first user gesture: unlock audio and let the
-      // pending menu soundtrack begin.
+    /* Browsers only let an AudioContext start inside a real gesture, and the
+     * 1.6 s auto-dismiss is not one. It used to call init()/resume() anyway,
+     * which logged three "AudioContext was not allowed to start" warnings on
+     * every load and left a context suspended until the next click. So the
+     * timer only hides the splash; audio is unlocked by the first real
+     * pointerdown or keydown, splash still up or not. */
+    let audioUnlocked = false;
+    const unlockAudio = () => {
+      if (audioUnlocked) return;
+      audioUnlocked = true;
       game.audio.init(); game.audio.resume();
       if (document.querySelector('#menu.on')) game.audio.menuMusic(true);
     };
-    const splashKey = (e) => { if (e.key === 'Enter' || e.key === ' ') dismissSplash(); };
-    splash.addEventListener('pointerdown', dismissSplash, { once: true });
+    const splashKey = (e) => {
+      if (e.key !== 'Enter' && e.key !== ' ') return;
+      hideSplash(); unlockAudio();
+    };
+    const hideSplash = () => {
+      splash.classList.add('off');
+      window.removeEventListener('keydown', splashKey);
+    };
+    splash.addEventListener('pointerdown', () => { hideSplash(); unlockAudio(); }, { once: true });
     window.addEventListener('keydown', splashKey);
-    setTimeout(dismissSplash, 1600);
+    window.addEventListener('pointerdown', unlockAudio, { once: true });
+    window.addEventListener('keydown', unlockAudio, { once: true });
+    setTimeout(hideSplash, 1600);
   };
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start);

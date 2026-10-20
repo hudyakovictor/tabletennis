@@ -16,11 +16,11 @@ const HIT_FEEDBACK = {
   // Particle system tuning
   PARTICLES: {
     baseCount: 8,
-    qualityMultiplier: 22,
+    qualityMultiplier: 10,
     speedMultiplier: 0.6,
-    maxCount: 60,
-    minSize: 0.008,
-    maxSize: 0.035,
+    maxCount: 24,
+    minSize: 0.004,
+    maxSize: 0.012,
   },
 
   // Camera shake tuning
@@ -63,7 +63,7 @@ class HitFeedbackSystem {
     this._audio = game.audio;
     this._camera = game;
     this._hapticEnabled = true;
-    this._lastHitTime = 0;
+    this._lastHitTime = -Infinity;
     this._cooldown = 0.05;  // prevent feedback spamming
   }
 
@@ -83,16 +83,16 @@ class HitFeedbackSystem {
    */
   execute(ctx) {
     const now = this.game.time;
-    if (now - this._lastHitTime < this._cooldown) return;
+    if (now >= this._lastHitTime && now - this._lastHitTime < this._cooldown) return;
     this._lastHitTime = now;
 
     // Determine spin characteristics
     const spin = ctx.spin || V3.new();
     const spinMag = V3.len(spin);
-    const spinType = this.determineSpinType(spin);
+    const spinType = this.determineSpinType({ ...spin, x: spin.x * (ctx.side || 1) });
 
     // Quality-based scaling
-    const quality = clamp(ctx.quality || 1, 0, 1);
+    const quality = clamp(Number.isFinite(ctx.quality) ? ctx.quality : 1, 0, 1);
     const speed = ctx.speed || 0;
 
     // ---- VISUAL FEEDBACK ----
@@ -110,7 +110,7 @@ class HitFeedbackSystem {
 
   /**
    * Determine spin type from spin vector.
-   * Convention: +w.x = topspin (ball top moves forward)
+   * Convention for the near player: -w.x = topspin; mirror for far side
    */
   determineSpinType(spin) {
     const w = spin;
@@ -119,7 +119,7 @@ class HitFeedbackSystem {
     const slice = Math.abs(w.z);
 
     if (top > side * 1.5 && top > slice * 1.5) {
-      return w.x > 0 ? 'topspin' : 'backspin';
+      return w.x < 0 ? 'topspin' : 'backspin';
     }
     if (side > top * 1.2 && side > slice * 1.2) {
       return w.y > 0 ? 'sidespin-right' : 'sidespin-left';
@@ -132,14 +132,15 @@ class HitFeedbackSystem {
    */
   visual(quality, speed, spinType, spinMag, ctx) {
     const game = this.game;
+    if (game.reducedMotion) return;
 
     // ---- Particle burst ----
     const baseCount = HIT_FEEDBACK.PARTICLES.baseCount;
-    const count = Math.min(
-      HIT_FEEDBACK.PARTICLES.maxCount,
-      Math.floor(baseCount + quality * HIT_FEEDBACK.PARTICLES.qualityMultiplier
-        + speed * HIT_FEEDBACK.PARTICLES.speedMultiplier)
-    );
+    const compact = ['BLOCK', 'PUSH', 'DROP'].includes(ctx.stroke);
+    const weight = compact ? .45 : ctx.isServeStroke ? .70 : 1;
+    const count = Math.min(HIT_FEEDBACK.PARTICLES.maxCount,
+      Math.floor((baseCount + quality * HIT_FEEDBACK.PARTICLES.qualityMultiplier
+        + speed * HIT_FEEDBACK.PARTICLES.speedMultiplier) * weight));
 
     // Particle colors based on spin type
     let colors;
@@ -170,11 +171,11 @@ class HitFeedbackSystem {
 
     // Burst particles
     const contactP = ctx.contactPoint || game.ball.p;
-    this._particles.burst(
+    game.emitParticles(
       contactP.x, contactP.y, contactP.z,
       count,
       0.8 + speed * 0.04,
-      0.25 + quality * 0.15,
+      0.10 + quality * 0.12,
       sizeBase + sizeRange * quality,
       colors.r, colors.g, colors.b,
       { x: -dir.x * 0.5, y: -dir.y * 0.5, z: -dir.z * 0.5 }
@@ -199,39 +200,17 @@ class HitFeedbackSystem {
    */
   audio(quality, speed, spinType, spinMag, ctx) {
     const audio = this._audio;
-    if (!audio || !audio.initialized) return;
+    if (!audio || !audio.ok) return;
 
-    // ---- Layer 1: Wood impact (body sound) ----
-    // Quality determines wood vs rubber ratio
-    const woodVolume = HIT_FEEDBACK.AUDIO.woodHitBase * (1 - quality * 0.4);
-    // Higher quality = more wood, less rubber
-    const woodPitch = 0.9 + quality * 0.2 + speed * 0.005;
-
+    // Body and rubber brush share one correctly-scaled impulse sound.
     if (audio.hitRacket) {
-      audio.hitRacket(speed * 3.6, 0, quality < 0.4);
+      audio.hitRacket(speed, ctx.contactSlip || 0, !!ctx.softHit || quality < 0.4);
     }
 
-    // ---- Layer 2: Rubber friction (spin sound) ----
-    if (spinMag > 30) {
-      const frictionVolume = HIT_FEEDBACK.AUDIO.rubberFrictionBase
-        * (spinMag / 100) * HIT_FEEDBACK.AUDIO.spinVolumeMultiplier;
-      // Higher spin = more friction sound
-      const frictionPitch = 0.8 + spinMag / 500;
-      // Play friction sound (whoosh-like)
-      if (audio.whoosh) {
-        audio.whoosh(clamp(spinMag / 80, 0, 1));
-      }
-    }
-
-    // ---- Layer 3: Air whoosh (speed sound) ----
-    if (speed > 8) {
-      const whooshVolume = HIT_FEEDBACK.AUDIO.whooshBase
-        * ((speed - 8) / 20) * (1 + quality * 0.2);
-      // Whoosh is already handled in swipe, but reinforce on hit
-      if (audio.whoosh) {
-        audio.whoosh(clamp((speed - 8) / 25, 0, 0.6));
-      }
-    }
+    // One optional air layer, never two overlapping whooshes. Rubber
+    // brush is already proportional to contactSlip inside hitRacket().
+    if (audio.whoosh && speed > 12 && !ctx.isServeStroke)
+      audio.whoosh(clamp((speed - 12) / 24, 0, .4));
 
     // ---- Layer 4: Special event sounds ----
     if (ctx.isNetCord) {
@@ -250,8 +229,7 @@ class HitFeedbackSystem {
    * Haptic feedback: variable vibration patterns.
    */
   haptic(quality, speed, spinType, ctx) {
-    if (!this._hapticEnabled) return;
-    if (!navigator.vibrate) return;
+    if (!this._hapticEnabled || ctx.side < 0 || !this.game.settings.haptics) return;
 
     // Quality-based pattern selection
     let pattern;
@@ -262,6 +240,10 @@ class HitFeedbackSystem {
       pattern = HIT_FEEDBACK.HAPTIC.EDGE_BALL;
     } else if (ctx.isWinner && ctx.side > 0) {
       pattern = HIT_FEEDBACK.HAPTIC.WINNER;
+    } else if (ctx.isServeStroke) {
+      pattern = HIT_FEEDBACK.HAPTIC.SERVE;
+    } else if (['BLOCK', 'PUSH', 'DROP'].includes(ctx.stroke)) {
+      pattern = HIT_FEEDBACK.HAPTIC.BLOCK;
     } else if (quality > 0.8 && speed > 15) {
       // Big hit — sharp
       pattern = HIT_FEEDBACK.HAPTIC.HIT.map(v => Math.floor(v * 1.3));
@@ -280,12 +262,7 @@ class HitFeedbackSystem {
       pattern[0] = Math.floor(pattern[0] * (0.5 + speed * 0.05));
     }
 
-    // Execute
-    try {
-      navigator.vibrate(pattern);
-    } catch (e) {
-      // Ignore — device may not support
-    }
+    this.game.buzz(pattern);
   }
 
   /**
@@ -293,12 +270,15 @@ class HitFeedbackSystem {
    */
   camera(quality, speed, ctx) {
     const game = this.game;
+    if (game.reducedMotion) return;
 
     // Layer 1: Micro shake on impact
     const shakeBase = HIT_FEEDBACK.CAMERA.shakeBase;
     const shakeSpeed = speed * HIT_FEEDBACK.CAMERA.shakeSpeedMultiplier;
     const shakeQuality = quality * HIT_FEEDBACK.CAMERA.shakeQualityMultiplier;
     let shakeAmount = shakeBase + shakeSpeed + shakeQuality;
+    const compact = ['BLOCK', 'PUSH', 'DROP'].includes(ctx.stroke);
+    shakeAmount *= ctx.side < 0 ? .35 : compact ? .40 : 1;
     shakeAmount = Math.min(HIT_FEEDBACK.CAMERA.maxShake, shakeAmount);
 
     if (shakeAmount > 0.005) {
@@ -308,13 +288,8 @@ class HitFeedbackSystem {
       game.shakeDir = V3.norm(V3.new(dirX, 0.3, dirZ), V3.new(dirX, 0.3, dirZ));
     }
 
-    // Layer 2: Speed-based FOV pulse on big hits
-    if (speed > 20 && quality > 0.6) {
-      const fovPulse = (speed - 20) * 0.02;
-      if (game.camFov !== undefined) {
-        game.camFov = (game.camFov || 48) + fovPulse;
-      }
-    }
+    // No permanent FOV mutation on impact: the camera must not drift
+    // further away on every smash.
 
     // Layer 3: Judgement line flash on perfect shots
     if (quality > 0.9 && speed > 15) {

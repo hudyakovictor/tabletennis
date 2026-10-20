@@ -33,10 +33,14 @@
       <div id="playStatus" role="status" aria-live="polite"></div>
     </div>
 
-    <!-- Read-only objective; the entire gesture area stays free of controls. -->
-    <div id="train" role="status" aria-live="polite" aria-atomic="true">
-      <div class="th"><span id="trStep"></span><b id="trTitle"></b><span id="trProgress"></span></div>
-      <div id="trTip"></div><div id="trMsg"></div>
+    <!-- Read-only objective, plus the ONE control training may take: the
+         preview is started by this button, never by itself. -->
+    <div id="train" role="group" aria-label="Обучение">
+      <div id="trText" role="status" aria-live="polite" aria-atomic="true">
+        <div class="th"><span id="trStep"></span><b id="trTitle"></b><span id="trProgress"></span></div>
+        <div id="trTip"></div><div id="trMsg"></div>
+      </div>
+      <button id="trDemo" class="tbt" type="button" aria-pressed="false">ПОКАЗАТЬ, КАК ИГРАТЬ</button>
     </div>
 
     <div id="dbg"></div>

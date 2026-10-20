@@ -9,6 +9,10 @@ const PADDLE_PROFILES = Object.freeze({
   PUSH: Object.freeze({ keys: Object.freeze([15, -10, -25, -30]), range: Object.freeze([15, 40]), roll: -.10, follow: .10, recover: .17 }),
   FLICK: Object.freeze({ keys: Object.freeze([15, 0, 20, 28]), range: Object.freeze([-30, -5]), roll: .20, follow: .09, recover: .16 }),
   BLOCK: Object.freeze({ keys: Object.freeze([15, 8, 8, 10]), range: Object.freeze([-15, 0]), roll: .03, follow: .06, recover: .13 }),
+  SMASH: Object.freeze({ keys: Object.freeze([15, 2, 18, 38]), range: Object.freeze([-35, 5]), roll: .13, follow: .08, recover: .16 }),
+  HOOK: Object.freeze({ keys: Object.freeze([15, 8, 22, 30]), range: Object.freeze([-45, 30]), roll: .34, follow: .11, recover: .17 }),
+  FADE: Object.freeze({ keys: Object.freeze([15, 8, 22, 30]), range: Object.freeze([-45, 30]), roll: -.34, follow: .11, recover: .17 }),
+  LOB: Object.freeze({ keys: Object.freeze([15, -15, -5, 12]), range: Object.freeze([-45, 45]), roll: .08, follow: .16, recover: .20 }),
   SERVE: Object.freeze({ keys: Object.freeze([15, -20, 0, 25]), range: Object.freeze([-45, 45]), roll: .20, follow: .12, recover: .20 }),
 });
 function paddleStrokeFamily(stroke) {
@@ -23,11 +27,18 @@ function paddleGripProfile(grip, stroke, forehand = true) {
   const pen = grip === 'penhold', k = base.keys;
   const loop = pen && family === 'LOOP';
   const contact = loop ? (forehand ? 25 : 30) : k[2];
+  const travel = { DRIVE: .13, LOOP: .18, CHOP: .15, PUSH: .055, FLICK: .09,
+    BLOCK: .025, SMASH: .20, HOOK: .14, FADE: .14, LOB: .17, SERVE: .12 };
+  const serveBack = stroke === 'SERVE_BACK';
+  const sideRoll = stroke === 'SERVE_SIDE' ? .34 : base.roll;
   return { family, ready: pen ? 5 : k[0], prepare: k[1], contact,
     follow: loop ? contact + (forehand ? 7 : 12) : k[3],
     // Reverse-penhold backhand needs more wrist travel than the forehand.
-    roll: base.roll * (pen ? (forehand ? 1.15 : 1.45) : 1),
+    roll: (serveBack ? -.18 : sideRoll) * (pen ? (forehand ? 1.15 : 1.45) : 1),
     followTime: base.follow, recoverTime: base.recover,
+    travel: travel[family] * (pen ? .85 : 1),
+    yawTravel: (family === 'HOOK' ? .23 : family === 'FADE' ? -.23
+      : family === 'BLOCK' ? .015 : .07) * (forehand ? 1 : -1),
     range: loop ? (forehand ? [-30, -10] : [-40, -15]) : base.range };
 }
 // A narrow dead band prevents tiny touch noise flipping the FH/BH grip.
@@ -99,9 +110,10 @@ function paddleFaceAngles(normal) {
   return { yaw: -Math.atan2(normal.x, -normal.z), pitch: Math.asin(clamp(normal.y / length, -1, 1)) };
 }
 
-/** Physical impact -> contact hold -> authored follow -> recovery.
- * The first sample is EXACTLY the assisted impact normal, even when physics
- * and drawing happen in the same render frame. No frame-counted timers. */
+/** Physical impact -> immediate follow -> recovery.
+ * contact() installs the exact impact pose in Game before rendering.
+ * sample(0) reads it; the very next positive dt MUST advance. There is no
+ * contact hold, skipped first frame, hit-stop or second angular low-pass. */
 class PaddleStrokeMotion {
   constructor() { this.reset(); }
   reset() { this.active = false; this.stage = 'ready'; this.elapsed = 0; this.fresh = false; }
@@ -111,33 +123,66 @@ class PaddleStrokeMotion {
     this.hand = hand === 'left' ? -1 : 1;
     this.rollDirection = this.hand * (grip === 'penhold' ? -1 : 1);
     this.followEnabled = followEnabled;
-    this.elapsed = 0; this.fresh = true; this.active = true; this.stage = 'contact';
+    this.elapsed = 0; this.fresh = false; this.active = true; this.stage = 'contact';
   }
   sample(dt, ready, interrupt = false) {
     if (interrupt) this.reset();
     if (!this.active) return null;
-    if (this.fresh) this.fresh = false;
-    else if (Number.isFinite(dt) && dt > 0) this.elapsed += dt;
-    const p = this.profile, hold = .025;
+    if (Number.isFinite(dt) && dt > 0) this.elapsed += dt;
+    const p = this.profile;
     const follow = this.followEnabled ? p.followTime : 0;
-    const end = hold + follow + p.recoverTime;
+    const end = follow + p.recoverTime;
     if (this.elapsed >= end) { this.reset(); return null; }
     const delta = this.followEnabled ? -(p.follow - p.contact) * DEG : 0;
     const followPitch = clamp(this.start.pitch + delta, -1.15, 1.05);
     const followRoll = this.start.roll + (this.followEnabled ? this.rollDirection * p.roll : 0);
-    if (this.elapsed <= hold) { this.stage = 'contact'; return { ...this.start, stage: this.stage }; }
-    if (follow && this.elapsed < hold + follow) {
+    if (this.elapsed === 0) { this.stage = 'contact'; return { ...this.start, stage: this.stage }; }
+    const followYaw = this.start.yaw + (this.followEnabled ? this.hand * p.yawTravel : 0);
+    if (follow && this.elapsed < follow) {
       this.stage = 'follow';
-      const t = smoothstep(0, 1, (this.elapsed - hold) / follow);
-      return { yaw: this.start.yaw, pitch: lerp(this.start.pitch, followPitch, t),
+      // Non-zero exit velocity at contact; zero velocity at full extension.
+      const u = clamp(this.elapsed / follow, 0, 1), t = 1 - (1 - u) ** 2;
+      return { yaw: lerp(this.start.yaw, followYaw, t), pitch: lerp(this.start.pitch, followPitch, t),
         roll: lerp(this.start.roll, followRoll, t), stage: this.stage };
     }
     this.stage = 'recover';
-    const t = smoothstep(0, 1, (this.elapsed - hold - follow) / p.recoverTime);
-    return { yaw: this.start.yaw + paddleAngleDelta(this.start.yaw, ready.yaw) * t,
+    const t = smoothstep(0, 1, (this.elapsed - follow) / p.recoverTime);
+    return { yaw: followYaw + paddleAngleDelta(followYaw, ready.yaw) * t,
       pitch: lerp(followPitch, ready.pitch, t),
       roll: followRoll + paddleAngleDelta(followRoll, ready.roll) * t, stage: this.stage };
   }
+}
+
+/** Contact-anchored positional path, in real seconds. The input target delta
+ * is additive even during follow-through: animation never locks the mouse.
+ * Called once per update, BEFORE the normal limits/table support.
+ *
+ * `lim` are the hard spatial limits applied later in updatePlayerPaddle. An
+ * authored path that runs into one of them used to be clipped and then held
+ * against the wall for the rest of the phase — the blade visibly parked at the
+ * top of its range right after contact, which read as a freeze at the hit.
+ * Now the phase ends the moment the path would leave the box, so the bat is
+ * handed straight back to the cursor instead of being held in a clamp. */
+function paddleFollowPosition(ft, target, dt, lim) {
+  if (!ft || !ft.active) return false;
+  if (!ft.base) ft.base = { ...target };
+  if (Number.isFinite(dt) && dt > 0) ft.t += dt;
+  const follow = ft.followTime, recover = ft.recoverTime;
+  const u = clamp(ft.t / Math.max(follow, 1e-6), 0, 1);
+  const reach = ft.amplitude * (1 - (1 - u) ** 2);
+  const blend = smoothstep(0, 1, (ft.t - follow) / Math.max(recover, 1e-6));
+  const out = {};
+  for (const [key, axis] of [['tx', 'x'], ['ty', 'y'], ['tz', 'z']]) {
+    const path = ft.anchor[axis] + ft.swingDir[axis] * reach + target[key] - ft.base[key];
+    if (lim && (path < lim[axis + 'Lo'] || path > lim[axis + 'Hi'])) {
+      ft.active = false;
+      return false;
+    }
+    out[key] = lerp(path, target[key], blend);
+  }
+  target.tx = out.tx; target.ty = out.ty; target.tz = out.tz;
+  if (ft.t >= follow + recover) ft.active = false;
+  return true;
 }
 
 /** Exact vertical support of the meshes in 60_scene / 56_rig. Includes

@@ -74,9 +74,32 @@ class Game {
   constructor(canvas, ui) {
     this.canvas = canvas;
     this.ui = ui;
+    /* Debug bisect switches, read once from the URL (?cut=hud,fx,blur,audio,path).
+     * Each one hard-disables a whole group of effects, so a stutter can be
+     * attributed to a subsystem by reloading the page, not by rebuilding it.
+     * Not a player-facing option: nothing is persisted and no cut is on by
+     * default. */
+    this.cut = (() => {
+      let params = null;
+      try { params = new URLSearchParams(location.search); } catch (_) {}
+      const q = (params && params.get('cut')) || '';
+      const set = new Set(q.split(',').map(s => s.trim().toLowerCase()).filter(Boolean));
+      return { hud: set.has('hud'), fx: set.has('fx'), blur: set.has('blur'),
+        audio: set.has('audio'), path: set.has('path'),
+        ft: set.has('ft'), antic: set.has('antic'), guard: set.has('guard') };
+    })();
+    /* ?diag=1 records frame durations and the events that surround them, then
+     * downloads the report — the only way to see the numbers on a machine we
+     * cannot profile (the console blocks pasting on the user's side). */
+    this.diagMode = (() => {
+      try { return new URLSearchParams(location.search).get('diag') === '1'; } catch (_) { return false; }
+    })();
+    if (this.diagMode) this.cut = { hud: false, fx: false, blur: false, audio: false, path: false,
+      ft: false, antic: false, guard: false };
     this.R = new Renderer(canvas, { quality: 'high' });
     this.scene = new Scene(this.R, 'arena');
     this.audio = new AudioEngine();
+    if (this.cut.audio) this.audio.disabled = true;
     this.ai = new OpponentAI(2);
     this.swipe = new SwipeTracker();
     this.particles = new Particles();
@@ -128,7 +151,7 @@ class Game {
       aimAssist: 0.85,       // trajectory correction (authored .85)
       footAssist: 0.85,      // footwork auto-approach (authored .85)
       batSens: 1,            // cursor gain (authored 1)
-      slowmoOnBigShots: true,
+      slowmoOnBigShots: false, // no automatic hit-stop; explicit slowmo remains available
       targetScore: 11,
       spinBias: 'norm',
       gestureProfile: defaultGestureProfile(),   // 'classic' | 'safe'
@@ -149,6 +172,7 @@ class Game {
      * smoke suite: 2 of 3 matches failed to boot once localStorage was warm. */
     installUnifiedControls(this.settings);
     this.loadSettings();
+    if (this.cut.path) this.settings.showPredict = false;
 
     this.ball = {
       p: V3.new(0, PH.TABLE_Y + 0.3, 1.2), v: V3.new(), w: V3.new(),
@@ -268,6 +292,7 @@ class Game {
     this.serveHint = 0;
     this._acc = 0;
     this._fpsT = 0; this._fpsN = 0; this.fps = 60;
+    this.peakMs = 0; this._peakAcc = 0;
 
     this.bindInput();
 
@@ -299,6 +324,90 @@ class Game {
   }
 
   /* ----------------------------- input ---------------------------- */
+  measurePressZone(pointer, pointerType) {
+    const rect = this.canvas.getBoundingClientRect();
+    const serveReady = this.state === GS.SERVE_READY && this.server === 1;
+    const servePress = (serveReady || this.state === GS.SERVE_TOSS) && this.server === 1;
+    /* Optional admission help: widen the press oval so a press a little
+     * further from the ball still counts (default 1 = authored shape). */
+    const zs = clamp(Number.isFinite(this.settings.zoneScale) ? this.settings.zoneScale : 1, 0.8, 2.5);
+    /* The serve press-zone doubles on top of the accessibility slider so a
+     * press anywhere near the tossed ball always registers. */
+    const serveMul = servePress ? 2 : 1;
+    const zoneSide = (pointerType === 'mouse' ? MATCH_RULES.ovalSideMousePx : MATCH_RULES.ovalSideTouchPx) * zs * serveMul;
+    const ballZone = pressZoneForBall(this.ball, pointer, rect.width, rect.height, {
+      project: point => this.project(point, {}), pointerType,
+      referenceWorld: this.player && this.player.pos,
+      kind: servePress ? 'serve' : 'rally',
+      deferServeTiming: true,
+      tossApex: this.tossApex, tossStartY: this.tossStartY, tableY: PH.TABLE_Y,
+      sidePx: zoneSide, fwdPx: MATCH_RULES.ovalForwardPx * zs * serveMul,
+      backPx: MATCH_RULES.ovalBackPx * zs * serveMul, forwardMaxPx: MATCH_RULES.ovalForwardMaxPx * zs * serveMul,
+      radius: MATCH_RULES.pressRadiusPx * zs * serveMul,
+    });
+    const zone = ballZone || { accepted: false, shape: MATCH_RULES.zoneShape,
+      radius: MATCH_RULES.pressRadiusPx, distancePx: null, score: null, along: null,
+      across: null, reason: 'OUTSIDE_ZONE', pointerType };
+    // The ready-state press is a TOSS command, not an attempt to hit the
+    // pre-toss ball. The toss moves to the player's stance, so testing the
+    // old ball position here rejects a valid first drag. Its actual stroke
+    // still needs motion, a legal falling toss and physical capture.
+    if (serveReady) {
+      zone.accepted = true;
+      zone.reason = null;
+      zone.via = 'serve-init';
+    }
+    return zone;
+  }
+
+  /* ------------------------ training preview ----------------------- */
+  /* A synthetic hand used by the training demo (65_train.js). It stamps the
+   * SAME press zone, the same stance depth and the same gesture tracker as a
+   * real pointerdown, because the preview must be admitted, aimed and captured
+   * by the real rules — a bot that bypasses them would teach a stroke that
+   * does not work. Only DOM bookkeeping (pointer capture, the shot journal,
+   * which records human attempts) is skipped. */
+  demoPress(x, y) {
+    const n = { x: clamp(x, 0, 1), y: clamp(y, 0, 1) };
+    const rect = this.canvas.getBoundingClientRect();
+    this.swipe.down(n.x, n.y, this.time);
+    this.stanceY = n.y;
+    const zone = this.measurePressZone(n, 'mouse');
+    zone.pressX = n.x; zone.pressY = n.y;
+    zone.vw = rect.width; zone.vh = rect.height;
+    zone.pointerId = -1;
+    zone.pointerType = 'mouse';
+    zone.pressT = this.time;
+    zone.serving = this.state === GS.SERVE_READY || this.state === GS.SERVE_TOSS;
+    this.swipe.pressZone = zone;
+    this.demoPointer = { x: n.x, y: n.y };
+    this.pointerFine = true;
+    this.pointerDown = true;
+    if (this.state === GS.SERVE_READY && this.server === 1) this.startToss();
+  }
+
+  /* `t` lets the preview emit several samples per frame: a swipe's curl is
+   * the turning BETWEEN consecutive samples, so a fast gesture sampled once
+   * a frame loses its curve. Absent, the sample is stamped with the frame. */
+  demoMove(x, y, t) {
+    const n = { x: clamp(x, 0, 1), y: clamp(y, 0, 1) };
+    this.demoPointer = n;
+    if (this.swipe.active) this.swipe.move(n.x, n.y, Number.isFinite(t) ? t : this.time);
+  }
+
+  demoRelease() {
+    const p = this.demoPointer || { x: 0.5, y: 0.55 };
+    if (this.swipe.active) this.swipe.up(p.x, p.y, this.time);
+    this.pointerDown = false;
+    this.swipeReleasedAt = this.time;
+  }
+
+  demoStop() {
+    this.demoPointer = null;
+    this.pointerDown = false;
+    if (this.swipe.active) this.swipe.cancel();
+  }
+
   bindInput() {
     const c = this.canvas;
     /* Screen → surface coordinates. A pointer event with a non-finite or
@@ -306,31 +415,39 @@ class Game {
        canvas with a zero-size rect) used to poison the paddle transform
        permanently: one NaN reached the smoothing filter and the racket
        never came back. Sanitise at the boundary, in one place. */
-    const norm = (e) => {
+    const normXY = (e) => {
       const r = c.getBoundingClientRect();
       const w = r.width > 0 ? r.width : (c.clientWidth || 1);
       const h = r.height > 0 ? r.height : (c.clientHeight || 1);
       let x = (e.clientX - r.left) / w;
       let y = (e.clientY - r.top) / h;
-      /* Outside the canvas the coordinates used to be clamped to
-       * [-0.25 .. 1.25] — a quarter of a screen BEYOND each edge. That is
-       * how the bat got parked somewhere the camera never shows and, since
-       * no further move events arrive once the cursor leaves the window,
-       * it stayed there. The pointer is now always inside 0..1. */
-      if (!Number.isFinite(x)) x = 0.5; else x = clamp(x, 0, 1);
-      if (!Number.isFinite(y)) y = 0.5; else y = clamp(y, 0, 1);
+      if (!Number.isFinite(x)) x = 0.5;
+      if (!Number.isFinite(y)) y = 0.5;
       return { x, y };
     };
+    /* Aiming is clamped: outside the canvas the bat used to be parked a
+       quarter of a screen beyond the edge, where the camera never looks.
+       The gesture is NOT clamped — dragging past the top of the window used
+       to pin every following sample at y=0, so the release speed of a serve
+       flick collapsed exactly when the hand left the page. */
+    const norm = (e) => { const p = normXY(e); return { x: clamp(p.x, 0, 1), y: clamp(p.y, 0, 1) }; };
+    const normRaw = normXY;
 
     // Left pointer = stroke. Right vertical drag = height; wheel = dolly.
     let cameraDrag = null;
+    let strokePointerId = null;
     const ptrs = new Map();
     const dropStroke = () => {
       this.swipe.cancel();
       this.pointerDown = false;
+      strokePointerId = null;
     };
 
-    this.cancelInput = () => { ptrs.clear(); cameraDrag = null; dropStroke(); };
+    this.cancelInput = () => {
+      ptrs.clear(); cameraDrag = null; dropStroke();
+      this.tossQueued = false;
+      if (this.anticipation) this.anticipation.active = false;
+    };
     const down = (e) => {
       if (this.paused || this.state === GS.MENU || this.state === GS.MATCH_END) return;
       if (e.button === 2) {
@@ -344,6 +461,15 @@ class Game {
       this.audio.init(); this.audio.resume();
       ptrs.set(e.pointerId, { x: e.clientX, y: e.clientY });
       e.preventDefault();
+      /* The training preview is not a shot. A press ends it and the drill
+       * serves immediately (Trainer.exitDemo), so taking over costs one click
+       * and never a rejected attempt. The first moments after the preview is
+       * requested belong to the button, which sits over the same canvas on
+       * some layouts — that press is swallowed, not read as a takeover. */
+      if (this.training && this.training.isDemo && this.training.isDemo()) {
+        if (this.time >= (this.training.demoGuardUntil || 0)) this.training.exitDemo();
+        return;
+      }
 
       if (this.replayer.on) { this.skipReplay(); return; }   // tap = skip the reel
       if (ptrs.size >= 2) {                          // a second finger cancels
@@ -355,7 +481,7 @@ class Game {
       // ---- ANTICIPATION TRIGGER ----
       // Before a swipe, pull the paddle back slightly to telegraph
       // the upcoming stroke. This is critical for game feel.
-      if (this.settings.anticipationHint && !this.anticipation.active) {
+      if (this.settings.anticipationHint && !this.reducedMotion && !this.anticipation.active) {
         const centerX = 0.5;
         const dx = n.x - centerX;
         const dy = n.y - 0.55;
@@ -372,29 +498,13 @@ class Game {
         }
       }
 
-      this.swipe.down(n.x, n.y, this.time);
+      const raw = normRaw(e);
+      this.swipe.down(raw.x, raw.y, this.time);
+      strokePointerId = e.pointerId;
+      this.stanceY = n.y;
       const rect = c.getBoundingClientRect();
       const pointerType = e.pointerType || (this.pointerFine === false ? 'touch' : 'mouse');
-      const servePress = this.state === GS.SERVE_TOSS && this.server === 1;
-      /* Optional admission help: widen the press oval so a press a little
-       * further from the ball still counts (default 1 = authored shape). */
-      const zs = clamp(Number.isFinite(this.settings.zoneScale) ? this.settings.zoneScale : 1, 0.8, 2.5);
-      /* The serve press-zone doubles on top of the accessibility slider so a
-       * press anywhere near the tossed ball always registers. */
-      const serveMul = servePress ? 2 : 1;
-      const zoneSide = (pointerType === 'mouse' ? MATCH_RULES.ovalSideMousePx : MATCH_RULES.ovalSideTouchPx) * zs * serveMul;
-      const ballZone = pressZoneForBall(this.ball, n, rect.width, rect.height, {
-        project: point => this.project(point, {}), pointerType,
-        referenceWorld: this.player && this.player.pos,
-        kind: servePress ? 'serve' : 'rally',
-        tossApex: this.tossApex, tossStartY: this.tossStartY, tableY: PH.TABLE_Y,
-        sidePx: zoneSide, fwdPx: MATCH_RULES.ovalForwardPx * zs * serveMul,
-        backPx: MATCH_RULES.ovalBackPx * zs * serveMul, forwardMaxPx: MATCH_RULES.ovalForwardMaxPx * zs * serveMul,
-        radius: MATCH_RULES.pressRadiusPx * zs * serveMul,
-      });
-      this.swipe.pressZone = ballZone || { accepted: false, shape: MATCH_RULES.zoneShape,
-        radius: MATCH_RULES.pressRadiusPx, distancePx: null, score: null, along: null,
-        across: null, reason: 'OUTSIDE_ZONE', pointerType };
+      this.swipe.pressZone = this.measurePressZone(n, pointerType);
       /* Admission is stamped once, here, from the ball at pointerdown.
        * Moving into the zone later, landing on the bat, position assist and
        * CCD are all downstream of this stamp and cannot rewrite it. */
@@ -421,11 +531,12 @@ class Game {
       if (this.state === GS.SERVE_READY && this.server === 1) this.startToss();
     };
 
-    /* Where the bat wants to be. Tracked on the WINDOW, not on the canvas:
-     * a cursor that leaves the canvas keeps sending events here, so the bat
-     * keeps following it instead of freezing at the last in-canvas position
-     * (that freeze was the "bat and cursor are kilometres apart" bug). */
+    // Hover aims only on the play surface. UI/paused/replay movement must
+    // not overwrite the last gameplay target behind an overlay.
     const track = (e) => {
+      const blocked = this.paused || this.replayer.on || this.state === GS.MENU ||
+        this.state === GS.MATCH_END || this.state === GS.POINT;
+      if (this.cut.guard && blocked) return this.pointer;
       const n = norm(e);
       this.pointer = n;
       if (e.pointerType) this.pointerFine = e.pointerType !== 'touch' && e.pointerType !== 'pen';
@@ -435,6 +546,7 @@ class Game {
         if (this.mouseTrail.length > 64) this.mouseTrail.shift();
       }
       this.pointerInside = n.x > 0.001 && n.x < 0.999 && n.y > 0.001 && n.y < 0.999;
+      if (!this.swipe.active && e.pointerType === 'mouse' && !e.buttons) this.stanceY = n.y;
       return n;
     };
 
@@ -447,10 +559,20 @@ class Game {
         e.preventDefault(); return;
       }
       const p = ptrs.get(e.pointerId);
+      // Only the pointer that began the stroke may contribute samples.
+      // Multi-touch cancels until ALL fingers have lifted.
+      if (this.cut.guard && ptrs.size && (ptrs.size > 1 || e.pointerId !== strokePointerId)) return;
+      if (this.cut.guard && !p && (this.swipe.active || (e.pointerType && e.pointerType !== 'mouse'))) return;
+      if (this.cut.guard && (this.paused || this.state === GS.MENU || this.state === GS.MATCH_END || this.replayer.on)) return;
+      if (this.cut.guard && p && e.pointerType === 'mouse' && !(e.buttons & 1)) {
+        this.cancelInput(); // recover from a button-up lost outside the tab
+        track(e); return;
+      }
       if (p) { p.x = e.clientX; p.y = e.clientY; }
+      const raw = normRaw(e);
       const n = track(e);
       if (this.swipe.active && ptrs.size < 2) {
-        this.swipe.move(n.x, n.y, this.time);
+        this.swipe.move(raw.x, raw.y, this.time);
         const sp = this.swipe.m.speed;
         if (sp > 1.6) this.audio.whoosh(clamp(sp / 4, 0, 1.4));
         this.logInput('pointermove', { pointer: n, pointerId: e.pointerId, buttons: e.buttons,
@@ -461,13 +583,16 @@ class Game {
 
     const up = (e) => {
       if (cameraDrag && cameraDrag.id === e.pointerId) { cameraDrag = null; e.preventDefault(); return; }
+      if (!ptrs.has(e.pointerId)) return;
       ptrs.delete(e.pointerId);
       if (e.button === 2 || e.button === 1) { e.preventDefault(); return; }
       if (ptrs.size >= 1) { e.preventDefault(); return; }   // still another finger down
       if (!this.swipe.active) { this.pointerDown = false; return; }
       const n = norm(e);
       this.pointer = n;
-      this.swipe.up(n.x, n.y, this.time);
+      const raw = normRaw(e);
+      this.swipe.up(raw.x, raw.y, this.time);
+      strokePointerId = null;
       this.pointerDown = false;
       this.swipeReleasedAt = this.time;
       this.updateShotDiagnostics();
@@ -477,14 +602,22 @@ class Game {
       e.preventDefault();
     };
 
-    c.addEventListener('pointerdown', (e) => { c.setPointerCapture(e.pointerId); down(e); });
+    c.addEventListener('pointerdown', (e) => {
+      down(e);
+      if (ptrs.has(e.pointerId) || (cameraDrag && cameraDrag.id === e.pointerId)) {
+        try { c.setPointerCapture(e.pointerId); } catch (_) { this.cancelInput(); }
+      }
+    });
     c.addEventListener('pointermove', move);
     c.addEventListener('pointerup', up);
     c.addEventListener('pointercancel', () => this.cancelInput());
     c.addEventListener('lostpointercapture', (e) => { if (ptrs.has(e.pointerId) || (cameraDrag && cameraDrag.id === e.pointerId)) this.cancelInput(); });
     c.addEventListener('contextmenu', (e) => e.preventDefault());
     // Hover movement follows the bat, except while the right button owns the camera.
-    window.addEventListener('pointermove', (e) => { if (!ptrs.size && !cameraDrag && !(e.buttons & 2)) track(e); }, { passive: true });
+    window.addEventListener('pointermove', (e) => {
+      if (e.target !== document.documentElement) return;
+      if (!ptrs.size && !cameraDrag && !e.buttons && e.pointerType === 'mouse') track(e);
+    }, { passive: true });
     window.addEventListener('blur', () => { this.cancelInput(); this.setPaused(true); });
     document.addEventListener('visibilitychange', () => {
       if (document.hidden) { this.cancelInput(); this.setPaused(true); this.profile.save(true); }
@@ -755,7 +888,9 @@ class Game {
     if (this.training) {                 // drills have no score, only feedback
       if (this.shotJournal) this.shotJournal.point(who, reason, this.ball.lastHitBy, this.time);
       this.training.onFault(who, reason);
-      this.ball.live = false;
+      /* The preview is not an attempt: let the demonstration ball finish its
+       * flight instead of vanishing where a point would have been awarded. */
+      if (!(this.training.isDemo && this.training.isDemo())) this.ball.live = false;
       return;
     }
     if (this.state === GS.POINT || this.state === GS.MATCH_END) return;
@@ -791,6 +926,8 @@ class Game {
     });
     if (this.lastMoment && this.ui) this.ui.flashMoment(this.lastMoment, this.moments.kept.indexOf(this.lastMoment));
     this.setState(GS.POINT);
+    if (this.diagMode && typeof window !== 'undefined' && window.__diag)
+      window.__diag.events.push({ t: Math.round(performance.now() - window.__diag.t0), k: 'point', who });
     this.shakeIt(0.5, V3.new(rndSym(1), 1, 0));
 
     const T = this.settings.targetScore;
@@ -904,13 +1041,14 @@ class Game {
   }
 
   shakeIt(amount, dir) {
-    if (this.reducedMotion) return;
+    if (this.reducedMotion || (this.cut && this.cut.fx)) return;
     this.shake = Math.min(1.1, this.shake + amount);
     if (dir) V3.copy(this.shakeDir, V3.norm(dir, dir));
   }
 
   /* -------------------------- impact events ------------------------ */
   applyHit(side, racket, contactP, quality, info) {
+    const cutFx = !!(this.cut && this.cut.fx);   // ?cut=fx debug switch, absent in unit stubs
     if (side < 0 && this.shotJournal) this.shotJournal.returned(this.time);
     const b = this.ball;
     b.lastHitBy = side;
@@ -949,18 +1087,24 @@ class Game {
 
     const name = racket.stroke ? racket.stroke.id : 'DRIVE';
     this.stats.byStroke[name] = (this.stats.byStroke[name] || 0) + 1;
+    if (this.diagMode && typeof window !== 'undefined' && window.__diag)
+      window.__diag.events.push({ t: Math.round(performance.now() - window.__diag.t0),
+        k: 'hit', side, speed: +speed.toFixed(2), stroke: name });
 
-    /* an off-centre contact sounds like wood, not like rubber */
-    const softHit = !!(racket.arch && racket.arch.soft) || (side > 0 && this.lastSweet !== undefined && this.lastSweet < 0.38);
-    this.audio.hitRacket(speed, info ? info.contactSlip : 0, softHit);
-    if (side > 0 && this.lastSweet !== undefined && this.lastSweet < 0.30) this.buzz(16);
-    const col = racket.stroke ? hexToRgb(racket.stroke.col) : [1, 1, 1];
-    this.emitParticles(contactP.x, contactP.y, contactP.z,
-      side > 0 ? 14 : 9, 0.7 + speed * 0.05, 0.32, 0.019, col[0], col[1], col[2],
-      { x: -racket.normal.x * 0.6, y: -racket.normal.y * 0.6, z: -racket.normal.z * 0.6 });
+    // Dispatch once, after final physical/equipment velocity is known.
+    // No duplicate sound, vibration, particle burst or camera impulse.
+    if (this.hitFeedback && !cutFx) {
+      this.hitFeedback.execute({ quality, speed, spin: b.w, contactPoint: contactP,
+        contactNormal: racket.normal, stroke: name, side,
+        isServeStroke: !!racket.isServe, contactSlip: info ? info.contactSlip : 0,
+        softHit: !!(racket.arch && racket.arch.soft) ||
+          (side > 0 && this.lastSweet !== undefined && this.lastSweet < .38) });
+    } else if (!cutFx) {
+      this.audio.hitRacket(speed, info ? info.contactSlip : 0, !!(racket.arch && racket.arch.soft));
+    }
 
     if (side > 0) {
-      this.hitFlash = 1;
+      if (!this.reducedMotion && !cutFx) this.hitFlash = Math.max(this.hitFlash, .35);
       this.lastShotInfo = {
         stroke: racket.stroke, speed: speed * 3.6, spin: spin / TAU,
         topspin: -b.w.x * side, sidespin: b.w.y, quality,
@@ -985,16 +1129,14 @@ class Game {
       if (sid === 'LOOP' || sid === 'COUNTER') this.matchTasks.topspin++;
       else if (sid === 'SMASH') this.matchTasks.smash++;
       else if (sid === 'SERVE_TOP' || sid === 'SERVE_SIDE' || sid === 'SERVE_FAST' || sid === 'SERVE_BACK') this.matchTasks.serves++;
-      this.buzz(Math.round(lerp(8, 26, clamp(speed / 90, 0, 1))));
-      this.shakeIt(clamp(speed / 55, 0.03, 0.38), V3.new(rndSym(0.4), 0.5, 1));
-      if (this.settings.slowmoOnBigShots && speed * 3.6 > 78) this.punchSlowmo(0.42, 0.26);
+      // Live hits never change simulation time. Manual training slowmo and
+      // replay speed are independent, explicit player choices.
       // refresh the landing preview
       if (this.settings.showPredict) {
         predict(V3.clone(b.p), V3.clone(b.v), V3.clone(b.w),
           { dt: 1 / 240, maxT: 2.4, stopOnFirstBounce: true, out: this.predictOut, path: this.predictPath });
       }
     } else {
-      this.shakeIt(clamp(speed / 90, 0.02, 0.18), V3.new(rndSym(0.4), 0.4, -1));
       this.recorder.addShot(-1, {
         stroke: racket.stroke, speed: speed * 3.6, spin: spin / TAU,
         topspin: b.w.x, sidespin: b.w.y, quality, t: this.time,
@@ -1475,6 +1617,9 @@ class Game {
   validatePressDirection(m) {
     const pz = this.swipe && this.swipe.pressZone;
     if (!pz || !pz.accepted || !m) return this.pressAdmitsBall();
+    // A serve flick chooses spin/placement. The initiating press launches
+    // the toss, and cannot be aimed at a ball that has not been tossed yet.
+    if (pz.via === 'serve-init') return true;
     if (pz.directionOk === true) return true;
     if (pz.directionOk === false) return false;
     if (![pz.x, pz.y, pz.pointerX, pz.pointerY, m.dx, m.dy].every(Number.isFinite)) return true;
@@ -1648,7 +1793,11 @@ class Game {
         (b.p.z - pad.pos.z) * b.v.z;
       const inside = playerInCaptureRange(b.p, pad.pos, false, cs);
       const still = b.v.x * b.v.x + b.v.y * b.v.y + b.v.z * b.v.z < 0.04;
-      if (inside && (closing <= 0.02 || still)) {
+      // r·v < 0 means the ball is APPROACHING the blade. Endpoint capture
+      // belongs at closest approach / on departure, not on entry. The
+      // inverted sign used to hit early balls and reject a fresh swing a
+      // few centimetres after the plane had been crossed.
+      if (inside && (closing >= -0.02 || still)) {
         const dx = b.p.x - p0.x, dy = b.p.y - p0.y, dz = b.p.z - p0.z;
         const dd = dx * dx + dy * dy + dz * dz;
         const u = dd > 1e-12
@@ -1721,10 +1870,7 @@ class Game {
       const rawShotFrame = { normal: shotVec(rawNormal), vR: shotVec(rawSwing),
         faceElev: racket.faceElev, swingElevation: racket.elev, swingAzimuth: racket.azSwing,
         faceAzimuth: racket.azFace, speed: racket.vmag, rubber: { ...racket.rubber } };
-      racket = refineRacket(contact, b.v, b.w, racket, assistLvl, quality);
-      if (isServeStroke && racket.valid === false && clamp(assistLvl, 0, 1) < 0.999) {
-        racket = refineRacket(contact, b.v, b.w, racket, 1, quality);
-      }
+      racket = refineRacketRealtime(contact, b.v, b.w, racket, assistLvl, quality);
       racket.sweet = sweet; racket.timing = timing;
       racket.unassisted = rawShotFrame;
     }
@@ -1738,6 +1884,12 @@ class Game {
      * null impact is how a ball that never touched the rubber still counted as
      * returned — and why the next, real attempt was ignored. */
     if (!info) return;
+    // A wind-up must end at impact, not pull the DRAWN blade backwards
+    // while the physical ball has already left the rubber.
+    if (this.anticipation && !this.cut.antic) {
+      this.anticipation.active = false;
+      if (this.anticipation.visualOffset) V3.zero(this.anticipation.visualOffset);
+    }
     {
       const bp = this.R && this.R.viewProj ? this.project(b.p, {}) : null;
       const pp = this.R && this.R.viewProj ? this.project(pad.pos, {}) : null;
@@ -1769,28 +1921,13 @@ class Game {
       const ft = this.followThrough;
       ft.active = true;
       ft.t = 0;
-      ft.duration = .025 + motion.profile.followTime + motion.profile.recoverTime * .5;
-      ft.amplitude = (motion.profile.family === 'BLOCK' ? .025 : motion.profile.family === 'PUSH' ? .055 : .14)
-        * (this.settings.grip === 'penhold' ? .85 : 1);
+      ft.followTime = motion.profile.followTime;
+      ft.recoverTime = motion.profile.recoverTime;
+      ft.duration = ft.followTime + ft.recoverTime;
+      ft.amplitude = motion.profile.travel;
+      ft.anchor = V3.clone(contact); ft.base = null;
       const spd = V3.len(racket.vR) || 1;
       V3.set(ft.swingDir, racket.vR.x / spd, racket.vR.y / spd, racket.vR.z / spd);
-    }
-
-    // Multi-sensory hit feedback (99-level)
-    if (this.hitFeedback) {
-      this.hitFeedback.execute({
-        quality,
-        speed: V3.len(b.v) || 0,
-        spin: b.w,
-        contactPoint: contact,
-        contactNormal: racket.normal,
-        stroke: racket.stroke ? racket.stroke.id : 'DRIVE',
-        power: racket.power,
-        isServeStroke,
-        isNetCord: this.netTouched,
-        isEdge: info && info.edge > 0.25,
-        side: 1,
-      });
     }
 
     if (isServeStroke) { this.serveBounces = 0; this.rallyBounces.length = 0; }
@@ -1879,7 +2016,7 @@ class Game {
      * before the strike was 0.081-0.173 m on 14 of 49 serves. */
     this.recenterT = RECENTER_S;         // no footwork assist while re-centring
     this.tossQueued = false;
-    this.swipe.cancel();
+    if (this.cancelInput) this.cancelInput(); else this.swipe.cancel();
     if (this._paddlePred) this._paddlePred.reach = null;
     if (this._strikePred) this._strikePred.reach = null;
     if (this._volleyPred) this._volleyPred.reach = null;
@@ -1903,18 +2040,20 @@ class Game {
     if (this.recenterT > 0) {
       this.recenterT = Math.max(0, this.recenterT - dt);
       /* release a serve the player asked for during the reset */
-      /* Only a finger that is STILL on the screen may release a queued toss.
-       * A tap during the bat's glide home queued the toss, the finger came
-       * up, and the toss fired anyway — the ball then dropped with no stroke
-       * behind it and the point was lost to «ПОДАЧА НЕ ВЫПОЛНЕНА». */
+      // A ready-state tap requests a toss even if released before the bat
+      // returns home. Pause/reset cancel the queue explicitly.
       if (this.recenterT === 0 && this.tossQueued) {
         this.tossQueued = false;
-        if (this.state === GS.SERVE_READY && this.server === 1 && this.pointerDown) this.startToss();
+        if (this.state === GS.SERVE_READY && this.server === 1) this.startToss();
       }
     }
 
-    let pt = this.pointer || { x: 0.5, y: 0.55 };
+    /* The training preview owns the bat through a synthetic pointer, so the
+     * pupil watches the real racket find the real ball. A real hover must not
+     * fight it — but a broken ghost must never poison the transform either. */
+    let pt = this.demoPointer || this.pointer || { x: 0.5, y: 0.55 };
     if (!Number.isFinite(pt.x) || !Number.isFinite(pt.y)) {
+      this.demoPointer = null;
       pt = { x: 0.5, y: 0.55 };
       this.pointer = pt;                 // self-heal: never stay broken
     }
@@ -1924,7 +2063,7 @@ class Game {
     // flicking the wrist upward must not lunge you over the table
     if (this.swipe.active && this.swipe.m.samples > 0) {
       if (this.stanceY === undefined) this.stanceY = this.swipe.m.sy;
-    } else this.stanceY = pt.y;
+    } else if (this.stanceY === undefined) this.stanceY = pt.y;
     const depthY = this.stanceY !== undefined ? this.stanceY : pt.y;
 
     /* A ball that dies short is a real table-tennis problem, and it used to
@@ -1977,20 +2116,8 @@ class Game {
     let tx = t.tx;
     let ty = t.ty;
     let tz = t.tz;
-    // Position follow-through uses the SAME smoothed/clamped target path.
-    // A squared-sine envelope has zero velocity at both ends; never write
-    // an independent visual position over the simulation after its update.
     const ft = this.followThrough;
-    if (ft && ft.active) {
-      if (this.playerStrokeIntent(this.state === GS.SERVE_TOSS)) ft.active = false;
-      else {
-        const progress = clamp(ft.t / ft.duration, 0, 1);
-        const reach = (ft.amplitude || .14) * Math.sin(progress * Math.PI) ** 2;
-        tx += ft.swingDir.x * reach;
-        ty += ft.swingDir.y * reach;
-        tz += ft.swingDir.z * reach;
-      }
-    }
+    if (ft && ft.active && this.playerStrokeIntent(this.state === GS.SERVE_TOSS)) ft.active = false;
 
     /* On a new point the bat goes HOME first, and while that window is open
      * the cursor is deliberately not obeyed. Without this the reset is
@@ -2106,6 +2233,28 @@ class Game {
     } else {
       this._reachF = 0;
     }
+    // One positional owner: authored contact path, with live pointer deltas.
+    // Apply after stance/footwork, before all spatial safety constraints.
+    t.tx = tx; t.ty = ty; t.tz = tz;
+    /* Where the cursor alone wants the blade. If the authored path has to be
+     * abandoned, this is where the bat is handed back — never the point on a
+     * clamp it never wanted to be at. */
+    const aimX = tx, aimY = ty, aimZ = tz;
+    let contactPath = false;
+    if (this.cut.ft) {
+      // ?cut=ft: no authored contact path, old smoothed follow only.
+      if (ft && ft.active) { ft.t += dt; if (ft.t >= ft.duration) ft.active = false; }
+    } else if (ft && ft.active) {
+      /* The same box the clamps below enforce, so the path can end itself
+       * instead of being clipped into a parked blade. */
+      if (!this._ftLim) this._ftLim = {
+        xLo: -PADDLE_LIMITS.x, xHi: PADDLE_LIMITS.x,
+        yLo: PH.TABLE_Y + PADDLE_LIMITS.yLo, yHi: PH.TABLE_Y + PADDLE_LIMITS.yHi,
+        zLo: PADDLE_LIMITS.zNear, zHi: PADDLE_LIMITS.zFar };
+      contactPath = paddleFollowPosition(ft, t, dt, this._ftLim);
+    }
+    const pathX = t.tx, pathY = t.ty, pathZ = t.tz;
+    tx = t.tx; ty = t.ty; tz = t.tz;
     /* Neither the cursor nor the assist may ever park the bat outside the
      * frame — that is the bug that used to leave it stranded off-screen. */
     if (this.camVPReady) {
@@ -2119,15 +2268,27 @@ class Game {
     tx = clamp(tx, -PADDLE_LIMITS.x, PADDLE_LIMITS.x);
     ty = clamp(ty, PH.TABLE_Y + PADDLE_LIMITS.yLo, PH.TABLE_Y + PADDLE_LIMITS.yHi);
     tz = clamp(tz, zNear, PADDLE_LIMITS.zFar);
+    /* The frustum clamp above is camera-dependent and can bite earlier than the
+     * box, especially at the angles where the table fills the frame. When it
+     * moves the authored path, the blade would sit against it for the rest of
+     * the follow — end the phase so the bat goes back to the cursor instead. */
+    if (contactPath) {
+      const cx = tx - pathX, cy = ty - pathY, cz = tz - pathZ;
+      if (cx * cx + cy * cy + cz * cz > 1e-4) {
+        if (ft) ft.active = false;
+        contactPath = false;
+        tx = aimX; ty = aimY; tz = aimZ;
+      }
+    }
 
     // re-centring after a point is a visible glide, not a teleport
     /* 20, not 13: the glide has to be over before a quick player can strike the
      * serve, or "the bat returns to the centre" is only true for people who
      * wait. Still visibly a glide (0.2-0.3 s), not a teleport. */
     const rate = this.recenterT > 0 ? 20 : 26;
-    pad.pos.x = expSmooth(pad.pos.x, tx, rate, dt);
-    pad.pos.y = expSmooth(pad.pos.y, ty, rate, dt);
-    pad.pos.z = expSmooth(pad.pos.z, tz, rate * 0.7, dt);
+    pad.pos.x = contactPath ? tx : expSmooth(pad.pos.x, tx, rate, dt);
+    pad.pos.y = contactPath ? ty : expSmooth(pad.pos.y, ty, rate, dt);
+    pad.pos.z = contactPath ? tz : expSmooth(pad.pos.z, tz, rate * 0.7, dt);
     V3.sub(pad.vel, pad.pos, pad.prevPos);
     V3.mul(pad.vel, pad.vel, 1 / Math.max(dt, 1e-4));
 
@@ -2557,6 +2718,16 @@ class Game {
     };
   }
 
+  /** Worst frame of the last three seconds. The FPS readout is an average
+   *  over half a second, so a single 60 ms hitch disappears into it; this is
+   *  the number that answers "did the frame actually stall?" */
+  noteFrame(ms) {
+    if (!Number.isFinite(ms) || ms <= 0 || ms > 2000) return;  // ignore sleep/tab switches
+    this._peakAcc = (this._peakAcc || 0) + ms;
+    if (this._peakAcc > 3000) { this._peakAcc = 0; this.peakMs = 0; }
+    if (ms > this.peakMs) this.peakMs = ms;
+  }
+
   /* ------------------------------ update --------------------------- */
   update(dtReal) {
     if (!Number.isFinite(dtReal) || dtReal <= 0) return;
@@ -2635,7 +2806,7 @@ class Game {
           // whose skill is already 1.0 has been solved at full assist, and
           // re-solving the same problem is pure frame time
           if (racket.valid === false && clamp(this.ai.L.skill, 0, 1) < 0.999) {
-            racket = refineRacket(this.ball.p, this.ball.v, this.ball.w, racket, 1, racket.quality);
+            racket = refineRacketRealtime(this.ball.p, this.ball.v, this.ball.w, racket, 1, racket.quality);
           }
           const contact = V3.clone(this.ball.p);
           const info = impactRacket(this.ball.v, this.ball.w, racket.normal, racket.vR, racket.quality, racket.rubber || {});
@@ -2721,13 +2892,6 @@ class Game {
     while (this.messages.length && this.messages[0].t > this.messages[0].dur) this.messages.shift();
     this.hitFlash = Math.max(0, this.hitFlash - dtReal * 3.2);
 
-    // Only the timer advances here. Position and orientation each have one
-    // owner in updatePlayerPaddle / PaddleStrokeMotion, before rendering.
-    if (this.followThrough.active) {
-      this.followThrough.t += dtReal;
-      if (this.followThrough.t >= this.followThrough.duration) this.followThrough.active = false;
-    }
-
     // Update anticipation
     if (this.settings.anticipationHint) {
       if (this.anticipation.active) {
@@ -2787,14 +2951,15 @@ class Game {
     // post-processing reacts to the action
     const P = this.R.post;
     const sp = clamp(V3.len(this.ball.v) / 30, 0, 1);
-    if (this.reducedMotion) {
+    if (this.reducedMotion || (this.cut && this.cut.blur)) {
       P.radial = 0; P.flash = 0;
+      if (this.cut && this.cut.blur) P.ca = 0;
     } else {
       P.radial = expSmooth(P.radial, this.ball.live ? sp * sp * 0.85 : 0, 5, dtReal);
       P.flash = expSmooth(P.flash, this.hitFlash * 0.05, 10, dtReal);
     }
     P.sat = expSmooth(P.sat, 1.05 + (1 - this.timeScale) * 0.25, 4, dtReal);
-    P.ca = expSmooth(P.ca, 0.55 + sp * 0.75, 4, dtReal);
+    P.ca = (this.cut && this.cut.blur) ? 0 : expSmooth(P.ca, 0.55 + sp * 0.75, 4, dtReal);
     this.audio.setCrowd(clamp(this.rally / 18, 0, 1) * 0.6 + (this.state === GS.POINT ? 0.4 : 0));
 
     // network: sync state (host) or input (guest)
@@ -2894,7 +3059,7 @@ class Game {
       const pp = this.player;
       /* The telegraph lives here and only here: the simulation keeps the
        * blade on the ball, the drawing pulls it back for the wind-up. */
-      const ao = this.anticipation.active ? this.anticipation.visualOffset : null;
+      const ao = !this.reducedMotion && this.anticipation.active ? this.anticipation.visualOffset : null;
       const dpos = this._drawPadPos || (this._drawPadPos = V3.new());
       if (ao && (ao.x || ao.y || ao.z)) V3.set(dpos, pp.pos.x + ao.x, pp.pos.y + ao.y, pp.pos.z + ao.z);
       else V3.copy(dpos, pp.pos);
