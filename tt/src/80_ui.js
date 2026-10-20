@@ -307,6 +307,17 @@ class UI {
     $('#tdAgain').addEventListener('click', startTrain);
     $('#trSkip').addEventListener('click', () => { const t = this.game.training; if (t && this.game.paused) { t.skip(); this.game.setPaused(false); this.game.audio.ui('click'); } });
     $('#trExit').addEventListener('click', () => { if (this.game.paused) this.showMainMenu(); });
+    /* The preview is opt-in: this button shows the lesson on a loop and the
+     * same button takes it back. Nothing starts it on its own, so the racket
+     * is never pulled out of a pupil's hand. */
+    const trDemoBtn = $('#trDemo');
+    if (trDemoBtn) trDemoBtn.addEventListener('click', (e) => {
+      e.preventDefault(); e.stopPropagation();
+      const t = this.game.training;
+      if (!t) return;
+      this.game.audio.init(); this.game.audio.resume(); this.game.audio.ui('click');
+      if (t.isDemo()) t.exitDemo(); else t.playDemo();
+    });
     /* --- workshop / shop / daily --- */
     const wsOpen = (tab) => {
       this.game.audio.ui('click');
@@ -990,19 +1001,32 @@ class UI {
 
   /* --------------------------- coach panel ------------------------ */
   trainShow() { $('#train').classList.add('on'); $('#score').style.opacity = '0'; $('#trainingActions').hidden = false; }
-  trainHide() { this.trainDemo = null; this._trainDemoStep = null; $('#trainingActions').hidden = true; $('#train').classList.remove('on'); $('#score').style.opacity = ''; $('#tdone').classList.remove('on'); }
+  trainHide() { $('#trainingActions').hidden = true; $('#train').classList.remove('on'); $('#score').style.opacity = ''; $('#tdone').classList.remove('on'); }
   trainSync(t) {
     const S = t.S, feedback = t.phase === 'ok' || t.phase === 'fail';
+    const preview = t.phase === 'demo';
+    const tip = trainingTip(S, this.inputMode,
+      this.game && this.game.settings && this.game.settings.gestureProfile === 'safe');
     $('#trStep').textContent = `${t.step + 1}/${TRAIN_STEPS.length}`;
     $('#trTitle').textContent = S.title;
     $('#trProgress').textContent = `${t.done}/${S.need}`;
-    $('#trTip').textContent = feedback ? '' : S.goal;
-    $('#trainPauseTip').textContent = trainingTip(S, this.inputMode,
-      this.game && this.game.settings && this.game.settings.gestureProfile === 'safe');
-    $('#trMsg').textContent = feedback ? t.msg : '';
-    $('#trMsg').style.color = t.msgCol || 'var(--good)';
+    $('#trTip').textContent = feedback ? '' : (preview ? 'Смотрите: бот выполняет приём.' : S.goal);
+    $('#trainPauseTip').textContent = tip;
+    /* The gesture itself is written UNDER the goal at all times: the preview
+     * used to be the only place it was shown, so with the preview now opt-in
+     * the pupil would have to open the pause menu to learn the swipe. */
+    $('#trMsg').textContent = feedback ? t.msg
+      : preview ? 'Клик по столу — и вы играете сами.' : tip;
+    $('#trMsg').style.color = feedback ? (t.msgCol || 'var(--good)') : 'var(--acc)';
+    /* The control says what the NEXT press does, so it reads as a button and
+     * not as another badge over the table. */
+    const demoBtn = $('#trDemo');
+    if (demoBtn) {
+      demoBtn.textContent = preview ? 'ХВАТИТ, ИГРАЮ САМ' : 'ПОКАЗАТЬ, КАК ИГРАТЬ';
+      demoBtn.setAttribute('aria-pressed', preview ? 'true' : 'false');
+    }
   }
-  trainDone() { this.trainDemo = null; this._trainDemoStep = null; $('#train').classList.remove('on'); $('#trainingActions').hidden = true; $('#tdone').classList.add('on'); }
+  trainDone() { $('#train').classList.remove('on'); $('#trainingActions').hidden = true; $('#tdone').classList.add('on'); }
 
   showMatchEnd(won) {
     const g = this.game, s = g.stats;
@@ -1198,63 +1222,90 @@ class UI {
     c.restore();
   }
 
-  /** Training: a compact one-shot demo of the drill gesture, played once when
-   *  the exercise starts. It sits just above the far edge of the table — clear
-   *  of the resting racket below and of the cue card on the left — so the
-   *  pupil reads the motion without it ever being painted over the blade.
-   *  Deliberately larger and slower than a live hint, and it never repeats. */
-  drawTrainDemo(c, W, H, d, dt) {
-    const dm = this.trainDemo;
-    const tr = this.game.training;
-    if (!dm || !tr) { this.trainDemo = null; return; }
-    if (this.game.paused) return;                      // frozen, not consumed
-    dm.t += dt;
-    const DRAW = 1.6, HOLD = 0.6, OUT = 0.5, DUR = DRAW + HOLD + OUT;
-    if (dm.t >= DUR) { this.trainDemo = null; return; }
-    let shape = tr.S && tr.S.guide;
-    if (!shape) return;
-    if (shape === 'down' && this.game.settings.gestureProfile === 'safe') shape = 'up';
-    // just above the far edge of the table, horizontally centred, then nudged
-    // 400 CSS px lower (fx space is device px, hence *d) so it reads over the
-    // play surface rather than in the empty void above it; clamped to stay on
-    // screen on short viewports.
-    const x = W * 0.5, y = Math.min(H * 0.17 + 400 * d, H * 0.82), L = 132 * d;
-    const path = this.trainGuidePath(shape, x, y, L);
-    const prog = this.reducedMotion ? 1 : Math.min(dm.t / DRAW, 1);
-    const ease = 1 - Math.pow(1 - prog, 3);
-    const fade = dm.t < DRAW + HOLD ? 1 : 1 - (dm.t - DRAW - HOLD) / OUT;
+  /** Training preview: the bot plays the drill so the pupil can SEE the two
+   *  things a cue card cannot say — where the cursor must stand, and which way
+   *  it travels. Everything is read from the demo driver in 65_train.js, which
+   *  moves a REAL pointer through the real press oval, so the ring below is the
+   *  point the pupil's own cursor has to occupy, not a decoration. */
+  drawTrainDemo(c, W, H, d) {
+    const g = this.game, tr = g.training, dm = tr && tr.demo;
+    if (!dm || dm.stopped || g.paused || (g.replayer && g.replayer.on)) return;
+    if (['ok', 'fail', 'done'].includes(tr.phase)) return;
     const col = '#39c6ff';
-    c.save(); c.globalAlpha = 0.85 * fade; c.lineCap = 'round'; c.lineJoin = 'round';
-    // groove: the full path stays readable as the hint of "where" to swipe
-    c.strokeStyle = col; c.globalAlpha = 0.18 * fade; c.lineWidth = 7 * d;
-    c.beginPath(); c.moveTo(path.pts[0][0], path.pts[0][1]);
-    for (let i = 1; i < path.pts.length; i++) c.lineTo(path.pts[i][0], path.pts[i][1]);
-    c.stroke();
-    // the drawn stroke up to the current progress
-    c.strokeStyle = col; c.globalAlpha = 0.8 * fade; c.lineWidth = 3.2 * d;
-    c.beginPath(); c.moveTo(path.pts[0][0], path.pts[0][1]);
-    const steps = 24;
-    for (let i = 1; i <= steps; i++) {
-      const [px, py] = this.trainGuideAt(path, (i / steps) * ease);
-      c.lineTo(px, py);
+    /* The words are drawn LAST (see section 4): the ghost hand and its ring
+     * stand exactly on top of them while the bot is still travelling. */
+    let label = null;
+    c.save();
+    c.lineCap = 'round'; c.lineJoin = 'round';
+
+    /* 1. The target: where the ball will meet the bat, i.e. where the cursor
+     *    has to wait. The halo closes as the ball arrives — that is the press
+     *    cue, and it is the same moment the bot presses. */
+    if (dm.state === 'seek') {
+      const tx = dm.tgt.x * W, ty = dm.tgt.y * H;
+      const near = clamp(dm.near || 0, 0, 1);
+      const R = (30 - 9 * near) * d;
+      c.globalAlpha = 0.30 + 0.45 * near;
+      c.strokeStyle = col; c.lineWidth = 1.6 * d;
+      c.setLineDash([5 * d, 6 * d]);
+      c.beginPath(); c.arc(tx, ty, R, 0, TAU); c.stroke();
+      c.setLineDash([]);
+      c.beginPath();
+      for (const sx of [-1, 1]) for (const sy of [-1, 1]) {
+        c.moveTo(tx + sx * (R + 3 * d), ty + sy * R);
+        c.lineTo(tx + sx * (R + 8 * d), ty + sy * R);
+      }
+      c.stroke();
+      c.globalAlpha = 0.14 + 0.30 * near;
+      c.beginPath(); c.arc(tx, ty, R + (1 - near) * 46 * d, 0, TAU); c.stroke();
+      label = { x: tx, y: ty - (R + 16 * d) };
     }
-    c.stroke();
-    // the "finger"
-    const [hx, hy] = this.trainGuideAt(path, ease);
-    const rg = c.createRadialGradient(hx, hy, 0, hx, hy, 13 * d);
-    rg.addColorStop(0, col + 'dd'); rg.addColorStop(1, col + '00');
-    c.globalAlpha = fade; c.fillStyle = rg;
-    c.beginPath(); c.arc(hx, hy, 13 * d, 0, TAU); c.fill();
-    c.fillStyle = '#eaf7ff'; c.beginPath(); c.arc(hx, hy, 3.6 * d, 0, TAU); c.fill();
-    // arrowhead at the end of the path, so the direction is unambiguous
-    const e = path.pts[path.pts.length - 1], pv = path.pts[path.pts.length - 2] || e;
-    const ang = Math.atan2(e[1] - pv[1], e[0] - pv[0]);
-    c.globalAlpha = 0.75 * fade * (ease > 0.85 ? 1 : 0.35); c.fillStyle = col;
-    c.beginPath();
-    c.moveTo(e[0], e[1]);
-    c.lineTo(e[0] - Math.cos(ang - 0.5) * 11 * d, e[1] - Math.sin(ang - 0.5) * 11 * d);
-    c.lineTo(e[0] - Math.cos(ang + 0.5) * 11 * d, e[1] - Math.sin(ang + 0.5) * 11 * d);
-    c.closePath(); c.fill();
+
+    /* 2. The bot's hand: the exact screen point the pupil must bring their own
+     *    pointer to. It is the real synthetic pointer that drives the racket. */
+    const gx = dm.pos.x * W, gy = dm.pos.y * H;
+    const pressed = dm.state !== 'seek';
+    const rg = c.createRadialGradient(gx, gy, 0, gx, gy, 26 * d);
+    rg.addColorStop(0, col + 'aa'); rg.addColorStop(1, col + '00');
+    c.globalAlpha = 0.95; c.fillStyle = rg;
+    c.beginPath(); c.arc(gx, gy, 26 * d, 0, TAU); c.fill();
+    c.strokeStyle = '#eaf7ff'; c.lineWidth = 2 * d;
+    c.beginPath(); c.arc(gx, gy, 13 * d, 0, TAU); c.stroke();
+    c.globalAlpha = 0.45;
+    c.beginPath(); c.arc(gx, gy, 20 * d, 0, TAU); c.stroke();
+    c.globalAlpha = 1; c.fillStyle = '#eaf7ff';
+    c.beginPath(); c.arc(gx, gy, (pressed ? 5.5 : 3.4) * d, 0, TAU); c.fill();
+
+    /* 3. How to swipe: the arrow leaves the cursor along the drill's own
+     *    gesture. During the swing the live ribbon takes over by itself. */
+    if (dm.state === 'seek' || dm.state === 'press') {
+      const dx = dm.dir.x, dy = dm.dir.y;
+      const L0 = 18 * d, L1 = 82 * d;
+      c.globalAlpha = 0.55; c.strokeStyle = col; c.lineWidth = 3 * d;
+      c.beginPath();
+      c.moveTo(gx + dx * L0, gy + dy * L0);
+      c.lineTo(gx + dx * L1, gy + dy * L1);
+      c.stroke();
+      const ax = gx + dx * L1, ay = gy + dy * L1, ang = Math.atan2(dy, dx);
+      c.fillStyle = col;
+      c.beginPath();
+      c.moveTo(ax + Math.cos(ang) * 11 * d, ay + Math.sin(ang) * 11 * d);
+      c.lineTo(ax + Math.cos(ang + 2.5) * 12 * d, ay + Math.sin(ang + 2.5) * 12 * d);
+      c.lineTo(ax + Math.cos(ang - 2.5) * 12 * d, ay + Math.sin(ang - 2.5) * 12 * d);
+      c.closePath(); c.fill();
+    }
+    /* 4. The one instruction that answers “куда вести курсор” — on a dark
+     *    plate, above every other mark, so no ring or arrow can eat it. */
+    if (label) {
+      c.font = `700 ${12 * d}px system-ui,sans-serif`;
+      c.textAlign = 'center';
+      const half = c.measureText('КУРСОР СЮДА').width / 2 + 7 * d;
+      c.globalAlpha = 0.76; c.fillStyle = 'rgba(4,10,18,.86)';
+      roundRect(c, label.x - half, label.y - 10 * d, half * 2, 17 * d, 5 * d);
+      c.fill();
+      c.globalAlpha = 0.96; c.fillStyle = col;
+      c.fillText('КУРСОР СЮДА', label.x, label.y);
+    }
     c.restore();
   }
 
@@ -1280,12 +1331,15 @@ class UI {
     const saved=g.swipe && g.swipe.pressZone;
     const serving=[GS.SERVE_READY,GS.SERVE_TOSS].includes(g.state) && g.server===1;
     const locked=saved && (g.swipe.active || (typeof g.playerStrokeIntent==='function' && g.playerStrokeIntent(serving)));
-    const zone=locked ? saved : pressZoneForBall(g.ball,g.pointer,rect.width,rect.height,{
-      project:(point,out)=>g.project(point,out||{}), pointerType:g.pointerFine===false?'touch':'mouse',
-      referenceWorld:g.player&&g.player.pos,
-      kind:serving&&g.state===GS.SERVE_TOSS?'serve':'rally',
-      tossApex:g.tossApex,tossStartY:g.tossStartY,tableY:PH.TABLE_Y});
+    const zone=locked ? saved : g.measurePressZone(g.pointer,g.pointerFine===false?'touch':'mouse');
     if (!zone || ![zone.x,zone.y,zone.radius].every(Number.isFinite)) return;
+    if (zone.via==='serve-init' && g.state===GS.SERVE_READY) {
+      // Ready accepts a toss command on the play surface, not just within
+      // an oval at the old ball position. Do not display a fake hit region.
+      c.save();c.fillStyle='#6ee7a8';c.font=`${12*d}px sans-serif`;c.textAlign='center';
+      c.fillText('ПОДБРОС: НАЖМИТЕ В ИГРОВОМ ПОЛЕ',W*.5,H*.90);c.restore();
+      return;
+    }
     const sx=W/rect.width,sy=H/rect.height;
     c.save();c.setLineDash([]);c.globalAlpha=.9;c.lineWidth=2*d;c.strokeStyle=zone.accepted?'#6ee7a8':'#ffb066';
     c.beginPath();
@@ -1491,11 +1545,6 @@ class UI {
 
     if (g.training && g.training._uiStamp !== g.training.phase + g.training.done + g.training.step + g.training.msg) {
       g.training._uiStamp = g.training.phase + g.training.done + g.training.step + g.training.msg;
-      // A new exercise: show its gesture once, above the table, then never again.
-      if (this._trainDemoStep !== g.training.step) {
-        this._trainDemoStep = g.training.step;
-        this.trainDemo = { t: 0 };
-      }
       this.trainSync(g.training);
     }
 
@@ -1523,7 +1572,7 @@ class UI {
       const a = aeroAccel(V3.new(), b.v, b.w);
       const magn = Math.hypot(a.x, a.y + PH.G, a.z) / PH.G;
       dbg.innerHTML =
-        `<b>FPS</b> ${g.fps.toFixed(0)}  <b>DC</b> ${g.R.drawCalls}  <b>TRI</b> ${(g.R.tris / 1000).toFixed(1)}k\n` +
+        `<b>FPS</b> ${g.fps.toFixed(0)}  <b>PEAK</b> ${(g.peakMs || 0).toFixed(0)}ms  <b>DC</b> ${g.R.drawCalls}  <b>TRI</b> ${(g.R.tris / 1000).toFixed(1)}k\n` +
         `<b>GL</b> ${g.R.isGL2 ? 'WebGL2' : 'WebGL1'}\n` +
         `<b>state</b> ${g.state}  <b>ts</b> ${g.timeScale.toFixed(2)}\n` +
         `<b>ball</b> p(${b.p.x.toFixed(2)},${b.p.y.toFixed(2)},${b.p.z.toFixed(2)})\n` +

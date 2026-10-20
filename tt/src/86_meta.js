@@ -284,11 +284,20 @@ class Profile {
 
   save(force) {
     if (!this.dirty && !force) return true;
+    const t0 = typeof performance !== 'undefined' ? performance.now() : 0;
+    let ok = true;
     try {
       if (typeof localStorage !== 'undefined') { localStorage.setItem(SAVE_KEY, JSON.stringify(this.data)); }
       this.dirty = false;
-      return true;
-    } catch (e) { return false; }        // private mode: the game still plays
+    } catch (e) { ok = false; }        // private mode: the game still plays
+    /* A localStorage write is synchronous disk I/O and can stall a frame; when
+     * ?diag=1 is on, the report gets the ones that actually took time. */
+    if (t0 && typeof window !== 'undefined' && window.__diag) {
+      const ms = performance.now() - t0;
+      if (ms > 0.4) window.__diag.events.push({
+        t: Math.round(performance.now() - window.__diag.t0), k: 'save', ms: +ms.toFixed(1) });
+    }
+    return ok;
   }
 
   touch() { this.dirty = true; if (this._sv === undefined) this._sv = 0; }
