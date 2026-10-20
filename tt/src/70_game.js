@@ -218,16 +218,17 @@ class Game {
       if (this.motionQuery.addEventListener) this.motionQuery.addEventListener('change', onMotionPreference);
       else if (this.motionQuery.addListener) this.motionQuery.addListener(onMotionPreference);
     }
-    // Presets are the baseline; mouse controls are session-local and resettable.
-    this.cameraControls = { zoom: 1, height: 0 };
+    /* No zoom, no manual height: the view is authored, fitted once per
+       aspect ratio and only changes when the player picks another preset. */
     this.camShiftY = 0;
-    this.camRig = { eye: V3.new(0, 1.68, 2.38), look: V3.new(0, 0.74, -0.25), fov: 48, mode: 'BROADCAST' };
+    this.camRig = { eye: V3.new(0, 1.68, 2.38), look: V3.new(0, 0.74, -0.25), fov: 44, shiftY: 0, mode: 'BROADCAST' };
     this._rigBuf = { vp: M4.create(), proj: M4.create(), view: M4.create() };
-    this.camVP = M4.create();          // view·proj of the authored rig, no shake
-    this.hudBandY = 0.72;              // screen y below the full table's feet
+    this.camVP = M4.create();          // view·proj of the camera on screen, no shake
+    this.hudBandY = PLAY_BAND_Y;       // screen y of the reading band
     this.camPos = V3.new(0, 1.68, 2.38); this.camLook = V3.new(0, 0.74, -0.25);
     this.camPosT = V3.clone(this.camPos); this.camLookT = V3.clone(this.camLook);
-    this.fov = 48; this.fovT = 48;
+    this.fov = 44; this.fovT = 44;
+    this._liveRig = { eye: V3.new(0, 1.68, 2.38), look: V3.new(0, 0.74, -0.25), fov: 44, shiftY: 0 };
     this.marks = [];
     this.stats = {
       shots: 0, winners: 0, errors: 0, maxSpeed: 0, maxSpin: 0,
@@ -297,23 +298,17 @@ class Game {
       return { x, y };
     };
 
-    // Left pointer = stroke. Right vertical drag = height; wheel = dolly.
-    let cameraDrag = null;
+    // Left pointer = stroke. The camera is fixed: no right-drag, no wheel.
     const ptrs = new Map();
     const dropStroke = () => {
       this.swipe.cancel();
       this.pointerDown = false;
     };
 
-    this.cancelInput = () => { ptrs.clear(); cameraDrag = null; dropStroke(); };
+    this.cancelInput = () => { ptrs.clear(); dropStroke(); };
     const down = (e) => {
       if (this.paused || this.state === GS.MENU || this.state === GS.MATCH_END) return;
-      if (e.button === 2) {
-        if (e.pointerType && e.pointerType !== 'mouse') return;
-        this.cancelInput();
-        cameraDrag = { id: e.pointerId, y: e.clientY };
-        e.preventDefault(); return;
-      }
+      if (e.button === 2) { e.preventDefault(); return; }
       if (e.button === 1) { e.preventDefault(); return; }
       if (this.demoMode) this.stopDemo(); // a real stroke always takes control
       this.audio.init(); this.audio.resume();
@@ -404,13 +399,6 @@ class Game {
     };
 
     const move = (e) => {
-      if (cameraDrag && cameraDrag.id === e.pointerId) {
-        if (!(e.buttons & 2)) { cameraDrag = null; return; }
-        const dy = e.clientY - cameraDrag.y;
-        cameraDrag.y = e.clientY;
-        if (Number.isFinite(dy)) this.cameraControls.height = clamp(this.cameraControls.height - dy * 0.012, -1, 2.5);
-        e.preventDefault(); return;
-      }
       const p = ptrs.get(e.pointerId);
       if (p) { p.x = e.clientX; p.y = e.clientY; }
       const n = track(e);
@@ -425,7 +413,6 @@ class Game {
     };
 
     const up = (e) => {
-      if (cameraDrag && cameraDrag.id === e.pointerId) { cameraDrag = null; e.preventDefault(); return; }
       ptrs.delete(e.pointerId);
       if (e.button === 2 || e.button === 1) { e.preventDefault(); return; }
       if (ptrs.size >= 1) { e.preventDefault(); return; }   // still another finger down
@@ -442,26 +429,28 @@ class Game {
       e.preventDefault();
     };
 
-    c.addEventListener('pointerdown', (e) => { c.setPointerCapture(e.pointerId); down(e); });
+    c.addEventListener('pointerdown', (e) => {
+      /* A synthetic or already-released pointer has no capture target, and
+       * setPointerCapture throws for it — which used to abort the whole
+       * handler, so the press never became a stroke. */
+      try { c.setPointerCapture(e.pointerId); } catch (err) { /* no active pointer */ }
+      down(e);
+    });
     c.addEventListener('pointermove', move);
     c.addEventListener('pointerup', up);
     c.addEventListener('pointercancel', () => this.cancelInput());
-    c.addEventListener('lostpointercapture', (e) => { if (ptrs.has(e.pointerId) || (cameraDrag && cameraDrag.id === e.pointerId)) this.cancelInput(); });
+    c.addEventListener('lostpointercapture', (e) => { if (ptrs.has(e.pointerId)) this.cancelInput(); });
     c.addEventListener('contextmenu', (e) => e.preventDefault());
-    // Hover movement follows the bat, except while the right button owns the camera.
-    window.addEventListener('pointermove', (e) => { if (!ptrs.size && !cameraDrag && !(e.buttons & 2)) track(e); }, { passive: true });
+    // Hover movement follows the bat. A held right button is not a camera command.
+    window.addEventListener('pointermove', (e) => { if (!ptrs.size) track(e); }, { passive: true });
     window.addEventListener('blur', () => { this.cancelInput(); this.setPaused(true); });
     document.addEventListener('visibilitychange', () => {
       if (document.hidden) { this.cancelInput(); this.setPaused(true); this.profile.save(true); }
     });
     window.addEventListener('pagehide', () => { this.saveSettings(); this.profile.save(true); this.career.save(); });
-    c.addEventListener('wheel', (e) => {
-      e.preventDefault();
-      if (this.state === GS.MENU || this.state === GS.MATCH_END || this.replayer.on) return;
-      const units = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? this.vh : 1;
-      const delta = clamp(e.deltaY * units, -200, 200);
-      if (Number.isFinite(delta)) this.cameraControls.zoom = clamp(this.cameraControls.zoom * Math.exp(delta * 0.0015), 0.72, 1.6);
-    }, { passive: false });
+    // The wheel used to dolly the camera. A page that scrolls nowhere should
+    // still not jump, so it is swallowed — but it changes nothing on screen.
+    c.addEventListener('wheel', (e) => { e.preventDefault(); }, { passive: false });
     c.style.touchAction = 'none';
 
     /* Keep vertical gestures in the mini app when Telegram supports the API;
@@ -500,6 +489,10 @@ class Game {
     const h = this.canvas.clientHeight || window.innerHeight;
     this.R.resize(w, h, dpr);
     this.vw = w; this.vh = h;
+    /* Refit in the same tick: the pointer map inverts the camera that is
+     * actually on screen, so a resize must never leave a stale projection
+     * behind for even one frame of aiming. */
+    if (this.camRig && this.settings) this.updateCamera(0);
   }
 
   /* --------------------------- match flow -------------------------- */
@@ -662,7 +655,7 @@ class Game {
      * "the racket drifts off and stays there" survived the reset. The click is
      * NOT swallowed: it is queued and fired the instant the reset finishes, so
      * serving immediately costs a third of a second of the intermission. */
-    if (this.recenterT > 0) { this.tossQueued = true; return; }
+    if (this.recenterT > 0) { this.tossQueued = true; this.tossQueuedAt = this.time; return; }
     this.tossQueued = false;
     const b = this.ball;
     const pad = this.player;
@@ -1752,7 +1745,6 @@ class Game {
     this.pointer = { x: 0.5, y: 0.55 };
     this.pointerInside = true;
     this.pointerDown = false;
-    this.stanceY = undefined;
     this.padYaw = 0;
     this.padRoll = (this.settings.hand === 'left' ? -1 : 1)
       * (this.settings.grip === 'penhold' ? Math.PI - 0.052 : 0.28);
@@ -1774,20 +1766,21 @@ class Game {
      * before the strike was 0.081-0.173 m on 14 of 49 serves. */
     this.recenterT = RECENTER_S;         // no footwork assist while re-centring
     this.tossQueued = false;
+    this.tossQueuedAt = -9;
     this.swipe.cancel();
     if (this._paddlePred) this._paddlePred.reach = null;
     if (this._strikePred) this._strikePred.reach = null;
     if (this._volleyPred) this._volleyPred.reach = null;
     const broken = ![pad.pos.x, pad.pos.y, pad.pos.z].every(Number.isFinite);
     if (hard || broken) {
-      V3.set(pad.pos, 0, PH.TABLE_Y + 0.25, 1.78);
+      V3.set(pad.pos, PADDLE_HOME.x, PADDLE_HOME.y, PADDLE_HOME.z);
       V3.copy(pad.prevPos, pad.pos);
       V3.copy(pad.prev, pad.pos);
       V3.zero(pad.vel);
     }
     V3.set(pad.normal, 0, Math.sin(this.padPitch), -Math.cos(this.padPitch));
     pad.swing = 0;
-    this._ptTarget = { tx: 0, ty: PH.TABLE_Y + 0.25, tz: 1.78 };
+    this._ptTarget = { tx: PADDLE_HOME.x, ty: PADDLE_HOME.y, tz: PADDLE_HOME.z };
   }
 
   updatePlayerPaddle(dt) {
@@ -1803,8 +1796,16 @@ class Game {
        * up, and the toss fired anyway — the ball then dropped with no stroke
        * behind it and the point was lost to «ПОДАЧА НЕ ВЫПОЛНЕНА». */
       if (this.recenterT === 0 && this.tossQueued) {
+        /* A queued toss used to need the finger to STILL be down, so a normal
+         * quick click during the glide was swallowed without a trace: the
+         * player pressed to serve, nothing happened, and the only way to find
+         * out was to press again. A tap is a request to serve, so it is
+         * honoured if it is FRESH — the timeout is what keeps the original
+         * bug fixed (a toss that fires seconds after the player has moved on
+         * drops a ball nobody asked for). */
+        const fresh = this.time - (this.tossQueuedAt === undefined ? -9 : this.tossQueuedAt) < 0.60;
         this.tossQueued = false;
-        if (this.state === GS.SERVE_READY && this.server === 1 && this.pointerDown) this.startToss();
+        if (this.state === GS.SERVE_READY && this.server === 1 && (this.pointerDown || fresh)) this.startToss();
       }
     }
 
@@ -1813,19 +1814,11 @@ class Game {
       pt = { x: 0.5, y: 0.55 };
       this.pointer = pt;                 // self-heal: never stay broken
     }
-    if (!Number.isFinite(this.stanceY)) this.stanceY = undefined;
-    const sens = MATCH_RULES.sensitivity;
-    // the depth of the stance is set when the hand lands, not by the swipe:
-    // flicking the wrist upward must not lunge you over the table
-    if (this.swipe.active && this.swipe.m.samples > 0) {
-      if (this.stanceY === undefined) this.stanceY = this.swipe.m.sy;
-    } else this.stanceY = pt.y;
-    const depthY = this.stanceY !== undefined ? this.stanceY : pt.y;
-
-    /* A ball that dies short is a real table-tennis problem, and it used to
-     * be an impossible one: the bat's depth was hard-clamped at 1.18 m, so a
-     * short serve simply could not be reached no matter what you did. Now a
-     * predicted short ball grants the step-in depth. */
+    /* A ball that dies short is a real table-tennis problem: with a bat
+     * plane fixed 1.78 m back, a ball that dies at 0.4 m cannot be reached.
+     * The step-in is DEPTH ONLY — it never moves the blade sideways — so it
+     * cannot break the pointer contract, and it is the one piece of footwork
+     * the player is not asked to perform with a mouse. */
     let zNear = PADDLE_LIMITS.zNear;
     const A = MATCH_RULES.positionAssist;
     const o = this._paddlePred || (this._paddlePred = {});
@@ -1853,24 +1846,62 @@ class Game {
         }
       }
     }
-    const shortBall = canReachShort && ((o.landed && o.landed.z > 0 && o.landed.z < 1.15) ||
-      (o.reach && o.reach.z < PADDLE_LIMITS.zNear + 0.22) || this.ball.p.z < 1.15);
+    /* A SHORT ball, not every ball that happens to be past the net. The old
+     * trigger fired on `ball.p.z < 1.15`, which is true for the whole flight
+     * of almost every rally ball — measured 2982 of 10 551 frames with the
+     * blade leaned in, i.e. the player spent a third of the match reaching
+     * over the table for no reason and losing the bottom of the pointer area
+     * to the table's own clearance rule. A lunge is for a ball that will
+     * BOUNCE short (inside 0.95 m of the net) or is already dying there. */
+    const shortBall = canReachShort && (
+      (o.landed && o.landed.z > 0 && o.landed.z < 0.95) ||
+      (looseShort && this.ball.p.z < 0.95 && this.ball.p.y < PH.TABLE_Y + 0.45));
     if (shortBall) zNear = PADDLE_LIMITS.zStepIn;
     /* The step is visible: the body goes forward and down, the blade tips
        into the ball. Without this the bat simply appeared 16 cm closer. */
     pad.stepIn = expSmooth(pad.stepIn || 0, shortBall ? 1 : 0, 8, dt);
 
-    /* Anticipation is a render cue, NOT a movement. It used to be added to
-     * the physical target, so pressing pulled the blade up to 12 cm away from
-     * the ball — backwards, opposite the stroke, exactly when the player was
-     * trying to hit it. drawDynamic applies the same offset to the drawn pose
-     * instead, where it cannot take a catchable ball out of the capture
-     * volume. */
-    const t = paddleTargetFromPointer(pt.x, pt.y, depthY, sens,
-      this._ptTarget || (this._ptTarget = { tx: 0, ty: 0, tz: 0 }), { zNear });
+    /* THE POINTER CONTRACT. The blade's centre is the exact inverse
+     * projection of the pointer onto the plane it stands on, so the blade is
+     * drawn under the cursor — always, at every preset and aspect ratio.
+     * `sens` is the player's sensitivity setting: it scales how far the bat
+     * travels per pixel of cursor travel (1 = the exact map). */
+    const sens = clamp(Number.isFinite(MATCH_RULES.sensitivity) ? MATCH_RULES.sensitivity : 1, 0.55, 2.0);
+    const px = clamp(0.5 + (pt.x - 0.5) * sens, 0, 1);
+    const py = clamp(0.5 + (pt.y - 0.5) * sens, 0, 1);
+    /* Depth plane. Standing still the bat lives at the authored stance; a
+     * short ball steps the whole body in by up to ~0.5 m. The projection of
+     * x/y is then taken on the plane the bat is ACTUALLY on, so the parallax
+     * of the step does not move the blade away from the cursor. */
+    let planeZ = PADDLE_STANCE_Z;
+    if (shortBall) {
+      const shortDepth = clamp(Math.min(o.reach ? o.reach.z : this.ball.p.z, this.ball.p.z) - 0.02,
+        PADDLE_LIMITS.zStepIn, PADDLE_STANCE_Z);
+      planeZ = lerp(PADDLE_STANCE_Z, shortDepth, clamp(pad.stepIn || 0, 0, 1));
+    }
+    /* Project onto the plane the blade is ACTUALLY on this frame, not the one
+     * it is heading for: during a step-in the two differ by up to half a
+     * metre, and inverting the wrong plane is a visible parallax offset —
+     * the exact class of "the racket is not where my cursor is" this rewrite
+     * exists to remove. The blade's own depth is the honest inverse. */
+    const projZ = clamp(pad.pos.z, PADDLE_LIMITS.zStepIn, PADDLE_LIMITS.zFar);
+    /* The pointer outranks the footwork assist. A leaned-in blade cannot be
+     * drawn low on the screen — it would pass through the table — so a player
+     * aiming at the bottom of the play area is asked to stand back instead of
+     * being ignored. Without this the cursor ran 21 % of the screen ahead of
+     * the blade for the whole of every short-ball lunge. */
+    let pointerDepth = false;
+    if (planeZ < PADDLE_STANCE_Z) {
+      const safe = depthForPointer(this._liveRig, this.R.aspect(), px, py, planeZ);
+      if (safe > planeZ + 1e-6) { planeZ = safe; pointerDepth = true; }
+    }
+    planeZ = quantizeDepth(planeZ);
+    const t = paddleTargetFromPointer(px, py, 0, 1,
+      this._ptTarget || (this._ptTarget = { tx: 0, ty: 0, tz: 0 }),
+      { rig: this._liveRig, aspect: this.R.aspect(), z: projZ });
     let tx = t.tx;
     let ty = t.ty;
-    let tz = t.tz;
+    let tz = planeZ;             // depth is footwork, not pointer aim
     // Position follow-through uses the SAME smoothed/clamped target path.
     // A squared-sine envelope has zero velocity at both ends; never write
     // an independent visual position over the simulation after its update.
@@ -1901,10 +1932,16 @@ class Game {
        * partway home: measured closest approach 0.098-0.212 m on 14 of 49
        * serves, i.e. the "the bat returns to the centre on every serve"
        * requirement was visibly not met even though the glide was running. */
-      const kHome = clamp((this.recenterT / RECENTER_S - 0.25) / 0.75, 0, 1);
-      tx = lerp(tx, 0, kHome);
-      ty = lerp(ty, PH.TABLE_Y + 0.25, kHome);
-      tz = lerp(tz, 1.78, kHome);
+      /* While the window is open the target IS home. A decaying blend looked
+       * gentler but measurably failed: the target gave up on the centre
+       * before the blade could get there (a bat 1.1 m out reached only
+       * 0.33 m), and "the bat returns to the centre on every point" was
+       * false for exactly the quick serves it matters for. The glide itself
+       * is the visible part — the position filter below supplies it. */
+      const kHome = 1;
+      tx = lerp(tx, PADDLE_HOME.x, kHome);
+      ty = lerp(ty, PADDLE_HOME.y, kHome);
+      tz = lerp(tz, PADDLE_HOME.z, kHome);
     }
 
     // during your own toss the bat slides under the ball: serving is about
@@ -1924,55 +1961,47 @@ class Game {
       const under = this.ball.p.y - 0.04;
       ty = lerp(ty, under, this.ball.v.y < 0 ? k : 0.45 * A);
     }
-    /* Footwork follows INTENT, not swipe length. It used to require a
-     * completed "real stroke", so a player who pressed and ran in at a short
-     * ball — the only sane way to play one — got no step-in at all and the
-     * bat stayed 0.45 m behind the ball until the point was awarded against
-     * them. A live press in the admitted zone is intent. */
-    if (A > 0.01 && canReachShort && this.recenterT <= 0 && this.pressAdmitsBall() && (this.swipe.active || this.playerStrokeIntent())) {
-      if (o.reach) {
-        // Footwork assist, not a magnet: a swipe on the far wing must not
-        // teleport the bat onto a ball it was never near.
-        const near = Math.hypot(pad.pos.x - o.reach.x, pad.pos.y - o.reach.y)
-          < 0.42 + 0.28 * A;
-        if (near) {
-          const k = A * clamp(1.3 - o.reachT * 1.0, 0.30, 1);
-          tx = lerp(tx, clamp(o.reach.x, -PADDLE_LIMITS.x, PADDLE_LIMITS.x), k);
-          ty = lerp(ty, clamp(o.reach.y, PH.TABLE_Y + PADDLE_LIMITS.yLo, PH.TABLE_Y + PADDLE_LIMITS.yHi), k * 0.95);
-          /* THE STEP-IN ITSELF. `o.reach.z` is where the ball crosses the
-           * bat's own plane, so it can never ask the bat to move: the old
-           * line was a no-op, and the bat stayed at z 1.44 while a short ball
-           * died at 1.05 in front of it. For a ball that is genuinely short
-           * (already in the front half of the table) the reach depth is the
-           * BALL's depth, and the bat leans in to meet it — the one motion
-           * this whole branch exists for. */
-          const deepZ = shortBall ? Math.min(o.reach.z, this.ball.p.z) : o.reach.z;
-          if (deepZ < tz) tz = Math.max(zNear, Math.min(tz, lerp(tz, deepZ - 0.02, clamp(A * 0.75, 0, 1))));
-        }
-      }
-    }
-    /* Neither the cursor nor the assist may ever park the bat outside the
-     * frame — that is the bug that used to leave it stranded off-screen. */
+    /* The old position assist pulled the blade toward the ball by up to
+     * 0.85 of the distance. That is exactly what a player experiences as
+     * "the racket is not where my cursor is", and with the reach box now
+     * covering the whole table there is nothing left for it to rescue: the
+     * capture radius already forgives a near miss. Only the depth assist
+     * survives, inside the step-in above. */
+    /* The follow-through and the toss slide are the only intentional offsets,
+     * and both are transient. A guard keeps a big swing from painting the
+     * blade off the edge of the play rectangle. */
     if (this.camVPReady) {
       t.tx = tx; t.ty = ty; t.tz = tz;
-      clampPaddleToFrustum(this.camVP, t, 0.05);
-      /* tz too: the clamp can now walk the depth back toward the body when the
-       * pose asked for cannot be shown at all, and a correction the caller
-       * throws away is the same as no correction. */
+      clampPaddleToFrustum(this.camVP, t, 0.012);
       tx = t.tx; ty = t.ty; tz = t.tz;
     }
-    tx = clamp(tx, -PADDLE_LIMITS.x, PADDLE_LIMITS.x);
-    ty = clamp(ty, PH.TABLE_Y + PADDLE_LIMITS.yLo, PH.TABLE_Y + PADDLE_LIMITS.yHi);
+    /* Limits come from the plane the blade is ON, not the one it is heading
+     * for: during a step-in the target is up to 0.2 m deeper, and clamping
+     * against the deeper plane's (higher) floor made the blade ride up the
+     * table edge for the frames the two disagreed. */
+    const lim = paddleLimitsFor(projZ);
+    tx = clamp(tx, -lim.x, lim.x);
+    ty = clamp(ty, PH.TABLE_Y + lim.yLo, PH.TABLE_Y + lim.yHi);
     tz = clamp(tz, zNear, PADDLE_LIMITS.zFar);
 
     // re-centring after a point is a visible glide, not a teleport
     /* 20, not 13: the glide has to be over before a quick player can strike the
      * serve, or "the bat returns to the centre" is only true for people who
      * wait. Still visibly a glide (0.2-0.3 s), not a teleport. */
-    const rate = this.recenterT > 0 ? 20 : 26;
+    /* 55 is a one-frame follow at 60 Hz. The map is exact, so any slower
+     * filter is visible as the blade trailing the cursor during a fast drag —
+     * the very complaint this rewrite exists to fix. Re-centring has to
+     * actually ARRIVE inside its own 0.3 s window, so it runs at 32: a 1 m
+     * correction lands within 0.15 s, still as a glide and not a teleport. */
+    const rate = this.recenterT > 0 ? 32 : 55;
     pad.pos.x = expSmooth(pad.pos.x, tx, rate, dt);
     pad.pos.y = expSmooth(pad.pos.y, ty, rate, dt);
-    pad.pos.z = expSmooth(pad.pos.z, tz, rate * 0.7, dt);
+    /* The blade follows the cursor on the plane it stands on, so a depth that
+     * the POINTER asked for must be reached at the same speed as the blade
+     * itself — lagging it is what leaves the blade a row above the cursor for
+     * the length of the transition. Depth asked for by the footwork assist
+     * keeps its slow, visible glide. */
+    pad.pos.z = expSmooth(pad.pos.z, tz, rate * (pointerDepth ? 1 : 0.7), dt);
     V3.sub(pad.vel, pad.pos, pad.prevPos);
     V3.mul(pad.vel, pad.vel, 1 / Math.max(dt, 1e-4));
 
@@ -2141,11 +2170,10 @@ class Game {
 
   /* ----------------------------- camera ---------------------------- */
 
-  /** A preset change resets both camera adjustments. */
+  /** Switching presets is instant and exact: there is nothing to adjust. */
   setCameraPreset(mode) {
     const P = CAMERA_PRESETS[mode];
     if (!P) return;
-    this.cameraControls.zoom = 1; this.cameraControls.height = 0;
     this.settings.camera = mode;
     this.ui && this.ui.syncSettings && this.ui.syncSettings();
     this.audio.ui('click');
@@ -2181,36 +2209,52 @@ class Game {
     V3.zero(pad.vel);
   }
 
+  /** The last word on where the bat may be. `updatePlayerPaddle` already
+   *  clamps its target, but a cinematic clamp, a follow-through offset and a
+   *  table lift all touch the pose afterwards. One hard clamp here makes
+   *  "the bat is always inside its authored volume" a property of the frame,
+   *  not of the order of those edits. */
+  clampPaddleVolume() {
+    const pad = this.player;
+    pad.pos.z = clamp(pad.pos.z, PADDLE_LIMITS.zStepIn, PADDLE_LIMITS.zFar);
+    const lim = paddleLimitsFor(clamp(pad.pos.z, PADDLE_LIMITS.zStepIn, PADDLE_STANCE_Z));
+    pad.pos.x = clamp(pad.pos.x, -lim.x, lim.x);
+    pad.pos.y = clamp(pad.pos.y, PH.TABLE_Y + lim.yLo, PH.TABLE_Y + lim.yHi);
+  }
+
   updateCamera(dt) {
     const aspect = this.R.aspect();
-    const rig = cameraRigFor(this.settings.camera, this.ball.p, aspect, this.camRig, this.cameraControls);
+    /* Pure function of (preset, aspect). It is applied to the live camera the
+     * same frame it is computed — no easing toward a destination — because
+     * the pointer map inverts EXACTLY this projection. Easing meant the bat
+     * was placed for a camera that was still 40 ms away, which is one of the
+     * reasons the cursor and the blade drifted apart during a resize. */
+    const rig = cameraRigFor(this.settings.camera, null, aspect, this.camRig);
+    V3.set(this.camPos, rig.eye.x, rig.eye.y, rig.eye.z);
+    V3.set(this.camLook, rig.look.x, rig.look.y, rig.look.z);
     V3.set(this.camPosT, rig.eye.x, rig.eye.y, rig.eye.z);
     V3.set(this.camLookT, rig.look.x, rig.look.y, rig.look.z);
-    this.fovT = rig.fov;
+    this.fov = this.fovT = rig.fov;
+    this.camShiftY = rig.shiftY;
     this.applyCamera(dt);
 
-    /* HUD and paddle constraints share the actual shifted projection.
-     * Text begins below the full table, including its feet. */
-    /* From the smoothed camera, not from the target rig: camVP is the contract
-     * for "what is on screen right now" (the band, the bat clamp, the strike
-     * ring), and applyCamera glides toward the rig over ~0.5 s, so building it
-     * from the destination made the clamp correct for a frame that had not
-     * happened yet. Shake is still excluded, as the field's comment promises. */
-    const lrig = this._liveRig || (this._liveRig = { eye: V3.new(), look: V3.new(), fov: 40 });
+    /* HUD and paddle constraints share the actual shifted projection. */
+    const lrig = this._liveRig;
     V3.copy(lrig.eye, this.camPos);
     V3.copy(lrig.look, this.camLook);
     lrig.fov = this.fov;
     lrig.shiftY = this.camShiftY;
     this.camVP = rigViewProj(lrig, aspect, this._rigBuf);
     this.camVPReady = true;
-    const bounds = tableScreenBounds(this.camVP, this._hudTableBounds || (this._hudTableBounds = {}));
-    const band = clamp(bounds.bottom, 0.2, 0.91);
-    this.hudBandY = band;
-    const css = band.toFixed(4);
+    /* The reading band is authored, not derived from the table: the whole
+     * point of the new framing is that the strip below the play area stays
+     * the same height whatever the device. */
+    this.hudBandY = PLAY_BAND_Y;
+    const css = PLAY_BAND_Y.toFixed(4);
     if (css !== this._bandCss) {
       this._bandCss = css;
       if (typeof document !== 'undefined' && document.documentElement)
-        document.documentElement.style.setProperty('--table-bottom', css);
+        document.documentElement.style.setProperty('--band-top', css);
     }
   }
 
@@ -2233,7 +2277,6 @@ class Game {
     const ox = (noise1(t) - 0.5) * s, oy = (noise1(t + 17.3) - 0.5) * s, oz = (noise1(t + 41.7) - 0.5) * s;
     const eye = V3.new(this.camPos.x + ox, this.camPos.y + oy, this.camPos.z + oz);
     const look = V3.new(this.camLook.x + ox * 0.5, this.camLook.y + oy * 0.5, this.camLook.z + oz * 0.5);
-    this.camShiftY = this.replayer.on ? 0 : tableFrameShift({ eye: this.camPos, look: this.camLook, fov: this.fov }, this.R.aspect());
     this.R.setCamera(eye, look, { x: 0, y: 1, z: 0 }, this.fov, 0.05, 60, this.camShiftY);
     this.R.setLightFrustum(V3.new(0, PH.TABLE_Y, 0), 6.0, 2.35, 0.5, 14);
   }
@@ -2258,6 +2301,10 @@ class Game {
       V3.set(this.camLookT, b.x * 0.9, b.y * 0.9 + 0.06, b.z * 0.9);
       this.fovT = lerp(41, 34, e);
     }
+    /* A replay is shot with a plain lens: the authored lens shift belongs to
+     * the play frame, and sliding the image during a cinematic reads as a
+     * broken projector. */
+    this.camShiftY = 0;
     this.applyCamera(dtReal);
     /* camVP is the matrix everything on screen is projected with — the HUD text
      * band, the bat clamp, the strike ring, the projected cursor. During a
@@ -2614,6 +2661,7 @@ class Game {
     }
     this.updateCamera(dtReal);
     this.keepPaddleOnScreen();
+    this.clampPaddleVolume();
 
     // post-processing reacts to the action
     const P = this.R.post;

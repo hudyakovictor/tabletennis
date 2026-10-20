@@ -131,16 +131,14 @@ class UI {
     const mode = pointerType === 'touch' || pointerType === 'pen' ? 'touch' : pointerType === 'mouse' ? 'mouse' : null;
     if (!mode || mode === this.inputMode) return;
     this.inputMode = mode; this.hasFinePointer = mode === 'mouse';
-    if (mode === 'touch' && this.game) {
-      this.game.cameraControls.zoom = 1; this.game.cameraControls.height = 0;
-    }
     this.updateInputCopy();
   }
   updateInputCopy() {
     const touch = this.inputMode === 'touch';
-    $('#cameraHelp').textContent = touch ? 'Виды настроены. Выберите удобный.' : 'Колесо — масштаб. ПКМ ↕ — высота.';
-    $('#gl').setAttribute('aria-label', touch ? 'Игровое поле. Удар — свайп. Камера — в настройках.'
-      : 'Игровое поле. Удар — ЛКМ и движение. Колесо — масштаб, ПКМ вверх/вниз — высота камеры, C — сброс.');
+    $('#cameraHelp').textContent = 'Три готовых вида. Кадр одинаковый на всех устройствах и не требует настройки.';
+    $('#gl').setAttribute('aria-label', touch
+      ? 'Игровое поле. Удар — свайп. Вид камеры — в настройках.'
+      : 'Игровое поле. Удар — ЛКМ и движение. Вид камеры — 1, 2, 3 или в настройках.');
     if (this.game && this.game.training) this.trainSync(this.game.training);
   }
 
