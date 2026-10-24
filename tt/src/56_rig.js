@@ -213,6 +213,10 @@ class PaddleRig {
       ? (mesh, matrix, mat) => R.drawShadow(mesh, matrix, null, 0)
       : (mesh, matrix, mat) => R.draw(mesh, matrix, mat);
     const ghost = o.ghost ? this.ghostMat(o) : null;
+    /* Optional uniform scale: the lab draws the player's blade smaller so it
+     * does not hide the contact area. Default 1 keeps every other caller. */
+    const scale = Number.isFinite(o.scale) ? o.scale : 1;
+    if (scale !== 1) V3.set(this._one, scale, scale, scale); else V3.set(this._one, 1, 1, 1);
     M4.compose(this._m, o.pos, q, this._one);
     draw(me.blade, this._m, ghost || mats.wood || ma.bladeWood);
 
@@ -227,7 +231,7 @@ class PaddleRig {
     M4.compose(this._partM, this._pos, q, this._one);
     draw(me.rubber, this._partM, ghost || mats.black || ma.rubberBlack);
 
-    M4.transformDir(this._pos, this._m, { x: 0, y: -0.125, z: 0 });
+    M4.transformDir(this._pos, this._m, { x: 0, y: -0.125 * scale, z: 0 });
     V3.add(this._pos, o.pos, this._pos);
     M4.compose(this._partM, this._pos, q, this._one);
     draw(me.handle, this._partM, ghost || mats.grip || ma.handle);

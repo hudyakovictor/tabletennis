@@ -1,0 +1,90 @@
+<div id="app" role="application" aria-label="TOPSPIN LAB — отладка ударов, настольный теннис">
+  <canvas id="gl" aria-label="Стол. Коснитесь мяча и проведите линию: восемь направлений дают восемь ударов."></canvas>
+
+  <!-- ============================ TOP COUNTERS ==================== -->
+  <header id="top" class="pe">
+    <div id="brand"><b>TOPSPIN</b><span>LAB</span></div>
+    <div id="counters" role="group" aria-label="Счётчики ударов"></div>
+    <div id="topRight">
+      <div id="missBox" title="Распознанные жесты без контакта">МИМО <b id="missN">0</b></div>
+      <div id="rallyBox" title="Возвраты в текущем розыгрыше">СЕРИЯ <b id="rallyN">0</b></div>
+      <button class="ic" id="btnSettings" title="Настройки" aria-label="Настройки"></button>
+      <button class="ic" id="btnSound" title="Звук" aria-label="Звук" aria-pressed="true"></button>
+      <button class="ic" id="btnFull" title="Полный экран (F)" aria-label="Полный экран"></button>
+    </div>
+  </header>
+
+  <!-- ============================ BOTTOM INFO ===================== -->
+  <div id="readout">
+    <div id="lastShot" role="status" aria-live="polite">
+      <b id="lsTitle">ГОТОВ</b>
+      <span id="lsMeta"></span>
+    </div>
+    <div id="debug" aria-live="off"></div>
+  </div>
+
+  <div id="toast" role="status" aria-live="polite"></div>
+
+  <!-- ============================ SETTINGS ======================== -->
+  <div class="sheet" id="panel" hidden>
+    <div class="sheetCard" role="dialog" aria-modal="true" aria-label="Настройки">
+      <div class="sheetHead">
+        <b>НАСТРОЙКИ</b>
+        <button class="x" id="panelClose" aria-label="Закрыть">×</button>
+      </div>
+
+      <label class="field">
+        <span>СТОЛ БЛИЖЕ / ДАЛЬШЕ <output id="distOut">100%</output></span>
+        <input id="distRange" type="range" min="72" max="134" value="100" step="1">
+      </label>
+      <p class="hint">Единственная настройка вида. Подберите её отдельно для телефона и десктопа.</p>
+
+      <h4>СВОЯ ПОДАЧА</h4>
+      <div class="row" id="serveDirs" role="group" aria-label="Направление подачи">
+        <button class="opt" data-serve-dir="LEFT">ВЛЕВО</button>
+        <button class="opt" data-serve-dir="CENTER">ПО ЦЕНТРУ</button>
+        <button class="opt" data-serve-dir="RIGHT">ВПРАВО</button>
+      </div>
+      <div class="row" id="serveSpins" role="group" aria-label="Тип подачи">
+        <button class="opt" data-serve-spin="FLAT">ПЛОСКАЯ</button>
+        <button class="opt" data-serve-spin="TOP">ТОПСПИН</button>
+        <button class="opt" data-serve-spin="BACK">ПОДРЕЗКА</button>
+        <button class="opt" data-serve-spin="SIDE">БОКОВАЯ</button>
+      </div>
+      <p class="hint">Направление и тип подачи не чередуются: игра берёт то, что выбрано здесь.</p>
+
+      <h4>ОТЛАДКА</h4>
+      <label class="toggle"><input type="checkbox" id="dbgToggle"> Показывать жест, силу и координаты</label>
+
+      <div class="row">
+        <button class="btn ghost" id="openHistory">ИСТОРИЯ И СТАТИСТИКА</button>
+      </div>
+      <button class="btn" id="panelDone">ЗАКРЫТЬ</button>
+    </div>
+  </div>
+
+  <!-- ============================ HISTORY ========================= -->
+  <div class="sheet" id="history" hidden>
+    <div class="sheetCard wide" role="dialog" aria-modal="true" aria-label="История ударов">
+      <div class="sheetHead">
+        <b>ИСТОРИЯ</b>
+        <button class="x" id="histClose" aria-label="Закрыть">×</button>
+      </div>
+      <div id="histTotal" class="histTotal"></div>
+      <div id="histSummary" class="histSummary"></div>
+      <h4>ИГРЫ</h4>
+      <div class="histTableWrap" id="histSessions"><table><thead><tr>
+        <th>НАЧАЛО</th><th>УДАРЫ</th><th>НА СТОЛ</th><th>ПОДАЧИ</th><th>ПРОМАХИ</th><th>СЕРИЯ</th>
+      </tr></thead><tbody></tbody></table></div>
+      <h4>ПОСЛЕДНИЕ ПОПЫТКИ</h4>
+      <div class="histTableWrap"><table id="histTable"><thead><tr>
+        <th>ВРЕМЯ</th><th>УДАР</th><th>СИЛА</th><th>ЖЕСТ</th><th>ИСХОД</th><th>ТОЧКА</th><th>КМ/Ч</th>
+      </tr></thead><tbody></tbody></table></div>
+      <div class="row">
+        <button class="btn ghost" id="histExport">СКОПИРОВАТЬ JSON</button>
+        <button class="btn ghost danger" id="histClear">ОЧИСТИТЬ</button>
+      </div>
+      <p class="hint" id="histHint"></p>
+    </div>
+  </div>
+</div>
