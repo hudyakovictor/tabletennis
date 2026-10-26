@@ -1,0 +1,34 @@
+{
+ "360x740 profile": {
+  "small": [],
+  "overflow": [],
+  "clipped": [],
+  "tiny": [],
+  "docScrollX": false,
+  "errs": []
+ },
+ "360x740 hub": {
+  "small": [],
+  "overflow": [],
+  "clipped": [],
+  "tiny": [],
+  "docScrollX": false,
+  "errs": []
+ },
+ "390x844 profile": {
+  "small": [],
+  "overflow": [],
+  "clipped": [],
+  "tiny": [],
+  "docScrollX": false,
+  "errs": []
+ },
+ "390x844 hub": {
+  "small": [],
+  "overflow": [],
+  "clipped": [],
+  "tiny": [],
+  "docScrollX": false,
+  "errs": []
+ }
+}

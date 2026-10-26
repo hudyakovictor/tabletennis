@@ -1,0 +1,230 @@
+<!doctype html><meta charset="utf-8"><title>Zone map — расхождения курсор⇄ракетка</title>
+<style>
+body{font:13px/1.45 system-ui;margin:16px;background:#0c1220;color:#dfe8ff}
+h1{font-size:18px} .grid{display:grid;grid-template-columns:repeat(10,130px);gap:3px;margin:12px 0}
+.cell{padding:5px;border-radius:6px;min-height:64px}
+.cell b{font-size:11px;display:block;margin-bottom:2px;opacity:.8}
+.cell span{font-size:10.5px;opacity:.92}
+.exact{background:#123c26;border:1px solid #2e9e63}
+.pinTop{background:#4a3413;border:1px solid #c08a2e}
+.pinBot{background:#1d2a4a;border:1px solid #4170d0}
+table{border-collapse:collapse}td{border:1px solid #334;padding:4px 8px;font-size:11px}
+.note{background:#141c30;padding:10px 14px;border-radius:8px;margin:10px 0;max-width:900px}
+</style>
+<h1>Разметка зон: курсор ⇄ ракетка (портрет 390×844, камера DYNAMIC)</h1>
+<div class="note"><b>Зелёное</b> (● точная) — клинок стоит РОВНО под курсором (ошибка ≤2 px, луч-солвер).
+<b>Жёлтое</b> (▲ пин) — потолок руки (верх): курсор выше головы, клинок на максимуме вылета.
+<b>Синее</b> — прижим к полу/краю: физический предел руки.<br>
+d — расстояние в пикселях от курсора до клинка; y — высота клинка над столом; z — глубина (подать к сетке/отойти).</div>
+<div class="grid"><div class="cell pinTop" title="cursor(0.05,0.05) → blade rel y=0.72 m, z=0.78 m, d=306px">
+  <b>Z00</b><span>▲ пин<br>d=306px<br>y=0.72<br>z=0.78</span></div>
+<div class="cell pinTop" title="cursor(0.15,0.05) → blade rel y=0.72 m, z=0.78 m, d=304px">
+  <b>Z01</b><span>▲ пин<br>d=304px<br>y=0.72<br>z=0.78</span></div>
+<div class="cell pinTop" title="cursor(0.25,0.05) → blade rel y=0.72 m, z=0.78 m, d=303px">
+  <b>Z02</b><span>▲ пин<br>d=303px<br>y=0.72<br>z=0.78</span></div>
+<div class="cell pinTop" title="cursor(0.35,0.05) → blade rel y=0.72 m, z=0.78 m, d=302px">
+  <b>Z03</b><span>▲ пин<br>d=302px<br>y=0.72<br>z=0.78</span></div>
+<div class="cell pinTop" title="cursor(0.45,0.05) → blade rel y=0.72 m, z=0.78 m, d=302px">
+  <b>Z04</b><span>▲ пин<br>d=302px<br>y=0.72<br>z=0.78</span></div>
+<div class="cell pinTop" title="cursor(0.55,0.05) → blade rel y=0.72 m, z=0.78 m, d=302px">
+  <b>Z05</b><span>▲ пин<br>d=302px<br>y=0.72<br>z=0.78</span></div>
+<div class="cell pinTop" title="cursor(0.65,0.05) → blade rel y=0.72 m, z=0.78 m, d=302px">
+  <b>Z06</b><span>▲ пин<br>d=302px<br>y=0.72<br>z=0.78</span></div>
+<div class="cell pinTop" title="cursor(0.75,0.05) → blade rel y=0.72 m, z=0.78 m, d=303px">
+  <b>Z07</b><span>▲ пин<br>d=303px<br>y=0.72<br>z=0.78</span></div>
+<div class="cell pinTop" title="cursor(0.85,0.05) → blade rel y=0.72 m, z=0.78 m, d=304px">
+  <b>Z08</b><span>▲ пин<br>d=304px<br>y=0.72<br>z=0.78</span></div>
+<div class="cell pinTop" title="cursor(0.95,0.05) → blade rel y=0.72 m, z=0.78 m, d=306px">
+  <b>Z09</b><span>▲ пин<br>d=306px<br>y=0.72<br>z=0.78</span></div>
+<div class="cell pinTop" title="cursor(0.05,0.15) → blade rel y=0.72 m, z=0.78 m, d=221px">
+  <b>Z10</b><span>▲ пин<br>d=221px<br>y=0.72<br>z=0.78</span></div>
+<div class="cell pinTop" title="cursor(0.15,0.15) → blade rel y=0.72 m, z=0.78 m, d=219px">
+  <b>Z11</b><span>▲ пин<br>d=219px<br>y=0.72<br>z=0.78</span></div>
+<div class="cell pinTop" title="cursor(0.25,0.15) → blade rel y=0.72 m, z=0.78 m, d=218px">
+  <b>Z12</b><span>▲ пин<br>d=218px<br>y=0.72<br>z=0.78</span></div>
+<div class="cell pinTop" title="cursor(0.35,0.15) → blade rel y=0.72 m, z=0.78 m, d=218px">
+  <b>Z13</b><span>▲ пин<br>d=218px<br>y=0.72<br>z=0.78</span></div>
+<div class="cell pinTop" title="cursor(0.45,0.15) → blade rel y=0.72 m, z=0.78 m, d=218px">
+  <b>Z14</b><span>▲ пин<br>d=218px<br>y=0.72<br>z=0.78</span></div>
+<div class="cell pinTop" title="cursor(0.55,0.15) → blade rel y=0.72 m, z=0.78 m, d=218px">
+  <b>Z15</b><span>▲ пин<br>d=218px<br>y=0.72<br>z=0.78</span></div>
+<div class="cell pinTop" title="cursor(0.65,0.15) → blade rel y=0.72 m, z=0.78 m, d=218px">
+  <b>Z16</b><span>▲ пин<br>d=218px<br>y=0.72<br>z=0.78</span></div>
+<div class="cell pinTop" title="cursor(0.75,0.15) → blade rel y=0.72 m, z=0.78 m, d=218px">
+  <b>Z17</b><span>▲ пин<br>d=218px<br>y=0.72<br>z=0.78</span></div>
+<div class="cell pinTop" title="cursor(0.85,0.15) → blade rel y=0.72 m, z=0.78 m, d=219px">
+  <b>Z18</b><span>▲ пин<br>d=219px<br>y=0.72<br>z=0.78</span></div>
+<div class="cell pinTop" title="cursor(0.95,0.15) → blade rel y=0.72 m, z=0.78 m, d=221px">
+  <b>Z19</b><span>▲ пин<br>d=221px<br>y=0.72<br>z=0.78</span></div>
+<div class="cell pinTop" title="cursor(0.05,0.25) → blade rel y=0.72 m, z=0.78 m, d=137px">
+  <b>Z20</b><span>▲ пин<br>d=137px<br>y=0.72<br>z=0.78</span></div>
+<div class="cell pinTop" title="cursor(0.15,0.25) → blade rel y=0.72 m, z=0.78 m, d=134px">
+  <b>Z21</b><span>▲ пин<br>d=134px<br>y=0.72<br>z=0.78</span></div>
+<div class="cell pinTop" title="cursor(0.25,0.25) → blade rel y=0.72 m, z=0.78 m, d=134px">
+  <b>Z22</b><span>▲ пин<br>d=134px<br>y=0.72<br>z=0.78</span></div>
+<div class="cell pinTop" title="cursor(0.35,0.25) → blade rel y=0.72 m, z=0.78 m, d=133px">
+  <b>Z23</b><span>▲ пин<br>d=133px<br>y=0.72<br>z=0.78</span></div>
+<div class="cell pinTop" title="cursor(0.45,0.25) → blade rel y=0.72 m, z=0.78 m, d=133px">
+  <b>Z24</b><span>▲ пин<br>d=133px<br>y=0.72<br>z=0.78</span></div>
+<div class="cell pinTop" title="cursor(0.55,0.25) → blade rel y=0.72 m, z=0.78 m, d=133px">
+  <b>Z25</b><span>▲ пин<br>d=133px<br>y=0.72<br>z=0.78</span></div>
+<div class="cell pinTop" title="cursor(0.65,0.25) → blade rel y=0.72 m, z=0.78 m, d=133px">
+  <b>Z26</b><span>▲ пин<br>d=133px<br>y=0.72<br>z=0.78</span></div>
+<div class="cell pinTop" title="cursor(0.75,0.25) → blade rel y=0.72 m, z=0.78 m, d=134px">
+  <b>Z27</b><span>▲ пин<br>d=134px<br>y=0.72<br>z=0.78</span></div>
+<div class="cell pinTop" title="cursor(0.85,0.25) → blade rel y=0.72 m, z=0.78 m, d=134px">
+  <b>Z28</b><span>▲ пин<br>d=134px<br>y=0.72<br>z=0.78</span></div>
+<div class="cell pinTop" title="cursor(0.95,0.25) → blade rel y=0.72 m, z=0.78 m, d=137px">
+  <b>Z29</b><span>▲ пин<br>d=137px<br>y=0.72<br>z=0.78</span></div>
+<div class="cell pinTop" title="cursor(0.05,0.35) → blade rel y=0.72 m, z=0.78 m, d=55px">
+  <b>Z30</b><span>▲ пин<br>d=55px<br>y=0.72<br>z=0.78</span></div>
+<div class="cell pinTop" title="cursor(0.15,0.35) → blade rel y=0.72 m, z=0.78 m, d=50px">
+  <b>Z31</b><span>▲ пин<br>d=50px<br>y=0.72<br>z=0.78</span></div>
+<div class="cell pinTop" title="cursor(0.25,0.35) → blade rel y=0.72 m, z=0.78 m, d=49px">
+  <b>Z32</b><span>▲ пин<br>d=49px<br>y=0.72<br>z=0.78</span></div>
+<div class="cell pinTop" title="cursor(0.35,0.35) → blade rel y=0.72 m, z=0.78 m, d=49px">
+  <b>Z33</b><span>▲ пин<br>d=49px<br>y=0.72<br>z=0.78</span></div>
+<div class="cell pinTop" title="cursor(0.45,0.35) → blade rel y=0.72 m, z=0.78 m, d=49px">
+  <b>Z34</b><span>▲ пин<br>d=49px<br>y=0.72<br>z=0.78</span></div>
+<div class="cell pinTop" title="cursor(0.55,0.35) → blade rel y=0.72 m, z=0.78 m, d=49px">
+  <b>Z35</b><span>▲ пин<br>d=49px<br>y=0.72<br>z=0.78</span></div>
+<div class="cell pinTop" title="cursor(0.65,0.35) → blade rel y=0.72 m, z=0.78 m, d=49px">
+  <b>Z36</b><span>▲ пин<br>d=49px<br>y=0.72<br>z=0.78</span></div>
+<div class="cell pinTop" title="cursor(0.75,0.35) → blade rel y=0.72 m, z=0.78 m, d=49px">
+  <b>Z37</b><span>▲ пин<br>d=49px<br>y=0.72<br>z=0.78</span></div>
+<div class="cell pinTop" title="cursor(0.85,0.35) → blade rel y=0.72 m, z=0.78 m, d=50px">
+  <b>Z38</b><span>▲ пин<br>d=50px<br>y=0.72<br>z=0.78</span></div>
+<div class="cell pinTop" title="cursor(0.95,0.35) → blade rel y=0.72 m, z=0.78 m, d=55px">
+  <b>Z39</b><span>▲ пин<br>d=55px<br>y=0.72<br>z=0.78</span></div>
+<div class="cell pinBot" title="cursor(0.05,0.45) → blade rel y=0.72 m, z=1.16 m, d=10px">
+  <b>Z40</b><span>▲ пин<br>d=10px<br>y=0.72<br>z=1.16</span></div>
+<div class="cell pinBot" title="cursor(0.15,0.45) → blade rel y=0.72 m, z=1.16 m, d=0px">
+  <b>Z41</b><span>▲ пин<br>d=0px<br>y=0.72<br>z=1.16</span></div>
+<div class="cell exact" title="cursor(0.25,0.45) → blade rel y=0.72 m, z=1.16 m, d=0px">
+  <b>Z42</b><span>● точная<br>d=0px<br>y=0.72<br>z=1.16</span></div>
+<div class="cell exact" title="cursor(0.35,0.45) → blade rel y=0.72 m, z=1.16 m, d=0px">
+  <b>Z43</b><span>● точная<br>d=0px<br>y=0.72<br>z=1.16</span></div>
+<div class="cell exact" title="cursor(0.45,0.45) → blade rel y=0.72 m, z=1.16 m, d=0px">
+  <b>Z44</b><span>● точная<br>d=0px<br>y=0.72<br>z=1.16</span></div>
+<div class="cell exact" title="cursor(0.55,0.45) → blade rel y=0.72 m, z=1.16 m, d=0px">
+  <b>Z45</b><span>● точная<br>d=0px<br>y=0.72<br>z=1.16</span></div>
+<div class="cell exact" title="cursor(0.65,0.45) → blade rel y=0.72 m, z=1.16 m, d=0px">
+  <b>Z46</b><span>● точная<br>d=0px<br>y=0.72<br>z=1.16</span></div>
+<div class="cell exact" title="cursor(0.75,0.45) → blade rel y=0.72 m, z=1.16 m, d=0px">
+  <b>Z47</b><span>● точная<br>d=0px<br>y=0.72<br>z=1.16</span></div>
+<div class="cell pinBot" title="cursor(0.85,0.45) → blade rel y=0.72 m, z=1.16 m, d=0px">
+  <b>Z48</b><span>▲ пин<br>d=0px<br>y=0.72<br>z=1.16</span></div>
+<div class="cell pinBot" title="cursor(0.95,0.45) → blade rel y=0.72 m, z=1.16 m, d=10px">
+  <b>Z49</b><span>▲ пин<br>d=10px<br>y=0.72<br>z=1.16</span></div>
+<div class="cell pinBot" title="cursor(0.05,0.55) → blade rel y=0.69 m, z=1.73 m, d=0px">
+  <b>Z50</b><span>▲ пин<br>d=0px<br>y=0.69<br>z=1.73</span></div>
+<div class="cell exact" title="cursor(0.15,0.55) → blade rel y=0.69 m, z=1.73 m, d=0px">
+  <b>Z51</b><span>● точная<br>d=0px<br>y=0.69<br>z=1.73</span></div>
+<div class="cell exact" title="cursor(0.25,0.55) → blade rel y=0.69 m, z=1.73 m, d=0px">
+  <b>Z52</b><span>● точная<br>d=0px<br>y=0.69<br>z=1.73</span></div>
+<div class="cell exact" title="cursor(0.35,0.55) → blade rel y=0.69 m, z=1.73 m, d=0px">
+  <b>Z53</b><span>● точная<br>d=0px<br>y=0.69<br>z=1.73</span></div>
+<div class="cell exact" title="cursor(0.45,0.55) → blade rel y=0.69 m, z=1.73 m, d=0px">
+  <b>Z54</b><span>● точная<br>d=0px<br>y=0.69<br>z=1.73</span></div>
+<div class="cell exact" title="cursor(0.55,0.55) → blade rel y=0.69 m, z=1.73 m, d=0px">
+  <b>Z55</b><span>● точная<br>d=0px<br>y=0.69<br>z=1.73</span></div>
+<div class="cell exact" title="cursor(0.65,0.55) → blade rel y=0.69 m, z=1.73 m, d=0px">
+  <b>Z56</b><span>● точная<br>d=0px<br>y=0.69<br>z=1.73</span></div>
+<div class="cell exact" title="cursor(0.75,0.55) → blade rel y=0.69 m, z=1.73 m, d=0px">
+  <b>Z57</b><span>● точная<br>d=0px<br>y=0.69<br>z=1.73</span></div>
+<div class="cell exact" title="cursor(0.85,0.55) → blade rel y=0.69 m, z=1.73 m, d=0px">
+  <b>Z58</b><span>● точная<br>d=0px<br>y=0.69<br>z=1.73</span></div>
+<div class="cell pinBot" title="cursor(0.95,0.55) → blade rel y=0.69 m, z=1.73 m, d=0px">
+  <b>Z59</b><span>▲ пин<br>d=0px<br>y=0.69<br>z=1.73</span></div>
+<div class="cell pinBot" title="cursor(0.05,0.65) → blade rel y=0.32 m, z=1.78 m, d=1px">
+  <b>Z60</b><span>▲ пин<br>d=1px<br>y=0.32<br>z=1.78</span></div>
+<div class="cell exact" title="cursor(0.15,0.65) → blade rel y=0.32 m, z=1.78 m, d=0px">
+  <b>Z61</b><span>● точная<br>d=0px<br>y=0.32<br>z=1.78</span></div>
+<div class="cell exact" title="cursor(0.25,0.65) → blade rel y=0.32 m, z=1.78 m, d=0px">
+  <b>Z62</b><span>● точная<br>d=0px<br>y=0.32<br>z=1.78</span></div>
+<div class="cell exact" title="cursor(0.35,0.65) → blade rel y=0.32 m, z=1.78 m, d=0px">
+  <b>Z63</b><span>● точная<br>d=0px<br>y=0.32<br>z=1.78</span></div>
+<div class="cell exact" title="cursor(0.45,0.65) → blade rel y=0.32 m, z=1.78 m, d=0px">
+  <b>Z64</b><span>● точная<br>d=0px<br>y=0.32<br>z=1.78</span></div>
+<div class="cell exact" title="cursor(0.55,0.65) → blade rel y=0.32 m, z=1.78 m, d=0px">
+  <b>Z65</b><span>● точная<br>d=0px<br>y=0.32<br>z=1.78</span></div>
+<div class="cell exact" title="cursor(0.65,0.65) → blade rel y=0.32 m, z=1.78 m, d=0px">
+  <b>Z66</b><span>● точная<br>d=0px<br>y=0.32<br>z=1.78</span></div>
+<div class="cell exact" title="cursor(0.75,0.65) → blade rel y=0.32 m, z=1.78 m, d=0px">
+  <b>Z67</b><span>● точная<br>d=0px<br>y=0.32<br>z=1.78</span></div>
+<div class="cell exact" title="cursor(0.85,0.65) → blade rel y=0.32 m, z=1.78 m, d=0px">
+  <b>Z68</b><span>● точная<br>d=0px<br>y=0.32<br>z=1.78</span></div>
+<div class="cell pinBot" title="cursor(0.95,0.65) → blade rel y=0.32 m, z=1.78 m, d=1px">
+  <b>Z69</b><span>▲ пин<br>d=1px<br>y=0.32<br>z=1.78</span></div>
+<div class="cell pinBot" title="cursor(0.05,0.75) → blade rel y=0.03 m, z=1.93 m, d=1px">
+  <b>Z70</b><span>▲ пин<br>d=1px<br>y=0.03<br>z=1.93</span></div>
+<div class="cell exact" title="cursor(0.15,0.75) → blade rel y=0.03 m, z=1.93 m, d=0px">
+  <b>Z71</b><span>● точная<br>d=0px<br>y=0.03<br>z=1.93</span></div>
+<div class="cell exact" title="cursor(0.25,0.75) → blade rel y=0.03 m, z=1.93 m, d=0px">
+  <b>Z72</b><span>● точная<br>d=0px<br>y=0.03<br>z=1.93</span></div>
+<div class="cell exact" title="cursor(0.35,0.75) → blade rel y=0.03 m, z=1.93 m, d=0px">
+  <b>Z73</b><span>● точная<br>d=0px<br>y=0.03<br>z=1.93</span></div>
+<div class="cell exact" title="cursor(0.45,0.75) → blade rel y=0.03 m, z=1.93 m, d=0px">
+  <b>Z74</b><span>● точная<br>d=0px<br>y=0.03<br>z=1.93</span></div>
+<div class="cell exact" title="cursor(0.55,0.75) → blade rel y=0.03 m, z=1.93 m, d=0px">
+  <b>Z75</b><span>● точная<br>d=0px<br>y=0.03<br>z=1.93</span></div>
+<div class="cell exact" title="cursor(0.65,0.75) → blade rel y=0.03 m, z=1.93 m, d=0px">
+  <b>Z76</b><span>● точная<br>d=0px<br>y=0.03<br>z=1.93</span></div>
+<div class="cell exact" title="cursor(0.75,0.75) → blade rel y=0.03 m, z=1.93 m, d=0px">
+  <b>Z77</b><span>● точная<br>d=0px<br>y=0.03<br>z=1.93</span></div>
+<div class="cell exact" title="cursor(0.85,0.75) → blade rel y=0.03 m, z=1.93 m, d=0px">
+  <b>Z78</b><span>● точная<br>d=0px<br>y=0.03<br>z=1.93</span></div>
+<div class="cell pinBot" title="cursor(0.95,0.75) → blade rel y=0.03 m, z=1.93 m, d=1px">
+  <b>Z79</b><span>▲ пин<br>d=1px<br>y=0.03<br>z=1.93</span></div>
+<div class="cell exact" title="cursor(0.05,0.85) → blade rel y=0.03 m, z=2.23 m, d=0px">
+  <b>Z80</b><span>● точная<br>d=0px<br>y=0.03<br>z=2.23</span></div>
+<div class="cell exact" title="cursor(0.15,0.85) → blade rel y=0.03 m, z=2.23 m, d=0px">
+  <b>Z81</b><span>● точная<br>d=0px<br>y=0.03<br>z=2.23</span></div>
+<div class="cell exact" title="cursor(0.25,0.85) → blade rel y=0.03 m, z=2.23 m, d=0px">
+  <b>Z82</b><span>● точная<br>d=0px<br>y=0.03<br>z=2.23</span></div>
+<div class="cell exact" title="cursor(0.35,0.85) → blade rel y=0.03 m, z=2.23 m, d=0px">
+  <b>Z83</b><span>● точная<br>d=0px<br>y=0.03<br>z=2.23</span></div>
+<div class="cell exact" title="cursor(0.45,0.85) → blade rel y=0.03 m, z=2.23 m, d=0px">
+  <b>Z84</b><span>● точная<br>d=0px<br>y=0.03<br>z=2.23</span></div>
+<div class="cell exact" title="cursor(0.55,0.85) → blade rel y=0.03 m, z=2.23 m, d=0px">
+  <b>Z85</b><span>● точная<br>d=0px<br>y=0.03<br>z=2.23</span></div>
+<div class="cell exact" title="cursor(0.65,0.85) → blade rel y=0.03 m, z=2.23 m, d=0px">
+  <b>Z86</b><span>● точная<br>d=0px<br>y=0.03<br>z=2.23</span></div>
+<div class="cell exact" title="cursor(0.75,0.85) → blade rel y=0.03 m, z=2.23 m, d=0px">
+  <b>Z87</b><span>● точная<br>d=0px<br>y=0.03<br>z=2.23</span></div>
+<div class="cell exact" title="cursor(0.85,0.85) → blade rel y=0.03 m, z=2.23 m, d=0px">
+  <b>Z88</b><span>● точная<br>d=0px<br>y=0.03<br>z=2.23</span></div>
+<div class="cell exact" title="cursor(0.95,0.85) → blade rel y=0.03 m, z=2.23 m, d=0px">
+  <b>Z89</b><span>● точная<br>d=0px<br>y=0.03<br>z=2.23</span></div>
+<div class="cell pinBot" title="cursor(0.05,0.95) → blade rel y=0.03 m, z=2.35 m, d=44px">
+  <b>Z90</b><span>▲ пин<br>d=44px<br>y=0.03<br>z=2.35</span></div>
+<div class="cell pinBot" title="cursor(0.15,0.95) → blade rel y=0.03 m, z=2.35 m, d=43px">
+  <b>Z91</b><span>▲ пин<br>d=43px<br>y=0.03<br>z=2.35</span></div>
+<div class="cell pinBot" title="cursor(0.25,0.95) → blade rel y=0.03 m, z=2.35 m, d=42px">
+  <b>Z92</b><span>▲ пин<br>d=42px<br>y=0.03<br>z=2.35</span></div>
+<div class="cell pinBot" title="cursor(0.35,0.95) → blade rel y=0.03 m, z=2.35 m, d=41px">
+  <b>Z93</b><span>▲ пин<br>d=41px<br>y=0.03<br>z=2.35</span></div>
+<div class="cell pinBot" title="cursor(0.45,0.95) → blade rel y=0.03 m, z=2.35 m, d=41px">
+  <b>Z94</b><span>▲ пин<br>d=41px<br>y=0.03<br>z=2.35</span></div>
+<div class="cell pinBot" title="cursor(0.55,0.95) → blade rel y=0.03 m, z=2.35 m, d=41px">
+  <b>Z95</b><span>▲ пин<br>d=41px<br>y=0.03<br>z=2.35</span></div>
+<div class="cell pinBot" title="cursor(0.65,0.95) → blade rel y=0.03 m, z=2.35 m, d=41px">
+  <b>Z96</b><span>▲ пин<br>d=41px<br>y=0.03<br>z=2.35</span></div>
+<div class="cell pinBot" title="cursor(0.75,0.95) → blade rel y=0.03 m, z=2.35 m, d=42px">
+  <b>Z97</b><span>▲ пин<br>d=42px<br>y=0.03<br>z=2.35</span></div>
+<div class="cell pinBot" title="cursor(0.85,0.95) → blade rel y=0.03 m, z=2.35 m, d=43px">
+  <b>Z98</b><span>▲ пин<br>d=43px<br>y=0.03<br>z=2.35</span></div>
+<div class="cell pinBot" title="cursor(0.95,0.95) → blade rel y=0.03 m, z=2.35 m, d=44px">
+  <b>Z99</b><span>▲ пин<br>d=44px<br>y=0.03<br>z=2.35</span></div></div>
+<h2>Сводка по строкам</h2><table><tr><th>Полоса экрана</th><th>Точных ячеек</th><th>Пин-зоны</th></tr><tr><td>Строка py≈0.05</td><td>0/10 точных</td><td>Z00(306px) Z01(304px) Z02(303px) Z03(302px) Z04(302px) Z05(302px) Z06(302px) Z07(303px) Z08(304px) Z09(306px)</td></tr>
+<tr><td>Строка py≈0.15</td><td>0/10 точных</td><td>Z10(221px) Z11(219px) Z12(218px) Z13(218px) Z14(218px) Z15(218px) Z16(218px) Z17(218px) Z18(219px) Z19(221px)</td></tr>
+<tr><td>Строка py≈0.25</td><td>0/10 точных</td><td>Z20(137px) Z21(134px) Z22(134px) Z23(133px) Z24(133px) Z25(133px) Z26(133px) Z27(134px) Z28(134px) Z29(137px)</td></tr>
+<tr><td>Строка py≈0.35</td><td>0/10 точных</td><td>Z30(55px) Z31(50px) Z32(49px) Z33(49px) Z34(49px) Z35(49px) Z36(49px) Z37(49px) Z38(50px) Z39(55px)</td></tr>
+<tr><td>Строка py≈0.45</td><td>6/10 точных</td><td>Z40(10px) Z41(0px) Z48(0px) Z49(10px)</td></tr>
+<tr><td>Строка py≈0.55</td><td>8/10 точных</td><td>Z50(0px) Z59(0px)</td></tr>
+<tr><td>Строка py≈0.65</td><td>8/10 точных</td><td>Z60(1px) Z69(1px)</td></tr>
+<tr><td>Строка py≈0.75</td><td>8/10 точных</td><td>Z70(1px) Z79(1px)</td></tr>
+<tr><td>Строка py≈0.85</td><td>10/10 точных</td><td>—</td></tr>
+<tr><td>Строка py≈0.95</td><td>0/10 точных</td><td>Z90(44px) Z91(43px) Z92(42px) Z93(41px) Z94(41px) Z95(41px) Z96(41px) Z97(42px) Z98(43px) Z99(44px)</td></tr></table>
+<p style="opacity:.7">AUDIT №5: 50+100 анализов, 150 симуляций.
+Дата: 2026-10-26T18:19:29Z</p>
