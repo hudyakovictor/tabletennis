@@ -2889,6 +2889,7 @@ class Game {
   update(dtReal) {
     if (!Number.isFinite(dtReal) || dtReal <= 0) return;
     dtReal = Math.min(dtReal, 0.1);
+    this.updateArenaFlashes(dtReal);
     if (this.state === GS.MENU) {
       this.updateCamera(dtReal);
       this.profile.maybeSave(dtReal);
@@ -3231,12 +3232,26 @@ class Game {
     R.uploadDyn(m, nv, ni);
   }
 
-  billboard(out, pos, size, roll) {
+  /* Вспышки фотоаппаратов на трибунах (62_arena): один переиспользуемый
+   * блик по расписанию «раз в 1–4 с на 80–150 мс». Собственные часы
+   * _arenaT: this.time в меню не идёт, а вспышки живут и в лобби.
+   * Не при reduced motion (фоточувствительность) и не на low-качестве. */
+  updateArenaFlashes(dt) {
+    this._arenaT = (this._arenaT || 0) + dt;
+    if (this._flash || this.reducedMotion || (this.settings && this.settings.quality === 'low')) return;
+    this._flashNext = (this._flashNext === undefined ? 1.4 : this._flashNext) - dt;
+    if (this._flashNext > 0) return;
+    this._flashNext = 1 + Math.random() * 3;
+    const F = ARENA_FLASH_SPOTS[(Math.random() * ARENA_FLASH_SPOTS.length) | 0];
+    this._flash = { x: F[0], y: F[1], z: F[2], t0: this._arenaT, dur: 0.08 + Math.random() * 0.07, size: 0.55 + Math.random() * 0.4 };
+  }
+
+  billboard(out, pos, size, roll, sy) {
     const t = this._bb || (this._bb = { f: V3.new(), q: Q.new(), q2: Q.new(), s: V3.new(), up: V3.new(0, 1, 0) });
     V3.sub(t.f, this.R.camPos, pos); V3.norm(t.f, t.f);
     Q.lookRotation(t.q, t.f, t.up);
     if (roll) { Q.setAxisAngle(t.q2, t.f.x, t.f.y, t.f.z, roll); Q.mul(t.q, t.q2, t.q); }
-    V3.set(t.s, size, size, size);
+    V3.set(t.s, size, sy === undefined ? size : sy, size);
     return M4.compose(out, pos, t.q, t.s);
   }
 
@@ -3439,6 +3454,53 @@ class Game {
         color: [1, 1, 1], tex: this.scene.tex.glow, blend: 'add', doubleSided: true,
         emissive: [0.42, 0.44, 0.40], rough: 1,
       });
+    }
+
+    /* Луч света по трибунам: крупный мягкий шар скользит справа налево
+     * и обратно (cos — плавный разворот у краёв), столб луча тянется к
+     * прожектору наверху по центру. Сцена при этом уходит в темноту:
+     * трибуны сами по себе тёмные, живёт только этот свет. */
+    if (!this.reducedMotion) {
+      const t = this._arenaT || 0;
+      // Матч-камера смотрит вниз (~-24°) с линзовым сдвигом: видимая
+      // полоса дальней стены над бортами — только y ∈ [-0.24, 0.23],
+      // поэтому ядро шара живёт у самой кромки бортов (sy ~0), а его
+      // нижняя часть естественно срезается бортом (он ближе к камере).
+      const sx = 8.6 * Math.cos(t * 0.21), sy = -0.02 + Math.sin(t * 0.147 + 1.3) * 0.08;
+      const pulse = 0.85 + 0.15 * Math.sin(t * 0.9);
+      const beamLen = Math.hypot(sx, 7.6 - sy) * 0.95;
+      // столб: от прожектора (0, 7.6 — выше кадра) к пятну; roll — наклон
+      this.billboard(tmp.m, V3.new(sx * 0.5, (sy + 7.6) / 2, -10.8), 2.4, Math.atan2(sx, 7.6 - sy), beamLen);
+      R.draw(me.quad, tmp.m, {
+        color: [1, 1, 1], tex: S.tex.glow, blend: 'add', doubleSided: true,
+        emissive: [0.170 * pulse, 0.200 * pulse, 0.280 * pulse], rough: 1,
+      });
+      // сам шар света на толпе
+      this.billboard(tmp.m, V3.new(sx, sy, -10.75), 7.5, 0);
+      R.draw(me.quad, tmp.m, {
+        color: [1, 1, 1], tex: S.tex.glow, blend: 'add', doubleSided: true,
+        emissive: [0.480 * pulse, 0.560 * pulse, 0.750 * pulse], rough: 1,
+      });
+      // яркое ядро прожектора (видно в кинематографичных ракурсах)
+      this.billboard(tmp.m, V3.new(0, 7.6, -10.85), 1.0, 0);
+      R.draw(me.quad, tmp.m, {
+        color: [1, 1, 1], tex: S.tex.glow, blend: 'add', doubleSided: true,
+        emissive: [0.40 * pulse, 0.46 * pulse, 0.58 * pulse], rough: 1,
+      });
+    }
+
+    /* camera flash over the stands: instant-on, quadratic fade out */
+    if (this._flash) {
+      const f = this._flash, k = (this._arenaT - f.t0) / f.dur;
+      if (k >= 1) this._flash = null;
+      else {
+        const a = (1 - k) * (1 - k);
+        this.billboard(tmp.m, V3.new(f.x, f.y, f.z), f.size * (0.7 + k * 0.5), 0);
+        R.draw(me.quad, tmp.m, {
+          color: [1, 1, 1], tex: S.tex.glow, blend: 'add', doubleSided: true,
+          emissive: [0.88 * a * 1.7, 0.94 * a * 1.7, 1.08 * a * 1.7], rough: 1,
+        });
+      }
     }
   }
 
