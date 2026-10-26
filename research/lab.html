@@ -1,0 +1,740 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>UI/Interaction Lab — 2026</title>
+<style>
+:root{
+  --bg:#06080e; --panel:#0d1220; --panel2:#121a2b; --line:#1f2a41; --txt:#e9eefb; --muted:#8b9bb6; --dim:#63718c;
+  --acc:#5fe0ff; --acc2:#a78bfa; --good:#4ade80; --warn:#fbbf24; --bad:#fb7185;
+  --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  --sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--txt);font:15px/1.5 var(--sans)}
+header{position:sticky;top:0;z-index:20;background:rgba(6,8,14,.94);backdrop-filter:blur(8px);border-bottom:1px solid var(--line)}
+.hrow{display:flex;gap:14px;align-items:center;padding:12px 16px;flex-wrap:wrap}
+.logo{font:700 12px/1 var(--mono);letter-spacing:.18em;text-transform:uppercase;color:var(--acc)}
+.sub{color:var(--dim);font-size:12px}
+.tabs{display:flex;gap:6px;overflow-x:auto;padding:0 16px 12px}
+.tabs button{white-space:nowrap;cursor:pointer;font:600 12px/1 var(--mono);letter-spacing:.04em;padding:9px 11px;border-radius:9px;
+  border:1px solid var(--line);background:var(--panel);color:var(--muted)}
+.tabs button.on{color:#04121a;background:linear-gradient(135deg,var(--acc),var(--acc2));border-color:transparent}
+main{max-width:1180px;margin:0 auto;padding:20px 16px 90px}
+.panel{display:none}
+.panel.on{display:block}
+h2{font-size:19px;margin:6px 0 4px}
+.rule{display:inline-block;font:600 11px/1.5 var(--mono);color:var(--warn);background:rgba(251,191,36,.09);
+  border:1px solid rgba(251,191,36,.35);border-radius:8px;padding:5px 9px;margin:6px 0 14px}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:16px;margin:12px 0}
+.card h3{margin:0 0 10px;font-size:14px;letter-spacing:.02em;color:#fff}
+.grid2{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,340px);gap:16px}
+@media(max-width:880px){.grid2{grid-template-columns:1fr}}
+label.f{display:block;font:600 11px/1 var(--mono);color:var(--muted);letter-spacing:.08em;text-transform:uppercase;margin:12px 0 6px}
+input[type=range]{width:100%;accent-color:var(--acc)}
+input[type=color]{width:44px;height:32px;background:none;border:1px solid var(--line);border-radius:8px}
+input[type=text],select{background:#080c16;color:var(--txt);border:1px solid var(--line);border-radius:8px;padding:8px 10px;font:13px var(--sans)}
+button.b{cursor:pointer;font:600 13px var(--sans);padding:10px 14px;border-radius:10px;border:1px solid var(--line);background:var(--panel2);color:var(--txt)}
+button.b:hover{border-color:rgba(95,224,255,.5)}
+button.p{background:linear-gradient(135deg,var(--acc),var(--acc2));color:#04121a;border-color:transparent;font-weight:700}
+.row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+.mono{font-family:var(--mono);font-size:12.5px;color:var(--muted)}
+.out{font-family:var(--mono);font-size:12.5px;background:#070b14;border:1px solid var(--line);border-radius:10px;padding:10px 12px;white-space:pre-wrap}
+.v{font:700 12px var(--mono);padding:3px 7px;border-radius:6px}
+.v.good{color:#062; background:var(--good)} .v.warn{color:#3a2500;background:var(--warn)} .v.bad{color:#3b0511;background:var(--bad)}
+/* device frame */
+.phone{position:relative;background:#04060c;border:1px solid var(--line);border-radius:26px;margin:0 auto;overflow:hidden}
+.screen{position:absolute;inset:0;border-radius:24px;overflow:hidden;background:linear-gradient(180deg,#0a1020,#0d1526)}
+.notch{position:absolute;top:0;left:50%;transform:translateX(-50%);width:96px;height:22px;background:#04060c;border-radius:0 0 14px 14px;z-index:6}
+.home{position:absolute;bottom:0;left:50%;transform:translateX(-50%);width:120px;height:18px;background:rgba(255,255,255,.07);border-radius:12px 12px 0 0;z-index:6}
+.gl{position:absolute;inset:0;pointer-events:none;z-index:4}
+#gridO{background-image:repeating-linear-gradient(to right,rgba(255,255,255,.07) 0 1px,transparent 1px 8px),repeating-linear-gradient(to bottom,rgba(255,255,255,.07) 0 1px,transparent 1px 8px)}
+#safeO{border-top:var(--safi) solid rgba(251,113,133,.18);border-bottom:var(--safb) solid rgba(251,113,133,.18)}
+.reachline{position:absolute;left:0;right:0;top:60%;border-top:1px dashed rgba(95,224,255,.6);z-index:5;pointer-events:none}
+.foldline{position:absolute;top:0;bottom:0;left:50%;width:6px;margin-left:-3px;background:repeating-linear-gradient(to bottom,rgba(167,139,250,.5) 0 6px,transparent 6px 12px);z-index:5;pointer-events:none;display:none}
+/* targets */
+.tgt{position:absolute;border-radius:50%;background:radial-gradient(circle at 35% 30%,#7ff0ff,#2aa6c8);box-shadow:0 6px 18px rgba(95,224,255,.35);
+  display:flex;align-items:center;justify-content:center;color:#04121a;font-weight:800;z-index:8;cursor:pointer}
+.tgt.hide{display:none}
+.missMark{position:absolute;width:14px;height:14px;margin:-7px 0 0 -7px;border-radius:50%;border:2px solid var(--bad);z-index:9;pointer-events:none}
+.hitMark{position:absolute;width:8px;height:8px;margin:-4px 0 0 -4px;border-radius:50%;background:var(--good);z-index:9;pointer-events:none}
+/* states */
+.chips{display:flex;gap:10px;flex-wrap:wrap}
+.chip{padding:10px 16px;border-radius:10px;font-weight:650;border:1px solid var(--line);background:var(--panel2);color:var(--txt);transition:.12s}
+.chip.pressed{transform:scale(.94);background:#1c2a45;border-color:var(--acc)}
+.chip.sel{background:linear-gradient(135deg,rgba(95,224,255,.25),rgba(167,139,250,.25));border-color:var(--acc);color:#fff}
+.chip.dis{opacity:.4;cursor:not-allowed}
+.chip.load{color:var(--dim);position:relative;overflow:hidden}
+.chip.load::after{content:"";position:absolute;inset:0;background:linear-gradient(90deg,transparent,rgba(95,224,255,.35),transparent);
+  animation:sw 1s linear infinite}
+@keyframes sw{from{transform:translateX(-100%)}to{transform:translateX(100%)}}
+table{width:100%;border-collapse:collapse;font-size:13px;margin-top:8px}
+th,td{text-align:left;padding:8px 10px;border-bottom:1px solid var(--line)}
+th{color:#fff;font-weight:650;background:#101827;position:sticky;top:0}
+input.cell{width:78px;background:#080c16;border:1px solid var(--line);border-radius:7px;color:var(--txt);padding:5px 7px;font:12px var(--mono)}
+pre{background:#070b14;border:1px solid var(--line);border-radius:10px;padding:12px;overflow:auto;font:12px/1.55 var(--mono);color:#cfe4ff}
+.tag{font:700 10px/1 var(--mono);padding:4px 6px;border-radius:6px;border:1px solid var(--line);color:var(--muted)}
+ul.tight{margin:8px 0 0 0;padding-left:18px}
+ul.tight li{margin:4px 0}
+.hl{color:var(--acc)}
+.sample{border:1px solid var(--line);border-radius:10px;padding:10px;background:#0a0f1c;margin-top:8px}
+.ovf{border-color:var(--bad) !important;box-shadow:0 0 0 2px rgba(251,113,133,.25) inset}
+.glare{position:absolute;inset:0;background:linear-gradient(180deg,rgba(255,255,255,.55),rgba(255,255,255,.18));pointer-events:none;display:none}
+</style>
+</head>
+<body>
+<header>
+  <div class="hrow">
+    <span class="logo">UI / Interaction Lab</span>
+    <span class="sub">числа, а не мнения · v2026</span>
+  </div>
+  <div class="tabs" id="tabs">
+    <button data-t="p1" class="on">1 · Отклик (мс)</button>
+    <button data-t="p2">2 · Тайминги и кривые</button>
+    <button data-t="p3">3 · Тач-таргеты</button>
+    <button data-t="p4">4 · Зона пальца</button>
+    <button data-t="p5">5 · Раскладки и safe area</button>
+    <button data-t="p6">6 · Контраст и типографика</button>
+    <button data-t="p7">7 · Таблица таймингов → экспорт</button>
+    <button data-t="p8">8 · Состояния компонента</button>
+    <button data-t="p9">9 · Слои фидбека</button>
+  </div>
+</header>
+<main>
+
+<!-- 1 LATENCY -->
+<section class="panel on" id="p1">
+  <h2>Отклик: сколько миллисекунд до визуальной реакции</h2>
+  <div class="rule">ПРАВИЛО: визуальный ответ на нажатие ≤100 мс · локальное изменение мгновенно, результат действия — потом</div>
+  <div class="grid2">
+    <div class="card">
+      <h3>Симулятор задержки: нажми и почувствуй разницу</h3>
+      <div class="row" style="margin-bottom:14px">
+        <label class="f" style="margin:0">Задержка отклика: <span class="hl" id="dv">0</span> мс</label>
+        <input type="range" id="delay" min="0" max="400" step="10" value="0">
+      </div>
+      <div class="row">
+        <button class="b" data-d="0">0 мс</button>
+        <button class="b" data-d="50">50 мс</button>
+        <button class="b" data-d="100">100 мс</button>
+        <button class="b" data-d="150">150 мс</button>
+        <button class="b" data-d="250">250 мс</button>
+        <button class="b" data-d="400">400 мс</button>
+      </div>
+      <label class="f">Тест: цель 88×88 pt</label>
+      <div id="hitArea" style="position:relative;height:200px;border:1px dashed var(--line);border-radius:14px;display:flex;align-items:center;justify-content:center">
+        <div id="bigTarget" style="width:120px;height:120px;border-radius:26px;background:#16233d;border:1px solid var(--line);
+             display:flex;align-items:center;justify-content:center;font-weight:700;user-select:none;cursor:pointer;transition:transform 120ms ease-out, background 120ms ease-out">ЖМИ</div>
+      </div>
+      <div class="row" style="margin-top:12px">
+        <label class="mono"><input type="checkbox" id="resetAnim" checked> сбрасывать анимацию при повторном тапе</label>
+      </div>
+      <p class="mono" id="latOut" style="margin:10px 0 0">факт: — мс</p>
+    </div>
+    <div class="card">
+      <h3>Что это значит</h3>
+      <ul class="tight">
+        <li><b>≤100 мс</b> — читается как «мгновенно»: живой UI.</li>
+        <li><b>100–200 мс</b> — ещё терпимо, но интерфейс «неохотный».</li>
+        <li><b>&gt;250 мс</b> — игрок жмёт второй раз. Это уже баг-репорт.</li>
+      </ul>
+      <p class="mono" style="margin-top:12px">Проверка в игре: запись экрана 60 fps → 1 кадр = 16,7 мс. Нажатие → первый видимый кадр с изменением: 1–2 кадра = 17–33 мс (идеально), 6 кадров = 100 мс (предел), 15 кадров = 250 мс (переделать).</p>
+      <div class="out" style="margin-top:12px">Чек: changed(scale/color) → local, instant
+queue: animation of result → after
+server: optimistic UI → rollback on fail</div>
+    </div>
+  </div>
+</section>
+
+<!-- 2 TIMING -->
+<section class="panel" id="p2">
+  <h2>Тайминги и кривые: подбор на живых элементах</h2>
+  <div class="rule">ПРАВИЛО: кнопка ≤100 мс · панель 200–300 мс ease-out · награда 200–800 мс · &gt;400 мс на рядовом элементе = тормоз</div>
+  <div class="grid2">
+    <div class="card">
+      <h3>Пресеты и длительность</h3>
+      <label class="f">Кривая</label>
+      <div class="row" id="curves">
+        <button class="b" data-c="0.22,1,0.36,1">ease-out (появление)</button>
+        <button class="b" data-c="0.45,0,0.55,1">ease-in-out (перенос)</button>
+        <button class="b" data-c="0.34,1.56,0.64,1">overshoot (награда)</button>
+        <button class="b" data-c="0,0,1,1">linear (прогресс)</button>
+      </div>
+      <label class="f">Длительность: <span class="hl" id="mv">260</span> мс</label>
+      <input type="range" id="mdur" min="60" max="900" step="10" value="260">
+      <div class="row" style="margin-top:10px">
+        <button class="b p" id="play">Проиграть все три</button>
+        <span class="mono" id="verdict"></span>
+      </div>
+      <label class="f">Панель (bottom sheet)</label>
+      <div style="height:150px;border:1px solid var(--line);border-radius:12px;position:relative;overflow:hidden;background:#080c16">
+        <div id="dPanel" style="position:absolute;left:8px;right:8px;bottom:8px;height:76px;border-radius:12px;background:#1a2743;border:1px solid var(--line)"></div>
+      </div>
+      <label class="f">Награда (появление)</label>
+      <div style="height:150px;border:1px solid var(--line);border-radius:12px;position:relative;overflow:hidden;background:#080c16;display:flex;align-items:center;justify-content:center">
+        <div id="dReward" style="width:96px;height:96px;border-radius:50%;background:radial-gradient(circle at 35% 30%,#ffe08a,#c98d00);opacity:0"></div>
+      </div>
+      <label class="f">Кнопка (нажатие)</label>
+      <div style="height:110px;border:1px solid var(--line);border-radius:12px;display:flex;align-items:center;justify-content:center;background:#080c16">
+        <div id="dBtn" style="padding:16px 34px;border-radius:14px;background:linear-gradient(135deg,var(--acc),var(--acc2));color:#04121a;font-weight:800">ИГРАТЬ</div>
+      </div>
+    </div>
+    <div class="card">
+      <h3>Кривая</h3>
+      <canvas id="cv" width="300" height="200" style="width:100%;max-width:320px;background:#070b14;border:1px solid var(--line);border-radius:12px"></canvas>
+      <div class="out" style="margin-top:12px" id="cubicOut">cubic-bezier(.22,1,.36,1)</div>
+      <p class="mono" style="margin-top:12px">Ориентиры: press 80–120 · тост 180–220 · шит 200–300 · модалка 240–320 · награда 200–800 · тряска камеры 80–150, амплитуда 2–6 px</p>
+    </div>
+  </div>
+</section>
+
+<!-- 3 TARGETS -->
+<section class="panel" id="p3">
+  <h2>Тач-таргеты: измерь свою точность попадания</h2>
+  <div class="rule">ПРАВИЛО: минимум 44×44 pt (iOS) / 48×48 dp (Android) · комфорт 56–64 · зазор между главными ≥8 pt</div>
+  <div class="grid2">
+    <div class="card">
+      <div class="row">
+        <label class="mono">Размер: <select id="tsize">
+          <option value="32">32 pt</option><option value="40">40 pt</option>
+          <option value="44" selected>44 pt</option><option value="48">48 pt</option>
+          <option value="56">56 pt</option><option value="64">64 pt</option>
+        </select></label>
+        <button class="b p" id="tstart">Старт · 12 попыток</button>
+        <span class="mono" id="tstat">попаданий: —</span>
+      </div>
+      <div class="phone" id="phone3" style="width:320px;height:560px;margin-top:14px">
+        <div class="screen"></div><div class="notch"></div><div class="home"></div>
+        <div id="tlayer" style="position:absolute;inset:0"></div>
+      </div>
+    </div>
+    <div class="card">
+      <h3>Результат</h3>
+      <div class="out" id="tout">Запустите тест: 12 целей появляются случайно. Считаем промахи и среднее смещение от центра.</div>
+      <p class="mono" style="margin-top:12px">Как читать: если при 44 pt вы мажете больше 10% — в вашей игре цель нужно увеличивать до 56–64 pt или двигать в нижнюю треть. Цель 32–40 pt допустима только как декоративная.</p>
+      <p class="mono">Правило зазора: два тапа рядом (пауза/ускорение) → ≥16 pt между центрами недопустимо, нужно ≥8 pt между краями и разный размер/цвет.</p>
+    </div>
+  </div>
+</section>
+
+<!-- 4 THUMB -->
+<section class="panel" id="p4">
+  <h2>Зона большого пальца: проверь каждый элемент</h2>
+  <div class="rule">ПРАВИЛО: главное действие — нижняя треть · средняя треть — вторичное · верхняя треть — только информация</div>
+  <div class="grid2">
+    <div class="card">
+      <div class="row">
+        <label class="mono">Рука: <select id="hand"><option value="r">правая</option><option value="l">левая</option></select></label>
+        <span class="mono">Кликните по экрану — получите вердикт</span>
+      </div>
+      <div class="phone" id="phone4" style="width:320px;height:560px;margin-top:14px">
+        <div class="screen"></div>
+        <div style="position:absolute;inset:0;background:radial-gradient(120% 90% at 78% 96%,rgba(74,222,128,.22),transparent 62%),
+             radial-gradient(120% 90% at 20% 40%,rgba(251,113,133,.16),transparent 60%),radial-gradient(90% 60% at 50% 70%,rgba(251,191,36,.10),transparent 60%)"></div>
+        <div class="notch"></div><div class="home"></div>
+        <div id="dots" style="position:absolute;inset:0;z-index:9"></div>
+      </div>
+    </div>
+    <div class="card">
+      <h3>Вердикт</h3>
+      <div class="out" id="tout4">—</div>
+      <ul class="tight" style="margin-top:12px">
+        <li><b>Естественная</b> (низ + сторона рабочей руки): главные действия, ежедневный вход, «играть».</li>
+        <li><b>Натяжение</b> (низ противоположной стороны, центр): вторичные кнопки, магазин.</li>
+        <li><b>Смертельная</b> (верх, дальний верхний угол, края ≤20 px): только статус, бейджи, счётчики. Кнопки — запрещены.</li>
+        <li><b>Края кромки:</b> 20 px снизу (home-жест), 15 px по бокам (системные жесты) — не размещать интерактив.</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<!-- 5 LAYOUT -->
+<section class="panel" id="p5">
+  <h2>Раскладки, safe area, фолды, псевдолокаль</h2>
+  <div class="rule">ПРАВИЛО: сетка 4/8 pt · сеть инсетов от системы · ≥320 pt по ширине · псевдолокаль +160% до вёрстки</div>
+  <div class="grid2">
+    <div class="card">
+      <div class="row">
+        <select id="dev">
+          <option value="320,568,20,0">SE 320×568</option>
+          <option value="360,800,24,16">Android 360×800</option>
+          <option value="390,844,44,34" selected>iPhone 390×844</option>
+          <option value="430,932,47,34">Pro Max 430×932</option>
+          <option value="673,841,40,24">Fold внутр. 673×841</option>
+          <option value="834,1112,24,20">Планшет 834×1112</option>
+        </select>
+        <button class="b" data-ov="grid">Сетка 8</button>
+        <button class="b" data-ov="safe">Safe area</button>
+        <button class="b" data-ov="reach">Досягаемость</button>
+        <button class="b" data-ov="fold">Сгиб</button>
+        <button class="b" data-ov="pseudo">Псевдолокаль +160%</button>
+      </div>
+      <div class="phone" id="phone5" style="width:320px;height:560px;margin-top:14px">
+        <div class="screen"></div>
+        <div class="gl" id="gridO" style="display:none"></div>
+        <div class="gl" id="safeO"></div>
+        <div class="reachline" style="display:none"></div>
+        <div class="foldline"></div>
+        <div class="notch"></div><div class="home"></div>
+        <div id="lx" style="position:absolute;left:16px;right:16px;top:80px;z-index:7"></div>
+      </div>
+    </div>
+    <div class="card">
+      <h3>Проверка строк</h3>
+      <div id="strings"></div>
+      <p class="mono" style="margin-top:12px">Псевдолокаль = те же строки с удлинением ×1.6 и диакритикой. Красная рамка = переполнение в вёрстке.</p>
+      <div class="out" style="margin-top:10px">Токены: space 4/8/12/16/24/32
+radius 8/12/16/24
+type 12/14/17/20/24/32
+gutter 16 · safe-inset from OS</div>
+    </div>
+  </div>
+</section>
+
+<!-- 6 CONTRAST -->
+<section class="panel" id="p6">
+  <h2>Контраст и размер текста</h2>
+  <div class="rule">ПРАВИЛО: тело ≥4,5:1 · мелкий/цифры ≥7:1 · минимум 12 pt, рабочий 14–17 pt</div>
+  <div class="grid2">
+    <div class="card">
+      <div class="row">
+        <label class="mono">Текст <input type="color" id="fxc" value="#e9eefb"></label>
+        <label class="mono">Фон <input type="color" id="bgc" value="#0d1220"></label>
+        <button class="b" data-fx="#e9eefb,#0d1220">тёмная тема</button>
+        <button class="b" data-fx="#1a2233,#ffffff">светлая тема</button>
+        <button class="b" data-fx="#e6d7a8,#8a6a2f">«крафт»</button>
+        <button class="b" data-fx="#9fb6d6,#1b2740">мутный UI</button>
+      </div>
+      <div class="row" style="margin-top:12px">
+        <span class="mono" id="cratio">—</span><span id="cverdict"></span>
+      </div>
+      <label class="f">Размер образца: <span class="hl" id="fsv">17</span> pt</label>
+      <input type="range" id="fs" min="10" max="28" value="17">
+      <div class="sample" id="sampleWrap" style="position:relative">
+        <div id="sample" style="color:#e9eefb;font-size:17px">Собрать отряд 3× и удержать точку</div>
+        <div class="glare" id="glare"></div>
+      </div>
+      <div class="row" style="margin-top:10px">
+        <label class="mono"><input type="checkbox" id="sun"> имитация солнца</label>
+        <span class="mono">Проверка: читается ли цифра баланса за 1 секунду при ярком свете</span>
+      </div>
+    </div>
+    <div class="card">
+      <h3>Порог по размеру</h3>
+      <table>
+        <tr><th>Тип</th><th>Размер</th><th>Мин. контраст</th></tr>
+        <tr><td>Body / подсказки</td><td>14–17 pt</td><td>4,5:1</td></tr>
+        <tr><td>Мелкий / подписи</td><td>12 pt</td><td>7:1</td></tr>
+        <tr><td>Баланс / ключевые цифры</td><td>24 pt+</td><td>7:1</td></tr>
+        <tr><td>Крупные заголовки</td><td>24 pt+ bold</td><td>3:1</td></tr>
+      </table>
+      <p class="mono" style="margin-top:12px">Цвет никогда не единственный носитель статуса: редкость/премиум/новое дублируйте формой, значком или буквой.</p>
+    </div>
+  </div>
+</section>
+
+<!-- 7 TOKENS -->
+<section class="panel" id="p7">
+  <h2>Таблица таймингов → экспорт в CSS / JSON / C#</h2>
+  <div class="rule">ПРАВИЛО: тайминги — токены. Меняются в одном месте, а не в 40 префабах</div>
+  <div class="card">
+    <table id="tokTable"><thead><tr><th>Элемент</th><th>мс</th><th>Кривая</th><th>Примечание</th></tr></thead><tbody></tbody></table>
+    <div class="row" style="margin-top:12px">
+      <button class="b" id="resetTok">Вернуть эталон</button>
+      <button class="b p" id="exp">Экспортировать</button>
+    </div>
+    <pre id="tokOut" style="margin-top:12px">—</pre>
+  </div>
+</section>
+
+<!-- 8 STATES -->
+<section class="panel" id="p8">
+  <h2>Матрица состояний: у каждого интерактивного элемента — пять</h2>
+  <div class="rule">ПРАВИЛО: default · pressed · selected · disabled · loading. Нет disabled — получишь двойные нажатия и «фарм»</div>
+  <div class="grid2">
+    <div class="card">
+      <div class="row">
+        <select id="comp">
+          <option value="button">Primary button</option>
+          <option value="icon">Icon tab</option>
+          <option value="card">Карточка контента</option>
+          <option value="shop">Слот магазина</option>
+        </select>
+        <span class="mono" id="compSpec"></span>
+      </div>
+      <div class="chips" style="margin-top:14px" id="chips"></div>
+      <p class="mono" style="margin-top:12px">Нажмите «pressed» мышью, переключайте состояния — проверьте, что каждая пара различима на 25% масштаба и в оттенках серого.</p>
+    </div>
+    <div class="card">
+      <h3>Чек-лист состояния</h3>
+      <ul class="tight">
+        <li><b>default</b> — читаемая мишень, ≥44 pt, контраст ≥4,5:1.</li>
+        <li><b>pressed</b> — виден ≤100 мс: масштаб −6%, яркость +8% или затемнение.</li>
+        <li><b>selected</b> — рамка/заливка/галка: не только цвет.</li>
+        <li><b>disabled</b> — + текст причины или тултип; не исчезает (иначе «дёргается» вёрстка).</li>
+        <li><b>loading</b> — блокировка повторов, спиннер в самом элементе, ≤3 с, потом таймаут с выходом.</li>
+      </ul>
+      <div class="out" style="margin-top:12px">Антипаттерны: disabled без объяснения · loader на весь экран вместо элемента · повторный тап запускает анимацию заново с нуля · «зелёная кнопка = можно, серая = нельзя» без иконки</div>
+    </div>
+  </div>
+</section>
+
+<!-- 9 FEEDBACK -->
+<section class="panel" id="p9">
+  <h2>Слои фидбека: движение + звук + хаптик</h2>
+  <div class="rule">ПРАВИЛО: у важного действия минимум 2 слоя из 3. Один слой = «мёртвая» кнопка</div>
+  <div class="grid2">
+    <div class="card">
+      <div class="row">
+        <label class="mono"><input type="checkbox" id="l1" checked> движение</label>
+        <label class="mono"><input type="checkbox" id="l2" checked> звук</label>
+        <label class="mono"><input type="checkbox" id="l3" checked> хаптик</label>
+      </div>
+      <div style="height:200px;display:flex;align-items:center;justify-content:center">
+        <div id="fbBtn" style="padding:22px 46px;border-radius:18px;background:linear-gradient(135deg,#5fe0ff,#8f7bfa);
+             color:#04121a;font-weight:800;font-size:18px;user-select:none;cursor:pointer;transition:transform 90ms ease-out">СОБРАТЬ</div>
+      </div>
+      <div class="out" id="fbOut">слоёв: 3 — норма</div>
+    </div>
+    <div class="card">
+      <h3>Где и что включать</h3>
+      <table>
+        <tr><th>Событие</th><th>Движение</th><th>Звук</th><th>Хаптик</th></tr>
+        <tr><td>Тап по кнопке</td><td>−6% scale</td><td>сухой клик</td><td>нет</td></tr>
+        <tr><td>Комбо / успех</td><td>overshoot</td><td>восходящий</td><td>10–20 мс</td></tr>
+        <tr><td>Ошибка/нельзя</td><td>shiver 120 мс</td><td>мягкий низкий</td><td>нет (раздражает)</td></tr>
+        <tr><td>Покупка</td><td>вспышка</td><td>аккорд</td><td>двойной импульс</td></tr>
+        <tr><td>Награда</td><td>200–800 мс</td><td>фон+акцент</td><td>1 импульс</td></tr>
+      </table>
+      <p class="mono" style="margin-top:10px">Игра обязана быть полноценной без звука и без вибрации: смысл не может держаться только на одном канале.</p>
+    </div>
+  </div>
+</section>
+
+</main>
+<script>
+/* ---------- tabs ---------- */
+document.querySelectorAll('#tabs button').forEach(b=>{
+  b.onclick=()=>{
+    document.querySelectorAll('#tabs button').forEach(x=>x.classList.toggle('on',x===b));
+    document.querySelectorAll('.panel').forEach(p=>p.classList.toggle('on',p.id===b.dataset.t));
+  };
+});
+
+/* ---------- 1: latency ---------- */
+(function(){
+  const r=document.getElementById('delay'),dvv=document.getElementById('dv'),
+        t=document.getElementById('bigTarget'),out=document.getElementById('latOut'),
+        reset=document.getElementById('resetAnim');
+  const presets={};
+  document.querySelectorAll('[data-d]').forEach(b=>b.onclick=()=>{r.value=b.dataset.d;sync();});
+  function sync(){dvv.textContent=r.value;}
+  r.oninput=sync; sync();
+  let timer=null,last=-1;
+  t.addEventListener('pointerdown',()=>{
+    const t0=performance.now(), delay=+r.value;
+    if(reset.checked && timer){clearTimeout(timer);timer=null;t.style.transition='none';t.style.transform='scale(1)';t.style.background='#16233d';}
+    const fire=()=>{
+      t.style.transition='transform 110ms ease-out, background 110ms ease-out';
+      t.style.transform='scale(.9)';t.style.background='#2b3f68';
+      setTimeout(()=>{t.style.transform='scale(1)';t.style.background='#16233d';},130);
+      const dt=performance.now()-t0;
+      const v=dt<=100?'<span class="v good">ок</span>':dt<=200?'<span class="v warn">терпимо</span>':'<span class="v bad">провал</span>';
+      out.innerHTML='факт: '+dt.toFixed(0)+' мс '+v+(delay?' (задано '+delay+')':' (мгновенно)');
+    };
+    if(delay===0){fire();}else{timer=setTimeout(fire,delay);}
+  });
+})();
+
+/* ---------- 2: timing ---------- */
+(function(){
+  const dur=document.getElementById('mdur'),mv=document.getElementById('mv'),cv=document.getElementById('cv'),
+        vo=document.getElementById('verdict'),cub=document.getElementById('cubicOut');
+  let bez=[0.22,1,0.36,1];
+  function draw(){
+    const g=cv.getContext('2d'),W=cv.width,H=cv.height;
+    g.clearRect(0,0,W,H);
+    g.strokeStyle='#1f2a41';
+    for(let i=0;i<=4;i++){g.beginPath();g.moveTo(0,H*i/4);g.lineTo(W,H*i/4);g.stroke();
+      g.beginPath();g.moveTo(W*i/4,0);g.lineTo(W*i/4,H);g.stroke();}
+    g.strokeStyle='#5fe0ff';g.lineWidth=2.4;g.beginPath();g.moveTo(0,H);
+    g.bezierCurveTo(bez[0]*W,(1-bez[1])*H,bez[2]*W,(1-bez[3])*H,W,0);g.stroke();
+    g.fillStyle='#a78bfa';
+    g.beginPath();g.arc(bez[0]*W,(1-bez[1])*H,4,0,7);g.fill();
+    g.beginPath();g.arc(bez[2]*W,(1-bez[3])*H,4,0,7);g.fill();
+  }
+  function verdict(){
+    const d=+dur.value;
+    const parts=[];
+    parts.push(d<=120?'кнопка: <span class="v good">ок</span>':'кнопка: <span class="v bad">слишком долго</span>');
+    parts.push(d>=180&&d<=320?'панель: <span class="v good">ок</span>':(d<180?'панель: <span class="v warn">резко</span>':'панель: <span class="v warn">затянуто</span>'));
+    parts.push(d>=200&&d<=800?'награда: <span class="v good">ок</span>':'награда: <span class="v warn">вне диапазона</span>');
+    vo.innerHTML=parts.join(' · ');
+  }
+  document.querySelectorAll('#curves button').forEach(b=>b.onclick=()=>{
+    bez=b.dataset.c.split(',').map(Number);cub.textContent='cubic-bezier('+bez.join(',')+')';draw();
+  });
+  dur.oninput=()=>{mv.textContent=dur.value;verdict();};
+  mv.textContent=dur.value;verdict();draw();
+  const P=document.getElementById('dPanel'),R=document.getElementById('dReward'),B=document.getElementById('dBtn');
+  const ease='cubic-bezier('+bez.join(',')+')';
+  document.getElementById('play').onclick=()=>{
+    const d=+dur.value,e='cubic-bezier('+bez.join(',')+')';
+    P.style.transition='none';P.style.transform='translateY(110%)';P.style.opacity='0';
+    R.style.transition='none';R.style.transform='scale(.4)';R.style.opacity='0';
+    B.style.transition='none';B.style.transform='scale(1)';
+    void P.offsetWidth;
+    P.style.transition='transform '+d+'ms '+e+', opacity '+Math.min(d,240)+'ms ease-out';
+    P.style.transform='translateY(0)';P.style.opacity='1';
+    R.style.transition='transform '+(d*1.6)+'ms '+e+', opacity '+Math.min(d,300)+'ms ease-out';
+    R.style.transform='scale(1)';R.style.opacity='1';
+    const bd=Math.min(d,120);
+    B.style.transition='transform '+bd+'ms ease-out, box-shadow '+bd+'ms ease-out';
+    B.style.transform='scale(.9)';
+    setTimeout(()=>{B.style.transform='scale(1)';},bd);
+  };
+})();
+
+/* ---------- 3: touch targets ---------- */
+(function(){
+  const size=document.getElementById('tsize'),start=document.getElementById('tstart'),
+        layer=document.getElementById('tlayer'),stat=document.getElementById('tstat'),out=document.getElementById('tout'),
+        ph=document.getElementById('phone3');
+  let playing=false,n=0,hits=0,offsets=[],cur=null,t0=0,tmr=null;
+  function scrub(){layer.querySelectorAll('.tgt,.missMark,.hitMark').forEach(e=>e.remove());}
+  function spawn(){
+    const s=+size.value, W=ph.clientWidth,H=ph.clientHeight;
+    const x=20+Math.random()*(W-40-s), y=90+Math.random()*(H-190-s);
+    const d=document.createElement('div');
+    d.className='tgt';d.style.left=x+'px';d.style.top=y+'px';d.style.width=s+'px';d.style.height=s+'px';
+    d.dataset.cx=x+s/2; d.dataset.cy=y+s/2; d.dataset.r=s/2;
+    if(s<40)d.style.fontSize='9px'; else d.style.fontSize=(s/4)+'px';
+    d.textContent='●';
+    d.addEventListener('pointerdown',ev=>{ev.stopPropagation();hit(ev);});
+    layer.appendChild(d);cur=d;t0=performance.now();
+    tmr=setTimeout(()=>{if(cur===d)miss();},1400);
+  }
+  function next(){scrub(); if(n>=12){finish();return;} n++; stat.textContent='попаданий: '+hits+' / '+n; spawn(); }
+  function hit(ev){
+    if(!cur||!playing)return; clearTimeout(tmr);
+    const r=cur.getBoundingClientRect();
+    const cx=r.left+r.width/2, cy=r.top+r.height/2;
+    const dist=Math.hypot(ev.clientX-cx,ev.clientY-cy);
+    hits++;offsets.push(dist);
+    const m=document.createElement('div');m.className='hitMark';
+    m.style.left=(ev.clientX-r.left+parseFloat(cur.style.left))+'px';
+    m.style.top=(ev.clientY-r.top+parseFloat(cur.style.top))+'px';
+    layer.appendChild(m);
+    cur=null;setTimeout(next,220);
+  }
+  layer.addEventListener('pointerdown',ev=>{if(playing&&cur)miss(ev);});
+  function miss(ev){
+    if(!playing)return;clearTimeout(tmr);
+    if(ev&&cur){const r=cur.getBoundingClientRect();
+      const m=document.createElement('div');m.className='missMark';
+      m.style.left=(ev.clientX-r.left+parseFloat(cur.style.left))+'px';
+      m.style.top=(ev.clientY-r.top+parseFloat(cur.style.top))+'px';layer.appendChild(m);
+    } else if(cur){const m=document.createElement('div');m.className='missMark';
+      m.style.left=cur.style.left;m.style.top=cur.style.top;layer.appendChild(m);}
+    cur=null;setTimeout(next,260);
+  }
+  function finish(){
+    playing=false;
+    const rate=Math.round(100*hits/12);
+    const avg=offsets.length? (offsets.reduce((a,b)=>a+b,0)/offsets.length):0;
+    const s=+size.value;
+    let v=rate>=92?'<span class="v good">ок для '+s+' pt</span>':rate>=75?'<span class="v warn">на грани — увеличьте</span>':'<span class="v bad">слишком мелко</span>';
+    out.innerHTML='Размер '+s+' pt · попаданий '+hits+'/12 ('+rate+'%) '+v+'\nсреднее смещение от центра: '+avg.toFixed(1)+' pt'+
+      (s<44?'\nправило: <44 pt допустимо только для декоративных элементов':'');
+    stat.textContent='попаданий: '+hits+'/12';
+  }
+  start.onclick=()=>{playing=true;n=0;hits=0;offsets=[];scrub();next();};
+  ph.addEventListener('pointerdown',()=>{});
+})();
+
+/* ---------- 4: thumb zone ---------- */
+(function(){
+  const hand=document.getElementById('hand'), dots=document.getElementById('dots'),
+        out=document.getElementById('tout4'), ph=document.getElementById('phone4');
+  ph.style.cursor='crosshair';
+  ph.addEventListener('pointerdown',e=>{
+    const r=ph.getBoundingClientRect();
+    const x=(e.clientX-r.left)/r.width, y=(e.clientY-r.top)/r.height;
+    const right=hand.value==='r';
+    const sideX=right?x:1-x;               // 1 = сторона рабочей руки
+    let zone,verdict;
+    if(y>0.6 && sideX>0.25){zone='естественная';verdict='<span class="v good">ок</span> для главного действия (Играть, ежедневный вход, основная петля)';}
+    else if(y>0.42){zone='досягаемая/натяжение';verdict='<span class="v warn">только вторичное</span>: магазин, коллекция, соцсети, настройки';}
+    else {zone='смертельная';verdict='<span class="v bad">запрещено для действий</span>: здесь только информация — счётчики, сезонный прогресс, бейджи';}
+    if(y<0.06 && sideX>0.7) verdict='<span class="v bad">дальний верхний угол</span> — самая частая жалоба «не могу нажать назад/закрыть»';
+    if(y>0.94) verdict='<span class="v bad">конфликт с home-жестом</span>: отступ ≥20 px';
+    if(sideX<0.06) verdict='<span class="v bad">кромка ≤15 px</span>: конфликт с системными жестами';
+    const d=document.createElement('div');
+    d.style.cssText='position:absolute;width:12px;height:12px;margin:-6px 0 0 -6px;border-radius:50%;background:#5fe0ff;box-shadow:0 0 0 4px rgba(95,224,255,.25)';
+    d.style.left=(x*100)+'%';d.style.top=(y*100)+'%';
+    dots.querySelectorAll('div').forEach(e=>e.remove());dots.appendChild(d);
+    out.innerHTML='зона: <b>'+zone+'</b> ('+Math.round(y*100)+'% высоты, сторона руки '+Math.round(sideX*100)+'%)\n'+verdict;
+  });
+})();
+
+/* ---------- 5: layout ---------- */
+(function(){
+  const dev=document.getElementById('dev'),ph=document.getElementById('phone5'),
+        gridO=document.getElementById('gridO'),safeO=document.getElementById('safeO'),
+        reach=document.querySelector('.reachline'),fold=document.querySelector('.foldline'),
+        lx=document.getElementById('lx'),stringsBox=document.getElementById('strings');
+  const samples=[
+    {en:'Continue',ru:'Продолжить'},
+    {en:'Watch ad to revive',ru:'Реклама, чтобы продолжить'},
+    {en:'Claim reward',ru:'Забрать награду'},
+    {en:'Daily bonus',ru:'Ежедневный бонус'}
+  ];
+  function pseudo(s){return s.replace(/[aeiou]/g,c=>c+'̈').replace(/[a-z]/g,c=>c)+ ' · ẍ⁺';}
+  function apply(){
+    const [w,h,ti,bi]=dev.value.split(',').map(Number);
+    const k=320/w;                      // вписываем в 320 px CSS
+    ph.style.width='320px'; ph.style.height=(h*k)+'px';
+    ph.style.setProperty('--safi',(ti*k)+'px');
+    ph.style.setProperty('--safb',(bi*k)+'px');
+    safeO.style.borderTopWidth=(ti*k)+'px';
+    safeO.style.borderBottomWidth=(bi*k)+'px';
+  }
+  document.querySelectorAll('[data-ov]').forEach(b=>b.onclick=()=>{
+    const t=b.dataset.ov;
+    if(t==='grid')gridO.style.display=gridO.style.display==='none'?'block':'none';
+    if(t==='safe')safeO.style.display=safeO.style.display==='none'?'block':'none';
+    if(t==='reach')reach.style.display=reach.style.display==='none'?'block':'none';
+    if(t==='fold')fold.style.display=fold.style.display==='none'?'block':'none';
+    if(t==='pseudo'){renderStrings(document.body.dataset.pseudo!=='1');}
+  });
+  function renderStrings(on){
+    document.body.dataset.pseudo=on?'1':'0';
+    lx.innerHTML='';
+    stringsBox.innerHTML='';
+    samples.forEach((s,i)=>{
+      const val=on? pseudo(s.ru):s.ru;
+      const el=document.createElement('div');
+      el.className='sample';el.style.cssText='font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:clip';
+      el.textContent=val;
+      stringsBox.appendChild(el);
+      const inMap=document.createElement('div');
+      inMap.textContent=val;inMap.style.cssText='font-size:13px;color:#cfe4ff;margin-bottom:6px;white-space:nowrap;overflow:hidden';
+      lx.appendChild(inMap);
+      const check=()=>{el.classList.toggle('ovf', el.scrollWidth>el.clientWidth+1);};
+      el.addEventListener('transitionend',check);setTimeout(check,30);
+    });
+    setTimeout(()=>{stringsBox.querySelectorAll('.sample').forEach(el=>el.classList.toggle('ovf',el.scrollWidth>el.clientWidth+1));},60);
+  }
+  dev.onchange=apply; apply(); renderStrings(false);
+})();
+
+/* ---------- 6: contrast ---------- */
+(function(){
+  const f=document.getElementById('fxc'),b=document.getElementById('bgc'),cr=document.getElementById('cratio'),
+        cv=document.getElementById('cverdict'),fs=document.getElementById('fs'),fsv=document.getElementById('fsv'),
+        sample=document.getElementById('sample'),sun=document.getElementById('sun'),glare=document.getElementById('glare');
+  function lum(hex){const c=[1,3,5].map(i=>parseInt(hex.substr(i,2),16)/255)
+    .map(v=>v<=0.03928?v/12.92:Math.pow((v+0.055)/1.055,2.4));
+    return 0.2126*c[0]+0.7152*c[1]+0.0722*c[2];}
+  function upd(){
+    const L1=lum(f.value),L2=lum(b.value);
+    const r=(Math.max(L1,L2)+0.05)/(Math.min(L1,L2)+0.05);
+    cr.textContent='контраст '+r.toFixed(2)+':1';
+    const size=+fs.value;
+    const need=size>=24?3:(size>=18?4.5:4.5);
+    cv.innerHTML=r>=7?'<span class="v good">AA+ / AAA</span>':r>=need?'<span class="v good">проходит AA</span>':r>=3?'<span class="v warn">только для крупного</span>':'<span class="v bad">провал</span>';
+    sample.style.color=f.value;sample.style.background=b.value;sample.style.fontSize=size+'px';
+    sample.parentElement.style.background=b.value;fsv.textContent=size;
+  }
+  document.querySelectorAll('[data-fx]').forEach(btn=>btn.onclick=()=>{
+    const [fg,bg]=btn.dataset.fx.split(',');f.value=fg;b.value=bg;upd();});
+  [f,b,fs].forEach(e=>e.addEventListener('input',upd));
+  sun.onchange=()=>glare.style.display=sun.checked?'block':'none';
+  upd();
+})();
+
+/* ---------- 7: tokens ---------- */
+(function(){
+  const base=[
+    ['press',90,'ease-out','масштаб −6%'],
+    ['toast',200,'ease-out','вход снизу, 180–220'],
+    ['sheet',260,'ease-out','bottom sheet'],
+    ['modal',300,'ease-out','подложка fade 200'],
+    ['reward',600,'overshoot','кнопка «пропустить» обязательна'],
+    ['errorShiver',120,'ease-in-out','2–6 px, без хаптика'],
+    ['cameraShake',110,'linear','2–6 px амплитуда'],
+    ['screenFade',240,'ease-in-out','переход между экранами'],
+    ['listStagger',40,'linear','задержка на элемент списка'],
+    ['hapticTap',15,'linear','один импульс, мс'],
+  ];
+  const tb=document.querySelector('#tokTable tbody'),out=document.getElementById('tokOut');
+  function render(rows){tb.innerHTML='';rows.forEach(r=>{
+    const tr=document.createElement('tr');
+    tr.innerHTML='<td>'+r[0]+'</td><td><input class="cell" value="'+r[1]+'"></td><td><input class="cell" value="'+r[2]+'"></td><td class="mono">'+r[3]+'</td>';
+    tb.appendChild(tr);});}
+  function read(){return [...tb.querySelectorAll('tr')].map(tr=>{
+    const i=tr.querySelectorAll('input');return [tr.children[0].textContent,i[0].value,i[1].value,tr.children[3].textContent];});}
+  document.getElementById('resetTok').onclick=()=>{render(base);out.textContent='—';};
+  document.getElementById('exp').onclick=()=>{
+    const rows=read();
+    const json='{\n'+rows.map(r=>'  "'+r[0]+'": { "ms": '+r[1]+', "curve": "'+r[2]+'" }').join(',\n')+'\n}';
+    const css=':root{\n'+rows.map(r=>'  --anim-'+r[0]+': '+r[1]+'ms;').join('\n')+'\n  --ease: cubic-bezier(.22,1,.36,1);\n}';
+    const cs='public static class Timing {\n'+rows.map(r=>'  public const int '+r[0].replace(/^./,c=>c.toUpperCase())+'Ms = '+r[1]+';').join('\n')+'\n}';
+    out.textContent='// JSON\ntokens.timing.json\n'+json+'\n\n/* CSS */\n'+css+'\n\n// C# (Unity)\n'+cs;
+  };
+  render(base);
+})();
+
+/* ---------- 8: states ---------- */
+(function(){
+  const comp=document.getElementById('comp'),chips=document.getElementById('chips'),spec=document.getElementById('compSpec');
+  const DEF={
+    button:{spec:'высота 56–64 pt · радиус 12–16 · текст 16–18 pt · ширина ≥180 pt',states:['default','pressed','selected','disabled','loading']},
+    icon:{spec:'иконка 28–32 pt в мишени 48–56 pt · зазор 8 pt · подпись 11–12 pt',states:['default','selected','disabled','badge','loading']},
+    card:{spec:'карточка 160×220 pt · радиус 16 · тень или рамка редкости',states:['default','pressed','selected','locked','new']},
+    shop:{spec:'слот 120×150 · цена 16 pt bold · старая цена зачёркнута',states:['default','pressed','owned','disabled','loading']}
+  };
+  function render(){
+    const d=DEF[comp.value];spec.textContent=d.spec;chips.innerHTML='';
+    d.states.forEach(s=>{
+      const c=document.createElement('div');c.className='chip';
+      c.textContent=s;
+      if(s==='pressed')c.classList.add('pressed');
+      if(s==='selected')c.classList.add('sel');
+      if(s==='disabled'||s==='locked')c.classList.add('dis');
+      if(s==='loading')c.classList.add('load');
+      c.onclick=()=>{if(!c.classList.contains('dis'))c.classList.toggle('sel');};
+      chips.appendChild(c);
+    });
+  }
+  comp.onchange=render;render();
+})();
+
+/* ---------- 9: feedback layers ---------- */
+(function(){
+  const l1=document.getElementById('l1'),l2=document.getElementById('l2'),l3=document.getElementById('l3'),
+        btn=document.getElementById('fbBtn'),out=document.getElementById('fbOut');
+  let ac=null;
+  function tick(){
+    ac=ac||new (window.AudioContext||window.webkitAudioContext)();
+    const o=ac.createOscillator(),g=ac.createGain();
+    o.type='triangle';o.frequency.value=880;g.gain.value=.06;
+    o.connect(g);g.connect(ac.destination);o.start();
+    g.gain.exponentialRampToValueAtTime(.0001,ac.currentTime+.07);
+    o.stop(ac.currentTime+.08);
+  }
+  function upd(){const n=[l1,l2,l3].filter(x=>x.checked).length;
+    out.textContent='слоёв: '+n+(n>=2?' — норма':' — мало: ощущение «мёртвой» кнопки');
+    out.className='out';}
+  [l1,l2,l3].forEach(c=>c.onchange=upd);upd();
+  btn.addEventListener('pointerdown',()=>{
+    if(l1.checked){btn.style.transition='transform 90ms ease-out';btn.style.transform='scale(.92)';
+      setTimeout(()=>btn.style.transform='scale(1)',90);}
+    if(l2.checked)tick();
+    if(l3.checked&&navigator.vibrate)navigator.vibrate(15);
+  });
+})();
+</script>
+</body>
+</html>
