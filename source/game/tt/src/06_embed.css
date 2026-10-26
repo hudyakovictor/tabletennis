@@ -1,0 +1,58 @@
+/* =====================================================================
+ *  EMBED MODE — the game runs inside the Telegram mini-app (ttu-v2).
+ *  The host draws the score, menus, banners, pause and results in its own
+ *  design language; the game keeps only the 3D court, the swipe ribbon,
+ *  the coach layer and the stroke read-out.
+ * ===================================================================== */
+html.tt-embed, html.tt-embed body { background: transparent !important; }
+html.tt-embed #loading,
+html.tt-embed #menu,
+html.tt-embed .screen,
+html.tt-embed #topright,
+html.tt-embed #score,
+html.tt-embed #pauseInd,
+html.tt-embed #over,
+html.tt-embed #train,
+html.tt-embed #tdone,
+html.tt-embed #trainingActions,
+html.tt-embed #msgs,
+html.tt-embed #mpInd,
+html.tt-embed #rally,
+html.tt-embed #mnToast,
+html.tt-embed #playStatus,
+html.tt-embed #timingCue,
+html.tt-embed #gestureCue,
+html.tt-embed #btnDemoExit,
+html.tt-embed #reel,
+html.tt-embed #reels,
+html.tt-embed #dbg { display: none !important; }
+html.tt-embed #playband {
+  left: 0; right: 0; align-items: center; text-align: center;
+  top: auto !important; bottom: calc(18px + env(safe-area-inset-bottom)); pointer-events: none;
+}
+html.tt-embed #playband::before { display: none; }
+html.tt-embed #shot:not(.on) { display: none !important; }
+html.tt-embed #shot {
+  font-family: inherit; display: inline-flex; gap: 8px; align-items: baseline; justify-content: center;
+  padding: 7px 14px; border-radius: 999px; background: rgba(6, 10, 20, .55);
+  border: 1px solid rgba(255, 255, 255, .10); backdrop-filter: blur(6px);
+  transition: opacity .25s;
+}
+html.tt-embed #shot b { font-weight: 900; letter-spacing: .06em; color: #fff; }
+html.tt-embed #shot small { color: #9fb2c8; }
+html.tt-embed #note { justify-content: center; max-width: 86vw; margin: 0 auto 6px; }
+html.tt-embed #note span { background: rgba(6, 10, 20, .55); padding: 6px 12px; border-radius: 12px; }
+html.tt-embed.tt-quiet #playband { opacity: 0; }
+html.tt-embed #shot[data-tone="tip"] { background: rgba(40, 28, 4, .72); border-color: rgba(255, 201, 58, .55); box-shadow: 0 0 24px rgba(255, 190, 40, .25); animation: ttTipIn .45s cubic-bezier(.18,1.25,.4,1); }
+html.tt-embed #shot[data-tone="tip"].on { display: flex; flex-direction: column; align-items: center; gap: 2px; border-radius: 16px; padding: 7px 14px 8px; }
+html.tt-embed #playband #shot[data-tone="tip"] b { color: #FFD54A; font: 900 9.5px/1.2 var(--ui); letter-spacing: .16em; text-transform: uppercase; }
+html.tt-embed #shot[data-tone="tip"] #shotStatus { color: #fff; font-weight: 800; }
+html.tt-embed #shot[data-tone="tip"] { padding: 7px 14px; border-radius: 999px; background: rgba(8,12,26,.72); box-shadow: 0 2px 12px rgba(0,0,0,.45), inset 0 0 0 1px rgba(255,255,255,.12); }
+html.tt-embed #shot[data-tone="tip"] #shotName { color: #7DF3FF; }
+html.tt-embed #shot[data-tone="tip"] #shotStatus, html.tt-embed #shot[data-tone="tip"] #shotName { font-size: 16px; line-height: 1.3; }
+@keyframes ttTipIn { from { transform: translateY(10px) scale(.92); opacity: 0; } to { transform: none; opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { html.tt-embed #shot[data-tone="tip"] { animation: none; } }
+/* compact pill: never under the corner buttons (56px each side + gaps) */
+html.tt-embed #shot { max-width: calc(100vw - 150px); margin: 0 auto; box-sizing: border-box; }
+html.tt-embed #playband #shot b, html.tt-embed #shot #shotStatus { font: 750 14px/1.25 var(--ui); }
+html.tt-embed #shot #shotMeta { font: 600 11.5px/1.25 var(--ui); }

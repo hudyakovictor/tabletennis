@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#05060F">
+<meta name="color-scheme" content="dark">
+<title>Table Tennis Ultimate — v2 · Telegram Mini App</title>
+<script src="https://telegram.org/js/telegram-web-app.js" async></script>
+<style>/*__CSS__*/</style>
+</head>
+<body>
+<div id="desk">
+  <!-- dev panel removed per design review: desktop shows only the app -->
+  <div id="deviceWrap">
+    <div id="device">
+      <canvas id="bg"></canvas>
+      <div id="gamelayer"></div>
+      <div id="glRecover" aria-live="polite"><div class="glr-ball"></div><b>Восстанавливаем арену…</b><small>Счёт сохранён</small></div>
+      <div id="screens"></div>
+      <nav id="nav"></nav>
+      <div id="sheets"></div>
+      <canvas id="fx"></canvas>
+      <div id="wipe"><i></i><i></i><i></i></div>
+      <div id="toasts"></div>
+      <div id="flash"></div>
+    </div>
+  </div>
+</div>
+<script>/*__JS__*/</script>
+<div id="rotate" aria-hidden="true"><svg viewBox="0 0 120 120" width="120" height="120"><g class="rt-phone"><rect x="38" y="18" width="44" height="84" rx="9" fill="#141A36" stroke="#35C6F4" stroke-width="3"/><rect x="44" y="28" width="32" height="60" rx="3" fill="#0B1024"/><circle cx="60" cy="95" r="2.6" fill="#35C6F4"/><circle cx="60" cy="58" r="5" fill="#FF7A4D"/></g><path d="M112 52a44 44 0 0 0-20-32" fill="none" stroke="#FFD54A" stroke-width="3" stroke-linecap="round"/><path d="M90 13l2 8-8 1" fill="none" stroke="#FFD54A" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg><b>Поверни телефон</b><small>Арена играется вертикально</small></div>
+</body>
+</html>

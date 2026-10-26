@@ -1,0 +1,20 @@
+CONSOLE warning [.WebGL-0x171c0016a800]GL Driver Message (OpenGL, Performance, GL_CLOSE_PATH_NV, High): GPU stall due to ReadPixels
+CONSOLE warning [.WebGL-0x171c0016a800]GL Driver Message (OpenGL, Performance, GL_CLOSE_PATH_NV, High): GPU stall due to ReadPixels
+CONSOLE warning [.WebGL-0x171c0016a800]GL Driver Message (OpenGL, Performance, GL_CLOSE_PATH_NV, High): GPU stall due to ReadPixels
+CONSOLE warning [.WebGL-0x171c0016a800]GL Driver Message (OpenGL, Performance, GL_CLOSE_PATH_NV, High): GPU stall due to ReadPixels (this message will no longer repeat)
+CONSOLE log [Telegram.WebView] > postEvent web_app_set_header_color {color_key: bg_color}
+CONSOLE log [Telegram.WebView] > postEvent web_app_set_bottom_bar_color {color: #ffffff}
+CONSOLE log [Telegram.WebView] > postEvent web_app_request_theme 
+CONSOLE log [Telegram.WebView] > postEvent web_app_request_viewport 
+CONSOLE log [Telegram.WebView] > postEvent web_app_request_safe_area 
+CONSOLE log [Telegram.WebView] > postEvent web_app_request_content_safe_area 
+CONSOLE log [Telegram.WebView] > postEvent web_app_ready 
+CONSOLE log [Telegram.WebView] > postEvent web_app_expand 
+CONSOLE warning [Telegram.WebApp] Orientation locking is not supported in version 6.0
+CONSOLE warning [Telegram.WebApp] Changing swipes behavior is not supported in version 6.0
+CONSOLE warning [Telegram.WebApp] Header color is not supported in version 6.0
+CONSOLE warning [Telegram.WebApp] Background color is not supported in version 6.0
+CONSOLE warning [Telegram.WebApp] Bottom bar color is not supported in version 6.0
+CONSOLE warning [Telegram.WebApp] BackButton is not supported in version 6.0
+CONSOLE warning [Telegram.WebApp] BackButton is not supported in version 6.0
+RESULT {'sheets': 1, 'spin': True, 'svgRect': '{"x":109.91732025146484,"y":403.2331848144531,"width":171.36627197265625,"height":172.46170043945312,"top":403.2331848144531,"right":281.2835922241211,"bottom":575.6948852539062,"left":109.91732025146484}', 'defs': None, 'pats': [0, 0]}
