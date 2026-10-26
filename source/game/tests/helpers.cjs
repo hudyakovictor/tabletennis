@@ -9,6 +9,12 @@ function load(files, names, extra = {}) {
     const index = files.findIndex(f => ['40_swipe.js', '56_rig.js', '70_game.js'].includes(f));
     files.splice(index, 0, '38_paddle_motion.js');
   }
+  if (!process.env.TT_TEST_REF && files.includes('70_game.js') && !files.includes('61_particles.js')) {
+    files = [...files]; files.splice(files.indexOf('70_game.js'), 0, '61_particles.js');
+  }
+  if (!process.env.TT_TEST_REF && files.some(f => ['65_train.js', '70_game.js', '80_ui.js', '90_boot.js', '92_embed.js'].includes(f)) && !files.includes('03_i18n.js')) {
+    files = ['03_i18n.js', ...files];
+  }
   if (!process.env.TT_TEST_REF && files.some(f => ['70_game.js', '80_ui.js'].includes(f)) && !files.includes('12_match_rules.js')) {
     files = [...files]; files.splice(Math.max(0, files.indexOf('10_math.js') + 1), 0, '12_match_rules.js');
   }
