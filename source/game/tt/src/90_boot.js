@@ -18,9 +18,9 @@
       const loading = document.getElementById('loading');
       if (loading) loading.innerHTML =
         `<div style="max-width:420px;text-align:center;padding:24px">
-           <div style="font-size:19px;font-weight:800;margin-bottom:10px">WebGL недоступен</div>
+           <div style="font-size:19px;font-weight:800;margin-bottom:10px">${ET('boot.webglTitle')}</div>
            <div style="font-size:12px;color:#8da3bd;line-height:1.6">
-             Этой демке нужен WebGL. Включите аппаратное ускорение в браузере и перезагрузите страницу.<br><br>
+             ${ET('boot.webglBody')}<br><br>
              <code style="font-size:10px;color:#ff8a8a">${(err && err.message) || err}</code>
            </div></div>`;
       return;

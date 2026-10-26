@@ -935,14 +935,14 @@ class UI {
   trainSync(t) {
     const S = t.S, feedback = t.phase === 'ok' || t.phase === 'fail';
     $('#trStep').textContent = `${t.step + 1}/${TRAIN_STEPS.length}`;
-    $('#trTitle').textContent = S.title;
+    $('#trTitle').textContent = ET(S.title);
     $('#trProgress').textContent = `${t.done}/${S.need}`;
     /* во время интро строку шапка НЕ дублирует — вся информация живёт
        в большой карточке урока */
     $('#trTip').textContent = t.phase === 'intro' ? ''
       : t.phase === 'fail'
-      ? 'Коснись — повторить сразу'
-      : feedback ? '' : (t.coachText || S.goal);
+      ? ET('ui.tapRetry')
+      : feedback ? '' : (t.coachText || ET(S.goal));
     $('#trainPauseTip').textContent = trainingTip(S, this.inputMode);
     $('#trMsg').textContent = feedback ? t.msg : '';
     $('#trMsg').style.color = t.msgCol || 'var(--good)';
@@ -960,11 +960,11 @@ class UI {
         /* «НОВЫЙ УДАР» — только для действительно новых ударов; базовое
          * отбитие и направление — просто очередной урок */
         const isNewStroke = S.id === 'TOPSPIN' || S.id === 'PUSH';
-        $('#tINo').textContent = t.step === 0 ? `Урок 1 из ${TRAIN_STEPS.length}`
-          : isNewStroke ? `НОВЫЙ УДАР · урок ${t.step + 1} из ${TRAIN_STEPS.length}`
-          : `Урок ${t.step + 1} из ${TRAIN_STEPS.length}`;
-        $('#tITitle').textContent = S.title;
-        $('#tIGoal').textContent = S.goal;
+        $('#tINo').textContent = t.step === 0 ? ET('ui.lessonFirst', { total: TRAIN_STEPS.length })
+          : isNewStroke ? ET('ui.lessonNew', { n: t.step + 1, total: TRAIN_STEPS.length })
+          : ET('ui.lesson', { n: t.step + 1, total: TRAIN_STEPS.length });
+        $('#tITitle').textContent = ET(S.title);
+        $('#tIGoal').textContent = ET(S.goal);
         $('#tITip').textContent = trainingTip(S, this.inputMode);
       }
     }

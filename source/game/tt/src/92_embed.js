@@ -24,6 +24,9 @@
   const easeInOut = (t) => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2);
 
   const start = () => {
+    if (typeof ET !== 'undefined' && window.__TT_LOCALE) ET.set(window.__TT_LOCALE);   // язык от хоста
+    const applyStaticTexts = () => { const w = document.getElementById('tIWait'); if (w && typeof ET !== 'undefined') w.textContent = ET('ui.tapContinue'); };
+    applyStaticTexts();
     const g = window.__game;
     if (!g) { post('error', { msg: 'game failed to boot' }); return; }
     const ui = g.ui;
@@ -150,7 +153,7 @@
         const S = t.S, key = [t.step, t.done, t.phase, t.frozen, t.nudge > 0, t.coachText].join('|');
         if (key !== lastTrain.key) {
           lastTrain.key = key;
-          post('train', { step: t.step, total: TRAIN_STEPS.length, id: S.id, title: S.title, goal: S.goal,
+          post('train', { step: t.step, total: TRAIN_STEPS.length, id: S.id, title: ET(S.title), goal: ET(S.goal),
             /* в интро вся информация живёт в большой внутриигровой карточке —
              * шапка хоста её НЕ дублирует */
             text: t.phase === 'intro' ? '' : t.coachText, tip: trainingTip(S, ui.inputMode || 'touch'), done: t.done, need: S.need,
@@ -342,7 +345,7 @@ const showTip = (text) => { if (text) tip = { text, until: g.time + 4.6 }; };
       if (!m || m.__tt !== 1) return;
       // only commands that need a visible, running arena wake it; 'attract'/'quit' just set the scene
       // behind a hidden layer (menus, matchmaking) and must not restart full-rate rendering there
-      if (!['sleep', 'mute', 'quality', 'rm', 'debug', 'hint', 'attract', 'quit', 'quiet', 'pause', 'resume'].includes(m.type)) wake();
+      if (!['sleep', 'mute', 'quality', 'rm', 'debug', 'hint', 'attract', 'quit', 'quiet', 'pause', 'resume', 'locale'].includes(m.type)) wake();
       switch (m.type) {
         case 'sleep': sleeping = true; break;      // frozen in place: update is skipped, so nothing advances
         case 'wake': break;
@@ -398,6 +401,7 @@ const showTip = (text) => { if (text) tip = { text, until: g.time + 4.6 }; };
           g.settings.quality = q; g.R.quality = q; g.resize(); break;
         }
         case 'quiet': document.documentElement.classList.toggle('tt-quiet', !!m.on); break;
+        case 'locale': if (typeof ET !== 'undefined') { ET.set(m.lang); applyStaticTexts(); } break;   // язык от хоста
         /* Калибровка из настроек оболочки: 10 личных параметров 0..100.
          * Применяются мгновенно, хранятся у хоста. Не трогают честные
          * правила боя — только комфорт, камеру и визуал. */
@@ -415,7 +419,7 @@ const showTip = (text) => { if (text) tip = { text, until: g.time + 4.6 }; };
         }
       }
     });
-    post('ready', { rules: Object.assign({}, MATCH_RULES), steps: TRAIN_STEPS.map((s) => ({ id: s.id, title: s.title })) });
+    post('ready', { rules: Object.assign({}, MATCH_RULES), steps: TRAIN_STEPS.map((s) => ({ id: s.id, title: ET(s.title) })) });
   };
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start);

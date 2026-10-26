@@ -59,8 +59,8 @@ canvas{display:block;width:100%;height:100%}
 /* полоса подсказок перенесена НАВЕРХ: под HUD, над столом; камерная проекция
  * (--band-top) неприкосновенна — она обсчитывает кадрирование стола */
 #playband{position:absolute;left:max(16px,env(safe-area-inset-left));right:max(16px,env(safe-area-inset-right));
-  top:calc(max(env(safe-area-inset-top),0px) + 15.5%);bottom:auto;max-height:34%;
-  display:flex;flex-direction:column;align-items:center;justify-content:flex-start;gap:8px;
+  top:calc(var(--band-top,.872) * 100%);bottom:max(16px,env(safe-area-inset-bottom));
+  display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;
   min-height:0;overflow:hidden;pointer-events:none;z-index:4;
   --play-size:clamp(12px,1.2vw,15px);--play-weight:650}
 #playband::before{content:"";width:42px;min-height:2px;background:#ff263e;border-radius:2px;margin-bottom:3px}
@@ -1069,12 +1069,99 @@ html.tt-embed #shot #shotMeta { font: 600 11.5px/1.25 var(--ui); }
 
 <script>
 const BUILD_VERSION = 'self-contained build 2026-10-26';
+/* ====== 03_i18n.js ====== */
+/* =====================================================================
+ *  ENGINE TEXTS — i18n каркас движка.
+ *  Хост (оболочка) присылает язык: window.__TT_LOCALE при старте и
+ *  postMessage {type:'locale', lang} при смене. Дефолт — 'ru'.
+ *  Добавить язык = добавить словарь сюда (и в оболочку свой).
+ *  Ключи, видимые игроку В МАТЧЕ/тренировке, живут здесь; меню и мета
+ *  автономной страницы (80_ui) — следующий транш локализации.
+ * ===================================================================== */
+const ET = (() => {
+  let lang = 'ru';
+  const D = {
+    ru: {
+      'boot.webglTitle': 'WebGL недоступен',
+      'boot.webglBody': 'Этой демке нужен WebGL. Включите аппаратное ускорение в браузере и перезагрузите страницу.',
+      'drill.serve.title': 'ПОДАЧА', 'drill.serve.goal': 'Подай: центр → лево → право',
+      'drill.serve.tip': 'Тап — подброс, вверх в зону', 'drill.serve.mouseTip': 'ЛКМ — подброс, вверх в зону',
+      'drill.hit.title': 'УДАР', 'drill.hit.goal': 'Отбей мяч на стол соперника',
+      'drill.hit.tip': 'Палец под кольцо — и вверх через него', 'drill.hit.mouseTip': 'ЛКМ под кольцом — и вверх',
+      'drill.hit.fail': 'Начни свайп под кольцом',
+      'drill.aim.title': 'НАПРАВЛЕНИЕ', 'drill.aim.goal': 'Попади в светлую половину',
+      'drill.aim.tip': 'Свайп по диагонали — туда и полетит', 'drill.aim.mouseTip': 'ЛКМ и по диагонали к цели',
+      'drill.aim.fail': 'Диагональ — в сторону цели',
+      'drill.topspin.title': 'ТОПСПИН', 'drill.topspin.goal': 'Верхнее вращение на стол',
+      'drill.topspin.tip': 'Длинный быстрый свайп вверх', 'drill.topspin.mouseTip': 'ЛКМ + длинно и быстро вверх',
+      'drill.topspin.fail': 'Длиннее и быстрее вверх',
+      'drill.push.title': 'ПОДРЕЗКА', 'drill.push.goal': 'Нижнее вращение на стол',
+      'drill.push.tip': 'Мягкий свайп вниз-вперёд', 'drill.push.mouseTip': 'ЛКМ + мягко вниз-вперёд',
+      'drill.push.fail': 'Веди вниз, без рывка',
+      'drill.rally.title': 'ЗАКРЕПЛЕНИЕ', 'drill.rally.goal': 'Отбей 3 мяча без подсказок',
+      'drill.rally.tip': 'Как в матче: под мяч и вверх', 'drill.rally.mouseTip': 'Как в матче: ЛКМ под мяч и вверх',
+      'drill.rally.fail': 'Под мяч — и вверх',
+      /* тренер: короткие реплики. NB: причины очков из awardPoint ('АУТ',
+       * 'В СЕТКУ', ...) — внутренние КОДЫ движка, не тексты; маппинг
+       * код→текст делается в Trainer.onFault и покрыт этими ключами. */
+      'train.done': 'Готово', 'train.counted': 'Зачтено',
+      'train.serveDone': 'Готово — подача везде!', 'train.serveNext': 'Отлично! Теперь — {name}.',
+      'target.center': 'по центру', 'target.left': 'в ЛЕВУЮ зону', 'target.right': 'в ПРАВУЮ зону',
+      'train.out': 'Аут.', 'train.net': 'Сетка.', 'train.serveFault': 'Ошибка подачи.',
+      'train.throughServe': 'Смахни вверх сквозь мяч.', 'train.through': 'Веди до конца — сквозь мяч.',
+      'train.repeat': 'Повтори жест.',
+      'ui.tapRetry': 'Коснись — повторить сразу',
+      'ui.lessonFirst': 'Урок 1 из {total}', 'ui.lessonNew': 'НОВЫЙ УДАР · урок {n} из {total}', 'ui.lesson': 'Урок {n} из {total}',
+      'ui.tapContinue': 'Коснись экрана — продолжить', 'ui.tapBallTouch': 'Коснись экрана — мяч подлетит', 'ui.tapBallMouse': 'Клик ЛКМ — мяч подлетит'
+    },
+    en: {
+      'boot.webglTitle': 'WebGL unavailable',
+      'boot.webglBody': 'This game needs WebGL. Enable hardware acceleration in your browser and reload the page.',
+      'drill.serve.title': 'SERVE', 'drill.serve.goal': 'Serve: center → left → right',
+      'drill.serve.tip': 'Tap — toss, swipe up into the zone', 'drill.serve.mouseTip': 'LMB — toss, swipe up into the zone',
+      'drill.hit.title': 'HIT', 'drill.hit.goal': 'Return the ball onto their side',
+      'drill.hit.tip': 'Finger under the ring — up through it', 'drill.hit.mouseTip': 'LMB under the ring — swipe up',
+      'drill.hit.fail': 'Start the swipe under the ring',
+      'drill.aim.title': 'AIM', 'drill.aim.goal': 'Hit the lit half',
+      'drill.aim.tip': 'Swipe diagonally — it flies that way', 'drill.aim.mouseTip': 'LMB diagonally toward the target',
+      'drill.aim.fail': 'Diagonal — toward the target',
+      'drill.topspin.title': 'TOPSPIN', 'drill.topspin.goal': 'Topspin onto the table',
+      'drill.topspin.tip': 'Long fast swipe up', 'drill.topspin.mouseTip': 'LMB + long and fast up',
+      'drill.topspin.fail': 'Longer and faster up',
+      'drill.push.title': 'PUSH', 'drill.push.goal': 'Backspin onto the table',
+      'drill.push.tip': 'Soft swipe down-forward', 'drill.push.mouseTip': 'LMB + soft down-forward',
+      'drill.push.fail': 'Guide it down, no jerk',
+      'drill.rally.title': 'RECAP', 'drill.rally.goal': 'Return 3 balls, no hints',
+      'drill.rally.tip': 'Like a match: under the ball, up', 'drill.rally.mouseTip': 'Like a match: LMB under the ball, up',
+      'drill.rally.fail': 'Under the ball — and up',
+      'train.done': 'Done', 'train.counted': 'Counted',
+      'train.serveDone': 'Done — serves everywhere!', 'train.serveNext': 'Great! Now — {name}.',
+      'target.center': 'to the center', 'target.left': 'to the LEFT zone', 'target.right': 'to the RIGHT zone',
+      'train.out': 'Out.', 'train.net': 'Net.', 'train.serveFault': 'Serve fault.',
+      'train.throughServe': 'Swipe up through the ball.', 'train.through': 'Follow through the ball.',
+      'train.repeat': 'Repeat the gesture.',
+      'ui.tapRetry': 'Tap — retry right away',
+      'ui.lessonFirst': 'Lesson 1 of {total}', 'ui.lessonNew': 'NEW STROKE · lesson {n} of {total}', 'ui.lesson': 'Lesson {n} of {total}',
+      'ui.tapContinue': 'Tap the screen to continue', 'ui.tapBallTouch': 'Tap the screen — the ball will fly', 'ui.tapBallMouse': 'Left-click — the ball will fly'
+    }
+  };
+  function ET(key, vars) {
+    let s = (D[lang] && D[lang][key]) ?? D.ru[key] ?? key;
+    if (vars) s = s.replace(/\{(\w+)\}/g, (m, n) => (vars[n] != null ? vars[n] : m));
+    return s;
+  }
+  ET.set = (l) => { if (l && D[l]) lang = l; };
+  ET.lang = () => lang;
+  ET.dicts = D;
+  return ET;
+})();
+
+
 /* ====== 10_math.js ====== */
 /* =====================================================================
  *  TOPSPIN // ARENA TABLE TENNIS  —  math core
  *  Minimal, allocation-conscious linear algebra (vec3 / mat3 / mat4 / quat)
  * ===================================================================== */
-'use strict';
 
 const TAU = Math.PI * 2;
 const DEG = Math.PI / 180;
@@ -7244,10 +7331,10 @@ function playerWristPose(pos, vel, hand, phase = {}) {
      where a real player sets the angle, not where the bat currently sits.
      Missing y is home so x/z-only callers keep the old rest pitch. */
   /* Neutral reference for the ready face — the SAME pose the camera and the
-     pointer map use as home (PADDLE_HOME in 57_camera.js): 28 cm above the
+     pointer map use as home (PADDLE_HOME in 57_camera.js): 42 cm above the
      playing surface, on the authored stance plane. It is duplicated as a
      literal because this module is also loaded on its own by the rig tests. */
-  const HOME_Y = 1.04;
+  const HOME_Y = 1.18;
   const hy = Number.isFinite(phase.contactY) ? phase.contactY
     : Number.isFinite(pos.y) ? pos.y : HOME_Y;
   /* Stretched arm cannot close as hard as a compact smash in front. */
@@ -9417,6 +9504,55 @@ class Scene {
 }
 
 
+/* ====== 61_particles.js ====== */
+/* =====================================================================
+ *  PARTICLES — GPU point-sprite burst pool (extracted from 70_game).
+ *  Fixed ring buffer: spawn writes into preallocated typed arrays, the
+ *  vertex buffer is re-uploaded with bufferSubData — no per-frame
+ *  allocation, no GC pressure on the hot path. Used by Game for hit
+ *  bursts, net/out flashes and celebration confetti.
+ * ===================================================================== */
+
+class Particles {
+  constructor(max = 260) {
+    this.max = max; this.n = 0;
+    this.p = new Float32Array(max * 3); this.v = new Float32Array(max * 3);
+    this.life = new Float32Array(max); this.maxLife = new Float32Array(max);
+    this.size = new Float32Array(max); this.col = new Float32Array(max * 3);
+    this.grav = new Float32Array(max);
+  }
+  spawn(x, y, z, vx, vy, vz, life, size, r, g, b, grav) {
+    const i = this.n < this.max ? this.n++ : (Math.random() * this.max) | 0;
+    this.p[i * 3] = x; this.p[i * 3 + 1] = y; this.p[i * 3 + 2] = z;
+    this.v[i * 3] = vx; this.v[i * 3 + 1] = vy; this.v[i * 3 + 2] = vz;
+    this.life[i] = life; this.maxLife[i] = life; this.size[i] = size;
+    this.col[i * 3] = r; this.col[i * 3 + 1] = g; this.col[i * 3 + 2] = b;
+    this.grav[i] = grav === undefined ? 4 : grav;
+  }
+  burst(x, y, z, n, speed, life, size, r, g, b, dir) {
+    for (let i = 0; i < n; i++) {
+      let vx = rndSym(1), vy = rndSym(1), vz = rndSym(1);
+      const l = Math.hypot(vx, vy, vz) || 1;
+      vx /= l; vy /= l; vz /= l;
+      if (dir) { vx = vx * 0.5 + dir.x; vy = vy * 0.5 + dir.y; vz = vz * 0.5 + dir.z; }
+      const s = speed * rnd(0.35, 1);
+      this.spawn(x, y, z, vx * s, vy * s, vz * s, life * rnd(0.6, 1.2), size * rnd(0.6, 1.3), r, g, b);
+    }
+  }
+  update(dt) {
+    for (let i = 0; i < this.n; i++) {
+      if (this.life[i] <= 0) continue;
+      this.life[i] -= dt;
+      this.v[i * 3 + 1] -= this.grav[i] * dt;
+      this.v[i * 3] *= 1 - 2.2 * dt; this.v[i * 3 + 2] *= 1 - 2.2 * dt;
+      this.p[i * 3] += this.v[i * 3] * dt;
+      this.p[i * 3 + 1] += this.v[i * 3 + 1] * dt;
+      this.p[i * 3 + 2] += this.v[i * 3 + 2] * dt;
+    }
+  }
+}
+
+
 /* ====== 65_train.js ====== */
 /* =====================================================================
  *  TRAINING — a real, interactive coach.
@@ -9432,51 +9568,51 @@ function detectInputMode(win = window, nav = navigator) {
   const matches = query => !!(win.matchMedia && win.matchMedia(query).matches);
   return matches('(pointer: coarse)') || ((nav.maxTouchPoints || 0) > 0 && !matches('(pointer: fine)')) ? 'touch' : 'mouse';
 }
-function trainingTip(step, mode) { return mode === 'touch' ? step.tip : step.mouseTip; }
+function trainingTip(step, mode) { return ET(mode === 'touch' ? step.tip : step.mouseTip); }
 
 /* The drills, in the order a beginner needs them: от САМОГО ПРОСТОГО к
  * сложному — сначала подать мяч в игру, потом отбить, потом управлять,
  * и только затем новые удары. Each drill holds the ball until the gesture. */
 const TRAIN_STEPS = [
   {
-    id: 'SERVE', goal: 'Подай: центр → лево → право', title: 'ПОДАЧА', need: 3, coach: 'serve',
-    tip: 'Тап — подброс, вверх в зону', mouseTip: 'ЛКМ — подброс, вверх в зону',
+    id: 'SERVE', goal: 'drill.serve.goal', title: 'drill.serve.title', need: 3, coach: 'serve',
+    tip: 'drill.serve.tip', mouseTip: 'drill.serve.mouseTip',
     feed: null,
   },
   {
-    id: 'HIT', goal: 'Отбей мяч на стол соперника', title: 'УДАР', need: 3, coach: 'hit',
-    tip: 'Палец под кольцо — и вверх через него', mouseTip: 'ЛКМ под кольцом — и вверх',
+    id: 'HIT', goal: 'drill.hit.goal', title: 'drill.hit.title', need: 3, coach: 'hit',
+    tip: 'drill.hit.tip', mouseTip: 'drill.hit.mouseTip',
     feed: { kind: 'normal', spin: -40, speed: 4.8 },
     check: () => true,
-    failHint: 'Начни свайп под кольцом',
+    failHint: 'drill.hit.fail',
   },
   {
-    id: 'AIM', goal: 'Попади в светлую половину', title: 'НАПРАВЛЕНИЕ', need: 2, coach: 'aim',
-    tip: 'Свайп по диагонали — туда и полетит', mouseTip: 'ЛКМ и по диагонали к цели',
+    id: 'AIM', goal: 'drill.aim.goal', title: 'drill.aim.title', need: 2, coach: 'aim',
+    tip: 'drill.aim.tip', mouseTip: 'drill.aim.mouseTip',
     feed: { kind: 'normal', spin: -55, speed: 5.0 },
     check: (g, s, T) => g.ball.p.x * T.aimSide > 0.10,
-    failHint: 'Диагональ — в сторону цели',
+    failHint: 'drill.aim.fail',
   },
   {
-    id: 'TOPSPIN', goal: 'Верхнее вращение на стол', title: 'ТОПСПИН', need: 2, coach: 'ring',
-    tip: 'Длинный быстрый свайп вверх', mouseTip: 'ЛКМ + длинно и быстро вверх',
+    id: 'TOPSPIN', goal: 'drill.topspin.goal', title: 'drill.topspin.title', need: 2, coach: 'ring',
+    tip: 'drill.topspin.tip', mouseTip: 'drill.topspin.mouseTip',
     feed: { kind: 'normal', spin: -95, speed: 6.0 },
     check: (g, s) => s.topspin > 45,
-    failHint: 'Длиннее и быстрее вверх',
+    failHint: 'drill.topspin.fail',
   },
   {
-    id: 'PUSH', goal: 'Нижнее вращение на стол', title: 'ПОДРЕЗКА', need: 2, coach: 'ring',
-    tip: 'Мягкий свайп вниз-вперёд', mouseTip: 'ЛКМ + мягко вниз-вперёд',
+    id: 'PUSH', goal: 'drill.push.goal', title: 'drill.push.title', need: 2, coach: 'ring',
+    tip: 'drill.push.tip', mouseTip: 'drill.push.mouseTip',
     feed: { kind: 'normal', spin: 40, speed: 5.2 },
     check: (g, s) => s.topspin < -30,
-    failHint: 'Веди вниз, без рывка',
+    failHint: 'drill.push.fail',
   },
   {
-    id: 'RALLY', goal: 'Отбей 3 мяча без подсказок', title: 'ЗАКРЕПЛЕНИЕ', need: 3, coach: 'none',
-    tip: 'Как в матче: под мяч и вверх', mouseTip: 'Как в матче: ЛКМ под мяч и вверх',
+    id: 'RALLY', goal: 'drill.rally.goal', title: 'drill.rally.title', need: 3, coach: 'none',
+    tip: 'drill.rally.tip', mouseTip: 'drill.rally.mouseTip',
     feed: { kind: 'mix', spin: -55, speed: 5.9 },
     check: () => true,
-    failHint: 'Под мяч — и вверх',
+    failHint: 'drill.rally.fail',
   },
 ];
 
@@ -9525,7 +9661,7 @@ class Trainer {
     if (this.phase === 'ok' || this.phase === 'fail') return this.msg;
     const S = this.S, touch = !(this.g.ui && this.g.ui.inputMode === 'mouse');
     if (S.id === 'SERVE' && this.g.state === GS.SERVE_READY)
-      return touch ? 'Коснись экрана — мяч подлетит' : 'Клик ЛКМ — мяч подлетит';
+      return touch ? ET('ui.tapBallTouch') : ET('ui.tapBallMouse');
     if (S.id === 'AIM')
       return this.aimSide > 0 ? 'Свайп вверх-вправо → в правую половину'
                               : 'Свайп вверх-влево → в левую половину';
@@ -9748,7 +9884,7 @@ class Trainer {
     const s = this.lastShot;
     if (!s) return;
     if (!S.check || S.check(this.g, s, this)) this.pass();
-    else this.fail(S.failHint || 'Повтори жест.');
+    else this.fail(S.failHint ? ET(S.failHint) : ET('train.repeat'));
   }
 
   /** called instead of awardPoint while training */
@@ -9757,12 +9893,12 @@ class Trainer {
     if (who > 0) return;                       // the feeder "lost" the point: ignore
     const S = this.S;
     let r = reason;
-    if (reason === 'АУТ') r = 'Аут.';
-    else if (reason === 'В СЕТКУ') r = 'Сетка.';
+    if (reason === 'АУТ') r = ET('train.out');
+    else if (reason === 'В СЕТКУ') r = ET('train.net');
     /* «Нет контакта» ни о чём не говорит ученику. Подсказка-ДЕЙСТВИЕ: */
     else if (reason === 'ВЫ НЕ ДОСТАЛИ МЯЧ' || reason === 'ОЧКО СОПЕРНИКУ')
-      r = S.id === 'SERVE' ? 'Смахни вверх сквозь мяч.' : 'Веди до конца — сквозь мяч.';
-    else if (reason.indexOf('ПОДАЧ') >= 0) r = 'Ошибка подачи.';
+      r = S.id === 'SERVE' ? ET('train.throughServe') : ET('train.through');
+    else if (reason.indexOf('ПОДАЧ') >= 0) r = ET('train.serveFault');
     this.fail(r);
   }
 
@@ -9772,10 +9908,10 @@ class Trainer {
     if (this.S.id === 'SERVE') {
       /* диалог тренера: «Отлично! Теперь попробуй — в левую зону» */
       const next = this.serveTarget();
-      const names = { center: 'по центру', left: 'в ЛЕВУЮ зону', right: 'в ПРАВУЮ зону' };
-      this.msg = this.done >= this.S.need ? 'Готово — подача везде!' : `Отлично! Теперь — ${names[next]}.`;
+      const names = { center: ET('target.center'), left: ET('target.left'), right: ET('target.right') };
+      this.msg = this.done >= this.S.need ? ET('train.serveDone') : ET('train.serveNext', { name: names[next] });
     } else {
-      this.msg = this.done >= this.S.need ? 'Готово' : 'Зачтено';
+      this.msg = this.done >= this.S.need ? ET('train.done') : ET('train.counted');
     }
     this.msgCol = '#4ee39a';
     this.g.audio.ui('good');
@@ -12052,45 +12188,7 @@ const GS = {
 const PHYS_DT = PH.SIM_DT;        // 600 Hz — and the same step every solver verdicts on
 
 /* --------------------------- particles ----------------------------- */
-class Particles {
-  constructor(max = 260) {
-    this.max = max; this.n = 0;
-    this.p = new Float32Array(max * 3); this.v = new Float32Array(max * 3);
-    this.life = new Float32Array(max); this.maxLife = new Float32Array(max);
-    this.size = new Float32Array(max); this.col = new Float32Array(max * 3);
-    this.grav = new Float32Array(max);
-  }
-  spawn(x, y, z, vx, vy, vz, life, size, r, g, b, grav) {
-    const i = this.n < this.max ? this.n++ : (Math.random() * this.max) | 0;
-    this.p[i * 3] = x; this.p[i * 3 + 1] = y; this.p[i * 3 + 2] = z;
-    this.v[i * 3] = vx; this.v[i * 3 + 1] = vy; this.v[i * 3 + 2] = vz;
-    this.life[i] = life; this.maxLife[i] = life; this.size[i] = size;
-    this.col[i * 3] = r; this.col[i * 3 + 1] = g; this.col[i * 3 + 2] = b;
-    this.grav[i] = grav === undefined ? 4 : grav;
-  }
-  burst(x, y, z, n, speed, life, size, r, g, b, dir) {
-    for (let i = 0; i < n; i++) {
-      let vx = rndSym(1), vy = rndSym(1), vz = rndSym(1);
-      const l = Math.hypot(vx, vy, vz) || 1;
-      vx /= l; vy /= l; vz /= l;
-      if (dir) { vx = vx * 0.5 + dir.x; vy = vy * 0.5 + dir.y; vz = vz * 0.5 + dir.z; }
-      const s = speed * rnd(0.35, 1);
-      this.spawn(x, y, z, vx * s, vy * s, vz * s, life * rnd(0.6, 1.2), size * rnd(0.6, 1.3), r, g, b);
-    }
-  }
-  update(dt) {
-    for (let i = 0; i < this.n; i++) {
-      if (this.life[i] <= 0) continue;
-      this.life[i] -= dt;
-      this.v[i * 3 + 1] -= this.grav[i] * dt;
-      this.v[i * 3] *= 1 - 2.2 * dt; this.v[i * 3 + 2] *= 1 - 2.2 * dt;
-      this.p[i * 3] += this.v[i * 3] * dt;
-      this.p[i * 3 + 1] += this.v[i * 3 + 1] * dt;
-      this.p[i * 3 + 2] += this.v[i * 3 + 2] * dt;
-    }
-  }
-}
-
+/* Particles — см. 61_particles.js (пул спрайт-вспышек, вынесен из Game). */
 /* --------------------------- the game ------------------------------ */
 /** How much the bat slides toward the predicted meeting point while the
  *  ball approaches the blade's plane — indexed by difficulty level. The
@@ -12266,8 +12364,8 @@ class Game {
       if (this.motionQuery.addEventListener) this.motionQuery.addEventListener('change', onMotionPreference);
       else if (this.motionQuery.addListener) this.motionQuery.addListener(onMotionPreference);
     }
-    /* The view is an authored fit (preset × aspect) plus a persistent
-       player trim: lens zoom and pitch offset, sanitised in cameraRigFor. */
+    /* No zoom, no manual height: the view is authored, fitted once per
+       aspect ratio and only changes when the player picks another preset. */
     this.camShiftY = 0;
     this.camRig = { eye: V3.new(0, 1.68, 2.38), look: V3.new(0, 0.74, -0.25), fov: 44, shiftY: 0, mode: 'BROADCAST' };
     this._rigBuf = { vp: M4.create(), proj: M4.create(), view: M4.create() };
@@ -12346,10 +12444,7 @@ class Game {
       return { x, y };
     };
 
-    // Left pointer = stroke. Every other gesture (right drag, wheel, second
-    // finger) is deliberately inert for the camera: the view is one of the
-    // fixed presets, trimmed nowhere else, so a stray gesture mid-rally can
-    // never swing it while the player is aiming.
+    // Left pointer = stroke. The camera is fixed: no right-drag, no wheel.
     const ptrs = new Map();
     const dropStroke = () => {
       this.swipe.cancel();
@@ -12359,13 +12454,7 @@ class Game {
     this.cancelInput = () => { ptrs.clear(); dropStroke(); };
     const down = (e) => {
       if (this.paused || this.state === GS.MENU || this.state === GS.MATCH_END) return;
-      if (e.button === 2) {
-        /* Right button used to be a camera pitch drag. Now it is inert: it
-         * never enters `ptrs`, so it can neither start a stroke nor cancel
-         * one as a "second finger", and it never moves the camera. */
-        e.preventDefault();
-        return;
-      }
+      if (e.button === 2) { e.preventDefault(); return; }
       if (e.button === 1) { e.preventDefault(); return; }
       if (this.demoMode) this.stopDemo(); // a real stroke always takes control
       this.audio.init(); this.audio.resume();
@@ -12505,17 +12594,15 @@ class Game {
     c.addEventListener('pointercancel', () => this.cancelInput());
     c.addEventListener('lostpointercapture', (e) => { if (ptrs.has(e.pointerId)) this.cancelInput(); });
     c.addEventListener('contextmenu', (e) => e.preventDefault());
-    // Hover movement follows the bat — except while a right-drag is aiming the camera.
+    // Hover movement follows the bat. A held right button is not a camera command.
     window.addEventListener('pointermove', (e) => { if (!ptrs.size) track(e); }, { passive: true });
     window.addEventListener('blur', () => { this.cancelInput(); this.setPaused(true); });
     document.addEventListener('visibilitychange', () => {
       if (document.hidden) { this.cancelInput(); this.setPaused(true); this.profile.save(true); }
     });
     window.addEventListener('pagehide', () => { this.saveSettings(); this.profile.save(true); this.career.save(); });
-    /* The wheel used to trim the LENS zoom. It no longer does: camera framing
-     * belongs to the authored presets, and a mid-rally wheel tick must not
-     * silently reframe the player's reach. The page itself never scrolls, so
-     * the event is still swallowed. */
+    // The wheel used to dolly the camera. A page that scrolls nowhere should
+    // still not jump, so it is swallowed — but it changes nothing on screen.
     c.addEventListener('wheel', (e) => { e.preventDefault(); }, { passive: false });
     c.style.touchAction = 'none';
 
@@ -14350,35 +14437,7 @@ class Game {
      * over the table for no reason and losing the bottom of the pointer area
      * to the table's own clearance rule. A lunge is for a ball that will
      * BOUNCE short (inside 0.95 m of the net) or is already dying there. */
-    /* Contract v3 footwork: depth is not something a finger on glass can
-     * aim, so the body walks to the ball's hitting point — the first moment
-     * after its bounce on our side that the ball is descending through a
-     * comfortable height, or reaches the stance plane, whichever comes first.
-     * The blade then meets the ball AT the blade, and the capture box can be
-     * the size of a racket instead of half a metre deep. */
-    let footZ = NaN;
-    if (MATCH_RULES.autoFootwork && canReachShort) {
-      const passed = Number.isFinite(this._footZ) && this.rallyBounces.some((x) => x > 0) &&
-        this.ball.p.z >= this._footZ - 0.05;   // committed: do not chase a ball already at the blade
-      if (!passed && (readClock.age === 0 || !Number.isFinite(this._footZ))) {
-        const fp = this._footPred || (this._footPred = { path: [] });
-        const path = fp.path;
-        predict(V3.clone(this.ball.p), V3.clone(this.ball.v), V3.clone(this.ball.w),
-          { dt: PHYS_DT * 3, maxT: 1.6, path, out: fp });
-        const ownDone = this.rallyBounces.some((x) => x > 0);
-        const hY = PH.TABLE_Y + MATCH_RULES.footworkHeight;
-        let bounced = ownDone, z = NaN, prevY = this.ball.p.y;
-        for (let i = 0; i + 2 < path.length; i += 3) {
-          const x = path[i], y = path[i + 1], pz = path[i + 2];
-          if (!bounced) { if (fp.landed && pz >= fp.landed.z - 1e-3 && fp.landed.z > 0) bounced = true; prevY = y; continue; }
-          if (pz >= PADDLE_STANCE_Z || (y < prevY && y <= hY)) { z = pz; break; }
-          prevY = y;
-        }
-        this._footZ = Number.isFinite(z) ? clamp(z, PADDLE_LIMITS.zStepIn, PADDLE_STANCE_Z) : PADDLE_STANCE_Z;
-      }
-      footZ = this._footZ;
-    } else this._footZ = NaN;
-    const shortBall = Number.isFinite(footZ) ? footZ < PADDLE_STANCE_Z - .04 : canReachShort && (
+    const shortBall = canReachShort && (
       (o.landed && o.landed.z > 0 && o.landed.z < 0.95) ||
       (looseShort && this.ball.p.z < 0.95 && this.ball.p.y < PH.TABLE_Y + 0.45));
     if (shortBall) zNear = PADDLE_LIMITS.zStepIn;
@@ -14399,9 +14458,7 @@ class Game {
      * x/y is then taken on the plane the bat is ACTUALLY on, so the parallax
      * of the step does not move the blade away from the cursor. */
     let planeZ = PADDLE_STANCE_Z;
-    if (shortBall && Number.isFinite(footZ)) {
-      planeZ = lerp(PADDLE_STANCE_Z, footZ, clamp(pad.stepIn || 0, 0, 1));
-    } else if (shortBall) {
+    if (shortBall) {
       const shortDepth = clamp(Math.min(o.reach ? o.reach.z : this.ball.p.z, this.ball.p.z) - 0.02,
         PADDLE_LIMITS.zStepIn, PADDLE_STANCE_Z);
       planeZ = lerp(PADDLE_STANCE_Z, shortDepth, clamp(pad.stepIn || 0, 0, 1));
@@ -14412,30 +14469,23 @@ class Game {
      * the exact class of "the racket is not where my cursor is" this rewrite
      * exists to remove. The blade's own depth is the honest inverse. */
     const projZ = clamp(pad.pos.z, PADDLE_LIMITS.zStepIn, PADDLE_LIMITS.zFar);
-    /* СТРОГИЙ КУРСОР-СОЛВЕР (аудит №5). Старые подходы провалились поочерёдно:
-     * луч на плоскость стойки давал вертикальный диапазон 0.26..2.2 м при
-     * потолке руки 0.72 (мёртвые зоны), а экранная band-карта рисовала клинок
-     * на 250-400 px от курсора — отсюда «курсор движется, ракетка стоит» и
-     * «подача невозможна»: индикатор (на мяче) указывал туда, куда лучевой
-     * зажим не пускал. Решение — геометрическое: pointerBladeSolve подбирает
-     * ГЛУБИНУ z плоскости под луч указателя, так что горизонталь И вертикаль
-     * всегда лучом-точные (клинок под курсором), а подъём руки физически
-     * превращается в шаг к сетке — ощущение «по дуге вперёд» получается само.
-     * Мёртвая зона остаётся только там, где луч выше головы живого игрока —
-     * там клинок честно паркуется на потолке руки. Шаговый ассист (короткий
-     * мяч) передаётся через zFoot и уступает указателю, как прежде. */
-    const ps = pointerBladeSolve(this._liveRig, this.R.aspect(), px, py, {
-      zFoot: planeZ < PADDLE_STANCE_Z ? planeZ : NaN, out: this._ptSolve || (this._ptSolve = {}),
-    });
-    let tx = ps.tx;
-    let ty = ps.ty;
-    let tz = ps.tz;
-    /* z-привод идёт на полной скорости, когда глубину выбрал указатель (он
-     * всегда в курсе видимой картинки), а медленная ×0.7 остаётся для
-     * стойки — шаг корпуса должен читаться как слайд, не как прыжок. */
-    const pointerDepth = ps.zByPointer;
-    /* Вытянутость руки для wrist-позы — от физической глубины солвера
-     * (ps.reachFwd), а не от высоты: один параметр — один смысл. */
+    /* The pointer outranks the footwork assist. A leaned-in blade cannot be
+     * drawn low on the screen — it would pass through the table — so a player
+     * aiming at the bottom of the play area is asked to stand back instead of
+     * being ignored. Without this the cursor ran 21 % of the screen ahead of
+     * the blade for the whole of every short-ball lunge. */
+    let pointerDepth = false;
+    if (planeZ < PADDLE_STANCE_Z) {
+      const safe = depthForPointer(this._liveRig, this.R.aspect(), px, py, planeZ);
+      if (safe > planeZ + 1e-6) { planeZ = safe; pointerDepth = true; }
+    }
+    planeZ = quantizeDepth(planeZ);
+    const t = paddleTargetFromPointer(px, py, 0, 1,
+      this._ptTarget || (this._ptTarget = { tx: 0, ty: 0, tz: 0 }),
+      { rig: this._liveRig, aspect: this.R.aspect(), z: projZ });
+    let tx = t.tx;
+    let ty = t.ty;
+    let tz = planeZ;             // depth is footwork, not pointer aim
     // Position follow-through uses the SAME smoothed/clamped target path.
     // A squared-sine envelope has zero velocity at both ends; never write
     // an independent visual position over the simulation after its update.
@@ -14497,77 +14547,20 @@ class Game {
       const under = this.ball.p.y - 0.04;
       ty = lerp(ty, under, this.ball.v.y < 0 ? k : 0.45 * A);
     }
-    /* Contract v3: a short, VISIBLE pull toward the meeting point. The bat
-     * slides to the ball on screen, so a near miss is forgiven honestly instead
-     * of by an invisible half-metre hitbox. */
-    if (MATCH_RULES.magnet > 0 && MATCH_RULES.magnetRadius > 0 && this.recenterT <= 0) {
-      const cp = this.contactPrediction();
-      if (cp && cp.t <= MATCH_RULES.magnetHorizon) {
-        const d = Math.hypot(tx - cp.p.x, ty - cp.p.y);
-        if (d < MATCH_RULES.magnetRadius) {
-          const near = 1 - d / MATCH_RULES.magnetRadius;
-          const ramp = clamp(1 - cp.t / MATCH_RULES.magnetHorizon, 0, 1);
-          const k = clamp(MATCH_RULES.magnet * Math.sqrt(near) * (0.35 + 0.65 * ramp), 0, 1);
-          tx = lerp(tx, cp.p.x, k); ty = lerp(ty, cp.p.y, k);
-        }
-      }
-    }
-    /* Meeting-point dovодка: while the incoming ball flies to the blade's
-     * plane, the blade slides part of the way toward it. The meeting point
-     * is predicted ON the bat's own plane (contactPrediction), so unlike the
-     * removed old pull this one can never drag the bat sideways off a
-     * mismatched depth. Strength scales with the chosen difficulty: a rookie
-     * opponent means heavy forgiveness, a legend means your hand alone. */
-    const meetK = MEET_ASSIST[clamp(Math.round(this.settings.difficulty || 0), 0, MEET_ASSIST.length - 1)];
-    if (meetK > 0 && this.recenterT <= 0 && !(ft && ft.active)) {
-      const cp = this.contactPrediction();
-      if (cp && cp.t > 0 && cp.t <= MEET_ASSIST_HORIZON) {
-        const d = Math.hypot(tx - cp.p.x, ty - cp.p.y);
-        if (d < MEET_ASSIST_RADIUS) {
-          const near = 1 - d / MEET_ASSIST_RADIUS;
-          const ramp = clamp(1 - cp.t / MEET_ASSIST_HORIZON, 0, 1);
-          const k = clamp(meetK * Math.sqrt(near) * (0.40 + 0.60 * ramp), 0, 1);
-          tx = lerp(tx, cp.p.x, k);
-          ty = lerp(ty, cp.p.y, k);
-        }
-      }
-    }
-    /* Why the dovодка above is `positionAssist`-shaped but gentler than the
-     * old one ever was: it only bites inside a half-metre window in the last
-     * 0.6 s of the flight, it never moves depth (footwork owns that), and it
-     * fades to 0.10 against a legend. The full-strength 0.85-for-everyone
-     * pull is what "the racket is not where my cursor is" used to mean. */
+    /* The old position assist pulled the blade toward the ball by up to
+     * 0.85 of the distance. That is exactly what a player experiences as
+     * "the racket is not where my cursor is", and with the reach box now
+     * covering the whole table there is nothing left for it to rescue: the
+     * capture radius already forgives a near miss. Only the depth assist
+     * survives, inside the step-in above. */
     /* The follow-through and the toss slide are the only intentional offsets,
      * and both are transient. A guard keeps a big swing from painting the
      * blade off the edge of the play rectangle. */
     if (this.camVPReady) {
-      const ft2 = this._frusT || (this._frusT = { tx: 0, ty: 0, tz: 0 });
-      ft2.tx = tx; ft2.ty = ty; ft2.tz = tz;
-      clampPaddleToFrustum(this.camVP, ft2, 0.012);
-      tx = ft2.tx; ty = ft2.ty; tz = ft2.tz;
+      t.tx = tx; t.ty = ty; t.tz = tz;
+      clampPaddleToFrustum(this.camVP, t, 0.012);
+      tx = t.tx; ty = t.ty; tz = t.tz;
     }
-    /* Оболочка досягаемости + карта ИГРОВОЙ ПОЛОСЫ по вертикали. Сырой луч
-     * камеры в портрете выдавал высоты 0.26..2.2 м: низ и верх экрана давали
-     * мёртвые зоны в потолке/полу, а вся жизнь — в серединных 30% (аудит №3,
-     * замер по сетке указателя). Поэтому вертикаль идёт из полосы экрана
-     * прямо в оболочку руки; горизонталь остаётся лучевой (она и так честная
-     * ±0.58 м). Рывки дуги вперёд убраны отдельным низкочастотным каналом
-     * (9 Гц): шум пальца ±2% полосы больше не пинает ракетку к сетке. */
-    /* Финальные ЖЁСТКИЕ пределы руки. Аудит №5 измерил: мягкий
-     * softSat-потолок на этом месте второй раз дожимал и без того готовую
-     * (оболочковую) цель солвера на 3-7 px в РАБОЧЕЙ зоне — тот самый
-     * визуальный отрыв «когда курсор движется, ракетка стоит на месте
-     * в паре миллиметров». Пределы мягкие внутри солвера; цели, дошедшие
-     * сюда от ассистов, нуждаются только в жёсткой рамке. */
-    tx = clamp(tx, -REACH_SHELL.xHard, REACH_SHELL.xHard);
-    ty = clamp(ty, PH.TABLE_Y + REACH_SHELL.yLoHard, PH.TABLE_Y + REACH_SHELL.yHiHard);
-    /* Вытянутая вперёд рука: глубина солвера — физический вылет. Плавный
-     * канал 9 Гц ± мёртвая полоса 15 мм, как и прежде, против шума пальца. */
-    const fwdSm = expSmooth(this._reachFwd || 0, ps.reachFwd, 9, dt);
-    this._reachFwd = fwdSm < 0.015 ? 0 : fwdSm;
-    /* наклон лица ограничен 0.30 рад: метр вылета к сетке не должен
-     * класть клинок плашмя — механика кисти клонит до ~17° и стоп. */
-    this._reachTilt = Math.min(this._reachFwd * REACH_SHELL.arcTilt, 0.30);
     /* Limits come from the plane the blade is ON, not the one it is heading
      * for: during a step-in the target is up to 0.2 m deeper, and clamping
      * against the deeper plane's (higher) floor made the blade ride up the
@@ -14586,14 +14579,7 @@ class Game {
      * the very complaint this rewrite exists to fix. Re-centring has to
      * actually ARRIVE inside its own 0.3 s window, so it runs at 32: a 1 m
      * correction lands within 0.15 s, still as a glide and not a teleport. */
-    /* Калибровка (настройки оболочки): padSpeed — насколько резво клинок
-     * догоняет палец (30..80), padSmooth — дополнительное сглаживание,
-     * убирающее дрожание кисти. Дефолты = прежние 55. */
-    const cal = this._cal; // задан только если пользователь крутил калибровку
-    const rate = this.recenterT > 0 ? 32 : (cal
-      ? (30 + 50 * (cal.padSpeed !== undefined ? cal.padSpeed : 0.55))
-        / (1 + 1.6 * Math.max(0, cal.padSmooth !== undefined ? cal.padSmooth : 0.35))
-      : 55); // поведение по умолчанию byte-to-byte прежнее
+    const rate = this.recenterT > 0 ? 32 : 55;
     pad.pos.x = expSmooth(pad.pos.x, tx, rate, dt);
     pad.pos.y = expSmooth(pad.pos.y, ty, rate, dt);
     /* The blade follows the cursor on the plane it stands on, so a depth that
@@ -14601,13 +14587,7 @@ class Game {
      * itself — lagging it is what leaves the blade a row above the cursor for
      * the length of the transition. Depth asked for by the footwork assist
      * keeps its slow, visible glide. */
-    /* Глубина догоняет с той же скоростью, когда её двигает указатель
-     * (pointerDepth) или дуга вылета (_reachFwd) — иначе ракетка визуально
-     * «подвисает» и тянется следом (тот самый рывок с задержкой). Тихий
-     * ×0.7 остаётся только для шаговой ассиста (footwork), который и должен
-     * быть неспешным слайдом корпуса. */
-    const zDrive = pointerDepth || (this._reachFwd || 0) > 0.001;
-    pad.pos.z = expSmooth(pad.pos.z, tz, rate * (zDrive ? 1 : 0.7), dt);
+    pad.pos.z = expSmooth(pad.pos.z, tz, rate * (pointerDepth ? 1 : 0.7), dt);
     V3.sub(pad.vel, pad.pos, pad.prevPos);
     V3.mul(pad.vel, pad.vel, 1 / Math.max(dt, 1e-4));
 
@@ -14857,13 +14837,12 @@ class Game {
 
   updateCamera(dt) {
     const aspect = this.R.aspect();
-    /* Pure function of (preset, aspect, trim). It is applied to the live
-     * camera the same frame it is computed — no easing toward a destination —
-     * because the pointer map inverts EXACTLY this projection. Easing meant
-     * the bat was placed for a camera that was still 40 ms away, which is one
-     * of the reasons the cursor and the blade drifted apart during a resize. */
-    const rig = cameraRigFor(this.settings.camera, null, aspect, this.camRig,
-      { zoom: this.settings.camZoom, pitch: this.settings.camPitch });
+    /* Pure function of (preset, aspect). It is applied to the live camera the
+     * same frame it is computed — no easing toward a destination — because
+     * the pointer map inverts EXACTLY this projection. Easing meant the bat
+     * was placed for a camera that was still 40 ms away, which is one of the
+     * reasons the cursor and the blade drifted apart during a resize. */
+    const rig = cameraRigFor(this.settings.camera, null, aspect, this.camRig);
     V3.set(this.camPos, rig.eye.x, rig.eye.y, rig.eye.z);
     V3.set(this.camLook, rig.look.x, rig.look.y, rig.look.z);
     V3.set(this.camPosT, rig.eye.x, rig.eye.y, rig.eye.z);
@@ -14909,21 +14888,8 @@ class Game {
     const s = this.reducedMotion ? 0 : this.shake * this.shake * 0.055;
     const t = this.time * 46;
     const ox = (noise1(t) - 0.5) * s, oy = (noise1(t + 17.3) - 0.5) * s, oz = (noise1(t + 41.7) - 0.5) * s;
-    /* Кинематографичный дрейф камеры (калибровка camSway 0..1): мягкое
-     * «дыхание» — аддитивно к eye/look, состояние camPos/camLook НЕ тронуто
-     * (статус-кво: без ввода камера статична, тест камеры это проверяет).
-     * В розыгрыше сведено к минимуму, в подаче/паузах заметнее. */
-    let swx = 0, swy = 0, swlx = 0;
-    const sw = (this._swayCal !== undefined ? this._swayCal : 0.4) * (this.reducedMotion ? 0 : 1);
-    if (sw > 0.005) {
-      const amp = sw * (this.state === GS.RALLY ? 0.012 : 0.045);
-      const ts = this.time;
-      swx = (noise1(ts * 0.21) - 0.5) * amp;
-      swy = (noise1(ts * 0.16 + 9) - 0.5) * amp * 0.6;
-      swlx = (noise1(ts * 0.19 + 31) - 0.5) * amp * 1.4;
-    }
-    const eye = V3.new(this.camPos.x + ox + swx, this.camPos.y + oy + swy, this.camPos.z + oz);
-    const look = V3.new(this.camLook.x + ox * 0.5 + swlx, this.camLook.y + oy * 0.5, this.camLook.z + oz * 0.5);
+    const eye = V3.new(this.camPos.x + ox, this.camPos.y + oy, this.camPos.z + oz);
+    const look = V3.new(this.camLook.x + ox * 0.5, this.camLook.y + oy * 0.5, this.camLook.z + oz * 0.5);
     this.R.setCamera(eye, look, { x: 0, y: 1, z: 0 }, this.fov, 0.05, 60, this.camShiftY);
   }
 
@@ -15818,9 +15784,7 @@ class UI {
   }
   updateInputCopy() {
     const touch = this.inputMode === 'touch';
-    $('#cameraHelp').textContent = touch
-      ? 'Три готовых вида камеры.'
-      : 'Три готовых вида камеры.';
+    $('#cameraHelp').textContent = 'Три готовых вида. Кадр одинаковый на всех устройствах и не требует настройки.';
     $('#gl').setAttribute('aria-label', touch
       ? 'Игровое поле. Удар — свайп. Вид камеры — в настройках.'
       : 'Игровое поле. Удар — ЛКМ и движение. Вид камеры — 1, 2, 3 или в настройках.');
@@ -16617,14 +16581,14 @@ class UI {
   trainSync(t) {
     const S = t.S, feedback = t.phase === 'ok' || t.phase === 'fail';
     $('#trStep').textContent = `${t.step + 1}/${TRAIN_STEPS.length}`;
-    $('#trTitle').textContent = S.title;
+    $('#trTitle').textContent = ET(S.title);
     $('#trProgress').textContent = `${t.done}/${S.need}`;
     /* во время интро строку шапка НЕ дублирует — вся информация живёт
        в большой карточке урока */
     $('#trTip').textContent = t.phase === 'intro' ? ''
       : t.phase === 'fail'
-      ? 'Коснись — повторить сразу'
-      : feedback ? '' : (t.coachText || S.goal);
+      ? ET('ui.tapRetry')
+      : feedback ? '' : (t.coachText || ET(S.goal));
     $('#trainPauseTip').textContent = trainingTip(S, this.inputMode);
     $('#trMsg').textContent = feedback ? t.msg : '';
     $('#trMsg').style.color = t.msgCol || 'var(--good)';
@@ -16642,11 +16606,11 @@ class UI {
         /* «НОВЫЙ УДАР» — только для действительно новых ударов; базовое
          * отбитие и направление — просто очередной урок */
         const isNewStroke = S.id === 'TOPSPIN' || S.id === 'PUSH';
-        $('#tINo').textContent = t.step === 0 ? `Урок 1 из ${TRAIN_STEPS.length}`
-          : isNewStroke ? `НОВЫЙ УДАР · урок ${t.step + 1} из ${TRAIN_STEPS.length}`
-          : `Урок ${t.step + 1} из ${TRAIN_STEPS.length}`;
-        $('#tITitle').textContent = S.title;
-        $('#tIGoal').textContent = S.goal;
+        $('#tINo').textContent = t.step === 0 ? ET('ui.lessonFirst', { total: TRAIN_STEPS.length })
+          : isNewStroke ? ET('ui.lessonNew', { n: t.step + 1, total: TRAIN_STEPS.length })
+          : ET('ui.lesson', { n: t.step + 1, total: TRAIN_STEPS.length });
+        $('#tITitle').textContent = ET(S.title);
+        $('#tIGoal').textContent = ET(S.goal);
         $('#tITip').textContent = trainingTip(S, this.inputMode);
       }
     }
@@ -17447,9 +17411,9 @@ const ICON = {
       const loading = document.getElementById('loading');
       if (loading) loading.innerHTML =
         `<div style="max-width:420px;text-align:center;padding:24px">
-           <div style="font-size:19px;font-weight:800;margin-bottom:10px">WebGL недоступен</div>
+           <div style="font-size:19px;font-weight:800;margin-bottom:10px">${ET('boot.webglTitle')}</div>
            <div style="font-size:12px;color:#8da3bd;line-height:1.6">
-             Этой демке нужен WebGL. Включите аппаратное ускорение в браузере и перезагрузите страницу.<br><br>
+             ${ET('boot.webglBody')}<br><br>
              <code style="font-size:10px;color:#ff8a8a">${(err && err.message) || err}</code>
            </div></div>`;
       return;
@@ -17523,6 +17487,9 @@ const ICON = {
   const easeInOut = (t) => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2);
 
   const start = () => {
+    if (typeof ET !== 'undefined' && window.__TT_LOCALE) ET.set(window.__TT_LOCALE);   // язык от хоста
+    const applyStaticTexts = () => { const w = document.getElementById('tIWait'); if (w && typeof ET !== 'undefined') w.textContent = ET('ui.tapContinue'); };
+    applyStaticTexts();
     const g = window.__game;
     if (!g) { post('error', { msg: 'game failed to boot' }); return; }
     const ui = g.ui;
@@ -17649,7 +17616,7 @@ const ICON = {
         const S = t.S, key = [t.step, t.done, t.phase, t.frozen, t.nudge > 0, t.coachText].join('|');
         if (key !== lastTrain.key) {
           lastTrain.key = key;
-          post('train', { step: t.step, total: TRAIN_STEPS.length, id: S.id, title: S.title, goal: S.goal,
+          post('train', { step: t.step, total: TRAIN_STEPS.length, id: S.id, title: ET(S.title), goal: ET(S.goal),
             /* в интро вся информация живёт в большой внутриигровой карточке —
              * шапка хоста её НЕ дублирует */
             text: t.phase === 'intro' ? '' : t.coachText, tip: trainingTip(S, ui.inputMode || 'touch'), done: t.done, need: S.need,
@@ -17841,7 +17808,7 @@ const showTip = (text) => { if (text) tip = { text, until: g.time + 4.6 }; };
       if (!m || m.__tt !== 1) return;
       // only commands that need a visible, running arena wake it; 'attract'/'quit' just set the scene
       // behind a hidden layer (menus, matchmaking) and must not restart full-rate rendering there
-      if (!['sleep', 'mute', 'quality', 'rm', 'debug', 'hint', 'attract', 'quit', 'quiet', 'pause', 'resume'].includes(m.type)) wake();
+      if (!['sleep', 'mute', 'quality', 'rm', 'debug', 'hint', 'attract', 'quit', 'quiet', 'pause', 'resume', 'locale'].includes(m.type)) wake();
       switch (m.type) {
         case 'sleep': sleeping = true; break;      // frozen in place: update is skipped, so nothing advances
         case 'wake': break;
@@ -17897,6 +17864,7 @@ const showTip = (text) => { if (text) tip = { text, until: g.time + 4.6 }; };
           g.settings.quality = q; g.R.quality = q; g.resize(); break;
         }
         case 'quiet': document.documentElement.classList.toggle('tt-quiet', !!m.on); break;
+        case 'locale': if (typeof ET !== 'undefined') { ET.set(m.lang); applyStaticTexts(); } break;   // язык от хоста
         /* Калибровка из настроек оболочки: 10 личных параметров 0..100.
          * Применяются мгновенно, хранятся у хоста. Не трогают честные
          * правила боя — только комфорт, камеру и визуал. */
@@ -17914,7 +17882,7 @@ const showTip = (text) => { if (text) tip = { text, until: g.time + 4.6 }; };
         }
       }
     });
-    post('ready', { rules: Object.assign({}, MATCH_RULES), steps: TRAIN_STEPS.map((s) => ({ id: s.id, title: s.title })) });
+    post('ready', { rules: Object.assign({}, MATCH_RULES), steps: TRAIN_STEPS.map((s) => ({ id: s.id, title: ET(s.title) })) });
   };
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start);

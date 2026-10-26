@@ -12,51 +12,51 @@ function detectInputMode(win = window, nav = navigator) {
   const matches = query => !!(win.matchMedia && win.matchMedia(query).matches);
   return matches('(pointer: coarse)') || ((nav.maxTouchPoints || 0) > 0 && !matches('(pointer: fine)')) ? 'touch' : 'mouse';
 }
-function trainingTip(step, mode) { return mode === 'touch' ? step.tip : step.mouseTip; }
+function trainingTip(step, mode) { return ET(mode === 'touch' ? step.tip : step.mouseTip); }
 
 /* The drills, in the order a beginner needs them: от САМОГО ПРОСТОГО к
  * сложному — сначала подать мяч в игру, потом отбить, потом управлять,
  * и только затем новые удары. Each drill holds the ball until the gesture. */
 const TRAIN_STEPS = [
   {
-    id: 'SERVE', goal: 'Подай: центр → лево → право', title: 'ПОДАЧА', need: 3, coach: 'serve',
-    tip: 'Тап — подброс, вверх в зону', mouseTip: 'ЛКМ — подброс, вверх в зону',
+    id: 'SERVE', goal: 'drill.serve.goal', title: 'drill.serve.title', need: 3, coach: 'serve',
+    tip: 'drill.serve.tip', mouseTip: 'drill.serve.mouseTip',
     feed: null,
   },
   {
-    id: 'HIT', goal: 'Отбей мяч на стол соперника', title: 'УДАР', need: 3, coach: 'hit',
-    tip: 'Палец под кольцо — и вверх через него', mouseTip: 'ЛКМ под кольцом — и вверх',
+    id: 'HIT', goal: 'drill.hit.goal', title: 'drill.hit.title', need: 3, coach: 'hit',
+    tip: 'drill.hit.tip', mouseTip: 'drill.hit.mouseTip',
     feed: { kind: 'normal', spin: -40, speed: 4.8 },
     check: () => true,
-    failHint: 'Начни свайп под кольцом',
+    failHint: 'drill.hit.fail',
   },
   {
-    id: 'AIM', goal: 'Попади в светлую половину', title: 'НАПРАВЛЕНИЕ', need: 2, coach: 'aim',
-    tip: 'Свайп по диагонали — туда и полетит', mouseTip: 'ЛКМ и по диагонали к цели',
+    id: 'AIM', goal: 'drill.aim.goal', title: 'drill.aim.title', need: 2, coach: 'aim',
+    tip: 'drill.aim.tip', mouseTip: 'drill.aim.mouseTip',
     feed: { kind: 'normal', spin: -55, speed: 5.0 },
     check: (g, s, T) => g.ball.p.x * T.aimSide > 0.10,
-    failHint: 'Диагональ — в сторону цели',
+    failHint: 'drill.aim.fail',
   },
   {
-    id: 'TOPSPIN', goal: 'Верхнее вращение на стол', title: 'ТОПСПИН', need: 2, coach: 'ring',
-    tip: 'Длинный быстрый свайп вверх', mouseTip: 'ЛКМ + длинно и быстро вверх',
+    id: 'TOPSPIN', goal: 'drill.topspin.goal', title: 'drill.topspin.title', need: 2, coach: 'ring',
+    tip: 'drill.topspin.tip', mouseTip: 'drill.topspin.mouseTip',
     feed: { kind: 'normal', spin: -95, speed: 6.0 },
     check: (g, s) => s.topspin > 45,
-    failHint: 'Длиннее и быстрее вверх',
+    failHint: 'drill.topspin.fail',
   },
   {
-    id: 'PUSH', goal: 'Нижнее вращение на стол', title: 'ПОДРЕЗКА', need: 2, coach: 'ring',
-    tip: 'Мягкий свайп вниз-вперёд', mouseTip: 'ЛКМ + мягко вниз-вперёд',
+    id: 'PUSH', goal: 'drill.push.goal', title: 'drill.push.title', need: 2, coach: 'ring',
+    tip: 'drill.push.tip', mouseTip: 'drill.push.mouseTip',
     feed: { kind: 'normal', spin: 40, speed: 5.2 },
     check: (g, s) => s.topspin < -30,
-    failHint: 'Веди вниз, без рывка',
+    failHint: 'drill.push.fail',
   },
   {
-    id: 'RALLY', goal: 'Отбей 3 мяча без подсказок', title: 'ЗАКРЕПЛЕНИЕ', need: 3, coach: 'none',
-    tip: 'Как в матче: под мяч и вверх', mouseTip: 'Как в матче: ЛКМ под мяч и вверх',
+    id: 'RALLY', goal: 'drill.rally.goal', title: 'drill.rally.title', need: 3, coach: 'none',
+    tip: 'drill.rally.tip', mouseTip: 'drill.rally.mouseTip',
     feed: { kind: 'mix', spin: -55, speed: 5.9 },
     check: () => true,
-    failHint: 'Под мяч — и вверх',
+    failHint: 'drill.rally.fail',
   },
 ];
 
@@ -105,7 +105,7 @@ class Trainer {
     if (this.phase === 'ok' || this.phase === 'fail') return this.msg;
     const S = this.S, touch = !(this.g.ui && this.g.ui.inputMode === 'mouse');
     if (S.id === 'SERVE' && this.g.state === GS.SERVE_READY)
-      return touch ? 'Коснись экрана — мяч подлетит' : 'Клик ЛКМ — мяч подлетит';
+      return touch ? ET('ui.tapBallTouch') : ET('ui.tapBallMouse');
     if (S.id === 'AIM')
       return this.aimSide > 0 ? 'Свайп вверх-вправо → в правую половину'
                               : 'Свайп вверх-влево → в левую половину';
@@ -328,7 +328,7 @@ class Trainer {
     const s = this.lastShot;
     if (!s) return;
     if (!S.check || S.check(this.g, s, this)) this.pass();
-    else this.fail(S.failHint || 'Повтори жест.');
+    else this.fail(S.failHint ? ET(S.failHint) : ET('train.repeat'));
   }
 
   /** called instead of awardPoint while training */
@@ -337,12 +337,12 @@ class Trainer {
     if (who > 0) return;                       // the feeder "lost" the point: ignore
     const S = this.S;
     let r = reason;
-    if (reason === 'АУТ') r = 'Аут.';
-    else if (reason === 'В СЕТКУ') r = 'Сетка.';
+    if (reason === 'АУТ') r = ET('train.out');
+    else if (reason === 'В СЕТКУ') r = ET('train.net');
     /* «Нет контакта» ни о чём не говорит ученику. Подсказка-ДЕЙСТВИЕ: */
     else if (reason === 'ВЫ НЕ ДОСТАЛИ МЯЧ' || reason === 'ОЧКО СОПЕРНИКУ')
-      r = S.id === 'SERVE' ? 'Смахни вверх сквозь мяч.' : 'Веди до конца — сквозь мяч.';
-    else if (reason.indexOf('ПОДАЧ') >= 0) r = 'Ошибка подачи.';
+      r = S.id === 'SERVE' ? ET('train.throughServe') : ET('train.through');
+    else if (reason.indexOf('ПОДАЧ') >= 0) r = ET('train.serveFault');
     this.fail(r);
   }
 
@@ -352,10 +352,10 @@ class Trainer {
     if (this.S.id === 'SERVE') {
       /* диалог тренера: «Отлично! Теперь попробуй — в левую зону» */
       const next = this.serveTarget();
-      const names = { center: 'по центру', left: 'в ЛЕВУЮ зону', right: 'в ПРАВУЮ зону' };
-      this.msg = this.done >= this.S.need ? 'Готово — подача везде!' : `Отлично! Теперь — ${names[next]}.`;
+      const names = { center: ET('target.center'), left: ET('target.left'), right: ET('target.right') };
+      this.msg = this.done >= this.S.need ? ET('train.serveDone') : ET('train.serveNext', { name: names[next] });
     } else {
-      this.msg = this.done >= this.S.need ? 'Готово' : 'Зачтено';
+      this.msg = this.done >= this.S.need ? ET('train.done') : ET('train.counted');
     }
     this.msgCol = '#4ee39a';
     this.g.audio.ui('good');
