@@ -134,20 +134,6 @@ function texBanner(palette) {
   return c;
 }
 
-function texWall(palette) {
-  // A calm vertical gradient. No text, no noise: the hall must never
-  // compete with the ball for the player's attention.
-  const W = 32, H = 512, c = cv(W, H), g = c.getContext('2d');
-  const lg = g.createLinearGradient(0, 0, 0, H);
-  lg.addColorStop(0.00, '#020305');
-  lg.addColorStop(0.42, '#03060b');
-  lg.addColorStop(0.78, '#081020');
-  lg.addColorStop(0.94, '#101c30');
-  lg.addColorStop(1.00, '#070b14');
-  g.fillStyle = lg; g.fillRect(0, 0, W, H);
-  return c;
-}
-
 function texShadow() {
   const S = 256, c = cv(S, S), g = c.getContext('2d');
   const r = g.createRadialGradient(S / 2, S / 2, 0, S / 2, S / 2, S / 2);
@@ -217,11 +203,19 @@ class Scene {
       rubberRed: R.texFromCanvas(texRubber('#c1232c'), { wrap: 'clamp' }),
       rubberBlack: R.texFromCanvas(texRubber('#23242c'), { wrap: 'clamp' }),
       banner: R.texFromCanvas(texBanner(P), { wrap: 'repeat' }),
-      wall: R.texFromCanvas(texWall(P), { wrap: 'repeat' }),
+      stands: R.texFromCanvas(texStandsFallback(), { wrap: 'repeat' }),
       glow: R.texFromCanvas(texGlow(), { wrap: 'clamp', mips: false }),
       ring: R.texFromCanvas(texRing(), { wrap: 'clamp', mips: false }),
       shadow: R.texFromCanvas(texShadow(), { wrap: 'clamp', mips: false }),
     };
+
+    for (const b of ARENA_BRANDS) this.tex['brand_' + b.id] = R.texFromCanvas(texBrandFallback(b), { wrap: 'repeat' });
+    // фото-текстуры из сборки (tt/build.py → window.__TT_ARENA): свап по готовности
+    const A = (typeof window !== 'undefined' && window.__TT_ARENA) || {};
+    if (A.stands) arenaImageTex(R, A.stands, 2048, 256, (tx) => { this.tex.stands = tx; if (this.mat.stands) this.mat.stands.tex = tx; });
+    ARENA_BRANDS.forEach((b, i) => {
+      if (A[b.id]) arenaImageTex(R, A[b.id], 1024, 256, (tx) => { this.tex['brand_' + b.id] = tx; if (this.matBrand) this.matBrand[i].tex = tx; });
+    });
 
     /* ---- meshes ---- */
     this.mesh = {
@@ -237,8 +231,8 @@ class Scene {
       handle: R.mesh(makeBox(0.030, 0.100, 0.022)),
       floor: R.mesh(makePlane(26, 26, 13)),
       quad: R.mesh(makeQuad(1, 1)),
-      bannerLong: R.mesh(makeQuadUV(1, 1, 4, 1)),
-      bannerShort: R.mesh(makeQuadUV(1, 1, 3.4, 1)),
+      bannerEnd: R.mesh(makeQuadUV(1, 1, 2.25, 1)),
+      bannerSide: R.mesh(makeQuadUV(1, 1, 3.25, 1)),
       wall: R.mesh(makeQuadUV(1, 1, 1, 1)),
       sphere: R.mesh(makeSphere(1, 16, 12)),
       box: R.mesh(makeBox(1, 1, 1)),
@@ -260,7 +254,7 @@ class Scene {
       rubberBlack: { color: [1, 1, 1], tex: this.tex.rubberBlack, rough: 0.78, specTint: 0.7, emissive: [0.022, 0.026, 0.034], rim: 0.34, rimCol: [0.66, 0.80, 1.0], rimPower: 2.0 },
       handle: { color: [0.26, 0.17, 0.12], rough: 0.62, emissive: [0.022, 0.015, 0.011] },
       floor: { color: [0.52, 0.54, 0.60], tex: this.tex.floor, rough: 0.80 },
-      wall: { color: [1, 1, 1], tex: this.tex.wall, rough: 1.0, emissive: [0.006, 0.009, 0.016] },
+      stands: { color: [0.82, 0.82, 0.88], tex: this.tex.stands, rough: 1.0 },
       banner: { color: [1, 1, 1], tex: this.tex.banner, rough: 0.52, emissive: [0.02, 0.04, 0.07] },
       barrier: { color: [0.06, 0.08, 0.12], rough: 0.5 },
       trail: { color: [1, 1, 1], rough: 1, blend: 'add', emissive: [1, 1, 1], doubleSided: true },
@@ -274,6 +268,9 @@ class Scene {
       pool: { color: [1, 1, 1], tex: this.tex.glow, blend: 'add', emissive: [0.050, 0.058, 0.080], doubleSided: true, rough: 1 },
       gloss: { color: [1, 1, 1], tex: this.tex.glow, blend: 'add', emissive: [1, 1, 1], doubleSided: true, rough: 1, unlit: true },
     };
+
+    // LED-борта: lit-текстура + крошечный плоский emissive (шейдер не умеет emissive×tex)
+    this.matBrand = ARENA_BRANDS.map((b) => ({ color: [0.92, 0.92, 0.92], tex: this.tex['brand_' + b.id], rough: 0.55, emissive: [0.035, 0.035, 0.035] }));
 
     /* ---- static transform cache ---- */
     this.M = {};
@@ -328,8 +325,31 @@ class Scene {
 
     M4.compose(m('floor'), V3.set(pos, 0, 0, 0), Q.identity(rot), V3.set(scl, 1, 1, 1));
 
-    // surrounding barriers removed per user request: clear unobstructed arena
+    /* Низкие ограждения с LED-баннерами: коробка-борт + светящаяся
+     * плоскость внутрь зала. Кольцо HX×HZ: камера во всех режимах
+     * внутри него (x ±1.5, z ≤ 4.0), борта обзор не перекрывают, а
+     * нижний край трибун уходит за них. Бренды — ARENA_BRANDS по
+     * сторонам: дальняя (главный фон), ближняя, левая, правая. */
     this.barriers = [];
+    {
+      const HX = 3.4, HZ = 4.9, BH = 0.75;
+      const sides = [
+        { brand: 0, long: true, x: 0, z: -HZ, ry: 0 },
+        { brand: 1, long: true, x: 0, z: HZ, ry: Math.PI },
+        { brand: 2, long: false, x: -HX, z: 0, ry: Math.PI / 2 },
+        { brand: 3, long: false, x: HX, z: 0, ry: -Math.PI / 2 },
+      ];
+      for (const sd of sides) {
+        const len = sd.long ? HX * 2 : HZ * 2;
+        const q = Q.setAxisAngle(Q.new(), 0, 1, 0, sd.ry);
+        const mm = M4.create();
+        M4.compose(mm, V3.new(sd.x, BH / 2, sd.z), q, V3.new(len, BH, 1));
+        const bm = M4.create();
+        M4.compose(bm, V3.new(sd.x - Math.sin(sd.ry) * 0.055, BH / 2, sd.z - Math.cos(sd.ry) * 0.055),
+          q, V3.new(len, BH, 0.09));
+        this.barriers.push({ m: mm, box: bm, long: sd.long, mat: this.matBrand[sd.brand] });
+      }
+    }
 
     // far wall + ceiling
     this.walls = [];
@@ -442,8 +462,8 @@ class Scene {
       d(me.floor, M.floor, ma.floor);
       R.draw(me.quad, this.floorPool, ma.pool);
       R.draw(me.quad, this.tableShade, this._shadowMat0);
-      for (const w of this.walls) d(me.wall, w, ma.wall);
-      for (const b of this.barriers) d(b.long ? me.bannerLong : me.bannerShort, b.m, ma.banner);
+      for (const w of this.walls) d(me.wall, w, ma.stands);
+      for (const b of this.barriers) { if (b.box) d(me.box, b.box, ma.barrier); d(b.long ? me.bannerEnd : me.bannerSide, b.m, b.mat || ma.banner); }
       for (const b of this.lightBodies) d(me.box, b, ma.lightBody);
       for (const l of this.lights) d(me.quad, l, ma.light);
       d(me.quad, this.ceiling, ma.ceiling);
