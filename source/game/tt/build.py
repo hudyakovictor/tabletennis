@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """Bundle every source file into one standalone, offline-capable HTML."""
-import os, re, sys, datetime, base64
+import os, re, sys, datetime, base64, json
 SRC = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'src')
 OUT = sys.argv[1] if len(sys.argv) > 1 else os.path.join(os.path.dirname(SRC), '..', 'table-tennis-topspin.html')
 
-JS_ORDER = ['10_math.js','12_match_rules.js','20_gl.js','25_career.js','27_network.js','30_physics.js','38_paddle_motion.js','40_swipe.js','42_shot_diagnostics.js','43_input_telemetry.js','50_audio.js',
-            '55_ai.js','56_rig.js','57_camera.js','58_coach.js','59_replay.js','60_scene.js',
+JS_ORDER = ['03_i18n.js','10_math.js','12_match_rules.js','20_gl.js','25_career.js','27_network.js','30_physics.js','38_paddle_motion.js','40_swipe.js','42_shot_diagnostics.js','43_input_telemetry.js','50_audio.js',
+            '55_ai.js','56_rig.js','57_camera.js','58_coach.js','59_replay.js','60_scene.js','61_particles.js','62_arena.js',
             '65_train.js','75_feedback.js','75_music.js','76_emotion.js','81_uiAnim.js','84_racket.js',
             '86_meta.js','70_game.js','80_ui.js','90_boot.js','92_embed.js']
 
@@ -35,6 +35,19 @@ for f in JS_ORDER:
     if js_parts: s=re.sub(r"^'use strict';\s*$", '', s, count=1, flags=re.M)
     js_parts.append(f"/* ====== {f} ====== */\n"+s)
 js="\n\n".join(js_parts)
+
+# Arena photo textures (stands + LED boards) inlined like the brand logo.
+# Scene falls back to procedural textures when these are absent.
+ARENA_ASSETS = {'stands': 'stands.jpg', 'abibos': 'banner-abibos.jpg', 'roflex': 'banner-roflex.jpg',
+                'NUKE': 'banner-NUKE.jpg', 'pumba': 'banner-pumba.jpg'}
+arena = {}
+if not os.environ.get('TT_NO_ARENA'):
+    for key, fn in ARENA_ASSETS.items():
+        ap = os.path.join(os.path.dirname(SRC), 'assets', fn)
+        if os.path.exists(ap):
+            with open(ap, 'rb') as fh:
+                arena[key] = 'data:image/jpeg;base64,' + base64.b64encode(fh.read()).decode('ascii')
+js = 'window.__TT_ARENA = ' + json.dumps(arena) + ';\n\n' + js
 
 stamp = datetime.datetime.now(datetime.timezone.utc).strftime('%Y-%m-%d')
 html = f"""<!DOCTYPE html>

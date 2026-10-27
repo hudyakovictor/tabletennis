@@ -66,10 +66,10 @@ const Art = (() => {
 
   /* сундук: отдельные группы крышки/корпуса для анимации */
   const CHEST = {
-    wood: { a: '#C98A4B', b: '#7A4520', band: '#9AA6C8', gem: '#7DF3FF', n: 'Деревянный', rar: '' },
-    silver: { a: '#DDE6FF', b: '#7B8BB0', band: '#4A5A86', gem: '#2EE6FF', n: 'Серебряный', rar: 'rare' },
-    gold: { a: '#FFE680', b: '#D08A00', band: '#8A4A00', gem: '#FF4B3E', n: 'Золотой', rar: 'leg' },
-    epic: { a: '#D3B5FF', b: '#6A2FE0', band: '#2A0F70', gem: '#FFC93A', n: 'Эпический', rar: 'epic' }
+    wood: { a: '#C98A4B', b: '#7A4520', band: '#9AA6C8', gem: '#7DF3FF', nk: 'chest.wood', rar: '' },
+    silver: { a: '#DDE6FF', b: '#7B8BB0', band: '#4A5A86', gem: '#2EE6FF', nk: 'chest.silver', rar: 'rare' },
+    gold: { a: '#FFE680', b: '#D08A00', band: '#8A4A00', gem: '#FF4B3E', nk: 'chest.gold', rar: 'leg' },
+    epic: { a: '#D3B5FF', b: '#6A2FE0', band: '#2A0F70', gem: '#FFC93A', nk: 'chest.epic', rar: 'epic' }
   };
   function chest(kind = 'gold', size = 120, { open = false } = {}) {
     const C = CHEST[kind] || CHEST.gold; const a = id('ca'), b = id('cb'), l = id('cl'), gl = id('cgl');
@@ -233,7 +233,8 @@ const Art = (() => {
     ball: '<circle cx="12" cy="12" r="7.5"/><path d="M8 6c2.5 3 4.5 7.5 4.5 12" fill="none"/>',
     refresh: '<path d="M20 12a8 8 0 1 1-2.6-5.9" fill="none"/><path d="M20 4v4.5h-4.5" fill="none"/>',
     tg: '<path d="M21 4.5L2.8 11.6c-1 .4-1 1.6 0 1.9l4.6 1.5 1.8 5.5c.2.7 1.1.9 1.6.4l2.6-2.4 4.7 3.5c.6.4 1.4.1 1.6-.6L22.6 5.7c.2-.9-.7-1.6-1.6-1.2z"/><path d="M7.4 15l9.6-7-6.5 8.2" fill="none"/>',
-    tstar: '<path d="M12 2.5l2.4 6.6 7 .3-5.5 4.4 1.9 6.8L12 16.7l-5.8 3.9 1.9-6.8-5.5-4.4 7-.3z"/>'
+    tstar: '<path d="M12 2.5l2.4 6.6 7 .3-5.5 4.4 1.9 6.8L12 16.7l-5.8 3.9 1.9-6.8-5.5-4.4 7-.3z"/>',
+    expand: '<path d="M4 9V5.5A1.5 1.5 0 0 1 5.5 4H9M15 4h3.5A1.5 1.5 0 0 1 20 5.5V9M20 15v3.5a1.5 1.5 0 0 1-1.5 1.5H15M9 20H5.5A1.5 1.5 0 0 1 4 18.5V15" fill="none"/>'
   };
   function icon(name, { c = 'currentColor', fill = null, sw = 1.9 } = {}) {
     if (name === 'coin') return coin(24); if (name === 'gem') return gem(24); if (name === 'trophy') return trophy(26);
@@ -283,5 +284,5 @@ const Art = (() => {
       <path d="M16 12a4 4 0 0 1 4-2" stroke="#fff" stroke-width="2" stroke-linecap="round"/></svg>`;
   }
 
-  return { coin, gem, star, trophy, badge, chest, CHEST, paddle, paddlePair, rubber, blade, avatar, icon, navIcon };
+  return { coin, gem, star, trophy, badge, chest, chestName: (kind) => t((CHEST[kind] || CHEST.gold).nk), CHEST, paddle, paddlePair, rubber, blade, avatar, icon, navIcon };
 })();

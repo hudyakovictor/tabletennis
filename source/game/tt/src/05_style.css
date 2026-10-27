@@ -390,6 +390,7 @@ button[hidden],.ic[hidden]{display:none!important}
 #btnMenu[aria-pressed="true"]{color:var(--warn);border-color:rgba(255,211,77,.55)}
 #btnFullscreen[aria-pressed="true"]{color:var(--good);border-color:rgba(78,227,154,.55)}
 #btnSound[aria-pressed="false"],#menuSound[aria-pressed="false"]{color:var(--bad)}
+#btnSlowmo[aria-pressed="true"]{color:#7dd3fc;border-color:rgba(125,211,252,.55);background:rgba(56,150,220,.16)}
 
 #pauseInd{cursor:default}
 #pauseInd small{font-size:13px;letter-spacing:.08em;text-align:center;line-height:1.45}
@@ -577,6 +578,10 @@ body:not(.is-playing) #topright{visibility:hidden;pointer-events:none}
 #shot.on{display:grid;grid-template-columns:auto auto;column-gap:10px;row-gap:4px;text-align:center}
 #playband #shot b,#shot #shotStatus{font:750 clamp(20px,2.2vw,28px)/1.2 var(--ui);letter-spacing:0;color:var(--txt)}
 #shotName:empty{display:none}
+#shot{--shotc:#ffd34d}
+#playband #shot #shotName{color:var(--shotc)}
+#shot.pop{animation:shotPop .55s cubic-bezier(.2,1.5,.3,1)}
+@keyframes shotPop{0%{transform:scale(.78);filter:brightness(2.1)}55%{transform:scale(1.07)}100%{transform:scale(1);filter:brightness(1)}}
 #shot #shotMeta{grid-column:1/-1;font:600 clamp(18px,1.7vw,22px)/1.25 var(--ui);color:var(--dim)}
 #shot[data-tone="good"] #shotStatus{color:var(--good)}
 #shot[data-tone="bad"] #shotStatus{color:var(--warn)}

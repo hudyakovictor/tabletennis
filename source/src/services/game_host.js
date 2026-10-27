@@ -9,7 +9,7 @@ const GameHost = {
   devRules() { try { return JSON.parse(localStorage.getItem('ttu-rules-dev') || '{}') || {}; } catch (e) { return {}; } },
   setDevRules(r) { try { localStorage.setItem('ttu-rules-dev', JSON.stringify(r || {})); } catch (e) {} this.reload(); },
   doc() {
-    const pre = '<script>window.__TT_EMBED=1;document.documentElement.classList.add("tt-embed");window.__TT_RULES=' +
+    const pre = '<script>window.__TT_EMBED=1;document.documentElement.classList.add("tt-embed");window.__TT_LOCALE=' + JSON.stringify(I18n.lang) + ';window.__TT_RULES=' +
       JSON.stringify(this.devRules()).replace(/</g, '\\u003c') + ';<\/script>';
     return GAME_HTML.replace('<head>', '<head>' + pre);
   },
@@ -71,6 +71,10 @@ window.addEventListener('message', (e) => {
     if (GameHost.debug) GameHost.send('debug', { on: true });
     GameHost.send('quality', { q: S.quality });
     GameHost.send('rm', { on: !!S.rm });
+    GameHost.send('locale', { lang: I18n.lang });
+    /* вся сохранённая калибровка (включая закрутку) — в движок сразу,
+       а не только когда игрок тронет ползунок */
+    if (S.cal) for (const k in S.cal) GameHost.send('cal', { k, v: S.cal[k] });
     const q = GameHost.q; GameHost.q = []; q.forEach((x) => GameHost.frame.contentWindow.postMessage(x, '*'));
   }
   if (m.type === 'haptic') haptic(m.kind);
@@ -110,15 +114,15 @@ const ZoneStats = {
       else cat.racket.push(a);
     });
     const top = Object.entries(cat).sort((a, b) => b[1].length - a[1].length)[0];
-    const lrOf = (A) => (A.reduce((s, a) => s + (a.dx || 0), 0) >= 0 ? 'правее' : 'левее');
-    let key = 'good', title = 'Чистая техника', tip = `${pct}% нажатий закончились контактом. Следующий шаг — свайп по дуге: так получается вращение.`;
-    if (win === false) tip = `${pct}% нажатий с контактом — техника в порядке, очки уходят на размещении. Веди свайп по диагонали: мяч уйдёт в угол, далеко от соперника.`;
+    const lrOf = (A) => (A.reduce((s, a) => s + (a.dx || 0), 0) >= 0 ? t('coach.right') : t('coach.left'));
+    let key = 'good', title = t('coach.goodTitle'), tip = t('coach.goodTip', { pct });
+    if (win === false) tip = t('coach.goodLoseTip', { pct });
     if (pct < 80 && top[1].length) {
       key = top[0];
-      ({ side: () => { title = `Палец уходит ${lrOf(top[1])} мяча`; tip = 'Ставь палец прямо под мячом, а не рядом с ним: зона удара узкая по бокам.'; },
-         high: () => { title = 'Свайп начинается выше мяча'; tip = 'Удар снизу вверх начинай под мячом. Сверху вниз — это подрезка: тогда начинай над мячом и веди вниз через него.'; },
-         early: () => { title = 'Удар раньше времени'; tip = 'Жми, когда мяч почти долетел до ракетки: в последний момент, а не на подлёте.'; },
-         racket: () => { title = `Ракетка проходит ${lrOf(top[1])} мяча`; tip = 'Место верное, но свайп уходит вбок. Веди строго вверх через мяч.'; } })[top[0]]();
+      ({ side: () => { title = t('coach.sideTitle', { dir: lrOf(top[1]) }); tip = t('coach.sideTip'); },
+         high: () => { title = t('coach.highTitle'); tip = t('coach.highTip'); },
+         early: () => { title = t('coach.earlyTitle'); tip = t('coach.earlyTip'); },
+         racket: () => { title = t('coach.racketTitle', { dir: lrOf(top[1]) }); tip = t('coach.racketTip'); } })[top[0]]();
     }
     return { n, hit, pct, key, title, tip, side, back, fwd, dots: L.slice(-24).map((a) => { const q = this.norm(a, R); return q && { dx: q.dx, dy: q.dy, contact: a.contact, accepted: a.accepted }; }).filter(Boolean) };
   },

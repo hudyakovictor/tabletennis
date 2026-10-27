@@ -6,7 +6,7 @@ const UI = {
   hud({ back = false, title = '' } = {}) {
     const L = leagueOf(S.rating); const p = S.xp / S.xpMax; const C = 2 * Math.PI * 21;
     const left = back
-      ? `<button class="ib" data-act="back" aria-label="Назад">${Art.icon('back', { c: '#fff' })}</button><div class="h2" style="flex:1;margin-left:4px">${title}</div>`
+      ? `<button class="ib" data-act="back" aria-label="${t('common.back')}">${Art.icon('back', { c: '#fff' })}</button><div class="h2" style="flex:1;margin-left:4px">${title}</div>`
       : `<div class="hud-me" data-act="profile">
           <div class="lvl-ring">
             <svg class="ring" viewBox="0 0 48 48"><circle cx="24" cy="24" r="21" fill="none" stroke="rgba(0,0,0,.55)" stroke-width="4.5"/>
@@ -14,7 +14,7 @@ const UI = {
             <defs><linearGradient id="xpg"><stop offset="0" stop-color="#7DF3FF"/><stop offset="1" stop-color="#2E8BFF"/></linearGradient></defs></svg>
             <div class="av">${Art.avatar('me', 38)}</div><div class="lv">${S.level}</div>
           </div>
-          <div class="hud-name"><b>${S.name.split(' ')[0]}</b><span>${Art.badge(L, 14)}${L.n}</span></div>
+          <div class="hud-name"><b>${S.name.split(' ')[0]}</b><span>${Art.badge(L, 14)}${leagueName(L)}</span></div>
         </div>`;
     /* Кнопки «+» убраны: они перегружали верхнюю плашку и перехватывали
      * случайные тапы в момент подачи/удара. Покупка — только из магазина. */
@@ -71,7 +71,4 @@ const UI = {
 };
 
 /* таймер-строка */
-function fmtLeft(ms) {
-  const s = Math.max(0, Math.floor(ms / 1000)); const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), ss = s % 60;
-  return h ? `${h}ч ${String(m).padStart(2, '0')}м` : `${m}:${String(ss).padStart(2, '0')}`;
-}
+function fmtLeft(ms) { return I18n.left(ms); }

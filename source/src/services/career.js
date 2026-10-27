@@ -6,12 +6,12 @@
 const ICON_FILL = new Set(['star', 'bolt', 'fire', 'crown']);   // у контурных иконок (мишень, часы) заливка превращает их в кляксу
 const SPIN_STROKES = new Set(['LOOP', 'COUNTER', 'FLICK', 'PUSH', 'CHOP', 'HOOK', 'FADE', 'LOB']);
 const ACH = [
-  { id: 'first_win', t: 'Первая победа', i: 'trophy', d: 'Выиграй матч' },
-  { id: 'streak3', t: 'Серия 3', i: 'fire', d: 'Выиграй 3 матча подряд' },
-  { id: 'sniper', t: 'Снайпер', i: 'target', d: 'Контакт 80%+ за матч (от 10 попыток)' },
-  { id: 'marathon', t: 'Марафонец', i: 'clock', d: 'Розыгрыш из 15+ ударов' },
-  { id: 'jeweler', t: 'Ювелир', i: 'star', d: '5 идеальных ударов за матч' },
-  { id: 'spinner', t: 'Мастер вращения', i: 'bolt', d: '10 ударов с вращением за матч' }
+  { id: 'first_win', tk: 'ach.first_win', dk: 'ach.first_winD', i: 'trophy' },
+  { id: 'streak3', tk: 'ach.streak3', dk: 'ach.streak3D', i: 'fire' },
+  { id: 'sniper', tk: 'ach.sniper', dk: 'ach.sniperD', i: 'target' },
+  { id: 'marathon', tk: 'ach.marathon', dk: 'ach.marathonD', i: 'clock' },
+  { id: 'jeweler', tk: 'ach.jeweler', dk: 'ach.jewelerD', i: 'star' },
+  { id: 'spinner', tk: 'ach.spinner', dk: 'ach.spinnerD', i: 'bolt' }
 ];
 const Career = {
   zero: () => ({ m: 0, w: 0, streak: 0, best: 0, hits: 0, perf: 0, smash: 0, spin: 0, oppHits: 0, rallyHits: 0, servePts: 0, serveWon: 0, att: 0, con: 0, maxRally: 0 }),
@@ -40,11 +40,11 @@ const Career = {
     const c = this.c, k = 2, n = c.m, mix = (prior, v) => clamp((prior * k + (v === null ? prior : v) * n) / (k + n), 0.15, 0.98);
     const r = (a, b, s = 1) => (b > 0 ? Math.min(1, a / b * s) : null);
     return [
-      ['Подача', mix(0.55, r(c.serveWon, c.servePts))],
-      ['Атака', mix(0.6, r(c.perf + c.smash, c.hits, 1.6))],
-      ['Защита', mix(0.55, r(c.rallyHits, c.oppHits))],
-      ['Вращение', mix(0.5, r(c.spin, c.hits, 2))],
-      ['Реакция', mix(0.6, r(c.con, c.att))]
+      [t('radar.serve'), mix(0.55, r(c.serveWon, c.servePts))],
+      [t('radar.attack'), mix(0.6, r(c.perf + c.smash, c.hits, 1.6))],
+      [t('radar.defense'), mix(0.55, r(c.rallyHits, c.oppHits))],
+      [t('radar.spin'), mix(0.5, r(c.spin, c.hits, 2))],
+      [t('radar.reaction'), mix(0.6, r(c.con, c.att))]
     ];
   }
 };
@@ -54,7 +54,7 @@ async function achievementPops(list, alive = () => true) {
   for (const a of list) {
     if (!alive()) return;
     const el = document.createElement('div'); el.className = 'ach-pop';
-    el.innerHTML = `<div class="ap-card"><span class="ap-ic">${Art.icon(a.i, { c: '#3A1A00', sw: 2.4, fill: ICON_FILL.has(a.i) ? '#3A1A00' : 'transparent' })}</span><div><span class="cap">Достижение открыто</span><b>${a.t}</b><small>${a.d}</small></div></div>`;
+    el.innerHTML = `<div class="ap-card"><span class="ap-ic">${Art.icon(a.i, { c: '#3A1A00', sw: 2.4, fill: ICON_FILL.has(a.i) ? '#3A1A00' : 'transparent' })}</span><div><span class="cap">${t('ach.unlocked')}</span><b>${t(a.tk)}</b><small>${t(a.dk)}</small></div></div>`;
     document.body.appendChild(el);
     await sleep(60); el.classList.add('on');
     const p = FX.pt(el.querySelector('.ap-ic'));
@@ -71,14 +71,14 @@ async function achievementPops(list, alive = () => true) {
  * точность контакта), награды забираются в хабе и платятся в Wallet.
  * Всё локально: S.daily = { d, ids, p, got } + save(); сброс — на новую дату. */
 const MISSION_POOL = [
-  { id: 'win1',   t: 'Выиграй матч',           m: 1,  r: 90,  k: 'coins', ev: 'win' },
-  { id: 'win2',   t: 'Выиграй 2 матча',        m: 2,  r: 160, k: 'coins', ev: 'win' },
-  { id: 'perf5',  t: '5 идеальных ударов',     m: 5,  r: 5,   k: 'gems',  ev: 'perfect' },
-  { id: 'perf10', t: '10 идеальных ударов',    m: 10, r: 11,  k: 'gems',  ev: 'perfect' },
-  { id: 'rally8', t: 'Розыгрыш из 8+ ударов',  m: 8,  r: 100, k: 'coins', ev: 'maxRally', max: true },
-  { id: 'hits40', t: 'Нанеси 40 ударов',       m: 40, r: 90,  k: 'coins', ev: 'hits' },
-  { id: 'smash3', t: '3 мощных смеша',         m: 3,  r: 70,  k: 'coins', ev: 'smash' },
-  { id: 'acc75',  t: 'Точность контакта 75%',  m: 75, r: 8,   k: 'gems',  ev: 'accMax', max: true },
+  { id: 'win1',   tk: 'mission.win1',           m: 1,  r: 90,  k: 'coins', ev: 'win' },
+  { id: 'win2',   tk: 'mission.win2',        m: 2,  r: 160, k: 'coins', ev: 'win' },
+  { id: 'perf5',  tk: 'mission.perf5',     m: 5,  r: 5,   k: 'gems',  ev: 'perfect' },
+  { id: 'perf10', tk: 'mission.perf10',    m: 10, r: 11,  k: 'gems',  ev: 'perfect' },
+  { id: 'rally8', tk: 'mission.rally8',  m: 8,  r: 100, k: 'coins', ev: 'maxRally', max: true },
+  { id: 'hits40', tk: 'mission.hits40',       m: 40, r: 90,  k: 'coins', ev: 'hits' },
+  { id: 'smash3', tk: 'mission.smash3',         m: 3,  r: 70,  k: 'coins', ev: 'smash' },
+  { id: 'acc75',  tk: 'mission.acc75',  m: 75, r: 8,   k: 'gems',  ev: 'accMax', max: true },
 ];
 const Daily = {
   key() { const n = new Date(); return n.getFullYear() + '-' + String(n.getMonth() + 1).padStart(2, '0') + '-' + String(n.getDate()).padStart(2, '0'); },
@@ -102,7 +102,7 @@ const Daily = {
     return st.ids.map((id) => {
       const q = MISSION_POOL.find((m) => m.id === id);
       const p = st.p[id] || 0;
-      return { id: q.id, t: q.t, p: Math.min(p, q.m), m: q.m, r: q.r, k: q.k, done: p >= q.m, claimed: !!st.got[id] };
+      return { id: q.id, t: t(q.tk), p: Math.min(p, q.m), m: q.m, r: q.r, k: q.k, done: p >= q.m, claimed: !!st.got[id] };
     });
   },
   ready() { const g = this.st.got; return this.items().filter((q) => q.done && !g[q.id]).length; },
