@@ -80,6 +80,8 @@ class Game {
       slowmoOnBigShots: false,          // slow-mo в момент удара деформирует твой же тайминг; ручной режим — в настройках
       targetScore: 11,
       spinBias: 'norm',
+      spinGain: 1,        // калибровка: сила закрутки мяча (0.5..1.6)
+      arcSens: 1,         // калибровка: чувствительность дуги «С» (0.6..1.8)
       // NEW: Enhanced gameplay settings
       showSpinIndicator: true,
       followThrough: true,
@@ -209,6 +211,7 @@ class Game {
     };
     this.replayBuf = []; this.replayMax = 360; this.replay = null;
     this.slowmo = { on: false, energy: 1, active: false, allowed: true, used: 0 };
+    this.inspectSlowmo = false;   // тумблер разбора траектории (кнопка слоу-мо)
     this.predictPath = [];
     this.predictOut = {};
     this.lastShotInfo = null;
@@ -1056,13 +1059,28 @@ class Game {
       S.energy = Math.min(1, S.energy + dtReal * 0.09);     // ~11 s to refill
       S.on = S.on && S.energy > 0.015;                      // ran dry → release
     }
+    if (this.inspectSlowmo &&
+      (this.state === GS.RALLY || this.state === GS.SERVE_TOSS || this.state === GS.SERVE_READY)) {
+      S.active = true; this.targetTimeScale = 0.30; return;
+    }
     S.active = want;
     if (want) { this.targetTimeScale = 0.34; this.slowmoUntil = 0; }
     else if (!this.slowmoUntil) this.targetTimeScale = 1;
   }
 
+  /* Инспекторское замедление: свободный тумблер «разобрать траекторию
+   * удара». В отличие от боевого слоу-мо не тратит энергию и не отпускает
+   * само; работает в розыгрыше и на подаче, между розыгрышами скорость
+   * обычная. Честность та же, что у боевого режима: allowed=false
+   * (карьерные турниры, онлайн) закрывает и этот переключатель. */
+  setInspectSlowmo(on) {
+    const ok = this.slowmo && this.slowmo.allowed && !(this.network && this.network.isInMatch);
+    this.inspectSlowmo = !!on && ok;
+    return this.inspectSlowmo;
+  }
+
   /** Career tournaments and online matches call this with false. */
-  setSlowmoAllowed(v) { this.slowmo.allowed = !!v; if (!v) this.setSlowmoHold(false); }
+  setSlowmoAllowed(v) { this.slowmo.allowed = !!v; if (!v) { this.setSlowmoHold(false); this.inspectSlowmo = false; } }
 
   /* --------------------------- settings ---------------------------- */
 
@@ -1091,7 +1109,7 @@ class Game {
       showTrail: s.showTrail, showPredict: s.showPredict,
       showTele: s.showTele, haptics: s.haptics, coach: s.coach, adaptive: s.adaptive,
       targetScore: s.targetScore,
-      spinBias: s.spinBias,
+      spinBias: s.spinBias, spinGain: s.spinGain, arcSens: s.arcSens,
     };
     if (this.career && this.career.active && this.career._baseSettings)
       this.profile.data.settings.difficulty = this.career._baseSettings.difficulty;
@@ -1106,7 +1124,7 @@ class Game {
       if (typeof s[k] === 'boolean' && typeof raw[k] === 'boolean') s[k] = raw[k];
     }
     // camZoom/camPitch mirror CAM_ADJUST.zoomMin..Max / pitchMin..Max — keep in sync.
-    const ranges = { difficulty: [0, 4], volume: [0, 1], camZoom: [0.6, 1.8], camPitch: [-16, 16] };
+    const ranges = { difficulty: [0, 4], volume: [0, 1], camZoom: [0.6, 1.8], camPitch: [-16, 16], spinGain: [0.5, 1.6], arcSens: [0.6, 1.8] };
     for (const [k, [lo, hi]] of Object.entries(ranges)) {
       if (Number.isFinite(raw[k])) s[k] = clamp(raw[k], lo, hi);
     }
@@ -1403,7 +1421,8 @@ class Game {
     const serving = this.state === GS.SERVE_TOSS || this.state === GS.SERVE_READY;
     const forehand = (this.player.pos.x * (this.settings.hand === 'left' ? -1 : 1)) >= -.05;
     const ctx = { side: 1, isServe: serving, ball: this.ball.p, ballSpin: this.ball.w,
-      grip: this.settings.grip, forehand, ballSpeed: this.ball.speed || V3.len(this.ball.v), movePitch: -.15 };
+      grip: this.settings.grip, forehand, ballSpeed: this.ball.speed || V3.len(this.ball.v), movePitch: -.15,
+      spinGain: this.settings.spinGain ?? 1, arcSens: this.settings.arcSens ?? 1 };
     const r = isRealStroke(m, serving) ? deriveStroke(m, ctx) : null;
     const lastSample = sw.samples[sw.samples.length - 1];
     journal.observe(sw.gestureId, m, { time: this.time, isServe: serving, active: sw.active,
@@ -1940,6 +1959,7 @@ class Game {
         moveYaw: this.padYaw || 0, movePitch: this.padPitch || 0,
         equip: sideParams,
         spinBias: 'norm',
+        spinGain: this.settings.spinGain ?? 1, arcSens: this.settings.arcSens ?? 1,
       };
       racket = deriveStroke(m, ctx);
       racket.vmag *= this.equip.vmagK;
@@ -2175,7 +2195,12 @@ class Game {
      * be struck, or the bat is still travelling when the ball is hit. Measured
      * in the headless matches at 0.55 s: the closest the bat got to the centre
      * before the strike was 0.081-0.173 m on 14 of 49 serves. */
-    this.recenterT = RECENTER_S;         // no footwork assist while re-centring
+    /* Ракетка в конце розыгрыша НЕ едет в стартовую позицию: окно возврата
+     * «домой» (RECENTER_S) отключаем по требованию игрока — бат остаётся
+     * ровно там, где его держит рука, управление ни на кадр не блокируется
+     * и смена розыгрышей не дёргает ракетку через весь стол. Очередь подачи
+     * (tossQueued) при нулевом окне просто не используется. */
+    this.recenterT = 0;
     this.tossQueued = false;
     this.tossQueuedAt = -9;
     this.swipe.cancel();
@@ -2444,6 +2469,7 @@ class Game {
     const intentType = intent ? classifyStroke(intent, {
       ball: { y: pad.pos.y, z: pad.pos.z }, isServe: servingNow,
       incomingTop: this.ball.w.x, ballSpeed: V3.len(this.ball.v),
+      arcSens: this.settings.arcSens ?? 1,
     }, clamp(Math.max(intent.releaseSpeed, intent.peakSpeed * .78) / 4.2, 0, 1.45)).id : null;
     if (intent && this.followThrough) this.followThrough.active = false;
     const wrist = playerWristPose(pad.pos, pad.vel, this.settings.hand, {

@@ -40,15 +40,47 @@ function devZoneSheet() {
 }
 
 /* ---------------- ИТОГ МАТЧА ---------------- */
-/* «Разбор матча»: одна главная ошибка этого матча и как её исправить,
-   из тех же попыток, что и dev-статистика зоны. */
-function coachCard(c, d) {
-  if (!c || c.n < 3) return `<div class="pnl rc tip" style="--d:${d}">${Art.icon('info', { c: '#9BE8FF' })}<p><b>${t('coach.tipLabel')}</b> ${t('coach.fallback')}</p></div>`;
-  const side = c.side, fwd = c.fwd, back = c.back;
-  const dots = c.dots.map((a) => `<circle cx="${clamp(a.dx, -88, 88)}" cy="${clamp(a.dy, -c.back - 10, c.fwd + 10)}" r="7" fill="${a.contact ? '#3BF5A0' : a.accepted ? '#FF5A4D' : '#8E98C4'}" stroke="#0B0E22" stroke-width="2"/>`).join('');
-  return `<div class="pnl rc coach ${c.key}" style="--d:${d}">
-    <svg class="cz" viewBox="-92 ${-c.back - 16} 184 ${c.back + c.fwd + 32}"><path d="M ${-side} 0 A ${side} ${back} 0 0 1 ${side} 0 A ${side} ${fwd} 0 0 1 ${-side} 0 Z" fill="rgba(53,198,244,.12)" stroke="#35C6F4" stroke-width="3" stroke-dasharray="9 7"/><circle r="8" fill="#FFD54A"/>${dots}</svg>
-    <div class="rcm"><span class="cap">${t('coach.title', { pct: c.pct })}</span><b class="ct">${c.title}</b><p>${c.tip}</p></div></div>`;
+/* «Разбор матча» — шторка снизу экрана итога. Закрыта: видна только ручка
+   с названием. Тап — поднимается на ~62% экрана поверх виджетов: внутри
+   крупная тепловая карта зоны удара (те же попытки, что собирает
+   ZoneStats) и советы по игре: главная ошибка матча из coach-разбора +
+   подсказки по статистике матча. */
+function analysisSheet(d) {
+  const c = d.coach, st = d.stats || {};
+  const has = !!(c && c.n >= 3 && Array.isArray(c.dots));
+  const tips = [];
+  if (has) tips.push({ h: c.title, p: c.tip });
+  if ((st.acc || 0) < 60) tips.push({ h: t('analysis.tipAccT'), p: t('analysis.tipAcc') });
+  if ((st.maxRally || 0) < 6) tips.push({ h: t('analysis.tipRallyT'), p: t('analysis.tipRally') });
+  tips.push({ h: t('analysis.tipSpinT'), p: t('analysis.tipSpin') });
+  let map;
+  if (has) {
+    const side = c.side, fwd = c.fwd, back = c.back;
+    const X = (a) => clamp(a.dx, -92, 92), Y = (a) => clamp(a.dy, -back - 12, fwd + 12);
+    const blobs = c.dots.map((a) => `<circle cx="${X(a)}" cy="${Y(a)}" r="30" fill="url(#heatG)"/>`).join('');
+    const dots = c.dots.map((a) => `<circle cx="${X(a)}" cy="${Y(a)}" r="6.5" fill="${a.contact ? '#3BF5A0' : a.accepted ? '#FF5A4D' : '#8E98C4'}" stroke="#0B0E22" stroke-width="2"/>`).join('');
+    map = `<div class="cap">${t('analysis.mapTitle')}</div>
+      <svg class="rs-map" viewBox="-104 ${-back - 30} 208 ${back + fwd + 60}" role="img" aria-label="${t('analysis.mapTitle')}">
+        <defs><radialGradient id="heatG"><stop offset="0%" stop-color="#FF6A3C" stop-opacity=".75"/><stop offset="55%" stop-color="#FF3C5A" stop-opacity=".32"/><stop offset="100%" stop-color="#FF3C5A" stop-opacity="0"/></radialGradient></defs>
+        <path d="M ${-side} 0 A ${side} ${back} 0 0 1 ${side} 0 A ${side} ${fwd} 0 0 1 ${-side} 0 Z" fill="rgba(53,198,244,.10)" stroke="#35C6F4" stroke-width="2.5" stroke-dasharray="9 7"/>
+        ${blobs}${dots}<circle r="7" fill="#FFD54A" stroke="#0B0E22" stroke-width="2"/>
+      </svg>
+      <div class="rs-legend"><span><i style="background:#3BF5A0"></i>${t('analysis.lgHit')}</span><span><i style="background:#FF5A4D"></i>${t('analysis.lgZone')}</span><span><i style="background:#8E98C4"></i>${t('analysis.lgOut')}</span></div>`;
+  } else {
+    map = `<div class="pnl rc tip" style="opacity:1;transform:none">${Art.icon('info', { c: '#9BE8FF' })}<p><b>${t('coach.tipLabel')}</b> ${t('coach.fallback')}</p></div>`;
+  }
+  return `<div class="res-sheet" id="resSheet">
+    <button class="rs-head" data-act="sheet" aria-expanded="false">
+      <span class="rs-grip"></span>
+      <span class="rs-name">${Art.icon('chart', { c: '#9BE8FF' })} ${t('result.analysis')}</span>
+      ${has ? `<span class="rs-pct num">${c.pct}%</span>` : ''}
+      <span class="rs-chev"></span>
+    </button>
+    <div class="rs-body">${map}
+      <div class="cap" style="margin-top:16px">${t('analysis.tipsTitle')}</div>
+      ${tips.slice(0, 3).map((x) => `<div class="rs-tip"><b>${x.h}</b><p>${x.p}</p></div>`).join('')}
+    </div>
+  </div>`;
 }
 
 Router.def('result', {
@@ -81,23 +113,23 @@ Router.def('result', {
         <div class="rs-p">${Art.avatar('p' + d.opp, 62, { ring: o.c[0] })}<b>${o.s.split(' ').pop()}</b></div>
       </div>
       <div class="medals">${medals.map((m, i) => `<div class="md" data-i="${i}"><span class="mds">${Art.star(i === 1 ? 74 : 60, m.on)}</span><small>${t(m.tk)}</small></div>`).join('')}</div>
-      <div class="res-cards">
+      <div class="res-widgets">
         <div class="pnl rc rating" style="--d:0"><span class="rcb">${Art.badge(L, 40)}</span><div class="rcm"><span class="cap">${t('result.rating')} · ${leagueName(L)}</span>
           <div class="rcv"><b class="num" id="rRating">${fmt(S.rating)}</b><em class="${delta > 0 ? 'up' : 'dn'}">${delta > 0 ? '+' : ''}${delta}</em></div>
           <div class="bar gold"><i id="rBar" style="--p:${N ? (S.rating - L.min) / (N.min - L.min) : 1}"></i></div></div></div>
         <div class="pnl rc" style="--d:1"><span class="rcl"><span>${S.level}</span></span><div class="rcm"><span class="cap">${t('result.xp', { n: S.level })}</span>
           <div class="rcv"><b class="num" id="rXp">${fmt(S.xp)}</b><span class="dim num">/ ${fmt(S.xpMax)}</span><em class="up">+${d.win ? 180 : 60} XP</em></div>
           <div class="bar"><i id="rXpBar" style="--p:${S.xp / S.xpMax}"></i></div></div></div>
-        <div class="rc-row">
-          <div class="pnl rc stat big" style="--d:3"><span class="cap">${t('result.maxSpeed')}</span><b class="num">${d.stats.maxSpeed || 0}<small class="dim"> ${t('unit.kmh')}</small></b></div>
-          <div class="pnl rc stat big" style="--d:4"><span class="cap">${t('result.accuracy')}</span><b class="num">${d.stats.acc || 0}<small class="dim">%</small></b></div>
-        </div>
-        ${d.quests && d.quests.length ? `<div class="pnl rc" style="--d:5"><span class="rcb">${Art.icon('target', { c: '#9BE8FF' })}</span><div class="rcm"><span class="cap">${t('result.questDone')}</span><b>${d.quests.map((q) => q.t).join(' · ')}</b><small class="dim">${t('result.questReward')}</small></div></div>` : ''}
-        ${d.win ? `<div class="pnl rc loot" style="--d:5"><span class="lc">${Art.chest('silver', 64)}</span><div class="rcm"><span class="cap">${t('result.reward')}</span><b>${Art.chestName('silver')} ${t('chest.word')}</b><small class="dim">${t('result.chestSent')}</small></div><span class="lcoin">${Art.coin(30)}<b class="num">+90</b></span></div>`
+        <div class="pnl rc stat big" style="--d:2"><span class="cap">${t('result.maxSpeed')}</span><b class="num">${d.stats.maxSpeed || 0}<small class="dim"> ${t('unit.kmh')}</small></b></div>
+        <div class="pnl rc stat big" style="--d:3"><span class="cap">${t('result.accuracy')}</span><b class="num">${d.stats.acc || 0}<small class="dim">%</small></b></div>
+      </div>
+      <div class="res-cards">
+        ${d.quests && d.quests.length ? `<div class="pnl rc" style="--d:4"><span class="rcb">${Art.icon('target', { c: '#9BE8FF' })}</span><div class="rcm"><span class="cap">${t('result.questDone')}</span><b>${d.quests.map((q) => q.t).join(' · ')}</b><small class="dim">${t('result.questReward')}</small></div></div>` : ''}
+        ${d.win ? `<div class="pnl rc loot" style="--d:4"><span class="lc">${Art.chest('silver', 64)}</span><div class="rcm"><span class="cap">${t('result.reward')}</span><b>${Art.chestName('silver')} ${t('chest.word')}</b><small class="dim">${t('result.chestSent')}</small></div><span class="lcoin">${Art.coin(30)}<b class="num">+90</b></span></div>`
           : ''}
-        ${coachCard(d.coach, d.win ? 6 : 5)}
       </div>
       <div class="res-btns"><button class="b3 dark" data-act="again">${Art.icon('refresh', { c: '#fff' })}${t('result.rematch')}</button><button class="b3 ${d.win ? '' : 'cyan'}" data-act="next"><span class="shine"></span>${t('common.next')}</button></div>
+      ${analysisSheet(d)}
     </div>`;
   },
   mount(el) {
@@ -120,7 +152,18 @@ Router.def('result', {
     }
     BG.mood(d.win ? 'gold' : 'lose');
     el.querySelector('[data-act=next]').addEventListener('click', () => Router.go('hub'));
-    el.querySelector('[data-act=again]').addEventListener('click', () => Router.go('mm'));
+    /* Реванш — СРАЗУ в матч с тем же соперником (BATTLE.opp и MODE живы):
+       ни радара, ни экрана VS — тот же игрок, новый матч. */
+    el.querySelector('[data-act=again]').addEventListener('click', () => Router.go('match'));
+    const sheet = el.querySelector('#resSheet');
+    if (sheet) {
+      const head = sheet.querySelector('[data-act=sheet]');
+      head.addEventListener('click', () => {
+        const open = sheet.classList.toggle('open');
+        head.setAttribute('aria-expanded', String(open));
+        haptic('select'); Sfx.soft();
+      });
+    }
     (async () => {
       await sleep(150); res.classList.add('t1');
       if (d.win) { Sfx.win(); FX.rain(70); } else Sfx.lose();

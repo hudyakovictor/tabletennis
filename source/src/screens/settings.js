@@ -8,7 +8,9 @@ const CAL = [
   { k: 'trailLen', tk: 'cal.trailLen', dk: 'cal.trailLenD', min: 0, max: 100, def: 45 },
   { k: 'tableGlow', tk: 'cal.tableGlow', dk: 'cal.tableGlowD', min: 0, max: 100, def: 50 },
   { k: 'flytime', tk: 'cal.flytime', dk: 'cal.flytimeD', min: 0, max: 100, def: 50 },
-  { k: 'hintRadius', tk: 'cal.hintRadius', dk: 'cal.hintRadiusD', min: 0, max: 100, def: 60 }
+  { k: 'hintRadius', tk: 'cal.hintRadius', dk: 'cal.hintRadiusD', min: 0, max: 100, def: 60 },
+  { k: 'spinGain', tk: 'cal.spinGain', dk: 'cal.spinGainD', min: 0, max: 100, def: 45 },
+  { k: 'arcSens', tk: 'cal.arcSens', dk: 'cal.arcSensD', min: 0, max: 100, def: 33 }
 ];
 function openSettings() {
   const row = (k, t, i, d) => `<div class="srow"><span class="si">${Art.icon(i, { c: '#9BE8FF' })}</span><span class="st"><b>${t}</b><small>${d}</small></span><button class="tgl ${S[k] ? 'on' : ''}" data-k="${k}" aria-label="${t}"></button></div>`;

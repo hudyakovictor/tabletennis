@@ -10,6 +10,8 @@
  *    outro                      victory orbit after the last point
  *    replay / skipReplay        best rally of the match
  *    hint {on} · debug {on} · mute {on}
+ *    slowmo {on}                инспекторское замедление траектории (тумблер)
+ *    cal {k, v}                 калибровка оболочки; spinGain/arcSens — закрутка
  *  Game → host:
  *    ready, state, point, hit, serve, matchEnd, train, trainDone, attempt, autoHint, awake,
  *    paused, replayEnd, haptic
@@ -364,6 +366,7 @@ const showTip = (text) => { if (text) tip = { text, until: g.time + 4.6 }; };
           setCine('prematch', m.dur || 2.0); break;
         case 'match':
           lobby = false;
+          g.inspectSlowmo = false;
           g.audio.init(); g.audio.resume();
           if (Number.isFinite(m.target)) g.settings.targetScore = m.target;
           resetAssist(); g.hintContact = !!m.hint;
@@ -386,13 +389,16 @@ const showTip = (text) => { if (text) tip = { text, until: g.time + 4.6 }; };
           break;
         case 'pause': hostPause(true); break;
         case 'resume': hostPause(false); break;
-        case 'quit': lobby = false; g.returnToMenu(); setCine('attract'); break;
+        case 'quit': lobby = false; g.inspectSlowmo = false; g.returnToMenu(); setCine('attract'); break;
         case 'outro': setCine('outro'); break;
         case 'live': cine.mode = null; break;
         case 'replay': if (!g.playBestMoments()) post('replayEnd', {}); break;
         case 'skipReplay': g.skipReplay(); break;
         case 'skipStep': if (g.training) g.training.skip(); break;
         case 'hint': if (!(autoHint && !m.on)) { autoHint = false; g.hintContact = !!m.on; } break;
+        /* Тумблер инспекторского слоу-мо из оболочки: разобрать траекторию
+         * удара в замедлении. Состояние кнопки в движке догонит syncSlowmoControl. */
+        case 'slowmo': if (g.setInspectSlowmo) g.setInspectSlowmo(!!m.on); break;
         case 'rm': g.reducedMotion = !!m.on || !!(g.motionQuery && g.motionQuery.matches); break;
         case 'debug': if (ui) ui.captureDebug = !!m.on; break;
         case 'mute': g.settings.sound = !m.on; g.audio.setMuted(!!m.on); break;
@@ -414,6 +420,11 @@ const showTip = (text) => { if (text) tip = { text, until: g.time + 4.6 }; };
           if (K === 'camHeight' && g.setCamPitch) g.setCamPitch(CAM_ADJUST.pitchMin + V * (CAM_ADJUST.pitchMax - CAM_ADJUST.pitchMin));
           if (K === 'camZoom' && g.setCamZoom) g.setCamZoom(CAM_ADJUST.zoomMin + V * (CAM_ADJUST.zoomMax - CAM_ADJUST.zoomMin));
           if (K === 'camSway') g._swayCal = V;
+          /* Закрутка из калибровки оболочки: те же поля настроек, что у
+           * ползунков самого движка. Ползунок 0..100 -> множитель физический:
+           * сила 0.5..1.6 (нейтраль ~45), чувствительность дуги 0.6..1.8 (~33). */
+          if (K === 'spinGain') g.settings.spinGain = 0.5 + V * 1.1;
+          if (K === 'arcSens') g.settings.arcSens = 0.6 + V * 1.2;
           if (K === 'trailLen' || K === 'ballSize' || K === 'padSpeed' || K === 'padSmooth') { /* читаются напрямую из g._cal */ }
           break;
         }

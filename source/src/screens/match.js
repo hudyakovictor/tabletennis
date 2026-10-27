@@ -14,6 +14,7 @@ Router.def('match', {
         <div class="sb-sub"><span class="cap">${t(MODE.tk)} · ${t('match.to', { n: T })}</span></div>
       </div>
       <button class="ib m-pause pe" data-act="pause" aria-label="${t('match.pause')}">${Art.icon('pause', { c: '#fff', sw: 2.6 })}</button>
+      <button class="ib m-slowmo pe" data-act="slowmo" aria-label="${t('match.slowmo')}" aria-pressed="false">${Art.icon('clock', { c: '#fff', sw: 2.4 })}<span>${t('match.slowmo')}</span></button>
       ${devBtn()}
       <div class="m-rally"><span>${t('match.rally')}</span><b class="num">×0</b></div>
       <div class="m-banner"></div>
@@ -36,6 +37,14 @@ Router.def('match', {
     GameHost.ensure(); GameHost.show(true); GameHost.send('quiet', { on: true }); GameHost.send('mute', { on: !S.sfx });
     this.off = GameHost.on((m) => this.onMsg(m));
     el.querySelector('[data-act=pause]').addEventListener('click', () => this.pause());
+    /* Слоу-мо «разобрать траекторию»: свободный тумблер в движок; состояние
+       кнопки живёт здесь, движок лишь замедляет время розыгрыша. */
+    const smBtn = el.querySelector('[data-act=slowmo]');
+    smBtn.addEventListener('click', () => {
+      const on = smBtn.getAttribute('aria-pressed') !== 'true';
+      smBtn.setAttribute('aria-pressed', String(on)); smBtn.classList.toggle('on', on);
+      GameHost.send('slowmo', { on }); haptic('select'); Sfx.soft();
+    });
     const dv = el.querySelector('[data-act=dev]'); if (dv) dv.addEventListener('click', () => devZoneSheet());
     this.intro();
   },
@@ -193,6 +202,7 @@ Router.def('match', {
     TGX.guard(false);
     if (this._mo) { this._mo.disconnect(); this._mo = null; }
     // fullscreen НЕ выключаем — весь путь (поиск → матч → итог) живёт в иммерсиве
+    GameHost.send('slowmo', { on: false });
     GameHost.send('quit'); GameHost.show(false);
   },
   onBack() { if (!this.st.over) this.pause(); }

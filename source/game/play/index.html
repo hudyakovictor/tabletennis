@@ -402,6 +402,7 @@ button[hidden],.ic[hidden]{display:none!important}
 #btnMenu[aria-pressed="true"]{color:var(--warn);border-color:rgba(255,211,77,.55)}
 #btnFullscreen[aria-pressed="true"]{color:var(--good);border-color:rgba(78,227,154,.55)}
 #btnSound[aria-pressed="false"],#menuSound[aria-pressed="false"]{color:var(--bad)}
+#btnSlowmo[aria-pressed="true"]{color:#7dd3fc;border-color:rgba(125,211,252,.55);background:rgba(56,150,220,.16)}
 
 #pauseInd{cursor:default}
 #pauseInd small{font-size:13px;letter-spacing:.08em;text-align:center;line-height:1.45}
@@ -589,6 +590,10 @@ body:not(.is-playing) #topright{visibility:hidden;pointer-events:none}
 #shot.on{display:grid;grid-template-columns:auto auto;column-gap:10px;row-gap:4px;text-align:center}
 #playband #shot b,#shot #shotStatus{font:750 clamp(20px,2.2vw,28px)/1.2 var(--ui);letter-spacing:0;color:var(--txt)}
 #shotName:empty{display:none}
+#shot{--shotc:#ffd34d}
+#playband #shot #shotName{color:var(--shotc)}
+#shot.pop{animation:shotPop .55s cubic-bezier(.2,1.5,.3,1)}
+@keyframes shotPop{0%{transform:scale(.78);filter:brightness(2.1)}55%{transform:scale(1.07)}100%{transform:scale(1);filter:brightness(1)}}
 #shot #shotMeta{grid-column:1/-1;font:600 clamp(18px,1.7vw,22px)/1.25 var(--ui);color:var(--dim)}
 #shot[data-tone="good"] #shotStatus{color:var(--good)}
 #shot[data-tone="bad"] #shotStatus{color:var(--warn)}
@@ -769,6 +774,7 @@ html.tt-embed #shot #shotMeta { font: 600 11.5px/1.25 var(--ui); }
     <div id="topright">
       <button class="ic pe" id="btnFullscreen" title="Полный экран (F)" aria-label="Полный экран" aria-pressed="false"></button>
       <button class="ic pe" id="btnSound" title="Выключить звук" aria-label="Выключить звук" aria-pressed="true"></button>
+      <button class="ic pe" id="btnSlowmo" title="Слоу-мо: разобрать траекторию" aria-label="Замедление" aria-pressed="false"></button>
       <button class="ic pe" id="btnSettings" title="Настройки" aria-label="Настройки"></button>
       <button class="ic pe" id="btnMenu" title="Пауза" aria-label="Пауза"></button>
     </div>
@@ -895,6 +901,11 @@ html.tt-embed #shot #shotMeta { font: 600 11.5px/1.25 var(--ui); }
         <button class="opt" data-set="hand" data-val="left" aria-pressed="false"><b>ЛЕВША</b></button>
       </div>
       <p class="note">Shakehand: лёгкий наклон вперёд. Перо: почти вертикально, рукоятка вверх. Поза зеркалится; направление свайпа остаётся экранным.</p>
+
+      <h3 class="sec">УДАРЫ · КАЛИБРОВКА ЗАКРУТКИ</h3>
+      <div class="btn-wrap"><span class="bs"><input type="range" class="rng" id="spinGain" data-set="spinGain" min="50" max="160" value="100"><b class="bn">Сила закрутки мяча</b></span></div>
+      <div class="btn-wrap"><span class="bs"><input type="range" class="rng" id="arcSens" data-set="arcSens" min="60" max="180" value="100"><b class="bn">Дуга «С» · чувствительность</b></span></div>
+      <p class="note">Боковая закрутка — свайп дугой: буква «С» уводит мяч влево, зеркальная дуга — вправо. Чем круче дуга и выше сила закрутки, тем сильнее изгиб полёта и боковой отскок от стола. Кривой свайп сам дотягивается до ближайшего удара: вверх — накат, вниз — подставка, дуга — боковая закрутка.</p>
 
       <h3 class="sec">КАМЕРА</h3>
       <div class="row" id="cameraViews" role="group" aria-label="Вид камеры">
@@ -1047,6 +1058,10 @@ html.tt-embed #shot #shotMeta { font: 600 11.5px/1.25 var(--ui); }
       <h3>Уменьшать ли зону?</h3>
       <p class="lab-help">Ниже — сколько ваших реальных ударов отсекла бы меньшая зона. Точность и качество удара здесь не оцениваются.</p>
       <div id="captureCalibrationSummary"></div>
+      <h3>Калибровка закрутки</h3>
+      <p class="lab-help">Сила закрутки меняет угол касания мяча: больше скольжения по резине — больше вращения и чуть меньше темпа. Чувствительность дуги — насколько пологой может быть «С», чтобы жест всё ещё читался закруткой, а не прямым свайпом. Те же ползунки есть в Настройках.</p>
+      <div class="btn-wrap"><span class="bs"><input type="range" class="rng" id="spinGainLab" data-set="spinGain" min="50" max="160" value="100"><b class="bn">Сила закрутки мяча</b></span></div>
+      <div class="btn-wrap"><span class="bs"><input type="range" class="rng" id="arcSensLab" data-set="arcSens" min="60" max="180" value="100"><b class="bn">Дуга «С» · чувствительность</b></span></div>
       <h3>Калибровка зоны по заданиям</h3>
       <p class="lab-help">Пошаговый сбор данных для разработки: углы стола, неподвижный мяч, медленный и быстрый мяч, подача, сила и спин — сначала мышью, затем касанием. Данные не меняют общую зону и не создают личный профиль.</p>
       <p class="lab-help" id="zoneCalStatus">Калибровка не начата.</p>
@@ -4474,7 +4489,11 @@ function isRealStroke(m, serving) {
   const minDist = serving ? 0.014 : 0.034;
   const minSp = serving ? 0.12 : 0.30;
   if (!Number.isFinite(m.pathLen) || m.pathLen < minPath) return false;
-  if (!Number.isFinite(m.dist) || m.dist < minDist) return false;
+  /* Дуга «С» — настоящий удар, даже если хорда короткая: замкнутая дуга
+   * почти не смещает палец, но несёт и путь, и поворот. */
+  if (!Number.isFinite(m.dist) || m.dist < minDist) {
+    if (!(m.pathLen >= 0.09 && Math.abs(m.curl || 0) >= 0.8)) return false;
+  }
   if (!Number.isFinite(m.peakSpeed) || m.peakSpeed < minSp) return false;
   return true;
 }
@@ -4507,23 +4526,39 @@ function classifyStroke(m, ctx, sp01) {
     if (incSpeed > 7.0 || incomingTop > 220) return STROKES.BLOCK;
     return (overTable && hAboveTable < 0.34) ? STROKES.DROP : STROKES.BLOCK;
   }
+  /* ДУГА «С» = БОКОВАЯ ЗАКРУТКА. Жест рисует дугу: большой суммарный
+   * поворот при заметно более длинном пути, чем хорда. Направление хорды
+   * у дуги случайно (та же «С» сверху вниз и снизу вверх — один жест),
+   * поэтому дуга проверяется ДО семейств «вверх/вниз по хорде», иначе
+   * половина всех «С» уезжала в подставки, а вторая — в накаты. Буква «С»
+   * (выпуклость влево, curl < 0) закручивает мяч влево — HOOK; зеркальная
+   * дуга (curl > 0) — вправо, FADE: куда гнётся жест, туда и летит мяч.
+   * Пороги масштабирует калибровка arcSens. */
+  {
+    const arcSens = clamp(Number.isFinite(ctx.arcSens) ? ctx.arcSens : 1, 0.6, 1.8);
+    const bend = m.dist > 0.001 ? (m.pathLen || 0) / m.dist : 0;
+    if (Math.abs(m.curl) >= 0.85 / arcSens && m.dist >= 0.028 &&
+      (bend >= 1.30 || (m.straightness <= 0.74 && Math.abs(m.curl) >= 1.15 / arcSens))) {
+      return m.curl < 0 ? STROKES.HOOK : STROKES.FADE;
+    }
+  }
   /* Finishing a high ball always beats everything else — but only if the
    * hand is actually going forward/up. A fast DOWNWARD gesture was caught
    * here before the backspin rule below could see it, so a defensive chop
    * on a ball above the tape was silently reclassified as a smash. The
    * assist then rotated the swing up until the chop "landed", and a 1.9 m/s
    * ball came back at 25 m/s off a hand that never swung forward. The
-   * boundary is the same -0.28 the backspin family uses, so the two rules
+   * boundary is the same -0.24 the backspin family uses, so the two rules
    * cannot overlap. */
-  if (hAboveNet > 0.14 && sp01 > 0.52 && u > -0.28 && u < 0.52) return STROKES.SMASH;
+  if (hAboveNet > 0.14 && sp01 > 0.52 && u > -0.24 && u < 0.52) return STROKES.SMASH;
   // downward gestures = backspin family
-  if (u < -0.28) {
+  if (u < -0.24) {
     if (depth > PH.T_HALF_LEN + 0.40 || (fast && m.dist > 0.20)) return STROKES.CHOP;
     if (sp01 < 0.22 && overTable && hAboveTable < 0.35) return STROKES.DROP;
     return STROKES.PUSH;
   }
   // a clearly curved sideways gesture = sidespin
-  if (latMag > 0.58 && curly) return (r > 0) ? STROKES.HOOK : STROKES.FADE;
+  if (latMag > 0.50 && Math.abs(m.curl) > 0.30) return (r > 0) ? STROKES.HOOK : STROKES.FADE;
   // upward gestures = topspin family
   if (u > 0.70) {
     if (slow && hAboveTable < 0.55) {
@@ -4538,7 +4573,7 @@ function classifyStroke(m, ctx, sp01) {
     if (overTable && m.dist < 0.13 && hAboveTable < 0.30) return STROKES.FLICK;
     return (incomingTop > 170 && fast) ? STROKES.COUNTER : STROKES.LOOP;
   }
-  if (u > 0.34) return (incomingTop > 260 && veryFast) ? STROKES.COUNTER : STROKES.LOOP;
+  if (u > 0.30) return (incomingTop > 260 && veryFast) ? STROKES.COUNTER : STROKES.LOOP;
   return STROKES.DRIVE;
 }
 
@@ -4608,6 +4643,15 @@ function deriveStroke(m, ctx) {
   contact += clamp(-hAboveNet * 42, -16, 10);
   contact = clamp(contact, 14, 80);
 
+  /* Калибровка силы закрутки (ползунок игрока, spinGain 0.5..1.6) — два
+   * честных канала: малый сдвиг угла касания и трение резины (mu/et в
+   * сборке rubber ниже) плюс глубина бокового разворота грани. Угол
+   * сознательно не главный канал: замер показал, что за ~65° касание
+   * уходит в проскальзывание и спин падает — ручка обязана быть
+   * монотонной. Полёт дальше считает измеренная аэродинамика (Магнус). */
+  const spinGain = clamp(Number.isFinite(ctx.spinGain) ? ctx.spinGain : 1, 0.5, 1.6);
+  if (spinGain !== 1) contact = clamp(contact + (spinGain - 1) * 8, 14, 80);
+
   // azimuth of the swing / of the face.  On a serve the body stays square
   // and the sidespin comes from the FACE, not from slinging the arm across.
   const azSwing = clamp(r * A.lat * (ctx.isServe ? 0.30 : 0.72), -1.35, 1.35);
@@ -4619,8 +4663,15 @@ function deriveStroke(m, ctx) {
   // itself lies in the horizontal plane and the ball is peeled round
   // the side. Only the genuinely lateral archetypes do this, so every
   // other stroke keeps exactly the numbers it had before.
-  const latMix = clamp((A.lat - 0.60) / 1.40, 0, 1) * clamp(Math.abs(r) * 1.35, 0, 1);
-  const latTurn = -Math.sign(r || 1) * contact * DEG * 0.62 * latMix;
+  /* Боковую щётку ведёт не только хорда: у чистой дуги «С» хорда почти
+   * нулевая, а закрутка — вся в повороте жеста. rLat берёт знак и силу из
+   * curl, когда хорда молчит, поэтому «С» округляет мяч, даже если палец
+   * вернулся почти в исходную точку. Знак согласован с классификатором:
+   * curl < 0 (буква «С») — удар вокруг левого бока мяча. */
+  const rLat = Math.abs(r) >= 0.25 ? r
+    : clamp(-(m.curl || 0) / 1.5, -1, 1) * ((st.id === 'HOOK' || st.id === 'FADE' || st.id === 'SERVE_SIDE') ? 1 : 0.45);
+  const latMix = clamp((A.lat - 0.60) / 1.40, 0, 1) * clamp(Math.abs(rLat) * 1.35, 0, 1);
+  const latTurn = -Math.sign(rLat || 1) * contact * DEG * 0.62 * latMix * (0.72 + 0.28 * spinGain);
   azFace = clamp(azFace + latTurn, -1.25, 1.25);
 
   /* The step yaw. The bat is turned into the direction it is moving (right
@@ -4656,6 +4707,8 @@ function deriveStroke(m, ctx) {
     contact = clamp(contact + sb * 9, 14, 80);
     vmag = clamp(vmag * (1 - sb * 0.08), 0.8, 19.5);
   }
+
+  /* spinGain применён выше: угол касания, разворот грани и трение резины. */
 
   /* ---- 5. build the 3-D racket frame ------------------------------ */
   const eR = elev * DEG;
@@ -4723,8 +4776,8 @@ function deriveStroke(m, ctx) {
   const eq = ctx.equip || { e: PH.E_RACKET, mu: PH.MU_RACKET, et: PH.ET_RACKET, damp: 1 };
   const rubber = {
     e: eq.e * (A.soft || 1),        // soft archetypes press the sponge
-    mu: eq.mu,
-    et: eq.et * (A.soft ? 0.5 + 0.5 * A.soft : 1),
+    mu: eq.mu * spinGain,
+    et: eq.et * (A.soft ? 0.5 + 0.5 * A.soft : 1) * (0.75 + 0.25 * spinGain),
     damp: eq.damp,
   };
 
@@ -7070,7 +7123,20 @@ class OpponentAI {
     const CAP = AI_SERVE_CAPS[this.levelIndex] || AI_SERVE_CAPS[0];
 
     // Aim — inside the orbit, biased middle; no more mail-slot corners on rookie
-    const aimX = clamp(rndSym(0.50), -CAP.orbit, CAP.orbit);
+    let aimX = clamp(rndSym(0.50), -CAP.orbit, CAP.orbit);
+    /* КРАЙ СТОЛА — НЕ ЦЕЛЬ. Слабая подача (НОВИЧОК/ЛЮБИТЕЛЬ, vmag <= 6) и
+     * любая сильная боковая прицеливаются не шире половины полуширины:
+     * слабый мяч с кромки уходит в аут от малейшей ошибки исполнения, а
+     * SERVE_SIDE после отскока добирает боковой увод (Магнус + трение о
+     * стол) и «убегает» за боковую линию даже при честном прицеле. Сильной
+     * прямой подаче старших уровней широкий прицел оставлен. */
+    if (CAP.vmag <= 6.0 || serveType === 'SERVE_SIDE') {
+      /* Слабым — ещё уже: у новичка пост-решательная ошибка исполнения и
+       * урезание темпа разносят приземление на ±0.3 м шире прицела
+       * (замер картой подач), поэтому запас до кромки нужен больше. */
+      const safeX = PH.T_HALF_WID * (CAP.vmag <= 6.0 ? 0.44 : 0.48);
+      aimX = clamp(aimX, -safeX, safeX);
+    }
     const aimZ = PH.T_HALF_LEN * (0.55 + 0.35 * rnd());
 
     const racket = makeRacket(-1, serveType, {
@@ -7108,7 +7174,7 @@ class OpponentAI {
       right: aimX * 0.5,
       up: (A.elev / 66),
       dist: 0.2,
-      curl: serveType === 'SERVE_SIDE' ? 0.5 : 0,
+      curl: serveType === 'SERVE_SIDE' ? 0.34 : 0,
       speed: 1.5,
       peakSpeed: 1.5,
       releaseSpeed: 1.5,
@@ -7149,6 +7215,39 @@ class OpponentAI {
      * verify against the real flight and retry softer toward the middle
      * before shipping anything. */
     finalRacket = this._ensureLegal(game, finalRacket, null, serveType, true);
+
+    /* ПОСТ-ПРОВЕРКА ШИРИНЫ — тем же predict, что судит легальность, и ПОСЛЕ
+     * всех мутаций (урезание темпа гандикапом выше уже применено). Замер
+     * картой подач показал: на слабых уровнях решатель систематически
+     * недооценивает боковой увод медленной кручёной подачи (длинный полёт,
+     * Магнус и отскок с вращением), и мяч с прицелом 0.06 м приземлялся на
+     * 0.71 м — у самой кромки. Зажатого прицела мало: проверяем само
+     * ПРИЗЕМЛЕНИЕ и, если оно шире безопасной зоны, пере(решаем) с прицелом
+     * заметно ближе к центру. Только для слабых уровней и боковых подач —
+     * сильная прямая подача мастера в угол остаётся законным оружием. */
+    if (CAP.vmag <= 6.0 || serveType === 'SERVE_SIDE') {
+      const widthOf = (rk) => {
+        if (!rk || !rk.normal || !rk.vR) return null;
+        const v = V3.clone(ball.v), w = V3.clone(ball.w);
+        if (!impactRacket(v, w, rk.normal, rk.vR, rk.quality, rk.rubber || {})) return null;
+        const p = V3.addScaled(V3.clone(ball.p), ball.p, rk.normal, PH.R * 1.05);
+        predict(p, v, w, { dt: 1 / 240, maxT: 2.4, stopAfterBounces: 2, out: this._q });
+        return this._q && this._q.b2 ? this._q.b2.x : null;
+      };
+      const widthCap = PH.T_HALF_WID * (CAP.vmag <= 6.0 ? 0.60 : 0.66);
+      for (let guard = 1; guard <= 4; guard++) {
+        const bx = widthOf(finalRacket);
+        if (bx === null || Math.abs(bx) <= widthCap) break;
+        const pulled = Object.assign({}, racketFromStroke,
+          { aim: { x: aimX * Math.pow(0.45, guard), z: aimZ } });
+        let re = refineRacket(ball.p, ball.v, ball.w, pulled, 1, racket.quality);
+        if (!re || re.valid === false) break;
+        if (this.handicap < 1 && re.vR) V3.mul(re.vR, re.vR, 1 - (1 - this.handicap) * 0.45);
+        re = this._ensureLegal(game, re, null, serveType, true);
+        if (!re || re.valid === false) break;
+        finalRacket = re;
+      }
+    }
 
     // A serve can be faulted too — at a third of the rally error rate.
     finalRacket = this.applyExecutionError(game, finalRacket, true);
@@ -12459,6 +12558,8 @@ class Game {
       slowmoOnBigShots: false,          // slow-mo в момент удара деформирует твой же тайминг; ручной режим — в настройках
       targetScore: 11,
       spinBias: 'norm',
+      spinGain: 1,        // калибровка: сила закрутки мяча (0.5..1.6)
+      arcSens: 1,         // калибровка: чувствительность дуги «С» (0.6..1.8)
       // NEW: Enhanced gameplay settings
       showSpinIndicator: true,
       followThrough: true,
@@ -12588,6 +12689,7 @@ class Game {
     };
     this.replayBuf = []; this.replayMax = 360; this.replay = null;
     this.slowmo = { on: false, energy: 1, active: false, allowed: true, used: 0 };
+    this.inspectSlowmo = false;   // тумблер разбора траектории (кнопка слоу-мо)
     this.predictPath = [];
     this.predictOut = {};
     this.lastShotInfo = null;
@@ -13435,13 +13537,28 @@ class Game {
       S.energy = Math.min(1, S.energy + dtReal * 0.09);     // ~11 s to refill
       S.on = S.on && S.energy > 0.015;                      // ran dry → release
     }
+    if (this.inspectSlowmo &&
+      (this.state === GS.RALLY || this.state === GS.SERVE_TOSS || this.state === GS.SERVE_READY)) {
+      S.active = true; this.targetTimeScale = 0.30; return;
+    }
     S.active = want;
     if (want) { this.targetTimeScale = 0.34; this.slowmoUntil = 0; }
     else if (!this.slowmoUntil) this.targetTimeScale = 1;
   }
 
+  /* Инспекторское замедление: свободный тумблер «разобрать траекторию
+   * удара». В отличие от боевого слоу-мо не тратит энергию и не отпускает
+   * само; работает в розыгрыше и на подаче, между розыгрышами скорость
+   * обычная. Честность та же, что у боевого режима: allowed=false
+   * (карьерные турниры, онлайн) закрывает и этот переключатель. */
+  setInspectSlowmo(on) {
+    const ok = this.slowmo && this.slowmo.allowed && !(this.network && this.network.isInMatch);
+    this.inspectSlowmo = !!on && ok;
+    return this.inspectSlowmo;
+  }
+
   /** Career tournaments and online matches call this with false. */
-  setSlowmoAllowed(v) { this.slowmo.allowed = !!v; if (!v) this.setSlowmoHold(false); }
+  setSlowmoAllowed(v) { this.slowmo.allowed = !!v; if (!v) { this.setSlowmoHold(false); this.inspectSlowmo = false; } }
 
   /* --------------------------- settings ---------------------------- */
 
@@ -13470,7 +13587,7 @@ class Game {
       showTrail: s.showTrail, showPredict: s.showPredict,
       showTele: s.showTele, haptics: s.haptics, coach: s.coach, adaptive: s.adaptive,
       targetScore: s.targetScore,
-      spinBias: s.spinBias,
+      spinBias: s.spinBias, spinGain: s.spinGain, arcSens: s.arcSens,
     };
     if (this.career && this.career.active && this.career._baseSettings)
       this.profile.data.settings.difficulty = this.career._baseSettings.difficulty;
@@ -13485,7 +13602,7 @@ class Game {
       if (typeof s[k] === 'boolean' && typeof raw[k] === 'boolean') s[k] = raw[k];
     }
     // camZoom/camPitch mirror CAM_ADJUST.zoomMin..Max / pitchMin..Max — keep in sync.
-    const ranges = { difficulty: [0, 4], volume: [0, 1], camZoom: [0.6, 1.8], camPitch: [-16, 16] };
+    const ranges = { difficulty: [0, 4], volume: [0, 1], camZoom: [0.6, 1.8], camPitch: [-16, 16], spinGain: [0.5, 1.6], arcSens: [0.6, 1.8] };
     for (const [k, [lo, hi]] of Object.entries(ranges)) {
       if (Number.isFinite(raw[k])) s[k] = clamp(raw[k], lo, hi);
     }
@@ -13782,7 +13899,8 @@ class Game {
     const serving = this.state === GS.SERVE_TOSS || this.state === GS.SERVE_READY;
     const forehand = (this.player.pos.x * (this.settings.hand === 'left' ? -1 : 1)) >= -.05;
     const ctx = { side: 1, isServe: serving, ball: this.ball.p, ballSpin: this.ball.w,
-      grip: this.settings.grip, forehand, ballSpeed: this.ball.speed || V3.len(this.ball.v), movePitch: -.15 };
+      grip: this.settings.grip, forehand, ballSpeed: this.ball.speed || V3.len(this.ball.v), movePitch: -.15,
+      spinGain: this.settings.spinGain ?? 1, arcSens: this.settings.arcSens ?? 1 };
     const r = isRealStroke(m, serving) ? deriveStroke(m, ctx) : null;
     const lastSample = sw.samples[sw.samples.length - 1];
     journal.observe(sw.gestureId, m, { time: this.time, isServe: serving, active: sw.active,
@@ -14319,6 +14437,7 @@ class Game {
         moveYaw: this.padYaw || 0, movePitch: this.padPitch || 0,
         equip: sideParams,
         spinBias: 'norm',
+        spinGain: this.settings.spinGain ?? 1, arcSens: this.settings.arcSens ?? 1,
       };
       racket = deriveStroke(m, ctx);
       racket.vmag *= this.equip.vmagK;
@@ -14554,7 +14673,12 @@ class Game {
      * be struck, or the bat is still travelling when the ball is hit. Measured
      * in the headless matches at 0.55 s: the closest the bat got to the centre
      * before the strike was 0.081-0.173 m on 14 of 49 serves. */
-    this.recenterT = RECENTER_S;         // no footwork assist while re-centring
+    /* Ракетка в конце розыгрыша НЕ едет в стартовую позицию: окно возврата
+     * «домой» (RECENTER_S) отключаем по требованию игрока — бат остаётся
+     * ровно там, где его держит рука, управление ни на кадр не блокируется
+     * и смена розыгрышей не дёргает ракетку через весь стол. Очередь подачи
+     * (tossQueued) при нулевом окне просто не используется. */
+    this.recenterT = 0;
     this.tossQueued = false;
     this.tossQueuedAt = -9;
     this.swipe.cancel();
@@ -14823,6 +14947,7 @@ class Game {
     const intentType = intent ? classifyStroke(intent, {
       ball: { y: pad.pos.y, z: pad.pos.z }, isServe: servingNow,
       incomingTop: this.ball.w.x, ballSpeed: V3.len(this.ball.v),
+      arcSens: this.settings.arcSens ?? 1,
     }, clamp(Math.max(intent.releaseSpeed, intent.peakSpeed * .78) / 4.2, 0, 1.45)).id : null;
     if (intent && this.followThrough) this.followThrough.active = false;
     const wrist = playerWristPose(pad.pos, pad.vel, this.settings.hand, {
@@ -16106,6 +16231,22 @@ class UI {
       button.title = label;
     }
   }
+  /* Кнопка инспекторского слоу-мо: иконка рисуется один раз, состояние
+   * (aria-pressed + подсветка) догоняет тумблер каждый кадр — переключатель
+   * может прийти и из оболочки (сообщение slowmo), и с этой же кнопки. */
+  syncSlowmoControl() {
+    const button = $('#btnSlowmo'), g = this.game;
+    if (!button) return;
+    if (!button.innerHTML) button.innerHTML = ICON.slowmo;
+    if (!g) return;
+    const on = !!g.inspectSlowmo;
+    if (button.dataset.slowmoOn !== String(on)) {
+      button.dataset.slowmoOn = String(on);
+      button.setAttribute('aria-pressed', String(on));
+      button.title = on ? 'Слоу-мо включено: обычная скорость' : 'Слоу-мо: разобрать траекторию';
+      button.setAttribute('aria-label', button.title);
+    }
+  }
   syncPauseControl() {
     const button = $('#btnMenu'), g = this.game;
     if (!button || !g) return;
@@ -16288,6 +16429,13 @@ class UI {
           !(e.target && /^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName))) { e.preventDefault(); this.toggleFullscreen(); }
     });
     $('#btnSound').addEventListener('click', () => this.toggleSound());
+    const slowmoBtn = $('#btnSlowmo');
+    if (slowmoBtn) slowmoBtn.addEventListener('click', () => {
+      const g = this.game; if (!g || !g.setInspectSlowmo) return;
+      g.setInspectSlowmo(!g.inspectSlowmo);
+      this.syncSlowmoControl();
+      g.audio && g.audio.ui('click');
+    });
     /* Spin dial: one tap cycles МЕНЬШЕ -> НОРМА -> БОЛЬШЕ. It biases how much
        of the contact is brush (more spin, less pace) and how much is punch. */
     const sbEl = $('#spinBias');
@@ -16624,7 +16772,14 @@ class UI {
       case 'haptics': s.haptics = v === 'on'; if (s.haptics) g.buzz(12); break;
         break;
       case 'target': s.targetScore = +v; $('#toWin').textContent = v; break;
+      /* Калибровка закрутки: ползунки в процентах, хранится множитель. */
+      case 'spinGain': s.spinGain = clamp(v / 100, 0.5, 1.6); break;
+      case 'arcSens': s.arcSens = clamp(v / 100, 0.6, 1.8); break;
       default: break;
+    }
+    if (k === 'spinGain' || k === 'arcSens') {
+      const val = String(Math.round(s[k] * 100));
+      $$('input[type=range][data-set="' + k + '"]').forEach(r => { if (r.value !== val) r.value = val; });
     }
     g.saveSettings();
     g.audio.ui('click');
@@ -16647,6 +16802,9 @@ class UI {
       });
     }
     this.syncCameraControls();
+    for (const [id, v] of [['#spinGain', s.spinGain], ['#spinGainLab', s.spinGain], ['#arcSens', s.arcSens], ['#arcSensLab', s.arcSens]]) {
+      const el = $(id); if (el) el.value = String(Math.round((Number.isFinite(v) ? v : 1) * 100));
+    }
   }
   syncCameraControls() {
     const g = this.game, s = g.settings;
@@ -16693,9 +16851,17 @@ class UI {
     $('#shotStatus').textContent = view.status;
     $('#shotMeta').textContent = view.metrics;
     el.dataset.tone = view.tone; el.classList.add('on');
+    /* Подсветка ИМЕННО этого удара: имя вспыхивает цветом архетипа
+     * (накат — свой цвет, боковая — свой), чтобы глаз связывал жест,
+     * название и полёт мяча без чтения мелкого текста. */
+    const stCol = (typeof STROKES !== 'undefined' && entry.strokeId && STROKES[entry.strokeId])
+      ? STROKES[entry.strokeId].col : null;
+    el.style.setProperty('--shotc', stCol || '#ffd34d');
+    el.classList.remove('pop'); void el.offsetWidth; el.classList.add('pop');
     this.shotTimer = 7;
   }
   openShotLab() {
+    this.syncSettings();
     this._labWasPaused = this.game.paused;
     this.game.setPaused(true);
     $('#shotLab').classList.add('on');
@@ -17339,6 +17505,7 @@ class UI {
   tick(dt) {
     const g = this.game; if (!g) return;
     this.syncPauseControl();
+    this.syncSlowmoControl();
     this.drawOverlay(dt);
     // A single short status, never a stack of messages/telemetry/hints.
     const status = $('#playStatus');
@@ -17657,6 +17824,7 @@ const ICON = {
   gear: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>',
   menu: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>',
   pause: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><line x1="8" y1="5" x2="8" y2="19"/><line x1="16" y1="5" x2="16" y2="19"/></svg>',
+  slowmo: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="13" r="8"/><path d="M12 9.5V13l2.6 2.6M9.5 2h5"/></svg>',
 };
 
 
@@ -17743,6 +17911,8 @@ const ICON = {
  *    outro                      victory orbit after the last point
  *    replay / skipReplay        best rally of the match
  *    hint {on} · debug {on} · mute {on}
+ *    slowmo {on}                инспекторское замедление траектории (тумблер)
+ *    cal {k, v}                 калибровка оболочки; spinGain/arcSens — закрутка
  *  Game → host:
  *    ready, state, point, hit, serve, matchEnd, train, trainDone, attempt, autoHint, awake,
  *    paused, replayEnd, haptic
@@ -18096,6 +18266,7 @@ const showTip = (text) => { if (text) tip = { text, until: g.time + 4.6 }; };
           setCine('prematch', m.dur || 2.0); break;
         case 'match':
           lobby = false;
+          g.inspectSlowmo = false;
           g.audio.init(); g.audio.resume();
           if (Number.isFinite(m.target)) g.settings.targetScore = m.target;
           resetAssist(); g.hintContact = !!m.hint;
@@ -18118,13 +18289,16 @@ const showTip = (text) => { if (text) tip = { text, until: g.time + 4.6 }; };
           break;
         case 'pause': hostPause(true); break;
         case 'resume': hostPause(false); break;
-        case 'quit': lobby = false; g.returnToMenu(); setCine('attract'); break;
+        case 'quit': lobby = false; g.inspectSlowmo = false; g.returnToMenu(); setCine('attract'); break;
         case 'outro': setCine('outro'); break;
         case 'live': cine.mode = null; break;
         case 'replay': if (!g.playBestMoments()) post('replayEnd', {}); break;
         case 'skipReplay': g.skipReplay(); break;
         case 'skipStep': if (g.training) g.training.skip(); break;
         case 'hint': if (!(autoHint && !m.on)) { autoHint = false; g.hintContact = !!m.on; } break;
+        /* Тумблер инспекторского слоу-мо из оболочки: разобрать траекторию
+         * удара в замедлении. Состояние кнопки в движке догонит syncSlowmoControl. */
+        case 'slowmo': if (g.setInspectSlowmo) g.setInspectSlowmo(!!m.on); break;
         case 'rm': g.reducedMotion = !!m.on || !!(g.motionQuery && g.motionQuery.matches); break;
         case 'debug': if (ui) ui.captureDebug = !!m.on; break;
         case 'mute': g.settings.sound = !m.on; g.audio.setMuted(!!m.on); break;
@@ -18146,6 +18320,11 @@ const showTip = (text) => { if (text) tip = { text, until: g.time + 4.6 }; };
           if (K === 'camHeight' && g.setCamPitch) g.setCamPitch(CAM_ADJUST.pitchMin + V * (CAM_ADJUST.pitchMax - CAM_ADJUST.pitchMin));
           if (K === 'camZoom' && g.setCamZoom) g.setCamZoom(CAM_ADJUST.zoomMin + V * (CAM_ADJUST.zoomMax - CAM_ADJUST.zoomMin));
           if (K === 'camSway') g._swayCal = V;
+          /* Закрутка из калибровки оболочки: те же поля настроек, что у
+           * ползунков самого движка. Ползунок 0..100 -> множитель физический:
+           * сила 0.5..1.6 (нейтраль ~45), чувствительность дуги 0.6..1.8 (~33). */
+          if (K === 'spinGain') g.settings.spinGain = 0.5 + V * 1.1;
+          if (K === 'arcSens') g.settings.arcSens = 0.6 + V * 1.2;
           if (K === 'trailLen' || K === 'ballSize' || K === 'padSpeed' || K === 'padSmooth') { /* читаются напрямую из g._cal */ }
           break;
         }
