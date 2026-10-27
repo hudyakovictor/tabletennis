@@ -453,17 +453,54 @@ function toGLSL1(src, isFrag) {
   return s;
 }
 
+/* ------------------ adaptive quality gate (desktop vs phone) ------------------
+ * The baked table-top texture (1024 px wide) and the no-MSAA pipeline were
+ * tuned for phones: there the table occupies a small part of the frame and
+ * the canvas is dpr-capped, so the 3 mm centre line (2 texture px) reads
+ * fine. On desktop monitors (dpr 1–2, the table spanning a large part of
+ * the screen) the texture is undersampled — mips dissolve the lines — and
+ * every geometry edge is jagged because antialias:false. Both fixes are
+ * gated HERE so they apply ONLY where the problem exists; phones keep the
+ * current pipeline byte-for-byte (no extra VRAM, no extra per-frame cost).
+ * The gate is computed once at boot: the GL context and the scene textures
+ * are created there and cannot be swapped later without a visible reload. */
+function detectDesktop() {
+  try {
+    return !!(typeof window !== 'undefined' && window.matchMedia &&
+      window.matchMedia('(hover: hover) and (pointer: fine)').matches);
+  } catch (e) { return false; }
+}
+function renderQualityGate(input = {}) {
+  const dpr = Number.isFinite(input.dpr) ? input.dpr : 1;
+  const desktop = input.desktop !== undefined ? !!input.desktop : detectDesktop();
+  const quality = input.quality || 'high';
+  return {
+    desktop, dpr, quality,
+    /* 2× table texture: one-time VRAM (~30 MB) + build cost — desktop only,
+       never on the 'low' tier (that tier exists to save memory/frame rate) */
+    tableTex2x: desktop && dpr <= 2 && quality !== 'low',
+    /* MSAA: per-frame geometry-edge cost — desktop 'high' only */
+    msaa: desktop && dpr <= 2 && quality === 'high',
+  };
+}
+
 /* ------------------------------ Renderer --------------------------- */
 class Renderer {
   constructor(canvas, opts = {}) {
     this.canvas = canvas;
-    const attribs = { alpha: false, antialias: false, depth: true, stencil: false, powerPreference: 'high-performance', preserveDrawingBuffer: false, desynchronized: true };
+    this.quality = opts.quality || 'high';
+    this.gate = renderQualityGate({
+      dpr: typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1,
+      desktop: opts.desktop, quality: this.quality,
+    });
+    /* desynchronized conflicts with MSAA on some drivers — when we pay for
+     * AA, drop the hint instead of losing the edge smoothing. */
+    const attribs = { alpha: false, antialias: this.gate.msaa, depth: true, stencil: false, powerPreference: 'high-performance', preserveDrawingBuffer: false, desynchronized: !this.gate.msaa };
     let gl = canvas.getContext('webgl2', attribs);
     this.isGL2 = !!gl;
     if (!gl) gl = canvas.getContext('webgl', attribs) || canvas.getContext('experimental-webgl', attribs);
     if (!gl) throw new Error('WebGL is not available');
     this.gl = gl;
-    this.quality = opts.quality || 'high';
     // Shadow mapping is OFF by design: at this scale a 2k map gives blocky,
     // crawling penumbrae on the table. Analytic contact shadows look better
     // and cost one quad each.

@@ -7,9 +7,12 @@
 function cv(w, h) { const c = document.createElement('canvas'); c.width = w; c.height = h; return c; }
 
 /* ------------------------- procedural textures --------------------- */
-function texTableTop(palette) {
+function texTableTop(palette, scale = 1) {
   // canvas x = table WIDTH (1.525 m), canvas y = table LENGTH (2.74 m)
-  const W = 1024, H = 1840, c = cv(W, H), g = c.getContext('2d');
+  // scale=2: desktop monitors render the table top at device-pixel scale ≤ 1
+  // (1024 px texture undersampled → mips dissolve the 2–3 px lines). All line
+  // widths below are proportional to W/H, so they scale with the canvas.
+  const W = Math.round(1024 * scale), H = Math.round(1840 * scale), c = cv(W, H), g = c.getContext('2d');
   const base = palette.table || '#123f74';
   g.fillStyle = base; g.fillRect(0, 0, W, H);
   const img = g.getImageData(0, 0, W, H), d = img.data;
@@ -196,7 +199,7 @@ class Scene {
 
     /* ---- textures ---- */
     this.tex = {
-      table: R.texFromCanvas(texTableTop(P), { wrap: 'clamp' }),
+      table: R.texFromCanvas(texTableTop(P, (R.gate && R.gate.tableTex2x) ? 2 : 1), { wrap: 'clamp' }),
       floor: R.texFromCanvas(texFloor(P), { wrap: 'repeat' }),
       net: R.texFromCanvas(texNet(), { wrap: 'clamp' }),
       ball: R.texFromCanvas(texBall(), { wrap: 'repeat' }),
