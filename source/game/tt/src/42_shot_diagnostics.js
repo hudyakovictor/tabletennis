@@ -30,7 +30,7 @@ function shotFeedbackView(entry) {
   const name = stroke ? stroke.name : 'ЖЕСТ';
   if (!entry.contact) return { title: entry.valid ? `Жест: ${name.toLowerCase()}` : 'Жест не распознан',
     status: entry.outcome === 'pending' ? 'Ищем контакт' : SHOT_OUTCOMES[entry.outcome] || 'Нет контакта',
-    metrics: '', detail: entry.outcome === 'no_contact' ? 'Свайп был, касания мяча не было' : '', tone: 'neutral' };
+    metrics: '', detail: entry.outcome === 'no_contact' ? 'Нажатие было, касания мяча не было' : '', tone: 'neutral' };
   return { title: `Жест: ${name.toLowerCase()}`, status: entry.outcome === 'pending' ? 'Контакт есть · ждём отскок' : SHOT_OUTCOMES[entry.outcome] || entry.outcome,
     metrics: `${entry.contact.speedKmh.toFixed(0)} км/ч · ${shotSpinText(entry.contact.spin)}`,
     detail: `Оценка контакта ${Math.round(entry.contact.quality * 100)}% · вращение измерено после удара`,
@@ -72,8 +72,13 @@ class ShotJournal {
     entry.gestureMetrics = { ...metrics };
     entry.gesture = { dx: metrics.dx, dy: metrics.dy, duration: metrics.dur, path: metrics.pathLen,
       peakSpeed: metrics.peakSpeed, releaseSpeed: metrics.releaseSpeed, samples: metrics.samples, curl: metrics.curl };
-    entry.deadline = context.sampleTime + (context.isServe ? 1.15 : context.active ? .18 : .25);
-    if (['no_contact', 'rejected'].includes(entry.outcome) && valid && context.time <= entry.deadline) { entry.outcome = 'pending'; entry.revision++; }
+    const windowSec = Number.isFinite(context.windowSec) ? context.windowSec
+      : context.isServe ? 1.15 : context.active ? .18 : .25;
+    entry.deadline = context.sampleTime + windowSec;
+    entry.deadlineSim = Number.isFinite(context.sampleSimTime) ? context.sampleSimTime + windowSec : null;
+    const withinWindow = Number.isFinite(context.simTime) && Number.isFinite(entry.deadlineSim)
+      ? context.simTime <= entry.deadlineSim : context.time <= entry.deadline;
+    if (['no_contact', 'rejected'].includes(entry.outcome) && valid && withinWindow) { entry.outcome = 'pending'; entry.revision++; }
     if (entry.pressZone && !entry.pressZone.accepted) { entry.outcome = 'outside'; return entry; }
     if (!valid && !context.active && entry.outcome !== 'rejected') { entry.outcome = 'rejected'; entry.revision++; }
     return entry;
@@ -89,9 +94,11 @@ class ShotJournal {
     e.pressZone.accepted = false; e.pressZone.reason = reason || 'OUTSIDE_ZONE';
     if (e.outcome === 'pending') { e.outcome = 'outside'; e.revision++; }
   }
-  expire(time) {
+  expire(time, simTime) {
     for (const entry of this.records) {
-      if (!entry.contact && entry.outcome === 'pending' && time > entry.deadline) {
+      const expired = Number.isFinite(simTime) && Number.isFinite(entry.deadlineSim)
+        ? simTime > entry.deadlineSim : time > entry.deadline;
+      if (!entry.contact && entry.outcome === 'pending' && expired) {
         entry.outcome = entry.valid ? 'no_contact' : 'rejected'; entry.revision++;
       }
     }

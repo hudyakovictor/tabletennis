@@ -15,6 +15,7 @@ Router.def('match', {
       </div>
       <button class="ib m-pause pe" data-act="pause" aria-label="${t('match.pause')}">${Art.icon('pause', { c: '#fff', sw: 2.6 })}</button>
       <button class="ib m-slowmo pe" data-act="slowmo" aria-label="${t('match.slowmo')}" aria-pressed="false">${Art.icon('clock', { c: '#fff', sw: 2.4 })}<span>${t('match.slowmo')}</span></button>
+      <button class="ib m-diag-shot pe" data-act="diag-mark" ${GameHost.debug ? '' : 'hidden'} aria-label="${t('debug.mark')}"><span aria-hidden="true">●</span> ${t('debug.mark')}</button>
       ${devBtn()}
       <div class="m-rally"><span>${t('match.rally')}</span><b class="num">×0</b></div>
       <div class="m-banner"></div>
@@ -37,6 +38,7 @@ Router.def('match', {
     GameHost.ensure(); GameHost.show(true); GameHost.send('quiet', { on: true }); GameHost.send('mute', { on: !S.sfx });
     this.off = GameHost.on((m) => this.onMsg(m));
     el.querySelector('[data-act=pause]').addEventListener('click', () => this.pause());
+    el.querySelector('[data-act=diag-mark]').addEventListener('click', diagnosticMarkFrame);
     /* Слоу-мо «разобрать траекторию»: свободный тумблер в движок; состояние
        кнопки живёт здесь, движок лишь замедляет время розыгрыша. */
     const smBtn = el.querySelector('[data-act=slowmo]');
@@ -132,6 +134,8 @@ Router.def('match', {
     GameHost.send('pause');
     Sheet.open(`<div class="h1" style="margin:4px 4px 6px">${t('match.pause')}</div><p class="dim" style="margin:0 4px 16px;font-size:12.5px">${t('match.pauseScore', { p: this.st.p, o: this.st.o })}</p>
       <div style="display:grid;gap:12px"><button class="b3 green block" data-a="resume"><span class="shine"></span>${Art.icon('play', { c: '#fff' })}${t('common.resume')}</button>
+      <button class="b3 dark block" data-a="screenshot">${t('debug.screenshot')}</button>
+      <button class="b3 dark block" data-a="diagnostics">${t('debug.title')}</button>
       <button class="b3 dark block" data-a="train">${Art.icon('target', { c: '#fff' })}${t('match.training')}</button>
       <button class="b3 dark block" data-a="settings">${Art.icon('gear', { c: '#fff' })}${t('nav.settings')}</button>
       <button class="b3 coral block sm" data-a="quit">${t('match.surrender')}</button></div>`, {
@@ -139,6 +143,8 @@ Router.def('match', {
         const a = e.target.closest('[data-a]'); if (!a) return;
         if (a.dataset.a === 'resume') Sheet.close();
         if (a.dataset.a === 'settings') openSettings();
+        if (a.dataset.a === 'screenshot') diagnosticsSheet({ focusScreenshot: true });
+        if (a.dataset.a === 'diagnostics') diagnosticsSheet();
         if (a.dataset.a === 'train') { this.st.over = true; Sheet.close(true); Router.go('train', { data: { then: 'hub' } }); }
         if (a.dataset.a === 'quit') { Sheet.close(true); this.finish({ won: false, quit: true, score: [this.st.p, this.st.o] }); }
       })

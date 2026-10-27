@@ -18,9 +18,9 @@ class SwipeTracker {
     this.startT = 0;
     this.m = this.blankMetrics();
     this.lastReleased = null;
-    /* Which gesture has already been a real stroke (see
+    /* Which gesture has already been a real swipe (see
      * Game.playerStrokeIntent). A held block must not die of sample
-     * freshness; a tap must never qualify. */
+     * freshness; a stationary hold never qualifies. Taps are released separately. */
     this.realGestureId = -1;
     this.realAt = 0;
   }
@@ -33,21 +33,33 @@ class SwipeTracker {
       curl: 0, dur: 0, samples: 0, jerk: 0, smooth: 1,
     };
   }
-  down(x, y, t) {
+  down(x, y, t, simTime) {
     this.gestureId++;
-    this.realGestureId = -1; this.realAt = 0;
+    this.realGestureId = -1; this.realAt = 0; this.realAtSim = null;
     this.consumedGestureId = -1; this.consumedAt = -Infinity;
     this.pressZone = null;
     this.active = true; this.startT = t;
+    // Gesture speed uses real time, but its opportunity to meet the ball
+    // must age in the same (possibly slowed) time as the ball's physics.
+    this.sampleSimTime = Number.isFinite(simTime) ? simTime : null;
+    this.releaseSimTime = null;
     this.samples.length = 0;
     this.samples.push({ x, y, t });
     this.m = this.blankMetrics();
     this.m.sx = x; this.m.sy = y; this.m.x = x; this.m.y = y;
   }
-  move(x, y, t) {
+  move(x, y, t, simTime) {
     if (!this.active) return;
+    if (Number.isFinite(simTime)) this.sampleSimTime = simTime;
     const s = this.samples, last = s[s.length - 1];
-    if (last && t - last.t < 0.0025) { last.x = x; last.y = y; return; }
+    if (last && t - last.t < 0.0025) {
+      // Several pointer events can arrive between animation frames. Never
+      // overwrite the starting point: doing so erased fast drags completely.
+      if (s.length === 1) s.push({ x, y, t });
+      else { last.x = x; last.y = y; last.t = Math.max(last.t, t); }
+      this.compute(t);
+      return;
+    }
     s.push({ x, y, t });
     if (s.length > this.maxSamples) s.shift();
     this.compute(t);
@@ -57,18 +69,23 @@ class SwipeTracker {
   cancel() {
     this.pressZone = null;
     this.active = false;
-    this.realGestureId = -1; this.realAt = 0;
+    this.realGestureId = -1; this.realAt = 0; this.realAtSim = null;
+    this.sampleSimTime = null; this.releaseSimTime = null;
     this.samples.length = 0;
     this.lastReleased = null;
     this.m = this.blankMetrics();
   }
-  up(x, y, t) {
+  up(x, y, t, simTime) {
     if (!this.active) return null;
+    this.releaseSimTime = Number.isFinite(simTime) ? simTime : null;
+    if (Number.isFinite(simTime)) this.sampleSimTime = simTime;
     /* Тот же лимит, что в move(): без него жест из 64 сэмплов пробивал
      * буфер до 65, и в массиве оставались точки вне окна скорости. */
     const last = this.samples[this.samples.length - 1];
-    if (last && t - last.t < 0.0025) { last.x = x; last.y = y; last.t = t; }
-    else {
+    if (last && t - last.t < 0.0025) {
+      if (this.samples.length === 1 && (x !== last.x || y !== last.y)) this.samples.push({ x, y, t });
+      else { last.x = x; last.y = y; last.t = Math.max(last.t, t); }
+    } else {
       this.samples.push({ x, y, t });
       if (this.samples.length > this.maxSamples) this.samples.shift();
     }
@@ -193,16 +210,20 @@ const ARCH = {
   SERVE_FAST: { elev: -13, contact: 24, speed: 1.12, lat: 0.60, back: false },
 };
 
-/** A click, a 2-pixel twitch or hover jitter is not a stroke — but a slow,
- *  honest swing IS one. The old 0.38 peak gate ate every deliberate push on
- *  a trackpad: the player swung, the ball fell dead, and no foul was ever
- *  called on the miss. The gates now accept a clearly moved gesture even at
- *  low peak speed; shot POWER still scales with speed, so a soft swing just
- *  produces a soft ball — which the opponent returns, by design.
- *  A serve is a shorter, slower flick (often down+up with one move) — the
- *  rally gate would reject a legal toss strike. */
+/** A released, deliberate click/tap is a compact, neutral return. It is
+ * created only by the pointer handler after distinguishing it from a drag;
+ * holding still, hovering, a toss tap and raw tracker samples are not shots. */
+function tapStrokeMetrics(metrics, x, y) {
+  return { ...metrics, tap: true, sx: x, sy: y, x, y, dx: 0, dy: 0,
+    dist: 0, pathLen: 0, samples: Math.max(2, metrics.samples || 0),
+    speed: .8, peakSpeed: .8, releaseSpeed: .8, up: 1, right: 0, curl: 0 };
+}
+
+/** A small twitch or hover jitter is not a swipe — a slow, deliberate swing
+ * is. A separately recognised tap is a short rally stroke, never a serve. */
 function isRealStroke(m, serving) {
-  if (!m || !Number.isFinite(m.samples) || m.samples < (serving ? 2 : 3)) return false;
+  if (!m || !Number.isFinite(m.samples) || m.samples < 2) return false;
+  if (m.tap === true) return !serving && Number.isFinite(m.sx) && Number.isFinite(m.sy);
   const minPath = serving ? 0.019 : 0.046;
   const minDist = serving ? 0.014 : 0.034;
   const minSp = serving ? 0.12 : 0.30;

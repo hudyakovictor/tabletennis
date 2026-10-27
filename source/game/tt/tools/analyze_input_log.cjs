@@ -1,7 +1,7 @@
 'use strict';
-/* Analyse topspin-input-log.jsonl from the pause button.
+/* Analyse the basic JSONL input log or the full local diagnostics JSON report.
  *
- *   node tt/tools/analyze_input_log.cjs LOG.jsonl [--csv out.csv] [--png out.png]
+ *   node tt/tools/analyze_input_log.cjs LOG.jsonl|REPORT.json [--csv out.csv] [--png out.png]
  *
  * Counts rejection reasons, the along/across distribution of rejected
  * presses, and a 90th-percentile oval-size recommendation. Outputs CSV plus
@@ -23,13 +23,21 @@ const option = (name, fallback) => {
   return i >= 0 && args[i + 1] ? args[i + 1] : fallback;
 };
 if (!input) {
-  console.error('usage: node tt/tools/analyze_input_log.cjs LOG.jsonl [--csv out.csv] [--png out.png]');
+  console.error('usage: node tt/tools/analyze_input_log.cjs LOG.jsonl|REPORT.json [--csv out.csv] [--png out.png]');
   process.exit(2);
 }
 
 const events = [];
-let malformed = 0;
-for (const line of fs.readFileSync(input, 'utf8').split(/\r?\n/)) {
+let malformed = 0, inputFormat = 'jsonl';
+const content = fs.readFileSync(input, 'utf8');
+let report = null;
+try {
+  const parsed = JSON.parse(content);
+  if (parsed && parsed.format === 'topspin-diagnostics' && Array.isArray(parsed.events)) {
+    report = parsed; for (const e of parsed.events) events.push(e); inputFormat = 'diagnostics-json';
+  }
+} catch { /* Normal multi-line JSONL is parsed line by line below. */ }
+if (!report) for (const line of content.split(/\r?\n/)) {
   if (!line.trim()) continue;
   try { events.push(JSON.parse(line)); } catch { malformed++; }
 }
@@ -81,8 +89,19 @@ const recommendation = {
   },
 };
 
+const countBy = (rows, pick) => {
+  const result = {};
+  for (const row of rows) { const key = pick(row) || 'unknown'; result[key] = (result[key] || 0) + 1; }
+  return result;
+};
 const summary = {
-  file: input, events: events.length, malformed,
+  file: input, inputFormat, events: events.length, malformed,
+  retention: report && report.recording || null,
+  physicsGates: countBy(events.filter(e => e.type === 'physics_gate'), e => e.outcome && e.outcome.stage),
+  anomalies: countBy(events.filter(e => e.type === 'anomaly'), e => e.outcome && e.outcome.reason),
+  cancellations: countBy(events.filter(e => e.type === 'input_cancel'), e => e.outcome && e.outcome.reason),
+  releases: countBy(events.filter(e => e.type === 'pointerup'), e => e.outcome && e.outcome.recognized),
+  runtimeErrors: countBy(events.filter(e => e.type === 'runtime_error'), e => e.outcome && e.outcome.kind),
   rulesVersions: [...new Set(events.map(e => e.rulesVersion))],
   attempts: attempts.length, rejected: rejected.length, contacts: contacts.length,
   byInputType: Object.fromEntries(['mouse', 'touch', 'pen'].map(t => [t,
