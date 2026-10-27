@@ -102,6 +102,9 @@ function openSettings() {
         const row = e.target.closest('.srow'); const toggle = e.target.closest('.tgl') || (row && row.querySelector('.tgl')); if (!toggle) return;
         const k = toggle.dataset.k; S[k] = !S[k]; save(); toggle.classList.toggle('on', S[k]); toggle.setAttribute('aria-pressed', String(!!S[k]));
         haptic('select'); Sfx.soft();
+        if (k === 'sfx' && GameHost.ready) GameHost.send('mute', { on: !S.sfx });
+        if (k === 'vibro' && GameHost.ready) GameHost.send('haptics', { on: !!S.vibro });
+        if (k === 'hint' && GameHost.ready) GameHost.send('hint', { on: !!S.hint });
         if (k === 'rm') { document.body.classList.toggle('rm', S.rm); GameHost.ready && GameHost.send('rm', { on: S.rm }); }
         if (k === 'missShots' && GameHost.ready) GameHost.send('missShots', { on: S.missShots, half: S.missShotHalf });
       });

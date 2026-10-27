@@ -32,9 +32,17 @@ const rec = (id, group, name, ok, detail, sev) =>
 /* ------------------------------------------------------------------ *
  *  S: static syntax — every ship file must parse clean               *
  * ------------------------------------------------------------------ */
+const walkJs = (dir, prefix = '') => {
+  const res = [];
+  for (const ent of fs.readdirSync(dir, { withFileTypes: true })) {
+    if (ent.isDirectory()) res.push(...walkJs(path.join(dir, ent.name), prefix ? `${prefix}/${ent.name}` : ent.name));
+    else if (ent.name.endsWith('.js')) res.push(prefix ? `${prefix}/${ent.name}` : ent.name);
+  }
+  return res.sort();
+};
 let id = 1;
 const gameJs = fs.readdirSync(SRC).filter(f => f.endsWith('.js')).sort();
-const hostJs = fs.readdirSync(HOST_SRC).filter(f => f.endsWith('.js')).sort();
+const hostJs = walkJs(HOST_SRC);
 for (const f of gameJs) {
   let ok = true, detail = '';
   try { execFileSync(process.execPath, ['--check', path.join(SRC, f)]); }
@@ -75,9 +83,9 @@ if (out[out.length - 1].ok) {
  *  H: host contract                                                  *
  * ------------------------------------------------------------------ */
 const hostText = (f) => fs.readFileSync(path.join(HOST_SRC, f), 'utf8');
-const battle = hostText('scr_battle.js');
-const coreSrc = hostText('core.js');
-const hostAll = battle + hostText('scr_hub.js') + hostText('scr_meta.js') + coreSrc + hostText('game_host.js') + hostText('main.js') + hostText('ui.js') + hostText('engine.js');
+const battle = hostText('screens/battle_common.js') + hostText('screens/match.js') + hostText('screens/matchmaking.js') + hostText('screens/result.js');
+const coreSrc = hostText('data/leagues.js') + '\n' + hostText('core/state.js');
+const hostAll = hostJs.map(hostText).join('\n');
 const mmPool = (() => { const m = battle.match(/const MM_POOL = \{([\s\S]*?)\};/); return m ? m[1] : ''; })();
 const peopleCount = (coreSrc.match(/n: '/g) || []).length;
 {
@@ -98,7 +106,7 @@ const peopleCount = (coreSrc.match(/n: '/g) || []).length;
   rec(id++, 'H', 'every Router.go target is defined', missing.length === 0, `missing: ${missing}`);
 }
 {
-  const sends = [...new Set([...(hostText('game_host.js') + battle).matchAll(/GameHost\.send\('(\w+)'/g)].map(m => m[1]))];
+  const sends = [...new Set([...hostAll.matchAll(/GameHost\.send\('(\w+)'/g)].map(m => m[1]))];
   const embed = fs.readFileSync(path.join(SRC, '92_embed.js'), 'utf8');
   const cases = [...new Set([...embed.matchAll(/case '(\w+)':/g)].map(m => m[1]))];
   const missing = sends.filter(s => !cases.includes(s));
@@ -131,18 +139,18 @@ const peopleCount = (coreSrc.match(/n: '/g) || []).length;
 }
 
 {
-  const cs = hostText('career.js');
-  const ids = [...cs.matchAll(/id: '(\w+)',\s*t: '[^']+'.*ev: '(\w+)'/g)].map((m) => m[1]);
+  const cs = hostText('services/career.js');
+  const ids = [...cs.matchAll(/id: '(\w+)',\s*(?:t|tk): '[^']+'.*ev: '(\w+)'/g)].map((m) => m[1]);
   const uniq = new Set(ids);
   rec(id++, 'H', 'daily mission pool: 6+ unique missions wired to real match events',
     ids.length >= 6 && uniq.size === ids.length && /const Daily = \{/.test(cs) && ids.every((i) => ['win1','win2','perf5','perf10','rally8','hits40','smash3','acc75'].includes(i)),
     `ids: ${ids}`);
 }
 {
-  const b = hostText('scr_battle.js');
+  const b = battle;
   rec(id++, 'H', 'result screen fed live match data (point sequence, max speed, daily tick)',
     /st\.seq\.push/.test(b) && /res\.seq = st\.seq/.test(b) &&
-    /stats\.maxSpeed = \(m\.stats/.test(b) && /Daily\.tick\(res, win\)/.test(b) && /Ход матча/.test(b), '');
+    /stats\.maxSpeed = \(m\.stats/.test(b) && /Daily\.tick\(res, win\)/.test(b) && (/Ход матча|result\.matchFlow/.test(b)), '');
 }
 {
   const g70 = fs.readFileSync(path.join(SRC, '70_game.js'), 'utf8');

@@ -90,7 +90,7 @@ Router.def('shop', {
           w.querySelector('.pd-stage').insertAdjacentHTML('beforeend', `<span class="pd-stamp">${t('shop.bought')}</span>`);
           const card = $(`.screen.current [data-item="${it.id}"] .ic-p`); if (card) { card.className = 'ic-p own'; card.innerHTML = Art.icon('check', { c: '#9CFFD0' }) + t('shop.owned'); }
         });
-        w.addEventListener('click', (e) => { if (e.target.closest('[data-a=equip]')) { S.equipped[it.kind] = it.id; save(); toast(t('shop.equipped', { name: itemName(it) }), 'check'); Sheet.close(); } });
+        w.addEventListener('click', (e) => { if (e.target.closest('[data-a=equip]')) { S.equipped[it.kind] = it.id; save(); if (typeof GameHost !== 'undefined' && GameHost.ready) GameHost.send('equip', { equipped: S.equipped }); toast(t('shop.equipped', { name: itemName(it) }), 'check'); Sheet.close(); } });
       }
     });
   }

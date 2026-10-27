@@ -94,6 +94,18 @@ class ShotJournal {
     e.pressZone.accepted = false; e.pressZone.reason = reason || 'OUTSIDE_ZONE';
     if (e.outcome === 'pending') { e.outcome = 'outside'; e.revision++; }
   }
+  promotePress(gestureId, zone) {
+    const e = this.records.find(r => r.gestureId === gestureId && !r.contact);
+    if (!e || !zone) return;
+    e.pressZone = { ...zone, accepted: true, reason: null };
+    if (e.outcome === 'outside' || e.outcome === 'rejected') { e.outcome = 'pending'; e.revision++; }
+  }
+  noteOutcome(tag) {
+    const e = this.latest;
+    if (!e) return;
+    e.note = tag;
+    e.revision++;
+  }
   expire(time, simTime) {
     for (const entry of this.records) {
       const expired = Number.isFinite(simTime) && Number.isFinite(entry.deadlineSim)
