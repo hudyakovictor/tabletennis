@@ -255,7 +255,11 @@ function classifyStroke(m, ctx, sp01) {
   {
     const arcSens = clamp(Number.isFinite(ctx.arcSens) ? ctx.arcSens : 1, 0.6, 1.8);
     const bend = m.dist > 0.001 ? (m.pathLen || 0) / m.dist : 0;
-    if (Math.abs(m.curl) >= 0.85 / arcSens && m.dist >= 0.028 &&
+    /* Медленный сильный подъём — это свеча (LOB), даже если рука дрогнула
+     * дугой: закрутка без темпа всё равно не полетит, а украденная свеча
+     * ломает защиту. Быстрая дуга при любом направлении хорды — закрутка. */
+    const lobLift = slow && u > 0.70;
+    if (!lobLift && Math.abs(m.curl) >= 0.85 / arcSens && m.dist >= 0.028 &&
       (bend >= 1.30 || (m.straightness <= 0.74 && Math.abs(m.curl) >= 1.15 / arcSens))) {
       return m.curl < 0 ? STROKES.HOOK : STROKES.FADE;
     }
