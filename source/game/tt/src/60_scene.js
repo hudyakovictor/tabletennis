@@ -388,44 +388,6 @@ class Scene {
       }
     }
 
-    /* Риги над трибунами: кинематографическая камера смотрит вниз и
-     * потолок в кадр не берёт — «верх экрана» там это верх стен.
-     * Четыре холодные панели над дальней трибуной (две средние дышат)
-     * и по две на боковых: верх кадра получает сине-голубой оттенок
-     * вместо чёрной дыры, а под каждой панелью — мягкая засветка
-     * верхних рядов (аддитивный градиент по стене). */
-    {
-      const rig = [];
-      for (const x of [-6.6, -2.2, 2.2, 6.6]) rig.push({ x, y: 2.55, z: -13.90, ry: 0, tilt: 0.3 });
-      for (const z of [-9, -3, 3, 9]) { rig.push({ x: -16.42, y: 2.55, z, ry: Math.PI / 2, tilt: 0 }); rig.push({ x: 16.42, y: 2.55, z, ry: -Math.PI / 2, tilt: 0 }); }
-      for (const x of [-6.6, -2.2, 2.2, 6.6]) rig.push({ x, y: 2.55, z: 13.90, ry: Math.PI, tilt: 0.3 });
-      let ri = 0;
-      for (const rp of rig) {
-        const q = Q.setAxisAngle(Q.new(), 0, 1, 0, rp.ry);
-        if (rp.tilt) { const qt = Q.setAxisAngle(Q.new(), 1, 0, 0, rp.tilt); Q.mul(q, q, qt); }
-        const m = M4.create();
-        M4.compose(m, V3.set(pos, rp.x, rp.y, rp.z), q, V3.set(scl, 3.0, 0.5, 1));
-        const b = M4.create();
-        const back = 0.09;
-        M4.compose(b, V3.set(pos, rp.x - Math.sin(rp.ry) * back, rp.y + 0.13, rp.z - Math.cos(rp.ry) * back), q, V3.set(scl, 2.7, 0.14, 0.16));
-        const base = [1.05, 1.35, 1.85];
-        const fl = (rp.ry === 0 && (ri === 1 || ri === 2)) ? 1 : 0;
-        const wash = M4.create();
-        M4.compose(wash, V3.set(pos, rp.x, rp.y - 1.05, rp.z + (rp.ry === 0 ? 0.03 : 0), ), q, V3.set(scl, 4.4, 2.2, 1));
-        if (rp.ry !== 0) { // боковые: засветку чуть внутрь зала
-          M4.compose(wash, V3.set(pos, rp.x - Math.sign(rp.x) * -0.03, rp.y - 1.05, rp.z), q, V3.set(scl, 4.4, 2.2, 1));
-        }
-        const glowBase = [0.13, 0.19, 0.30];
-        this.ceilingLights.push({
-          b, m, fl, ph: ri * 2.4, rate: ri % 2 ? 0.73 : 0.9, base,
-          mat: { color: [0.55, 0.70, 1.0], emissive: base.slice(), rough: 1 },
-          glow: wash, glowBase,
-          glowMat: { color: [1, 1, 1], tex: this.tex.glow, blend: 'add', doubleSided: true, emissive: glowBase.slice(), rough: 1 },
-        });
-        ri++;
-      }
-    }
-
     // a soft pool of light on the floor: sells "this table is lit" without
     // a single shadow-map texel
     this.floorPool = M4.create();
@@ -519,7 +481,6 @@ class Scene {
       cl.mat.emissive[0] = cl.base[0] * k;
       cl.mat.emissive[1] = cl.base[1] * k;
       cl.mat.emissive[2] = cl.base[2] * k;
-      if (cl.glowMat) for (let i = 0; i < 3; i++) cl.glowMat.emissive[i] = cl.glowBase[i] * k;
     }
   }
 
@@ -540,7 +501,7 @@ class Scene {
       R.draw(me.quad, this.tableShade, this._shadowMat0);
       for (const w of this.walls) d(me.wall, w, ma.stands);
       for (const b of this.barriers) { if (b.box) d(me.box, b.box, ma.barrier); d(b.long ? me.bannerEnd : me.bannerSide, b.m, b.mat || ma.banner); }
-      for (const cl of this.ceilingLights) { if (cl.b) d(me.box, cl.b, ma.lightBody); R.draw(me.quad, cl.m, cl.mat); if (cl.glow) R.draw(me.quad, cl.glow, cl.glowMat); }
+      for (const cl of this.ceilingLights) { if (cl.b) d(me.box, cl.b, ma.lightBody); R.draw(me.quad, cl.m, cl.mat); }
       d(me.quad, this.ceiling, ma.ceiling);
     } else {
       d(me.net, M.net, ma.net);

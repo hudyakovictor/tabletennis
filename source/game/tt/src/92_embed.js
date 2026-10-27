@@ -12,9 +12,10 @@
  *    hint {on} · debug {on} · mute {on}
  *    slowmo {on}                инспекторское замедление траектории (тумблер)
  *    cal {k, v}                 калибровка оболочки; spinGain/arcSens — закрутка
+ *    missShots {on, half}       автоматические снимки первого нажатия
  *  Game → host:
- *    ready, state, point, hit, serve, matchEnd, train, trainDone, attempt, autoHint, awake,
- *    paused, replayEnd, haptic
+ *    ready, state, point, hit, serve, matchEnd, train, trainDone, attempt,
+ *    shot, shotresult, shoterror, autoHint, awake, paused, replayEnd, haptic
  * ===================================================================== */
 'use strict';
 
@@ -40,6 +41,11 @@
      * OFF by default left players guessing ("то рисуется, то не рисуется" =
      * the miss-streak auto-toggle kicking in). Guidance on from ball one. */
     g.hintContact = true;
+
+    // Restore the calibration gallery from the earlier branch. Capture on
+    // pointerdown, not on pause; the host decides which attempts were misses.
+    const missCap = createMissShotCapture({ getCanvas: () => g.canvas,
+      getOverlay: () => ui && ui.fx, post });
 
     /* ---------------------------- cinema ---------------------------- */
     let lobby = false;
@@ -197,8 +203,8 @@
         return 'Мимо зоны — ставь палец на линию мяча';
       }
       if (a.reason === 'TIMING_EARLY' || (Number.isFinite(a.lead) && a.lead > 0.2)) return 'Рано! Дождись, пока мяч подлетит к тебе';
-      if (a.reason === 'NO_FRESH_SWIPE') return 'Каждый удар — новый свайп';
-      if (a.reason === 'STATIC_CLICK') return 'Не тапай — проведи пальцем вверх через мяч';
+      if (a.reason === 'NO_FRESH_SWIPE') return 'Для каждого удара нужен новый тап или свайп';
+      if (a.reason === 'STATIC_CLICK') return 'Нажми коротко или проведи через мяч';
       if (Number.isFinite(a.dx) && Math.abs(a.dx) > side * 0.55) return `Ракетка прошла ${lr} — веди свайп прямо через мяч`;
       return 'Свайп быстрее и прямо через мяч';
     };
@@ -227,6 +233,10 @@ const showTip = (text) => { if (text) tip = { text, until: g.time + 4.6 }; };
       if (!att) return;
       if (!lobby && !g.demoMode) {
         post('attempt', att);
+        // A successful contact removes only this attempt's frame, as in the
+        // original gallery. Otherwise keep its first observed rejection code.
+        if (att.captureId) post('shotresult', { id: att.captureId, contact: !!att.contact,
+          reason: att.reason || att.zoneReason || null });
         if (!att.training && att.kind === 'rally') {
           if (att.contact) onContact();
           else showTip(onMiss() || missTip(att));
@@ -270,6 +280,38 @@ const showTip = (text) => { if (text) tip = { text, until: g.time + 4.6 }; };
         sig: [MATCH_RULES[(z.pointerType || 'touch') === 'mouse' ? 'contactSideMousePx' : 'contactSideTouchPx'], MATCH_RULES.contactBackPx, MATCH_RULES.contactForwardPx, MATCH_RULES.captureRadius].map((v) => +(+v).toFixed(2)).join('/'),
         ext: z.anchor === 'contact' ? [z.sidePx, z.backPx, z.fwdPx].map((v) => Math.round(v)) : null,
         kx: Number.isFinite(z.kx) ? +z.kx.toFixed(2) : null };
+      // The gate may be anchored to a predicted meeting point rather than the
+      // ball's current screen position. Preserve both instead of labelling the
+      // reference point as the ball or the visible hint.
+      try {
+        const ballScreen = this.ball && this.ball.p ? this.project(this.ball.p, {}) : null;
+        const zone = Number.isFinite(z.x) && Number.isFinite(z.y) ? {
+          x: z.x, y: z.y, radius: z.radius, shape: z.shape, anchor: z.anchor || 'ball',
+          axisX: z.axisX, axisY: z.axisY, fwdPx: z.fwdPx, backPx: z.backPx, sidePx: z.sidePx } : null;
+        const ball = ballScreen && ballScreen.ok ? { x: ballScreen.x * z.vw, y: ballScreen.y * z.vh } : null;
+        att.captureId = missCap.request({ press: { x: z.pressX * z.vw, y: z.pressY * z.vh },
+          vw: z.vw, vh: z.vh, zone, ball, kind: att.kind, input: att.input, training: att.training,
+          gameTime: this.time, gestureId: this.swipe.gestureId, shotId: this.shotId,
+          greenAtPress: z.pressContactable, accepted: att.accepted, zoneReason: z.reason,
+          dx: att.dx, dy: att.dy });
+        if (att.captureId) {
+          // WebGL's buffer is not preserved. Redraw and copy synchronously,
+          // before physics can advance or the browser clears the buffer.
+          const startedAt = typeof performance !== 'undefined' ? performance.now() : 0;
+          if (!this.R || !this.R.gl || this.R.gl.isContextLost()) throw new Error('WebGL context unavailable');
+          this.render();
+          const rec = missCap.capture();
+          if (this.debugRecording) this.logInput('calibration_capture', { outcome: {
+            id: att.captureId, captured: !!rec, half: missCap.getHalf(),
+            imageWidth: rec && rec.imageWidth, imageHeight: rec && rec.imageHeight,
+            captureWallMs: typeof performance !== 'undefined' ? performance.now() - startedAt : null,
+            gameTime: this.time, gestureId: this.swipe.gestureId, shotId: this.shotId } });
+        }
+      } catch (e) {
+        missCap.fail(e);
+        if (this.debugRecording) this.logInput('calibration_capture', { outcome: {
+          id: att.captureId || null, captured: false, error: String(e && e.message || e) } });
+      }
     };
     wrap(g, 'logPressRejection', function (orig, reason, detail) {
       if (att && !att.reason && !att.contact) att.reason = reason;
@@ -347,7 +389,7 @@ const showTip = (text) => { if (text) tip = { text, until: g.time + 4.6 }; };
       if (!m || m.__tt !== 1) return;
       // only commands that need a visible, running arena wake it; 'attract'/'quit' just set the scene
       // behind a hidden layer (menus, matchmaking) and must not restart full-rate rendering there
-      if (!['sleep', 'mute', 'quality', 'rm', 'debug', 'hint', 'attract', 'quit', 'quiet', 'pause', 'resume', 'locale'].includes(m.type)) wake();
+      if (!['sleep', 'mute', 'quality', 'rm', 'debug', 'hint', 'attract', 'quit', 'quiet', 'pause', 'resume', 'locale', 'missShots'].includes(m.type)) wake();
       switch (m.type) {
         case 'sleep': sleeping = true; break;      // frozen in place: update is skipped, so nothing advances
         case 'wake': break;
@@ -399,8 +441,12 @@ const showTip = (text) => { if (text) tip = { text, until: g.time + 4.6 }; };
         /* Тумблер инспекторского слоу-мо из оболочки: разобрать траекторию
          * удара в замедлении. Состояние кнопки в движке догонит syncSlowmoControl. */
         case 'slowmo': if (g.setInspectSlowmo) g.setInspectSlowmo(!!m.on); break;
+        case 'missShots': missCap.setEnabled(!!m.on); missCap.setHalf(m.half); break;
         case 'rm': g.reducedMotion = !!m.on || !!(g.motionQuery && g.motionQuery.matches); break;
-        case 'debug': if (ui) ui.captureDebug = !!m.on; break;
+        case 'debug':
+          if (typeof g.setDiagnosticMode === 'function') g.setDiagnosticMode(!!m.on);
+          else if (ui) ui.captureDebug = !!m.on;
+          break;
         case 'mute': g.settings.sound = !m.on; g.audio.setMuted(!!m.on); break;
         case 'quality': {
           const q = { high: 'high', mid: 'medium', low: 'low' }[m.q] || 'high';

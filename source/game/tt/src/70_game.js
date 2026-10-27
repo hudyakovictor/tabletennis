@@ -130,6 +130,7 @@ class Game {
     this.paused = false;
     this.training = null;
     this.time = 0; this.frame = 0; this.stateT = 0;
+    this.strokeTime = 0;                // same scaled clock as the ball, for input freshness
     this.score = [0, 0];                 // [player, ai]
     this.games = [0, 0];
     this.server = 1;                     // +1 player serves
@@ -276,23 +277,43 @@ class Game {
 
     // Left pointer = stroke. The camera is fixed: no right-drag, no wheel.
     const ptrs = new Map();
+    const domEvent = e => ({ type: e.type, pointerId: e.pointerId, pointerType: e.pointerType || null,
+      clientX: Number.isFinite(e.clientX) ? e.clientX : null, clientY: Number.isFinite(e.clientY) ? e.clientY : null,
+      button: e.button, buttons: e.buttons, pressure: Number.isFinite(e.pressure) ? e.pressure : null,
+      width: Number.isFinite(e.width) ? e.width : null, height: Number.isFinite(e.height) ? e.height : null,
+      timestamp: Number.isFinite(e.timeStamp) ? e.timeStamp : null,
+      receivedAt: typeof performance !== 'undefined' ? performance.now() : null,
+      trusted: !!e.isTrusted, cancelable: !!e.cancelable });
     const dropStroke = () => {
       this.swipe.cancel();
       this.pointerDown = false;
     };
 
-    this.cancelInput = () => { ptrs.clear(); dropStroke(); };
+    this.cancelInput = (reason = 'unspecified', event = null) => {
+      if (this.debugRecording) this.logInput('input_cancel', { dom: event ? domEvent(event) : null,
+        outcome: { reason, active: !!this.swipe.active, pointerDown: !!this.pointerDown, pointers: ptrs.size } });
+      ptrs.clear(); dropStroke();
+    };
     const down = (e) => {
-      if (this.paused || this.state === GS.MENU || this.state === GS.MATCH_END) return;
-      if (e.button === 2) { e.preventDefault(); return; }
-      if (e.button === 1) { e.preventDefault(); return; }
+      if (this.paused || this.state === GS.MENU || this.state === GS.MATCH_END) {
+        if (this.debugRecording) this.logInput('pointer_ignored', { dom: domEvent(e), outcome: { reason: this.paused ? 'PAUSED' : 'NON_PLAY_STATE' } });
+        return;
+      }
+      if (e.button === 2 || e.button === 1) {
+        if (this.debugRecording) this.logInput('pointer_ignored', { dom: domEvent(e), outcome: { reason: 'NON_PRIMARY_BUTTON' } });
+        e.preventDefault(); return;
+      }
       if (this.demoMode) this.stopDemo(); // a real stroke always takes control
       this.audio.init(); this.audio.resume();
       ptrs.set(e.pointerId, { x: e.clientX, y: e.clientY });
       e.preventDefault();
 
-      if (this.replayer.on) { this.skipReplay(); return; }   // tap = skip the reel
+      if (this.replayer.on) {
+        if (this.debugRecording) this.logInput('pointer_ignored', { dom: domEvent(e), outcome: { reason: 'REPLAY_SKIPPED' } });
+        this.skipReplay(); return;
+      }
       if (ptrs.size >= 2) {                          // a second finger cancels
+        if (this.debugRecording) this.logInput('input_cancel', { dom: domEvent(e), outcome: { reason: 'SECOND_POINTER', pointers: ptrs.size } });
         dropStroke();
         return;
       }
@@ -318,7 +339,8 @@ class Game {
         }
       }
 
-      this.swipe.down(n.x, n.y, this.time);
+      this.swipe.down(n.x, n.y, this.time, this.strokeTime);
+      this.swipe.tapMaxMovePx = 0;
       const rect = c.getBoundingClientRect();
       const pointerType = e.pointerType || (this.pointerFine === false ? 'touch' : 'mouse');
       const servePress = this.state === GS.SERVE_TOSS && this.server === 1;
@@ -341,23 +363,30 @@ class Game {
       this.swipe.pressZone.pointerId = e.pointerId;
       this.swipe.pressZone.pointerType = pointerType;
       this.swipe.pressZone.pressT = this.time;
+      if (this.debugRecording && Number.isFinite(e.timeStamp)) this.swipe.pressZone.domTimestamp = e.timeStamp;
+      this.swipe.pressZone.pressContactable = !!(this._strike && this._strike.on && this._strike.contactable);
+      this.swipe.pressZone.shotId = this.shotId;
       this.swipe.pressZone.serving = this.state === GS.SERVE_READY || this.state === GS.SERVE_TOSS;
       if (this.training && typeof this.training.onPress === 'function') this.training.onPress(this.swipe.pressZone);
       if (typeof this.onPressZone === 'function') this.onPressZone(this.swipe.pressZone, cpGate, servePress);
       if (this.shotJournal) {
         const attempt = this.shotJournal.create(this.swipe.gestureId, this.time);
         attempt.pressZone = { ...this.swipe.pressZone };
-        attempt.deadline = this.time + (attempt.pressZone.serving ? 1.15 : .25);
+        const win = attempt.pressZone.serving ? 1.15 : .25;
+        attempt.deadline = this.time + win;
+        attempt.deadlineSim = this.strokeTime + win;
         if (!attempt.pressZone.accepted) attempt.outcome = 'outside';
       }
-      /* Mouse hover already drives the BAT. Committing that trail (or worse,
-         inventing a 3.5 % upward flick) on button-down made a motionless
-         click look like a stroke — the ball came off the rubber with no
-         swing. Desktop now matches touch: the stroke is the drag while the
-         button is down. Hover still aims; it does not hit. */
+      /* Hover aims only. A quick release without a drag becomes a compact
+       * return; a drag keeps its own speed, direction and spin. */
       this.pointer = n; this.pointerDown = true;
       this.pointerFine = e.pointerType !== 'touch' && e.pointerType !== 'pen';
-      this.logInput('pointerdown', { pointer: n, pointerId: e.pointerId, buttons: e.buttons, inputType: pointerType });
+      this.logInput('pointerdown', { pointer: n, pointerId: e.pointerId, buttons: e.buttons, inputType: pointerType,
+        dom: this.debugRecording ? domEvent(e) : null,
+        outcome: { greenAtPress: !!this.swipe.pressZone.pressContactable,
+          gateAnchor: cpGate ? 'predicted_contact' : 'current_ball', predictedEta: cpGate ? cpGate.t : null } });
+      if (this.debugRecording) this._debugLastPress = { shotId: this.shotId, gestureId: this.swipe.gestureId,
+        green: !!this.swipe.pressZone.pressContactable, accepted: !!this.swipe.pressZone.accepted, time: this.time };
       if (this.state === GS.SERVE_READY && this.server === 1) this.startToss();
     };
 
@@ -383,11 +412,15 @@ class Game {
       if (p) { p.x = e.clientX; p.y = e.clientY; }
       const n = track(e);
       if (this.swipe.active && ptrs.size < 2) {
-        this.swipe.move(n.x, n.y, this.time);
+        const z = this.swipe.pressZone;
+        if (z) this.swipe.tapMaxMovePx = Math.max(this.swipe.tapMaxMovePx || 0,
+          Math.hypot((n.x - z.pressX) * z.vw, (n.y - z.pressY) * z.vh));
+        this.swipe.move(n.x, n.y, this.time, this.strokeTime);
         const sp = this.swipe.m.speed;
         if (sp > 1.6) this.audio.whoosh(clamp(sp / 4, 0, 1.4));
         this.logInput('pointermove', { pointer: n, pointerId: e.pointerId, buttons: e.buttons,
-          inputType: e.pointerType || (this.pointerFine === false ? 'touch' : 'mouse') });
+          inputType: e.pointerType || (this.pointerFine === false ? 'touch' : 'mouse'),
+          dom: this.debugRecording ? domEvent(e) : null });
       }
       if (e.cancelable) e.preventDefault();
     };
@@ -398,16 +431,37 @@ class Game {
         e.preventDefault();
         return;
       }
-      if (ptrs.size >= 1) { e.preventDefault(); return; }   // still another finger down
-      if (!this.swipe.active) { this.pointerDown = false; return; }
+      if (ptrs.size >= 1) {
+        if (this.debugRecording) this.logInput('pointer_ignored', { dom: domEvent(e), outcome: { reason: 'OTHER_POINTER_STILL_DOWN' } });
+        e.preventDefault(); return;
+      }
+      if (!this.swipe.active) {
+        if (this.debugRecording) this.logInput('pointer_ignored', { dom: domEvent(e), outcome: { reason: 'RELEASE_WITHOUT_ACTIVE_PRESS' } });
+        this.pointerDown = false; return;
+      }
       const n = norm(e);
       this.pointer = n;
-      this.swipe.up(n.x, n.y, this.time);
+      const sw = this.swipe, zone = sw.pressZone;
+      if (zone) sw.tapMaxMovePx = Math.max(sw.tapMaxMovePx || 0,
+        Math.hypot((n.x - zone.pressX) * zone.vw, (n.y - zone.pressY) * zone.vh));
+      sw.up(n.x, n.y, this.time, this.strokeTime);
       this.pointerDown = false;
       this.swipeReleasedAt = this.time;
+      /* A short, nearly motionless release is an intentional return, not an
+       * invented swipe. It is bound to the incoming shot on which it began;
+       * toss taps, long holds and drags cannot silently become extra hits. */
+      const tapAge = this.time - sw.startT;
+      const tapSlop = zone && zone.pointerType === 'mouse' ? 10 : 14;
+      if (zone && !zone.serving && zone.shotId === this.shotId &&
+          this.state === GS.RALLY && this.ball.live && this.ball.lastHitBy === -1 &&
+          tapAge >= 0 && tapAge <= .35 && sw.tapMaxMovePx <= tapSlop &&
+          !isRealStroke(sw.lastReleased, false)) {
+        sw.lastReleased = tapStrokeMetrics(sw.lastReleased, zone.pressX, zone.pressY);
+      }
       this.updateShotDiagnostics();
       this.logSwipeRelease({ pointer: n, pointerId: e.pointerId, buttons: e.buttons,
-        inputType: e.pointerType || (this.pointerFine === false ? 'touch' : 'mouse') });
+        inputType: e.pointerType || (this.pointerFine === false ? 'touch' : 'mouse'),
+        dom: this.debugRecording ? domEvent(e) : null });
       this.lastSwipeT = this.time;
       e.preventDefault();
     };
@@ -421,16 +475,21 @@ class Game {
     });
     c.addEventListener('pointermove', move);
     c.addEventListener('pointerup', up);
-    c.addEventListener('pointercancel', () => this.cancelInput());
-    c.addEventListener('lostpointercapture', (e) => { if (ptrs.has(e.pointerId)) this.cancelInput(); });
+    c.addEventListener('pointercancel', (e) => this.cancelInput('pointercancel', e));
+    c.addEventListener('lostpointercapture', (e) => { if (ptrs.has(e.pointerId)) this.cancelInput('lostpointercapture', e); });
     c.addEventListener('contextmenu', (e) => e.preventDefault());
     // Hover movement follows the bat. A held right button is not a camera command.
     window.addEventListener('pointermove', (e) => { if (!ptrs.size) track(e); }, { passive: true });
-    window.addEventListener('blur', () => { this.cancelInput(); this.setPaused(true); });
+    window.addEventListener('blur', () => { this.cancelInput('window_blur'); this.setPaused(true); });
     document.addEventListener('visibilitychange', () => {
-      if (document.hidden) { this.cancelInput(); this.setPaused(true); this.profile.save(true); }
+      if (this.debugRecording) this.logInput('visibility', { outcome: { state: document.visibilityState } });
+      if (document.hidden) { this.cancelInput('document_hidden'); this.setPaused(true); this.profile.save(true); }
     });
-    window.addEventListener('pagehide', () => { this.saveSettings(); this.profile.save(true); this.career.save(); });
+    window.addEventListener('pagehide', (e) => {
+      if (this.debugRecording) this.logInput('pagehide', { outcome: { persisted: !!e.persisted } });
+      if (this.debugArchive) this.debugArchive.flush();
+      this.saveSettings(); this.profile.save(true); this.career.save();
+    });
     // The wheel used to dolly the camera. A page that scrolls nowhere should
     // still not jump, so it is swallowed — but it changes nothing on screen.
     c.addEventListener('wheel', (e) => { e.preventDefault(); }, { passive: false });
@@ -445,6 +504,10 @@ class Game {
       }
     } catch (e) { console.debug('Telegram swipe behavior unavailable', e); }
     document.addEventListener('touchmove', (e) => {
+      // The pause actions are a real scroll area on small phones. Do not
+      // swallow its touch scroll while preventing rubber-banding during play.
+      const scroll = e.target && e.target.closest && e.target.closest('.pause-actions');
+      if (this.paused && scroll) return;
       if (e.cancelable) e.preventDefault();
     }, { passive: false });
     /* Prevent iOS rubber-banding / pull-to-refresh on the body. */
@@ -591,7 +654,9 @@ class Game {
   }
 
   setState(s) {
+    const previous = this.state;
     this.state = s; this.stateT = 0; if (this.paused) this.setPaused(false);
+    if (this.debugRecording && previous !== s) this.logInput('state_change', { outcome: { from: previous, to: s } });
     if (typeof document !== 'undefined' && document.body) {
       document.body.classList.toggle('is-playing', s !== GS.MENU && s !== GS.MATCH_END);
     }
@@ -602,8 +667,14 @@ class Game {
   setPaused(v) {
     const play = this.state === GS.RALLY || this.state === GS.SERVE_READY ||
                  this.state === GS.SERVE_TOSS || this.state === GS.POINT;
-    this.paused = !!v && play;
-    if (this.paused && this.cancelInput) this.cancelInput();
+    const wasPaused = !!this.paused, next = !!v && play;
+    if (next && !wasPaused && this.debugRecording && typeof this.captureDiagnosticFrame === 'function') {
+      try { this.captureDiagnosticFrame(); }
+      catch (e) { this.diagnosticIssue('screenshot', e && e.message || e, e && e.stack); }
+    }
+    this.paused = next;
+    if (this.paused && this.cancelInput) this.cancelInput('pause');
+    if (this.debugRecording && wasPaused !== this.paused) this.logInput('pause', { outcome: { paused: this.paused, requested: !!v } });
     if (typeof document !== 'undefined' && document.body)
       document.body.classList.toggle('is-paused', this.paused);
   }
@@ -699,6 +770,14 @@ class Game {
 
   /* ---------------------------- scoring ---------------------------- */
   awardPoint(who, reason) {
+    if (this.debugRecording) {
+      this.logInput('point', { outcome: { winner: who, reason } });
+      const press = this._debugLastPress;
+      if (who < 0 && press && press.shotId === this.shotId && press.green && this.ball.lastHitBy === -1) {
+        this.logInput('anomaly', { outcome: { reason: 'GREEN_PRESS_WITHOUT_RETURN', press,
+          note: 'Observation only; inspect input, cancellation and physics_gate events for the cause.' } });
+      }
+    }
     if (this.training) {                 // drills have no score, only feedback
       if (this.shotJournal) this.shotJournal.point(who, reason, this.ball.lastHitBy, this.time);
       this.training.onFault(who, reason);
@@ -786,6 +865,8 @@ class Game {
 
     const lh = this.ball.lastHitBy;
     this.rallyBounces.push(side);
+    if (this.debugRecording) this.logInput('bounce', { outcome: { side, speed, lastHitBy: lh,
+      edge: info && Number.isFinite(info.edge) ? info.edge : null } });
     this.recorder.addBounce(side, this.ball.p.x, this.ball.p.z, lh);
     if (this.training) this.training.onBounce(side, lh);
 
@@ -881,6 +962,9 @@ class Game {
    *  the shot that should (almost) always be a point. */
   hitInputGrade() {
     const pz = this.swipe.pressZone, S = this.swipe.samples;
+    // A click is a deliberately simple return, not a failed swipe and not an
+    // "ideal" power shot with its near-guaranteed winner bonus.
+    if (pz && pz.accepted && this.swipe.lastReleased && this.swipe.lastReleased.tap) return 'yellow';
     if (!pz || pz.accepted !== true || !Number.isFinite(pz.distancePx) || !S || S.length < 3) return 'red';
     let peak = 0, peakT = null;
     for (let i = 1; i < S.length; i++) {
@@ -1076,6 +1160,7 @@ class Game {
   setInspectSlowmo(on) {
     const ok = this.slowmo && this.slowmo.allowed && !(this.network && this.network.isInMatch);
     this.inspectSlowmo = !!on && ok;
+    if (this.debugRecording) this.logInput('slowmo', { outcome: { requested: !!on, enabled: this.inspectSlowmo, allowed: !!ok } });
     return this.inspectSlowmo;
   }
 
@@ -1399,6 +1484,7 @@ class Game {
 
     /* --- paddles (CCD) --- */
     if (this.time - this.player.lastHitT > 0.09) this.tryPlayerHit(p0);
+    else this.debugRecording && this.diagnosticPhysicsGate('hit_cooldown', { elapsedReal: this.time - this.player.lastHitT, requiredReal: .09 });
   }
 
   /** net touch on a service: no point, the serve is simply taken again. */
@@ -1414,7 +1500,7 @@ class Game {
   updateShotDiagnostics() {
     const journal = this.shotJournal, sw = this.swipe;
     if (!journal || !sw) return;
-    journal.expire(this.time);
+    journal.expire(this.time, this.strokeTime);
     if (![GS.SERVE_READY, GS.SERVE_TOSS, GS.RALLY].includes(this.state)) return;
     const m = sw.active ? sw.m : sw.lastReleased;
     if (!m || m.samples < 2) return;
@@ -1425,8 +1511,11 @@ class Game {
       spinGain: this.settings.spinGain ?? 1, arcSens: this.settings.arcSens ?? 1 };
     const r = isRealStroke(m, serving) ? deriveStroke(m, ctx) : null;
     const lastSample = sw.samples[sw.samples.length - 1];
+    const heldStroke = sw.active && sw.realGestureId === sw.gestureId;
     journal.observe(sw.gestureId, m, { time: this.time, isServe: serving, active: sw.active,
-      sampleTime: sw.active && lastSample ? lastSample.t : this.swipeReleasedAt,
+      sampleTime: heldStroke ? sw.realAt : sw.active && lastSample ? lastSample.t : this.swipeReleasedAt,
+      sampleSimTime: heldStroke ? sw.realAtSim : sw.active ? sw.sampleSimTime : sw.releaseSimTime,
+      simTime: this.strokeTime, windowSec: serving ? 1.15 : heldStroke ? 2.5 : sw.active ? .18 : .25,
       strokeId: r && r.stroke.id });
   }
 
@@ -1434,7 +1523,17 @@ class Game {
     if (!this.inputLog || typeof makeInputLogEvent !== 'function') return null;
     const event = makeInputLogEvent(this, type, extra);
     if (!event) return null;
+    if (this.debugRecording && typeof diagnosticSnapshot === 'function') {
+      try {
+        event.debug = diagnosticSnapshot(this);
+        if (extra.dom) event.dom = extra.dom;
+      } catch (e) {
+        // Diagnostics must not break the input or physics path they observe.
+        this._diagnosticInternalError = typeof diagErrorText === 'function' ? diagErrorText(e && e.stack || e) : String(e);
+      }
+    }
     this.inputLog.record(event);
+    if (this.debugRecording && this.debugArchive) this.debugArchive.add(event);
     if ((type === 'pointerdown' || type === 'contact') && this.moments &&
         typeof this.moments.addInputDecision === 'function')
       this.moments.addInputDecision(event.t, event.decision, event.outcome, event.inputType);
@@ -1442,9 +1541,114 @@ class Game {
   }
 
   logSwipeRelease(extra = {}) {
-    const serving = !!(this.swipe && this.swipe.pressZone && this.swipe.pressZone.serving);
+    const sw = this.swipe || {}, zone = sw.pressZone;
+    const serving = !!(zone && zone.serving), released = sw.lastReleased;
+    const valid = isRealStroke(released, serving);
+    const age = this.time - sw.startT, slop = zone && zone.pointerType === 'mouse' ? 10 : 14;
     return this.logInput('pointerup', { ...extra, outcome: { released: true, contact: false,
-      reason: isRealStroke(this.swipe && this.swipe.lastReleased, serving) ? null : 'STATIC_CLICK' } });
+      recognized: valid ? (released.tap ? 'tap' : 'swipe') : 'none',
+      reason: valid ? null : 'STATIC_CLICK', tapDurationGameSeconds: Number.isFinite(age) ? age : null,
+      tapDurationEventMs: zone && extra.dom && Number.isFinite(zone.domTimestamp) && Number.isFinite(extra.dom.timestamp)
+        ? Math.max(0, extra.dom.timestamp - zone.domTimestamp) : null,
+      tapMaxDuration: .35, tapMovePx: Number.isFinite(sw.tapMaxMovePx) ? sw.tapMaxMovePx : null,
+      tapSlopPx: slop, sameShot: !!(zone && zone.shotId === this.shotId),
+      pressAccepted: zone ? !!zone.accepted : null } });
+  }
+
+  setDiagnosticMode(on) {
+    on = !!on;
+    if (on === !!this.debugRecording) return on;
+    if (on && typeof DiagnosticArchive !== 'undefined') {
+      if (!this.debugArchive || this.debugArchive.status === 'unavailable') {
+        this.debugArchive = new DiagnosticArchive(diagnosticSessionId());
+        // The ordinary 30-second ring can still provide pre-enable context,
+        // though only events recorded after enabling have detailed snapshots.
+        for (const event of this.inputLog.events(this.time)) this.debugArchive.add(event);
+      } else this.debugArchive.start();
+    }
+    this.debugRecording = on;
+    if (this.ui) this.ui.captureDebug = on;
+    this.logInput('diagnostics', { outcome: { enabled: on } });
+    if (!on && this.debugArchive) this.debugArchive.stop();
+    return on;
+  }
+
+  diagnosticIssue(kind, message, stack = '') {
+    if (typeof diagErrorText !== 'function') return;
+    const issue = { kind: diagErrorText(kind, 100), message: diagErrorText(message),
+      stack: diagErrorText(stack, 4000), wallMs: Date.now(), gameSeconds: this.time };
+    const list = this._diagnosticErrors || (this._diagnosticErrors = []);
+    list.push(issue); if (list.length > 100) list.shift();
+    if (this.debugRecording) this.logInput('runtime_error', { outcome: issue });
+  }
+
+  // Opening an existing session does not turn recording back on. It lets the
+  // pause UI restore the last bookmarked frame even after recording was
+  // stopped and the page reloaded, before a report has been prepared.
+  diagnosticRecoveryArchive() {
+    if (!this.debugArchive && typeof DiagnosticArchive !== 'undefined') {
+      try {
+        const previous = sessionStorage.getItem(DIAGNOSTIC_SESSION_KEY);
+        if (previous) { this.debugArchive = new DiagnosticArchive(previous); this.debugArchive.stop(); }
+      } catch (e) {}
+    }
+    return this.debugArchive || null;
+  }
+
+  async diagnosticReport() {
+    if (this.debugRecording) this.logInput('report_requested', { outcome: { paused: !!this.paused } });
+    this.diagnosticRecoveryArchive();
+    const archived = this.debugArchive ? await this.debugArchive.read() : [];
+    const current = this.inputLog ? this.inputLog.events(this.time) : [];
+    const byId = new Map();
+    for (const e of archived.concat(current)) byId.set(`${e.instance}:${e.seq}`, e);
+    const events = Array.from(byId.values());
+    const archive = this.debugArchive;
+    const safeSettings = {};
+    for (const key of ['difficulty', 'quality', 'camera', 'camZoom', 'camPitch', 'hand', 'grip',
+      'spinGain', 'arcSens', 'showTrail', 'showPredict', 'targetScore', 'adaptive']) safeSettings[key] = this.settings[key];
+    const calibration = {};
+    for (const key of ['camHeight', 'camZoom', 'camSway', 'padSpeed', 'padSmooth', 'ballSize', 'trailLen',
+      'tableGlow', 'flytime', 'hintRadius', 'spinGain', 'arcSens'])
+      if (this._cal && Number.isFinite(this._cal[key])) calibration[key] = this._cal[key];
+    return { format: 'topspin-diagnostics', version: DIAGNOSTIC_VERSION, createdAt: new Date().toISOString(),
+      sessionId: archive ? archive.sessionId : null,
+      privacy: 'Local only. No automatic transmission. Review before sharing; contains device details, input coordinates and game state.',
+      recording: { enabled: !!this.debugRecording, memory: this.inputLog && this.inputLog.stats(this.time),
+        recovery: { status: archive ? archive.status : 'not_enabled', error: archive && archive.error,
+          pendingDropped: archive ? archive.dropped : 0, chunksPrunedThisInstance: archive ? archive.pruned : 0,
+          bookmarkedFrame: archive ? archive.frameStatus : 'unavailable', frameError: archive && archive.frameError || null,
+          maxChunks: 64, maxEventsPerChunk: 256, flushIntervalSeconds: 3 },
+        events: events.length, firstWallMs: events.length ? events[0].wallMs : null,
+        lastWallMs: events.length ? events[events.length - 1].wallMs : null, includesPreEnableSummary: true,
+        note: 'Memory and recovery are capped; older events may be overwritten. A crash may lose the last unflushed batch.' },
+      environment: diagnosticEnvironment(this), settings: safeSettings, calibration,
+      rules: typeof MATCH_RULES !== 'undefined' ? MATCH_RULES : null,
+      graceRules: typeof GRACE_RULES !== 'undefined' ? GRACE_RULES : null,
+      physics: typeof PH !== 'undefined' ? PH : null,
+      current: diagnosticSnapshot(this), errors: (this._diagnosticErrors || []).slice(),
+      diagnosticInternalError: this._diagnosticInternalError || null,
+      shots: this.shotJournal ? this.shotJournal.exportData().records : [], events };
+  }
+
+  captureDiagnosticFrame(bookmark = false) {
+    if (!this.canvas || !this.R || !this.R.gl || this.R.gl.isContextLost()) throw new Error('WebGL context unavailable');
+    if (!this.canvas.width || !this.canvas.height) throw new Error('Empty game canvas');
+    // The drawing buffer is not preserved. Draw and copy immediately in the
+    // same task, before the browser clears it. No DOM/shell controls are in it.
+    this.render();
+    const out = document.createElement('canvas'); out.width = this.canvas.width; out.height = this.canvas.height;
+    const ctx = out.getContext('2d'); if (!ctx) throw new Error('2D canvas unavailable');
+    ctx.drawImage(this.canvas, 0, 0);
+    if (this.ui && this.ui.fx && this.ui.fx.width && this.ui.fx.height)
+      ctx.drawImage(this.ui.fx, 0, 0, out.width, out.height);
+    const result = { dataUrl: out.toDataURL('image/png'), capturedAt: new Date().toISOString(),
+      gameSeconds: this.time, state: this.state, width: out.width, height: out.height,
+      includes: 'game WebGL and 2D canvases only; shell DOM/scoreboard omitted' };
+    this._diagnosticFrame = result;
+    if (bookmark && this.debugArchive) this.debugArchive.saveFrame(result);
+    if (this.debugRecording) this.logInput('frame_captured', { outcome: { ...result, dataUrl: undefined, bookmark: !!bookmark } });
+    return result;
   }
 
   pressConsumed() {
@@ -1478,13 +1682,23 @@ class Game {
     const passed = Number.isFinite(b.p.z) && Number.isFinite(pad.pos.z) &&
       b.p.z > pad.pos.z + MATCH_RULES.depthTolerance;
     if (!inRange && !passed) return null;
+    if (this.debugRecording && passed && sw.active && sw.pressZone && sw.pressZone.accepted &&
+        sw.pressZone.pressContactable && !isRealStroke(sw.m, serving)) {
+      const key = `${this.shotId}:${sw.gestureId}`;
+      if (this._debugHeldPastWindow !== key) {
+        this._debugHeldPastWindow = key;
+        this.logInput('anomaly', { outcome: { reason: 'GREEN_PRESS_HELD_PAST_CAPTURE',
+          note: 'The stationary press is not a tap until release; this records an observation, not a root cause.' } });
+      }
+    }
     const releasedAt = Number.isFinite(this.swipeReleasedAt) ? this.swipeReleasedAt : -Infinity;
+    const releasedAge = this.strokeAge(sw.releaseSimTime, releasedAt);
     const deadWin = serving ? 1.15 : .25;
-    if (!sw.active && isRealStroke(sw.lastReleased, serving) && this.time - releasedAt >= deadWin)
-      return this.logPressRejection('TIMING_EARLY', { releasedAgeMs: (this.time - releasedAt) * 1000 });
+    if (!sw.active && isRealStroke(sw.lastReleased, serving) && releasedAge >= deadWin)
+      return this.logPressRejection('TIMING_EARLY', { releasedAgeMs: (this.time - releasedAt) * 1000, simulationAgeMs: releasedAge * 1000 });
     const heldWin = serving ? 1.15 : 2.5;
     const staleHeld = sw.active && sw.gestureId === sw.realGestureId &&
-      this.time - (sw.realAt || 0) >= heldWin;
+      this.strokeAge(sw.realAtSim, sw.realAt || 0) >= heldWin;
     const noGesture = !sw.active && !sw.lastReleased && !(sw.samples && sw.samples.length);
     if (staleHeld || noGesture) return this.logPressRejection('NO_FRESH_SWIPE');
     return null;
@@ -1516,6 +1730,9 @@ class Game {
   validatePressDirection(m) {
     const pz = this.swipe && this.swipe.pressZone;
     if (!pz || !pz.accepted || !m) return this.pressAdmitsBall();
+    // A tap has no path to judge. Its position and the physical contact
+    // checks still apply; only a swipe can fail the direction test.
+    if (m.tap === true) return true;
     if (pz.directionOk === true) return true;
     if (pz.directionOk === false) return false;
     if (![pz.x, pz.y, pz.pointerX, pz.pointerY, m.dx, m.dy].every(Number.isFinite)) return true;
@@ -1734,6 +1951,13 @@ class Game {
     return zone;
   }
 
+  /** Prefer elapsed physics time for real pointer events. Synthetic/demo
+   * gestures without a simulation timestamp keep their existing real clock. */
+  strokeAge(simStamp, realStamp) {
+    return Number.isFinite(this.strokeTime) && Number.isFinite(simStamp)
+      ? this.strokeTime - simStamp : this.time - realStamp;
+  }
+
   playerStrokeIntent(serving = false) {
     const sw = this.swipe;
     const lastSample = sw.samples[sw.samples.length - 1];
@@ -1743,21 +1967,22 @@ class Game {
        freshness (correct for a rally) dropped a legal toss strike. */
     const liveWin = serving ? 1.15 : 0.18;
     const deadWin = serving ? 1.15 : 0.25;
-    /* A BLOCK is a real stroke that then stands still: the hand moves into
-       position and waits for the ball. Sample freshness alone killed it
-       180 ms after the finger stopped moving, so the one shot where holding
-       still is the whole technique could not be played at all. Remember that
-       THIS gesture has already been a real stroke; a tap (never real) still
-       produces no intent, which the browser test pins down. */
-    if (sw.active && sw.gestureId !== sw.realGestureId && isRealStroke(sw.m, serving)) {
+    /* A real swipe can be held in position for a block. Only a fresh sample
+       may start that hold: discovering an old motion late must not re-arm it.
+       A stationary hold is not a swipe; a tap is recognised on release. */
+    const sampleAge = lastSample ? this.strokeAge(sw.sampleSimTime, lastSample.t) : Infinity;
+    if (sw.active && sw.gestureId !== sw.realGestureId && sampleAge >= 0 && sampleAge < liveWin &&
+        isRealStroke(sw.m, serving)) {
       sw.realGestureId = sw.gestureId;
       sw.realAt = this.time;
+      sw.realAtSim = Number.isFinite(sw.sampleSimTime) ? this.strokeTime : null;
     }
-    const held = sw.active && sw.gestureId === sw.realGestureId &&
-      this.time - (sw.realAt || 0) < (serving ? 1.15 : 2.5);
-    const fresh = sw.active && lastSample && this.time - lastSample.t >= 0 && this.time - lastSample.t < liveWin;
+    const heldAge = this.strokeAge(sw.realAtSim, sw.realAt || 0);
+    const releasedAge = this.strokeAge(sw.releaseSimTime, releasedAt);
+    const held = sw.active && sw.gestureId === sw.realGestureId && heldAge >= 0 && heldAge < (serving ? 1.15 : 2.5);
+    const fresh = sw.active && lastSample && sampleAge >= 0 && sampleAge < liveWin;
     const m = fresh || held ? sw.m
-      : !sw.active && this.time - releasedAt >= 0 && this.time - releasedAt < deadWin ? sw.lastReleased : null;
+      : !sw.active && releasedAge >= 0 && releasedAge < deadWin ? sw.lastReleased : null;
     if (!isRealStroke(m, serving)) return null;
     return m;
   }
@@ -1810,6 +2035,22 @@ class Game {
     return s;
   }
 
+  diagnosticPhysicsGate(stage, detail = {}) {
+    if (!this.debugRecording || !this.ball || !this.ball.live || !this.ball.p || !this.player || !this.player.pos) return;
+    // Detailed substep samples near the player, not 600 full snapshots per
+    // second of ordinary flight. Log every stage transition immediately.
+    if (this.ball.lastHitBy !== -1 && this.state !== GS.SERVE_TOSS) return;
+    if (Math.abs(this.ball.p.z - this.player.pos.z) > .9 && !(this.swipe && this.swipe.active)) return;
+    const key = [stage, this.shotId, this.swipe && this.swipe.gestureId].join(':');
+    const changed = this._debugPhysicsKey !== key;
+    this._debugPhysicsKey = key;
+    // Count across frames: at 0.3x a frame often has fewer than six
+    // substeps, so using the per-frame index would silently skip them all.
+    this._debugPhysicsSamples = (this._debugPhysicsSamples || 0) + 1;
+    if (!changed && this._debugPhysicsSamples % 6 !== 0) return;
+    this.logInput('physics_gate', { outcome: { stage, ...detail } });
+  }
+
   tryPlayerHit(p0) {
     const pad = this.player, b = this.ball;
     if (!b.live) return;
@@ -1820,12 +2061,13 @@ class Game {
     /* A serve has to bounce on the receiver's side before it can be returned.
      * `isServeBall` alone did not stop the near side from volleying the
      * opponent's serve straight out of the toss. */
-    if (this.pressConsumed()) { this.logPressRejection('CONSUMED'); return; }
+    if (this.pressConsumed()) { this.debugRecording && this.diagnosticPhysicsGate('consumed'); this.logPressRejection('CONSUMED'); return; }
     if (this.isServeBall && b.lastHitBy === -1) {
+      this.debugRecording && this.diagnosticPhysicsGate('opponent_serve_not_returnable');
       if (this.pressAdmitsBall() && this.playerStrokeIntent(false)) this.logPressRejection('BOUNCE_ILLEGAL');
       return;
     }
-    if (!this.pressAdmitsBall()) return;
+    if (!this.pressAdmitsBall()) { this.debugRecording && this.diagnosticPhysicsGate('press_not_admitted'); return; }
 
     // The fixed envelope belongs to the racket, NOT the pointer marker.
     const reachRadius = MATCH_RULES.captureRadius;
@@ -1836,9 +2078,10 @@ class Game {
     if (!m) {
       /* Палец держит ракетку без замаха — «стенка»: пассивный блок с честной
        * физикой отражения, но только когда ЭТОТ же жест уже вывел ракетку в
-       * позицию (стал реальным ударом). Голый тап или случайное касание мяч
-       * отражать не должны — иначе мяч сам отскакивал от ближайшего пальца. */
-      if (!serveCtx && this._tryPassiveBlock(pad, b)) return;
+       * позицию (стал реальным ударом). Удержание без движения само по себе
+       * не отражает мяч; короткий тап распознаётся отдельно при отпускании. */
+      if (!serveCtx && this._tryPassiveBlock(pad, b)) { this.debugRecording && this.diagnosticPhysicsGate('passive_block'); return; }
+      this.debugRecording && this.diagnosticPhysicsGate('no_stroke_intent', { serving: serveCtx });
       this.logNoStrokeIntent(serveCtx);
       return;
     }
@@ -1851,6 +2094,7 @@ class Game {
      * consumed, so it is still there for the real chance. */
     const ownBounce = this.rallyBounces.some((s) => s > 0);
     if (!serveCtx && !ownBounce) {
+      this.debugRecording && this.diagnosticPhysicsGate('bounce_illegal');
       this.logPressRejection('BOUNCE_ILLEGAL');
       if (b.p.z >= PH.T_HALF_LEN) this.hintOut = this.time;
       return;
@@ -1859,60 +2103,64 @@ class Game {
     const spad = this.staticPad(pad);
     const captureSample = measureCaptureAllowance(spad, p0, b.p, serveCtx, endpointEligible);
     if (captureSample && this.shotJournal) this.shotJournal.observeCapture(sw.gestureId, captureSample, this.time);
-    if (b.v.z < 0 && b.p.z < pad.pos.z - .35) return;
+    if (b.v.z < 0 && b.p.z < pad.pos.z - .35) {
+      this.debugRecording && this.diagnosticPhysicsGate('moving_away', { capture: captureSample }); return;
+    }
     if (serveCtx && (b.v.y >= 0 || !(this.tossRiseNow() > MATCH_RULES.serveTossMinRise))) {
+      this.debugRecording && this.diagnosticPhysicsGate('serve_not_legal', { tossRise: this.tossRiseNow(), capture: captureSample });
       if (b.v.y < 0) this.logPressRejection('SERVE_TOSS_LOW', { tossRise: this.tossRiseNow() });
       return;
     }
-    let hit = null;
+    let hit = null, gateDetail = null;
 
     if (serveCtx) {
       // ITTF 2.06: the ball must be struck while FALLING from the toss.
-      const rad = V3.dist(b.p, pad.pos);
-      const serveIn = playerInCaptureRange(b.p, pad.pos, true);
-      const serveEdge = !serveIn && playerGraceRange(b.p, pad.pos, true);
+      const rad = V3.dist(b.p, spad.pos);
+      const serveIn = playerInCaptureRange(b.p, spad.pos, true);
+      const serveEdge = !serveIn && playerGraceRange(b.p, spad.pos, true);
       if (b.v.y < 0 && this.tossRiseNow() > MATCH_RULES.serveTossMinRise && (serveIn || serveEdge)) {
         /* Подача краем: мяч чуть шире/выше честной сферы всё равно ударяется —
          * слабо, срезанно, но честно. Чистый пропуск тут ощущался как баг
          * «мяч не подаётся, хотя в реальности подался бы». */
         hit = { t: 1, x: b.p.x, y: b.p.y, z: b.p.z,
           captureKind: serveIn ? 'serve' : 'serve_edge',
-          rad: serveIn ? rad * 0.40 : serveReach, px: pad.pos.x, py: pad.pos.y, pz: pad.pos.z,
+          rad: serveIn ? rad * 0.40 : serveReach, px: spad.pos.x, py: spad.pos.y, pz: spad.pos.z,
           edge: !serveIn };
       }
     } else if (ownBounce) {
-      /* The endpoint route fires at the CLOSEST APPROACH of the ball to the
-       * blade, not the instant it enters the assist box. The box is 0.62 m
-       * wide and 0.62 m deep, so firing on entry put the contact up to 62 cm
-       * in front of the racket — the ball left a place the blade visibly
-       * never reached. While the ball is still closing, this substep simply
-       * does not hit; the gesture stays alive and the next substep (or the
-       * bat's own sweep) takes it at the blade. */
-      const closing = (b.p.x - pad.pos.x) * b.v.x + (b.p.y - pad.pos.y) * b.v.y +
-        (b.p.z - pad.pos.z) * b.v.z;
-      const inside = playerInCaptureRange(b.p, pad.pos);
+      /* Swipes normally meet at the closest approach; a tap is a short
+       * explicit strike and may fire inside the capture window. An edge-only
+       * approach still waits for the blade rather than striking prematurely.
+       * Both routes use the actual paddle pose at this physics substep. */
+      const pp = spad.pos;
+      const closing = (b.p.x - pp.x) * b.v.x + (b.p.y - pp.y) * b.v.y +
+        (b.p.z - pp.z) * b.v.z;
+      const inside = playerInCaptureRange(b.p, pp);
       /* Кольцо края: на расстоянии (capture × 1 .. 1.34] жест всё равно
        * даёт контакт — не ассист, а физически честное срезанное касание:
        * слабо и по-глупому, но не «тихий промах». */
-      const grazing = !inside && playerGraceRange(b.p, pad.pos);
+      const grazing = !inside && playerGraceRange(b.p, pp);
       const still = b.v.x * b.v.x + b.v.y * b.v.y + b.v.z * b.v.z < 0.04;
       const atClosest = MATCH_RULES.contactAtClosest ? closing >= -0.02 : closing <= 0.02;
-      if ((inside || grazing) && (atClosest || still)) {
+      if (this.debugRecording) gateDetail = { inside, grazing, still, closing, atClosest, tap: m.tap === true,
+        capture: captureSample, previousBall: inputLogVec(p0),
+        paddleStart: inputLogVec(spad.prevPos), paddleEnd: inputLogVec(spad.pos) };
+      if ((inside || grazing) && ((m.tap === true && inside) || atClosest || still)) {
         const dx = b.p.x - p0.x, dy = b.p.y - p0.y, dz = b.p.z - p0.z;
         const dd = dx * dx + dy * dy + dz * dz;
         const u = dd > 1e-12
-          ? clamp((-(p0.x - pad.pos.x) * dx - (p0.y - pad.pos.y) * dy - (p0.z - pad.pos.z) * dz) / dd, 0, 1)
+          ? clamp((-(p0.x - pp.x) * dx - (p0.y - pp.y) * dy - (p0.z - pp.z) * dz) / dd, 0, 1)
           : 1;
         const cx = p0.x + dx * u, cy = p0.y + dy * u, cz = p0.z + dz * u;
         /* Quality is the NORMALISED distance inside the box, on both axes.
          * `dist2d * 0.35` ignored depth entirely: a ball 30 cm in front of
          * the blade scored as a dead-centre contact with the full sweet
          * spot. */
-        const lat = Math.hypot(cx - pad.pos.x, cy - pad.pos.y);
+        const lat = Math.hypot(cx - pp.x, cy - pp.y);
         const frac = Math.max(lat / reachRadius,
-          Math.abs(cz - pad.pos.z) / MATCH_RULES.depthTolerance);
+          Math.abs(cz - pp.z) / MATCH_RULES.depthTolerance);
         hit = { t: u, x: cx, y: cy, z: cz, captureKind: inside ? 'endpoint' : 'edge',
-          rad: clamp(frac, 0, 1) * reachRadius, px: pad.pos.x, py: pad.pos.y, pz: pad.pos.z,
+          rad: clamp(frac, 0, 1) * reachRadius, px: pp.x, py: pp.y, pz: pp.z,
           edge: !inside };
       }
     }
@@ -1920,9 +2168,13 @@ class Game {
     if (!hit) {
       hit = this.sweepPaddle(spad, p0, b.p, serveCtx ? serveReach : reachRadius);
     }
-    if (!hit) { this.logNoContactReason(captureSample, serveCtx); return; }
-    if (!this.validatePressDirection(m)) return;
-    if (b.lastHitBy === 1) { this.logPressRejection('CONSUMED'); return; } // you already hit it
+    if (!hit) {
+      this.debugRecording && this.diagnosticPhysicsGate('no_intersection', gateDetail || { capture: captureSample });
+      this.logNoContactReason(captureSample, serveCtx); return;
+    }
+    this.debugRecording && this.diagnosticPhysicsGate('hit_candidate', { ...(gateDetail || {}), hit: { ...hit } });
+    if (!this.validatePressDirection(m)) { this.debugRecording && this.diagnosticPhysicsGate('wrong_direction'); return; }
+    if (b.lastHitBy === 1) { this.debugRecording && this.diagnosticPhysicsGate('already_hit'); this.logPressRejection('CONSUMED'); return; } // you already hit it
 
     const isServeStroke = this.isServeBall && b.lastHitBy === 0 && this.server === 1;
     const contact = V3.new(hit.x, hit.y, hit.z);
@@ -1931,8 +2183,8 @@ class Game {
     const sideParams = this.equip.forSide(grip.forehand ? 1 : -1);
     const radius = MATCH_RULES.sweetRadius;
     const sweet = clamp((1 - hit.rad / reachRadius) * (sideParams.sweet || this.equip.sweetK), 0, 1);
-    const offLat = clamp((hit.x - pad.pos.x) / Math.max(radius, 1e-4), -1, 1);
-    const offVer = clamp((hit.y - pad.pos.y) / Math.max(radius, 1e-4), -1, 1);
+    const offLat = clamp((hit.x - hit.px) / Math.max(radius, 1e-4), -1, 1);
+    const offVer = clamp((hit.y - hit.py) / Math.max(radius, 1e-4), -1, 1);
     const offMag = clamp(Math.hypot(offLat, offVer), 0, 1);
     this.lastSweet = sweet;
 
@@ -2035,7 +2287,7 @@ class Game {
      * the gesture (and the 90 ms hit cooldown, and the paddle's position) on a
      * null impact is how a ball that never touched the rubber still counted as
      * returned — and why the next, real attempt was ignored. */
-    if (!info) return;
+    if (!info) { this.debugRecording && this.diagnosticPhysicsGate('impact_separating_face', { hit: { ...hit }, quality }); return; }
     {
       const bp = this.R && this.R.viewProj ? this.project(b.p, {}) : null;
       const pp = this.R && this.R.viewProj ? this.project(pad.pos, {}) : null;
@@ -2915,7 +3167,7 @@ class Game {
   update(dtReal) {
     if (!Number.isFinite(dtReal) || dtReal <= 0) return;
     dtReal = Math.min(dtReal, 0.1);
-    this.updateArenaFlashes(dtReal);
+    this._arenaT = (this._arenaT || 0) + dtReal; // keep the separate ceiling lighting animated
     if (this.scene.updateCeilingLights) this.scene.updateCeilingLights(this._arenaT || 0, this.reducedMotion);
     if (this.state === GS.MENU) {
       this.updateCamera(dtReal);
@@ -2943,6 +3195,7 @@ class Game {
     const ts = this.timeScale;
     const dt = Math.min(dtReal, 0.05) * ts;
     this.time += dtReal;
+    this.strokeTime += dt;
     this.stateT += dtReal;
 
     if (this.slowmoUntil && this.time > this.slowmoUntil) { this.targetTimeScale = 1; this.slowmoUntil = 0; }
@@ -3076,7 +3329,7 @@ class Game {
       /* How many physics steps this frame will take, so the paddle's own
        * frame-long travel can be split into exactly that many poses. */
       const nSub = Math.max(1, Math.min(400, Math.floor(this._acc / PHYS_DT + 1e-9)));
-      this._subK = 0;
+      this._subK = 0; this._subN = nSub;
       while (this._acc >= PHYS_DT && guard++ < 400) {
         this._subPad = this.substepPadPose(this._subK++, nSub);
         this.stepPhysics(PHYS_DT);
@@ -3257,20 +3510,6 @@ class Game {
       }
     }
     R.uploadDyn(m, nv, ni);
-  }
-
-  /* Вспышки фотоаппаратов на трибунах (62_arena): один переиспользуемый
-   * блик по расписанию «раз в 1–4 с на 80–150 мс». Собственные часы
-   * _arenaT: this.time в меню не идёт, а вспышки живут и в лобби.
-   * Не при reduced motion (фоточувствительность) и не на low-качестве. */
-  updateArenaFlashes(dt) {
-    this._arenaT = (this._arenaT || 0) + dt;
-    if (this._flash || this.reducedMotion || (this.settings && this.settings.quality === 'low')) return;
-    this._flashNext = (this._flashNext === undefined ? 1.4 : this._flashNext) - dt;
-    if (this._flashNext > 0) return;
-    this._flashNext = 1 + Math.random() * 3;
-    const F = ARENA_FLASH_SPOTS[(Math.random() * ARENA_FLASH_SPOTS.length) | 0];
-    this._flash = { x: F[0], y: F[1], z: F[2], t0: this._arenaT, dur: 0.08 + Math.random() * 0.07, size: 0.75 + Math.random() * 0.55 };
   }
 
   billboard(out, pos, size, roll, sy) {
@@ -3483,52 +3722,7 @@ class Game {
       });
     }
 
-    /* Луч света по трибунам: крупный мягкий шар скользит справа налево
-     * и обратно (cos — плавный разворот у краёв), столб луча тянется к
-     * прожектору наверху по центру. Сцена при этом уходит в темноту:
-     * трибуны сами по себе тёмные, живёт только этот свет. */
-    if (!this.reducedMotion) {
-      const t = this._arenaT || 0;
-      // Борта уехали вдвое дальше (кольцо 6.8×9.8): в матч-камере
-      // дальний борт перекрывает низ трибун, поэтому шар света —
-      // герой кинематографических ракурсов (хаб/демо), где трибуны
-      // видны широко; там он скользит по передним рядам (sy ~0.55).
-      const sx = 8.6 * Math.cos(t * 0.21), sy = 0.55 + Math.sin(t * 0.147 + 1.3) * 0.15;
-      const pulse = 0.85 + 0.15 * Math.sin(t * 0.9);
-      const beamLen = Math.hypot(sx, 7.6 - sy) * 0.95;
-      // столб: от прожектора (0, 7.6 — выше кадра) к пятну; roll — наклон
-      this.billboard(tmp.m, V3.new(sx * 0.5, (sy + 7.6) / 2, -13.8), 2.4, Math.atan2(sx, 7.6 - sy), beamLen);
-      R.draw(me.quad, tmp.m, {
-        color: [1, 1, 1], tex: S.tex.glow, blend: 'add', doubleSided: true,
-        emissive: [0.170 * pulse, 0.200 * pulse, 0.280 * pulse], rough: 1,
-      });
-      // сам шар света на толпе
-      this.billboard(tmp.m, V3.new(sx, sy, -13.75), 7.5, 0);
-      R.draw(me.quad, tmp.m, {
-        color: [1, 1, 1], tex: S.tex.glow, blend: 'add', doubleSided: true,
-        emissive: [0.480 * pulse, 0.560 * pulse, 0.750 * pulse], rough: 1,
-      });
-      // яркое ядро прожектора (видно в кинематографичных ракурсах)
-      this.billboard(tmp.m, V3.new(0, 7.6, -13.85), 1.0, 0);
-      R.draw(me.quad, tmp.m, {
-        color: [1, 1, 1], tex: S.tex.glow, blend: 'add', doubleSided: true,
-        emissive: [0.40 * pulse, 0.46 * pulse, 0.58 * pulse], rough: 1,
-      });
-    }
 
-    /* camera flash over the stands: instant-on, quadratic fade out */
-    if (this._flash) {
-      const f = this._flash, k = (this._arenaT - f.t0) / f.dur;
-      if (k >= 1) this._flash = null;
-      else {
-        const a = (1 - k) * (1 - k);
-        this.billboard(tmp.m, V3.new(f.x, f.y, f.z), f.size * (0.7 + k * 0.5), 0);
-        R.draw(me.quad, tmp.m, {
-          color: [1, 1, 1], tex: S.tex.glow, blend: 'add', doubleSided: true,
-          emissive: [0.88 * a * 1.7, 0.94 * a * 1.7, 1.08 * a * 1.7], rough: 1,
-        });
-      }
-    }
   }
 
   /** The opponent is deliberately NOT a character model: a floating bat

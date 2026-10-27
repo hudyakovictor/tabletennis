@@ -12,6 +12,8 @@ Router.def('train', {
         <div class="tc-msg"></div>
       </div>
       <button class="ib m-pause pe" data-act="exit" aria-label="${t('common.exit')}">${Art.icon('x', { c: '#fff', sw: 2.6 })}</button>
+      <button class="ib m-diag-open pe" data-act="diagnostics">${t('debug.title')}</button>
+      <button class="ib m-diag-shot pe" data-act="diag-mark" ${GameHost.debug ? '' : 'hidden'} aria-label="${t('debug.mark')}"><span aria-hidden="true">●</span> ${t('debug.mark')}</button>
       <button class="b3 dark sm tx-skip pe" data-act="skip">${t('train.skipStep')} ›</button>
       ${devBtn()}
       <div class="tx-done"><div class="pnl tx-card">
@@ -34,6 +36,8 @@ Router.def('train', {
     GameHost.ensure(); GameHost.show(true); GameHost.send('quiet', { on: true }); GameHost.send('mute', { on: !S.sfx });
     this.off = GameHost.on((m) => this.onMsg(m));
     el.querySelector('[data-act=exit]').addEventListener('click', () => this.exit());
+    el.querySelector('[data-act=diagnostics]').addEventListener('click', () => { GameHost.send('pause'); diagnosticsSheet(); this.watchSheets(); });
+    el.querySelector('[data-act=diag-mark]').addEventListener('click', diagnosticMarkFrame);
     el.querySelector('[data-act=skip]').addEventListener('click', () => { GameHost.send('skipStep'); haptic('select'); });
     const dv = el.querySelector('[data-act=dev]'); if (dv) dv.addEventListener('click', () => devZoneSheet());
     el.querySelector('.tx-done').addEventListener('click', (e) => {
@@ -80,13 +84,15 @@ Router.def('train', {
     }
     if (m.type === 'paused' && m.v && !m.host && !Sheet.cur) {
       GameHost.send('pause');
-      Sheet.open(`<div class="h1" style="margin:4px 4px 14px">${t('match.pause')}</div><div style="display:grid;gap:12px"><button class="b3 green block" data-a="go"><span class="shine"></span>${Art.icon('play', { c: '#fff' })}${t('common.resume')}</button><button class="b3 dark block sm" data-a="exit">${t('train.exit')}</button></div>`, {
-        onOpen: (w) => w.addEventListener('click', (e) => { const a = e.target.closest('[data-a]'); if (!a) return; Sheet.close(true); if (a.dataset.a === 'exit') this.exit(); })
+      Sheet.open(`<div class="h1" style="margin:4px 4px 14px">${t('match.pause')}</div><div style="display:grid;gap:12px"><button class="b3 green block" data-a="go"><span class="shine"></span>${Art.icon('play', { c: '#fff' })}${t('common.resume')}</button><button class="b3 dark block" data-a="screenshot">${t('debug.screenshot')}</button><button class="b3 dark block" data-a="diagnostics">${t('debug.title')}</button><button class="b3 dark block sm" data-a="exit">${t('train.exit')}</button></div>`, {
+        onOpen: (w) => w.addEventListener('click', (e) => {
+          const a = e.target.closest('[data-a]'); if (!a) return;
+          if (a.dataset.a === 'screenshot') { diagnosticsSheet({ focusScreenshot: true }); return; }
+          if (a.dataset.a === 'diagnostics') { diagnosticsSheet(); return; }
+          Sheet.close(true); if (a.dataset.a === 'exit') this.exit();
+        })
       });
-      // resume — только когда листов не осталось вообще
-      const host = $('#sheets'); if (this._mo) this._mo.disconnect();
-      this._mo = new MutationObserver(() => { if (!Sheet.cur && this.alive) { this._mo.disconnect(); this._mo = null; GameHost.send('resume'); } });
-      this._mo.observe(host, { childList: true });
+      this.watchSheets();
     }
     if (m.type === 'trainDone') {
       S.tutorialDone = true; save();
@@ -100,6 +106,11 @@ Router.def('train', {
           Wallet.add('coins', 200, from).then(() => this.alive && Wallet.add('gems', 5, from)); }, 900);
       }
     }
+  },
+  watchSheets() {
+    const host = $('#sheets'); if (this._mo) this._mo.disconnect();
+    this._mo = new MutationObserver(() => { if (!Sheet.cur && this.alive) { this._mo.disconnect(); this._mo = null; GameHost.send('resume'); } });
+    this._mo.observe(host, { childList: true });
   },
   exit() {
     if (!S.tutorialDone && this.data.then === 'mm') {

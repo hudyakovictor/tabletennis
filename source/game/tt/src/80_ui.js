@@ -140,8 +140,8 @@ class UI {
     const touch = this.inputMode === 'touch';
     $('#cameraHelp').textContent = 'Три готовых вида. Кадр одинаковый на всех устройствах и не требует настройки.';
     $('#gl').setAttribute('aria-label', touch
-      ? 'Игровое поле. Удар — свайп. Вид камеры — в настройках.'
-      : 'Игровое поле. Удар — ЛКМ и движение. Вид камеры — 1, 2, 3 или в настройках.');
+      ? 'Игровое поле. Короткий тап отбивает мяч, свайп задаёт вращение. Вид камеры — в настройках.'
+      : 'Игровое поле. Короткий клик отбивает мяч, ЛКМ с движением задаёт вращение. Вид камеры — 1, 2, 3 или в настройках.');
     if (this.game && this.game.training) this.trainSync(this.game.training);
   }
 
@@ -210,8 +210,11 @@ class UI {
   syncPauseControl() {
     const button = $('#btnMenu'), g = this.game;
     if (!button || !g) return;
-    const key = `${g.state}|${g.paused}`;
+    const key = `${g.state}|${g.paused}|${!!g.debugRecording}`;
     if (button.dataset.syncState === key) return;
+    const mark = $('#diagMark'); if (mark) mark.hidden = !g.debugRecording || g.paused || g.state === GS.MENU || g.state === GS.MATCH_END;
+    const record = $('#diagnosticRecordPause'); if (record) record.checked = !!g.debugRecording;
+    if (g.paused) this.refreshDiagnosticPause();
     button.dataset.syncState = key;
     const inPlay = g.state !== GS.MENU && g.state !== GS.MATCH_END;
     const label = g.paused ? 'В главное меню' : 'Пауза';
@@ -361,6 +364,48 @@ class UI {
     for (const id of ['#shotLabPause', '#shotLabResults']) $(id).addEventListener('click', e => { e.stopPropagation(); this.openShotLab(); });
     const logButton = $('#inputLogPause');
     if (logButton) logButton.addEventListener('click', e => { e.stopPropagation(); this.exportInputLog(); });
+    const pauseActions = document.querySelector('.pause-actions');
+    if (pauseActions) pauseActions.addEventListener('click', e => e.stopPropagation());
+    $('#diagnosticRecordPause').addEventListener('change', e => {
+      this.game.setDiagnosticMode(e.target.checked);
+      try { sessionStorage.setItem('ttu-debug-recording', e.target.checked ? '1' : '0'); } catch (err) {}
+      this.syncPauseControl(); this.refreshDiagnosticPause();
+    });
+    $('#diagMark').addEventListener('click', e => {
+      e.stopPropagation();
+      try { this._diagnosticBookmark = this.game.captureDiagnosticFrame(true); this.game.logInput('bookmark', { outcome: { capturedAt: this._diagnosticBookmark.capturedAt } }); }
+      catch (err) { this.game.diagnosticIssue('screenshot', err && err.message || err, err && err.stack); }
+    });
+    $('#diagnosticShotPause').addEventListener('click', () => {
+      try {
+        this._diagnosticBookmark = this.game.captureDiagnosticFrame(true); this.refreshDiagnosticPause();
+        const reveal = () => {
+          const box = $('#diagnosticPreview'), body = document.querySelector('.pause-actions');
+          if (!box || box.hidden || !body) return;
+          body.scrollTop += box.getBoundingClientRect().top - body.getBoundingClientRect().top;
+        };
+        requestAnimationFrame(reveal);
+        const image = $('#diagnosticImage');
+        if (image && typeof image.decode === 'function') image.decode().then(() => requestAnimationFrame(reveal)).catch(() => {});
+        setTimeout(() => this.refreshDiagnosticPause(), 500);
+      } catch (err) { $('#diagnosticStatus').textContent = 'Не удалось сделать снимок: ' + (err && err.message || err); }
+    });
+    $('#diagnosticReportPause').addEventListener('click', async e => {
+      e.target.disabled = true; $('#diagnosticStatus').textContent = 'Подготавливаем отчёт…';
+      try {
+        const report = await this.game.diagnosticReport();
+        // Keep the same evidence with a smaller export on memory-limited phones.
+        this._diagnosticReportText = JSON.stringify(report);
+        if (this._diagnosticReportUrl) URL.revokeObjectURL(this._diagnosticReportUrl);
+        this._diagnosticReportUrl = URL.createObjectURL(new Blob([this._diagnosticReportText], { type: 'application/json' }));
+        const link = $('#diagnosticReportLink'); link.href = this._diagnosticReportUrl; link.hidden = false;
+        $('#diagnosticTextButton').hidden = false; this.refreshDiagnosticPause();
+      } catch (err) { $('#diagnosticStatus').textContent = 'Не удалось подготовить отчёт: ' + (err && err.message || err); }
+      finally { e.target.disabled = false; }
+    });
+    $('#diagnosticTextButton').addEventListener('click', () => {
+      const area = $('#diagnosticText'); area.value = this._diagnosticReportText || ''; area.hidden = false; area.focus(); area.select();
+    });
     const calMenu = $('#zoneCalMenu');
     if (calMenu) calMenu.addEventListener('click', () => { this.ensureZoneCalibration(); this.openShotLab(); });
     const calStart = $('#zoneCalStart');
@@ -895,6 +940,31 @@ class UI {
     const url = URL.createObjectURL(new Blob([JSON.stringify(session.exportData(), null, 2)], { type: 'application/json' }));
     const link = document.createElement('a'); link.href = url; link.download = 'topspin-zone-calibration.json'; link.click();
     setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
+  refreshDiagnosticPause() {
+    const g = this.game, status = $('#diagnosticStatus'); if (!g || !status || !g.inputLog) return;
+    const stats = g.inputLog.stats(g.time), archive = g.diagnosticRecoveryArchive();
+    if (archive && archive.status === 'opening' && this._diagnosticRecoveryReady !== archive) {
+      this._diagnosticRecoveryReady = archive;
+      archive.ready.then(() => this.refreshDiagnosticPause());
+    }
+    const storage = archive && archive.status === 'available' ? 'локальное восстановление доступно'
+      : archive && archive.status === 'opening' ? 'подключаем локальное хранилище' : 'восстановление после перезагрузки недоступно';
+    const frameStatus = this._diagnosticBookmark ? ' · ' + (archive && archive.frameStatus === 'saved' ? 'кадр в локальном резерве'
+      : archive && archive.frameStatus === 'pending' ? 'сохраняем кадр' : 'кадр только в памяти') : '';
+    status.textContent = `${g.debugRecording ? 'Запись включена' : 'Запись выключена'} · в памяти ${Math.round(stats.retainedWallSeconds)} с / ${stats.inWindow} событий · ${storage}${frameStatus}`;
+    if (!this._diagnosticBookmark && !this._diagnosticRestoreTried && g.debugArchive) {
+      this._diagnosticRestoreTried = true;
+      g.debugArchive.readFrame().then(saved => {
+        if (saved && !this._diagnosticBookmark) { this._diagnosticBookmark = saved; this.refreshDiagnosticPause(); }
+      }).catch(() => {});
+    }
+    const frame = this._diagnosticBookmark || g._diagnosticFrame, box = $('#diagnosticPreview');
+    if (frame && frame.dataUrl && box) {
+      box.hidden = false;
+      $('#diagnosticFrameTime').textContent = frame.capturedAt ? 'Время снимка: ' + new Date(frame.capturedAt).toLocaleString() : '';
+      $('#diagnosticImage').src = frame.dataUrl; $('#diagnosticImageLink').href = frame.dataUrl;
+    }
   }
   exportInputLog() {
     const log = this.game && this.game.inputLog;

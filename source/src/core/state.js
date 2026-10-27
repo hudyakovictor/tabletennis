@@ -11,7 +11,7 @@
    уровень 1. Всё остальное зарабатывается матчами (см. сложность формы в
    screens/match.js). */
 const SAVE_KEY = 'ttu-v2';
-const SAVE_VERSION = 2;
+const SAVE_VERSION = 3;
 const DEFAULT_STATE = {
   v: SAVE_VERSION, lang: null,
   name: 'Anton Spin', nick: '@anton_tt', club: 'Spin Lab',
@@ -26,7 +26,8 @@ const DEFAULT_STATE = {
     null
   ],
   owned: ['r-teal', 'b-ink', 't-coral'], equipped: { rubber: 'r-teal', blade: 'b-ink', trail: 't-coral' },
-  sfx: true, music: true, vibro: true, rm: false, quality: 'high', assist: true, tutorial: true, hint: true, tutorialDone: false
+  sfx: true, music: true, vibro: true, rm: false, quality: 'high', assist: true, tutorial: true, hint: true, tutorialDone: false,
+  missShots: true, missShotHalf: 350  // automatic first-press gallery crop in CSS px
 };
 /* Шаги миграции: MIGRATIONS[v] переводит сейв версии v в v+1 (мутирует черновик). */
 const MIGRATIONS = {
@@ -39,7 +40,11 @@ const MIGRATIONS = {
       Object.assign(s, { rating: 1000, wins: 0, losses: 0, streak: 0, bestRally: 0, level: 1, xp: 0 });
     }
     if (s.lang === undefined) s.lang = null;
-  }
+  },
+  // Previous gallery versions used ±20 or ±100, too narrow to show the
+  // ball and the admission area together. Upgrade existing saves once;
+  // choices made after this migration remain unchanged on later reloads.
+  2: (s) => { s.missShotHalf = 350; }
 };
 const Store = {
   ok: (() => { try { const k = '__t'; localStorage.setItem(k, '1'); localStorage.removeItem(k); return true; } catch (e) { return false; } })(),
