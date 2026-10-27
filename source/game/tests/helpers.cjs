@@ -33,10 +33,19 @@ function load(files, names, extra = {}) {
   const context = vm.createContext({ console, setInterval, clearInterval, URLSearchParams,
     localStorage: { getItem: k => saved.get(k) ?? null, setItem: (k, v) => saved.set(k, v), removeItem: k => saved.delete(k) },
     ...extra });
-  const source = files.map(f => process.env.TT_TEST_REF
-    ? execFileSync('git', ['show', `${process.env.TT_TEST_REF}:tt/src/${f}`], { cwd: root, encoding: 'utf8' })
-    : fs.readFileSync(path.join(root, 'tt/src', f), 'utf8')).join('\n');
-  vm.runInContext(source + '\n;globalThis.api = {' + names.join(',') + '};', context);
+  /* Keep browser-like shared globals, but compile each source unit with its
+   * actual filename. Besides useful stacks this lets Node/V8 report coverage
+   * for gameplay source instead of one opaque eval bundle. */
+  for (const f of files) {
+    const source = process.env.TT_TEST_REF
+      ? execFileSync('git', ['show', `${process.env.TT_TEST_REF}:tt/src/${f}`], { cwd: root, encoding: 'utf8' })
+      : fs.readFileSync(path.join(root, 'tt/src', f), 'utf8');
+    const filename = process.env.TT_TEST_REF
+      ? `tt-ref/${process.env.TT_TEST_REF}/${f}` : path.join(root, 'tt/src', f);
+    vm.runInContext(source, context, { filename });
+  }
+  vm.runInContext(';globalThis.api = {' + names.join(',') + '};', context,
+    { filename: path.join(root, 'tests', 'helpers-exports.vm.js') });
   return { ...context.api, context, saved };
 }
 module.exports = { load, root };

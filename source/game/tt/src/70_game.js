@@ -254,29 +254,47 @@ class Game {
   /* ----------------------------- input ---------------------------- */
   bindInput() {
     const c = this.canvas;
-    /* Screen → surface coordinates. A pointer event with a non-finite or
-       absurd coordinate (broken touch driver, synthetic event, detached
-       canvas with a zero-size rect) used to poison the paddle transform
-       permanently: one NaN reached the smoothing filter and the racket
-       never came back. Sanitise at the boundary, in one place. */
-    const norm = (e) => {
+    /* Screen → two deliberately separate coordinate systems.
+     *
+     * - `x/y` are clamped [0..1] and only steer the visible bat.
+     * - `gx/gy` are raw gesture coordinates in units of the SHORTER CSS side.
+     *   They preserve an exit past a canvas edge and put horizontal/vertical
+     *   movement on one physical scale, so a diagonal has the same meaning on
+     *   portrait and wide screens.
+     *
+     * A bounded raw margin rejects broken drivers without flattening ordinary
+     * movement at an edge. */
+    const pointerPoint = (e) => {
       const r = c.getBoundingClientRect();
       const w = r.width > 0 ? r.width : (c.clientWidth || 1);
       const h = r.height > 0 ? r.height : (c.clientHeight || 1);
-      let x = (e.clientX - r.left) / w;
-      let y = (e.clientY - r.top) / h;
-      /* Outside the canvas the coordinates used to be clamped to
-       * [-0.25 .. 1.25] — a quarter of a screen BEYOND each edge. That is
-       * how the bat got parked somewhere the camera never shows and, since
-       * no further move events arrive once the cursor leaves the window,
-       * it stayed there. The pointer is now always inside 0..1. */
-      if (!Number.isFinite(x)) x = 0.5; else x = clamp(x, 0, 1);
-      if (!Number.isFinite(y)) y = 0.5; else y = clamp(y, 0, 1);
-      return { x, y };
+      const scale = Math.max(1, Math.min(w, h));
+      let rawX = Number.isFinite(e.clientX) ? e.clientX - r.left : w * .5;
+      let rawY = Number.isFinite(e.clientY) ? e.clientY - r.top : h * .5;
+      /* A real stroke may leave the canvas; a corrupted coordinate may not
+       * turn a single input into an unbounded metric or paddle target. */
+      rawX = clamp(rawX, -2 * scale, w + 2 * scale);
+      rawY = clamp(rawY, -2 * scale, h + 2 * scale);
+      return { x: clamp(rawX / w, 0, 1), y: clamp(rawY / h, 0, 1),
+        gx: rawX / scale, gy: rawY / scale, rawX, rawY, scale, width: w, height: h };
+    };
+    /* PointerEvent.timeStamp is the clock for hand speed. Unlike `this.time`,
+     * it changes for every DOM event even when several moves arrive before the
+     * next game frame. SwipeTracker keeps it monotonic and rejects a zero-time
+     * segment for speed instead of substituting an artificial denominator. */
+    const inputEventTime = (e) => {
+      /* Programmatically dispatched events have no physical hand clock. Their
+       * deterministic/replay contract is the simulation clock; real DOM
+       * events always keep the browser timestamp, including equal timestamps
+       * which SwipeTracker correctly treats as zero-duration. */
+      if (e && e.isTrusted === false && Number.isFinite(this.time)) return this.time;
+      if (e && Number.isFinite(e.timeStamp) && e.timeStamp >= 0) return e.timeStamp / 1000;
+      return typeof performance !== 'undefined' && Number.isFinite(performance.now()) ? performance.now() / 1000 : this.time;
     };
 
     // Left pointer = stroke. The camera is fixed: no right-drag, no wheel.
     const ptrs = new Map();
+    let activeStrokePointerId = null;
     const domEvent = e => ({ type: e.type, pointerId: e.pointerId, pointerType: e.pointerType || null,
       clientX: Number.isFinite(e.clientX) ? e.clientX : null, clientY: Number.isFinite(e.clientY) ? e.clientY : null,
       button: e.button, buttons: e.buttons, pressure: Number.isFinite(e.pressure) ? e.pressure : null,
@@ -287,11 +305,13 @@ class Game {
     const dropStroke = () => {
       this.swipe.cancel();
       this.pointerDown = false;
+      activeStrokePointerId = null;
     };
 
     this.cancelInput = (reason = 'unspecified', event = null) => {
       if (this.debugRecording) this.logInput('input_cancel', { dom: event ? domEvent(event) : null,
-        outcome: { reason, active: !!this.swipe.active, pointerDown: !!this.pointerDown, pointers: ptrs.size } });
+        outcome: { reason, active: !!this.swipe.active, pointerDown: !!this.pointerDown,
+          activeStrokePointerId, pointers: ptrs.size } });
       ptrs.clear(); dropStroke();
     };
     const down = (e) => {
@@ -305,10 +325,14 @@ class Game {
       }
       if (this.demoMode) this.stopDemo(); // a real stroke always takes control
       this.audio.init(); this.audio.resume();
+      /* A duplicate pointerdown from a buggy driver must not reset the owner
+       * halfway through a stroke. A genuinely second pointer still cancels. */
+      if (activeStrokePointerId === e.pointerId) { e.preventDefault(); return; }
       ptrs.set(e.pointerId, { x: e.clientX, y: e.clientY });
       e.preventDefault();
 
       if (this.replayer.on) {
+        ptrs.delete(e.pointerId);
         if (this.debugRecording) this.logInput('pointer_ignored', { dom: domEvent(e), outcome: { reason: 'REPLAY_SKIPPED' } });
         this.skipReplay(); return;
       }
@@ -317,7 +341,7 @@ class Game {
         dropStroke();
         return;
       }
-      const n = norm(e);
+      const n = pointerPoint(e);
 
       // ---- ANTICIPATION TRIGGER ----
       // Before a swipe, pull the paddle back slightly to telegraph
@@ -339,7 +363,7 @@ class Game {
         }
       }
 
-      this.swipe.down(n.x, n.y, this.time, this.strokeTime);
+      this.swipe.down(n.gx, n.gy, inputEventTime(e), this.strokeTime);
       this.swipe.tapMaxMovePx = 0;
       const rect = c.getBoundingClientRect();
       const pointerType = e.pointerType || (this.pointerFine === false ? 'touch' : 'mouse');
@@ -355,14 +379,22 @@ class Game {
       this.swipe.pressZone = ballZone || { accepted: false, shape: MATCH_RULES.zoneShape,
         radius: MATCH_RULES.pressRadiusPx, distancePx: null, score: null, along: null,
         across: null, reason: 'OUTSIDE_ZONE', pointerType };
-      /* Admission is stamped once, here, from the ball at pointerdown.
-       * Moving into the zone later, landing on the bat, position assist and
-       * CCD are all downstream of this stamp and cannot rewrite it. */
+      /* Keep the start sample for diagnostics and coaching, but do not turn it
+       * into a permanent physics veto. A deliberate path may enter the same
+       * admission gate later; the physical blade/contact test remains final. */
+      this.swipe.pressZone.startAccepted = this.swipe.pressZone.accepted === true;
+      this.swipe.pressZone.contactEligible = this.swipe.pressZone.startAccepted;
+      this.swipe.pressZone.enteredZone = this.swipe.pressZone.startAccepted;
+      this.swipe.pressZone.enteredAt = this.swipe.pressZone.startAccepted ? this.time : null;
       this.swipe.pressZone.pressX = n.x; this.swipe.pressZone.pressY = n.y;
+      this.swipe.pressZone.gesturePressX = n.gx; this.swipe.pressZone.gesturePressY = n.gy;
+      this.swipe.pressZone.pressClientX = n.rawX; this.swipe.pressZone.pressClientY = n.rawY;
+      this.swipe.pressZone.gestureScale = n.scale;
       this.swipe.pressZone.vw = rect.width; this.swipe.pressZone.vh = rect.height;
       this.swipe.pressZone.pointerId = e.pointerId;
       this.swipe.pressZone.pointerType = pointerType;
       this.swipe.pressZone.pressT = this.time;
+      this.swipe.pressZone.pressEventT = inputEventTime(e);
       if (this.debugRecording && Number.isFinite(e.timeStamp)) this.swipe.pressZone.domTimestamp = e.timeStamp;
       this.swipe.pressZone.pressContactable = !!(this._strike && this._strike.on && this._strike.contactable);
       this.swipe.pressZone.shotId = this.shotId;
@@ -375,11 +407,15 @@ class Game {
         const win = attempt.pressZone.serving ? 1.15 : .25;
         attempt.deadline = this.time + win;
         attempt.deadlineSim = this.strokeTime + win;
-        if (!attempt.pressZone.accepted) attempt.outcome = 'outside';
+        /* A start outside the guide is evidence, not a final result: a swipe
+         * can still enter the live contact gate before the ball reaches the bat. */
+        if (!attempt.pressZone.startAccepted) attempt.startOutsideZone = true;
       }
       /* Hover aims only. A quick release without a drag becomes a compact
        * return; a drag keeps its own speed, direction and spin. */
-      this.pointer = n; this.pointerDown = true;
+      this.pointer = { x: n.x, y: n.y }; this.inputPointer = { x: n.x, y: n.y, gx: n.gx, gy: n.gy,
+        rawX: n.rawX, rawY: n.rawY, scale: n.scale }; this.pointerDown = true;
+      activeStrokePointerId = e.pointerId;
       this.pointerFine = e.pointerType !== 'touch' && e.pointerType !== 'pen';
       this.logInput('pointerdown', { pointer: n, pointerId: e.pointerId, buttons: e.buttons, inputType: pointerType,
         dom: this.debugRecording ? domEvent(e) : null,
@@ -395,27 +431,58 @@ class Game {
      * keeps following it instead of freezing at the last in-canvas position
      * (that freeze was the "bat and cursor are kilometres apart" bug). */
     const track = (e) => {
-      const n = norm(e);
-      this.pointer = n;
+      /* A second finger / pen / mouse cannot steer an already-owned stroke.
+       * Previously it could move the paddle, flip pointer precision and add
+       * samples to the first pointer's swipe. */
+      if (activeStrokePointerId !== null && e.pointerId !== activeStrokePointerId) return null;
+      const n = pointerPoint(e);
+      this.pointer = { x: n.x, y: n.y };
+      this.inputPointer = { x: n.x, y: n.y, gx: n.gx, gy: n.gy, rawX: n.rawX, rawY: n.rawY, scale: n.scale };
       if (e.pointerType) this.pointerFine = e.pointerType !== 'touch' && e.pointerType !== 'pen';
       if (e.pointerType === 'mouse') {
         this.mouseTrail = (this.mouseTrail || []).filter(p => this.time - p.t < 0.14);
-        this.mouseTrail.push({ x: n.x, y: n.y, t: this.time });
+        /* Aim/gesture components must use the same scale here too; otherwise
+         * the wrist receives aspect-ratio-biased mouse velocity. */
+        this.mouseTrail.push({ x: n.gx, y: n.gy, t: this.time });
         if (this.mouseTrail.length > 64) this.mouseTrail.shift();
       }
       this.pointerInside = n.x > 0.001 && n.x < 0.999 && n.y > 0.001 && n.y < 0.999;
       return n;
     };
 
+    const updateTapDistance = (n, zone) => {
+      if (!n || !zone) return;
+      const x0 = Number.isFinite(zone.pressClientX) ? zone.pressClientX : zone.pressX * zone.vw;
+      const y0 = Number.isFinite(zone.pressClientY) ? zone.pressClientY : zone.pressY * zone.vh;
+      this.swipe.tapMaxMovePx = Math.max(this.swipe.tapMaxMovePx || 0, Math.hypot(n.rawX - x0, n.rawY - y0));
+    };
+    const progress = (n, pointerType) => {
+      if (!n || !this.swipe.pressZone || typeof this.notePressProgress !== 'function') return;
+      this.notePressProgress(n, pointerType);
+    };
+
     const move = (e) => {
       const p = ptrs.get(e.pointerId);
       if (p) { p.x = e.clientX; p.y = e.clientY; }
-      const n = track(e);
-      if (this.swipe.active && ptrs.size < 2) {
+      if (e.pointerId !== activeStrokePointerId || !this.swipe.active || ptrs.size >= 2) {
+        if (e.cancelable) e.preventDefault();
+        return;
+      }
+      /* Browser coalescing preserves high-rate pen/touch shape. Every sample
+       * retains its own DOM timestamp; the tracker itself safely handles an
+       * equal timestamp instead of overwriting a previous point. */
+      let events = typeof e.getCoalescedEvents === 'function' ? e.getCoalescedEvents() : null;
+      if (!events || !events.length) events = [e];
+      let n = null;
+      for (const sample of events) {
+        n = track(sample);
+        if (!n) continue;
         const z = this.swipe.pressZone;
-        if (z) this.swipe.tapMaxMovePx = Math.max(this.swipe.tapMaxMovePx || 0,
-          Math.hypot((n.x - z.pressX) * z.vw, (n.y - z.pressY) * z.vh));
-        this.swipe.move(n.x, n.y, this.time, this.strokeTime);
+        updateTapDistance(n, z);
+        this.swipe.move(n.gx, n.gy, inputEventTime(sample), this.strokeTime);
+        progress(n, sample.pointerType || e.pointerType || (this.pointerFine === false ? 'touch' : 'mouse'));
+      }
+      if (n) {
         const sp = this.swipe.m.speed;
         if (sp > 1.6) this.audio.whoosh(clamp(sp / 4, 0, 1.4));
         this.logInput('pointermove', { pointer: n, pointerId: e.pointerId, buttons: e.buttons,
@@ -426,10 +493,13 @@ class Game {
     };
 
     const up = (e) => {
+      const ownsStroke = e.pointerId === activeStrokePointerId;
       ptrs.delete(e.pointerId);
-      if (e.button === 2 || e.button === 1) {
-        e.preventDefault();
-        return;
+      if (e.button === 2 || e.button === 1) { e.preventDefault(); return; }
+      if (!ownsStroke) {
+        if (this.debugRecording) this.logInput('pointer_ignored', { dom: domEvent(e),
+          outcome: { reason: 'NON_OWNER_RELEASE', activeStrokePointerId } });
+        e.preventDefault(); return;
       }
       if (ptrs.size >= 1) {
         if (this.debugRecording) this.logInput('pointer_ignored', { dom: domEvent(e), outcome: { reason: 'OTHER_POINTER_STILL_DOWN' } });
@@ -437,26 +507,27 @@ class Game {
       }
       if (!this.swipe.active) {
         if (this.debugRecording) this.logInput('pointer_ignored', { dom: domEvent(e), outcome: { reason: 'RELEASE_WITHOUT_ACTIVE_PRESS' } });
-        this.pointerDown = false; return;
+        this.pointerDown = false; activeStrokePointerId = null; return;
       }
-      const n = norm(e);
-      this.pointer = n;
+      const n = track(e);
+      if (!n) { this.pointerDown = false; activeStrokePointerId = null; return; }
       const sw = this.swipe, zone = sw.pressZone;
-      if (zone) sw.tapMaxMovePx = Math.max(sw.tapMaxMovePx || 0,
-        Math.hypot((n.x - zone.pressX) * zone.vw, (n.y - zone.pressY) * zone.vh));
-      sw.up(n.x, n.y, this.time, this.strokeTime);
+      updateTapDistance(n, zone);
+      sw.up(n.gx, n.gy, inputEventTime(e), this.strokeTime);
+      progress(n, e.pointerType || (this.pointerFine === false ? 'touch' : 'mouse'));
       this.pointerDown = false;
+      activeStrokePointerId = null;
       this.swipeReleasedAt = this.time;
       /* A short, nearly motionless release is an intentional return, not an
        * invented swipe. It is bound to the incoming shot on which it began;
        * toss taps, long holds and drags cannot silently become extra hits. */
-      const tapAge = this.time - sw.startT;
+      const tapAge = inputEventTime(e) - sw.startT;
       const tapSlop = zone && zone.pointerType === 'mouse' ? 10 : 14;
       if (zone && !zone.serving && zone.shotId === this.shotId &&
           this.state === GS.RALLY && this.ball.live && this.ball.lastHitBy === -1 &&
           tapAge >= 0 && tapAge <= .35 && sw.tapMaxMovePx <= tapSlop &&
           !isRealStroke(sw.lastReleased, false)) {
-        sw.lastReleased = tapStrokeMetrics(sw.lastReleased, zone.pressX, zone.pressY);
+        sw.lastReleased = tapStrokeMetrics(sw.lastReleased, zone.gesturePressX, zone.gesturePressY);
       }
       this.updateShotDiagnostics();
       this.logSwipeRelease({ pointer: n, pointerId: e.pointerId, buttons: e.buttons,
@@ -475,8 +546,18 @@ class Game {
     });
     c.addEventListener('pointermove', move);
     c.addEventListener('pointerup', up);
-    c.addEventListener('pointercancel', (e) => this.cancelInput('pointercancel', e));
-    c.addEventListener('lostpointercapture', (e) => { if (ptrs.has(e.pointerId)) this.cancelInput('lostpointercapture', e); });
+    c.addEventListener('pointercancel', (e) => {
+      /* No owner can occur only for a programmatic/replay gesture that called
+       * SwipeTracker directly; retain its historic safe-cancel behaviour. */
+      if (e.pointerId === activeStrokePointerId || (activeStrokePointerId === null && this.swipe.active))
+        this.cancelInput('pointercancel', e);
+      else ptrs.delete(e.pointerId);
+    });
+    c.addEventListener('lostpointercapture', (e) => {
+      if (e.pointerId === activeStrokePointerId || (activeStrokePointerId === null && this.swipe.active))
+        this.cancelInput('lostpointercapture', e);
+      else ptrs.delete(e.pointerId);
+    });
     c.addEventListener('contextmenu', (e) => e.preventDefault());
     // Hover movement follows the bat. A held right button is not a camera command.
     window.addEventListener('pointermove', (e) => { if (!ptrs.size) track(e); }, { passive: true });
@@ -961,19 +1042,18 @@ class Game {
    *  Green needs BOTH to be truly human-hard (≈<25 px, ≈<50 ms) — that is
    *  the shot that should (almost) always be a point. */
   hitInputGrade() {
-    const pz = this.swipe.pressZone, S = this.swipe.samples;
+    const pz = this.swipe.pressZone;
+    const metrics = this.swipe.lastReleased || this.swipe.m;
     // A click is a deliberately simple return, not a failed swipe and not an
     // "ideal" power shot with its near-guaranteed winner bonus.
-    if (pz && pz.accepted && this.swipe.lastReleased && this.swipe.lastReleased.tap) return 'yellow';
-    if (!pz || pz.accepted !== true || !Number.isFinite(pz.distancePx) || !S || S.length < 3) return 'red';
-    let peak = 0, peakT = null;
-    for (let i = 1; i < S.length; i++) {
-      const dt = S[i].t - S[i - 1].t;
-      if (dt <= 0) continue;
-      const v = Math.hypot(S[i].x - S[i - 1].x, S[i].y - S[i - 1].y) / dt;
-      if (v > peak) { peak = v; peakT = S[i].t; }
-    }
-    const timingErr = peakT === null ? 1 : Math.abs(this.time - peakT);
+    if (pz && pz.contactEligible && metrics && metrics.tap) return 'yellow';
+    if (!pz || !pz.contactEligible || !Number.isFinite(pz.distancePx) || !metrics || metrics.samples < 3) return 'red';
+    /* Peak hand speed is timestamped in the DOM-event clock, but contact is
+     * resolved on the simulation clock. SwipeTracker stores the corresponding
+     * simulation stamp at the event, so do not subtract `this.time` from a
+     * DOM timestamp (that mixed clocks after the input-time repair). */
+    const timingErr = Number.isFinite(metrics.peakSimTime) && Number.isFinite(this.strokeTime)
+      ? Math.abs(this.strokeTime - metrics.peakSimTime) : 1;
     const placeErr = pz.distancePx;
     /* "идеальное движение" на мыши и на пальце — это не 50 мс ровно. Окна
      * подняты до стабильно программируемых значений: зелёный — ≈<60 мс и
@@ -1331,22 +1411,43 @@ class Game {
   }
 
   /* ----------------- continuous collision: ball vs paddle ---------- */
-  sweepPaddle(pad, p0, p1, radius) {
-    const n = pad.normal;
-    const d0 = (p0.x - pad.prevPos.x) * n.x + (p0.y - pad.prevPos.y) * n.y + (p0.z - pad.prevPos.z) * n.z;
-    const d1 = (p1.x - pad.pos.x) * n.x + (p1.y - pad.pos.y) * n.y + (p1.z - pad.pos.z) * n.z;
-    const R = PH.R;
-    if (d0 > R && d1 <= R) {
-      const t = clamp((d0 - R) / Math.max(d0 - d1, 1e-9), 0, 1);
-      const cx = lerp(p0.x, p1.x, t), cy = lerp(p0.y, p1.y, t), cz = lerp(p0.z, p1.z, t);
-      const px = lerp(pad.prevPos.x, pad.pos.x, t), py = lerp(pad.prevPos.y, pad.pos.y, t), pz = lerp(pad.prevPos.z, pad.pos.z, t);
-      const ex = cx - px, ey = cy - py, ez = cz - pz;
-      const dn = ex * n.x + ey * n.y + ez * n.z;
-      const rx = ex - n.x * dn, ry = ey - n.y * dn, rz = ez - n.z * dn;
-      const rad = Math.hypot(rx, ry, rz);
-      if (rad <= radius) return { t, x: cx, y: cy, z: cz, rad, px, py, pz };
+  sweepPaddle(pad, p0, p1, radius, serving = false) {
+    if (!pad || !pad.pos || !pad.prevPos || !p0 || !p1 || !(radius > 0)) return null;
+    const finite = q => q && [q.x, q.y, q.z].every(Number.isFinite);
+    if (![pad.pos, pad.prevPos, p0, p1].every(finite)) return null;
+    const r0x = p0.x - pad.prevPos.x, r0y = p0.y - pad.prevPos.y, r0z = p0.z - pad.prevPos.z;
+    const r1x = p1.x - pad.pos.x, r1y = p1.y - pad.pos.y, r1z = p1.z - pad.pos.z;
+    const drx = r1x - r0x, dry = r1y - r0y, drz = r1z - r0z;
+    let t = null, rad = null;
+    if (serving) {
+      /* The serve envelope is a sphere; use the same swept sphere here as
+       * endpoint capture and diagnostics. */
+      const dd = drx * drx + dry * dry + drz * drz;
+      const u = dd > 1e-12 ? clamp(-(r0x * drx + r0y * dry + r0z * drz) / dd, 0, 1) : 0;
+      const ex = r0x + drx * u, ey = r0y + dry * u, ez = r0z + drz * u;
+      const dist = Math.hypot(ex, ey, ez);
+      if (dist <= radius) { t = u; rad = dist; }
+    } else {
+      const n = pad.normal;
+      if (!finite(n)) return null;
+      const nl = Math.hypot(n.x, n.y, n.z);
+      if (!(nl > 1e-7) || !Number.isFinite(nl)) return null;
+      const nx = n.x / nl, ny = n.y / nl, nz = n.z / nl;
+      const d0 = r0x * nx + r0y * ny + r0z * nz;
+      const d1 = r1x * nx + r1y * ny + r1z * nz;
+      if (d0 > PH.R && d1 <= PH.R) {
+        const u = clamp((d0 - PH.R) / Math.max(d0 - d1, 1e-9), 0, 1);
+        const ex = r0x + drx * u, ey = r0y + dry * u, ez = r0z + drz * u;
+        const dn = ex * nx + ey * ny + ez * nz;
+        const lateral = Math.hypot(ex - nx * dn, ey - ny * dn, ez - nz * dn);
+        if (lateral <= radius) { t = u; rad = lateral; }
+      }
     }
-    return null;
+    if (t === null) return null;
+    const x = lerp(p0.x, p1.x, t), y = lerp(p0.y, p1.y, t), z = lerp(p0.z, p1.z, t);
+    return { t, x, y, z, rad,
+      px: lerp(pad.prevPos.x, pad.pos.x, t), py: lerp(pad.prevPos.y, pad.pos.y, t),
+      pz: lerp(pad.prevPos.z, pad.pos.z, t), serving: !!serving };
   }
 
   /* ------------------------------ step ----------------------------- */
@@ -1544,10 +1645,14 @@ class Game {
     const sw = this.swipe || {}, zone = sw.pressZone;
     const serving = !!(zone && zone.serving), released = sw.lastReleased;
     const valid = isRealStroke(released, serving);
-    const age = this.time - sw.startT, slop = zone && zone.pointerType === 'mouse' ? 10 : 14;
+    const eventDuration = released && Number.isFinite(released.dur) ? released.dur : null;
+    const simDuration = sw.startSample && Number.isFinite(sw.startSample.simTime) && Number.isFinite(sw.releaseSimTime)
+      ? Math.max(0, sw.releaseSimTime - sw.startSample.simTime) : null;
+    const slop = zone && zone.pointerType === 'mouse' ? 10 : 14;
     return this.logInput('pointerup', { ...extra, outcome: { released: true, contact: false,
       recognized: valid ? (released.tap ? 'tap' : 'swipe') : 'none',
-      reason: valid ? null : 'STATIC_CLICK', tapDurationGameSeconds: Number.isFinite(age) ? age : null,
+      reason: valid ? null : 'STATIC_CLICK', tapDurationEventSeconds: eventDuration,
+      tapDurationSimulationSeconds: simDuration,
       tapDurationEventMs: zone && extra.dom && Number.isFinite(zone.domTimestamp) && Number.isFinite(extra.dom.timestamp)
         ? Math.max(0, extra.dom.timestamp - zone.domTimestamp) : null,
       tapMaxDuration: .35, tapMovePx: Number.isFinite(sw.tapMaxMovePx) ? sw.tapMaxMovePx : null,
@@ -1678,7 +1783,7 @@ class Game {
     const ownBounce = Array.isArray(this.rallyBounces) && this.rallyBounces.some(side => side > 0);
     if (!serving && !ownBounce) return null;
     if (serving && b.v && b.v.y >= 0) return null; // no legal serve contact opportunity yet
-    const inRange = typeof playerInCaptureRange === 'function' && playerInCaptureRange(b.p, pad.pos, serving);
+    const inRange = typeof playerInCaptureRange === 'function' && playerInCaptureRange(b.p, pad, serving);
     const passed = Number.isFinite(b.p.z) && Number.isFinite(pad.pos.z) &&
       b.p.z > pad.pos.z + MATCH_RULES.depthTolerance;
     if (!inRange && !passed) return null;
@@ -1724,34 +1829,37 @@ class Game {
       ? serveTossRise(this.tossApex, this.tossStartY, PH.TABLE_Y) : NaN;
   }
 
-  /** Direction is judged at the contact candidate, from the whole gesture:
-   * an early backswing segment may still be moving away from the ball. This
-   * can only reject an admitted press; it can never admit an outside one. */
+  /** Direction is judged at the contact candidate, from the whole gesture.
+   * A route can enter the input affordance after pointerdown, but direction
+   * can still reject that route; it never makes a non-entered gesture legal. */
   validatePressDirection(m) {
     const pz = this.swipe && this.swipe.pressZone;
-    if (!pz || !pz.accepted || !m) return this.pressAdmitsBall();
-    // A tap has no path to judge. Its position and the physical contact
-    // checks still apply; only a swipe can fail the direction test.
+    if (!m) return false;
+    /* Synthetic/demo/replay gestures can deliberately have no screen gate;
+     * they still need the same physical/bounce checks, but have no pointer
+     * direction vector to reject. This is also the old public helper contract. */
+    if (!pz) return true;
+    if (!this.pressAdmitsBall()) return false;
+    // A tap has no path to judge. Its position and physical contact still apply.
     if (m.tap === true) return true;
+    const gate = pz.entryZone || pz;
     if (pz.directionOk === true) return true;
     if (pz.directionOk === false) return false;
-    if (![pz.x, pz.y, pz.pointerX, pz.pointerY, m.dx, m.dy].every(Number.isFinite)) return true;
-    const toBallX = pz.x - pz.pointerX, toBallY = pz.y - pz.pointerY;
-    const swipeX = m.dx * (pz.vw > 0 ? pz.vw : 1), swipeY = m.dy * (pz.vh > 0 ? pz.vh : 1);
+    if (![gate.x, gate.y, gate.pointerX, gate.pointerY, m.dx, m.dy].every(Number.isFinite)) return true;
+    const toBallX = gate.x - gate.pointerX, toBallY = gate.y - gate.pointerY;
+    /* Gesture coordinates are both measured against `gestureScale` (the
+     * shorter CSS side), so this dot product is aspect-ratio invariant. */
+    const gestureScale = pz.gestureScale > 0 ? pz.gestureScale : Math.min(pz.vw || 1, pz.vh || 1);
+    const swipeX = m.dx * gestureScale, swipeY = m.dy * gestureScale;
     const dist = Math.hypot(toBallX, toBallY), len = Math.hypot(swipeX, swipeY);
     if (dist < 4) { pz.directionDot = 1; pz.directionOk = true; return true; }
     if (!(len > 1e-9)) return false;
     const dot = (swipeX * toBallX + swipeY * toBallY) / (len * dist);
-    /* Линейность в масштабе скорости: медленный свайп игрок ещё может
-     * вести ровно, но быстрый взмах (он же реальный ударный темп настольного
-     * тенниса) — всегда с дугой и задержкой. Чем длиннее/быстрее жест,
-     * тем мягче порог направления: до ~104° для мыши и ~90° для пальца.
-     * Медленные свайпы не меняются вообще. */
-    const fast = len > 0.16;
+    const fast = len > 0.16 * gestureScale;
     const dotLimit = pz.pointerType === 'mouse' ? -0.3 : (fast ? -0.12 : 0);
     pz.directionDot = dot; pz.directionOk = dot > dotLimit;
     if (!pz.directionOk) {
-      pz.accepted = false; pz.reason = 'WRONG_DIRECTION';
+      pz.directionRejected = true; pz.contactEligible = false; pz.reason = 'WRONG_DIRECTION';
       if (this.shotJournal && typeof this.shotJournal.rejectPress === 'function')
         this.shotJournal.rejectPress(this.swipe.gestureId, 'WRONG_DIRECTION', pz);
       this.logInput('decision', { outcome: { contact: false, reason: 'WRONG_DIRECTION' } });
@@ -1802,7 +1910,7 @@ class Game {
         const v = V3.clone(b.v), w = V3.clone(b.w);
         if (!impactRacket(v, w, n, vR, R.quality, rubber)) continue;
         const p0 = V3.addScaled(V3.clone(contact), contact, n, PH.R * 1.05);
-        const o = predict(p0, v, w, { dt: 1 / 120, maxT: 2.2, stopAfterBounces: 2, out: {} });
+        const o = predict(p0, v, w, { dt: PH.SIM_DT, maxT: 2.2, stopAfterBounces: 2, out: {} });
         if (o.landed && !o.hitNet && !o.diverged &&
             o.landed.z > 0 && Math.abs(o.landed.x) <= PH.T_HALF_WID + 0.01 &&
             o.b2 && o.b2.z < 0 && o.b2.z >= -PH.T_HALF_LEN - 0.01 &&
@@ -1869,7 +1977,7 @@ class Game {
      * движения не бьёт» это формально запрещает. */
     if (this.swipe.realGestureId !== this.swipe.gestureId) return false;
     if (!this.pressAdmitsBall()) return false;
-    if (!playerInCaptureRange(b.p, pad.pos, false)) return false; // честный бокс, не кольцо края
+    if (!playerInCaptureRange(b.p, pad, false)) return false; // честный бокс, не кольцо края
     if (!this.rallyBounces.some((s) => s > 0)) return false;      // ITTF: сначала свой отскок
     const closing = (b.p.x - pad.pos.x) * b.v.x + (b.p.y - pad.pos.y) * b.v.y + (b.p.z - pad.pos.z) * b.v.z;
     if (closing > 0.05) return false;                             // мяч уже уходит
@@ -1913,7 +2021,7 @@ class Game {
     const v = V3.clone(b.v), w = V3.clone(b.w);
     if (!impactRacket(v, w, racket.normal, racket.vR, racket.quality ?? .5, racket.rubber || {})) return false;
     const p = V3.addScaled(V3.clone(contact), contact, racket.normal, PH.R * 1.05);
-    const o = predict(p, v, w, { dt: 1 / 160, maxT: 2.2, stopAfterBounces: 2, out: this._q || (this._q = {}) });
+    const o = predict(p, v, w, { dt: PH.SIM_DT, maxT: 2.2, stopAfterBounces: 2, out: this._q || (this._q = {}) });
     if (o.diverged || o.hitNet || !o.landed) return false;
     if (isServe) {
       return o.landed.z > 0 && Math.abs(o.landed.x) <= PH.T_HALF_WID + 0.01 &&
@@ -1987,19 +2095,76 @@ class Game {
     return m;
   }
 
-  /** The press gate is the oval/circle stamped at pointerdown (see
-   *  pressZoneForBall). The oval already reaches ahead of the ball along its
-   *  screen trajectory, which is where a backswing starts; anything later
-   *  may only reject (wrong swipe direction), never admit. */
+  /** Evaluate the same input affordance used at pointerdown. The start sample
+   * is still retained for diagnostics, but a stroke is allowed to ENTER this
+   * live gate before physical contact. This deliberately does not replace the
+   * bounce, freshness, direction or racket-geometry checks. */
+  currentPressZone(pointer, pointerType) {
+    if (!this.canvas || !pointer || !Number.isFinite(pointer.x) || !Number.isFinite(pointer.y)) return null;
+    const rect = this.canvas.getBoundingClientRect();
+    if (!(rect.width > 0 && rect.height > 0)) return null;
+    const servePress = this.state === GS.SERVE_TOSS && this.server === 1;
+    const cpGate = !servePress && MATCH_RULES.zoneAnchor === 'contact' ? this.contactPrediction() : null;
+    let zone = null;
+    try {
+      zone = cpGate
+        ? pressContactZone(this.project(cpGate.p, {}), pointer, rect.width, rect.height,
+          { pointerType, scale: this.contactGateScale(cpGate.p, rect) })
+        : pressZoneForBall(this.ball, pointer, rect.width, rect.height, {
+          project: point => this.project(point, {}), pointerType,
+          referenceWorld: this.player && this.player.pos,
+          kind: servePress ? 'serve' : 'rally', tossApex: this.tossApex,
+          tossStartY: this.tossStartY, tableY: PH.TABLE_Y,
+        });
+    } catch (e) { zone = null; }
+    return { zone, cpGate, servePress, rect };
+  }
+
+  /** Record an actual move/release that reaches the admission affordance. */
+  notePressProgress(pointer, pointerType) {
+    const sw = this.swipe, pz = sw && sw.pressZone;
+    if (!pz || !pointer) return false;
+    const result = this.currentPressZone(pointer, pointerType || pz.pointerType);
+    const zone = result && result.zone;
+    if (!zone) return !!pz.contactEligible;
+    pz.lastScore = zone.score; pz.lastReason = zone.reason;
+    pz.lastZoneAt = this.time;
+    if (zone.accepted && !pz.directionRejected) {
+      /* Direction must be measured at the FIRST physical entry. Replacing the
+       * entry point on every subsequent move made any stroke which continued
+       * through the gate point away from its final sample and falsely become
+       * WRONG_DIRECTION. */
+      const enteredNow = !pz.enteredZone;
+      pz.enteredZone = true;
+      pz.contactEligible = true;
+      if (enteredNow) {
+        pz.enteredAt = this.time;
+        /* Keep start fields intact. Direction validation uses this particular
+         * entry geometry, not an obsolete pointerdown centre. */
+        pz.entryZone = { ...zone };
+        pz.entryPointer = { x: pointer.x, y: pointer.y };
+      }
+      if (this.shotJournal && typeof this.shotJournal.admitPress === 'function')
+        this.shotJournal.admitPress(sw.gestureId, pz);
+    }
+    return !!pz.contactEligible;
+  }
+
+  /** The input gate is an admission path, not a one-frame latch. A start in
+   * the guide is immediately eligible; an outside start becomes eligible only
+   * after the owned pointer actually enters the same live gate. */
   pressAdmitsBall() {
-    const pz = this.swipe && this.swipe.pressZone;
-    /* A missing zone means a synthetic/internal swipe (demo stamps its own,
-     * tools call SwipeTracker directly). Every real pointerdown stamps one
-     * before any physics runs, and that stamp is final: no path, paddle,
-     * assist or CCD re-evaluation may turn an outside press into a hit. */
+    const sw = this.swipe, pz = sw && sw.pressZone;
     if (this.pressConsumed()) return false;
+    /* Missing zone = synthetic/internal swipe (demo and unit tools). */
     if (!pz) return true;
-    return pz.accepted === true;
+    if (pz.directionRejected) return false;
+    /* Keep synthetic/test callers and old replay sidecars compatible: they
+     * carry only the original `accepted` boolean, not the new path fields. */
+    if (pz.startAccepted === undefined && pz.accepted === true) pz.contactEligible = true;
+    if (!pz.contactEligible && this.inputPointer)
+      this.notePressProgress(this.inputPointer, pz.pointerType);
+    return pz.contactEligible === true;
   }
 
   /** The pose the blade is drawn with this frame. The continuous test must use
@@ -2106,7 +2271,7 @@ class Game {
     if (b.v.z < 0 && b.p.z < pad.pos.z - .35) {
       this.debugRecording && this.diagnosticPhysicsGate('moving_away', { capture: captureSample }); return;
     }
-    if (serveCtx && (b.v.y >= 0 || !(this.tossRiseNow() > MATCH_RULES.serveTossMinRise))) {
+    if (serveCtx && (b.v.y >= 0 || !(serveTossIsLegal(this.tossRiseNow())))) {
       this.debugRecording && this.diagnosticPhysicsGate('serve_not_legal', { tossRise: this.tossRiseNow(), capture: captureSample });
       if (b.v.y < 0) this.logPressRejection('SERVE_TOSS_LOW', { tossRise: this.tossRiseNow() });
       return;
@@ -2116,9 +2281,9 @@ class Game {
     if (serveCtx) {
       // ITTF 2.06: the ball must be struck while FALLING from the toss.
       const rad = V3.dist(b.p, spad.pos);
-      const serveIn = playerInCaptureRange(b.p, spad.pos, true);
-      const serveEdge = !serveIn && playerGraceRange(b.p, spad.pos, true);
-      if (b.v.y < 0 && this.tossRiseNow() > MATCH_RULES.serveTossMinRise && (serveIn || serveEdge)) {
+      const serveIn = playerInCaptureRange(b.p, spad, true);
+      const serveEdge = !serveIn && playerGraceRange(b.p, spad, true);
+      if (b.v.y < 0 && serveTossIsLegal(this.tossRiseNow()) && (serveIn || serveEdge)) {
         /* Подача краем: мяч чуть шире/выше честной сферы всё равно ударяется —
          * слабо, срезанно, но честно. Чистый пропуск тут ощущался как баг
          * «мяч не подаётся, хотя в реальности подался бы». */
@@ -2135,11 +2300,11 @@ class Game {
       const pp = spad.pos;
       const closing = (b.p.x - pp.x) * b.v.x + (b.p.y - pp.y) * b.v.y +
         (b.p.z - pp.z) * b.v.z;
-      const inside = playerInCaptureRange(b.p, pp);
+      const inside = playerInCaptureRange(b.p, spad);
       /* Кольцо края: на расстоянии (capture × 1 .. 1.34] жест всё равно
        * даёт контакт — не ассист, а физически честное срезанное касание:
        * слабо и по-глупому, но не «тихий промах». */
-      const grazing = !inside && playerGraceRange(b.p, pp);
+      const grazing = !inside && playerGraceRange(b.p, spad);
       const still = b.v.x * b.v.x + b.v.y * b.v.y + b.v.z * b.v.z < 0.04;
       const atClosest = MATCH_RULES.contactAtClosest ? closing >= -0.02 : closing <= 0.02;
       if (this.debugRecording) gateDetail = { inside, grazing, still, closing, atClosest, tap: m.tap === true,
@@ -2156,9 +2321,14 @@ class Game {
          * `dist2d * 0.35` ignored depth entirely: a ball 30 cm in front of
          * the blade scored as a dead-centre contact with the full sweet
          * spot. */
-        const lat = Math.hypot(cx - pp.x, cy - pp.y);
-        const frac = Math.max(lat / reachRadius,
-          Math.abs(cz - pp.z) / MATCH_RULES.depthTolerance);
+        /* Quality uses the same local disk/slab as endpoint admission and
+         * CCD. World XY/Z here made a tilted blade look centre-hit to one
+         * route and edge-hit to the other. */
+        const geo = typeof paddleCaptureGeometry === 'function'
+          ? paddleCaptureGeometry({ x: cx, y: cy, z: cz }, spad) : null;
+        const frac = geo ? Math.max(geo.radial / reachRadius, geo.depthGap / MATCH_RULES.depthTolerance)
+          : Math.max(Math.hypot(cx - pp.x, cy - pp.y) / reachRadius,
+            Math.abs(cz - pp.z) / MATCH_RULES.depthTolerance);
         hit = { t: u, x: cx, y: cy, z: cz, captureKind: inside ? 'endpoint' : 'edge',
           rad: clamp(frac, 0, 1) * reachRadius, px: pp.x, py: pp.y, pz: pp.z,
           edge: !inside };
@@ -2166,7 +2336,7 @@ class Game {
     }
 
     if (!hit) {
-      hit = this.sweepPaddle(spad, p0, b.p, serveCtx ? serveReach : reachRadius);
+      hit = this.sweepPaddle(spad, p0, b.p, serveCtx ? serveReach : reachRadius, serveCtx);
     }
     if (!hit) {
       this.debugRecording && this.diagnosticPhysicsGate('no_intersection', gateDetail || { capture: captureSample });
@@ -2827,16 +2997,16 @@ class Game {
     if (this.paused || (this.replayer && this.replayer.on)) { w.k = 0; return; }
     if (this.state === GS.SERVE_TOSS && this.server === 1 && b.live && b.lastHitBy === 0) {
       // No ready circle on the paddle and no "hit now" while the toss rises.
-      if (b.v.y < 0 && this.tossRiseNow() > MATCH_RULES.serveTossMinRise) {
+      if (b.v.y < 0 && serveTossIsLegal(this.tossRiseNow())) {
         w.on = true; w.kind = 'serve'; w.t = 0;
-        w.contactable = playerInCaptureRange(b.p, pad.pos, true) || playerGraceRange(b.p, pad.pos, true);
+        w.contactable = playerInCaptureRange(b.p, pad, true) || playerGraceRange(b.p, pad, true);
         w.ready = w.contactable ? 1 : .4;
       }
     } else if (incoming && this.rallyBounces.some(side => side > 0)) {
       const o = this._strikePred || (this._strikePred = {});
       if (read) predict(V3.clone(b.p), V3.clone(b.v), V3.clone(b.w),
         { dt: 1 / 200, maxT: 1.8, stopZ: pad.pos.z, stopDir: 1, stopAtPlane: true, out: o });
-      w.contactable = playerInCaptureRange(b.p, pad.pos) || playerGraceRange(b.p, pad.pos);
+      w.contactable = playerInCaptureRange(b.p, pad) || playerGraceRange(b.p, pad);
       const eta = o.reach && Number.isFinite(o.reachT) ? Math.max(0, o.reachT - clock.age) : Infinity;
       if (w.contactable || eta <= MATCH_RULES.timingHorizon) {
         w.on = true; w.kind = 'rally'; w.t = w.contactable ? 0 : eta;

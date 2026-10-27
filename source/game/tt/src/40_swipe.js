@@ -13,9 +13,25 @@ class SwipeTracker {
   constructor() {
     this.gestureId = 0;
     this.active = false;
-    this.samples = [];          // {x,y,t} normalized screen units (y down)
+    /* This is a bounded TRAILING history for live UI and diagnostics.  It is
+     * deliberately not the source of whole-gesture metrics: long gestures
+     * used to lose their start when this array shifted, then combine a recent
+     * chord with an old peak speed. */
+    this.samples = [];          // {x,y,t,simTime}; x/y use one CSS-derived scale
     this.maxSamples = 64;
     this.startT = 0;
+    this.startSample = null;
+    this._lastPoint = null;
+    this._sampleCount = 0;
+    this._pathLen = 0;
+    this._curl = 0;
+    this._lastVector = null;
+    this._lastSegmentSpeed = null;
+    this._jerkAcc = 0;
+    this._speedChanges = 0;
+    this._peakSpeed = 0;
+    this._peakEventTime = null;
+    this._peakSimTime = null;
     this.m = this.blankMetrics();
     this.lastReleased = null;
     /* Which gesture has already been a real swipe (see
@@ -31,38 +47,106 @@ class SwipeTracker {
       speed: 0, peakSpeed: 0, releaseSpeed: 0, accel: 0,
       angle: 0, angleDeg: 0, up: 0, right: 0,
       curl: 0, dur: 0, samples: 0, jerk: 0, smooth: 1,
+      /* Event time is only for hand kinematics.  The paired simulation stamp
+       * is used later for a ball-time freshness/grade decision; never subtract
+       * these two clock domains. */
+      peakEventTime: null, peakSimTime: null, eventTime: null, simTime: null,
     };
+  }
+  _point(x, y, t, simTime) {
+    const prev = this._lastPoint;
+    const fallback = prev ? prev.t : 0;
+    let eventTime = Number.isFinite(t) ? t : fallback;
+    /* A browser can report an equal timestamp for coalesced samples, and some
+     * old webviews can occasionally report an earlier one. Keep ordering but
+     * do not invent a tiny duration: zero-duration segments contribute shape,
+     * never an artificial multi-thousand-unit/s speed. */
+    if (prev && eventTime < prev.t) eventTime = prev.t;
+    return { x: Number.isFinite(x) ? x : (prev ? prev.x : 0),
+      y: Number.isFinite(y) ? y : (prev ? prev.y : 0), t: eventTime,
+      simTime: Number.isFinite(simTime) ? simTime : null };
+  }
+  _resetMetrics(point) {
+    this.startSample = { ...point };
+    this._lastPoint = point;
+    this._sampleCount = 1;
+    this._pathLen = 0;
+    this._curl = 0;
+    this._lastVector = null;
+    this._lastSegmentSpeed = null;
+    this._jerkAcc = 0;
+    this._speedChanges = 0;
+    this._peakSpeed = 0;
+    this._peakEventTime = null;
+    this._peakSimTime = null;
+    this.samples.length = 0;
+    this.samples.push(point);
+  }
+  _appendPoint(x, y, t, simTime) {
+    const point = this._point(x, y, t, simTime);
+    const prev = this._lastPoint;
+    if (!prev) { this._resetMetrics(point); return point; }
+    /* Pointerup commonly repeats the final pointermove. It carries no new
+     * geometry; retain a newer simulation stamp without manufacturing a sample. */
+    if (point.x === prev.x && point.y === prev.y && point.t === prev.t) {
+      if (Number.isFinite(point.simTime)) prev.simTime = point.simTime;
+      return prev;
+    }
+    const dx = point.x - prev.x, dy = point.y - prev.y;
+    const segment = Math.hypot(dx, dy);
+    this._pathLen += segment;
+    if (segment > 1e-7) {
+      if (this._lastVector) this._curl += Math.atan2(this._lastVector.x * dy - this._lastVector.y * dx,
+        this._lastVector.x * dx + this._lastVector.y * dy);
+      this._lastVector = { x: dx, y: dy };
+    }
+    const dt = point.t - prev.t;
+    /* Do not fall back to 1e-4 / 1e-3 here. A zero-time segment has no
+     * measurable velocity; treating it as one created false "power swipes"
+     * whenever events were delivered within one animation frame. */
+    if (dt > 1e-4 && segment > 1e-7) {
+      const speed = segment / dt;
+      if (Number.isFinite(speed)) {
+        if (this._lastSegmentSpeed !== null) {
+          this._jerkAcc += Math.abs(speed - this._lastSegmentSpeed);
+          this._speedChanges++;
+        }
+        this._lastSegmentSpeed = speed;
+        if (speed > this._peakSpeed) {
+          this._peakSpeed = speed;
+          this._peakEventTime = point.t;
+          this._peakSimTime = point.simTime;
+        }
+      }
+    }
+    this._lastPoint = point;
+    this._sampleCount++;
+    this.samples.push(point);
+    if (this.samples.length > this.maxSamples) this.samples.shift();
+    return point;
   }
   down(x, y, t, simTime) {
     this.gestureId++;
     this.realGestureId = -1; this.realAt = 0; this.realAtSim = null;
     this.consumedGestureId = -1; this.consumedAt = -Infinity;
     this.pressZone = null;
-    this.active = true; this.startT = t;
-    // Gesture speed uses real time, but its opportunity to meet the ball
-    // must age in the same (possibly slowed) time as the ball's physics.
+    this.active = true;
+    const point = this._point(x, y, t, simTime);
+    this.startT = point.t;
+    // Gesture speed uses device/event time, while its opportunity to meet the
+    // ball ages in the simulation clock (which can be in slow motion).
     this.sampleSimTime = Number.isFinite(simTime) ? simTime : null;
     this.releaseSimTime = null;
-    this.samples.length = 0;
-    this.samples.push({ x, y, t });
+    this._resetMetrics(point);
     this.m = this.blankMetrics();
-    this.m.sx = x; this.m.sy = y; this.m.x = x; this.m.y = y;
+    this.m.sx = point.x; this.m.sy = point.y; this.m.x = point.x; this.m.y = point.y;
+    this.m.samples = 1; this.m.eventTime = point.t; this.m.simTime = point.simTime;
   }
   move(x, y, t, simTime) {
     if (!this.active) return;
     if (Number.isFinite(simTime)) this.sampleSimTime = simTime;
-    const s = this.samples, last = s[s.length - 1];
-    if (last && t - last.t < 0.0025) {
-      // Several pointer events can arrive between animation frames. Never
-      // overwrite the starting point: doing so erased fast drags completely.
-      if (s.length === 1) s.push({ x, y, t });
-      else { last.x = x; last.y = y; last.t = Math.max(last.t, t); }
-      this.compute(t);
-      return;
-    }
-    s.push({ x, y, t });
-    if (s.length > this.maxSamples) s.shift();
-    this.compute(t);
+    this._appendPoint(x, y, t, simTime);
+    this.compute();
   }
   /** Abandon the gesture without producing a stroke — used when a second
    *  finger lands and the touch turns into a camera orbit. */
@@ -72,6 +156,7 @@ class SwipeTracker {
     this.realGestureId = -1; this.realAt = 0; this.realAtSim = null;
     this.sampleSimTime = null; this.releaseSimTime = null;
     this.samples.length = 0;
+    this.startSample = null; this._lastPoint = null; this._sampleCount = 0;
     this.lastReleased = null;
     this.m = this.blankMetrics();
   }
@@ -79,72 +164,60 @@ class SwipeTracker {
     if (!this.active) return null;
     this.releaseSimTime = Number.isFinite(simTime) ? simTime : null;
     if (Number.isFinite(simTime)) this.sampleSimTime = simTime;
-    /* Тот же лимит, что в move(): без него жест из 64 сэмплов пробивал
-     * буфер до 65, и в массиве оставались точки вне окна скорости. */
-    const last = this.samples[this.samples.length - 1];
-    if (last && t - last.t < 0.0025) {
-      if (this.samples.length === 1 && (x !== last.x || y !== last.y)) this.samples.push({ x, y, t });
-      else { last.x = x; last.y = y; last.t = Math.max(last.t, t); }
-    } else {
-      this.samples.push({ x, y, t });
-      if (this.samples.length > this.maxSamples) this.samples.shift();
-    }
-    this.compute(t);
+    this._appendPoint(x, y, t, simTime);
+    this.compute();
     this.active = false;
     this.lastReleased = { ...this.m };
     return this.lastReleased;
   }
-  compute(now) {
-    const s = this.samples, n = s.length, m = this.m;
-    if (n < 2) return m;
-    const a = s[0], b = s[n - 1];
-    m.sx = a.x; m.sy = a.y; m.x = b.x; m.y = b.y;
-    m.dx = b.x - a.x; m.dy = b.y - a.y;
+  _windowVelocity(windowSec) {
+    const s = this.samples, n = s.length;
+    if (n < 2) return { speed: 0, vx: 0, vy: 0, duration: 0, sample: null };
+    const b = s[n - 1];
+    let i = n - 1;
+    while (i > 0 && b.t - s[i - 1].t <= windowSec) i--;
+    const a = s[i], duration = b.t - a.t;
+    if (!(duration > 1e-4)) return { speed: 0, vx: 0, vy: 0, duration: 0, sample: a };
+    const vx = (b.x - a.x) / duration, vy = (b.y - a.y) / duration;
+    const speed = Math.hypot(vx, vy);
+    return Number.isFinite(speed) ? { speed, vx, vy, duration, sample: a }
+      : { speed: 0, vx: 0, vy: 0, duration: 0, sample: a };
+  }
+  compute() {
+    const start = this.startSample, b = this._lastPoint, m = this.m;
+    if (!start || !b) return m;
+    m.sx = start.x; m.sy = start.y; m.x = b.x; m.y = b.y;
+    m.dx = b.x - start.x; m.dy = b.y - start.y;
     m.dist = Math.hypot(m.dx, m.dy);
-    m.dur = Math.max(1e-3, b.t - a.t);
-    m.samples = n;
+    m.dur = Math.max(0, b.t - start.t);
+    m.samples = this._sampleCount;
+    m.pathLen = this._pathLen;
+    m.straightness = m.pathLen > 1e-5 ? clamp(m.dist / m.pathLen, 0, 1) : 1;
+    m.curl = clamp(this._curl, -3.2, 3.2);
+    m.jerk = this._speedChanges ? this._jerkAcc / this._speedChanges : 0;
+    m.peakSpeed = this._peakSpeed;
+    m.peakEventTime = this._peakEventTime;
+    m.peakSimTime = this._peakSimTime;
+    m.eventTime = b.t; m.simTime = b.simTime;
 
-    // path length + curl (signed turning, + = counter-clockwise on screen)
-    let pl = 0, curl = 0, jerkAcc = 0, prevSpeed = 0, speedChanges = 0;
-    for (let i = 1; i < n; i++) {
-      const px = s[i].x - s[i - 1].x, py = s[i].y - s[i - 1].y;
-      const seg = Math.hypot(px, py);
-      pl += seg;
-      const dt = Math.max(1e-4, s[i].t - s[i - 1].t);
-      const sp = seg / dt;
-      if (i > 1) { jerkAcc += Math.abs(sp - prevSpeed); speedChanges++; }
-      prevSpeed = sp;
-      if (i > 1) {
-        const qx = s[i - 1].x - s[i - 2].x, qy = s[i - 1].y - s[i - 2].y;
-        const cr = qx * py - qy * px, dp = qx * px + qy * py;
-        if (seg > 1e-5) curl += Math.atan2(cr, dp);     // signed turn, radians
-      }
-    }
-    m.pathLen = pl;
-    m.straightness = pl > 1e-5 ? clamp(m.dist / pl, 0, 1) : 1;
-    m.curl = clamp(curl, -3.2, 3.2);          // total signed turning [rad]
-    m.jerk = speedChanges ? jerkAcc / speedChanges : 0;
+    // Velocity over the trailing 55 ms window: what the hand is doing NOW.
+    const trailing = this._windowVelocity(0.055);
+    m.speed = trailing.speed;
+    m.releaseSpeed = trailing.speed;
+    // A short-vs-long trailing comparison describes acceleration without any
+    // zero-duration denominator.
+    const short = this._windowVelocity(0.025);
+    m.accel = trailing.duration > 1e-4 && short.duration > 1e-4
+      ? (short.speed - trailing.speed) / trailing.duration : 0;
 
-    // velocity over the trailing 55 ms window (what the hand is doing *now*)
-    const W = 0.055;
-    let i0 = n - 1;
-    while (i0 > 0 && b.t - s[i0].t < W) i0--;
-    const w = s[i0];
-    const wdt = Math.max(1e-3, b.t - w.t);
-    const vx = (b.x - w.x) / wdt, vy = (b.y - w.y) / wdt;
-    m.speed = Math.hypot(vx, vy);
-    m.releaseSpeed = m.speed;
-    if (m.speed > m.peakSpeed) m.peakSpeed = m.speed;
-    // 25 ms acceleration (is the hand still accelerating into the ball?)
-    let i1 = n - 1; while (i1 > 0 && b.t - s[i1].t < 0.025) i1--;
-    const w1 = s[i1], wdt1 = Math.max(1e-3, b.t - w1.t);
-    const sp1 = Math.hypot(b.x - w1.x, b.y - w1.y) / wdt1;
-    m.accel = (sp1 - m.speed) / Math.max(wdt1, 1e-3);
-
-    // direction: blend of overall displacement and current velocity
-    let dirx = vx, diry = vy;
+    // Direction blends current event-time velocity with the whole gesture.
+    let dirx = trailing.vx, diry = trailing.vy;
     if (m.speed < 0.08) { dirx = m.dx; diry = m.dy; }
-    else { dirx = vx * 0.72 + m.dx / m.dur * 0.28; diry = vy * 0.72 + m.dy / m.dur * 0.28; }
+    else {
+      const mean = m.dur > 1e-4 ? 1 / m.dur : 0;
+      dirx = trailing.vx * 0.72 + m.dx * mean * 0.28;
+      diry = trailing.vy * 0.72 + m.dy * mean * 0.28;
+    }
     m.angle = Math.atan2(-diry, dirx);      // screen y is down -> flip
     m.angleDeg = m.angle / DEG;
     m.right = Math.cos(m.angle);

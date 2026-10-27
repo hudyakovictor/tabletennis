@@ -16,7 +16,7 @@ function diagMetrics(value) {
   if (!value) return null;
   const keys = ['sx', 'sy', 'x', 'y', 'dx', 'dy', 'dur', 'dist', 'pathLen', 'speed', 'peakSpeed',
     'releaseSpeed', 'accel', 'samples', 'curl', 'straightness', 'vx', 'vy', 'angle', 'angleDeg',
-    'up', 'right', 'jerk', 'smooth', 't0', 't1'];
+    'up', 'right', 'jerk', 'smooth', 'peakEventTime', 'peakSimTime', 'eventTime', 'simTime', 't0', 't1'];
   const result = {};
   for (const key of keys) if (value[key] !== undefined) result[key] = diagNumber(value[key]);
   return result;
@@ -103,8 +103,8 @@ function diagnosticSnapshot(game) {
       ownBounce: Array.isArray(game.rallyBounces) && game.rallyBounces.includes(1),
       strokeAge: sampleAge, worldDistance: capture ? diagNumber(capture.distance) : null,
       depth: capture ? diagNumber(capture.depthGap) : null, lateral: capture ? diagNumber(capture.lateral) : null,
-      inside: b.p && sp.pos && typeof playerInCaptureRange === 'function' ? playerInCaptureRange(b.p, sp.pos, serving) : null,
-      grace: b.p && sp.pos && typeof playerGraceRange === 'function' ? playerGraceRange(b.p, sp.pos, serving) : null,
+      inside: b.p && sp.pos && typeof playerInCaptureRange === 'function' ? playerInCaptureRange(b.p, sp, serving) : null,
+      grace: b.p && sp.pos && typeof playerGraceRange === 'function' ? playerGraceRange(b.p, sp, serving) : null,
       captureScore: capture ? diagNumber(capture.score) : null,
       predictedPoint: diagVec(cpPoint), predictedEta: cp ? diagNumber(cp.t) : null,
       predictedFrame: diagNumber(game._cpFrame), predictedRealTime: diagNumber(game._cpTime) },

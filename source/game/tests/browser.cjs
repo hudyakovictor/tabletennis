@@ -318,6 +318,26 @@ const { root } = require('./helpers.cjs');
             return g.camPos.y===before.eye.y && g.camPos.z===before.eye.z && g.fov===before.fov && g.camShiftY===before.shift;
           } finally {g.canvas.setPointerCapture=capture;g.cancelInput();g.returnToMenu();}
         });
+        check('the active pointer owns its gesture; foreign move/up and duplicate down cannot rewrite it', () => {
+          g.startMatch(2);g.setPaused(false);g.setState(GS.RALLY);g.cancelInput();
+          const rect=g.canvas.getBoundingClientRect(), event=(type,id,x,y)=>new PointerEvent(type,
+            {pointerId:id,pointerType:'touch',button:0,buttons:type==='pointerup'?0:1,
+              clientX:rect.left+x,clientY:rect.top+y,bubbles:true,cancelable:true});
+          const capture=g.canvas.setPointerCapture;g.canvas.setPointerCapture=()=>{};
+          try {
+            g.canvas.dispatchEvent(event('pointerdown',91,120,480));g.time+=.04;
+            g.canvas.dispatchEvent(event('pointermove',91,160,390));
+            const sw=g.swipe, snapshot={id:sw.gestureId,samples:sw.m.samples,
+              x:g.inputPointer.x,y:g.inputPointer.y,fine:g.pointerFine};
+            g.canvas.dispatchEvent(event('pointermove',92,rect.width-10,20));
+            g.canvas.dispatchEvent(event('pointerup',92,rect.width-10,20));
+            g.canvas.dispatchEvent(event('pointerdown',91,140,440));
+            const retained=sw.active && sw.gestureId===snapshot.id && sw.m.samples===snapshot.samples &&
+              g.inputPointer.x===snapshot.x && g.inputPointer.y===snapshot.y && g.pointerFine===snapshot.fine;
+            g.canvas.dispatchEvent(event('pointerup',91,160,390));
+            return retained && !sw.active;
+          } finally {g.canvas.setPointerCapture=capture;g.cancelInput();g.returnToMenu();}
+        });
         const incomingBall = () => {
           g.startMatch(2); g.setState(GS.RALLY); g.time+=1;
           g.isServeBall=false;g.rallyBounces=[1];g.ball.live=true;g.ball.lastHitBy=-1;
@@ -810,14 +830,26 @@ const { root } = require('./helpers.cjs');
         g.player.lastHitT=g.time-1;g.shotJournal.reset();
         const p=g.project(g.ball.p),rect=g.canvas.getBoundingClientRect();return {x:rect.x+p.x*rect.width,y:rect.y+p.y*rect.height};
       });
-      await page.mouse.move(aimPoint.x+70,aimPoint.y);await page.mouse.down();
+      // Start outside the side edge, then travel *towards* the live contact
+      // point. This proves admission is path-based without bypassing the
+      // separate direction check.
+      await page.mouse.move(aimPoint.x+70,aimPoint.y-50);await page.mouse.down();
       await page.evaluate(()=>window.__game.time+=.05);
-      await page.mouse.move(aimPoint.x,aimPoint.y-50,{steps:4});
+      await page.mouse.move(aimPoint.x,aimPoint.y,{steps:4});
       await page.evaluate(()=>window.__game.time+=.05);await page.mouse.up();
       assert.equal(await page.evaluate(()=>{
-        const g=window.__game;if(!g.swipe.pressZone || g.swipe.pressZone.accepted)return false;
-        g.tryPlayerHit(V3.clone(g.ball.p));return g.ball.lastHitBy===-1 && g.shotJournal.latest.outcome==='outside';
-      }),true,'outside real pointer-down must not be rescued by moving into the zone or by CCD');
+        const g=window.__game, z=g.swipe.pressZone;
+        if(!z || z.startAccepted || !z.enteredZone || !z.contactEligible)return false;
+        g.tryPlayerHit(V3.clone(g.ball.p));
+        return g.ball.lastHitBy===1 && !!g.shotJournal.latest.contact;
+      }),true,'an outside start can enter the live admission gate and still make one physical return');
+      // The admitted path intentionally consumed the first ball; make the
+      // next click an independent incoming-ball fixture.
+      await page.evaluate(()=>{
+        const g=window.__game;g.swipe.cancel();g.swipeReleasedAt=-Infinity;
+        g.rallyBounces=[1];g.ball.live=true;g.ball.lastHitBy=-1;g.player.lastHitT=g.time-1;
+        V3.copy(g.ball.p,g.player.pos);V3.set(g.ball.v,0,0,6);V3.zero(g.ball.w);g.shotJournal.reset();
+      });
       await page.mouse.move(aimPoint.x,aimPoint.y);await page.mouse.down();
       await page.evaluate(()=>window.__game.time+=.1);await page.mouse.up();
       assert.equal(await page.evaluate(()=>{
@@ -829,15 +861,25 @@ const { root } = require('./helpers.cjs');
         g.tryPlayerHit(V3.clone(g.ball.p));
         return !!hit && g.ball.lastHitBy===-1;
       }),true,'inside a legal capture window a quick click returns the ball exactly once');
+      await page.evaluate(()=>{
+        const g=window.__game;g.swipe.cancel();g.swipeReleasedAt=-Infinity;
+        g.rallyBounces=[1];g.ball.live=true;g.ball.lastHitBy=-1;g.player.lastHitT=g.time-1;
+        V3.copy(g.ball.p,g.player.pos);V3.set(g.ball.v,0,0,6);V3.zero(g.ball.w);g.shotJournal.reset();
+      });
       await page.mouse.move(aimPoint.x,aimPoint.y);await page.mouse.down();
-      await page.evaluate(()=>window.__game.time+=.05);await page.mouse.move(aimPoint.x,aimPoint.y-70,{steps:4});
+      await page.evaluate(()=>window.__game.time+=.05);await page.mouse.move(aimPoint.x,aimPoint.y+70,{steps:4});
       await page.evaluate(()=>window.__game.time+=.05);await page.mouse.up();
-      assert.equal(await page.evaluate(()=>{
-        const g=window.__game;if(!g.swipe.pressZone || !g.swipe.pressZone.accepted)return false;
+      const insideMotion=await page.evaluate(()=>{
+        const g=window.__game,z=g.swipe.pressZone;
+        if(!z || !z.accepted)return {ok:false,stage:'press',z};
         g.tryPlayerHit(V3.clone(g.ball.p));const hit=g.ball.lastHitBy===1;
-        g.update=g._testUpdate;delete g._testUpdate;return hit;
-      }),true,'inside real pointer-down plus fresh motion can make a physical hit');
-      count++;console.log(`PASS ${width}x${height}: real clicks and swipes hit once inside the capture window; outside starts stay rejected`);
+        const detail={ok:hit,stage:'contact',hit,lastHitBy:g.ball.lastHitBy,
+          directionOk:z.directionOk,directionDot:z.directionDot,contactEligible:z.contactEligible,
+          reason:z.reason,metrics:g.swipe.lastReleased};
+        g.update=g._testUpdate;delete g._testUpdate;return detail;
+      });
+      assert.equal(insideMotion.ok,true,`inside real pointer-down plus fresh motion: ${JSON.stringify(insideMotion)}`);
+      count++;console.log(`PASS ${width}x${height}: real clicks/swipes hit once; an outside start may enter the live gate`);
 
       if (width < 600) {
         const touchPoint=await page.evaluate(()=>{

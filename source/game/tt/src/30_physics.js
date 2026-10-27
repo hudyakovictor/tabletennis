@@ -197,24 +197,50 @@ function aeroAccelMeasured(out, v, w) {
  *  RK4 integration of one ball over dt (no collisions here).
  * ---------------------------------------------------------------- */
 const _k1 = V3.new(), _k2 = V3.new(), _k3 = V3.new(), _k4 = V3.new();
-const _vt = V3.new(), _pt = V3.new();
+const _rkV2 = V3.new(), _rkV3 = V3.new(), _rkV4 = V3.new();
+const _rkW2 = V3.new(), _rkW3 = V3.new(), _rkW4 = V3.new();
 function integrateBall(p, v, w, dt) {
-  // velocity derivative via RK4; position via the matching weighted velocity
+  /* RK4 evolves the complete (position, velocity) state.  The old code used
+   * RK4 only to average acceleration then advanced position as
+   * `v + a*dt/2`; that is second order when drag/Magnus changes with velocity
+   * and made prediction drift from the live flight. Spin has a closed-form
+   * exponential decay, so its exact value is sampled at every RK stage. */
+  if (!p || !v || !w || !Number.isFinite(dt) || dt <= 0) return;
+  const finite = q => Number.isFinite(q.x) && Number.isFinite(q.y) && Number.isFinite(q.z);
+  if (!finite(p) || !finite(v) || !finite(w)) return;
+  const half = dt * .5;
+  const decayHalf = Math.exp(-half / PH.SPIN_DECAY_TAU);
+  const decay = decayHalf * decayHalf;
+
+  // k1: current state
   aeroAccel(_k1, v, w);
-  V3.addScaled(_vt, v, _k1, dt * 0.5); aeroAccel(_k2, _vt, w);
-  V3.addScaled(_vt, v, _k2, dt * 0.5); aeroAccel(_k3, _vt, w);
-  V3.addScaled(_vt, v, _k3, dt); aeroAccel(_k4, _vt, w);
-  let ax = (_k1.x + 2 * _k2.x + 2 * _k3.x + _k4.x) / 6;
-  let ay = (_k1.y + 2 * _k2.y + 2 * _k3.y + _k4.y) / 6;
-  let az = (_k1.z + 2 * _k2.z + 2 * _k3.z + _k4.z) / 6;
-  if (!Number.isFinite(ax)) ax = 0;
-  if (!Number.isFinite(ay)) ay = 0;
-  if (!Number.isFinite(az)) az = 0;
-  p.x += (v.x + ax * dt * 0.5) * dt;
-  p.y += (v.y + ay * dt * 0.5) * dt;
-  p.z += (v.z + az * dt * 0.5) * dt;
-  v.x += ax * dt; v.y += ay * dt; v.z += az * dt;
-  const decay = Math.exp(-dt / PH.SPIN_DECAY_TAU);
+  // k2: v + k1*dt/2, w(t + dt/2)
+  V3.addScaled(_rkV2, v, _k1, half);
+  V3.mul(_rkW2, w, decayHalf);
+  aeroAccel(_k2, _rkV2, _rkW2);
+  // k3: v + k2*dt/2, w(t + dt/2)
+  V3.addScaled(_rkV3, v, _k2, half);
+  V3.mul(_rkW3, w, decayHalf);
+  aeroAccel(_k3, _rkV3, _rkW3);
+  // k4: v + k3*dt, w(t + dt)
+  V3.addScaled(_rkV4, v, _k3, dt);
+  V3.mul(_rkW4, w, decay);
+  aeroAccel(_k4, _rkV4, _rkW4);
+
+  // dp/dt is velocity, so use the RK stage velocities — not an acceleration
+  // shortcut. Every component is guarded independently against hostile input.
+  const px = (v.x + 2 * _rkV2.x + 2 * _rkV3.x + _rkV4.x) / 6;
+  const py = (v.y + 2 * _rkV2.y + 2 * _rkV3.y + _rkV4.y) / 6;
+  const pz = (v.z + 2 * _rkV2.z + 2 * _rkV3.z + _rkV4.z) / 6;
+  const ax = (_k1.x + 2 * _k2.x + 2 * _k3.x + _k4.x) / 6;
+  const ay = (_k1.y + 2 * _k2.y + 2 * _k3.y + _k4.y) / 6;
+  const az = (_k1.z + 2 * _k2.z + 2 * _k3.z + _k4.z) / 6;
+  p.x += (Number.isFinite(px) ? px : v.x) * dt;
+  p.y += (Number.isFinite(py) ? py : v.y) * dt;
+  p.z += (Number.isFinite(pz) ? pz : v.z) * dt;
+  v.x += (Number.isFinite(ax) ? ax : 0) * dt;
+  v.y += (Number.isFinite(ay) ? ay : 0) * dt;
+  v.z += (Number.isFinite(az) ? az : 0) * dt;
   w.x *= decay; w.y *= decay; w.z *= decay;
 }
 
@@ -224,7 +250,7 @@ function integrateBall(p, v, w, dt) {
  *  with velocity vSurf and has material (e, mu, et).
  *  Mutates v and w in place. Returns impact diagnostics.
  * ---------------------------------------------------------------- */
-const _u = V3.new(), _un = V3.new(), _ut = V3.new(), _vc = V3.new(), _jt = V3.new(), _tmpc = V3.new();
+const _u = V3.new(), _un = V3.new(), _ut = V3.new(), _vc = V3.new(), _jt = V3.new(), _tmpc = V3.new(), _impactN = V3.new();
 /* ---------------------------------------------------------------- *
  *  Input hygiene
  *
@@ -266,24 +292,31 @@ function saneN(n) {
 
 function impactSphere(v, w, n, vSurf, e, mu, et) {
   if (!saneN(n) || !v || !w) return null;
+  /* All impulse formulae assume a unit normal. Callers normally provide one,
+   * but accepting a finite non-unit normal previously changed both the normal
+   * impulse and the tangent decomposition. Normalise a scratch copy so this
+   * boundary stays physically invariant without mutating a paddle pose. */
+  const nLen = Math.hypot(n.x, n.y, n.z);
+  V3.mul(_impactN, n, 1 / nLen);
+  const nn = _impactN;
   sanitizeV(v); sanitizeV(w, SPIN_CAP * 2);
   if (vSurf) sanitizeV(vSurf); else vSurf = ZERO3;
   // relative velocity of the ball centre wrt the surface
   V3.sub(_u, v, vSurf);
-  const un = V3.dot(_u, n);
+  const un = V3.dot(_u, nn);
   if (un > 0) return null;                      // separating, no impact
-  V3.mul(_un, n, un);
+  V3.mul(_un, nn, un);
   V3.sub(_ut, _u, _un);
 
   // contact point velocity (relative, tangential):  ut + w x (-R n)
-  V3.cross(_tmpc, w, n);                        // w x n
+  V3.cross(_tmpc, w, nn);                       // w x n
   _vc.x = _ut.x - PH.R * _tmpc.x;
   _vc.y = _ut.y - PH.R * _tmpc.y;
   _vc.z = _ut.z - PH.R * _tmpc.z;
   const vcLen = V3.len(_vc);
 
   // ---- normal impulse (per unit mass) ----
-  const eEff = Math.max(0.05, e);
+  const eEff = Math.max(0.05, Number.isFinite(e) ? e : 0.05);
   const dvn = -(1 + eEff) * un;                  // >0
   const Jn = PH.M * dvn;
 
@@ -292,8 +325,10 @@ function impactSphere(v, w, n, vSurf, e, mu, et) {
   //   dv_c = (1/m)(1 + R^2/I_eff_r2) Jt  with I = I_eff m R^2
   //   => factor  k = 1 + 1/I_eff
   const kFac = 1 + 1 / PH.I_EFF;                 // 3.0 for I_EFF=0.5
-  const gripMag = (PH.M / kFac) * (1 + et) * vcLen;
-  const maxFric = mu * Jn;
+  const tangentialRestitution = Number.isFinite(et) ? et : 0;
+  const friction = Math.max(0, Number.isFinite(mu) ? mu : 0);
+  const gripMag = (PH.M / kFac) * (1 + tangentialRestitution) * vcLen;
+  const maxFric = friction * Jn;
   let slipping = false, jtMag;
   if (gripMag <= maxFric || vcLen < 1e-6) jtMag = gripMag;
   else { jtMag = maxFric; slipping = true; }
@@ -301,12 +336,12 @@ function impactSphere(v, w, n, vSurf, e, mu, et) {
   if (vcLen > 1e-6) V3.mul(_jt, _vc, -jtMag / vcLen); else V3.zero(_jt);
 
   // apply linear
-  v.x += (_jt.x + n.x * Jn) / PH.M;
-  v.y += (_jt.y + n.y * Jn) / PH.M;
-  v.z += (_jt.z + n.z * Jn) / PH.M;
+  v.x += (_jt.x + nn.x * Jn) / PH.M;
+  v.y += (_jt.y + nn.y * Jn) / PH.M;
+  v.z += (_jt.z + nn.z * Jn) / PH.M;
   // apply angular:  dw = (1/I) (-R n) x Jt  = -(R/I) (n x Jt)
   const invI = 1 / (PH.I_EFF * PH.M * PH.R * PH.R);
-  V3.cross(_tmpc, n, _jt);
+  V3.cross(_tmpc, nn, _jt);
   w.x -= PH.R * invI * _tmpc.x;
   w.y -= PH.R * invI * _tmpc.y;
   w.z -= PH.R * invI * _tmpc.z;
@@ -485,7 +520,7 @@ const _pp = V3.new(), _pv = V3.new(), _pw = V3.new();
  * @param {object} res  out: {hitTableZ, hitTableX, tToTable, apexY, crossZ:{t,x,y}, out:boolean}
  */
 function predict(p0, v0, w0, opts = {}) {
-  const dt = opts.dt || 1 / 240;
+  const dt = Number.isFinite(opts.dt) && opts.dt > 0 ? opts.dt : PH.SIM_DT;
   const maxT = opts.maxT || 3.0;
   const stopZ = opts.stopZ;              // stop when z crosses this plane (towards the player)
   const stopDir = opts.stopDir || 1;
@@ -580,14 +615,15 @@ const _ELEV = [-0.34, -0.26, -0.19, -0.13, -0.08, -0.04, 0, 0.035, 0.07, 0.105,
 const _ELEV_SCAN = [-0.34, -0.19, -0.08, 0, 0.035, 0.07, 0.105, 0.145, 0.24, 0.36, 0.51, 0.70, 0.93, 1.06];
 /** Integration steps: coarse for the scan, medium for the polish, production
  *  step for the answer that is handed to the impact solver. */
-const DT_SCAN = 1 / 130, DT_POLISH = 1 / 200, DT_FINE = 1 / 260;
+const DT_SCAN = 1 / 130, DT_POLISH = 1 / 200, DT_FINE = PH.SIM_DT;
 
 function _tryLaunch(from, spin, speed, ux, uz, elev, netClear, out, dt) {
   V3.copy(_ip, from);
   const ch = Math.cos(elev), sh = Math.sin(elev);
   V3.set(_iv, ux * speed * ch, speed * sh, uz * speed * ch);
   V3.copy(_iw, spin);
-  predict(_ip, _iv, _iw, { dt: dt || 1 / 260, maxT: 2.4, stopOnFirstBounce: true, out });
+  predict(_ip, _iv, _iw, { dt: Number.isFinite(dt) && dt > 0 ? dt : PH.SIM_DT,
+    maxT: 2.4, stopOnFirstBounce: true, out });
   const clear = (out.netCross ? out.netCross.y : 99) - PH.NET_TOP - PH.R;
   return { clear, landed: out.landed, hitNet: out.hitNet, vx: _iv.x, vy: _iv.y, vz: _iv.z };
 }

@@ -77,16 +77,44 @@ function playerCaptureLimits(isServe) {
   return { radius: (isServe ? MATCH_RULES.serveCaptureRadius : MATCH_RULES.captureRadius) * CAPTURE_FORGIVE,
     depth: MATCH_RULES.depthTolerance * CAPTURE_FORGIVE, sweet: MATCH_RULES.sweetRadius };
 }
+
+/**
+ * Describe a ball relative to the actual racket plane.  Old endpoint capture
+ * used world XY plus world Z while CCD used the blade normal, so rotating a
+ * racket silently changed one gate but not the other.  Passing a bare point
+ * remains supported for tooling/legacy callers and retains that old world
+ * fallback; live gameplay passes the full paddle with its normal.
+ */
+function paddleCaptureGeometry(ball, paddle) {
+  const p = paddle && (paddle.pos || paddle);
+  if (!ball || !p || ![ball.x, ball.y, ball.z, p.x, p.y, p.z].every(Number.isFinite)) return null;
+  const dx = ball.x - p.x, dy = ball.y - p.y, dz = ball.z - p.z;
+  const n = paddle && paddle.normal;
+  if (n && [n.x, n.y, n.z].every(Number.isFinite)) {
+    const nl = Math.hypot(n.x, n.y, n.z);
+    if (nl > 1e-7 && Number.isFinite(nl)) {
+      const nx = n.x / nl, ny = n.y / nl, nz = n.z / nl;
+      const signedDepth = dx * nx + dy * ny + dz * nz;
+      const rx = dx - nx * signedDepth, ry = dy - ny * signedDepth, rz = dz - nz * signedDepth;
+      return { p, nx, ny, nz, signedDepth, depthGap: Math.abs(signedDepth),
+        radial: Math.hypot(rx, ry, rz), distance: Math.hypot(dx, dy, dz), local: true };
+    }
+  }
+  // Compatibility fallback for call sites which only have a centre point.
+  return { p, nx: 0, ny: 0, nz: 1, signedDepth: dz, depthGap: Math.abs(dz),
+    radial: Math.hypot(dx, dy), distance: Math.hypot(dx, dy, dz), local: false };
+}
+
 /** Endpoint capture used by impact AND the timing cue. CCD remains the
  * additional continuous path for a fast crossing between physical substeps.
  * This does not manufacture a stroke: callers still enforce fresh gestures,
  * bounce legality, toss height and the consumed-once rule. */
 function playerInCaptureRange(ball, paddle, isServe = false) {
-  if (!ball || !paddle || ![ball.x, ball.y, ball.z, paddle.x, paddle.y, paddle.z].every(Number.isFinite)) return false;
-  const dx = ball.x - paddle.x, dy = ball.y - paddle.y, dz = ball.z - paddle.z;
-  return isServe ? Math.hypot(dx, dy, dz) <= MATCH_RULES.serveCaptureRadius * CAPTURE_FORGIVE
-    : Math.hypot(dx, dy) <= MATCH_RULES.captureRadius * CAPTURE_FORGIVE
-      && Math.abs(dz) <= MATCH_RULES.depthTolerance * CAPTURE_FORGIVE;
+  const geo = paddleCaptureGeometry(ball, paddle);
+  if (!geo) return false;
+  const limits = playerCaptureLimits(isServe);
+  return isServe ? geo.distance <= limits.radius
+    : geo.radial <= limits.radius && geo.depthGap <= limits.depth;
 }
 /** Pure overlay model: cue follows the ball; no fake area-of-effect circle.
  * A warm solid bracket means an available time/position window, never an
@@ -140,55 +168,100 @@ const GRACE_RULES = Object.freeze({
  * нужен: вызывающий код проверяет capture ПЕРВЫМ, и эта функция тоже —
  * она никогда не возвращает true там, где уже сработал чистый захват. */
 function playerGraceRange(ball, paddle, isServe = false) {
-  if (!ball || !paddle || ![ball.x, ball.y, ball.z, paddle.x, paddle.y, paddle.z].every(Number.isFinite)) return false;
-  if (playerInCaptureRange(ball, paddle, isServe)) return false;   // честный захват сильнее края
-  const dx = ball.x - paddle.x, dy = ball.y - paddle.y, dz = ball.z - paddle.z;
+  const geo = paddleCaptureGeometry(ball, paddle);
+  if (!geo || playerInCaptureRange(ball, paddle, isServe)) return false; // clean capture wins over an edge
   return isServe
-    ? Math.hypot(dx, dy, dz) <= MATCH_RULES.serveCaptureRadius * CAPTURE_FORGIVE * GRACE_RULES.serveBandMul
-    : Math.hypot(dx, dy) <= MATCH_RULES.captureRadius * CAPTURE_FORGIVE * GRACE_RULES.bandMul
-      && Math.abs(dz) <= MATCH_RULES.depthTolerance * CAPTURE_FORGIVE * GRACE_RULES.depthMul;
+    ? geo.distance <= MATCH_RULES.serveCaptureRadius * CAPTURE_FORGIVE * GRACE_RULES.serveBandMul
+    : geo.radial <= MATCH_RULES.captureRadius * CAPTURE_FORGIVE * GRACE_RULES.bandMul
+      && geo.depthGap <= MATCH_RULES.depthTolerance * CAPTURE_FORGIVE * GRACE_RULES.depthMul;
 }
 
+function capturePlaneBasis(geo) {
+  /* Pick a stable perpendicular pair for the projected contact disk. */
+  let ux = -geo.nz, uy = 0, uz = geo.nx;
+  let ul = Math.hypot(ux, uy, uz);
+  if (ul <= 1e-7) { ux = 1; uy = 0; uz = 0; ul = 1; }
+  ux /= ul; uy /= ul; uz /= ul;
+  return { ux, uy, uz,
+    vx: geo.ny * uz - geo.nz * uy,
+    vy: geo.nz * ux - geo.nx * uz,
+    vz: geo.nx * uy - geo.ny * ux };
+}
 function ballCaptureTarget(paddle, ball, serving = false) {
-  if (!paddle || !paddle.pos || !ball || ![paddle.pos.x,paddle.pos.y,paddle.pos.z,ball.x,ball.y,ball.z].every(Number.isFinite)) return null;
-  const limits = playerCaptureLimits(serving), dz = ball.z - paddle.pos.z;
-  const depth = serving ? limits.radius : limits.depth, depthOk = Math.abs(dz) <= depth;
-  const radius = serving ? Math.sqrt(Math.max(0, limits.radius ** 2 - dz ** 2)) : limits.radius;
-  const center = { x: ball.x, y: ball.y, z: paddle.pos.z }, points = [];
-  if (depthOk) for (let i = 0; i <= 48; i++) {
-    const a = i / 48 * Math.PI * 2;
-    points.push({ x: center.x + Math.cos(a)*radius, y: center.y + Math.sin(a)*radius, z: center.z });
+  if (!paddle || !paddle.pos || !ball) return null;
+  const geo = paddleCaptureGeometry(ball, paddle);
+  if (!geo) return null;
+  const limits = playerCaptureLimits(serving);
+  const depth = serving ? limits.radius : limits.depth;
+  const depthOk = geo.depthGap <= depth;
+  const radius = serving ? Math.sqrt(Math.max(0, limits.radius ** 2 - geo.depthGap ** 2)) : limits.radius;
+  /* Projection of the ball onto the blade plane. This is the same local plane
+   * endpoint capture and CCD use, so the diagnostic ring cannot promise a
+   * contact that the physical gate rejects. */
+  const center = { x: ball.x - geo.nx * geo.signedDepth, y: ball.y - geo.ny * geo.signedDepth,
+    z: ball.z - geo.nz * geo.signedDepth };
+  const points = [];
+  if (depthOk) {
+    const basis = capturePlaneBasis(geo);
+    for (let i = 0; i <= 48; i++) {
+      const a = i / 48 * Math.PI * 2, c = Math.cos(a) * radius, q = Math.sin(a) * radius;
+      points.push({ x: center.x + basis.ux * c + basis.vx * q,
+        y: center.y + basis.uy * c + basis.vy * q,
+        z: center.z + basis.uz * c + basis.vz * q });
+    }
   }
-  return { center, points, radius, limitRadius: limits.radius, depth, depthGap: Math.abs(dz), depthOk,
-    inside: playerInCaptureRange(ball, paddle.pos, serving), serving };
+  return { center, points, radius, limitRadius: limits.radius, depth, depthGap: geo.depthGap,
+    signedDepth: geo.signedDepth, radial: geo.radial, localPlane: geo.local, depthOk,
+    inside: playerInCaptureRange(ball, paddle, serving), serving };
 }
 
 /** Numeric evidence at one physical substep, before impact changes the ball.
- * Includes the alternate CCD route so endpoint-only counting cannot overstate
- * how many hits a smaller radius would reject. Depth is held fixed. */
+ * Endpoint and continuous routes use the exact same disk/slab (or serving
+ * sphere), allowing diagnostics to explain the contact the game actually saw. */
 function measureCaptureAllowance(paddle, p0, p1, serving, endpointEligible) {
-  const p = paddle.pos, n = paddle.normal, previous = paddle.prevPos;
-  if (!p || !n || !previous || !p0 || !p1 ||
-      ![p.x,p.y,p.z,n.x,n.y,n.z,previous.x,previous.y,previous.z,p0.x,p0.y,p0.z,p1.x,p1.y,p1.z].every(Number.isFinite)) return null;
-  const limits = playerCaptureLimits(serving), dx = p1.x-p.x, dy = p1.y-p.y, dz = p1.z-p.z;
-  const lateral = Math.hypot(dx,dy), distance = Math.hypot(dx,dy,dz);
-  const endpointRadius = endpointEligible && (serving || Math.abs(dz)<=limits.depth) ? (serving ? distance : lateral) : null;
-  const d0 = (p0.x-previous.x)*n.x+(p0.y-previous.y)*n.y+(p0.z-previous.z)*n.z;
-  const d1 = dx*n.x+dy*n.y+dz*n.z;
-  let ccdRadius = null;
-  if (d0 > PH.R && d1 <= PH.R) {
-    const t = Math.max(0,Math.min(1,(d0-PH.R)/Math.max(d0-d1,1e-9)));
-    const ex = p0.x+(p1.x-p0.x)*t-(previous.x+(p.x-previous.x)*t);
-    const ey = p0.y+(p1.y-p0.y)*t-(previous.y+(p.y-previous.y)*t);
-    const ez = p0.z+(p1.z-p0.z)*t-(previous.z+(p.z-previous.z)*t);
-    const dn = ex*n.x+ey*n.y+ez*n.z;
-    ccdRadius = Math.hypot(ex-n.x*dn,ey-n.y*dn,ez-n.z*dn);
+  const p = paddle && paddle.pos, previous = paddle && paddle.prevPos;
+  if (!p || !previous || !p0 || !p1 ||
+      ![p.x,p.y,p.z,previous.x,previous.y,previous.z,p0.x,p0.y,p0.z,p1.x,p1.y,p1.z].every(Number.isFinite)) return null;
+  const end = paddleCaptureGeometry(p1, paddle);
+  if (!end) return null;
+  const limits = playerCaptureLimits(serving);
+  const endpointRadius = endpointEligible && (serving || end.depthGap <= limits.depth)
+    ? (serving ? end.distance : end.radial) : null;
+
+  const r0x = p0.x - previous.x, r0y = p0.y - previous.y, r0z = p0.z - previous.z;
+  const r1x = p1.x - p.x, r1y = p1.y - p.y, r1z = p1.z - p.z;
+  const drx = r1x - r0x, dry = r1y - r0y, drz = r1z - r0z;
+  let ccdRadius = null, ccdT = null, ccdDepthGap = null;
+  if (serving) {
+    /* Toss contact is intentionally spherical. Its continuous companion is
+     * therefore the closest approach of the same moving sphere, not a blade
+     * plane that could disagree at a high toss angle. */
+    const dd = drx * drx + dry * dry + drz * drz;
+    const t = dd > 1e-12 ? Math.max(0, Math.min(1, -(r0x * drx + r0y * dry + r0z * drz) / dd)) : 0;
+    const ex = r0x + drx * t, ey = r0y + dry * t, ez = r0z + drz * t;
+    ccdRadius = Math.hypot(ex, ey, ez); ccdT = t; ccdDepthGap = ccdRadius;
+  } else if (end.local || (paddle && paddle.normal)) {
+    const n = paddle.normal || { x: 0, y: 0, z: 1 };
+    const nl = Math.hypot(n.x, n.y, n.z);
+    if (Number.isFinite(nl) && nl > 1e-7) {
+      const nx = n.x / nl, ny = n.y / nl, nz = n.z / nl;
+      const d0 = r0x * nx + r0y * ny + r0z * nz;
+      const d1 = r1x * nx + r1y * ny + r1z * nz;
+      if (d0 > PH.R && d1 <= PH.R) {
+        const t = Math.max(0, Math.min(1, (d0 - PH.R) / Math.max(d0 - d1, 1e-9)));
+        const ex = r0x + drx * t, ey = r0y + dry * t, ez = r0z + drz * t;
+        const dn = ex * nx + ey * ny + ez * nz;
+        ccdRadius = Math.hypot(ex - nx * dn, ey - ny * dn, ez - nz * dn);
+        ccdT = t; ccdDepthGap = Math.abs(dn);
+      }
+    }
   }
-  const candidates = [endpointRadius,ccdRadius].filter(Number.isFinite);
+  const candidates = [endpointRadius, ccdRadius].filter(Number.isFinite);
   return { serving: !!serving, radius: limits.radius, depthLimit: limits.depth,
-    lateral, depthGap: Math.abs(dz), distance, endpointEligible: !!endpointEligible,
-    endpointRadius, ccdRadius, requiredRadius: candidates.length ? Math.min(...candidates) : null,
-    score: serving ? distance/limits.radius : Math.max(lateral/limits.radius,Math.abs(dz)/limits.depth) };
+    lateral: end.radial, radial: end.radial, depthGap: end.depthGap, signedDepth: end.signedDepth,
+    distance: end.distance, endpointEligible: !!endpointEligible,
+    endpointRadius, ccdRadius, ccdT, ccdDepthGap, requiredRadius: candidates.length ? Math.min(...candidates) : null,
+    score: serving ? end.distance / limits.radius : Math.max(end.radial / limits.radius, end.depthGap / limits.depth) };
 }
 
 const PRESS_REJECTION_REASONS = Object.freeze([
@@ -216,6 +289,11 @@ function serveTossRise(tossApex, tossStartY, tableY) {
   const start = Number.isFinite(tossStartY) ? tossStartY
     : Number.isFinite(tableY) ? tableY + .14 : NaN;
   return Number.isFinite(tossApex) && Number.isFinite(start) ? tossApex - start : NaN;
+}
+/** A minimum toss is inclusive. The small tolerance only absorbs binary
+ * floating-point noise at the documented boundary; it is not extra height. */
+function serveTossIsLegal(rise) {
+  return Number.isFinite(rise) && rise >= MATCH_RULES.serveTossMinRise - 1e-6;
 }
 
 /** Oval press admission, elongated along the ball's SCREEN velocity.
@@ -409,7 +487,7 @@ function pressHitZoneOval(ball, pointer, width, height, opts = {}) {
       : worldVelocity ? worldVelocity.y < 0 : screenVy > 0;
     const rise = Number.isFinite(opts.tossRise) ? opts.tossRise
       : serveTossRise(opts.tossApex, opts.tossStartY, opts.tableY);
-    if (!falling || !(rise > MATCH_RULES.serveTossMinRise)) { accepted = false; reason = 'SERVE_TOSS_LOW'; }
+    if (!falling || !serveTossIsLegal(rise)) { accepted = false; reason = 'SERVE_TOSS_LOW'; }
   }
   return { x: center.x, y: center.y, radius: Math.max(forwardExtent, backExtent, sidePx),
     distancePx, pointerX, pointerY, accepted, shape: blendEff > 0 ? 'oval' : 'circle',

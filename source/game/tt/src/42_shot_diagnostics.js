@@ -79,19 +79,30 @@ class ShotJournal {
     const withinWindow = Number.isFinite(context.simTime) && Number.isFinite(entry.deadlineSim)
       ? context.simTime <= entry.deadlineSim : context.time <= entry.deadline;
     if (['no_contact', 'rejected'].includes(entry.outcome) && valid && withinWindow) { entry.outcome = 'pending'; entry.revision++; }
-    if (entry.pressZone && !entry.pressZone.accepted) { entry.outcome = 'outside'; return entry; }
+    /* A rejected pointerdown is evidence, not a terminal outcome: the owned
+     * stroke can enter the live admission gate later. Terminal direction and
+     * contact failures are recorded explicitly by rejectPress/expiry. */
     if (!valid && !context.active && entry.outcome !== 'rejected') { entry.outcome = 'rejected'; entry.revision++; }
     return entry;
   }
-  /** The pointerdown stamp is final. The only later change is a REJECTION
-   *  (the finished swipe did not move towards the ball it started near), and
-   *  the journal's copy must learn about it or the report disagrees with the
-   *  gate that actually ran. */
+  /** A later move/release reached the same live gate. Preserve the original
+   * start sample in the journal while exposing why a formerly outside press
+   * became contact-eligible. */
+  admitPress(gestureId, zone) {
+    const e = this.records.find(r => r.gestureId === gestureId && !r.contact);
+    if (!e || !e.pressZone || !zone) return;
+    e.pressZone = { ...zone };
+    if (e.outcome === 'outside') { e.outcome = 'pending'; e.revision++; }
+  }
+  /** Direction is a final rejection for this gesture, but it must not erase
+   * whether the *start* was inside the guide. */
   rejectPress(gestureId, reason, zone) {
     const e = this.records.find(r => r.gestureId === gestureId && !r.contact);
     if (!e || !e.pressZone) return;
     if (zone) e.pressZone = { ...zone };
-    e.pressZone.accepted = false; e.pressZone.reason = reason || 'OUTSIDE_ZONE';
+    e.pressZone.contactEligible = false;
+    e.pressZone.directionRejected = reason === 'WRONG_DIRECTION';
+    e.pressZone.reason = reason || 'OUTSIDE_ZONE';
     if (e.outcome === 'pending') { e.outcome = 'outside'; e.revision++; }
   }
   expire(time, simTime) {
