@@ -516,7 +516,7 @@ class Renderer {
       ground: V3.new(0.030, 0.028, 0.027),
       fill1: { p: V3.new(-2.5, 2.5, 1.9), c: V3.new(0.80, 0.90, 1.45) },
       fill2: { p: V3.new(2.5, 2.5, -1.9), c: V3.new(1.40, 0.76, 0.50) },
-      fogDensity: 0.0032,
+      fogDensity: 0.0026,
       fogCol: V3.new(0.020, 0.024, 0.034),
     };
     this.post = { bloom: 0.52, exposure: 1.02, vignette: 0.86, grain: 0.014, ca: 1.0, radial: 0, sat: 1.05, flash: 0, focus: [0.5, 0.52], threshold: 1.14, soft: 0.55 };

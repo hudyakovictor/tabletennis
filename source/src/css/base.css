@@ -45,8 +45,17 @@ body.in-tg{--sat:0px;--sab:0px} /* внутри Telegram env() дублируе�
 @media (min-width:900px) and (min-height:620px){
   /* большой экран (напр. Telegram Desktop): узкая центральная колонка, без рамки */
   #desk{display:flex;justify-content:center;align-items:center}
-  #deviceWrap{flex:none;width:460px;height:min(96vh,1000px)}
+  #deviceWrap{flex:none;width:min(460px,54vh);height:min(96vh,1000px)}
   #device{height:100%;border-radius:26px;box-shadow:0 40px 120px rgba(0,0,0,.65),0 0 160px rgba(80,60,255,.10)}
+}
+/* ДЕСКТОП (мышь, широкое окно): в матче/тренировке «устройство»
+   раскрывается на всё окно — большой стол, свайп мышью по полному
+   полю; меню остаются телефонной колонкой (правило выше). Без условия
+   pointer: тач-ноутбуки и планшеты в матче тоже получают полный экран. */
+@media (min-width:760px){
+  body.in-game #deviceWrap{width:100%;height:100%}
+  body.in-game #device{border-radius:0;box-shadow:none}
+  body.in-game #gameLayer{border-radius:0}
 }
 
 /* ---------------- layers ---------------- */

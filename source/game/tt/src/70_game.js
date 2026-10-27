@@ -15,45 +15,7 @@ const GS = {
 const PHYS_DT = PH.SIM_DT;        // 600 Hz — and the same step every solver verdicts on
 
 /* --------------------------- particles ----------------------------- */
-class Particles {
-  constructor(max = 260) {
-    this.max = max; this.n = 0;
-    this.p = new Float32Array(max * 3); this.v = new Float32Array(max * 3);
-    this.life = new Float32Array(max); this.maxLife = new Float32Array(max);
-    this.size = new Float32Array(max); this.col = new Float32Array(max * 3);
-    this.grav = new Float32Array(max);
-  }
-  spawn(x, y, z, vx, vy, vz, life, size, r, g, b, grav) {
-    const i = this.n < this.max ? this.n++ : (Math.random() * this.max) | 0;
-    this.p[i * 3] = x; this.p[i * 3 + 1] = y; this.p[i * 3 + 2] = z;
-    this.v[i * 3] = vx; this.v[i * 3 + 1] = vy; this.v[i * 3 + 2] = vz;
-    this.life[i] = life; this.maxLife[i] = life; this.size[i] = size;
-    this.col[i * 3] = r; this.col[i * 3 + 1] = g; this.col[i * 3 + 2] = b;
-    this.grav[i] = grav === undefined ? 4 : grav;
-  }
-  burst(x, y, z, n, speed, life, size, r, g, b, dir) {
-    for (let i = 0; i < n; i++) {
-      let vx = rndSym(1), vy = rndSym(1), vz = rndSym(1);
-      const l = Math.hypot(vx, vy, vz) || 1;
-      vx /= l; vy /= l; vz /= l;
-      if (dir) { vx = vx * 0.5 + dir.x; vy = vy * 0.5 + dir.y; vz = vz * 0.5 + dir.z; }
-      const s = speed * rnd(0.35, 1);
-      this.spawn(x, y, z, vx * s, vy * s, vz * s, life * rnd(0.6, 1.2), size * rnd(0.6, 1.3), r, g, b);
-    }
-  }
-  update(dt) {
-    for (let i = 0; i < this.n; i++) {
-      if (this.life[i] <= 0) continue;
-      this.life[i] -= dt;
-      this.v[i * 3 + 1] -= this.grav[i] * dt;
-      this.v[i * 3] *= 1 - 2.2 * dt; this.v[i * 3 + 2] *= 1 - 2.2 * dt;
-      this.p[i * 3] += this.v[i * 3] * dt;
-      this.p[i * 3 + 1] += this.v[i * 3 + 1] * dt;
-      this.p[i * 3 + 2] += this.v[i * 3 + 2] * dt;
-    }
-  }
-}
-
+/* Particles — см. 61_particles.js (пул спрайт-вспышек, вынесен из Game). */
 /* --------------------------- the game ------------------------------ */
 /** How much the bat slides toward the predicted meeting point while the
  *  ball approaches the blade's plane — indexed by difficulty level. The
@@ -118,6 +80,8 @@ class Game {
       slowmoOnBigShots: false,          // slow-mo в момент удара деформирует твой же тайминг; ручной режим — в настройках
       targetScore: 11,
       spinBias: 'norm',
+      spinGain: 1,        // калибровка: сила закрутки мяча (0.5..1.6)
+      arcSens: 1,         // калибровка: чувствительность дуги «С» (0.6..1.8)
       // NEW: Enhanced gameplay settings
       showSpinIndicator: true,
       followThrough: true,
@@ -247,6 +211,7 @@ class Game {
     };
     this.replayBuf = []; this.replayMax = 360; this.replay = null;
     this.slowmo = { on: false, energy: 1, active: false, allowed: true, used: 0 };
+    this.inspectSlowmo = false;   // тумблер разбора траектории (кнопка слоу-мо)
     this.predictPath = [];
     this.predictOut = {};
     this.lastShotInfo = null;
@@ -1094,13 +1059,28 @@ class Game {
       S.energy = Math.min(1, S.energy + dtReal * 0.09);     // ~11 s to refill
       S.on = S.on && S.energy > 0.015;                      // ran dry → release
     }
+    if (this.inspectSlowmo &&
+      (this.state === GS.RALLY || this.state === GS.SERVE_TOSS || this.state === GS.SERVE_READY)) {
+      S.active = true; this.targetTimeScale = 0.30; return;
+    }
     S.active = want;
     if (want) { this.targetTimeScale = 0.34; this.slowmoUntil = 0; }
     else if (!this.slowmoUntil) this.targetTimeScale = 1;
   }
 
+  /* Инспекторское замедление: свободный тумблер «разобрать траекторию
+   * удара». В отличие от боевого слоу-мо не тратит энергию и не отпускает
+   * само; работает в розыгрыше и на подаче, между розыгрышами скорость
+   * обычная. Честность та же, что у боевого режима: allowed=false
+   * (карьерные турниры, онлайн) закрывает и этот переключатель. */
+  setInspectSlowmo(on) {
+    const ok = this.slowmo && this.slowmo.allowed && !(this.network && this.network.isInMatch);
+    this.inspectSlowmo = !!on && ok;
+    return this.inspectSlowmo;
+  }
+
   /** Career tournaments and online matches call this with false. */
-  setSlowmoAllowed(v) { this.slowmo.allowed = !!v; if (!v) this.setSlowmoHold(false); }
+  setSlowmoAllowed(v) { this.slowmo.allowed = !!v; if (!v) { this.setSlowmoHold(false); this.inspectSlowmo = false; } }
 
   /* --------------------------- settings ---------------------------- */
 
@@ -1129,7 +1109,7 @@ class Game {
       showTrail: s.showTrail, showPredict: s.showPredict,
       showTele: s.showTele, haptics: s.haptics, coach: s.coach, adaptive: s.adaptive,
       targetScore: s.targetScore,
-      spinBias: s.spinBias,
+      spinBias: s.spinBias, spinGain: s.spinGain, arcSens: s.arcSens,
     };
     if (this.career && this.career.active && this.career._baseSettings)
       this.profile.data.settings.difficulty = this.career._baseSettings.difficulty;
@@ -1144,7 +1124,7 @@ class Game {
       if (typeof s[k] === 'boolean' && typeof raw[k] === 'boolean') s[k] = raw[k];
     }
     // camZoom/camPitch mirror CAM_ADJUST.zoomMin..Max / pitchMin..Max — keep in sync.
-    const ranges = { difficulty: [0, 4], volume: [0, 1], camZoom: [0.6, 1.8], camPitch: [-16, 16] };
+    const ranges = { difficulty: [0, 4], volume: [0, 1], camZoom: [0.6, 1.8], camPitch: [-16, 16], spinGain: [0.5, 1.6], arcSens: [0.6, 1.8] };
     for (const [k, [lo, hi]] of Object.entries(ranges)) {
       if (Number.isFinite(raw[k])) s[k] = clamp(raw[k], lo, hi);
     }
@@ -1441,7 +1421,8 @@ class Game {
     const serving = this.state === GS.SERVE_TOSS || this.state === GS.SERVE_READY;
     const forehand = (this.player.pos.x * (this.settings.hand === 'left' ? -1 : 1)) >= -.05;
     const ctx = { side: 1, isServe: serving, ball: this.ball.p, ballSpin: this.ball.w,
-      grip: this.settings.grip, forehand, ballSpeed: this.ball.speed || V3.len(this.ball.v), movePitch: -.15 };
+      grip: this.settings.grip, forehand, ballSpeed: this.ball.speed || V3.len(this.ball.v), movePitch: -.15,
+      spinGain: this.settings.spinGain ?? 1, arcSens: this.settings.arcSens ?? 1 };
     const r = isRealStroke(m, serving) ? deriveStroke(m, ctx) : null;
     const lastSample = sw.samples[sw.samples.length - 1];
     journal.observe(sw.gestureId, m, { time: this.time, isServe: serving, active: sw.active,
@@ -1978,6 +1959,7 @@ class Game {
         moveYaw: this.padYaw || 0, movePitch: this.padPitch || 0,
         equip: sideParams,
         spinBias: 'norm',
+        spinGain: this.settings.spinGain ?? 1, arcSens: this.settings.arcSens ?? 1,
       };
       racket = deriveStroke(m, ctx);
       racket.vmag *= this.equip.vmagK;
@@ -2213,7 +2195,12 @@ class Game {
      * be struck, or the bat is still travelling when the ball is hit. Measured
      * in the headless matches at 0.55 s: the closest the bat got to the centre
      * before the strike was 0.081-0.173 m on 14 of 49 serves. */
-    this.recenterT = RECENTER_S;         // no footwork assist while re-centring
+    /* Ракетка в конце розыгрыша НЕ едет в стартовую позицию: окно возврата
+     * «домой» (RECENTER_S) отключаем по требованию игрока — бат остаётся
+     * ровно там, где его держит рука, управление ни на кадр не блокируется
+     * и смена розыгрышей не дёргает ракетку через весь стол. Очередь подачи
+     * (tossQueued) при нулевом окне просто не используется. */
+    this.recenterT = 0;
     this.tossQueued = false;
     this.tossQueuedAt = -9;
     this.swipe.cancel();
@@ -2482,6 +2469,7 @@ class Game {
     const intentType = intent ? classifyStroke(intent, {
       ball: { y: pad.pos.y, z: pad.pos.z }, isServe: servingNow,
       incomingTop: this.ball.w.x, ballSpeed: V3.len(this.ball.v),
+      arcSens: this.settings.arcSens ?? 1,
     }, clamp(Math.max(intent.releaseSpeed, intent.peakSpeed * .78) / 4.2, 0, 1.45)).id : null;
     if (intent && this.followThrough) this.followThrough.active = false;
     const wrist = playerWristPose(pad.pos, pad.vel, this.settings.hand, {
@@ -2927,6 +2915,8 @@ class Game {
   update(dtReal) {
     if (!Number.isFinite(dtReal) || dtReal <= 0) return;
     dtReal = Math.min(dtReal, 0.1);
+    this.updateArenaFlashes(dtReal);
+    if (this.scene.updateCeilingLights) this.scene.updateCeilingLights(this._arenaT || 0, this.reducedMotion);
     if (this.state === GS.MENU) {
       this.updateCamera(dtReal);
       this.profile.maybeSave(dtReal);
@@ -3269,12 +3259,26 @@ class Game {
     R.uploadDyn(m, nv, ni);
   }
 
-  billboard(out, pos, size, roll) {
+  /* Вспышки фотоаппаратов на трибунах (62_arena): один переиспользуемый
+   * блик по расписанию «раз в 1–4 с на 80–150 мс». Собственные часы
+   * _arenaT: this.time в меню не идёт, а вспышки живут и в лобби.
+   * Не при reduced motion (фоточувствительность) и не на low-качестве. */
+  updateArenaFlashes(dt) {
+    this._arenaT = (this._arenaT || 0) + dt;
+    if (this._flash || this.reducedMotion || (this.settings && this.settings.quality === 'low')) return;
+    this._flashNext = (this._flashNext === undefined ? 1.4 : this._flashNext) - dt;
+    if (this._flashNext > 0) return;
+    this._flashNext = 1 + Math.random() * 3;
+    const F = ARENA_FLASH_SPOTS[(Math.random() * ARENA_FLASH_SPOTS.length) | 0];
+    this._flash = { x: F[0], y: F[1], z: F[2], t0: this._arenaT, dur: 0.08 + Math.random() * 0.07, size: 0.75 + Math.random() * 0.55 };
+  }
+
+  billboard(out, pos, size, roll, sy) {
     const t = this._bb || (this._bb = { f: V3.new(), q: Q.new(), q2: Q.new(), s: V3.new(), up: V3.new(0, 1, 0) });
     V3.sub(t.f, this.R.camPos, pos); V3.norm(t.f, t.f);
     Q.lookRotation(t.q, t.f, t.up);
     if (roll) { Q.setAxisAngle(t.q2, t.f.x, t.f.y, t.f.z, roll); Q.mul(t.q, t.q2, t.q); }
-    V3.set(t.s, size, size, size);
+    V3.set(t.s, size, sy === undefined ? size : sy, size);
     return M4.compose(out, pos, t.q, t.s);
   }
 
@@ -3477,6 +3481,53 @@ class Game {
         color: [1, 1, 1], tex: this.scene.tex.glow, blend: 'add', doubleSided: true,
         emissive: [0.42, 0.44, 0.40], rough: 1,
       });
+    }
+
+    /* Луч света по трибунам: крупный мягкий шар скользит справа налево
+     * и обратно (cos — плавный разворот у краёв), столб луча тянется к
+     * прожектору наверху по центру. Сцена при этом уходит в темноту:
+     * трибуны сами по себе тёмные, живёт только этот свет. */
+    if (!this.reducedMotion) {
+      const t = this._arenaT || 0;
+      // Борта уехали вдвое дальше (кольцо 6.8×9.8): в матч-камере
+      // дальний борт перекрывает низ трибун, поэтому шар света —
+      // герой кинематографических ракурсов (хаб/демо), где трибуны
+      // видны широко; там он скользит по передним рядам (sy ~0.55).
+      const sx = 8.6 * Math.cos(t * 0.21), sy = 0.55 + Math.sin(t * 0.147 + 1.3) * 0.15;
+      const pulse = 0.85 + 0.15 * Math.sin(t * 0.9);
+      const beamLen = Math.hypot(sx, 7.6 - sy) * 0.95;
+      // столб: от прожектора (0, 7.6 — выше кадра) к пятну; roll — наклон
+      this.billboard(tmp.m, V3.new(sx * 0.5, (sy + 7.6) / 2, -13.8), 2.4, Math.atan2(sx, 7.6 - sy), beamLen);
+      R.draw(me.quad, tmp.m, {
+        color: [1, 1, 1], tex: S.tex.glow, blend: 'add', doubleSided: true,
+        emissive: [0.170 * pulse, 0.200 * pulse, 0.280 * pulse], rough: 1,
+      });
+      // сам шар света на толпе
+      this.billboard(tmp.m, V3.new(sx, sy, -13.75), 7.5, 0);
+      R.draw(me.quad, tmp.m, {
+        color: [1, 1, 1], tex: S.tex.glow, blend: 'add', doubleSided: true,
+        emissive: [0.480 * pulse, 0.560 * pulse, 0.750 * pulse], rough: 1,
+      });
+      // яркое ядро прожектора (видно в кинематографичных ракурсах)
+      this.billboard(tmp.m, V3.new(0, 7.6, -13.85), 1.0, 0);
+      R.draw(me.quad, tmp.m, {
+        color: [1, 1, 1], tex: S.tex.glow, blend: 'add', doubleSided: true,
+        emissive: [0.40 * pulse, 0.46 * pulse, 0.58 * pulse], rough: 1,
+      });
+    }
+
+    /* camera flash over the stands: instant-on, quadratic fade out */
+    if (this._flash) {
+      const f = this._flash, k = (this._arenaT - f.t0) / f.dur;
+      if (k >= 1) this._flash = null;
+      else {
+        const a = (1 - k) * (1 - k);
+        this.billboard(tmp.m, V3.new(f.x, f.y, f.z), f.size * (0.7 + k * 0.5), 0);
+        R.draw(me.quad, tmp.m, {
+          color: [1, 1, 1], tex: S.tex.glow, blend: 'add', doubleSided: true,
+          emissive: [0.88 * a * 1.7, 0.94 * a * 1.7, 1.08 * a * 1.7], rough: 1,
+        });
+      }
     }
   }
 

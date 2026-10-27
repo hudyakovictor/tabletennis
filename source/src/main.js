@@ -1,13 +1,7 @@
 /* =====================================================================
    MAIN — сплэш с прелоадом и загрузка приложения
    ===================================================================== */
-const TIPS = [
-  'Свайп вверх по экрану — удар. Чем быстрее, тем сильнее.',
-  'Наклон свайпа задаёт кручение мяча.',
-  'Серия побед ускоряет подъём по лиге.',
-  'Сундуки открываются, даже когда приложение закрыто.',
-  'Сезонный пропуск обновляется каждые 26 дней.'
-];
+const TIPS = ['tip.1', 'tip.2', 'tip.3', 'tip.4', 'tip.5'];   // тексты — в словарях
 
 Router.def('splash', {
   full: true, mood: 'violet',
@@ -21,7 +15,7 @@ Router.def('splash', {
         <div class="sp-t1">Ultimate</div>
       </div>
       <div class="sp-bar"><div class="bar gold"><i id="spBar" style="--p:0;transition:width .25s linear"></i><span class="lbl" id="spPct">0%</span></div></div>
-      <div class="sp-tip" id="spTip">${TIPS[0]}</div>
+      <div class="sp-tip" id="spTip">${t(TIPS[0])}</div>
     </div>`;
   },
   mount(el) {
@@ -32,7 +26,7 @@ Router.def('splash', {
     const useGame = S.quality !== 'low', t0 = performance.now();
     if (useGame) setTimeout(() => { try { GameHost.ensure(); } catch (e) {} }, 450);
     let p = 0, ti = 0; const bar = $('#spBar', el), pct = $('#spPct', el), tip = $('#spTip', el);
-    const tipT = setInterval(() => { ti = (ti + 1) % TIPS.length; tip.animate([{ opacity: 0, transform: 'translateY(6px)' }, { opacity: 1, transform: 'none' }], { duration: 300 }); tip.textContent = TIPS[ti]; }, 2600);
+    const tipT = setInterval(() => { ti = (ti + 1) % TIPS.length; tip.animate([{ opacity: 0, transform: 'translateY(6px)' }, { opacity: 1, transform: 'none' }], { duration: 300 }); tip.textContent = t(TIPS[ti]); }, 2600);
     const step = () => {
       if (Router.cur !== 'splash') { clearInterval(tipT); return; }
       // полоса честная: последние 12% ждут готовности движка (но не дольше 9 с — дальше хаб сам догрузит)
@@ -55,6 +49,7 @@ Router.def('splash', {
 /* ---------- boot ---------- */
 function boot() {
   TGX.init();
+  I18n.init();            // язык: S.lang → Telegram language_code → браузер → ru
   const mob = () => document.body.classList.toggle('mobile', TGX.inTG || matchMedia('(max-width:760px), (pointer:coarse) and (max-width:1100px)').matches);
   mob(); window.addEventListener('resize', mob);
   document.body.classList.toggle('rm', !!S.rm || matchMedia('(prefers-reduced-motion: reduce)').matches);

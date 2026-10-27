@@ -1,22 +1,25 @@
 # Table Tennis Ultimate — v2 (game-grade redesign)
 
-**Результат:** `index.html` — один самодостаточный файл (~350 КБ). Без CDN, без внешних шрифтов и картинок. Работает офлайн, в Telegram и в превью-iframe.
+**Результат:** `index.html` — один самодостаточный файл (~1.7 МБ: оболочка + встроенный WebGL-движок). Без CDN, без внешних шрифтов и картинок. Работает офлайн, в Telegram и в превью-iframe.
 
 ## Структура
+
+Полное описание слоёв, контрактов (i18n, сейвы, каталог, протокол хост↔движок) и «как добавить экран/товар/язык» — в [`docs/ARCHITECTURE.ru.md`](docs/ARCHITECTURE.ru.md). Кратко:
+
 ```
-ttu-v2/
-  build.py            → собирает src/* в index.html (инлайнит шрифты/аватары/CSS/JS)
-  src/index.tpl.html  каркас: dev-панель (десктоп) + #device
-  src/styles.css      дизайн-система: токены, 3D-кнопки, панели, бары, навбар, шиты, редкости
-  src/screens.css     стили экранов
-  src/core.js         состояние, Telegram SDK, хаптика, WebAudio-синтез звуков, роутер, шиты, тосты
-  src/art.js          процедурная SVG-графика: монеты, гемы, сундуки, ракетки, лиги, иконки
-  src/fx.js           canvas-частицы: burst, конфетти, кольца, «летящие монеты» в кошелёк, тряска, Level Up
-  src/bg.js           WebGL-шейдер фона (прожекторы арены), смена настроения по экрану
-  src/engine.js       псевдо-3D настольный теннис: физика, ИИ, ассист, slow-mo идеального удара
-  src/ui.js           HUD, 3D-наклон карточек, hold-to-confirm, сегмент-контрол
-  src/scr_*.js        экраны: hub · mm/vs/match/result/chest · shop/pass/ranks/profile
-  src/main.js         сплэш + загрузка
+source/
+  build.py            → собирает src/* в index.html (инлайнит шрифты/аватары/CSS/JS + GAME_HTML движка)
+  src/index.tpl.html  каркас + #device
+  src/core/           util · i18n · state (сейвы v2) · platform (Telegram) · audio · ui_core (роутер/шиты) · dev
+  src/locales/        словари ru.js / en.js — весь видимый текст только через t('key')
+  src/data/           leagues · catalog (маркетплейс) · season — чистые данные
+  src/ui/             art · item_art · bg · fx · ui — переиспользуемый рендер
+  src/services/       economy · career · game_host (мост postMessage в движок)
+  src/engine2d/       2D-демо хаба (фолбэк без WebGL)
+  src/screens/        один файл = один экран: hub · matchmaking · match · training · result · shop · pass · ranks · profile · settings
+  src/css/            base.css + screens_{hub,battle,meta,misc}.css
+  src/main.js         сплэш + загрузка (последний в порядке сборки)
+  game/               WebGL-движок (свой build: game/tt/build.py, тесты: npm test в game/ и в source/)
 ```
 Пересборка: `python3 build.py`. Открыть экран напрямую: `index.html?s=shop` (`hub, mm, vs, match, result, chest, shop, pass, ranks, profile`).
 

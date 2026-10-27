@@ -10,6 +10,8 @@
  *    outro                      victory orbit after the last point
  *    replay / skipReplay        best rally of the match
  *    hint {on} · debug {on} · mute {on}
+ *    slowmo {on}                инспекторское замедление траектории (тумблер)
+ *    cal {k, v}                 калибровка оболочки; spinGain/arcSens — закрутка
  *  Game → host:
  *    ready, state, point, hit, serve, matchEnd, train, trainDone, attempt, autoHint, awake,
  *    paused, replayEnd, haptic
@@ -24,6 +26,9 @@
   const easeInOut = (t) => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2);
 
   const start = () => {
+    if (typeof ET !== 'undefined' && window.__TT_LOCALE) ET.set(window.__TT_LOCALE);   // язык от хоста
+    const applyStaticTexts = () => { const w = document.getElementById('tIWait'); if (w && typeof ET !== 'undefined') w.textContent = ET('ui.tapContinue'); };
+    applyStaticTexts();
     const g = window.__game;
     if (!g) { post('error', { msg: 'game failed to boot' }); return; }
     const ui = g.ui;
@@ -150,7 +155,7 @@
         const S = t.S, key = [t.step, t.done, t.phase, t.frozen, t.nudge > 0, t.coachText].join('|');
         if (key !== lastTrain.key) {
           lastTrain.key = key;
-          post('train', { step: t.step, total: TRAIN_STEPS.length, id: S.id, title: S.title, goal: S.goal,
+          post('train', { step: t.step, total: TRAIN_STEPS.length, id: S.id, title: ET(S.title), goal: ET(S.goal),
             /* в интро вся информация живёт в большой внутриигровой карточке —
              * шапка хоста её НЕ дублирует */
             text: t.phase === 'intro' ? '' : t.coachText, tip: trainingTip(S, ui.inputMode || 'touch'), done: t.done, need: S.need,
@@ -342,7 +347,7 @@ const showTip = (text) => { if (text) tip = { text, until: g.time + 4.6 }; };
       if (!m || m.__tt !== 1) return;
       // only commands that need a visible, running arena wake it; 'attract'/'quit' just set the scene
       // behind a hidden layer (menus, matchmaking) and must not restart full-rate rendering there
-      if (!['sleep', 'mute', 'quality', 'rm', 'debug', 'hint', 'attract', 'quit', 'quiet', 'pause', 'resume'].includes(m.type)) wake();
+      if (!['sleep', 'mute', 'quality', 'rm', 'debug', 'hint', 'attract', 'quit', 'quiet', 'pause', 'resume', 'locale'].includes(m.type)) wake();
       switch (m.type) {
         case 'sleep': sleeping = true; break;      // frozen in place: update is skipped, so nothing advances
         case 'wake': break;
@@ -361,6 +366,7 @@ const showTip = (text) => { if (text) tip = { text, until: g.time + 4.6 }; };
           setCine('prematch', m.dur || 2.0); break;
         case 'match':
           lobby = false;
+          g.inspectSlowmo = false;
           g.audio.init(); g.audio.resume();
           if (Number.isFinite(m.target)) g.settings.targetScore = m.target;
           resetAssist(); g.hintContact = !!m.hint;
@@ -383,13 +389,16 @@ const showTip = (text) => { if (text) tip = { text, until: g.time + 4.6 }; };
           break;
         case 'pause': hostPause(true); break;
         case 'resume': hostPause(false); break;
-        case 'quit': lobby = false; g.returnToMenu(); setCine('attract'); break;
+        case 'quit': lobby = false; g.inspectSlowmo = false; g.returnToMenu(); setCine('attract'); break;
         case 'outro': setCine('outro'); break;
         case 'live': cine.mode = null; break;
         case 'replay': if (!g.playBestMoments()) post('replayEnd', {}); break;
         case 'skipReplay': g.skipReplay(); break;
         case 'skipStep': if (g.training) g.training.skip(); break;
         case 'hint': if (!(autoHint && !m.on)) { autoHint = false; g.hintContact = !!m.on; } break;
+        /* Тумблер инспекторского слоу-мо из оболочки: разобрать траекторию
+         * удара в замедлении. Состояние кнопки в движке догонит syncSlowmoControl. */
+        case 'slowmo': if (g.setInspectSlowmo) g.setInspectSlowmo(!!m.on); break;
         case 'rm': g.reducedMotion = !!m.on || !!(g.motionQuery && g.motionQuery.matches); break;
         case 'debug': if (ui) ui.captureDebug = !!m.on; break;
         case 'mute': g.settings.sound = !m.on; g.audio.setMuted(!!m.on); break;
@@ -398,6 +407,7 @@ const showTip = (text) => { if (text) tip = { text, until: g.time + 4.6 }; };
           g.settings.quality = q; g.R.quality = q; g.resize(); break;
         }
         case 'quiet': document.documentElement.classList.toggle('tt-quiet', !!m.on); break;
+        case 'locale': if (typeof ET !== 'undefined') { ET.set(m.lang); applyStaticTexts(); } break;   // язык от хоста
         /* Калибровка из настроек оболочки: 10 личных параметров 0..100.
          * Применяются мгновенно, хранятся у хоста. Не трогают честные
          * правила боя — только комфорт, камеру и визуал. */
@@ -410,12 +420,17 @@ const showTip = (text) => { if (text) tip = { text, until: g.time + 4.6 }; };
           if (K === 'camHeight' && g.setCamPitch) g.setCamPitch(CAM_ADJUST.pitchMin + V * (CAM_ADJUST.pitchMax - CAM_ADJUST.pitchMin));
           if (K === 'camZoom' && g.setCamZoom) g.setCamZoom(CAM_ADJUST.zoomMin + V * (CAM_ADJUST.zoomMax - CAM_ADJUST.zoomMin));
           if (K === 'camSway') g._swayCal = V;
+          /* Закрутка из калибровки оболочки: те же поля настроек, что у
+           * ползунков самого движка. Ползунок 0..100 -> множитель физический:
+           * сила 0.5..1.6 (нейтраль ~45), чувствительность дуги 0.6..1.8 (~33). */
+          if (K === 'spinGain') g.settings.spinGain = 0.5 + V * 1.1;
+          if (K === 'arcSens') g.settings.arcSens = 0.6 + V * 1.2;
           if (K === 'trailLen' || K === 'ballSize' || K === 'padSpeed' || K === 'padSmooth') { /* читаются напрямую из g._cal */ }
           break;
         }
       }
     });
-    post('ready', { rules: Object.assign({}, MATCH_RULES), steps: TRAIN_STEPS.map((s) => ({ id: s.id, title: s.title })) });
+    post('ready', { rules: Object.assign({}, MATCH_RULES), steps: TRAIN_STEPS.map((s) => ({ id: s.id, title: ET(s.title) })) });
   };
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start);
