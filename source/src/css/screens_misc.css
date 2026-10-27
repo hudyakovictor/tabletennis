@@ -156,6 +156,7 @@ body.rm .tx-reward.pay .tx-rw-plus{animation-duration:.01s}
 .rc.coach:not(.good) .ct{color:#FFD54A}
 /* кнопки результата всегда под пальцем, даже когда карточек больше экрана */
 .res-btns{position:sticky;bottom:0;z-index:3;margin-top:auto;padding-bottom:4px;background:linear-gradient(180deg,transparent,rgba(5,7,16,.85) 38%)}
+.res .res-btns{bottom:calc(56px + var(--sab))}
 .res{padding-bottom:0}
 .res-btns{padding-bottom:calc(var(--sab) + 16px)}
 

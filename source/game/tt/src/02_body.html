@@ -54,6 +54,7 @@
     <div id="topright">
       <button class="ic pe" id="btnFullscreen" title="Полный экран (F)" aria-label="Полный экран" aria-pressed="false"></button>
       <button class="ic pe" id="btnSound" title="Выключить звук" aria-label="Выключить звук" aria-pressed="true"></button>
+      <button class="ic pe" id="btnSlowmo" title="Слоу-мо: разобрать траекторию" aria-label="Замедление" aria-pressed="false"></button>
       <button class="ic pe" id="btnSettings" title="Настройки" aria-label="Настройки"></button>
       <button class="ic pe" id="btnMenu" title="Пауза" aria-label="Пауза"></button>
     </div>
@@ -180,6 +181,11 @@
         <button class="opt" data-set="hand" data-val="left" aria-pressed="false"><b>ЛЕВША</b></button>
       </div>
       <p class="note">Shakehand: лёгкий наклон вперёд. Перо: почти вертикально, рукоятка вверх. Поза зеркалится; направление свайпа остаётся экранным.</p>
+
+      <h3 class="sec">УДАРЫ · КАЛИБРОВКА ЗАКРУТКИ</h3>
+      <div class="btn-wrap"><span class="bs"><input type="range" class="rng" id="spinGain" data-set="spinGain" min="50" max="160" value="100"><b class="bn">Сила закрутки мяча</b></span></div>
+      <div class="btn-wrap"><span class="bs"><input type="range" class="rng" id="arcSens" data-set="arcSens" min="60" max="180" value="100"><b class="bn">Дуга «С» · чувствительность</b></span></div>
+      <p class="note">Боковая закрутка — свайп дугой: буква «С» уводит мяч влево, зеркальная дуга — вправо. Чем круче дуга и выше сила закрутки, тем сильнее изгиб полёта и боковой отскок от стола. Кривой свайп сам дотягивается до ближайшего удара: вверх — накат, вниз — подставка, дуга — боковая закрутка.</p>
 
       <h3 class="sec">КАМЕРА</h3>
       <div class="row" id="cameraViews" role="group" aria-label="Вид камеры">
@@ -332,6 +338,10 @@
       <h3>Уменьшать ли зону?</h3>
       <p class="lab-help">Ниже — сколько ваших реальных ударов отсекла бы меньшая зона. Точность и качество удара здесь не оцениваются.</p>
       <div id="captureCalibrationSummary"></div>
+      <h3>Калибровка закрутки</h3>
+      <p class="lab-help">Сила закрутки меняет угол касания мяча: больше скольжения по резине — больше вращения и чуть меньше темпа. Чувствительность дуги — насколько пологой может быть «С», чтобы жест всё ещё читался закруткой, а не прямым свайпом. Те же ползунки есть в Настройках.</p>
+      <div class="btn-wrap"><span class="bs"><input type="range" class="rng" id="spinGainLab" data-set="spinGain" min="50" max="160" value="100"><b class="bn">Сила закрутки мяча</b></span></div>
+      <div class="btn-wrap"><span class="bs"><input type="range" class="rng" id="arcSensLab" data-set="arcSens" min="60" max="180" value="100"><b class="bn">Дуга «С» · чувствительность</b></span></div>
       <h3>Калибровка зоны по заданиям</h3>
       <p class="lab-help">Пошаговый сбор данных для разработки: углы стола, неподвижный мяч, медленный и быстрый мяч, подача, сила и спин — сначала мышью, затем касанием. Данные не меняют общую зону и не создают личный профиль.</p>
       <p class="lab-help" id="zoneCalStatus">Калибровка не начата.</p>

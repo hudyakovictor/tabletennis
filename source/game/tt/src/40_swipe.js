@@ -207,7 +207,11 @@ function isRealStroke(m, serving) {
   const minDist = serving ? 0.014 : 0.034;
   const minSp = serving ? 0.12 : 0.30;
   if (!Number.isFinite(m.pathLen) || m.pathLen < minPath) return false;
-  if (!Number.isFinite(m.dist) || m.dist < minDist) return false;
+  /* Дуга «С» — настоящий удар, даже если хорда короткая: замкнутая дуга
+   * почти не смещает палец, но несёт и путь, и поворот. */
+  if (!Number.isFinite(m.dist) || m.dist < minDist) {
+    if (!(m.pathLen >= 0.09 && Math.abs(m.curl || 0) >= 0.8)) return false;
+  }
   if (!Number.isFinite(m.peakSpeed) || m.peakSpeed < minSp) return false;
   return true;
 }
@@ -240,23 +244,39 @@ function classifyStroke(m, ctx, sp01) {
     if (incSpeed > 7.0 || incomingTop > 220) return STROKES.BLOCK;
     return (overTable && hAboveTable < 0.34) ? STROKES.DROP : STROKES.BLOCK;
   }
+  /* ДУГА «С» = БОКОВАЯ ЗАКРУТКА. Жест рисует дугу: большой суммарный
+   * поворот при заметно более длинном пути, чем хорда. Направление хорды
+   * у дуги случайно (та же «С» сверху вниз и снизу вверх — один жест),
+   * поэтому дуга проверяется ДО семейств «вверх/вниз по хорде», иначе
+   * половина всех «С» уезжала в подставки, а вторая — в накаты. Буква «С»
+   * (выпуклость влево, curl < 0) закручивает мяч влево — HOOK; зеркальная
+   * дуга (curl > 0) — вправо, FADE: куда гнётся жест, туда и летит мяч.
+   * Пороги масштабирует калибровка arcSens. */
+  {
+    const arcSens = clamp(Number.isFinite(ctx.arcSens) ? ctx.arcSens : 1, 0.6, 1.8);
+    const bend = m.dist > 0.001 ? (m.pathLen || 0) / m.dist : 0;
+    if (Math.abs(m.curl) >= 0.85 / arcSens && m.dist >= 0.028 &&
+      (bend >= 1.30 || (m.straightness <= 0.74 && Math.abs(m.curl) >= 1.15 / arcSens))) {
+      return m.curl < 0 ? STROKES.HOOK : STROKES.FADE;
+    }
+  }
   /* Finishing a high ball always beats everything else — but only if the
    * hand is actually going forward/up. A fast DOWNWARD gesture was caught
    * here before the backspin rule below could see it, so a defensive chop
    * on a ball above the tape was silently reclassified as a smash. The
    * assist then rotated the swing up until the chop "landed", and a 1.9 m/s
    * ball came back at 25 m/s off a hand that never swung forward. The
-   * boundary is the same -0.28 the backspin family uses, so the two rules
+   * boundary is the same -0.24 the backspin family uses, so the two rules
    * cannot overlap. */
-  if (hAboveNet > 0.14 && sp01 > 0.52 && u > -0.28 && u < 0.52) return STROKES.SMASH;
+  if (hAboveNet > 0.14 && sp01 > 0.52 && u > -0.24 && u < 0.52) return STROKES.SMASH;
   // downward gestures = backspin family
-  if (u < -0.28) {
+  if (u < -0.24) {
     if (depth > PH.T_HALF_LEN + 0.40 || (fast && m.dist > 0.20)) return STROKES.CHOP;
     if (sp01 < 0.22 && overTable && hAboveTable < 0.35) return STROKES.DROP;
     return STROKES.PUSH;
   }
   // a clearly curved sideways gesture = sidespin
-  if (latMag > 0.58 && curly) return (r > 0) ? STROKES.HOOK : STROKES.FADE;
+  if (latMag > 0.50 && Math.abs(m.curl) > 0.30) return (r > 0) ? STROKES.HOOK : STROKES.FADE;
   // upward gestures = topspin family
   if (u > 0.70) {
     if (slow && hAboveTable < 0.55) {
@@ -271,7 +291,7 @@ function classifyStroke(m, ctx, sp01) {
     if (overTable && m.dist < 0.13 && hAboveTable < 0.30) return STROKES.FLICK;
     return (incomingTop > 170 && fast) ? STROKES.COUNTER : STROKES.LOOP;
   }
-  if (u > 0.34) return (incomingTop > 260 && veryFast) ? STROKES.COUNTER : STROKES.LOOP;
+  if (u > 0.30) return (incomingTop > 260 && veryFast) ? STROKES.COUNTER : STROKES.LOOP;
   return STROKES.DRIVE;
 }
 
@@ -341,6 +361,15 @@ function deriveStroke(m, ctx) {
   contact += clamp(-hAboveNet * 42, -16, 10);
   contact = clamp(contact, 14, 80);
 
+  /* Калибровка силы закрутки (ползунок игрока, spinGain 0.5..1.6) — два
+   * честных канала: малый сдвиг угла касания и трение резины (mu/et в
+   * сборке rubber ниже) плюс глубина бокового разворота грани. Угол
+   * сознательно не главный канал: замер показал, что за ~65° касание
+   * уходит в проскальзывание и спин падает — ручка обязана быть
+   * монотонной. Полёт дальше считает измеренная аэродинамика (Магнус). */
+  const spinGain = clamp(Number.isFinite(ctx.spinGain) ? ctx.spinGain : 1, 0.5, 1.6);
+  if (spinGain !== 1) contact = clamp(contact + (spinGain - 1) * 8, 14, 80);
+
   // azimuth of the swing / of the face.  On a serve the body stays square
   // and the sidespin comes from the FACE, not from slinging the arm across.
   const azSwing = clamp(r * A.lat * (ctx.isServe ? 0.30 : 0.72), -1.35, 1.35);
@@ -352,8 +381,15 @@ function deriveStroke(m, ctx) {
   // itself lies in the horizontal plane and the ball is peeled round
   // the side. Only the genuinely lateral archetypes do this, so every
   // other stroke keeps exactly the numbers it had before.
-  const latMix = clamp((A.lat - 0.60) / 1.40, 0, 1) * clamp(Math.abs(r) * 1.35, 0, 1);
-  const latTurn = -Math.sign(r || 1) * contact * DEG * 0.62 * latMix;
+  /* Боковую щётку ведёт не только хорда: у чистой дуги «С» хорда почти
+   * нулевая, а закрутка — вся в повороте жеста. rLat берёт знак и силу из
+   * curl, когда хорда молчит, поэтому «С» округляет мяч, даже если палец
+   * вернулся почти в исходную точку. Знак согласован с классификатором:
+   * curl < 0 (буква «С») — удар вокруг левого бока мяча. */
+  const rLat = Math.abs(r) >= 0.25 ? r
+    : clamp(-(m.curl || 0) / 1.5, -1, 1) * ((st.id === 'HOOK' || st.id === 'FADE' || st.id === 'SERVE_SIDE') ? 1 : 0.45);
+  const latMix = clamp((A.lat - 0.60) / 1.40, 0, 1) * clamp(Math.abs(rLat) * 1.35, 0, 1);
+  const latTurn = -Math.sign(rLat || 1) * contact * DEG * 0.62 * latMix * (0.72 + 0.28 * spinGain);
   azFace = clamp(azFace + latTurn, -1.25, 1.25);
 
   /* The step yaw. The bat is turned into the direction it is moving (right
@@ -389,6 +425,8 @@ function deriveStroke(m, ctx) {
     contact = clamp(contact + sb * 9, 14, 80);
     vmag = clamp(vmag * (1 - sb * 0.08), 0.8, 19.5);
   }
+
+  /* spinGain применён выше: угол касания, разворот грани и трение резины. */
 
   /* ---- 5. build the 3-D racket frame ------------------------------ */
   const eR = elev * DEG;
@@ -456,8 +494,8 @@ function deriveStroke(m, ctx) {
   const eq = ctx.equip || { e: PH.E_RACKET, mu: PH.MU_RACKET, et: PH.ET_RACKET, damp: 1 };
   const rubber = {
     e: eq.e * (A.soft || 1),        // soft archetypes press the sponge
-    mu: eq.mu,
-    et: eq.et * (A.soft ? 0.5 + 0.5 * A.soft : 1),
+    mu: eq.mu * spinGain,
+    et: eq.et * (A.soft ? 0.5 + 0.5 * A.soft : 1) * (0.75 + 0.25 * spinGain),
     damp: eq.damp,
   };
 

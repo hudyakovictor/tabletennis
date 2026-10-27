@@ -191,6 +191,22 @@ class UI {
       button.title = label;
     }
   }
+  /* Кнопка инспекторского слоу-мо: иконка рисуется один раз, состояние
+   * (aria-pressed + подсветка) догоняет тумблер каждый кадр — переключатель
+   * может прийти и из оболочки (сообщение slowmo), и с этой же кнопки. */
+  syncSlowmoControl() {
+    const button = $('#btnSlowmo'), g = this.game;
+    if (!button) return;
+    if (!button.innerHTML) button.innerHTML = ICON.slowmo;
+    if (!g) return;
+    const on = !!g.inspectSlowmo;
+    if (button.dataset.slowmoOn !== String(on)) {
+      button.dataset.slowmoOn = String(on);
+      button.setAttribute('aria-pressed', String(on));
+      button.title = on ? 'Слоу-мо включено: обычная скорость' : 'Слоу-мо: разобрать траекторию';
+      button.setAttribute('aria-label', button.title);
+    }
+  }
   syncPauseControl() {
     const button = $('#btnMenu'), g = this.game;
     if (!button || !g) return;
@@ -373,6 +389,13 @@ class UI {
           !(e.target && /^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName))) { e.preventDefault(); this.toggleFullscreen(); }
     });
     $('#btnSound').addEventListener('click', () => this.toggleSound());
+    const slowmoBtn = $('#btnSlowmo');
+    if (slowmoBtn) slowmoBtn.addEventListener('click', () => {
+      const g = this.game; if (!g || !g.setInspectSlowmo) return;
+      g.setInspectSlowmo(!g.inspectSlowmo);
+      this.syncSlowmoControl();
+      g.audio && g.audio.ui('click');
+    });
     /* Spin dial: one tap cycles МЕНЬШЕ -> НОРМА -> БОЛЬШЕ. It biases how much
        of the contact is brush (more spin, less pace) and how much is punch. */
     const sbEl = $('#spinBias');
@@ -709,7 +732,14 @@ class UI {
       case 'haptics': s.haptics = v === 'on'; if (s.haptics) g.buzz(12); break;
         break;
       case 'target': s.targetScore = +v; $('#toWin').textContent = v; break;
+      /* Калибровка закрутки: ползунки в процентах, хранится множитель. */
+      case 'spinGain': s.spinGain = clamp(v / 100, 0.5, 1.6); break;
+      case 'arcSens': s.arcSens = clamp(v / 100, 0.6, 1.8); break;
       default: break;
+    }
+    if (k === 'spinGain' || k === 'arcSens') {
+      const val = String(Math.round(s[k] * 100));
+      $$('input[type=range][data-set="' + k + '"]').forEach(r => { if (r.value !== val) r.value = val; });
     }
     g.saveSettings();
     g.audio.ui('click');
@@ -732,6 +762,9 @@ class UI {
       });
     }
     this.syncCameraControls();
+    for (const [id, v] of [['#spinGain', s.spinGain], ['#spinGainLab', s.spinGain], ['#arcSens', s.arcSens], ['#arcSensLab', s.arcSens]]) {
+      const el = $(id); if (el) el.value = String(Math.round((Number.isFinite(v) ? v : 1) * 100));
+    }
   }
   syncCameraControls() {
     const g = this.game, s = g.settings;
@@ -778,9 +811,17 @@ class UI {
     $('#shotStatus').textContent = view.status;
     $('#shotMeta').textContent = view.metrics;
     el.dataset.tone = view.tone; el.classList.add('on');
+    /* Подсветка ИМЕННО этого удара: имя вспыхивает цветом архетипа
+     * (накат — свой цвет, боковая — свой), чтобы глаз связывал жест,
+     * название и полёт мяча без чтения мелкого текста. */
+    const stCol = (typeof STROKES !== 'undefined' && entry.strokeId && STROKES[entry.strokeId])
+      ? STROKES[entry.strokeId].col : null;
+    el.style.setProperty('--shotc', stCol || '#ffd34d');
+    el.classList.remove('pop'); void el.offsetWidth; el.classList.add('pop');
     this.shotTimer = 7;
   }
   openShotLab() {
+    this.syncSettings();
     this._labWasPaused = this.game.paused;
     this.game.setPaused(true);
     $('#shotLab').classList.add('on');
@@ -1424,6 +1465,7 @@ class UI {
   tick(dt) {
     const g = this.game; if (!g) return;
     this.syncPauseControl();
+    this.syncSlowmoControl();
     this.drawOverlay(dt);
     // A single short status, never a stack of messages/telemetry/hints.
     const status = $('#playStatus');
@@ -1742,4 +1784,5 @@ const ICON = {
   gear: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>',
   menu: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>',
   pause: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><line x1="8" y1="5" x2="8" y2="19"/><line x1="16" y1="5" x2="16" y2="19"/></svg>',
+  slowmo: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="13" r="8"/><path d="M12 9.5V13l2.6 2.6M9.5 2h5"/></svg>',
 };

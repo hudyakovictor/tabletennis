@@ -11,7 +11,6 @@ Router.def('mm', {
   full: true, mood: 'battle',
   render() {
     const L = leagueOf(S.rating);
-    const reel = [...Array(24)].map((_, i) => { const k = i % 8; return `<span class="ri">${Art.avatar('p' + k, 64, { round: false })}</span>`; }).join('');
     return `<div class="mm safe-top">
       <i class="mm-ill" style="background-image:url('${ILL.radar}')"></i>
       <div class="mm-top"><span class="chip gold">${Art.icon(MODE.i, { c: '#FFE28A' })} ${t(MODE.tk)} · ${leagueName(L)}</span>
@@ -23,7 +22,6 @@ Router.def('mm', {
         ${[...Array(6)].map((_, i) => `<span class="blip" style="--a:${i * 61 + 20}deg;--r:${60 + (i % 3) * 34}px;--dl:${i * .4}s"></span>`).join('')}
         <div class="me">${Art.avatar('me', 96)}</div>
       </div>
-      <div class="reel"><div class="strip">${reel}</div><div class="reel-frame"></div></div>
       <div class="found"><span class="cap">${t('mm.found')}</span><b class="h2"></b></div>
       <div class="mm-tip pnl inset"><span>${Art.icon('info', { c: '#9BE8FF' })}</span><p>${t('mm.tip')}</p></div>
       <button class="b3 dark sm mm-cancel" data-act="cancel">${t('common.cancel')}</button>
@@ -39,20 +37,20 @@ Router.def('mm', {
     this.cancelled = false;
     GameHost.ensure(); GameHost.send('attract');
     BATTLE = { opp: MODE.id === 'friend' ? 0 : pick(MM_POOL[leagueOf(S.rating).id] || MM_POOL.bronze) };
+    /* Только радар: поиск — свип и блипы, нашёлся — имя и вспышка в центре.
+       Лента-рулетка с карточками соперников убрана по дизайну: выбор
+       соперника — дело лиги и рейтинга, а не барабана. */
     (async () => {
       await sleep(2300); if (this.cancelled) return;
       clearInterval(this.sonar);
-      el.querySelector('.mm').classList.add('rolling');
-      const strip = el.querySelector('.strip'); const item = 76; const target = 16 + BATTLE.opp; // индекс карточки соперника
-      const reelW = el.querySelector('.reel').clientWidth;
-      const endX = -(target * item - reelW / 2 + item / 2);
-      let last = 0; const dur = 2100; const st = performance.now();
-      await new Promise((res) => { const f = (now) => { const t = clamp((now - st) / dur, 0, 1); const e = 1 - Math.pow(1 - t, 4); const x = endX * e; strip.style.transform = `translateX(${x}px)`; const idx = Math.floor(-x / item); if (idx !== last) { last = idx; Sfx.tick(); haptic('select'); } if (t < 1) requestAnimationFrame(f); else res(); }; requestAnimationFrame(f); });
-      if (this.cancelled) return;
-      const card = strip.children[target]; card.classList.add('win');
-      const p = FX.pt(card); FX.burst(p.x, p.y, { c: ['#2EE6FF', '#fff', '#FFC93A'], count: 36, speed: 12, size: 1.2 }); FX.shake(8, 300); Sfx.impact(); haptic('heavy'); flash('#7DF3FF', .4);
-      const o = PEOPLE[BATTLE.opp]; const f = el.querySelector('.found'); f.querySelector('b').textContent = o.n; f.classList.add('on');
-      await sleep(1100); if (this.cancelled) return;
+      const o = PEOPLE[BATTLE.opp]; const f = el.querySelector('.found');
+      f.querySelector('b').textContent = o.n; f.classList.add('on');
+      el.querySelector('.mm').classList.add('found-on');
+      const p = FX.pt(el.querySelector('.radar .me'));
+      FX.burst(p.x, p.y, { c: ['#2EE6FF', '#fff', '#FFC93A'], count: 36, speed: 12, size: 1.2 });
+      FX.ring(p.x, p.y, '#7DF3FF', 170, 9);
+      Sfx.impact(); haptic('heavy'); flash('#7DF3FF', .35);
+      await sleep(1150); if (this.cancelled) return;
       Router.go('vs');
     })();
   },

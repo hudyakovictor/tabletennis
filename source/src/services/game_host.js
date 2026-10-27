@@ -72,6 +72,9 @@ window.addEventListener('message', (e) => {
     GameHost.send('quality', { q: S.quality });
     GameHost.send('rm', { on: !!S.rm });
     GameHost.send('locale', { lang: I18n.lang });
+    /* вся сохранённая калибровка (включая закрутку) — в движок сразу,
+       а не только когда игрок тронет ползунок */
+    if (S.cal) for (const k in S.cal) GameHost.send('cal', { k, v: S.cal[k] });
     const q = GameHost.q; GameHost.q = []; q.forEach((x) => GameHost.frame.contentWindow.postMessage(x, '*'));
   }
   if (m.type === 'haptic') haptic(m.kind);

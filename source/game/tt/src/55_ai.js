@@ -636,7 +636,20 @@ class OpponentAI {
     const CAP = AI_SERVE_CAPS[this.levelIndex] || AI_SERVE_CAPS[0];
 
     // Aim — inside the orbit, biased middle; no more mail-slot corners on rookie
-    const aimX = clamp(rndSym(0.50), -CAP.orbit, CAP.orbit);
+    let aimX = clamp(rndSym(0.50), -CAP.orbit, CAP.orbit);
+    /* КРАЙ СТОЛА — НЕ ЦЕЛЬ. Слабая подача (НОВИЧОК/ЛЮБИТЕЛЬ, vmag <= 6) и
+     * любая сильная боковая прицеливаются не шире половины полуширины:
+     * слабый мяч с кромки уходит в аут от малейшей ошибки исполнения, а
+     * SERVE_SIDE после отскока добирает боковой увод (Магнус + трение о
+     * стол) и «убегает» за боковую линию даже при честном прицеле. Сильной
+     * прямой подаче старших уровней широкий прицел оставлен. */
+    if (CAP.vmag <= 6.0 || serveType === 'SERVE_SIDE') {
+      /* Слабым — ещё уже: у новичка пост-решательная ошибка исполнения и
+       * урезание темпа разносят приземление на ±0.3 м шире прицела
+       * (замер картой подач), поэтому запас до кромки нужен больше. */
+      const safeX = PH.T_HALF_WID * (CAP.vmag <= 6.0 ? 0.44 : 0.48);
+      aimX = clamp(aimX, -safeX, safeX);
+    }
     const aimZ = PH.T_HALF_LEN * (0.55 + 0.35 * rnd());
 
     const racket = makeRacket(-1, serveType, {
@@ -674,7 +687,7 @@ class OpponentAI {
       right: aimX * 0.5,
       up: (A.elev / 66),
       dist: 0.2,
-      curl: serveType === 'SERVE_SIDE' ? 0.5 : 0,
+      curl: serveType === 'SERVE_SIDE' ? 0.34 : 0,
       speed: 1.5,
       peakSpeed: 1.5,
       releaseSpeed: 1.5,
@@ -715,6 +728,39 @@ class OpponentAI {
      * verify against the real flight and retry softer toward the middle
      * before shipping anything. */
     finalRacket = this._ensureLegal(game, finalRacket, null, serveType, true);
+
+    /* ПОСТ-ПРОВЕРКА ШИРИНЫ — тем же predict, что судит легальность, и ПОСЛЕ
+     * всех мутаций (урезание темпа гандикапом выше уже применено). Замер
+     * картой подач показал: на слабых уровнях решатель систематически
+     * недооценивает боковой увод медленной кручёной подачи (длинный полёт,
+     * Магнус и отскок с вращением), и мяч с прицелом 0.06 м приземлялся на
+     * 0.71 м — у самой кромки. Зажатого прицела мало: проверяем само
+     * ПРИЗЕМЛЕНИЕ и, если оно шире безопасной зоны, пере(решаем) с прицелом
+     * заметно ближе к центру. Только для слабых уровней и боковых подач —
+     * сильная прямая подача мастера в угол остаётся законным оружием. */
+    if (CAP.vmag <= 6.0 || serveType === 'SERVE_SIDE') {
+      const widthOf = (rk) => {
+        if (!rk || !rk.normal || !rk.vR) return null;
+        const v = V3.clone(ball.v), w = V3.clone(ball.w);
+        if (!impactRacket(v, w, rk.normal, rk.vR, rk.quality, rk.rubber || {})) return null;
+        const p = V3.addScaled(V3.clone(ball.p), ball.p, rk.normal, PH.R * 1.05);
+        predict(p, v, w, { dt: 1 / 240, maxT: 2.4, stopAfterBounces: 2, out: this._q });
+        return this._q && this._q.b2 ? this._q.b2.x : null;
+      };
+      const widthCap = PH.T_HALF_WID * (CAP.vmag <= 6.0 ? 0.60 : 0.66);
+      for (let guard = 1; guard <= 4; guard++) {
+        const bx = widthOf(finalRacket);
+        if (bx === null || Math.abs(bx) <= widthCap) break;
+        const pulled = Object.assign({}, racketFromStroke,
+          { aim: { x: aimX * Math.pow(0.45, guard), z: aimZ } });
+        let re = refineRacket(ball.p, ball.v, ball.w, pulled, 1, racket.quality);
+        if (!re || re.valid === false) break;
+        if (this.handicap < 1 && re.vR) V3.mul(re.vR, re.vR, 1 - (1 - this.handicap) * 0.45);
+        re = this._ensureLegal(game, re, null, serveType, true);
+        if (!re || re.valid === false) break;
+        finalRacket = re;
+      }
+    }
 
     // A serve can be faulted too — at a third of the rally error rate.
     finalRacket = this.applyExecutionError(game, finalRacket, true);
