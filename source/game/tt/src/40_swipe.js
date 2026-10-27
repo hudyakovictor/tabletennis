@@ -15,6 +15,17 @@ class SwipeTracker {
     this.active = false;
     this.samples = [];          // {x,y,t} normalized screen units (y down)
     this.maxSamples = 64;
+    /* Экранный аспект для перевода жеста в КВАДРАТНЫЕ единицы: X в NDC
+     * нормирован на ширину, Y — на высоту, и одинаковый физический сдвиг
+     * пальца давал разные доли по осям (30×30px → угол 25° вместо 45°).
+     * Метрики длины/скорости/угла считаются в исправленных единицах;
+     * сырые m.dx/m.dy/m.x/m.y сохраняются для прицела и px-проверок. */
+    this.aspect = 1;
+    /* Настоящее начало жеста. Кольцевой буфер на 64 сэмпла затирал s[0]
+     * на длинных замахах, после чего хорда, длительность и точка старта
+     * описывали уже остаток жеста. Скорость по-прежнему считается по
+     * свежему окну сэмплов. */
+    this.origin = null;
     this.startT = 0;
     this.m = this.blankMetrics();
     this.lastReleased = null;
@@ -33,12 +44,19 @@ class SwipeTracker {
       curl: 0, dur: 0, samples: 0, jerk: 0, smooth: 1,
     };
   }
+  /** Портретный телефон: width/height ≈ 0.46. Вызывается из игры при
+   *  resize/down; по умолчанию 1 (юнит-тесты, реплеи) — математика
+   *  полностью совпадает со старой. */
+  setAspect(a) {
+    this.aspect = Number.isFinite(a) && a > 0 ? clamp(a, 0.3, 2) : 1;
+  }
   down(x, y, t, simTime) {
     this.gestureId++;
     this.realGestureId = -1; this.realAt = 0; this.realAtSim = null;
     this.consumedGestureId = -1; this.consumedAt = -Infinity;
     this.pressZone = null;
     this.active = true; this.startT = t;
+    this.origin = { x, y, t };
     // Gesture speed uses real time, but its opportunity to meet the ball
     // must age in the same (possibly slowed) time as the ball's physics.
     this.sampleSimTime = Number.isFinite(simTime) ? simTime : null;
@@ -64,14 +82,15 @@ class SwipeTracker {
     if (s.length > this.maxSamples) s.shift();
     this.compute(t);
   }
-  /** Abandon the gesture without producing a stroke — used when a second
-   *  finger lands and the touch turns into a camera orbit. */
+  /** Abandon the gesture without producing a stroke — used when input is
+   *  cancelled explicitly (window blur, second-finger camera in replays). */
   cancel() {
     this.pressZone = null;
     this.active = false;
     this.realGestureId = -1; this.realAt = 0; this.realAtSim = null;
     this.sampleSimTime = null; this.releaseSimTime = null;
     this.samples.length = 0;
+    this.origin = null;
     this.lastReleased = null;
     this.m = this.blankMetrics();
   }
@@ -97,17 +116,23 @@ class SwipeTracker {
   compute(now) {
     const s = this.samples, n = s.length, m = this.m;
     if (n < 2) return m;
-    const a = s[0], b = s[n - 1];
+    /* Хорда и длительность — от НАСТОЯЩЕГО начала жеста, даже когда кольцевой
+     * буфер уже вытеснил первые сэмплы. Сырые NDC-координаты сохраняются:
+     * из них живут прицел (deriveStroke) и px-проверка направления. */
+    const a = this.origin || s[0], b = s[n - 1];
+    const asp = this.aspect > 0 ? this.aspect : 1;
     m.sx = a.x; m.sy = a.y; m.x = b.x; m.y = b.y;
     m.dx = b.x - a.x; m.dy = b.y - a.y;
-    m.dist = Math.hypot(m.dx, m.dy);
+    // Квадратные единицы: X умножается на аспект экрана, Y остаётся.
+    const dxU = m.dx * asp, dyU = m.dy;
+    m.dist = Math.hypot(dxU, dyU);
     m.dur = Math.max(1e-3, b.t - a.t);
     m.samples = n;
 
     // path length + curl (signed turning, + = counter-clockwise on screen)
     let pl = 0, curl = 0, jerkAcc = 0, prevSpeed = 0, speedChanges = 0;
     for (let i = 1; i < n; i++) {
-      const px = s[i].x - s[i - 1].x, py = s[i].y - s[i - 1].y;
+      const px = (s[i].x - s[i - 1].x) * asp, py = s[i].y - s[i - 1].y;
       const seg = Math.hypot(px, py);
       pl += seg;
       const dt = Math.max(1e-4, s[i].t - s[i - 1].t);
@@ -115,7 +140,7 @@ class SwipeTracker {
       if (i > 1) { jerkAcc += Math.abs(sp - prevSpeed); speedChanges++; }
       prevSpeed = sp;
       if (i > 1) {
-        const qx = s[i - 1].x - s[i - 2].x, qy = s[i - 1].y - s[i - 2].y;
+        const qx = (s[i - 1].x - s[i - 2].x) * asp, qy = s[i - 1].y - s[i - 2].y;
         const cr = qx * py - qy * px, dp = qx * px + qy * py;
         if (seg > 1e-5) curl += Math.atan2(cr, dp);     // signed turn, radians
       }
@@ -131,20 +156,20 @@ class SwipeTracker {
     while (i0 > 0 && b.t - s[i0].t < W) i0--;
     const w = s[i0];
     const wdt = Math.max(1e-3, b.t - w.t);
-    const vx = (b.x - w.x) / wdt, vy = (b.y - w.y) / wdt;
+    const vx = ((b.x - w.x) * asp) / wdt, vy = (b.y - w.y) / wdt;
     m.speed = Math.hypot(vx, vy);
     m.releaseSpeed = m.speed;
     if (m.speed > m.peakSpeed) m.peakSpeed = m.speed;
     // 25 ms acceleration (is the hand still accelerating into the ball?)
     let i1 = n - 1; while (i1 > 0 && b.t - s[i1].t < 0.025) i1--;
     const w1 = s[i1], wdt1 = Math.max(1e-3, b.t - w1.t);
-    const sp1 = Math.hypot(b.x - w1.x, b.y - w1.y) / wdt1;
+    const sp1 = Math.hypot((b.x - w1.x) * asp, b.y - w1.y) / wdt1;
     m.accel = (sp1 - m.speed) / Math.max(wdt1, 1e-3);
 
     // direction: blend of overall displacement and current velocity
     let dirx = vx, diry = vy;
-    if (m.speed < 0.08) { dirx = m.dx; diry = m.dy; }
-    else { dirx = vx * 0.72 + m.dx / m.dur * 0.28; diry = vy * 0.72 + m.dy / m.dur * 0.28; }
+    if (m.speed < 0.08) { dirx = dxU; diry = dyU; }
+    else { dirx = vx * 0.72 + dxU / m.dur * 0.28; diry = vy * 0.72 + dyU / m.dur * 0.28; }
     m.angle = Math.atan2(-diry, dirx);      // screen y is down -> flip
     m.angleDeg = m.angle / DEG;
     m.right = Math.cos(m.angle);

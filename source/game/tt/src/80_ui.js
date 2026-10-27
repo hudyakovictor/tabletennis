@@ -1405,7 +1405,8 @@ class UI {
     const serving=[GS.SERVE_READY,GS.SERVE_TOSS].includes(g.state) && g.server===1;
     const locked=saved && (g.swipe.active || (typeof g.playerStrokeIntent==='function' && g.playerStrokeIntent(serving)));
     const cpz=!serving && MATCH_RULES.zoneAnchor==='contact' && typeof g.contactPrediction==='function' ? g.contactPrediction() : null;
-    const zone=locked ? saved : cpz ? pressContactZone(g.project(cpz.p,{}),g.pointer,rect.width,rect.height,{pointerType:g.pointerFine===false?'touch':'mouse',scale:typeof g.contactGateScale==='function'?g.contactGateScale(cpz.p,rect):null}) : pressZoneForBall(g.ball,g.pointer,rect.width,rect.height,{
+    const forgive = typeof getCaptureForgiveness === 'function' ? getCaptureForgiveness() : 1;
+    const zone=locked ? saved : cpz ? pressContactZone(g.project(cpz.p,{}),g.pointer,rect.width,rect.height,{pointerType:g.pointerFine===false?'touch':'mouse',scale:typeof g.contactGateScale==='function'?g.contactGateScale(cpz.p,rect):null, forgive}) : pressZoneForBall(g.ball,g.pointer,rect.width,rect.height,{
       project:(point,out)=>g.project(point,out||{}), pointerType:g.pointerFine===false?'touch':'mouse',
       referenceWorld:g.player&&g.player.pos,
       kind:serving&&g.state===GS.SERVE_TOSS?'serve':'rally',

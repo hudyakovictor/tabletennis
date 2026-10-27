@@ -224,7 +224,7 @@ function integrateBall(p, v, w, dt) {
  *  with velocity vSurf and has material (e, mu, et).
  *  Mutates v and w in place. Returns impact diagnostics.
  * ---------------------------------------------------------------- */
-const _u = V3.new(), _un = V3.new(), _ut = V3.new(), _vc = V3.new(), _jt = V3.new(), _tmpc = V3.new();
+const _u = V3.new(), _un = V3.new(), _ut = V3.new(), _vc = V3.new(), _jt = V3.new(), _tmpc = V3.new(), _nn = V3.new();
 /* ---------------------------------------------------------------- *
  *  Input hygiene
  *
@@ -266,6 +266,13 @@ function saneN(n) {
 
 function impactSphere(v, w, n, vSurf, e, mu, et) {
   if (!saneN(n) || !v || !w) return null;
+  /* Импульсные формулы предполагают ЕДИНИЧНУЮ нормаль. Раньше вызывающий
+   * код был обязан не забыть нормировать (saneN проверял только ненулевую
+   * длину); не-единичная нормаль тихо искажала удар. Локальная копия не
+   * мутирует нормаль ракетки. Для всех текущих единичных входов поведение
+   * бит-в-бит прежнее. */
+  const nLen = Math.hypot(n.x, n.y, n.z);
+  if (Math.abs(nLen - 1) > 1e-6) { V3.set(_nn, n.x / nLen, n.y / nLen, n.z / nLen); n = _nn; }
   sanitizeV(v); sanitizeV(w, SPIN_CAP * 2);
   if (vSurf) sanitizeV(vSurf); else vSurf = ZERO3;
   // relative velocity of the ball centre wrt the surface

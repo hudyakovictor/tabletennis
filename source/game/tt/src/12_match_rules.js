@@ -397,9 +397,10 @@ function pressHitZoneOval(ball, pointer, width, height, opts = {}) {
     if (sl > 1e-9) {
       directionDot = distancePx > 1e-9 ? -(swipe.x * dx + swipe.y * dy) / (sl * distancePx) : 1;
       /* Nobody draws a perfectly straight line with a mouse — a diagonal flick
-       * still intends "towards the ball". Touch keeps the strict hemisphere so
-       * an accidental backwards push is still pushed back. */
-      const dotLimit = opts.pointerType === 'mouse' ? -0.3 : 0;
+       * still intends "towards the ball". Touch uses the same -0.12 limit as
+       * ContactSystem.directionAllows: the two paths used to disagree (0 here,
+       * -0.12/0 in the game), so one physical swipe got two verdicts. */
+      const dotLimit = opts.pointerType === 'mouse' ? -0.3 : -0.12;
       directionOk = directionDot > dotLimit;
       if (accepted && !directionOk) { accepted = false; reason = 'WRONG_DIRECTION'; }
     }
@@ -432,20 +433,24 @@ function pressServeZoneOval(ball, pointer, width, height, opts = {}) {
  * ball and blade. The point does not move, so the shape is not stretched by
  * ball speed: it is taller below the point (a swipe starts under the ball
  * and goes up through it) and short above it. */
-function contactGateExtents(pointerType, scale) {
+function contactGateExtents(pointerType, scale, forgive = 1) {
   const mouse = (pointerType || 'touch') === 'mouse', R = MATCH_RULES;
   const world = R.zoneScale === 'world' && scale && Number.isFinite(scale.kx) && Number.isFinite(scale.ky);
   const lim = (k) => Math.min(R.zoneScaleMax || 1.5, Math.max(R.zoneScaleMin || .75, k));
   const kx = world ? lim(scale.kx) : 1, ky = world ? lim(scale.ky) : 1;
   const minSide = (mouse ? R.contactMinSideMousePx : R.contactMinSideTouchPx) || 0, minAlong = R.contactMinAlongPx || 0;
+  // Тренировка расширяет физический захват через CAPTURE_FORGIVE: экранный
+  // гейт масштабируется тем же коэффициентом, чтобы нарисованная зона и
+  // решение не расходились. В бою forgive всегда 1 — замороженная геометрия.
+  const fk = Number.isFinite(forgive) && forgive > 0 ? forgive : 1;
   return { kx, ky,
-    sidePx: Math.max(minSide, (mouse ? R.contactSideMousePx : R.contactSideTouchPx) * kx),
-    fwdPx: Math.max(minAlong, R.contactForwardPx * ky),
-    backPx: R.contactBackPx > 0 ? Math.max(Math.min(minAlong, R.contactBackPx), R.contactBackPx * ky) : 1e-3 };
+    sidePx: Math.max(minSide, (mouse ? R.contactSideMousePx : R.contactSideTouchPx) * kx) * fk,
+    fwdPx: Math.max(minAlong, R.contactForwardPx * ky) * fk,
+    backPx: (R.contactBackPx > 0 ? Math.max(Math.min(minAlong, R.contactBackPx), R.contactBackPx * ky) : 1e-3) * fk };
 }
 function pressContactZone(contactScreen, pointer, width, height, opts = {}) {
   if (!contactScreen || !contactScreen.ok) return null;
-  const ext = contactGateExtents(opts.pointerType, opts.scale);
+  const ext = contactGateExtents(opts.pointerType, opts.scale, opts.forgive);
   // a meeting point past the edge is gated at the edge: the finger cannot follow it off the glass
   let cx = contactScreen.x, cy = contactScreen.y, clamped = false;
   const e = (MATCH_RULES.contactEdgePx || 0) / width;

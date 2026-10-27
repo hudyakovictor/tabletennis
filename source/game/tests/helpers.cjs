@@ -21,6 +21,12 @@ function load(files, names, extra = {}) {
   if (!process.env.TT_TEST_REF && files.some(f => ['70_game.js', '80_ui.js'].includes(f)) && !files.includes('12_match_rules.js')) {
     files = [...files]; files.splice(Math.max(0, files.indexOf('10_math.js') + 1), 0, '12_match_rules.js');
   }
+  // 13_contact.js (ContactSystem) orchestrates the press gate and direction
+  // checks used by 70_game.js; load it right after the rules geometry so any
+  // fixture exercising the game sees the same pipeline as the bundle.
+  if (!process.env.TT_TEST_REF && files.includes('12_match_rules.js') && !files.includes('13_contact.js')) {
+    files = [...files]; files.splice(files.indexOf('12_match_rules.js') + 1, 0, '13_contact.js');
+  }
   if (!process.env.TT_TEST_REF && files.some(f => ['70_game.js', '80_ui.js'].includes(f)) && !files.includes('42_shot_diagnostics.js')) {
     files = [...files]; const index = files.findIndex(f => ['70_game.js', '80_ui.js'].includes(f));
     files.splice(index, 0, '42_shot_diagnostics.js');

@@ -277,6 +277,11 @@ class Game {
 
     // Left pointer = stroke. The camera is fixed: no right-drag, no wheel.
     const ptrs = new Map();
+    /* Владелец текущего жеста. Второй палец (опорный хват на краю стекла)
+     * больше НЕ отменяет удар: его события просто игнорируются, пока жив
+     * жест владельца. Раньше ptrs.size>=2 вызывал dropStroke() — на реальном
+     * телефоне это давало «мёртвые зоны» в момент касания вторым пальцем. */
+    let strokePointerId = -1;
     const domEvent = e => ({ type: e.type, pointerId: e.pointerId, pointerType: e.pointerType || null,
       clientX: Number.isFinite(e.clientX) ? e.clientX : null, clientY: Number.isFinite(e.clientY) ? e.clientY : null,
       button: e.button, buttons: e.buttons, pressure: Number.isFinite(e.pressure) ? e.pressure : null,
@@ -287,6 +292,7 @@ class Game {
     const dropStroke = () => {
       this.swipe.cancel();
       this.pointerDown = false;
+      strokePointerId = -1;
     };
 
     this.cancelInput = (reason = 'unspecified', event = null) => {
@@ -312,11 +318,13 @@ class Game {
         if (this.debugRecording) this.logInput('pointer_ignored', { dom: domEvent(e), outcome: { reason: 'REPLAY_SKIPPED' } });
         this.skipReplay(); return;
       }
-      if (ptrs.size >= 2) {                          // a second finger cancels
-        if (this.debugRecording) this.logInput('input_cancel', { dom: domEvent(e), outcome: { reason: 'SECOND_POINTER', pointers: ptrs.size } });
-        dropStroke();
+      if (strokePointerId !== -1) {
+        /* Доп. палец при живом жесте: запоминаем, но жест не трогаем.
+         * События этого указателя отфильтруют move/up по strokePointerId. */
+        if (this.debugRecording) this.logInput('pointer_ignored', { dom: domEvent(e), outcome: { reason: 'SECONDARY_POINTER', pointers: ptrs.size } });
         return;
       }
+      strokePointerId = e.pointerId;
       const n = norm(e);
 
       // ---- ANTICIPATION TRIGGER ----
@@ -339,40 +347,32 @@ class Game {
         }
       }
 
-      this.swipe.down(n.x, n.y, this.time, this.strokeTime);
-      this.swipe.tapMaxMovePx = 0;
       const rect = c.getBoundingClientRect();
+      /* Скорость руки меряется настенными часами события, а не игровым
+       * временем: в буллет-тайме сим-часы идут в 0.22× и раньше раздували
+       * measured speed в ~4.5 раза, ломая классификацию и силу удара. */
+      this.swipe.setAspect(rect.width / Math.max(1, rect.height));
+      this.swipe.down(n.x, n.y, ContactSystem.wallTime(e), this.strokeTime);
+      this.swipe.tapMaxMovePx = 0;
       const pointerType = e.pointerType || (this.pointerFine === false ? 'touch' : 'mouse');
-      const servePress = this.state === GS.SERVE_TOSS && this.server === 1;
-      const cpGate = !servePress && MATCH_RULES.zoneAnchor === 'contact' ? this.contactPrediction() : null;
-      const ballZone = cpGate ? pressContactZone(this.project(cpGate.p, {}), n, rect.width, rect.height, { pointerType, scale: this.contactGateScale(cpGate.p, rect) })
-        : pressZoneForBall(this.ball, n, rect.width, rect.height, {
-        project: point => this.project(point, {}), pointerType,
-        referenceWorld: this.player && this.player.pos,
-        kind: servePress ? 'serve' : 'rally',
-        tossApex: this.tossApex, tossStartY: this.tossStartY, tableY: PH.TABLE_Y,
-      });
-      this.swipe.pressZone = ballZone || { accepted: false, shape: MATCH_RULES.zoneShape,
-        radius: MATCH_RULES.pressRadiusPx, distancePx: null, score: null, along: null,
-        across: null, reason: 'OUTSIDE_ZONE', pointerType };
+      /* Единая точка допуска (13_contact.js): contact-гейт по прогнозу
+       * встречи, серверный штамп на SERVE_READY, тренировочное прощение. */
+      const ballZone = ContactSystem.evaluatePress(this, n, rect, pointerType, e);
+      this.swipe.pressZone = ballZone;
       /* Admission is stamped once, here, from the ball at pointerdown.
        * Moving into the zone later, landing on the bat, position assist and
-       * CCD are all downstream of this stamp and cannot rewrite it. */
-      this.swipe.pressZone.pressX = n.x; this.swipe.pressZone.pressY = n.y;
-      this.swipe.pressZone.vw = rect.width; this.swipe.pressZone.vh = rect.height;
+       * CCD are all downstream of this stamp and cannot rewrite it; the
+       * ContactSystem refresh may only update the geometry of an ALREADY
+       * accepted press, never resurrect a rejected one. */
       this.swipe.pressZone.pointerId = e.pointerId;
-      this.swipe.pressZone.pointerType = pointerType;
-      this.swipe.pressZone.pressT = this.time;
       if (this.debugRecording && Number.isFinite(e.timeStamp)) this.swipe.pressZone.domTimestamp = e.timeStamp;
-      this.swipe.pressZone.pressContactable = !!(this._strike && this._strike.on && this._strike.contactable);
-      this.swipe.pressZone.shotId = this.shotId;
-      this.swipe.pressZone.serving = this.state === GS.SERVE_READY || this.state === GS.SERVE_TOSS;
       if (this.training && typeof this.training.onPress === 'function') this.training.onPress(this.swipe.pressZone);
-      if (typeof this.onPressZone === 'function') this.onPressZone(this.swipe.pressZone, cpGate, servePress);
+      const zoneLead = Number.isFinite(this.swipe.pressZone.lead) ? { t: this.swipe.pressZone.lead } : null;
+      if (typeof this.onPressZone === 'function') this.onPressZone(this.swipe.pressZone, zoneLead, !!this.swipe.pressZone.serving);
       if (this.shotJournal) {
         const attempt = this.shotJournal.create(this.swipe.gestureId, this.time);
         attempt.pressZone = { ...this.swipe.pressZone };
-        const win = attempt.pressZone.serving ? 1.15 : .25;
+        const win = contactTimingFor(!!attempt.pressZone.serving).attemptWin;
         attempt.deadline = this.time + win;
         attempt.deadlineSim = this.strokeTime + win;
         if (!attempt.pressZone.accepted) attempt.outcome = 'outside';
@@ -384,7 +384,8 @@ class Game {
       this.logInput('pointerdown', { pointer: n, pointerId: e.pointerId, buttons: e.buttons, inputType: pointerType,
         dom: this.debugRecording ? domEvent(e) : null,
         outcome: { greenAtPress: !!this.swipe.pressZone.pressContactable,
-          gateAnchor: cpGate ? 'predicted_contact' : 'current_ball', predictedEta: cpGate ? cpGate.t : null } });
+          gateAnchor: this.swipe.pressZone.anchor === 'contact' ? 'predicted_contact' : 'current_ball',
+          predictedEta: Number.isFinite(this.swipe.pressZone.lead) ? this.swipe.pressZone.lead : null } });
       if (this.debugRecording) this._debugLastPress = { shotId: this.shotId, gestureId: this.swipe.gestureId,
         green: !!this.swipe.pressZone.pressContactable, accepted: !!this.swipe.pressZone.accepted, time: this.time };
       if (this.state === GS.SERVE_READY && this.server === 1) this.startToss();
@@ -410,12 +411,15 @@ class Game {
     const move = (e) => {
       const p = ptrs.get(e.pointerId);
       if (p) { p.x = e.clientX; p.y = e.clientY; }
+      /* Чужой указатель (второй палец, опорный хват) не двигает ни биту,
+       * ни жест — иначе опорный палец уводил ракетку и рвал свайп. */
+      if (e.pointerId !== strokePointerId) return;
       const n = track(e);
-      if (this.swipe.active && ptrs.size < 2) {
+      if (this.swipe.active) {
         const z = this.swipe.pressZone;
         if (z) this.swipe.tapMaxMovePx = Math.max(this.swipe.tapMaxMovePx || 0,
           Math.hypot((n.x - z.pressX) * z.vw, (n.y - z.pressY) * z.vh));
-        this.swipe.move(n.x, n.y, this.time, this.strokeTime);
+        this.swipe.move(n.x, n.y, ContactSystem.wallTime(e), this.strokeTime);
         const sp = this.swipe.m.speed;
         if (sp > 1.6) this.audio.whoosh(clamp(sp / 4, 0, 1.4));
         this.logInput('pointermove', { pointer: n, pointerId: e.pointerId, buttons: e.buttons,
@@ -431,10 +435,12 @@ class Game {
         e.preventDefault();
         return;
       }
-      if (ptrs.size >= 1) {
-        if (this.debugRecording) this.logInput('pointer_ignored', { dom: domEvent(e), outcome: { reason: 'OTHER_POINTER_STILL_DOWN' } });
+      /* Отпущен второй (опорный) палец: жеста владельца это не касается. */
+      if (e.pointerId !== strokePointerId) {
         e.preventDefault(); return;
       }
+      strokePointerId = -1;
+      ptrs.clear();
       if (!this.swipe.active) {
         if (this.debugRecording) this.logInput('pointer_ignored', { dom: domEvent(e), outcome: { reason: 'RELEASE_WITHOUT_ACTIVE_PRESS' } });
         this.pointerDown = false; return;
@@ -444,13 +450,15 @@ class Game {
       const sw = this.swipe, zone = sw.pressZone;
       if (zone) sw.tapMaxMovePx = Math.max(sw.tapMaxMovePx || 0,
         Math.hypot((n.x - zone.pressX) * zone.vw, (n.y - zone.pressY) * zone.vh));
-      sw.up(n.x, n.y, this.time, this.strokeTime);
+      const wallNow = ContactSystem.wallTime(e);
+      sw.up(n.x, n.y, wallNow, this.strokeTime);
       this.pointerDown = false;
       this.swipeReleasedAt = this.time;
       /* A short, nearly motionless release is an intentional return, not an
        * invented swipe. It is bound to the incoming shot on which it began;
-       * toss taps, long holds and drags cannot silently become extra hits. */
-      const tapAge = this.time - sw.startT;
+       * toss taps, long holds and drags cannot silently become extra hits.
+       * Возраст тапа — в настенных часах: startT теперь пишется по ним. */
+      const tapAge = wallNow - sw.startT;
       const tapSlop = zone && zone.pointerType === 'mouse' ? 10 : 14;
       if (zone && !zone.serving && zone.shotId === this.shotId &&
           this.state === GS.RALLY && this.ball.live && this.ball.lastHitBy === -1 &&
@@ -755,7 +763,11 @@ class Game {
    *  on. One cached prediction per simulated frame; null when nothing is coming. */
   contactPrediction() {
     const b = this.ball, pad = this.player;
-    if (!b.live || b.lastHitBy !== -1 || !(b.v.z > .2) || this.state !== GS.RALLY) return null;
+    /* Раньше порог v.z>.2 выключал contact-гейт на зависших свечах и мячах
+     * у апексы: игра молча падала в ball-овал другой формы. Прогноз нужен
+     * для любого мяча, летящего к игроку (v.z>-.2); остановившийся/уходящий
+     * по-прежнему даёт null и честный откат. */
+    if (!contactPredictionAllowed(b, this.state)) return null;
     if (this._cpFrame === this.frame && this._cpTime === this.time) return this._cp;
     this._cpFrame = this.frame; this._cpTime = this.time;
     const o = this._cpOut || (this._cpOut = {});
@@ -1483,7 +1495,7 @@ class Game {
     this._trailCrumb(b);
 
     /* --- paddles (CCD) --- */
-    if (this.time - this.player.lastHitT > 0.09) this.tryPlayerHit(p0);
+    if (this.time - this.player.lastHitT > CONTACT_TIMING.hitCooldown) this.tryPlayerHit(p0);
     else this.debugRecording && this.diagnosticPhysicsGate('hit_cooldown', { elapsedReal: this.time - this.player.lastHitT, requiredReal: .09 });
   }
 
@@ -1515,7 +1527,8 @@ class Game {
     journal.observe(sw.gestureId, m, { time: this.time, isServe: serving, active: sw.active,
       sampleTime: heldStroke ? sw.realAt : sw.active && lastSample ? lastSample.t : this.swipeReleasedAt,
       sampleSimTime: heldStroke ? sw.realAtSim : sw.active ? sw.sampleSimTime : sw.releaseSimTime,
-      simTime: this.strokeTime, windowSec: serving ? 1.15 : heldStroke ? 2.5 : sw.active ? .18 : .25,
+      simTime: this.strokeTime, windowSec: (() => { const tw = contactTimingFor(serving);
+        return serving ? tw.attemptWin : heldStroke ? tw.heldWin : sw.active ? tw.liveWin : tw.deadWin; })(),
       strokeId: r && r.stroke.id });
   }
 
@@ -1544,7 +1557,12 @@ class Game {
     const sw = this.swipe || {}, zone = sw.pressZone;
     const serving = !!(zone && zone.serving), released = sw.lastReleased;
     const valid = isRealStroke(released, serving);
-    const age = this.time - sw.startT, slop = zone && zone.pointerType === 'mouse' ? 10 : 14;
+    /* startT теперь в настенных часах (время устройства), поэтому возраст
+     * тапа считаем от DOM-события, а не от симуляции (в slow-mo разошлись бы). */
+    const wallNow = extra.dom && Number.isFinite(extra.dom.timestamp) ? extra.dom.timestamp / 1000
+      : (typeof performance !== 'undefined' ? performance.now() / 1000 : NaN);
+    const age = Number.isFinite(wallNow) && Number.isFinite(sw.startT) ? wallNow - sw.startT : NaN;
+    const slop = zone && zone.pointerType === 'mouse' ? 10 : 14;
     return this.logInput('pointerup', { ...extra, outcome: { released: true, contact: false,
       recognized: valid ? (released.tap ? 'tap' : 'swipe') : 'none',
       reason: valid ? null : 'STATIC_CLICK', tapDurationGameSeconds: Number.isFinite(age) ? age : null,
@@ -1693,10 +1711,10 @@ class Game {
     }
     const releasedAt = Number.isFinite(this.swipeReleasedAt) ? this.swipeReleasedAt : -Infinity;
     const releasedAge = this.strokeAge(sw.releaseSimTime, releasedAt);
-    const deadWin = serving ? 1.15 : .25;
-    if (!sw.active && isRealStroke(sw.lastReleased, serving) && releasedAge >= deadWin)
+    const tw = contactTimingFor(serving);
+    if (!sw.active && isRealStroke(sw.lastReleased, serving) && releasedAge >= tw.deadWin)
       return this.logPressRejection('TIMING_EARLY', { releasedAgeMs: (this.time - releasedAt) * 1000, simulationAgeMs: releasedAge * 1000 });
-    const heldWin = serving ? 1.15 : 2.5;
+    const heldWin = tw.heldWin;
     const staleHeld = sw.active && sw.gestureId === sw.realGestureId &&
       this.strokeAge(sw.realAtSim, sw.realAt || 0) >= heldWin;
     const noGesture = !sw.active && !sw.lastReleased && !(sw.samples && sw.samples.length);
@@ -1730,33 +1748,16 @@ class Game {
   validatePressDirection(m) {
     const pz = this.swipe && this.swipe.pressZone;
     if (!pz || !pz.accepted || !m) return this.pressAdmitsBall();
-    // A tap has no path to judge. Its position and the physical contact
-    // checks still apply; only a swipe can fail the direction test.
-    if (m.tap === true) return true;
-    if (pz.directionOk === true) return true;
-    if (pz.directionOk === false) return false;
-    if (![pz.x, pz.y, pz.pointerX, pz.pointerY, m.dx, m.dy].every(Number.isFinite)) return true;
-    const toBallX = pz.x - pz.pointerX, toBallY = pz.y - pz.pointerY;
-    const swipeX = m.dx * (pz.vw > 0 ? pz.vw : 1), swipeY = m.dy * (pz.vh > 0 ? pz.vh : 1);
-    const dist = Math.hypot(toBallX, toBallY), len = Math.hypot(swipeX, swipeY);
-    if (dist < 4) { pz.directionDot = 1; pz.directionOk = true; return true; }
-    if (!(len > 1e-9)) return false;
-    const dot = (swipeX * toBallX + swipeY * toBallY) / (len * dist);
-    /* Линейность в масштабе скорости: медленный свайп игрок ещё может
-     * вести ровно, но быстрый взмах (он же реальный ударный темп настольного
-     * тенниса) — всегда с дугой и задержкой. Чем длиннее/быстрее жест,
-     * тем мягче порог направления: до ~104° для мыши и ~90° для пальца.
-     * Медленные свайпы не меняются вообще. */
-    const fast = len > 0.16;
-    const dotLimit = pz.pointerType === 'mouse' ? -0.3 : (fast ? -0.12 : 0);
-    pz.directionDot = dot; pz.directionOk = dot > dotLimit;
-    if (!pz.directionOk) {
-      pz.accepted = false; pz.reason = 'WRONG_DIRECTION';
-      if (this.shotJournal && typeof this.shotJournal.rejectPress === 'function')
-        this.shotJournal.rejectPress(this.swipe.gestureId, 'WRONG_DIRECTION', pz);
-      this.logInput('decision', { outcome: { contact: false, reason: 'WRONG_DIRECTION' } });
-    }
-    return pz.directionOk;
+    /* Единый контракт направления живёт в ContactSystem.directionAllows
+     * (13_contact.js): мышь -0.30, палец/перо -0.12, без скачка от длины
+     * жеста. Центр зоны уже обновлён refreshPressZone по живому прогнозу. */
+    const before = pz.directionOk;
+    const ok = ContactSystem.directionAllows(pz, m);
+    if (ok || before === false) return ok;
+    if (this.shotJournal && typeof this.shotJournal.rejectPress === 'function')
+      this.shotJournal.rejectPress(this.swipe.gestureId, 'WRONG_DIRECTION', pz);
+    this.logInput('decision', { outcome: { contact: false, reason: 'WRONG_DIRECTION' } });
+    return ok;
   }
 
   /* ==== Край ракетки: физика срезанного контакта ========================
@@ -1936,13 +1937,14 @@ class Game {
       const servePress = this.state === GS.SERVE_TOSS && this.server === 1;
       const dummyPointer = { x: 0.5, y: 0.62 };   // only acceptance depends on it, not the shape we draw
       try {
+        const forgive = typeof getCaptureForgiveness === 'function' ? getCaptureForgiveness() : 1;
         const cpGate = !servePress && MATCH_RULES.zoneAnchor === 'contact' ? this.contactPrediction() : null;
         zone = cpGate
-          ? pressContactZone(this.project(cpGate.p, {}), dummyPointer, rect.width, rect.height, { pointerType, scale: this.contactGateScale(cpGate.p, rect) })
+          ? pressContactZone(this.project(cpGate.p, {}), dummyPointer, rect.width, rect.height, { pointerType, scale: this.contactGateScale(cpGate.p, rect), forgive })
           : pressZoneForBall(this.ball, dummyPointer, rect.width, rect.height, {
             project: point => this.project(point, {}), pointerType,
             referenceWorld: this.player && this.player.pos,
-            kind: servePress ? 'serve' : 'rally',
+            kind: servePress ? 'serve' : 'rally', forgive,
             tossApex: this.tossApex, tossStartY: this.tossStartY, tableY: PH.TABLE_Y,
           });
       } catch (e) { zone = null; }
@@ -1964,9 +1966,11 @@ class Game {
     const releasedAt = Number.isFinite(this.swipeReleasedAt) ? this.swipeReleasedAt : -Infinity;
     /* A serve is struck on the way down, often after the swipe has already
        finished or the hand is waiting at the end of the flick. 0.18 s of
-       freshness (correct for a rally) dropped a legal toss strike. */
-    const liveWin = serving ? 1.15 : 0.18;
-    const deadWin = serving ? 1.15 : 0.25;
+       freshness (correct for a rally) dropped a legal toss strike.
+       Все окна — из единого CONTACT_TIMING (13_contact.js). */
+    const tw = contactTimingFor(serving);
+    const liveWin = tw.liveWin;
+    const deadWin = tw.deadWin;
     /* A real swipe can be held in position for a block. Only a fresh sample
        may start that hold: discovering an old motion late must not re-arm it.
        A stationary hold is not a swipe; a tap is recognised on release. */
@@ -1979,7 +1983,7 @@ class Game {
     }
     const heldAge = this.strokeAge(sw.realAtSim, sw.realAt || 0);
     const releasedAge = this.strokeAge(sw.releaseSimTime, releasedAt);
-    const held = sw.active && sw.gestureId === sw.realGestureId && heldAge >= 0 && heldAge < (serving ? 1.15 : 2.5);
+    const held = sw.active && sw.gestureId === sw.realGestureId && heldAge >= 0 && heldAge < tw.heldWin;
     const fresh = sw.active && lastSample && sampleAge >= 0 && sampleAge < liveWin;
     const m = fresh || held ? sw.m
       : !sw.active && releasedAge >= 0 && releasedAge < deadWin ? sw.lastReleased : null;
@@ -2141,7 +2145,11 @@ class Game {
        * слабо и по-глупому, но не «тихий промах». */
       const grazing = !inside && playerGraceRange(b.p, pp);
       const still = b.v.x * b.v.x + b.v.y * b.v.y + b.v.z * b.v.z < 0.04;
-      const atClosest = MATCH_RULES.contactAtClosest ? closing >= -0.02 : closing <= 0.02;
+      /* Допуск ближайшей точки масштабируется скоростью: фикс -2см на
+       * быстром мяче пропускал фазу сближения (подшаг 240Гц ≈ 5см при
+       * 12 м/с), и контакт держался только на CCD. */
+      const closeTol = ContactSystem.closestTolerance(b);
+      const atClosest = MATCH_RULES.contactAtClosest ? closing >= -closeTol : closing <= closeTol;
       if (this.debugRecording) gateDetail = { inside, grazing, still, closing, atClosest, tap: m.tap === true,
         capture: captureSample, previousBall: inputLogVec(p0),
         paddleStart: inputLogVec(spad.prevPos), paddleEnd: inputLogVec(spad.pos) };
@@ -2822,7 +2830,8 @@ class Game {
     const b = this.ball, pad = this.player;
     w.on = false; w.ready = 0; w.contactable = false; w.kind = 'none';
     const clock = this.strikeReadClock || (this.strikeReadClock = new PaddleReadClock());
-    const incoming = this.state === GS.RALLY && b.live && b.lastHitBy === -1 && b.v.z > .2;
+    // Тот же контракт, что у contactPrediction: окно удара не гаснет у апексы.
+    const incoming = this.state === GS.RALLY && b.live && b.lastHitBy === -1 && b.v.z > -.2;
     const read = clock.advance(dt, incoming, this.shotId);
     if (this.paused || (this.replayer && this.replayer.on)) { w.k = 0; return; }
     if (this.state === GS.SERVE_TOSS && this.server === 1 && b.live && b.lastHitBy === 0) {
@@ -3346,6 +3355,10 @@ class Game {
       if (!tcap) h.length = 0; else if (h.length > tcap * 3) h.splice(0, 3);
     } else this._acc = 0;
 
+    /* Уточняем геометрию уже принятого нажатия по живому прогнозу встречи
+     * (дрейф после шнура/аэро). Отклонённые нажатия не воскрешаются —
+     * инвариант pressAdmitsBall сохранён. */
+    if (this.swipe && this.swipe.active) ContactSystem.refreshPressZone(this);
     this.updateStrikeWindow(dtReal);
     this.logInput('frame', { dt: dtReal });
     if (this.state === GS.RALLY || this.state === GS.SERVE_TOSS) this.moments.push(this.time, this);
@@ -3534,7 +3547,8 @@ class Game {
       const BS = (this._cal && this._cal.ballSize !== undefined) ? (0.8 + this._cal.ballSize * 0.5) : 1;
       M4.compose(tmp.m, this.ball.p, this.ball.q, V3.set(tmp.scl, BS, BS, BS));
       const w = this._strike;
-      const green = !shadowPass && w && w.on && w.contactable;
+      // ready>=.82 включает зелёный с упреждением, а не ровно в момент касания.
+      const green = !shadowPass && ContactSystem.strikeArmed(w);
       if (green) {
         const gm = this._ballGreen || (this._ballGreen = Object.assign({}, ma.ball));
         gm.emissive = [0.05, 0.55, 0.22];

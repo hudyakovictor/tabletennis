@@ -4,7 +4,7 @@ import os, re, sys, datetime, base64, json, hashlib
 SRC = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'src')
 OUT = sys.argv[1] if len(sys.argv) > 1 else os.path.join(os.path.dirname(SRC), '..', 'table-tennis-topspin.html')
 
-JS_ORDER = ['03_i18n.js','10_math.js','12_match_rules.js','20_gl.js','25_career.js','27_network.js','30_physics.js','38_paddle_motion.js','40_swipe.js','42_shot_diagnostics.js','43_input_telemetry.js','44_diagnostics.js','44_miss_shots.js','50_audio.js',
+JS_ORDER = ['03_i18n.js','10_math.js','12_match_rules.js','13_contact.js','20_gl.js','25_career.js','27_network.js','30_physics.js','38_paddle_motion.js','40_swipe.js','42_shot_diagnostics.js','43_input_telemetry.js','44_diagnostics.js','44_miss_shots.js','50_audio.js',
             '55_ai.js','56_rig.js','57_camera.js','58_coach.js','59_replay.js','60_scene.js','61_particles.js','62_arena.js',
             '65_train.js','75_feedback.js','75_music.js','76_emotion.js','81_uiAnim.js','84_racket.js',
             '86_meta.js','70_game.js','80_ui.js','90_boot.js','92_embed.js']
