@@ -169,6 +169,6 @@ bladePlaneCapture()     — непрерывный swept-контакт в пл�
 
 Добавлены два стража: `camera.test.js` — «`forceZ` держит биту на луче
 указателя при любой глубине», `shot-diagnostics.test.js` — «у промаха всегда
-есть причина (`TIMING_EARLY` / `STATIC_CLICK`)». Оболочки пересобраны:
-`source/index.html`, `source/game/table-tennis-topspin.html`,
-`source/game/play/index.html`, `play/index.html`.
+есть причина (`TIMING_EARLY` / `STATIC_CLICK`)». Сборка пересобрана:
+`play/index.html` — единственная сборка; автономная страница движка для
+браузерных тестов собирается по требованию в `build/engine.html`.

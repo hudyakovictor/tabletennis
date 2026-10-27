@@ -178,7 +178,7 @@
 
 ```
 npm test          # 174 теста, из них 21 камерный
-npm run build     # play/index.html + table-tennis-topspin.html
+python3 source/build.py     # → play/index.html
 npm run test:browser   # 166 проверок, десктоп + телефон, 0 исключений
 node tt/tools/analyze.js            # 41 541 кейс
 node tt/tools/analyze.js --suite reach    # карта достижимости

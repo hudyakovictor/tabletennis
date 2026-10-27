@@ -10,7 +10,7 @@ const { execFileSync } = require('node:child_process');
 const { pathToFileURL } = require('node:url');
 const puppeteer = require('puppeteer-core');
 const chromium = require('@sparticuz/chromium');
-const { root } = require('./helpers.cjs');
+const { root, enginePage } = require('./helpers.cjs');
 const repo = path.resolve(root, '../..');
 const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
 async function download(pathname) {
@@ -115,7 +115,7 @@ async function assertPngIsNotBlank(page, imageSelector) {
     const standaloneDir = fs.mkdtempSync(path.join(os.tmpdir(), 'topspin-standalone-diag-'));
     const cd = await standalone.createCDPSession();
     await cd.send('Browser.setDownloadBehavior', { behavior: 'allow', downloadPath: standaloneDir });
-    await standalone.goto(pathToFileURL(path.join(root, 'play/index.html')).href);
+    await standalone.goto(pathToFileURL(enginePage()).href);
     await standalone.waitForFunction('window.__game && window.__game.R.drawCalls > 0', { timeout: 30000 });
     await standalone.evaluate(() => {
       document.querySelectorAll('.screen.on').forEach(e => e.classList.remove('on'));
@@ -238,7 +238,7 @@ async function assertPngIsNotBlank(page, imageSelector) {
     // a document-wide touchmove preventDefault must not trap its controls.
     const small = await browser.newPage();
     await small.setViewport({ width: 390, height: 844, isMobile: true, hasTouch: true });
-    await small.goto(pathToFileURL(path.join(root, 'play/index.html')).href);
+    await small.goto(pathToFileURL(enginePage()).href);
     await small.waitForFunction('window.__game && window.__game.R.drawCalls > 0', { timeout: 30000 });
     await small.evaluate(() => {
       document.querySelectorAll('.screen.on').forEach(e => e.classList.remove('on'));
@@ -507,7 +507,7 @@ async function assertPngIsNotBlank(page, imageSelector) {
     // Storage denial must not break recording, export or gameplay.
     const denied = await browser.newPage();
     await denied.evaluateOnNewDocument(() => Object.defineProperty(window, 'indexedDB', { configurable: true, get() { throw new Error('storage denied'); } }));
-    await denied.goto(pathToFileURL(path.join(root, 'play/index.html')).href);
+    await denied.goto(pathToFileURL(enginePage()).href);
     await denied.waitForFunction('window.__game && window.__game.R.drawCalls > 0', { timeout: 30000 });
     const fallback = await denied.evaluate(async () => {
       __game.startMatch(0); __game.setDiagnosticMode(true);

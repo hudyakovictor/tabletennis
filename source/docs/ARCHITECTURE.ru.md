@@ -6,7 +6,7 @@
 
 ```
 source/
-  build.py            # собирает оболочку → source/index.html (один файл)
+  build.py            # собирает оболочку + движок → play/index.html (один файл)
   src/                # оболочка (меню, мета, магазин) — слои ниже
   game/               # WebGL-движок (свой build: game/tt/build.py → встраивается в оболочку)
 docs/ARCHITECTURE.ru.md
