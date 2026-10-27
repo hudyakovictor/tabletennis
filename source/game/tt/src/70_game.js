@@ -1919,7 +1919,14 @@ class Game {
     const b = this.ball, pad = this.player;
     const dz = b.p.z - pad.pos.z;
     const separating = (b.p.x - pad.pos.x) * b.v.x + (b.p.y - pad.pos.y) * b.v.y + dz * b.v.z;
-    if (!(dz > MATCH_RULES.depthTolerance) || !(separating > 0)) return null;
+    /* A ball that has reached the blade's depth band and is already leaving
+     * is a miss on EITHER side of the depth tolerance. The old guard demanded
+     * `dz > depthTolerance`, so a lateral miss that happened exactly at the
+     * blade's depth (|dz| <= tolerance) produced no code at all — those are
+     * the "admitted press vanished without a reason" reports. Once the ball
+     * is past the bat there is always something to say: lateral → TIMING_LATE,
+     * depth → DEPTH_FAIL. While it is still approaching, stay silent. */
+    if (!(dz > -MATCH_RULES.depthTolerance) || !(separating > 0)) return null;
     const lateral = captureSample && Number.isFinite(captureSample.lateral)
       ? captureSample.lateral : Math.hypot(b.p.x - pad.pos.x, b.p.y - pad.pos.y);
     const depthGap = captureSample && Number.isFinite(captureSample.depthGap)
@@ -2804,8 +2811,21 @@ class Game {
     /* Footwork depth plane (`this._footZ`): standing still the bat lives at
      * PADDLE_STANCE_Z, while an incoming short or deep ball shifts the feet
      * smoothly toward the optimal strike plane when `autoFootwork` is active. */
+    /* An admitted press is a promise: the player has already been told "this
+     * ball is yours". From that moment the FEET follow the live ball's depth
+     * (the finger keeps drawing the stroke on screen), so the 3D blade and the
+     * screen oval live on the same depth plane. A stationary hold gains no
+     * strike rights from this — `playerStrokeIntent` stays null and only a
+     * release/tap or a real swing can consume the contact. */
+    const pressFoot = !!(this.swipe && this.swipe.pressZone &&
+      this.swipe.pressZone.accepted === true && this.swipe.pressZone.shotId === this.shotId &&
+      this.state === GS.RALLY && this.ball && this.ball.live && this.ball.lastHitBy === -1 &&
+      this.recenterT <= 0 && this.ball.p &&
+      this.ball.p.z > PADDLE_LIMITS.zStepIn - 0.35);
     let wantFootZ = PADDLE_STANCE_Z;
-    if (shortBall) {
+    if (pressFoot) {
+      wantFootZ = clamp(this.ball.p.z - 0.02, PADDLE_LIMITS.zStepIn, PADDLE_STANCE_Z);
+    } else if (shortBall) {
       wantFootZ = clamp(Math.min(o.reach ? o.reach.z : this.ball.p.z, this.ball.p.z) - 0.02,
         PADDLE_LIMITS.zStepIn, PADDLE_STANCE_Z);
     } else if (MATCH_RULES.autoFootwork && this.state === GS.RALLY && canReachShort) {
@@ -2820,17 +2840,27 @@ class Game {
       }
     }
     this._footZ = expSmooth(Number.isFinite(this._footZ) ? this._footZ : PADDLE_STANCE_Z,
-      wantFootZ, shortBall ? 14 : 11, dt);
+      wantFootZ, pressFoot ? 24 : shortBall ? 14 : 11, dt);
 
-    const zFootArg = (shortBall || (MATCH_RULES.autoFootwork && canReachShort && this._footZ < PADDLE_STANCE_Z - 0.02))
+    const zFootArg = (pressFoot || shortBall ||
+      (MATCH_RULES.autoFootwork && canReachShort && this._footZ < PADDLE_STANCE_Z - 0.02))
       ? quantizeDepth(this._footZ) : undefined;
+    /* Forcing the depth is only safe for a ball this press was stamped for:
+     * the point stays on the pointer ray (under the finger), only Z follows
+     * the physical ball instead of the camera's hand-box. */
+    const forceZ = pressFoot && Number.isFinite(this._footZ) ? quantizeDepth(this._footZ) : undefined;
+    /* The solver's 5th argument is an OPTIONS object (`out`, `zHint`, `zFoot`),
+     * not a result buffer: the old six-argument call passed `_ptTarget` as
+     * `opts` and `zFoot` as an ignored 6th argument, so auto-footwork never
+     * reached the blade. The blade stayed on the stance plane while the ball
+     * was up to 0.8 m nearer, and an admitted press could not enter the
+     * physical envelope no matter where the finger was. */
     const t = pointerBladeSolve(
       this._liveRig,
       this.R.aspect(),
       px,
       py,
-      this._ptTarget || (this._ptTarget = { tx: 0, ty: 0, tz: 0 }),
-      { zFoot: zFootArg }
+      { out: this._ptTarget || (this._ptTarget = { tx: 0, ty: 0, tz: 0 }), zFoot: zFootArg, forceZ }
     );
     let tx = t.tx;
     let ty = t.ty;

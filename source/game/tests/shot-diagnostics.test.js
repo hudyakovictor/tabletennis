@@ -26,12 +26,15 @@ test('recognition alone is never a hit, spin or successful return', () => {
   const j = attempt(); assert.equal(j.latest.valid, true); assert.equal(j.latest.contact, null);
   assert.equal(lib.shotFeedbackView(j.latest).metrics, ''); assert.equal(j.latest.outcome, 'pending');
   j.expire(.36); assert.equal(j.latest.outcome, 'no_contact');
+  /* no capture sample was ever seen → the report must still name the miss */
+  assert.equal(j.latest.reason, 'TIMING_EARLY');
   assert.match(lib.shotFeedbackView(j.latest).detail, /касания мяча не было/);
 });
 test('stationary click is rejected, not classified as a topspin', () => {
   const sw = new SwipeTracker(); sw.down(.5, .5, 0); sw.up(.5, .5, .1); const j = new ShotJournal();
   j.observe(1, sw.lastReleased, { time: .1, sampleTime: .1, active: false, isServe: false, strokeId: 'LOOP' });
   assert.equal(j.latest.outcome, 'rejected'); assert.equal(j.latest.strokeId, null);
+  j.expire(.2); assert.equal(j.latest.reason, 'STATIC_CLICK');
 });
 test('one gesture updates one record; holding can resume but never duplicates contact', () => {
   const j = attempt(), sw = gesture(); j.expire(.4);
