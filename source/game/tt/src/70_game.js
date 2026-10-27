@@ -2890,6 +2890,7 @@ class Game {
     if (!Number.isFinite(dtReal) || dtReal <= 0) return;
     dtReal = Math.min(dtReal, 0.1);
     this.updateArenaFlashes(dtReal);
+    if (this.scene.updateCeilingLights) this.scene.updateCeilingLights(this._arenaT || 0, this.reducedMotion);
     if (this.state === GS.MENU) {
       this.updateCamera(dtReal);
       this.profile.maybeSave(dtReal);
@@ -3243,7 +3244,7 @@ class Game {
     if (this._flashNext > 0) return;
     this._flashNext = 1 + Math.random() * 3;
     const F = ARENA_FLASH_SPOTS[(Math.random() * ARENA_FLASH_SPOTS.length) | 0];
-    this._flash = { x: F[0], y: F[1], z: F[2], t0: this._arenaT, dur: 0.08 + Math.random() * 0.07, size: 0.55 + Math.random() * 0.4 };
+    this._flash = { x: F[0], y: F[1], z: F[2], t0: this._arenaT, dur: 0.08 + Math.random() * 0.07, size: 0.75 + Math.random() * 0.55 };
   }
 
   billboard(out, pos, size, roll, sy) {
@@ -3462,27 +3463,27 @@ class Game {
      * трибуны сами по себе тёмные, живёт только этот свет. */
     if (!this.reducedMotion) {
       const t = this._arenaT || 0;
-      // Матч-камера смотрит вниз (~-24°) с линзовым сдвигом: видимая
-      // полоса дальней стены над бортами — только y ∈ [-0.24, 0.23],
-      // поэтому ядро шара живёт у самой кромки бортов (sy ~0), а его
-      // нижняя часть естественно срезается бортом (он ближе к камере).
-      const sx = 8.6 * Math.cos(t * 0.21), sy = -0.02 + Math.sin(t * 0.147 + 1.3) * 0.08;
+      // Борта уехали вдвое дальше (кольцо 6.8×9.8): в матч-камере
+      // дальний борт перекрывает низ трибун, поэтому шар света —
+      // герой кинематографических ракурсов (хаб/демо), где трибуны
+      // видны широко; там он скользит по передним рядам (sy ~0.55).
+      const sx = 8.6 * Math.cos(t * 0.21), sy = 0.55 + Math.sin(t * 0.147 + 1.3) * 0.15;
       const pulse = 0.85 + 0.15 * Math.sin(t * 0.9);
       const beamLen = Math.hypot(sx, 7.6 - sy) * 0.95;
       // столб: от прожектора (0, 7.6 — выше кадра) к пятну; roll — наклон
-      this.billboard(tmp.m, V3.new(sx * 0.5, (sy + 7.6) / 2, -10.8), 2.4, Math.atan2(sx, 7.6 - sy), beamLen);
+      this.billboard(tmp.m, V3.new(sx * 0.5, (sy + 7.6) / 2, -13.8), 2.4, Math.atan2(sx, 7.6 - sy), beamLen);
       R.draw(me.quad, tmp.m, {
         color: [1, 1, 1], tex: S.tex.glow, blend: 'add', doubleSided: true,
         emissive: [0.170 * pulse, 0.200 * pulse, 0.280 * pulse], rough: 1,
       });
       // сам шар света на толпе
-      this.billboard(tmp.m, V3.new(sx, sy, -10.75), 7.5, 0);
+      this.billboard(tmp.m, V3.new(sx, sy, -13.75), 7.5, 0);
       R.draw(me.quad, tmp.m, {
         color: [1, 1, 1], tex: S.tex.glow, blend: 'add', doubleSided: true,
         emissive: [0.480 * pulse, 0.560 * pulse, 0.750 * pulse], rough: 1,
       });
       // яркое ядро прожектора (видно в кинематографичных ракурсах)
-      this.billboard(tmp.m, V3.new(0, 7.6, -10.85), 1.0, 0);
+      this.billboard(tmp.m, V3.new(0, 7.6, -13.85), 1.0, 0);
       R.draw(me.quad, tmp.m, {
         color: [1, 1, 1], tex: S.tex.glow, blend: 'add', doubleSided: true,
         emissive: [0.40 * pulse, 0.46 * pulse, 0.58 * pulse], rough: 1,

@@ -229,10 +229,10 @@ class Scene {
       blade: R.mesh(makePaddleBlade(0.077, 0.082, 0.014, 44)),
       rubber: R.mesh(makePaddleBlade(0.072, 0.077, 0.003, 44)),
       handle: R.mesh(makeBox(0.030, 0.100, 0.022)),
-      floor: R.mesh(makePlane(26, 26, 13)),
+      floor: R.mesh(makePlane(34, 30, 17)),
       quad: R.mesh(makeQuad(1, 1)),
-      bannerEnd: R.mesh(makeQuadUV(1, 1, 2.25, 1)),
-      bannerSide: R.mesh(makeQuadUV(1, 1, 3.25, 1)),
+      bannerEnd: R.mesh(makeQuadUV(1, 1, 4.5, 1)),
+      bannerSide: R.mesh(makeQuadUV(1, 1, 6.5, 1)),
       wall: R.mesh(makeQuadUV(1, 1, 1, 1)),
       sphere: R.mesh(makeSphere(1, 16, 12)),
       box: R.mesh(makeBox(1, 1, 1)),
@@ -263,7 +263,7 @@ class Scene {
       ring: { color: [1, 1, 1], tex: this.tex.ring, blend: 'add', emissive: [1, 1, 1], doubleSided: true, rough: 1 },
       light: { color: [1, 1, 1], emissive: [3.4, 3.35, 3.1], rough: 0.2 },
       lightBody: { color: [0.14, 0.15, 0.18], rough: 0.4, metal: 0.6 },
-      ceiling: { color: [0.04, 0.047, 0.06], rough: 0.95 },
+      ceiling: { color: [0.07, 0.10, 0.16], emissive: [0.016, 0.026, 0.048], rough: 0.95 },
       shadow: { color: [0, 0, 0], tex: this.tex.shadow, unlit: true, emissive: [0, 0, 0], blend: true, doubleSided: true, rough: 1 },
       pool: { color: [1, 1, 1], tex: this.tex.glow, blend: 'add', emissive: [0.050, 0.058, 0.080], doubleSided: true, rough: 1 },
       gloss: { color: [1, 1, 1], tex: this.tex.glow, blend: 'add', emissive: [1, 1, 1], doubleSided: true, rough: 1, unlit: true },
@@ -326,13 +326,14 @@ class Scene {
     M4.compose(m('floor'), V3.set(pos, 0, 0, 0), Q.identity(rot), V3.set(scl, 1, 1, 1));
 
     /* Низкие ограждения с LED-баннерами: коробка-борт + светящаяся
-     * плоскость внутрь зала. Кольцо HX×HZ: камера во всех режимах
-     * внутри него (x ±1.5, z ≤ 4.0), борта обзор не перекрывают, а
-     * нижний край трибун уходит за них. Бренды — ARENA_BRANDS по
-     * сторонам: дальняя (главный фон), ближняя, левая, правая. */
+     * плоскость внутрь зала. Кольцо HX×HZ (по просьбе — в два раза
+     * шире прежнего: зал ощущается большим, борта уходят вглубь).
+     * Камера во всех режимах внутри кольца (x ±1.5, z ≤ 4.0).
+     * Бренды — ARENA_BRANDS по сторонам: дальняя (главный фон),
+     * ближняя, левая, правая. */
     this.barriers = [];
     {
-      const HX = 3.4, HZ = 4.9, BH = 0.75;
+      const HX = 6.8, HZ = 9.8, BH = 0.75;
       const sides = [
         { brand: 0, long: true, x: 0, z: -HZ, ry: 0 },
         { brand: 1, long: true, x: 0, z: HZ, ry: Math.PI },
@@ -353,15 +354,77 @@ class Scene {
 
     // far wall + ceiling
     this.walls = [];
-    for (const [x, z, w, h, ry] of [[0, -11, 30, 10, 0], [0, 11, 30, 10, Math.PI], [-13, 0, 24, 10, Math.PI / 2], [13, 0, 24, 10, -Math.PI / 2]]) {
+    for (const [x, z, w, h, ry] of [[0, -14, 36, 11, 0], [0, 14, 36, 11, Math.PI], [-16.5, 0, 30, 11, Math.PI / 2], [16.5, 0, 30, 11, -Math.PI / 2]]) {
       const mm = M4.create();
       M4.compose(mm, V3.set(pos, x, h / 2 - 0.5, z), Q.setAxisAngle(rot, 0, 1, 0, ry), V3.set(scl, w, h, 1));
       this.walls.push(mm);
     }
-    // ceiling light bars removed per user request: no overhead clutter
-    this.lights = []; this.lightBodies = [];
     this.ceiling = M4.create();
-    M4.compose(this.ceiling, V3.set(pos, 0, 5.4, 0), Q.setAxisAngle(rot, 1, 0, 0, Math.PI / 2), V3.set(scl, 26, 26, 1));
+    M4.compose(this.ceiling, V3.set(pos, 0, 5.4, 0), Q.setAxisAngle(rot, 1, 0, 0, Math.PI / 2), V3.set(scl, 36, 30, 1));
+
+    /* Потолочные светильники: четыре холодные сине-голубые панели —
+     * верх кадра не проваливается в черноту, а читается как тёмный
+     * зал с техникой над головой. Две панели (по диагонали) дышат:
+     * яркость медленно уходит к 50% и обратно (updateCeilingLights).
+     * Свечение слабое, без выбивания в блум — настроение, не люстра. */
+    this.ceilingLights = [];
+    {
+      const spots = [
+        { x: -3.2, z: -3.6, fl: 0 }, { x: 3.2, z: -3.6, fl: 1 },
+        { x: -3.2, z: -8.6, fl: 1 }, { x: 3.2, z: -8.6, fl: 0 },
+      ];
+      let fi = 0;
+      for (const sp of spots) {
+        const b = M4.create();
+        M4.compose(b, V3.set(pos, sp.x, 5.40, sp.z), Q.identity(rot), V3.set(scl, 3.2, 0.07, 0.8));
+        const m = M4.create();
+        M4.compose(m, V3.set(pos, sp.x, 5.35, sp.z), Q.setAxisAngle(rot, 1, 0, 0, Math.PI / 2), V3.set(scl, 3.0, 0.62, 1));
+        const base = [0.70, 0.95, 1.35];
+        this.ceilingLights.push({
+          b, m, fl: 0, ph: fi * 2.4, rate: fi % 2 ? 0.73 : 0.9, base,
+          mat: { color: [0.55, 0.70, 1.0], emissive: base.slice(), rough: 1 },
+        });
+        fi++;
+      }
+    }
+
+    /* Риги над трибунами: кинематографическая камера смотрит вниз и
+     * потолок в кадр не берёт — «верх экрана» там это верх стен.
+     * Четыре холодные панели над дальней трибуной (две средние дышат)
+     * и по две на боковых: верх кадра получает сине-голубой оттенок
+     * вместо чёрной дыры, а под каждой панелью — мягкая засветка
+     * верхних рядов (аддитивный градиент по стене). */
+    {
+      const rig = [];
+      for (const x of [-6.6, -2.2, 2.2, 6.6]) rig.push({ x, y: 2.55, z: -13.90, ry: 0, tilt: 0.3 });
+      for (const z of [-9, -3, 3, 9]) { rig.push({ x: -16.42, y: 2.55, z, ry: Math.PI / 2, tilt: 0 }); rig.push({ x: 16.42, y: 2.55, z, ry: -Math.PI / 2, tilt: 0 }); }
+      for (const x of [-6.6, -2.2, 2.2, 6.6]) rig.push({ x, y: 2.55, z: 13.90, ry: Math.PI, tilt: 0.3 });
+      let ri = 0;
+      for (const rp of rig) {
+        const q = Q.setAxisAngle(Q.new(), 0, 1, 0, rp.ry);
+        if (rp.tilt) { const qt = Q.setAxisAngle(Q.new(), 1, 0, 0, rp.tilt); Q.mul(q, q, qt); }
+        const m = M4.create();
+        M4.compose(m, V3.set(pos, rp.x, rp.y, rp.z), q, V3.set(scl, 3.0, 0.5, 1));
+        const b = M4.create();
+        const back = 0.09;
+        M4.compose(b, V3.set(pos, rp.x - Math.sin(rp.ry) * back, rp.y + 0.13, rp.z - Math.cos(rp.ry) * back), q, V3.set(scl, 2.7, 0.14, 0.16));
+        const base = [1.05, 1.35, 1.85];
+        const fl = (rp.ry === 0 && (ri === 1 || ri === 2)) ? 1 : 0;
+        const wash = M4.create();
+        M4.compose(wash, V3.set(pos, rp.x, rp.y - 1.05, rp.z + (rp.ry === 0 ? 0.03 : 0), ), q, V3.set(scl, 4.4, 2.2, 1));
+        if (rp.ry !== 0) { // боковые: засветку чуть внутрь зала
+          M4.compose(wash, V3.set(pos, rp.x - Math.sign(rp.x) * -0.03, rp.y - 1.05, rp.z), q, V3.set(scl, 4.4, 2.2, 1));
+        }
+        const glowBase = [0.13, 0.19, 0.30];
+        this.ceilingLights.push({
+          b, m, fl, ph: ri * 2.4, rate: ri % 2 ? 0.73 : 0.9, base,
+          mat: { color: [0.55, 0.70, 1.0], emissive: base.slice(), rough: 1 },
+          glow: wash, glowBase,
+          glowMat: { color: [1, 1, 1], tex: this.tex.glow, blend: 'add', doubleSided: true, emissive: glowBase.slice(), rough: 1 },
+        });
+        ri++;
+      }
+    }
 
     // a soft pool of light on the floor: sells "this table is lit" without
     // a single shadow-map texel
@@ -447,6 +510,19 @@ class Scene {
    *  object (including the ball) or it would be overwritten. */
   drawNet(R) { R.draw(this.mesh.net, this.M.net, this.mat.net); }
 
+  /* Дыхание двух потолочных панелей: яркость 50%..100%, медленно.
+   * reducedMotion — статика на среднем уровне (без мерцания вообще). */
+  updateCeilingLights(t, reducedMotion) {
+    for (const cl of this.ceilingLights) {
+      if (!cl.fl) continue;
+      const k = reducedMotion ? 0.85 : 0.75 + 0.25 * Math.sin(t * cl.rate + cl.ph);
+      cl.mat.emissive[0] = cl.base[0] * k;
+      cl.mat.emissive[1] = cl.base[1] * k;
+      cl.mat.emissive[2] = cl.base[2] * k;
+      if (cl.glowMat) for (let i = 0; i < 3; i++) cl.glowMat.emissive[i] = cl.glowBase[i] * k;
+    }
+  }
+
   drawStatic(R, shadowPass) {
     const d = shadowPass
       ? (mesh, mat4, mat) => R.drawShadow(mesh, mat4, mat && mat.alphaTest ? mat.tex : null, mat && mat.alphaTest)
@@ -464,8 +540,7 @@ class Scene {
       R.draw(me.quad, this.tableShade, this._shadowMat0);
       for (const w of this.walls) d(me.wall, w, ma.stands);
       for (const b of this.barriers) { if (b.box) d(me.box, b.box, ma.barrier); d(b.long ? me.bannerEnd : me.bannerSide, b.m, b.mat || ma.banner); }
-      for (const b of this.lightBodies) d(me.box, b, ma.lightBody);
-      for (const l of this.lights) d(me.quad, l, ma.light);
+      for (const cl of this.ceilingLights) { if (cl.b) d(me.box, cl.b, ma.lightBody); R.draw(me.quad, cl.m, cl.mat); if (cl.glow) R.draw(me.quad, cl.glow, cl.glowMat); }
       d(me.quad, this.ceiling, ma.ceiling);
     } else {
       d(me.net, M.net, ma.net);

@@ -44,10 +44,10 @@ Router.def('hub', {
       </div>
     </div>
     <div class="playzone play-grid">
-      <button class="b3 modebtn rise" style="--d:2" data-modebtn="quick" data-press><span class="shine"></span><span class="mb-i"><img src="${ILL['ic-swirl']}" alt="" width="34" height="34"></span><span class="mb-t"><small>${t('hub.quickSub')}</small><b>${t('mode.quick')}</b></span></button>
-      <button class="b3 modebtn gold rise" style="--d:3" data-modebtn="ranked" data-press><span class="shine"></span><span class="mb-i"><img src="${ILL['ic-cross']}" alt="" width="34" height="34"></span><span class="mb-t"><small>${t('hub.rankedSub')}</small><b>${t('hub.online')}</b></span></button>
-      <button class="b3 modebtn dark rise" style="--d:4" data-modebtn="practice" data-press><span class="shine"></span><span class="mb-i"><img src="${ILL['ic-basket']}" alt="" width="34" height="34"></span><span class="mb-t"><small>${t('hub.practiceSub')}</small><b>${t('mode.practice')}</b></span></button>
-      <button class="b3 modebtn dark rise" style="--d:5" data-modebtn="career" data-press><span class="shine"></span><span class="mb-i"><img src="${ILL['ic-medalp']}" alt="" width="34" height="34"></span><span class="mb-t"><small>${t('hub.careerSub')}</small><b>${t('hub.career')}</b></span></button>
+      <button class="b3 modebtn rise" style="--d:2" data-modebtn="quick" data-press><span class="mb-i"><img src="${ILL['ic-swirl']}" alt="" width="120" height="120"></span><span class="mb-t"><b>${t('mode.quick')}</b></span></button>
+      <button class="b3 modebtn gold rise" style="--d:3" data-modebtn="ranked" data-press><span class="mb-i"><img src="${ILL['ic-cross']}" alt="" width="120" height="120"></span><span class="mb-t"><b>${t('hub.online')}</b></span></button>
+      <button class="b3 modebtn dark rise" style="--d:4" data-modebtn="practice" data-press><span class="mb-i"><img src="${ILL['ic-basket']}" alt="" width="120" height="120"></span><span class="mb-t"><b>${t('mode.practice')}</b></span></button>
+      <button class="b3 modebtn dark rise" style="--d:5" data-modebtn="career" data-press><span class="mb-i"><img src="${ILL['ic-medalp']}" alt="" width="120" height="120"></span><span class="mb-t"><b>${t('hub.career')}</b></span></button>
     </div>
     ${this.friendsBar()}`;
   },
