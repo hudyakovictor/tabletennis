@@ -79,7 +79,7 @@ test('both error flavours fault: face closed + dead arm nets, open face + hot ar
   }
 });
 
-test('a serve rolls a THIRD of the base rate, and legend barely errs', () => {
+test('a serve rolls a THIRD of the base rate, and WTF barely errs', () => {
   const ai = new lib.OpponentAI(0);                     // serve rate = 0.38/3 ≈ 0.1267
   const g = fixtureGame();
   const noMiss = (rig(ai, [0.20]), ai.applyExecutionError(g, goodRacket(), true));
@@ -88,12 +88,12 @@ test('a serve rolls a THIRD of the base rate, and legend barely errs', () => {
   assert.equal(miss.aiError, 'net', 'roll 0.10 < 0.127 faults the serve');
   assert.equal(flightFaults(miss, g, true), true, 'a serve error is a serve fault by the rules');
 
-  const legend = new lib.OpponentAI(4);                 // errBase 0.03
+  const wtf = new lib.OpponentAI(3);                    // WTF: errBase 0.017
   const cleanL = goodRacket();
-  const safe = (rig(legend, [0.10]), legend.applyExecutionError(g, cleanL, false));
-  assert.equal(safe, cleanL, 'legend ignores a roll that would beat a rookie');
-  const rare = (rig(legend, [0.02, 0.30]), legend.applyExecutionError(g, goodRacket(), false));
-  assert.equal(rare.aiError, 'net', 'legend errs only inside 3 %');
+  const safe = (rig(wtf, [0.10]), wtf.applyExecutionError(g, cleanL, false));
+  assert.equal(safe, cleanL, 'WTF ignores a roll that would beat a rookie');
+  const rare = (rig(wtf, [0.01, 0.30]), wtf.applyExecutionError(g, goodRacket(), false));
+  assert.equal(rare.aiError, 'net', 'WTF errs only inside 2 %');
 });
 
 test('scoreboard pressure and the director handicap widen the rate', () => {

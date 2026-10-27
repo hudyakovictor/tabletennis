@@ -4,7 +4,7 @@
    ===================================================================== */
 const MODES = [
   { id: 'ranked', tk: 'mode.ranked', sk: 'mode.rankedSub', i: 'crown', c: 'gold', diff: .62, tag: '±24' },
-  { id: 'quick', tk: 'mode.quick', sk: 'mode.quickSub', i: 'bolt', c: 'coral', diff: .5, tagk: 'mode.quickTag' },
+  { id: 'free', tk: 'mode.free', sk: 'mode.freeSub', i: 'bolt', c: 'coral', diff: .5, tagk: 'mode.freeTag' },
   { id: 'practice', tk: 'mode.practice', sk: 'mode.practiceSub', i: 'target', c: 'violet', diff: .35, tagk: 'mode.practiceTag' }
 ];
 const modeTag = (m) => (m.tagk ? t(m.tagk) : m.tag || '');
@@ -43,13 +43,23 @@ Router.def('hub', {
         <button class="fab pop ${freeLeft <= 0 ? 'free' : ''}" style="--d:2" data-act="gifts" data-press><span class="fchest">${Art.icon('gift', { c: '#FFE9B0' })}</span><em class="num" id="freeT" data-gift="1">${freeLeft > 0 ? fmtLeft(freeLeft) : t('hub.gift')}</em></button>
       </div>
     </div>
+    ${this.diffBar()}
     <div class="playzone play-grid">
-      <button class="b3 modebtn rise" style="--d:2" data-modebtn="quick" data-press><span class="mb-i"><img src="${ILL['ic-swirl']}" alt="" width="120" height="120"></span><span class="mb-t"><b>${t('mode.quick')}</b></span></button>
+      <button class="b3 modebtn rise" style="--d:2" data-modebtn="free" data-press><span class="mb-i"><img src="${ILL['ic-swirl']}" alt="" width="120" height="120"></span><span class="mb-t"><b>${t('mode.free')}</b></span></button>
       <button class="b3 modebtn gold rise" style="--d:3" data-modebtn="ranked" data-press><span class="mb-i"><img src="${ILL['ic-cross']}" alt="" width="120" height="120"></span><span class="mb-t"><b>${t('hub.online')}</b></span></button>
       <button class="b3 modebtn dark rise" style="--d:4" data-modebtn="practice" data-press><span class="mb-i"><img src="${ILL['ic-basket']}" alt="" width="120" height="120"></span><span class="mb-t"><b>${t('mode.practice')}</b></span></button>
       <button class="b3 modebtn dark rise" style="--d:5" data-modebtn="career" data-press><span class="mb-i"><img src="${ILL['ic-medalp']}" alt="" width="120" height="120"></span><span class="mb-t"><b>${t('hub.career')}</b></span></button>
     </div>
     ${this.friendsBar()}`;
+  },
+  /* Панель сложности ПЕРЕД матчем: четыре уровня движка, выбор — один тап,
+   * хранится в профиле (S.diff) и уезжает в бота вместе с матчем. */
+  diffBar() {
+    const D = diffOf(S.diff);
+    return `<div class="diffbar rise" style="--d:1">
+      <span class="db-l">${Art.icon('target', { c: D.c, sw: 2.4 })}<b>${t('diff.botLevel')}</b><small>${t(D.sk)}</small></span>
+      <span class="db-chips">${DIFFS.map((d) => `<button class="dchip${d.id === D.id ? ' on' : ''}${d.id === 3 ? ' wtf' : ''}" data-diff="${d.id}" data-press aria-pressed="${d.id === D.id}" style="--c:${d.c}"><b>${d.name}</b></button>`).join('')}</span>
+    </div>`;
   },
   /* Друзья-лента (3 друга + «+» к рефералке):
    * в матче — мини-ракетка (красная накладка, жёлтая ручка) на месте точки;
@@ -113,6 +123,7 @@ Router.def('hub', {
   },
   mount(el) {
     UI.bindHud(el);
+    this.el = el;
     // живой стол: настоящий движок за интерфейсом (бот против бота, облёт камеры);
     // на «Эконом» — лёгкая 2D-заглушка
     this.lobby = S.quality !== 'low';
@@ -143,15 +154,36 @@ Router.def('hub', {
       }
     }, 1000);
     el.addEventListener('click', (e) => {
-      const a = e.target.closest('[data-act],[data-modebtn],[data-chest],[data-f]'); if (!a) return;
+      /* Router.go при busy молча возвращается: тап по плитке во время перехода
+       * splash → hub терялся без всякого ответа. Ждём освобождения и повторяем. */
+      const goRoute = (id, opt) => {
+        Router.go(id, opt);
+        if (!Router.busy || !Router.screens[id]) return;
+        let tries = 0;
+        const tick = () => { if (!Router.busy) Router.go(id, opt); else if (++tries < 40) setTimeout(tick, 50); };
+        setTimeout(tick, 50);
+      };
+      const a = e.target.closest('[data-act],[data-modebtn],[data-chest],[data-f],[data-diff]'); if (!a) return;
+      /* Сложность бота: один тап по ступеньке — и она в профиле. */
+      if (a.dataset.diff !== undefined) return this.setDiff(+a.dataset.diff, a);
       const mb = a.dataset.modebtn;
       if (mb) {
         const p = FX.pt(a); FX.burst(p.x, p.y, { count: 24, speed: 9 }); haptic('heavy');
         TGX.fullscreen(true);          // иммерсивный режим запрашиваем из жеста — так требует клиент
         MODE = MODES.find((m) => m.id === mb) || MODE;
-        if (mb === 'practice') Router.go('train', { data: { then: 'hub' } });
-        else if (mb === 'career') Router.go('profile');
-        else Router.go('mm');
+        if (mb === 'free') {
+          /* Свободная игра стартует сразу: без радара и VS — только спарринг
+           * без счёта и без последствий для рейтинга. */
+          BATTLE = { opp: pick(MM_POOL[leagueOf(S.rating).id] || MM_POOL.bronze) };
+          goRoute('match');
+          return;
+        }
+        if (mb === 'practice') goRoute('train', { data: { then: 'hub' } });
+        else if (mb === 'career') goRoute('profile');
+        /* Плитка подписана «Онлайн» — значит ведёт в лобби матча с другом,
+         * а не в радар под бота: рейтинговый бой остаётся большой кнопкой. */
+        else if (mb === 'ranked') goRoute('online');
+        else goRoute('mm');
         return;
       }
       if (a.dataset.chest !== undefined) return this.chestTap(+a.dataset.chest, a);
@@ -160,8 +192,12 @@ Router.def('hub', {
       if (k === 'play') {
         const p = FX.pt(a); FX.burst(p.x, p.y, { count: 30, speed: 11 }); haptic('heavy');
         TGX.fullscreen(true);
-        if (MODE.id === 'practice') Router.go('train', { data: { then: 'hub' } });
-        else Router.go('mm');
+        if (MODE.id === 'free') {
+          BATTLE = { opp: pick(MM_POOL[leagueOf(S.rating).id] || MM_POOL.bronze) };
+          goRoute('match');
+        }
+        else if (MODE.id === 'practice') goRoute('train', { data: { then: 'hub' } });
+        else goRoute('mm');
       }
       if (k === 'mode' && this.modeSheet) this.modeSheet();
       if (k === 'ranks') Router.go('ranks');
@@ -173,7 +209,23 @@ Router.def('hub', {
     // пасхалка: тап по столу = искры
     cv.addEventListener('pointerdown', (e) => { const p = FX.pt({ getBoundingClientRect: () => ({ left: e.clientX, top: e.clientY, width: 0, height: 0 }) }); FX.burst(p.x, p.y, { c: ['#2EE6FF', '#fff'], count: 12, speed: 6, size: .7 }); Sfx.paddle(1.2); });
   },
-  leave() { this.game && this.game.destroy(); this.game = null; clearInterval(this.timer); if (this.lobby) { GameHost.show(false); GameHost.send('attract'); } },
+  leave() { this.game && this.game.destroy(); this.game = null; this.el = null; clearInterval(this.timer); if (this.lobby) { GameHost.show(false); GameHost.send('attract'); } },
+  /* Смена уровня — с звуком, толчком и тостом: игрок должен видеть, что
+   * бот стал другим, а не узнавать об этом по проигранному матчу. */
+  setDiff(id, btn) {
+    S.diff = clamp(Math.round(id), 0, DIFFS.length - 1); save();
+    const D = diffOf(S.diff);
+    $$('[data-diff]', this.el || document).forEach((b) => {
+      const on = +b.dataset.diff === D.id;
+      b.classList.toggle('on', on); b.setAttribute('aria-pressed', String(on));
+    });
+    const lbl = this.el && this.el.querySelector('.diffbar .db-l small');
+    if (lbl) lbl.textContent = t(D.sk);
+    if (btn) { const p = FX.pt(btn); FX.ring(p.x, p.y, D.c, 90, 5); bump(btn); }
+    haptic('select'); Sfx.tab();
+    if (D.id === 3) { flash('#FF69D8', .28, 220); Sfx.impact(); toast(t('diff.wtfWarn'), 'target'); }
+    else toast(t('diff.changed', { name: t(D.tk) }), 'target');
+  },
   chestTap(i, btn) {
     const c = S.chests[i]; if (!c) return;
     if (c.state === 'ready') { Router.go('chest', { data: { kind: c.kind, slot: i } }); return; }

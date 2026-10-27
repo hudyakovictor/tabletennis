@@ -16,24 +16,34 @@ const REASON = (who, r) => {
   if (r.includes('ПОДАЧ')) return t('reason.serve');
   return t('reason.miss');
 };
-/* Сложность бота = ТВОЯ лига, не карточка соперника: бронзовый игрок не
- * должен получать ПРО-руку только потому, что в ростере все карточки про.
- * Quick играет ступенькой ниже рейтинга, ranked — ровно по лиге. */
-const LDIFF = { bronze: 0, silver: 1, gold: 2, pro: 3, super: 4, legend: 4 };
+/* Уровень бота — ВЫБОР ИГРОКА, а не карточка соперника и не лига:
+ * четыре ступеньки движка (AI_LEVELS: EASY/MEDIUM/HARD/WTF) и ровно они
+ * же в S.diff (0..3). Лига осталась рейтингу: она лишь подсказывает
+ * стартовую ступеньку новому профилю (миграция сейва = СРЕДНИЙ). */
+const DIFFS = [
+  { id: 0, name: 'EASY', tk: 'diff.easy', sk: 'diff.easySub', c: '#9CFFD0' },
+  { id: 1, name: 'MEDIUM', tk: 'diff.medium', sk: 'diff.mediumSub', c: '#9BE8FF' },
+  { id: 2, name: 'HARD', tk: 'diff.hard', sk: 'diff.hardSub', c: '#FFC93A' },
+  { id: 3, name: 'WTF', tk: 'diff.wtf', sk: 'diff.wtfSub', c: '#FF69D8' }
+];
+const diffOf = (i) => DIFFS[clamp(Math.round(Number(i) || 0), 0, DIFFS.length - 1)];
+/* Адаптация бота к игроку — ТОЛЬКО между матчами: перевес последних
+ * результатов даёт тренд −1…+1, движок правит им агрессию и точность
+ * на ±4 % (у WTF ±2 %) и НИКОГДА — реакцию. Раньше форма двигала
+ * уровень бота целиком, то есть «бот всегда на полшага сильнее». */
+const aiTrend = () => {
+  const f = Array.isArray(S.form) ? S.form.slice(-6) : [];
+  if (f.length < 3) return 0;
+  const w = f.reduce((n, x) => n + (x ? 1 : 0), 0), l = f.length - w;
+  return clamp((w - l) / f.length, -1, 1);
+};
 /* Карточки, которые крутит рулетка: слабейшие лица ростера внизу, все — к
  * Легенде. Визуально рейтинги честные, клипать их не станем. */
 const MM_POOL = {
   bronze: [4, 3, 6], silver: [4, 3, 6, 2], gold: [2, 0, 1, 6],
   pro: [0, 1, 2, 6, 5], super: [0, 1, 2, 5, 6, 7], legend: [1, 5, 7],
 };
-const TARGET = { ranked: 11, quick: 7, practice: 11 };
-/* Сложность зарабатывается формой последних матчей: по последним 6 играм
-   перевес побед ≥ 3 — оппонент на уровень жёстче, перевес поражений ≥ 3 —
-   на уровень мягче. Новый игрок (формы нет) играет честную базу. */
-const formAdjust = () => {
-  const f = Array.isArray(S.form) ? S.form.slice(-6) : [];
-  if (f.length < 4) return 0;
-  const w = f.reduce((n, x) => n + (x ? 1 : 0), 0), l = f.length - w;
-  return w - l >= 3 ? 1 : l - w >= 3 ? -1 : 0;
-};
+/* Партии до 11. У свободной игры счёта нет вовсе (движок держит freePlay),
+   поэтому target там — только вежливая заглушка для протокола. */
+const TARGET = { ranked: 11, free: 11, practice: 11 };
 const devBtn = () => (DEVMODE ? `<button class="ib mx-dev pe" data-act="dev" aria-label="${t('dev.zone')}">${Art.icon('target', { c: '#9BE8FF', sw: 2.4 })}</button>` : '');

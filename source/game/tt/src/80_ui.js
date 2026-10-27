@@ -56,6 +56,7 @@ class UI {
     this.game = game;
     this.syncDialogFocus();
     this.pendingDiff = game.settings.difficulty;
+    this.syncDiffMenu();
     this.updateInputCopy();
     this.syncSettings();
     this.syncFullscreen();
@@ -237,8 +238,22 @@ class UI {
     this.game.returnToMenu();
     $$('.screen').forEach(s => s.classList.remove('on'));
     $('#menu').classList.add('on');
+    this.syncDiffMenu();
     this.refreshMenuBits();
     this.syncMenuScrollHint();
+  }
+
+  /* Подсветка уровня в меню — по сохранённым настройкам, а не по статичному
+   * class="sel" в разметке (иначе после смены уровня из оболочки меню
+   * продолжало бы врать «СРЕДНИЙ»). */
+  syncDiffMenu() {
+    const d = this.game ? this.game.settings.difficulty : 0;
+    this.pendingDiff = d;
+    $$('#menu .opt[data-diff]').forEach((x) => {
+      const on = +x.dataset.diff === d;
+      x.classList.toggle('sel', on);
+      x.setAttribute('aria-pressed', String(on));
+    });
   }
 
   syncMenuScrollHint() {
@@ -274,6 +289,9 @@ class UI {
         x.setAttribute('aria-pressed', String(selected));
       });
       this.pendingDiff = +b.dataset.diff;
+      /* Выбор уровня — не только на этот матч: он сохраняется в настройках
+       * профиля (setDifficulty -> saveSettings). */
+      if (this.game) this.game.setDifficulty(this.pendingDiff);
       if (this.game) this.game.audio.ui('click');
     }));
     $$('.opt[data-set]').forEach((b) => b.addEventListener('click', () => {
@@ -289,7 +307,7 @@ class UI {
       this.applySetting(r.dataset.set, +r.value);
     }));
     const startMatch = () => {
-      const d = this.pendingDiff !== undefined ? this.pendingDiff : 2;
+      const d = this.pendingDiff !== undefined ? this.pendingDiff : this.game.settings.difficulty;
       $$('.screen').forEach((s) => s.classList.remove('on'));
       document.body.classList.add('is-playing');
       this.trainHide();
@@ -843,7 +861,13 @@ class UI {
     }
     $('#servA').classList.toggle('on', g.server === 1);
     $('#servB').classList.toggle('on', g.server === -1);
-    $('#oppName').textContent = g.ai.L.name;
+    /* Имя соперника в HUD = УРОВЕНЬ СЛОЖНОСТИ (ЛЁГКИЙ/СРЕДНИЙ/СЛОЖНЫЙ/WTF),
+     * а не безымянный «ПРО». Уровень WTF дополнительно красит букву —
+     * data-ai-lvl читает CSS (§ боссовый вид). */
+    const L = g.ai.L;
+    $('#oppName').textContent = L.ru || L.name;
+    const lvl = String(g.ai.levelIndex);
+    if (document.body.dataset.aiLvl !== lvl) document.body.dataset.aiLvl = lvl;
   }
 
   showShot() { this.syncShotFeedback(); }
@@ -1234,6 +1258,10 @@ class UI {
 
   drawCoach(c, W, H, d) {
     const g = this.game, now = (typeof performance !== 'undefined' ? performance.now() : Date.now()) / 1000;
+    /* Яркость кольца из калибровки: тише — меньше визуального шума,
+     * громче — легче поймать окно. Размер живёт в hintRadius. */
+    const glowK = (g._cal && Number.isFinite(g._cal.hintGlow))
+      ? lerp(0.30, 1.15, clamp(g._cal.hintGlow, 0, 1)) : 1;
     let cue = this.coachCueNow();
     /* Никакого «досвета» последнего кадра и никакого сглаживания между
      * позициями: точки сигналов теперь ПРИКОЛОЧЕНЫ при появлении (матч —
@@ -1253,7 +1281,7 @@ class UI {
       const mx = clamp(mx0, padE, W - padE), my = clamp(my0, 90 * d, H - 70 * d);
       const heat = clamp(1 - (cue.t || .3) / .30, 0, 1);
       c.save();
-      c.globalAlpha = 0.8 + 0.2 * heat;
+      c.globalAlpha = Math.min(1, (0.8 + 0.2 * heat) * glowK);
       c.shadowColor = heat > .66 ? '#FFE699' : '#35C6F4'; c.shadowBlur = (8 + heat * 6) * d;
       c.strokeStyle = heat > .66 ? '#FFE699' : 'rgba(255,255,255,.92)';
       c.lineWidth = (2 + heat * 1.6) * d;
@@ -1289,9 +1317,9 @@ class UI {
       c.fillStyle = hole; c.beginPath(); c.arc(x, y, r * 3.4, 0, TAU); c.fill();
       c.globalCompositeOperation = 'source-over';
     }
-    const alpha = (cue.subtle ? 0.75 : 1) *
+    const alpha = Math.min(1, (cue.subtle ? 0.75 : 1) *
       (cue.fade !== undefined ? cue.fade : 1) *
-      (cue._holdAge !== undefined ? Math.max(.25, 1 - cue._holdAge / .24) : 1);
+      (cue._holdAge !== undefined ? Math.max(.25, 1 - cue._holdAge / .24) : 1) * glowK);
     c.globalAlpha = alpha;
     if (cue.kind === 'tap') {
       const ph = (now % 1.2) / 1.2;
@@ -1376,7 +1404,9 @@ class UI {
     const p = g.project(g.ball.p, this._pv);
     if (!p.ok || !Number.isFinite(p.x) || !Number.isFinite(p.y) || p.x < 0 || p.x > 1 || p.y < 0 || p.y > 1) return;
     const x = p.x * W, y = p.y * H, r = cue.radius * d, arm = 4 * d;
-    c.save(); c.globalAlpha = cue.alpha;
+    const glowK = (g._cal && Number.isFinite(g._cal.hintGlow))
+      ? lerp(0.30, 1.15, clamp(g._cal.hintGlow, 0, 1)) : 1;
+    c.save(); c.globalAlpha = Math.min(1, cue.alpha * glowK);
     /* язык цвета единый: зелёный = «бей сейчас» (окно открыто). Сине-серый
      * вне-оконный цвет убран — он читался как ещё один «синий шлейф». */
     c.strokeStyle = cue.hot ? 'rgba(124,255,158,.95)' : 'rgba(255,255,255,.55)';
@@ -1465,6 +1495,9 @@ class UI {
     // пальцем и читалась как «не тот» шлейф. Вердикт показывают шлейф мяча
     // и вспышка контакта (зелёный/жёлтый/красный) — после удара, по делу.
     const sw = g.swipe;
+    /* След пальца из калибровки: 0.35× .. 1.25× по толщине и яркости. */
+    const trailK = (g._cal && Number.isFinite(g._cal.fingerTrail))
+      ? lerp(0.35, 1.25, clamp(g._cal.fingerTrail, 0, 1)) : 1;
     if (!this.captureDebug && sw.active && sw.samples.length > 1) {
       const pts = sw.samples;
       const n = pts.length;
@@ -1472,14 +1505,14 @@ class UI {
       for (let i = 1; i < n; i++) {
         const t = i / (n - 1);
         c.strokeStyle = '#ffffff';
-        c.globalAlpha = 0.07 + t * 0.5;
-        c.lineWidth = (1.5 + t * 11) * d;
+        c.globalAlpha = Math.min(1, (0.07 + t * 0.5) * trailK);
+        c.lineWidth = (1.5 + t * 11) * d * trailK;
         c.beginPath();
         c.moveTo(pts[i - 1].x * W, pts[i - 1].y * H);
         c.lineTo(pts[i].x * W, pts[i].y * H);
         c.stroke();
       }
-      c.globalAlpha = 1;
+      c.globalAlpha = Math.min(1, trailK);
       const hx = pts[n - 1].x * W, hy = pts[n - 1].y * H;
       const rg = c.createRadialGradient(hx, hy, 0, hx, hy, 34 * d);
       rg.addColorStop(0, 'rgba(255,255,255,.55)'); rg.addColorStop(1, 'rgba(255,255,255,0)');
@@ -1504,14 +1537,14 @@ class UI {
           for (let i = 1; i < n; i++) {
             const t = i / (n - 1);
             c.strokeStyle = rb.col;
-            c.globalAlpha = (0.07 + t * 0.5) * rb.fade;
-            c.lineWidth = (1.5 + t * 11) * d;
+            c.globalAlpha = Math.min(1, (0.07 + t * 0.5) * rb.fade * trailK);
+            c.lineWidth = (1.5 + t * 11) * d * trailK;
             c.beginPath();
             c.moveTo(pts[i - 1].x * W, pts[i - 1].y * H);
             c.lineTo(pts[i].x * W, pts[i].y * H);
             c.stroke();
           }
-          c.globalAlpha = rb.fade;
+          c.globalAlpha = Math.min(1, rb.fade * trailK);
           const hx = pts[n - 1].x * W, hy = pts[n - 1].y * H;
           const rg = c.createRadialGradient(hx, hy, 0, hx, hy, 34 * d);
           rg.addColorStop(0, rb.col + 'cc'); rg.addColorStop(1, rb.col + '00');

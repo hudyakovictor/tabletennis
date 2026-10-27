@@ -20,12 +20,20 @@ const PHYS_DT = PH.SIM_DT;        // 600 Hz — and the same step every solver v
 /** How much the bat slides toward the predicted meeting point while the
  *  ball approaches the blade's plane — indexed by difficulty level. The
  *  harder the opponent, the more honest the geometry: 0.85 with a rookie,
- *  nearly nothing with a legend. The point itself is solved ON the bat's
- *  own plane by contactPrediction(), so the pull can never run along a
- *  wrong depth. */
-const MEET_ASSIST = [0.85, 0.66, 0.45, 0.26, 0.10];
+ *  nearly nothing with WTF. The point itself is solved ON the bat's own
+ *  plane by contactPrediction(), so the pull can never run along a wrong
+ *  depth.
+ *  Таблица обязана иметь ровно столько же строк, сколько AI_LEVELS
+ *  (это проверяет tests/ai-levels.test.js): раньше их было пять, пока
+ *  уровней было пять, и после перебалансировки осталась строка-сирота. */
+const MEET_ASSIST = [0.85, 0.60, 0.30, 0.10];
 const MEET_ASSIST_RADIUS = 0.62;   // metres — outside this the bat is the pointer's
 const MEET_ASSIST_HORIZON = 0.60;  // seconds to the meeting point
+
+/* Шлейф мяча: одна ширина на всю ленту и короткий хвост в точках истории.
+ * 32 точки — это ≈0.17 с полёта: направление видно, «облако» не рисуется. */
+const TRAIL_WIDTH = 0.011;   // metres — half-width of the ribbon
+const TRAIL_POINTS = 32;
 class Game {
   constructor(canvas, ui) {
     this.canvas = canvas;
@@ -33,7 +41,10 @@ class Game {
     this.R = new Renderer(canvas, { quality: 'high' });
     this.scene = new Scene(this.R, 'arena');
     this.audio = new AudioEngine();
-    this.ai = new OpponentAI(2);
+    this.ai = new OpponentAI(0);
+    /* Тренд адаптации между матчами (−1…+1): его ставит хост (S.form) или
+     * своя история результатов в автономном меню движка. */
+    this.aiTrend = 0;
     this.swipe = new SwipeTracker();
     this.particles = new Particles();
     this.rig = new PaddleRig();
@@ -99,6 +110,7 @@ class Game {
      * smoke suite: 2 of 3 matches failed to boot once localStorage was warm. */
     installUnifiedControls(this.settings);
     this.loadSettings();
+    this.ai.setLevel(this.settings.difficulty);
 
     this.ball = {
       p: V3.new(0, PH.TABLE_Y + 0.3, 1.2), v: V3.new(), w: V3.new(),
@@ -130,6 +142,9 @@ class Game {
     this.paused = false;
     this.training = null;
     this.time = 0; this.frame = 0; this.stateT = 0;
+    /* Внутренний масштаб рендера: 1 — как выбрал игрок в quality, ниже —
+     * движок сам экономит пиксели на слабом телефоне (решает PerfMonitor). */
+    this.renderScale = 1;
     this.strokeTime = 0;                // same scaled clock as the ball, for input freshness
     this.score = [0, 0];                 // [player, ai]
     this.games = [0, 0];
@@ -213,6 +228,7 @@ class Game {
     this.replayBuf = []; this.replayMax = 360; this.replay = null;
     this.slowmo = { on: false, energy: 1, active: false, allowed: true, used: 0 };
     this.inspectSlowmo = false;   // тумблер разбора траектории (кнопка слоу-мо)
+    this.freePlay = false;        // свободная игра: очки идут, счёт и матч — нет
     this.predictPath = [];
     this.predictOut = {};
     this.lastShotInfo = null;
@@ -624,7 +640,8 @@ class Game {
   }
 
   resize() {
-    const dpr = Math.min(window.devicePixelRatio || 1, this.settings.quality === 'low' ? 1.25 : 2);
+    // renderScale — авто-экономия пикселей поверх выбранного качества
+    const dpr = Math.min(window.devicePixelRatio || 1, this.settings.quality === 'low' ? 1.25 : 2) * (this.renderScale || 1);
     const w = this.canvas.clientWidth || window.innerWidth;
     const h = this.canvas.clientHeight || window.innerHeight;
     this.R.resize(w, h, dpr);
@@ -633,6 +650,17 @@ class Game {
      * actually on screen, so a resize must never leave a stale projection
      * behind for even one frame of aiming. */
     if (this.camRig && this.settings) this.updateCamera(0);
+  }
+
+  /** Авто-масштаб рендера (0.6…1) от PerfMonitor: качество (quality) остаётся
+   *  выбором игрока, мы меняем только реальное число пикселей за кадром. */
+  setRenderScale(k) {
+    const n = Number(k);
+    const v = Number.isFinite(n) ? clamp(n, 0.6, 1) : 1;
+    if (Math.abs(v - (this.renderScale || 1)) < 0.001) return this.renderScale;
+    this.renderScale = v;
+    this.resize();
+    return v;
   }
 
   /* --------------------------- match flow -------------------------- */
@@ -663,6 +691,9 @@ class Game {
     this.director.enabled = this.settings.adaptive;
     this.pointNote = null;
     if (diff !== undefined) { this.settings.difficulty = diff; this.ai.setLevel(diff); }
+    /* Адаптация работает ТОЛЬКО между матчами: значение посчитано до первого
+     * мяча и внутри розыгрыша не меняется — резиновой сложности здесь нет. */
+    this.ai.setTrend(this.aiTrend !== undefined ? this.aiTrend : this.trendFromHistory());
     // career: the chop perk slows the opponent, always from the base speed
     if (this.career.active && this._careerAISlowdown < 1) {
       this.ai.maxSpeed = this.ai.L.move * this._careerAISlowdown;
@@ -688,6 +719,7 @@ class Game {
   startDemo(diff = 2) {
     this.career.stop();
     this.network.disconnect();
+    this.freePlay = false;
     this._keepDemo = true;
     this.demoMode = true;
     this._demoPos = null;          // автопилот начинает наведение с чистого листа
@@ -708,6 +740,7 @@ class Game {
 
   returnToMenu() {
     this.endReplay(false);
+    this.freePlay = false;
     this.stopTraining();
     this.career.save();
     this.career.stop();
@@ -731,6 +764,7 @@ class Game {
     this.career.stop();
     this.network.disconnect();
     this.demoMode = false;
+    this.freePlay = false;
     this.setSlowmoAllowed(true);
     this.timeScale = this.targetTimeScale = 1; this.slowmoUntil = 0;
     this.resetPaddle(true);
@@ -827,7 +861,10 @@ class Game {
     // ITTF requires a near-vertical toss of at least 16 cm; we throw ~30 cm
     V3.set(b.p, pad.pos.x,
       PH.TABLE_Y + 0.14, clamp(pad.pos.z - 0.04, PH.T_HALF_LEN + 0.04, 2.0));
-    V3.set(b.v, rndSym(0.03), 2.45 + rnd(0, 0.2), rndSym(0.03));
+    /* Высота подброса из калибровки: 2.10..2.85 м/с throw (нейтраль 0.45 →
+     * прежние ~2.45). Выше — больше времени на замах, ниже — быстрее темп. */
+    const tossK = (this._cal && Number.isFinite(this._cal.tossHeight)) ? clamp(this._cal.tossHeight, 0, 1) : 0.45;
+    V3.set(b.v, rndSym(0.03), 2.10 + tossK * 0.75 + rnd(0, 0.2), rndSym(0.03));
     this.tossStartY = b.p.y;
     this.tossApex = b.p.y;
     V3.zero(b.w);
@@ -977,7 +1014,9 @@ class Game {
      * а не висит «мерзкой полосой» до следующей подачи */
     this.ball.hist.length = 0; this.ball.trailGrade = null; this.ball.golden = null;
     const idx = who > 0 ? 0 : 1;
-    this.score[idx]++;
+    /* Свободная игра: мяч разыгрывается как обычно, но счёт не растёт —
+     * партия не может закончиться, подача ротируется, розыгрыш идёт дальше. */
+    if (!this.freePlay) this.score[idx]++;
     if (this.shotJournal) this.shotJournal.point(who, reason, this.ball.lastHitBy, this.time);
     const lh = this.ball.lastHitBy;
     this.stats.rallies++;
@@ -1353,7 +1392,11 @@ class Game {
     }
     if (this.inspectSlowmo &&
       (this.state === GS.RALLY || this.state === GS.SERVE_TOSS || this.state === GS.SERVE_READY)) {
-      S.active = true; this.targetTimeScale = 0.30; return;
+      /* Глубина разбора из калибровки: 0.55 (мягко) .. 0.12 (почти стоп-кадр),
+       * нейтраль 0.60 → прежние 0.30. Боевое слоу-мо не трогаем. */
+      const depth = (this._cal && Number.isFinite(this._cal.slowmoDepth))
+        ? lerp(0.55, 0.12, clamp(this._cal.slowmoDepth, 0, 1)) : 0.30;
+      S.active = true; this.targetTimeScale = depth; return;
     }
     S.active = want;
     if (want) { this.targetTimeScale = 0.34; this.slowmoUntil = 0; }
@@ -1417,7 +1460,7 @@ class Game {
       if (typeof s[k] === 'boolean' && typeof raw[k] === 'boolean') s[k] = raw[k];
     }
     // camZoom/camPitch mirror CAM_ADJUST.zoomMin..Max / pitchMin..Max — keep in sync.
-    const ranges = { difficulty: [0, 4], volume: [0, 1], camZoom: [0.6, 1.8], camPitch: [-16, 16], spinGain: [0.5, 1.6], arcSens: [0.6, 1.8] };
+    const ranges = { difficulty: [0, 3], volume: [0, 1], camZoom: [0.6, 1.8], camPitch: [-16, 16], spinGain: [0.5, 1.6], arcSens: [0.6, 1.8] };
     for (const [k, [lo, hi]] of Object.entries(ranges)) {
       if (Number.isFinite(raw[k])) s[k] = clamp(raw[k], lo, hi);
     }
@@ -1433,6 +1476,36 @@ class Game {
     if (raw.rulesVersion !== MATCH_RULES.version || ['hitZone', 'assist', 'posAssist', 'sensitivity', 'showZone'].some(k => Object.prototype.hasOwnProperty.call(raw, k)))
       this.saveSettings(); // one-way migration: never re-persist private control rules
     return true;
+  }
+
+  setDifficulty(idx) {
+    /* Уровень приходит из UI и оболочки — иногда строкой; мусор не должен
+     * записать в профиль NaN и оставить бота без уровня. */
+    const n = Math.round(Number(idx));
+    this.settings.difficulty = Number.isFinite(n)
+      ? clamp(n, 0, AI_LEVELS.length - 1)
+      : this.settings.difficulty;
+    this.ai.setLevel(this.settings.difficulty);
+    this.saveSettings();
+    return this.settings.difficulty;
+  }
+
+  /* ------------------------- difficulty trend ---------------------- */
+  /** Адаптация бота между матчами: −1 (игрок всё проигрывает) … +1 (выигрывает).
+   *  Внутри розыгрыша не меняется никогда; WTF ограничен ±2 % внутри AI. */
+  setAiTrend(v) {
+    this.aiTrend = clamp(Number(v) || 0, -1, 1);
+    this.ai.setTrend(this.aiTrend);
+    return this.aiTrend;
+  }
+
+  /** Тренд из последних матчей своего профиля (автономное меню движка). */
+  trendFromHistory() {
+    const d = this.profile && this.profile.data;
+    const h = d && Array.isArray(d.aiHistory) ? d.aiHistory.slice(-10) : [];
+    if (h.length < 3) return 0;
+    const w = h.reduce((n, x) => n + (x ? 1 : 0), 0), l = h.length - w;
+    return clamp((w - l) / h.length, -1, 1);
   }
 
   /* --------------------------- equipment --------------------------- */
@@ -1519,6 +1592,20 @@ class Game {
     const p = this.profile;
     if (!p) return;
     const res = p.onMatchEnd(won, this.score, this.stats, this.moments.kept.length);
+    /* История для адаптации между матчами — копится здесь, читается в
+     * startMatch (trendFromHistory). Больше 10 матчей не держим. */
+    if (p.data) {
+      const h = Array.isArray(p.data.aiHistory) ? p.data.aiHistory : (p.data.aiHistory = []);
+      h.push(won ? 1 : 0);
+      if (h.length > 10) h.splice(0, h.length - 10);
+      /* Локальный лог телеметрии бота — для балансировки уровней без сервера:
+       * уровень, ошибки (сетка/длинные), скорость ответа, давление, удары.
+       * Храним последние 20 матчей; читается в отчёте диагностики (aiLog). */
+      const log = Array.isArray(p.data.aiLog) ? p.data.aiLog : (p.data.aiLog = []);
+      log.push({ t: Date.now(), won, score: this.score.join('-'), rally: this.bestRally,
+        diff: this.ai.levelIndex, ai: this.ai.telemetry() });
+      if (log.length > 20) log.splice(0, log.length - 20);
+    }
     p.taskProgress('topspin', 0, this.matchTasks.topspin >= 10 ? 10 : 0);
     p.taskProgress('smash', 0, this.matchTasks.smash >= 3 ? 3 : 0);
     p.taskProgress('serves', 0, this.matchTasks.serves >= 5 ? 5 : 0);
@@ -1526,6 +1613,8 @@ class Game {
     this.analytics && this.analytics.send('match:end', {
       won, score: this.score.join('-'), rally: this.bestRally, shots: this.stats.shots,
       moments: this.moments.kept.length, level: p.data.level, session: Math.round(this.analytics.sessionSec),
+      /* Телеметрия бота по уровням: без неё балансировка WTF/EASY — гадание. */
+      ai: this.ai.telemetry(),
     });
     this.lastReward = res;
     this.ui && this.ui.refreshMenuBits && this.ui.refreshMenuBits();
@@ -1838,6 +1927,12 @@ class Game {
       physics: typeof PH !== 'undefined' ? PH : null,
       current: diagnosticSnapshot(this), errors: (this._diagnosticErrors || []).slice(),
       diagnosticInternalError: this._diagnosticInternalError || null,
+      /* Последние 20 матчей с телеметрией бота: по ним видно, ошибается ли
+       * WTF, жива ли сетка/длинная ошибка и какова сила ответа по уровням. */
+      aiLog: (this.profile && this.profile.data && this.profile.data.aiLog) || [],
+      /* Цена кадра по подсистемам и текущий авто-масштаб: по этому блоку
+       * видно, тормозит ли телефон из-за рендера, физики или оболочки. */
+      perf: this.perf && typeof this.perf.snapshot === 'function' ? this.perf.snapshot() : null,
       shots: this.shotJournal ? this.shotJournal.exportData().records : [], events };
   }
 
@@ -3437,8 +3532,6 @@ class Game {
   update(dtReal) {
     if (!Number.isFinite(dtReal) || dtReal <= 0) return;
     dtReal = Math.min(dtReal, 0.1);
-    this._arenaT = (this._arenaT || 0) + dtReal; // keep the separate ceiling lighting animated
-    if (this.scene.updateCeilingLights) this.scene.updateCeilingLights(this._arenaT || 0, this.reducedMotion);
     if (this.state === GS.MENU) {
       this.updateCamera(dtReal);
       this.profile.maybeSave(dtReal);
@@ -3610,9 +3703,8 @@ class Game {
       // trail history
       const h = this.ball.hist;
       h.push(this.ball.p.x, this.ball.p.y, this.ball.p.z);
-      /* В 3 раза короче прежнего хвоста в 96 точек: 32 кадра. */
-      /* Длина шлейфа подгоняется калибровкой: trailLen 0..1 → 0..96 точек. */
-      const tcap = Math.round((this._cal && this._cal.trailLen !== undefined ? this._cal.trailLen : 0.33) * 96);
+      /* Короткий хвост (24 кадра вместо 32) — и вдвое реже точек в буфере. */
+      const tcap = Math.round((this._cal && this._cal.trailLen !== undefined ? this._cal.trailLen : 0.33) * TRAIL_POINTS);
       if (!tcap) h.length = 0; else if (h.length > tcap * 3) h.splice(0, 3);
     } else this._acc = 0;
 
@@ -3755,14 +3847,17 @@ class Game {
   }
 
   /* ------------------------------ render --------------------------- */
+  /* Шлейф мяча — тонкая лента постоянной ширины. Раньше ширина росла от
+   * скорости и затухала кубом к хвосту, а сама история держалась в 96 точек:
+   * получалось почти круглое пятно-облако из десятков аддитивных треугольников.
+   * Теперь — одна ширина, короткий хвост, вчетверо меньше геометрии. */
   buildTrail() {
     const h = this.ball.hist, R = this.R, m = this.scene.mesh.trail;
     const n = h.length / 3;
     if (n < 3 || !this.settings.showTrail || this.reducedMotion) { m.count = 0; return; }
     const cam = this.R.camPos;
     let nv = 0, ni = 0;
-    /* Толще прежнего: шлейф — это читаемый свидетель направления, а не нить. */
-    const maxW = clamp(0.007 + V3.len(this.ball.v) * 0.0012, 0.007, 0.024);
+    const wid = TRAIL_WIDTH;
     for (let i = 0; i < n; i++) {
       const x = h[i * 3], y = h[i * 3 + 1], z = h[i * 3 + 2];
       const nx = i < n - 1 ? h[(i + 1) * 3] : x, ny = i < n - 1 ? h[(i + 1) * 3 + 1] : y, nz = i < n - 1 ? h[(i + 1) * 3 + 2] : z;
@@ -3772,7 +3867,7 @@ class Game {
       let sx = dy * vz - dz * vy, sy = dz * vx - dx * vz, sz = dx * vy - dy * vx;
       const sl = Math.hypot(sx, sy, sz) || 1;
       const t = i / (n - 1);
-      const w = maxW * t * t * t;   // быстрее затухает к хвосту
+      const w = wid * t;   // линейное сужение к хвосту — без кубов и степени
       sx = sx / sl * w; sy = sy / sl * w; sz = sz / sl * w;
       m.pos[nv * 3] = x - sx; m.pos[nv * 3 + 1] = y - sy; m.pos[nv * 3 + 2] = z - sz;
       m.nrm[nv * 3] = 0; m.nrm[nv * 3 + 1] = 1; m.nrm[nv * 3 + 2] = 0;
@@ -3872,32 +3967,25 @@ class Game {
   }
 
   /** Everything that touches a horizontal surface gets a soft blob of shade:
-   *  the one cue that actually tells you how high the ball is. */
+   *  the one cue that actually tells you how high the ball is.
+   *  Намеренно просто: три круга, без промежуточных веток «на столе / не на
+   *  столе» и без масштабирования от высоты — пятна читаются, а альфы и
+   *  геометрии вдвое меньше. */
   drawContactShadows() {
     const R = this.R, S = this.scene, b = this.ball;
     const TY = PH.TABLE_Y, HW = PH.T_HALF_WID + 0.05, HL = PH.T_HALF_LEN + 0.05;
-    S.blob(R, 0, 0, 0, 0, 1, 0.23, 1);                       // under the table (halved)
+    S.blob(R, 0, 0, 0, 0, 1, 0.23, 1);                       // under the table
     const onTable = (x, z) => Math.abs(x) < HW && Math.abs(z) < HL;
 
-    if (b.live || this.state === GS.SERVE_READY) {
-      /* Тень мяча должна выдерживать конкуренцию с собственным же глоссом,
-       * который аддитивно заливает ту же точку: держим её у капа плотности.
-       * Полупрозрачность: -50% к плотности, чтобы пятно читалось без «дыры». */
-      /* Тень мяча: просто тёмное пятно, без цветовых примесей; плотность
-       * ещё вдвое ниже прежней (0.80 → 0.40) — «дыры» под мячом нет,
-       * мягкий переход к столу. */
-      if (onTable(b.p.x, b.p.z) && b.p.y > TY - 0.02) S.blob(R, b.p.x, b.p.y, b.p.z, TY, 0.085, 0.40, 1);
-      else S.blob(R, b.p.x, b.p.y, b.p.z, 0, 0.095, 0.18, 1);
+    if ((b.live || this.state === GS.SERVE_READY) && onTable(b.p.x, b.p.z) && b.p.y > TY - 0.02) {
+      S.blob(R, b.p.x, b.p.y, b.p.z, TY, 0.085, 0.40, 1);
     }
-    /* Тень ракетки игрока — главный глубинный маркер: по ней видно, где
-     * ракетка висит над столом из любого пресета камеры. */
+    /* Ракетки: одно пятно, только когда ракетка над столом. Тень за его
+     * пределами игроку ничего не сообщает, а кадр заливает. */
     const pp = this.player.pos;
-    /* Тени ракеток удвоены в прозрачности: только земле иллюзия, без «дырок». */
     if (onTable(pp.x, pp.z)) S.blob(R, pp.x, pp.y, pp.z, TY, 0.16, 0.33, 1.1);
-    else if (pp.z > HL + 0.02) S.blob(R, pp.x, pp.y, pp.z, 0, 0.18, 0.14, 1.1);
     const ap = this.aiPaddle.pos;
     if (onTable(ap.x, ap.z)) S.blob(R, ap.x, ap.y, ap.z, TY, 0.15, 0.27, 1.15);
-    else S.blob(R, ap.x, ap.y, ap.z, 0, 0.18, 0.12, 1.15);
   }
 
   /** Short haptic pulse on touch devices. Silent no-op everywhere else. */
@@ -3907,19 +3995,15 @@ class Game {
   }
 
   /** Reflections of the bright movers in the table top. Only things that
-   *  actually add light get one: the ball, the red rubber, the net tape. */
+   *  actually add light get one: the ball, the red rubber, the net tape.
+   *  Ракетки блик больше не получают: два аддитивных пятна поверх тени
+   *  превращали зону под ракеткой в светлую кашу. */
   drawReflections() {
     const R = this.R, S = this.scene, b = this.ball;
     const cx = this.camPos.x, cz = this.camPos.z;
     if (b.live || this.state === GS.SERVE_READY) {
       S.gloss(R, b.p.x, b.p.y, b.p.z, cx, cz, 0.055, 1.70, [1.0, 0.96, 0.86]);
     }
-    const pp = this.player.pos;
-    /* Нейтральный блик: красный отблеск под красной накладкой пользователь
-     * читал как «красную тень» — теперь блик просто светлый, без тона. */
-    S.gloss(R, pp.x, pp.y, pp.z, cx, cz, 0.095, 0.85, [0.95, 0.82, 0.72]);
-    const ap = this.aiPaddle.pos;
-    S.gloss(R, ap.x, ap.y, ap.z, cx, cz, 0.095, 0.40, [0.40, 0.50, 0.68]);
   }
 
   drawFX() {

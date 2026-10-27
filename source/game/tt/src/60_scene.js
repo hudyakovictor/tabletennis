@@ -122,18 +122,6 @@ function texRubber(color) {
   return c;
 }
 
-function texBanner(palette) {
-  // a calm dark board with a single accent line - no shouty repeated text
-  const W = 512, H = 128, c = cv(W, H), g = c.getContext('2d');
-  const lg = g.createLinearGradient(0, 0, 0, H);
-  lg.addColorStop(0, '#16233a'); lg.addColorStop(0.5, '#101a2c'); lg.addColorStop(1, '#0a1220');
-  g.fillStyle = lg; g.fillRect(0, 0, W, H);
-  g.fillStyle = 'rgba(57,198,255,0.55)'; g.fillRect(0, 0, W, 3);
-  g.fillStyle = 'rgba(57,198,255,0.08)'; g.fillRect(0, 3, W, 10);
-  g.fillStyle = 'rgba(0,0,0,0.45)'; g.fillRect(0, H - 6, W, 6);
-  return c;
-}
-
 function texShadow() {
   const S = 256, c = cv(S, S), g = c.getContext('2d');
   const r = g.createRadialGradient(S / 2, S / 2, 0, S / 2, S / 2, S / 2);
@@ -202,20 +190,16 @@ class Scene {
       ball: R.texFromCanvas(texBall(), { wrap: 'repeat' }),
       rubberRed: R.texFromCanvas(texRubber('#c1232c'), { wrap: 'clamp' }),
       rubberBlack: R.texFromCanvas(texRubber('#23242c'), { wrap: 'clamp' }),
-      banner: R.texFromCanvas(texBanner(P), { wrap: 'repeat' }),
       stands: R.texFromCanvas(texStandsFallback(), { wrap: 'repeat' }),
       glow: R.texFromCanvas(texGlow(), { wrap: 'clamp', mips: false }),
       ring: R.texFromCanvas(texRing(), { wrap: 'clamp', mips: false }),
       shadow: R.texFromCanvas(texShadow(), { wrap: 'clamp', mips: false }),
     };
 
-    for (const b of ARENA_BRANDS) this.tex['brand_' + b.id] = R.texFromCanvas(texBrandFallback(b), { wrap: 'repeat' });
-    // фото-текстуры из сборки (tt/build.py → window.__TT_ARENA): свап по готовности
+    /* Фото-текстура трибуны из сборки (tt/build.py → window.__TT_ARENA):
+     * свап по готовности. Баннерные текстуры больше не грузим. */
     const A = (typeof window !== 'undefined' && window.__TT_ARENA) || {};
     if (A.stands) arenaImageTex(R, A.stands, 2048, 256, (tx) => { this.tex.stands = tx; if (this.mat.stands) this.mat.stands.tex = tx; });
-    ARENA_BRANDS.forEach((b, i) => {
-      if (A[b.id]) arenaImageTex(R, A[b.id], 1024, 256, (tx) => { this.tex['brand_' + b.id] = tx; if (this.matBrand) this.matBrand[i].tex = tx; });
-    });
 
     /* ---- meshes ---- */
     this.mesh = {
@@ -231,8 +215,6 @@ class Scene {
       handle: R.mesh(makeBox(0.030, 0.100, 0.022)),
       floor: R.mesh(makePlane(34, 30, 17)),
       quad: R.mesh(makeQuad(1, 1)),
-      bannerEnd: R.mesh(makeQuadUV(1, 1, 4.5, 1)),
-      bannerSide: R.mesh(makeQuadUV(1, 1, 6.5, 1)),
       wall: R.mesh(makeQuadUV(1, 1, 1, 1)),
       sphere: R.mesh(makeSphere(1, 16, 12)),
       box: R.mesh(makeBox(1, 1, 1)),
@@ -255,22 +237,15 @@ class Scene {
       handle: { color: [0.26, 0.17, 0.12], rough: 0.62, emissive: [0.022, 0.015, 0.011] },
       floor: { color: [0.52, 0.54, 0.60], tex: this.tex.floor, rough: 0.80 },
       stands: { color: [0.82, 0.82, 0.88], tex: this.tex.stands, rough: 1.0 },
-      banner: { color: [1, 1, 1], tex: this.tex.banner, rough: 0.52, emissive: [0.02, 0.04, 0.07] },
-      barrier: { color: [0.06, 0.08, 0.12], rough: 0.5 },
       trail: { color: [1, 1, 1], rough: 1, blend: 'add', emissive: [1, 1, 1], doubleSided: true },
       mark: { color: [1, 1, 1], rough: 1, blend: true, doubleSided: true, emissive: [0.4, 0.4, 0.4] },
       glow: { color: [1, 1, 1], tex: this.tex.glow, blend: 'add', emissive: [1, 1, 1], doubleSided: true, rough: 1 },
       ring: { color: [1, 1, 1], tex: this.tex.ring, blend: 'add', emissive: [1, 1, 1], doubleSided: true, rough: 1 },
-      light: { color: [1, 1, 1], emissive: [3.4, 3.35, 3.1], rough: 0.2 },
-      lightBody: { color: [0.14, 0.15, 0.18], rough: 0.4, metal: 0.6 },
       ceiling: { color: [0.07, 0.10, 0.16], emissive: [0.016, 0.026, 0.048], rough: 0.95 },
       shadow: { color: [0, 0, 0], tex: this.tex.shadow, unlit: true, emissive: [0, 0, 0], blend: true, doubleSided: true, rough: 1 },
       pool: { color: [1, 1, 1], tex: this.tex.glow, blend: 'add', emissive: [0.050, 0.058, 0.080], doubleSided: true, rough: 1 },
       gloss: { color: [1, 1, 1], tex: this.tex.glow, blend: 'add', emissive: [1, 1, 1], doubleSided: true, rough: 1, unlit: true },
     };
-
-    // LED-борта: lit-текстура + крошечный плоский emissive (шейдер не умеет emissive×tex)
-    this.matBrand = ARENA_BRANDS.map((b) => ({ color: [0.92, 0.92, 0.92], tex: this.tex['brand_' + b.id], rough: 0.55, emissive: [0.035, 0.035, 0.035] }));
 
     /* ---- static transform cache ---- */
     this.M = {};
@@ -325,32 +300,8 @@ class Scene {
 
     M4.compose(m('floor'), V3.set(pos, 0, 0, 0), Q.identity(rot), V3.set(scl, 1, 1, 1));
 
-    /* Низкие ограждения с LED-баннерами: коробка-борт + светящаяся
-     * плоскость внутрь зала. Кольцо HX×HZ (по просьбе — в два раза
-     * шире прежнего: зал ощущается большим, борта уходят вглубь).
-     * Камера во всех режимах внутри кольца (x ±1.5, z ≤ 4.0).
-     * Бренды — ARENA_BRANDS по сторонам: дальняя (главный фон),
-     * ближняя, левая, правая. */
-    this.barriers = [];
-    {
-      const HX = 6.8, HZ = 9.8, BH = 0.75;
-      const sides = [
-        { brand: 0, long: true, x: 0, z: -HZ, ry: 0 },
-        { brand: 1, long: true, x: 0, z: HZ, ry: Math.PI },
-        { brand: 2, long: false, x: -HX, z: 0, ry: Math.PI / 2 },
-        { brand: 3, long: false, x: HX, z: 0, ry: -Math.PI / 2 },
-      ];
-      for (const sd of sides) {
-        const len = sd.long ? HX * 2 : HZ * 2;
-        const q = Q.setAxisAngle(Q.new(), 0, 1, 0, sd.ry);
-        const mm = M4.create();
-        M4.compose(mm, V3.new(sd.x, BH / 2, sd.z), q, V3.new(len, BH, 1));
-        const bm = M4.create();
-        M4.compose(bm, V3.new(sd.x - Math.sin(sd.ry) * 0.055, BH / 2, sd.z - Math.cos(sd.ry) * 0.055),
-          q, V3.new(len, BH, 0.09));
-        this.barriers.push({ m: mm, box: bm, long: sd.long, mat: this.matBrand[sd.brand] });
-      }
-    }
+    /* Борта, LED-баннеры и потолочные панели убраны: зал остался голыми
+     * стенами с трибуной — игроку читать мяч проще, кадру дешевле. */
 
     // far wall + ceiling
     this.walls = [];
@@ -361,32 +312,6 @@ class Scene {
     }
     this.ceiling = M4.create();
     M4.compose(this.ceiling, V3.set(pos, 0, 5.4, 0), Q.setAxisAngle(rot, 1, 0, 0, Math.PI / 2), V3.set(scl, 36, 30, 1));
-
-    /* Потолочные светильники: четыре холодные сине-голубые панели —
-     * верх кадра не проваливается в черноту, а читается как тёмный
-     * зал с техникой над головой. Две панели (по диагонали) дышат:
-     * яркость медленно уходит к 50% и обратно (updateCeilingLights).
-     * Свечение слабое, без выбивания в блум — настроение, не люстра. */
-    this.ceilingLights = [];
-    {
-      const spots = [
-        { x: -3.2, z: -3.6, fl: 0 }, { x: 3.2, z: -3.6, fl: 1 },
-        { x: -3.2, z: -8.6, fl: 1 }, { x: 3.2, z: -8.6, fl: 0 },
-      ];
-      let fi = 0;
-      for (const sp of spots) {
-        const b = M4.create();
-        M4.compose(b, V3.set(pos, sp.x, 5.40, sp.z), Q.identity(rot), V3.set(scl, 3.2, 0.07, 0.8));
-        const m = M4.create();
-        M4.compose(m, V3.set(pos, sp.x, 5.35, sp.z), Q.setAxisAngle(rot, 1, 0, 0, Math.PI / 2), V3.set(scl, 3.0, 0.62, 1));
-        const base = [0.70, 0.95, 1.35];
-        this.ceilingLights.push({
-          b, m, fl: 0, ph: fi * 2.4, rate: fi % 2 ? 0.73 : 0.9, base,
-          mat: { color: [0.55, 0.70, 1.0], emissive: base.slice(), rough: 1 },
-        });
-        fi++;
-      }
-    }
 
     // a soft pool of light on the floor: sells "this table is lit" without
     // a single shadow-map texel
@@ -472,18 +397,6 @@ class Scene {
    *  object (including the ball) or it would be overwritten. */
   drawNet(R) { R.draw(this.mesh.net, this.M.net, this.mat.net); }
 
-  /* Дыхание двух потолочных панелей: яркость 50%..100%, медленно.
-   * reducedMotion — статика на среднем уровне (без мерцания вообще). */
-  updateCeilingLights(t, reducedMotion) {
-    for (const cl of this.ceilingLights) {
-      if (!cl.fl) continue;
-      const k = reducedMotion ? 0.85 : 0.75 + 0.25 * Math.sin(t * cl.rate + cl.ph);
-      cl.mat.emissive[0] = cl.base[0] * k;
-      cl.mat.emissive[1] = cl.base[1] * k;
-      cl.mat.emissive[2] = cl.base[2] * k;
-    }
-  }
-
   drawStatic(R, shadowPass) {
     const d = shadowPass
       ? (mesh, mat4, mat) => R.drawShadow(mesh, mat4, mat && mat.alphaTest ? mat.tex : null, mat && mat.alphaTest)
@@ -500,8 +413,6 @@ class Scene {
       R.draw(me.quad, this.floorPool, ma.pool);
       R.draw(me.quad, this.tableShade, this._shadowMat0);
       for (const w of this.walls) d(me.wall, w, ma.stands);
-      for (const b of this.barriers) { if (b.box) d(me.box, b.box, ma.barrier); d(b.long ? me.bannerEnd : me.bannerSide, b.m, b.mat || ma.banner); }
-      for (const cl of this.ceilingLights) { if (cl.b) d(me.box, cl.b, ma.lightBody); R.draw(me.quad, cl.m, cl.mat); }
       d(me.quad, this.ceiling, ma.ceiling);
     } else {
       d(me.net, M.net, ma.net);

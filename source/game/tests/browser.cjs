@@ -442,9 +442,9 @@ const { root, enginePage } = require('./helpers.cjs');
             return g.ball.lastHitBy===1;
           } finally {g._subPad=null;g.cancelInput();g.returnToMenu();g.paused=true;}
         });
-        check('stand-mounted fixtures and their glow are gone but the arena remains', () =>
-          g.scene.walls.length===4 && g.scene.barriers.length===4 && g.scene.ceilingLights.length===4 &&
-          g.scene.ceilingLights.every(l=>!l.glow && !l.glowMat));
+        check('arena keeps only the stands: no sponsor boards, no ceiling fixtures', () =>
+          g.scene.walls.length===4 && !g.scene.barriers && !g.scene.ceilingLights &&
+          !g.scene.matBrand && !g.scene.mat.banner && !g.scene.mesh.bannerEnd && !g.scene.mesh.bannerSide);
         check('stand spotlight and camera flashes never appear in the dynamic effects', () => {
           const old={draw:g.R.draw, live:g.ball.live, hist:g.ball.hist, predict:g.settings.showPredict,
             trail:g.settings.showTrail, marks:g.marks, particles:g.particles, reduced:g.reducedMotion,

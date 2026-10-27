@@ -16,8 +16,20 @@ const GameHost = {
   },
   devRules() { try { return JSON.parse(localStorage.getItem('ttu-rules-dev') || '{}') || {}; } catch (e) { return {}; } },
   setDevRules(r) { try { localStorage.setItem('ttu-rules-dev', JSON.stringify(r || {})); } catch (e) {} this.reload(); },
+  /* Адрес WS-релея для движка. Внутри srcdoc-iframe своя «пустая» страница:
+   * location.search пуст, origin равен "null", поэтому адрес передаётся
+   * инжектом. Берём ?net= оболочки, иначе тот же домен, где лежит игра
+   * (/api/relay) — так работает ссылка вида https://хост/ без параметров. */
+  relayUrl() {
+    const q = new URLSearchParams(location.search).get('net');
+    if (q) return q;
+    return /^https?:$/.test(location.protocol) ? location.origin.replace(/^http/, 'ws') + '/api/relay' : '';
+  },
   doc() {
-    const pre = '<script>window.__TT_EMBED=1;document.documentElement.classList.add("tt-embed");window.__TT_LOCALE=' + JSON.stringify(I18n.lang) + ';window.__TT_RULES=' +
+    const pre = '<script>window.__TT_EMBED=1;document.documentElement.classList.add("tt-embed");window.__TT_LOCALE=' + JSON.stringify(I18n.lang) +
+      ';window.__TT_PERF=' + (/[?&]perf\b/.test(location.search) ? '1' : '0') +
+      ';window.__TT_NET=' + JSON.stringify(this.relayUrl()) +
+      ';window.__TT_RULES=' +
       JSON.stringify(this.devRules()).replace(/</g, '\\u003c') + ';<\/script>';
     return GAME_HTML.replace('<head>', '<head>' + pre);
   },

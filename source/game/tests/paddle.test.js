@@ -61,7 +61,7 @@ test('grip roll is bounded and never alters the face normal for either hand', ()
 
 test('AI initializes a finite pose at every difficulty and does not strike inside think', () => {
   const { OpponentAI, V3 } = load(['10_math.js', '30_physics.js', '40_swipe.js', '55_ai.js'], ['OpponentAI', 'V3']);
-  for (let level = 0; level < 5; level++) {
+  for (let level = 0; level < 4; level++) {
     const ai = new OpponentAI(level);
     assert.equal(ai.L.id, level);
     assert.equal(ai.side, -1);

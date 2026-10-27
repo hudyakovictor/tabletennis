@@ -51,6 +51,19 @@
     // main loop
     let last = performance.now();
     let acc = 0;
+    /* Монитор считает цену кадра всегда (три суммы на кадр), а панель
+     * показывает только по ?perf или при включённой записи диагностики.
+     * Масштаб рендера он правит сам: слабый телефон перестаёт задыхаться
+     * без того, чтобы игрок лез в настройки. */
+    let perf = null;
+    try {
+      // В оболочке движок живёт в iframe без query — флаг приходит от хоста
+      // (window.__TT_PERF); автономная сборка читает ?perf сама.
+      const wantHud = (typeof window.__TT_PERF !== 'undefined' ? !!window.__TT_PERF : false) ||
+        /[?&]perf\b/.test(location.search) || !!game.debugRecording;
+      perf = new PerfMonitor({ overlay: wantHud, onScale: (k) => game.setRenderScale(k) });
+      game.perf = perf;
+    } catch (e) { console.error(e); }
     function frame(now) {
       const rawDt = (now - last) / 1000;
       const dt = Math.min(rawDt, 0.1);
@@ -59,9 +72,14 @@
         game._debugLastFrameDelta = rawDt;
         if (!game.paused && rawDt > .05) game.logInput('frame_gap', { outcome: { rawSeconds: rawDt, appliedSeconds: dt } });
       }
+      const t0 = performance.now();
       if (!game.paused) game.update(dt);
+      const t1 = performance.now();
       game.render();
+      const t2 = performance.now();
       ui.tick(dt);
+      const t3 = performance.now();
+      if (perf) perf.frame(rawDt * 1000, [t1 - t0, t2 - t1, t3 - t2]);
       requestAnimationFrame(frame);
     }
     requestAnimationFrame((t) => { last = t; frame(t); });

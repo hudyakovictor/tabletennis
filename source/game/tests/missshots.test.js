@@ -59,17 +59,36 @@ test('capture preserves actual GL pixel resolution and scales the overlay indepe
   assert.equal(rec.img, 'FAKEIMAGE1234'); assert.equal(rec.status, 'pending');
 });
 
-test('default wide capture retains the full render pixels; old narrow mode still works', () => {
+test('default wide capture is capped at 900 px on the long side; old narrow mode still works', () => {
   const f = fixture();
   f.cap.request({ press: { x: 400, y: 300 }, vw: 800, vh: 600, zone: null });
   const rec = f.cap.capture();
   assert.ok(rec); assert.equal(rec.half, 350);
-  assert.deepEqual([rec.w, rec.h, f.out.width, f.out.height], [701, 600, 1402, 900]);
+  // 701×600 CSS px at 2×/1.5× GL backing would be 1402×900 — a readback plus a
+  // JPEG that size is what made phones hitch. The long side is capped at 900.
+  assert.deepEqual([rec.w, rec.h, f.out.width, f.out.height], [701, 600, 900, 578]);
   assert.ok(f.calls.arcs.some(v => v[0] === 350 && v[1] === 300));
   f.cap.setHalf(100);
   f.cap.request({ press: { x: 400, y: 300 }, vw: 800, vh: 600 });
   const old = f.cap.capture();
+  // Under the cap nothing is resampled: the small crop keeps its GL pixels.
   assert.equal(old.half, 100); assert.deepEqual([old.w, old.h, old.imageWidth, old.imageHeight], [201, 201, 402, 302]);
+});
+
+test('a deferred capture refuses to shoot a newer press than the one it wanted', () => {
+  const f = fixture();
+  const first = f.cap.request({ press: { x: 400, y: 300 }, vw: 800, vh: 600 });
+  const second = f.cap.request({ press: { x: 420, y: 300 }, vw: 800, vh: 600 });
+  assert.notEqual(first, second);
+  // The queued shot was for `first`, but the pending frame is now `second`.
+  assert.equal(f.cap.capture(first), null);
+  assert.equal(f.cap.hasPending(), true, 'the newer frame must survive');
+  const rec = f.cap.capture(second);
+  assert.equal(rec.id, second);
+  assert.equal(f.posted.length, 1);
+  // Without an id the call keeps its old synchronous meaning.
+  f.cap.request({ press: { x: 400, y: 300 }, vw: 800, vh: 600 });
+  assert.ok(f.cap.capture());
 });
 
 test('disabled capture clears pending; failed capture reports an error', () => {

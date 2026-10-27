@@ -144,7 +144,8 @@ Router.def('result', {
        * negative, and the league badge then showed a number no league owns. */
       S.rating = Math.max(0, S.rating + this.delta);
       if (d.win) { S.wins++; S.streak++; } else { S.losses++; S.streak = 0; }
-      /* форма для formAdjust: последние 8 результатов, победа = 1 */
+      /* форма (aiTrend в battle_common.js) — последние 8 результатов, победа = 1:
+       * по ней бот понимает тренд МЕЖДУ матчами, а не внутри розыгрыша */
       S.form = (Array.isArray(S.form) ? S.form : []).concat(d.win ? 1 : 0).slice(-8);
       const add = d.win ? 180 : 60;
       this.xv = Math.min(S.xp + add, S.xpMax); this.xpBar = Math.min(1, (S.xp + add) / S.xpMax);

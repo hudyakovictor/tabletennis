@@ -11,7 +11,7 @@
    уровень 1. Всё остальное зарабатывается матчами (см. сложность формы в
    screens/match.js). */
 const SAVE_KEY = 'ttu-v2';
-const SAVE_VERSION = 3;
+const SAVE_VERSION = 4;
 const DEFAULT_STATE = {
   v: SAVE_VERSION, lang: null,
   name: 'Anton Spin', nick: '@anton_tt', club: 'Spin Lab',
@@ -27,6 +27,9 @@ const DEFAULT_STATE = {
   ],
   owned: ['r-teal', 'b-ink', 't-coral'], equipped: { rubber: 'r-teal', blade: 'b-ink', trail: 't-coral' },
   sfx: true, music: true, vibro: true, rm: false, quality: 'high', assist: true, tutorial: true, hint: true, tutorialDone: false,
+  /* Уровень бота: выбор игрока (0 EASY … 3 WTF), а не лига. Живёт в
+     профиле и переживает перезапуск. Ступенька по умолчанию — СРЕДНИЙ. */
+  diff: 1,
   missShots: true, missShotHalf: 350  // automatic first-press gallery crop in CSS px
 };
 /* Шаги миграции: MIGRATIONS[v] переводит сейв версии v в v+1 (мутирует черновик). */
@@ -44,7 +47,10 @@ const MIGRATIONS = {
   // Previous gallery versions used ±20 or ±100, too narrow to show the
   // ball and the admission area together. Upgrade existing saves once;
   // choices made after this migration remain unchanged on later reloads.
-  2: (s) => { s.missShotHalf = 350; }
+  2: (s) => { s.missShotHalf = 350; },
+  /* v3 → v4: уровень бота выбирает игрок (4 ступеньки: EASY/MEDIUM/HARD/WTF).
+     Старые сейвы получают СРЕДНИЙ — тот же темп, что и прежний «ПРО-на-единицу». */
+  3: (s) => { if (!Number.isFinite(s.diff)) s.diff = 1; }
 };
 const Store = {
   ok: (() => { try { const k = '__t'; localStorage.setItem(k, '1'); localStorage.removeItem(k); return true; } catch (e) { return false; } })(),

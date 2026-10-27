@@ -14,13 +14,60 @@
  *    Server → Host:    { type: 'input', ... }  (relayed from guest)
  *    Either → Server:  { type: 'point', who, reason }
  *    Server → Both:    { type: 'point', who, reason }
+ *
+ *  Координаты в обе стороны идут зеркальными по z: у каждого игрока своя
+ *  ракетка у ближнего края (+z), так что локальный кадр одного — это отражение
+ *  кадра другого. Отражение применяется на приёме (netMirrorState/netMirrorInput).
  * ===================================================================== */
 'use strict';
 
 const NET_SERVER_URL = 'wss://topspin-relay.fly.dev';  // configurable
+const NET_RELAY_PATH = '/api/relay';   // реле того же домена, что и игра
 const NET_TICK_RATE = 20;        // Hz — state updates per second
 const NET_INPUT_RATE = 30;       // Hz — input updates per second
 const NET_INTERP_MS = 80;        // interpolation buffer in ms
+
+/* Адрес реле по убыванию конкретности: явный аргумент → инъекция от оболочки
+ * (window.__TT_NET) → ?net= на странице → тот же домен, с которого лежит игра
+ * (/api/relay) → задеплоенный запасной реле. Внутри srcdoc-iframe оболочки
+ * location.origin равен "null", а search пуст, поэтому без __TT_NET там не
+ * обойтись — оболочка знает настоящий адрес страницы. */
+function resolveNetUrl(explicit, origin, search, injected) {
+  if (explicit) return explicit;
+  if (injected) return injected;
+  let q = null;
+  try { q = new URLSearchParams(search || '').get('net'); } catch (e) { /* нет query */ }
+  if (q) return q;
+  if (typeof origin === 'string' && /^https?:\/\//.test(origin)) {
+    return origin.replace(/^http/, 'ws') + NET_RELAY_PATH;
+  }
+  return NET_SERVER_URL;
+}
+
+/* Полярные векторы (позиция, скорость, нормаль) при отражении по z меняют
+ * знак z; осевые (спин) — знаки x и y, а z сохраняет: иначе подкрутка
+ * закручивала бы мяч в обратную сторону. */
+const netFlipZ = (v) => [v[0], v[1], -v[2]];
+const netFlipAxial = (v) => [-v[0], -v[1], v[2]];
+
+function netMirrorState(msg) {
+  const out = Object.assign({}, msg);
+  const b = msg.ball;
+  if (b) out.ball = { p: netFlipZ(b.p), v: netFlipZ(b.v), w: netFlipAxial(b.w) };
+  const r = msg.racket;
+  if (r) out.racket = { pos: netFlipZ(r.pos), n: netFlipZ(r.n), sw: r.sw };
+  if (Array.isArray(msg.score)) out.score = [msg.score[1], msg.score[0]];
+  if (msg.server === 1 || msg.server === -1) out.server = -msg.server;
+  if (msg.who === 1 || msg.who === -1) out.who = -msg.who;
+  return out;
+}
+
+function netMirrorInput(msg) {
+  const out = Object.assign({}, msg);
+  if (Array.isArray(msg.pos)) out.pos = netFlipZ(msg.pos);
+  if (Array.isArray(msg.n)) out.n = netFlipZ(msg.n);
+  return out;
+}
 
 class NetworkManager {
   constructor(game) {
@@ -54,17 +101,11 @@ class NetworkManager {
   connect(url) {
     if (this.ws) this.disconnect();
     this.state = 'CONNECTING';
-    // the relay is not part of the bundle: it is chosen per page load
-    // (?net=wss://your.host) or falls back to the default deployment
-    let target = url;
-    if (!target) {
-      try {
-        const q = new URLSearchParams(location.search).get('net');
-        if (q) target = q;
-      } catch (e) { /* no query string available */ }
-    }
+    const glub = (typeof window !== 'undefined') ? window : {};
+    const loc = (typeof location !== 'undefined') ? location : {};
+    const target = resolveNetUrl(url, loc.origin, loc.search, glub.__TT_NET);
     try {
-      this.ws = new WebSocket(target || NET_SERVER_URL);
+      this.ws = new WebSocket(target);
     } catch(e) {
       this.state = 'DISCONNECTED';
       this._emit('error', 'Не удалось подключиться');
@@ -146,16 +187,22 @@ class NetworkManager {
         this._emit('matchStart', { side: this.side });
         break;
       case 'state':
-        // received from host (we are guest)
-        if (!this.isHost) this._applyRemoteState(msg);
+        // received from host (we are guest): хостовый кадр → наше зеркало
+        if (!this.isHost) this._applyRemoteState(netMirrorState(msg));
         break;
       case 'input':
-        // received from guest (we are host)
-        if (this.isHost) this._applyRemoteInput(msg);
+        // received from guest (we are host): его кадр → наш зеркальный мир
+        if (this.isHost) this._applyRemoteInput(netMirrorInput(msg));
         break;
-      case 'point':
-        this._emit('point', msg);
+      case 'point': {
+        /* очки считает хост: для гостя это единственный источник счёта,
+         * иначе его собственная физика разыгрывает розыгрыш сама, и счёт
+         * расходится уже на первой подаче */
+        const m = netMirrorState(msg);
+        if (!this.isHost) this._applyRemotePoint(m);
+        this._emit('point', m);
         break;
+      }
       case 'peer_left':
         if (msg.roomClosed) this._resetSession();
         this.state = 'LOBBY';
@@ -192,6 +239,16 @@ class NetworkManager {
     if (this._pingInterval) { clearInterval(this._pingInterval); this._pingInterval = null; }
   }
 
+  /* ---- guest: счёт и подающий — только те, что объявил хост ---- */
+  _applyRemotePoint(msg) {
+    const g = this.game;
+    if (Array.isArray(msg.score) && msg.score.length === 2 && msg.score.every((v) => Number.isFinite(v))) {
+      g.score = msg.score.slice();
+    }
+    if (msg.server === 1 || msg.server === -1) g.server = msg.server;
+    if (Number.isFinite(msg.rally)) g.rally = msg.rally;
+  }
+
   /* ---- host: send game state to server ---- */
   sendGameState() {
     if (!this.isHost || this.state !== 'IN_MATCH') return;
@@ -207,6 +264,9 @@ class NetworkManager {
       ball: b.live ? { p: [b.p.x, b.p.y, b.p.z], v: [b.v.x, b.v.y, b.v.z], w: [b.w.x, b.w.y, b.w.z] } : null,
       racket: { pos: [pad.pos.x, pad.pos.y, pad.pos.z], n: [pad.normal.x, pad.normal.y, pad.normal.z], sw: pad.swing },
       score: g.score.slice(),
+      /* кто подаёт по мнению хоста — синхронизируется только на мёртвом мяче
+       * (см. _applyRemoteState), чтобы не перепрыгивать подачу внутри розыгрыша */
+      server: g.server,
       rally: g.rally,
       shotId: g.shotId,
     });
@@ -249,6 +309,7 @@ class NetworkManager {
       V3.set(b.w, bw[0], bw[1], bw[2]);
     } else {
       this.game.ball.live = false;
+      if (msg.server === 1 || msg.server === -1) this.game.server = msg.server;
     }
     // apply opponent racket (for rendering)
     if (msg.racket) {

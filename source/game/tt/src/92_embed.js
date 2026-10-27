@@ -4,7 +4,7 @@
  *  Host → game  (postMessage {__tt:1, type, ...}):
  *    attract                    slow orbit over an idle table (menus, VS)
  *    prematch {dur}             fly from the orbit into the playing camera
- *    match {diff,target,hint}   start a scored match
+ *    match {diff,target,hint,free}   start a scored match (free — no score, endless)
  *    train {step}               start the tutorial (optionally at a drill)
  *    pause / resume / quit
  *    outro                      victory orbit after the last point
@@ -13,9 +13,11 @@
  *    slowmo {on}                инспекторское замедление траектории (тумблер)
  *    cal {k, v}                 калибровка оболочки; spinGain/arcSens — закрутка
  *    missShots {on, half}       автоматические снимки первого нажатия
+ *    net {cmd, url?, code?}     cmd: create | join | status | leave — онлайн
  *  Game → host:
  *    ready, state, point, hit, serve, matchEnd, train, trainDone, attempt,
- *    shot, shotresult, shoterror, autoHint, awake, paused, replayEnd, haptic
+ *    shot, shotresult, shoterror, autoHint, awake, paused, replayEnd, haptic,
+ *    net {st, room, side, latency, msg}  — статусы онлайн-лобби
  * ===================================================================== */
 'use strict';
 
@@ -46,6 +48,30 @@
     // pointerdown, not on pause; the host decides which attempts were misses.
     const missCap = createMissShotCapture({ getCanvas: () => g.canvas,
       getOverlay: () => ui && ui.fx, post });
+    /* Снимок не снимается внутри обработчика касания: readback WebGL-канваса
+     * плюс JPEG — это десятки миллисекунд ровно в момент удара, и телефон
+     * ощущает это как «тупит на каждом мяче». Захват откладывается на
+     * ближайший render() цикла: буфер читается сразу после draw (пока
+     * браузер его не очистил), а ввод уже отдан игре. */
+    let shotQueue = null, shotTimer = 0;
+    const takeShot = (id, redraw) => {
+      shotQueue = null; clearTimeout(shotTimer);
+      const startedAt = typeof performance !== 'undefined' ? performance.now() : 0;
+      try {
+        if (redraw) g.render();          // цикл не успел отрисовать — рисуем сами
+        const rec = missCap.capture(id);
+        if (g.debugRecording) g.logInput('calibration_capture', { outcome: {
+          id, captured: !!rec, half: missCap.getHalf(),
+          imageWidth: rec && rec.imageWidth, imageHeight: rec && rec.imageHeight,
+          captureWallMs: typeof performance !== 'undefined' ? performance.now() - startedAt : null,
+          gameTime: g.time, gestureId: g.swipe.gestureId, shotId: g.shotId } });
+      } catch (e) { missCap.fail(e); }
+    };
+    const armShot = (id) => {
+      shotQueue = id; clearTimeout(shotTimer);
+      // Пауза/сон могут не дать ни одного кадра — тогда снимаем сами.
+      shotTimer = setTimeout(() => { if (shotQueue === id) takeShot(id, true); }, 180);
+    };
 
     /* ---------------------------- cinema ---------------------------- */
     let lobby = false;
@@ -105,6 +131,13 @@
       obj[name] = function (...args) { return fn.call(this, orig.bind(this), ...args); };
     };
     const stateName = (s) => Object.keys(GS).find((k) => GS[k] === s) || String(s);
+    // Снимок промаха снимается в ближайшем кадре: буфер читается сразу после
+    // draw, пока браузер его не очистил, но уже вне обработчика касания.
+    wrap(g, 'render', function (orig) {
+      const r = orig();
+      if (shotQueue) takeShot(shotQueue, false);
+      return r;
+    });
     wrap(g, 'setState', function (orig, s) {
       const r = orig(s);
       if (lobby) return r;
@@ -163,7 +196,12 @@
         const s = g.stats;
         post('matchEnd', { won: !!won, score: g.score.slice(), bestRally: g.bestRally,
           stats: { shots: s.shots, winners: s.winners, errors: s.errors, maxSpeed: Math.round(s.maxSpeed),
-            maxSpin: Math.round(s.maxSpin), byStroke: s.byStroke }, hasReplay: !!(g.moments && g.moments.best) });
+            maxSpin: Math.round(s.maxSpin), byStroke: s.byStroke },
+          /* Телеметрия бота именно этого матча — по уровню, ошибкам (сетка/
+           * длинные), скорости ответа и балансу ударов. Хост пишет её в
+           * аналитику; без аналитики она остаётся в последнем сообщении. */
+          ai: g.ai && g.ai.telemetry ? g.ai.telemetry() : null,
+          hasReplay: !!(g.moments && g.moments.best) });
       };
       const lastTrain = { key: '' };
       wrap(ui, 'trainSync', function (orig, t) {
@@ -304,24 +342,12 @@ const showTip = (text) => { if (text) tip = { text, until: g.time + 4.6 }; };
           gameTime: this.time, gestureId: this.swipe.gestureId, shotId: this.shotId,
           greenAtPress: z.pressContactable, accepted: att.accepted, zoneReason: z.reason,
           dx: att.dx, dy: att.dy });
-        if (att.captureId) {
-          // WebGL's buffer is not preserved. Redraw and copy synchronously,
-          // before physics can advance or the browser clears the buffer.
-          const startedAt = typeof performance !== 'undefined' ? performance.now() : 0;
-          if (!this.R || !this.R.gl || this.R.gl.isContextLost()) throw new Error('WebGL context unavailable');
-          this.render();
-          const rec = missCap.capture();
-          if (this.debugRecording) this.logInput('calibration_capture', { outcome: {
-            id: att.captureId, captured: !!rec, half: missCap.getHalf(),
-            imageWidth: rec && rec.imageWidth, imageHeight: rec && rec.imageHeight,
-            captureWallMs: typeof performance !== 'undefined' ? performance.now() - startedAt : null,
-            gameTime: this.time, gestureId: this.swipe.gestureId, shotId: this.shotId } });
-        }
       } catch (e) {
         missCap.fail(e);
         if (this.debugRecording) this.logInput('calibration_capture', { outcome: {
           id: att.captureId || null, captured: false, error: String(e && e.message || e) } });
       }
+      if (att.captureId) armShot(att.captureId);
     };
     wrap(g, 'logPressRejection', function (orig, reason, detail) {
       if (att && !att.reason && !att.contact) att.reason = reason;
@@ -420,6 +446,65 @@ const showTip = (text) => { if (text) tip = { text, until: g.time + 4.6 }; };
       }
     };
 
+    /* ---------------------------- online ----------------------------
+     * В embed-режиме оболочка прячет все экраны движка, поэтому его онлайн-
+     * лобби недоступно: управление сетью пришло командами net {}, а статусы
+     * уходят хосту одним сообщением 'net' {st, room, side, latency, msg}.
+     * Табло движка (#score, #rally) в embed тоже скрыто — на время онлайн-
+     * матча включаем классом tt-online, иначе игрок играет вслепую.
+     * */
+    let netPending = null;                       // код комнаты, ждущий connect
+    let netTried = false;                         // игрок хотя бы раз жал «создать/войти»
+    const netSay = (st, extra) => post('net', Object.assign({ st }, extra || {}));
+    const onlineHud = (on) => { try { document.documentElement.classList.toggle('tt-online', !!on); } catch (e) {} };
+    function netStart(intent) {                   // '' — создать, иначе — войти по коду
+      const net = g.network;
+      netPending = intent; netTried = true;
+      if (net.connected) { net.joinRoom(netPending || undefined); netPending = null; }
+      else if (net.state !== 'CONNECTING') { netSay('connecting'); net.connect(window.__TT_NET || undefined); }
+    }
+    function netCommand(m) {
+      const net = g.network;
+      switch (m.cmd) {
+        case 'create': netStart(''); break;
+        case 'join': netStart(String(m.code || '').toUpperCase().slice(0, 8)); break;
+        case 'status':
+          /* опрос идёт каждые 2 с: пока игрок ничего не нажимал, отсутствие
+           * сокета — не поломка, а нормальное состояние лобби */
+          netSay(net.state === 'IN_MATCH' ? 'match' : net.state === 'WAITING' ? 'waiting' :
+                 net.state === 'CONNECTING' ? 'connecting' : net.state === 'LOBBY' ? 'lobby' :
+                 (netTried ? 'closed' : 'idle'),
+                 { room: net.room, side: net.side, latency: net.latency });
+          break;
+        case 'leave':
+          netPending = null; netTried = false; onlineHud(false); net.leaveRoom(); net.disconnect(); netSay('closed');
+          break;
+        default: break;
+      }
+    }
+    (function bindNetwork() {
+      const net = g.network;
+      net.on('connected', () => {
+        if (netPending !== null) { net.joinRoom(netPending || undefined); netPending = null; }
+        else netSay('lobby');
+      });
+      net.on('assigned', (msg) => netSay('assigned', { room: msg.room, side: msg.side }));
+      net.on('matchStart', () => {
+        /* Оба игрока стартуют по одному сигналу реле. Физика считается на
+         * хосте, гость присылает положение ракетки; уровень 2 — не «бот вместо
+         * соперника», а качество отскока дальней ракетки, которую ведут руками. */
+        g.inspectSlowmo = false; lobby = false;
+        g.settings.targetScore = 11; g.freePlay = false;
+        resetAssist(); g.hintContact = false;
+        g.startMatch(2);
+        onlineHud(true);
+        netSay('match', { side: net.side });
+      });
+      net.on('peerLeft', () => { onlineHud(false); netSay('peerleft'); g.returnToMenu(); });
+      net.on('disconnected', () => { onlineHud(false); netSay(netTried ? 'closed' : 'idle'); });
+      net.on('error', (msg) => netSay('error', { msg: String(msg && msg.message ? msg.message : msg) }));
+    })();
+
     /* ---------------------------- commands -------------------------- */
     window.addEventListener('message', (e) => {
       const m = e.data;
@@ -428,6 +513,7 @@ const showTip = (text) => { if (text) tip = { text, until: g.time + 4.6 }; };
       // behind a hidden layer (menus, matchmaking) and must not restart full-rate rendering there
       if (!['sleep', 'mute', 'haptics', 'equip', 'quality', 'rm', 'debug', 'hint', 'attract', 'quit', 'quiet', 'pause', 'resume', 'locale', 'missShots'].includes(m.type)) wake();
       switch (m.type) {
+        case 'net': netCommand(m); break;
         case 'sleep': sleeping = true; break;      // frozen in place: update is skipped, so nothing advances
         case 'wake': break;
         case 'attract':
@@ -448,6 +534,13 @@ const showTip = (text) => { if (text) tip = { text, until: g.time + 4.6 }; };
           g.inspectSlowmo = false;
           g.audio.init(); g.audio.resume();
           if (Number.isFinite(m.target)) g.settings.targetScore = m.target;
+          /* Свободная игра: очки и подачи идут, но score не растёт и матч не
+           * заканчивается. Флаг снимается при выходе в меню/тренировку. */
+          g.freePlay = !!m.free;
+          /* Адаптация между матчами от хоста (тренд его последних игр);
+           * без неё — своя история результатов.*/
+          if (Number.isFinite(m.trend)) g.setAiTrend(m.trend);
+          else g.aiTrend = g.trendFromHistory();
           resetAssist(); g.hintContact = !!m.hint;
           g.startMatch(Number.isFinite(m.diff) ? m.diff : g.settings.difficulty);
           if (m.resume && Array.isArray(m.resume.score)) {
@@ -519,7 +612,8 @@ const showTip = (text) => { if (text) tip = { text, until: g.time + 4.6 }; };
               emissive: [0.018 * k, 0.042 * k, 0.10 * k],
             });
           }
-          if (K === 'trailLen' || K === 'ballSize' || K === 'padSpeed' || K === 'padSmooth' || K === 'hintRadius') { /* читаются напрямую из g._cal */ }
+          if (K === 'trailLen' || K === 'ballSize' || K === 'padSpeed' || K === 'padSmooth' || K === 'hintRadius' ||
+              K === 'hintGlow' || K === 'fingerTrail' || K === 'tossHeight' || K === 'slowmoDepth') { /* читаются напрямую из g._cal */ }
           break;
         }
       }

@@ -57,3 +57,11 @@ html.tt-embed #shot[data-tone="tip"] #shotStatus, html.tt-embed #shot[data-tone=
 html.tt-embed #shot { max-width: calc(100vw - 150px); margin: 0 auto; box-sizing: border-box; }
 html.tt-embed #playband #shot b, html.tt-embed #shot #shotStatus { font: 750 14px/1.25 var(--ui); }
 html.tt-embed #shot #shotMeta { font: 600 11.5px/1.25 var(--ui); }
+
+/* ============================ ОНЛАЙН =============================
+ * В онлайн-матче очки приходят с хоста и ведёт их движок, а не оболочка:
+ * класс tt-online (его включает мост при matchStart) возвращает табло.
+ * Оболочка в этом рисует только код комнаты и пинг. */
+html.tt-embed.tt-online #score { display: flex !important; }
+html.tt-embed.tt-online #rally.on,
+html.tt-embed.tt-online #mpInd.on { display: flex !important; }

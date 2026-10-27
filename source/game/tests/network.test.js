@@ -83,3 +83,84 @@ test('relay room lifecycle, capacity, authority and malformed messages', { timeo
   send(a,{type:'leave'}); assert.equal((await receive(c,'peer_left')).roomClosed,true); assert.equal(rooms.size,0);
   send(c,{type:'join'}); assert.equal((await receive(c,'assigned')).side,1);
 });
+
+test('relay address: argument wins over shell injection, then ?net=, then same origin', () => {
+  const { resolveNetUrl, NET_SERVER_URL } = load(['10_math.js','30_physics.js','27_network.js'],
+    ['resolveNetUrl','NET_SERVER_URL']);
+  assert.equal(resolveNetUrl('wss://a','https://b','?net=wss://c','wss://d'),'wss://a');
+  assert.equal(resolveNetUrl('','https://b','?net=wss://c','wss://d'),'wss://d');
+  assert.equal(resolveNetUrl('','https://b','?net=wss://c',''),'wss://c');
+  assert.equal(resolveNetUrl('','https://host.example','',''),'wss://host.example/api/relay');
+  assert.equal(resolveNetUrl('','http://localhost:3001','',''),'ws://localhost:3001/api/relay');
+  // srcdoc-iframe оболочки: origin «null», query пуст — остаётся запасной реле
+  assert.equal(resolveNetUrl('','null','',''),NET_SERVER_URL);
+});
+test('connect picks the shell-injected address, else the page origin', () => {
+  function probe(extra) {
+    const made = [];
+    class Socket{static OPEN=1;constructor(u){this.url=u;this.readyState=1;made.push(this);}send(){}close(){this.readyState=3;}}
+    const lib=load(['10_math.js','30_physics.js','27_network.js'],['NetworkManager','V3'],
+      Object.assign({ WebSocket:Socket }, extra));
+    const game={ball:{p:lib.V3.new(),v:lib.V3.new(),w:lib.V3.new(),live:true},score:[0,0]};
+    new lib.NetworkManager(game).connect();
+    return made[0].url;
+  }
+  assert.equal(probe({ location:{search:'',origin:'https://vercel.example'}, window:{__TT_NET:'wss://tunnel.example/api/relay'} }),
+    'wss://tunnel.example/api/relay');
+  assert.equal(probe({ location:{search:'',origin:'https://game.example'} }), 'wss://game.example/api/relay');
+  assert.equal(probe({ location:{search:'?net=wss://manual.example',origin:'https://game.example'} }), 'wss://manual.example');
+});
+test('mirroring: z of polar vectors flips, spin keeps z, score and server swap', () => {
+  const { netMirrorState, netMirrorInput } = load(['10_math.js','30_physics.js','27_network.js'],
+    ['netMirrorState','netMirrorInput']);
+  const s = netMirrorState({ ball:{p:[1,2,3],v:[4,5,6],w:[7,8,9]}, racket:{pos:[0,1,2],n:[0,0,1],sw:0.5},
+    score:[3,5], server:1, who:1, rally:4 });
+  /* векторы и score созданы в vm-контексте: снимаем в основной realm, иначе
+   * deepStrictEqual спотыкается о разные прототипы Array */
+  assert.deepEqual([...s.ball.p],[1,2,-3]); assert.deepEqual([...s.ball.v],[4,5,-6]);
+  assert.deepEqual([...s.ball.w],[-7,-8,9]);                   // осевой вектор: x,y меняются, z нет
+  assert.deepEqual([...s.racket.pos],[0,1,-2]); assert.deepEqual([...s.racket.n],[0,0,-1]);
+  assert.equal(s.racket.sw,0.5); assert.equal(s.rally,4);
+  assert.deepEqual([...s.score],[5,3]); assert.equal(s.server,-1); assert.equal(s.who,-1);
+  assert.deepEqual([...netMirrorInput({pos:[0,0.3,1.2],n:[0,0,-1],sw:0.4}).pos],[0,0.3,-1.2]);
+  // отражение — инволюция: обратный ход возвращает кадр отправителя
+  const back = netMirrorState(netMirrorState({ ball:{p:[1,2,3],v:[4,5,6],w:[7,8,9]}, score:[3,5], server:1 }));
+  assert.deepEqual([...back.ball.p],[1,2,3]); assert.deepEqual([...back.ball.w],[7,8,9]);
+  assert.deepEqual([...back.score],[3,5]); assert.equal(back.server,1);
+});
+test('both roles mirror what arrives: guest sees the host frame, host sees the guest frame', () => {
+  const { net, game } = fixture();
+  net.isHost=false; net.state='IN_MATCH';
+  net._handle({ type:'state', ball:{p:[0,0.3,1],v:[0,0,-2],w:[1,0,0]}, racket:{pos:[0,0.3,0.9],n:[0,0,1],sw:0}, score:[3,5] });
+  /* живой мяч гость не телепортирует, а догоняет (k = 0.35): проверяем знак
+   * из зеркала и величину из лера, а не точное попадание в кадр хоста */
+  assert.ok(Math.abs(game.ball.p.z + 0.35) < 1e-9);
+  assert.ok(Math.abs(game.ball.v.z - 0.7) < 1e-9);
+  assert.equal(game.ball.w.x,-1); assert.equal(game.ball.w.z,0);
+  assert.deepEqual([...game.score],[5,3]);
+  assert.equal(net.opponentRacket.pos.z,-0.9);
+  const h = fixture(); h.net.isHost=true; h.net.state='IN_MATCH';
+  h.net._handle({ type:'input', pos:[0,0.3,1.2], n:[0,0,-1], sw:0.6 });
+  assert.equal(h.net.opponentRacket.pos.z,-1.2);
+  assert.equal(h.net.opponentRacket.normal.z,1);
+});
+test('host serve flag is copied to the guest only between rallies', () => {
+  const { net, game } = fixture(); net.isHost=false;
+  game.server=1;
+  net._handle({ type:'state', ball:{p:[0,0.3,1],v:[0,0,0],w:[0,0,0]}, server:1 });
+  assert.equal(game.server,1);                       // внутри розыгрыша подачу не перепрыгиваем
+  net._handle({ type:'state', ball:null, server:1 });
+  assert.equal(game.server,-1);                      // подача хоста для гостя = подаёт соперник
+});
+test('guest takes the score from the host point packet, not from its own physics', () => {
+  const { net, game } = fixture(); net.isHost=false; net.state='IN_MATCH';
+  game.score=[0,0]; game.server=1; game.rally=0;
+  net._handle({ type:'point', who:1, reason:'out', score:[1,0], server:-1, rally:5 });
+  assert.deepEqual([...game.score],[0,1]);   // очко хоста для гостя — очко соперника
+  assert.equal(game.server,1);                // подающий отражается так же, как в кадре
+  assert.equal(game.rally,5);
+  const h = fixture(); h.net.isHost=true; h.net.state='IN_MATCH';
+  h.game.score=[7,2];
+  h.net._handle({ type:'point', who:1, score:[7,2] });   // хост счёт не отдаёт никому
+  assert.deepEqual([...h.game.score],[7,2]);
+});

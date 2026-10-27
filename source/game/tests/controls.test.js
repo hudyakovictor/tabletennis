@@ -1,10 +1,12 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const { load } = require('./helpers.cjs');
+/* 55_ai.js sits before 70_game.js: Game.setDifficulty() reads the global
+ * AI_LEVELS to clamp the index, so the fixture must load the AI module too. */
 const lib = load(['10_math.js', '12_match_rules.js', '25_career.js', '30_physics.js', '38_paddle_motion.js',
-  '40_swipe.js', '56_rig.js', '57_camera.js', '70_game.js', '80_ui.js'],
+  '40_swipe.js', '55_ai.js', '56_rig.js', '57_camera.js', '70_game.js', '80_ui.js'],
   ['MATCH_RULES', 'pressHitZone', 'ballCaptureTarget', 'measureCaptureAllowance', 'installUnifiedControls', 'playerCaptureLimits', 'playerInCaptureRange', 'strikeCueModel',
-    'Game', 'UI', 'GS', 'V3', 'Career', 'PERKS', 'MEET_ASSIST']);
+    'Game', 'UI', 'GS', 'V3', 'Career', 'PERKS', 'MEET_ASSIST', 'AI_LEVELS']);
 const { MATCH_RULES: rules, V3, GS } = lib;
 function fixture() {
   const g = Object.create(lib.Game.prototype);
@@ -297,10 +299,26 @@ test('camera trim persists, quantises and clamps back into its band', () => {
   assert.equal(g4.settings.camPitch, 0);
 });
 
-test('meeting-point assist fades with difficulty: heavy vs rookie, nearly none vs legend', () => {
+test('meeting-point assist fades with difficulty: heavy vs rookie, nearly none vs WTF', () => {
   const M = lib.MEET_ASSIST;
-  assert.equal(M.length, 5, 'one strength per AI level');
-  assert.equal(M[0], 0.85); assert.equal(M[4], 0.10);
+  assert.equal(M.length, 4, 'one strength per AI level');
+  assert.equal(M[0], 0.85); assert.equal(M[3], 0.10);
   for (let i = 1; i < M.length; i++) assert.ok(M[i] < M[i - 1], `assist must fall off: ${M}`);
   for (const v of M) assert.ok(v >= 0 && v <= 1);
+});
+
+test('setDifficulty drives the bot, persists to the profile and ignores garbage', () => {
+  const g = fixture();
+  g.settings = lib.installUnifiedControls({ difficulty: 1 });
+  const seen = [];
+  g.ai = { setLevel(i) { seen.push(i); this.levelIndex = i; }, reset() {} };
+  assert.equal(g.setDifficulty(3), 3);
+  assert.equal(g.ai.levelIndex, 3, 'движок переключил бота, а не только надпись');
+  assert.equal(g.profile.data.settings.difficulty, 3, 'уровень уехал в профиль');
+  assert.equal(g.setDifficulty('0'), 0, 'строка из UI тоже принимается');
+  assert.equal(g.setDifficulty(99), 3, 'индекс клампится сверху');
+  assert.equal(g.setDifficulty(-5), 0, 'и снизу');
+  assert.equal(g.setDifficulty('wtf'), 0, 'мусор не пишет NaN в профиль');
+  assert.equal(lib.AI_LEVELS.length, 4, 'кламп считается по реальному числу уровней');
+  assert.equal(seen.join(','), '3,0,3,0,0', 'каждый вызов дошёл до бота');
 });
