@@ -42,6 +42,9 @@ class InputTelemetryLog {
     this.dropped = 0;
     this.lastT = -Infinity;
     this.epoch = 0;
+    // Distinguishes retained events from different engine instances/reloads.
+    this.instance = Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 10);
+    this.sequence = 0;
   }
 
   /** Game.time is monotonic in the current Game, but a future reset must not
@@ -64,6 +67,9 @@ class InputTelemetryLog {
     if (!event || !Number.isFinite(event.t)) return null;
     if (event.t < this.lastT - 1e-9) this.resetClock(event.t, true);
     event.epoch = this.epoch;
+    event.instance = this.instance;
+    event.seq = ++this.sequence;
+    event.wallMs = Date.now();
     event.schema = INPUT_LOG_SCHEMA;
     event.rulesVersion = MATCH_RULES.version;
     event.build = typeof BUILD_VERSION !== 'undefined' ? BUILD_VERSION : 'source';
@@ -91,9 +97,18 @@ class InputTelemetryLog {
 
   stats(now = this.lastT) {
     const events = this.events(now);
+    // A pre-enable summary event is much smaller than detailed debug events;
+    // sample across the ring instead of multiplying its first event's size.
+    const step = Math.max(1, Math.floor(events.length / 16));
+    let sampleBytes = 0, sampleCount = 0;
+    for (let i = 0; i < events.length; i += step) { sampleBytes += JSON.stringify(events[i]).length; sampleCount++; }
     return { schema: INPUT_LOG_SCHEMA, seconds: this.seconds, capacity: this.capacity, epoch: this.epoch,
       stored: this.count, inWindow: events.length, dropped: this.dropped,
-      approxBytes: events.length ? JSON.stringify(events[0]).length * events.length : 0 };
+      retainedSeconds: events.length > 1 ? Math.max(0, events[events.length - 1].t - events[0].t) : 0,
+      retainedWallSeconds: events.length > 1 ? Math.max(0, (events[events.length - 1].wallMs - events[0].wallMs) / 1000) : 0,
+      firstTime: events.length ? events[0].t : null, lastTime: events.length ? events[events.length - 1].t : null,
+      approxBytes: sampleCount ? Math.round(sampleBytes / sampleCount * events.length) : 0,
+      byteEstimateSamples: sampleCount };
   }
 
   clear() {

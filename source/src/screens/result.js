@@ -26,7 +26,7 @@ function devZoneSheet() {
       w.addEventListener('input', (e) => { const i = e.target.closest('input[data-k]'); if (!i) return; draft[i.dataset.k] = +i.value; w.querySelector(`[data-v="${i.dataset.k}"]`).textContent = i.value; });
       w.addEventListener('click', (e) => {
         const t = e.target.closest('[data-t]');
-        if (t) { const k = t.dataset.t; if (k === 'debug') { GameHost.debug = !GameHost.debug; t.classList.toggle('on', GameHost.debug); GameHost.send('debug', { on: GameHost.debug }); } else { draft[k] = !t.classList.contains('on'); t.classList.toggle('on', draft[k]); } return; }
+        if (t) { const k = t.dataset.t; if (k === 'debug') { GameHost.setDebug(!GameHost.debug); t.classList.toggle('on', GameHost.debug); } else { draft[k] = !t.classList.contains('on'); t.classList.toggle('on', draft[k]); } return; }
         const a = e.target.closest('[data-a]'); if (!a) return;
         if (a.dataset.a === 'stats') { Sheet.close(true); zoneStatsSheet(); return; }
         if (a.dataset.a === 'link') { const u = RulesLink.url(RulesLink.clean(Object.assign({}, R, draft)) || {}); copyText(u).then((ok) => toast(ok ? 'Ссылка скопирована — у тестеров будет эта же зона' : 'Не удалось скопировать', ok ? 'check' : 'x')); return; }

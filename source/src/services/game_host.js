@@ -5,7 +5,15 @@
    ===================================================================== */
 const DEVMODE = /[?&]dev=1/.test(location.search);
 const GameHost = {
-  frame: null, ready: false, q: [], subs: new Set(), rules: null, debug: false,
+  frame: null, ready: false, q: [], subs: new Set(), rules: null,
+  debug: (() => { try { return sessionStorage.getItem('ttu-debug-recording') === '1'; } catch (e) { return false; } })(),
+  setDebug(on) {
+    this.debug = !!on;
+    try { sessionStorage.setItem('ttu-debug-recording', on ? '1' : '0'); } catch (e) {}
+    this.send('debug', { on: this.debug });
+    document.querySelectorAll('[data-act=diag-mark]').forEach(b => { b.hidden = !this.debug; });
+    return this.debug;
+  },
   devRules() { try { return JSON.parse(localStorage.getItem('ttu-rules-dev') || '{}') || {}; } catch (e) { return {}; } },
   setDevRules(r) { try { localStorage.setItem('ttu-rules-dev', JSON.stringify(r || {})); } catch (e) {} this.reload(); },
   doc() {
@@ -31,6 +39,9 @@ const GameHost = {
     if (['quiet', 'mute', 'hint', 'quality', 'rm', 'debug'].includes(type)) this.sticky[type] = data || {};
     if (type === 'pause') this.paused = true; if (type === 'resume' || type === 'quit') this.paused = false;
     if (type === 'quit') this.mode = { type: 'attract', data: {} };
+    if (this.debug && typeof HostDiagnostics !== 'undefined' &&
+        ['debug', 'pause', 'resume', 'slowmo', 'sleep', 'wake', 'match', 'train', 'quit'].includes(type))
+      HostDiagnostics.record('host_command', { command: type, on: data && typeof data.on === 'boolean' ? data.on : null, ready: this.ready });
     if (this.ready && this.frame) this.frame.contentWindow.postMessage(m, '*'); else this.q.push(m);
   },
   on(fn) { this.subs.add(fn); return () => this.subs.delete(fn); },
@@ -64,7 +75,24 @@ const GameHost = {
 };
 window.addEventListener('message', (e) => {
   const m = e.data; if (!m || m.__tt !== 1 || !GameHost.frame || e.source !== GameHost.frame.contentWindow) return;
-  if (m.type === 'glLost') { GameHost.recover(m); return; }
+  if (GameHost.debug && typeof HostDiagnostics !== 'undefined' && ['glLost', 'ready', 'paused', 'matchEnd'].includes(m.type))
+    HostDiagnostics.record('engine_message', { messageType: m.type, paused: m.type === 'paused' ? !!m.v : null });
+  if (m.type === 'glLost') {
+    if (GameHost._glRecoveryPending) return;
+    let flush = null;
+    try {
+      const g = GameHost.frame.contentWindow.__game;
+      if (GameHost.debug && g && g.debugArchive) flush = g.debugArchive.flush();
+    } catch (err) {}
+    if (flush && typeof flush.then === 'function') {
+      GameHost._glRecoveryPending = true;
+      // Give the bounded local journal a short chance to finish before the
+      // old iframe is destroyed. Never leave GPU recovery waiting on storage.
+      Promise.race([flush.catch(() => false), new Promise(resolve => setTimeout(resolve, 250))])
+        .then(() => { GameHost._glRecoveryPending = false; GameHost.recover(m); });
+    } else GameHost.recover(m);
+    return;
+  }
   if (m.type === 'ready') {
     GameHost.ready = true; GameHost.rules = m.rules;
     if (GameHost._recovering) { GameHost._recovering = false; setTimeout(() => { const ov = $('#glRecover'); ov && ov.classList.remove('on'); }, 350); }
@@ -75,10 +103,24 @@ window.addEventListener('message', (e) => {
     /* вся сохранённая калибровка (включая закрутку) — в движок сразу,
        а не только когда игрок тронет ползунок */
     if (S.cal) for (const k in S.cal) GameHost.send('cal', { k, v: S.cal[k] });
+    GameHost.send('missShots', { on: S.missShots !== false, half: S.missShotHalf });
     const q = GameHost.q; GameHost.q = []; q.forEach((x) => GameHost.frame.contentWindow.postMessage(x, '*'));
   }
   if (m.type === 'haptic') haptic(m.kind);
   if (m.type === 'attempt') ZoneStats.add(m);
+  if (m.type === 'shot') {
+    const added = MissShots.add(m);
+    if (!added) MissShots.captureError = t('set.missesInvalidFrame');
+    if (GameHost.debug && typeof HostDiagnostics !== 'undefined') HostDiagnostics.record('calibration_shot',
+      { id: m.id, added, storage: MissShots.storage, width: m.w, height: m.h,
+        imageWidth: m.imageWidth, imageHeight: m.imageHeight, gameTime: m.gameTime });
+  }
+  if (m.type === 'shotresult') MissShots.result(m.id, m);
+  if (m.type === 'shotdrop') MissShots.drop(m.id);
+  if (m.type === 'shoterror') {
+    MissShots.captureError = String(m.message || 'capture failed');
+    if (GameHost.debug && typeof HostDiagnostics !== 'undefined') HostDiagnostics.record('calibration_shot_error', { message: MissShots.captureError });
+  }
   GameHost.subs.forEach((f) => { try { f(m); } catch (err) { console.error(err); } });
 });
 

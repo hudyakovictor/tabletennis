@@ -1,5 +1,5 @@
-<div id="app" role="application" aria-label="TOPSPIN ARENA — настольный теннис, управление свайпом">
-  <canvas id="gl" tabindex="0" aria-label="Игровое поле. Свайп или зажатая кнопка мыши задаёт удар. Клавиши 1, 2, 3 переключают готовый вид камеры."></canvas>
+<div id="app" role="application" aria-label="TOPSPIN ARENA — настольный теннис">
+  <canvas id="gl" tabindex="0" aria-label="Игровое поле. Короткий клик или касание отбивает мяч, свайп задаёт направление и вращение. Клавиши 1, 2, 3 переключают вид камеры."></canvas>
   <canvas id="fx"></canvas>
 
   <div id="hud">
@@ -51,6 +51,7 @@
 
     <div id="dbg"></div>
 
+    <button id="diagMark" class="tbt pe" hidden>● КАДР</button>
     <div id="topright">
       <button class="ic pe" id="btnFullscreen" title="Полный экран (F)" aria-label="Полный экран" aria-pressed="false"></button>
       <button class="ic pe" id="btnSound" title="Выключить звук" aria-label="Выключить звук" aria-pressed="true"></button>
@@ -65,7 +66,22 @@
       <div class="pause-actions">
         <button id="pauseResume" class="tbt">ПРОДОЛЖИТЬ</button>
         <button id="pauseSettings" class="tbt"><span class="ui-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></span>НАСТРОЙКИ</button>
+        <button id="diagnosticShotPause" class="tbt">СКРИНШОТ</button>
         <label class="capture-debug-toggle"><input type="checkbox" id="captureDebugPause"> Зона нажатия</label>
+        <label class="capture-debug-toggle"><input type="checkbox" id="diagnosticRecordPause"> Подробная запись</label>
+        <div class="diagnostic-pause">
+          <p id="diagnosticStatus" role="status">Запись выключена</p>
+          <p>Включите запись, продолжите игру и повторите ошибку. Данные остаются на устройстве; отчёт содержит координаты и сведения об устройстве.</p>
+          <button id="diagnosticReportPause" class="tbt">ПОДГОТОВИТЬ ОТЧЁТ JSON</button>
+          <a id="diagnosticReportLink" class="tbt" download="topspin-diagnostics.json" hidden>СКАЧАТЬ ОТЧЁТ</a>
+          <button id="diagnosticTextButton" class="tbt" hidden>ПОКАЗАТЬ ТЕКСТ</button>
+          <textarea id="diagnosticText" readonly hidden aria-label="Текст отчёта"></textarea>
+          <div id="diagnosticPreview" hidden>
+            <a id="diagnosticImageLink" class="tbt" download="topspin-frame.png">СКАЧАТЬ PNG</a>
+            <img id="diagnosticImage" alt="Снимок игровой сцены"><p id="diagnosticFrameTime"></p>
+            <p>Только игровая сцена и зоны, без счёта и кнопок. Если скачивание не работает, удерживайте изображение.</p>
+          </div>
+        </div>
         <button id="shotLabPause" class="tbt">КАЛИБРОВКА ПОПАДАНИЯ</button>
         <button id="inputLogPause" class="tbt">СОХРАНИТЬ ПОСЛЕДНИЕ 30 С</button>
         <div id="trainingActions" hidden>
@@ -169,7 +185,7 @@
       <div class="logo" style="font-size:24px">НАСТРОЙКИ</div>
       <div class="sub">Личные предпочтения · единые правила игры</div>
 
-      <p class="note">Допуски попадания и помощь настроены одинаково для всех — без ползунков. Мяч отбивается ракеткой. Мышь или палец управляют её движением, свайп задаёт удар. Скобки у мяча подсказывают время: пунктир — приближение, сплошные — окно для свайпа. Сам по себе маркер мяч не отбивает.</p>
+      <p class="note">Допуски попадания и помощь одинаковы для всех. Мышь или палец управляют ракеткой. Короткий клик или тап во время приёма — простой удар; свайп задаёт направление и вращение. На подаче клик подбрасывает мяч, затем нужен свайп. Скобки у мяча подсказывают время: пунктир — приближение, сплошные — окно удара. Сам по себе маркер мяч не отбивает.</p>
 
       <h3 class="sec">ХВАТ И ВЕДУЩАЯ РУКА</h3>
       <div class="row" role="group" aria-label="Хват ракетки">
@@ -334,7 +350,7 @@
       <h2 id="shotLabTitle">КАЛИБРОВКА ПОПАДАНИЯ</h2>
       <div class="lab-actions"><button class="tbt" id="shotLabExport">СКАЧАТЬ ИЗМЕРЕНИЯ</button><button class="tbt" id="shotLabClose">ЗАКРЫТЬ</button></div>
       <label class="capture-debug-toggle"><input type="checkbox" id="captureDebugLab"> Показывать зону у мяча</label>
-      <p class="lab-help">Овал у мяча — допустимое место начала нажатия: длинная ось смотрит по экранной скорости мяча, вперёд — скорость×0,16 с + 24 px, назад — 18 px, поперёк — 40 px (мышь) / 56 px (касание). Снаружи удар блокируется окончательно. Внутри всё ещё нужны движение к мячу и правильный момент.</p>
+      <p class="lab-help">Овал показывает допустимое место начала нажатия. Снаружи удар блокируется. Внутри короткий клик или тап даёт простой удар, а направление свайпа задаёт его тип. Для контакта мяч должен оказаться у ракетки после отскока.</p>
       <h3>Уменьшать ли зону?</h3>
       <p class="lab-help">Ниже — сколько ваших реальных ударов отсекла бы меньшая зона. Точность и качество удара здесь не оцениваются.</p>
       <div id="captureCalibrationSummary"></div>

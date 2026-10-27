@@ -26,6 +26,16 @@
       return;
     }
     window.__game = game;
+    try {
+      if (!document.documentElement.classList.contains('tt-embed') && sessionStorage.getItem('ttu-debug-recording') === '1') game.setDiagnosticMode(true);
+    } catch (e) {}
+    window.addEventListener('error', (e) => game.diagnosticIssue('error', e.message || 'Script error', e.error && e.error.stack));
+    window.addEventListener('unhandledrejection', (e) => {
+      const r = e.reason;
+      game.diagnosticIssue('unhandledrejection', r && r.message || String(r), r && r.stack);
+    });
+    canvas.addEventListener('webglcontextlost', () => game.diagnosticIssue('webglcontextlost', 'WebGL context lost'));
+    canvas.addEventListener('webglcontextrestored', () => game.diagnosticIssue('webglcontextrestored', 'WebGL context restored'));
 
     // tap/click the pause overlay to resume
     const pauseInd = document.getElementById('pauseInd');
@@ -42,8 +52,13 @@
     let last = performance.now();
     let acc = 0;
     function frame(now) {
-      const dt = Math.min((now - last) / 1000, 0.1);
+      const rawDt = (now - last) / 1000;
+      const dt = Math.min(rawDt, 0.1);
       last = now;
+      if (game.debugRecording) {
+        game._debugLastFrameDelta = rawDt;
+        if (!game.paused && rawDt > .05) game.logInput('frame_gap', { outcome: { rawSeconds: rawDt, appliedSeconds: dt } });
+      }
       if (!game.paused) game.update(dt);
       game.render();
       ui.tick(dt);

@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """Bundle every source file into one standalone, offline-capable HTML."""
-import os, re, sys, datetime, base64, json
+import os, re, sys, datetime, base64, json, hashlib
 SRC = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'src')
 OUT = sys.argv[1] if len(sys.argv) > 1 else os.path.join(os.path.dirname(SRC), '..', 'table-tennis-topspin.html')
 
-JS_ORDER = ['03_i18n.js','10_math.js','12_match_rules.js','20_gl.js','25_career.js','27_network.js','30_physics.js','38_paddle_motion.js','40_swipe.js','42_shot_diagnostics.js','43_input_telemetry.js','50_audio.js',
+JS_ORDER = ['03_i18n.js','10_math.js','12_match_rules.js','20_gl.js','25_career.js','27_network.js','30_physics.js','38_paddle_motion.js','40_swipe.js','42_shot_diagnostics.js','43_input_telemetry.js','44_diagnostics.js','44_miss_shots.js','50_audio.js',
             '55_ai.js','56_rig.js','57_camera.js','58_coach.js','59_replay.js','60_scene.js','61_particles.js','62_arena.js',
             '65_train.js','75_feedback.js','75_music.js','76_emotion.js','81_uiAnim.js','84_racket.js',
             '86_meta.js','70_game.js','80_ui.js','90_boot.js','92_embed.js']
@@ -50,16 +50,20 @@ if not os.environ.get('TT_NO_ARENA'):
 js = 'window.__TT_ARENA = ' + json.dumps(arena) + ';\n\n' + js
 
 stamp = datetime.datetime.now(datetime.timezone.utc).strftime('%Y-%m-%d')
+# A date alone cannot distinguish two different builds deployed on the same
+# day. Hash the actual embedded sources/assets so a player's report identifies
+# the exact engine bundle without relying on Git or network access.
+fingerprint = hashlib.sha256((css + '\n' + body + '\n' + js).encode('utf-8')).hexdigest()[:12]
 html = f"""<!DOCTYPE html>
 <html lang="ru">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="theme-color" content="#05070c">
-<meta name="description" content="TOPSPIN ARENA — демо настольного тенниса: физика ITTF, эффект Магнуса, удары управляются свайпом.">
+<meta name="description" content="TOPSPIN ARENA — демо настольного тенниса: физика ITTF, эффект Магнуса, удары нажатием или свайпом.">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
-<title>TOPSPIN ARENA — настольный теннис · физика ITTF · свайп-управление</title>
+<title>TOPSPIN ARENA — настольный теннис · физика ITTF · управление нажатием и свайпом</title>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><circle cx='16' cy='16' r='13' fill='%23fbfbf7'/><path d='M3 16h26' stroke='%23888' stroke-width='1.6'/></svg>">
 <style>
 {css}
@@ -68,7 +72,7 @@ html = f"""<!DOCTYPE html>
 <body>
 {body}
 <script>
-const BUILD_VERSION = 'self-contained build {stamp}';
+const BUILD_VERSION = 'self-contained build {stamp} · {fingerprint}';
 {js}
 </script>
 <!-- TOPSPIN ARENA · self-contained build {stamp} · no external assets, no network required -->

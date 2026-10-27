@@ -23,6 +23,7 @@ html.tt-embed #playStatus,
 html.tt-embed #timingCue,
 html.tt-embed #gestureCue,
 html.tt-embed #btnDemoExit,
+html.tt-embed #diagMark,
 html.tt-embed #reel,
 html.tt-embed #reels,
 html.tt-embed #dbg { display: none !important; }
