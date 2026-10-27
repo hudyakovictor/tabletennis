@@ -89,7 +89,7 @@ class HitFeedbackSystem {
     // Determine spin characteristics
     const spin = ctx.spin || V3.new();
     const spinMag = V3.len(spin);
-    const spinType = this.determineSpinType(spin);
+    const spinType = this.determineSpinType(spin, ctx.side);
 
     // Quality-based scaling
     const quality = clamp(ctx.quality || 1, 0, 1);
@@ -110,18 +110,20 @@ class HitFeedbackSystem {
 
   /**
    * Determine spin type from spin vector.
-   * Convention: +w.x = topspin (ball top moves forward)
+   * Convention in 30_physics.js: for player (+1, shooting -z), w.x < 0 is topspin;
+   * for opponent (-1, shooting +z), w.x > 0 is topspin -> topSigned = -side * w.x.
    */
-  determineSpinType(spin) {
+  determineSpinType(spin, side = 1) {
     const w = spin;
-    const top = Math.abs(w.x);
-    const side = Math.abs(w.y);
+    const topSigned = -(side || 1) * w.x;
+    const top = Math.abs(topSigned);
+    const lat = Math.abs(w.y);
     const slice = Math.abs(w.z);
 
-    if (top > side * 1.5 && top > slice * 1.5) {
-      return w.x > 0 ? 'topspin' : 'backspin';
+    if (top > lat * 1.5 && top > slice * 1.5) {
+      return topSigned > 0 ? 'topspin' : 'backspin';
     }
-    if (side > top * 1.2 && side > slice * 1.2) {
+    if (lat > top * 1.2 && lat > slice * 1.2) {
       return w.y > 0 ? 'sidespin-right' : 'sidespin-left';
     }
     return 'mixed';
@@ -157,41 +159,32 @@ class HitFeedbackSystem {
     // Higher quality = more wood, less rubber
     const woodPitch = 0.9 + quality * 0.2 + speed * 0.005;
 
-    if (audio.hitRacket) {
-      audio.hitRacket(speed * 3.6, 0, quality < 0.4);
+    if (!ctx.skipBaseHitAudio && audio.hitRacket) {
+      audio.hitRacket(speed, 0, quality < 0.4);
     }
 
     // ---- Layer 2: Rubber friction (spin sound) ----
     if (spinMag > 30) {
-      const frictionVolume = HIT_FEEDBACK.AUDIO.rubberFrictionBase
-        * (spinMag / 100) * HIT_FEEDBACK.AUDIO.spinVolumeMultiplier;
-      // Higher spin = more friction sound
-      const frictionPitch = 0.8 + spinMag / 500;
-      // Play friction sound (whoosh-like)
       if (audio.whoosh) {
         audio.whoosh(clamp(spinMag / 80, 0, 1));
       }
     }
 
     // ---- Layer 3: Air whoosh (speed sound) ----
-    if (speed > 8) {
-      const whooshVolume = HIT_FEEDBACK.AUDIO.whooshBase
-        * ((speed - 8) / 20) * (1 + quality * 0.2);
-      // Whoosh is already handled in swipe, but reinforce on hit
+    if (speed > 8 && spinMag <= 30) {
       if (audio.whoosh) {
         audio.whoosh(clamp((speed - 8) / 25, 0, 0.6));
       }
     }
 
     // ---- Layer 4: Special event sounds ----
-    if (ctx.isNetCord) {
+    if (ctx.isNetCord && audio.hitNet) {
       audio.hitNet();
     }
-    if (ctx.isEdge) {
+    if (ctx.isEdge && audio.hitEdge) {
       audio.hitEdge();
     }
-    if (ctx.isWinner && ctx.side > 0) {
-      // Winner sound — brief celebration
+    if (ctx.isWinner && ctx.side > 0 && audio.point) {
       audio.point(true);
     }
   }
@@ -201,7 +194,8 @@ class HitFeedbackSystem {
    */
   haptic(quality, speed, spinType, ctx) {
     if (!this._hapticEnabled) return;
-    if (!navigator.vibrate) return;
+    if (this.game && this.game.settings && this.game.settings.haptics === false) return;
+    if (ctx.skipBaseHaptic && !ctx.isNetCord && !ctx.isEdge && !ctx.isWinner) return;
 
     // Quality-based pattern selection
     let pattern;
@@ -213,28 +207,25 @@ class HitFeedbackSystem {
     } else if (ctx.isWinner && ctx.side > 0) {
       pattern = HIT_FEEDBACK.HAPTIC.WINNER;
     } else if (quality > 0.8 && speed > 15) {
-      // Big hit — sharp
       pattern = HIT_FEEDBACK.HAPTIC.HIT.map(v => Math.floor(v * 1.3));
     } else if (quality > 0.5) {
       pattern = HIT_FEEDBACK.HAPTIC.HIT;
     } else if (speed < 3 && quality < 0.4) {
-      // Soft/block — gentle
       pattern = HIT_FEEDBACK.HAPTIC.BLOCK;
     } else {
-      // Default — medium
       pattern = [6, 20, 6];
     }
 
-    // Scale by speed
     if (pattern.length === 1) {
       pattern[0] = Math.floor(pattern[0] * (0.5 + speed * 0.05));
     }
 
-    // Execute
-    try {
-      navigator.vibrate(pattern);
-    } catch (e) {
-      // Ignore — device may not support
+    if (this.game && typeof this.game.buzz === 'function') {
+      this.game.buzz(pattern);
+      return;
+    }
+    if (typeof navigator !== 'undefined' && navigator.vibrate) {
+      try { navigator.vibrate(pattern); } catch (e) {}
     }
   }
 
@@ -243,6 +234,7 @@ class HitFeedbackSystem {
    */
   camera(quality, speed, ctx) {
     const game = this.game;
+    if (!game || game.reducedMotion) return;
 
     // Layer 1: Micro shake on impact
     const shakeBase = HIT_FEEDBACK.CAMERA.shakeBase;
@@ -259,11 +251,9 @@ class HitFeedbackSystem {
     }
 
     // Layer 2: Speed-based FOV pulse on big hits
-    if (speed > 20 && quality > 0.6) {
-      const fovPulse = (speed - 20) * 0.02;
-      if (game.camFov !== undefined) {
-        game.camFov = (game.camFov || 48) + fovPulse;
-      }
+    if (speed > 20 && quality > 0.6 && Number.isFinite(game.fov)) {
+      const fovPulse = Math.min(2.2, (speed - 20) * 0.08);
+      game.fov = game.fov + fovPulse;
     }
 
     // Layer 3: Judgement line flash on perfect shots

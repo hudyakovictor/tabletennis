@@ -71,12 +71,12 @@ class MusicSystem {
    * Uses oscillators and noise for synthetic but pleasant sounds.
    */
   async _createAmbientTextures() {
-    const ctx = new OfflineAudioContext(2, 44100 * 4, 44100);
+    if (typeof OfflineAudioContext === 'undefined') return;
+    const ctx = new OfflineAudioContext(2, 44100 * 2, 44100);
 
-    // ---- Base layer: soft pad ----
-    // Multiple detuned oscillators for rich texture
     const baseOscs = [];
-    const baseFreqs = [55, 65, 72.5, 82.5]; // Low A, C, D, E
+    const baseOscNodes = [];
+    const baseFreqs = [55, 65, 72.5, 82.5];
     for (let i = 0; i < baseFreqs.length; i++) {
       const osc = ctx.createOscillator();
       osc.type = 'sine';
@@ -92,9 +92,9 @@ class MusicSystem {
       osc.connect(filter);
       filter.connect(gain);
       baseOscs.push(gain);
+      baseOscNodes.push(osc);
     }
 
-    // Connect to output
     const baseMix = ctx.createGain();
     baseMix.gain.value = 0.7;
     for (const g of baseOscs) {
@@ -102,20 +102,18 @@ class MusicSystem {
     }
     baseMix.connect(ctx.destination);
 
-    // Start all
-    for (const osc of ctx.createOscillator ? [] : []) {
-      osc.start();
+    for (const osc of baseOscNodes) {
+      osc.start(0);
+      osc.stop(2);
     }
 
-    // Render and store
     const baseBuffer = await ctx.startRendering();
     this._buffers.base = baseBuffer;
 
-    // ---- Tension layer: pads that evolve ----
-    // Higher frequency content, more movement
-    const tensionCtx = new OfflineAudioContext(2, 44100 * 4, 44100);
+    const tensionCtx = new OfflineAudioContext(2, 44100 * 2, 44100);
     const tensionOscs = [];
-    const tensionFreqs = [130, 165, 196, 220]; // Higher A, E, G, A
+    const tensionNodes = [];
+    const tensionFreqs = [130, 165, 196, 220];
     for (let i = 0; i < tensionFreqs.length; i++) {
       const osc = tensionCtx.createOscillator();
       osc.type = 'triangle';
@@ -138,6 +136,7 @@ class MusicSystem {
       osc.connect(filter);
       filter.connect(gain);
       tensionOscs.push(gain);
+      tensionNodes.push(osc, lfo);
     }
 
     const tensionMix = tensionCtx.createGain();
@@ -146,6 +145,10 @@ class MusicSystem {
       g.connect(tensionMix);
     }
     tensionMix.connect(tensionCtx.destination);
+    for (const node of tensionNodes) {
+      node.start(0);
+      node.stop(2);
+    }
 
     const tensionBuffer = await tensionCtx.startRendering();
     this._buffers.tension = tensionBuffer;

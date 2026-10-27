@@ -263,20 +263,40 @@ class Game {
       const r = c.getBoundingClientRect();
       const w = r.width > 0 ? r.width : (c.clientWidth || 1);
       const h = r.height > 0 ? r.height : (c.clientHeight || 1);
-      let x = (e.clientX - r.left) / w;
-      let y = (e.clientY - r.top) / h;
-      /* Outside the canvas the coordinates used to be clamped to
-       * [-0.25 .. 1.25] — a quarter of a screen BEYOND each edge. That is
-       * how the bat got parked somewhere the camera never shows and, since
-       * no further move events arrive once the cursor leaves the window,
-       * it stayed there. The pointer is now always inside 0..1. */
-      if (!Number.isFinite(x)) x = 0.5; else x = clamp(x, 0, 1);
-      if (!Number.isFinite(y)) y = 0.5; else y = clamp(y, 0, 1);
-      return { x, y };
+      const xr = (e.clientX - r.left) / w;
+      const yr = (e.clientY - r.top) / h;
+      const x = Number.isFinite(xr) ? clamp(xr, 0, 1) : 0.5;
+      const y = Number.isFinite(yr) ? clamp(yr, 0, 1) : 0.5;
+      /* Raw gesture coordinates preserve swipe velocity & angle when a fast
+       * flick travels past the canvas border, while x/y stay inside 0..1 so
+       * the 3D paddle can never park off-screen. */
+      const rawX = Number.isFinite(xr) ? clamp(xr, -0.35, 1.35) : x;
+      const rawY = Number.isFinite(yr) ? clamp(yr, -0.35, 1.35) : y;
+      return { x, y, rawX, rawY };
     };
+
+    // Monotonic hardware-timestamp gesture clock anchored to `this.time` so
+    // multi-event bursts within one rAF frame keep true millisecond spacing.
+    let _domT0 = null, _gameT0 = 0, _lastEvT = 0;
+    const evTime = (e) => {
+      const ts = e && Number.isFinite(e.timeStamp) && e.timeStamp > 0 ? e.timeStamp : null;
+      if (ts === null) {
+        _lastEvT = Math.max(_lastEvT, this.time);
+        return _lastEvT;
+      }
+      if (_domT0 === null || Math.abs((this.time - _gameT0) - (ts - _domT0) * 0.001) > 0.22) {
+        _domT0 = ts;
+        _gameT0 = this.time;
+      }
+      const mapped = _gameT0 + Math.max(0, (ts - _domT0) * 0.001);
+      _lastEvT = Math.max(_lastEvT, mapped);
+      return _lastEvT;
+    };
+    const evSimTime = (tReal) => this.strokeTime + Math.max(0, tReal - this.time) * (this.timeScale || 1);
 
     // Left pointer = stroke. The camera is fixed: no right-drag, no wheel.
     const ptrs = new Map();
+    let activeStrokePointerId = null;
     const domEvent = e => ({ type: e.type, pointerId: e.pointerId, pointerType: e.pointerType || null,
       clientX: Number.isFinite(e.clientX) ? e.clientX : null, clientY: Number.isFinite(e.clientY) ? e.clientY : null,
       button: e.button, buttons: e.buttons, pressure: Number.isFinite(e.pressure) ? e.pressure : null,
@@ -285,6 +305,7 @@ class Game {
       receivedAt: typeof performance !== 'undefined' ? performance.now() : null,
       trusted: !!e.isTrusted, cancelable: !!e.cancelable });
     const dropStroke = () => {
+      activeStrokePointerId = null;
       this.swipe.cancel();
       this.pointerDown = false;
     };
@@ -339,68 +360,118 @@ class Game {
         }
       }
 
-      this.swipe.down(n.x, n.y, this.time, this.strokeTime);
+      activeStrokePointerId = e.pointerId;
+      const tEv = evTime(e), simEv = evSimTime(tEv);
+      const pointerType = e.pointerType || (this.pointerFine === false ? 'touch' : 'mouse');
+      this.pointer = { x: n.x, y: n.y };
+      this.pointerFine = pointerType !== 'touch' && pointerType !== 'pen';
+
+      this.swipe.down(n.rawX, n.rawY, tEv, simEv);
       this.swipe.tapMaxMovePx = 0;
       const rect = c.getBoundingClientRect();
-      const pointerType = e.pointerType || (this.pointerFine === false ? 'touch' : 'mouse');
+      const serveReadyPress = this.state === GS.SERVE_READY && this.server === 1;
       const servePress = this.state === GS.SERVE_TOSS && this.server === 1;
-      const cpGate = !servePress && MATCH_RULES.zoneAnchor === 'contact' ? this.contactPrediction() : null;
-      const ballZone = cpGate ? pressContactZone(this.project(cpGate.p, {}), n, rect.width, rect.height, { pointerType, scale: this.contactGateScale(cpGate.p, rect) })
-        : pressZoneForBall(this.ball, n, rect.width, rect.height, {
-        project: point => this.project(point, {}), pointerType,
-        referenceWorld: this.player && this.player.pos,
-        kind: servePress ? 'serve' : 'rally',
-        tossApex: this.tossApex, tossStartY: this.tossStartY, tableY: PH.TABLE_Y,
-      });
+      const cpGate = (!servePress && !serveReadyPress && MATCH_RULES.zoneAnchor === 'contact')
+        ? this.contactPrediction() : null;
+      const corridor = (!servePress && !serveReadyPress && MATCH_RULES.zoneAnchor === 'contact')
+        ? this.strikeCorridor() : null;
+
+      let ballZone = null;
+      if (!servePress && !serveReadyPress && MATCH_RULES.zoneAnchor === 'contact') {
+        ballZone = evaluateContactZone(
+          corridor,
+          this.ball,
+          n,
+          rect.width,
+          rect.height,
+          point => this.project(point, {}),
+          point => this.contactGateScale(point, rect),
+          {
+            pointerType,
+            frozen: !!(this.training && this.training.frozen),
+            referenceWorld: this.player && this.player.pos,
+          }
+        );
+        if (ballZone && ballZone.accepted && ballZone.worldTarget && Number.isFinite(ballZone.worldTarget.z)) {
+          this._footZ = clamp(ballZone.worldTarget.z, PADDLE_LIMITS.zStepIn, PADDLE_LIMITS.zFar);
+        }
+      } else {
+        ballZone = pressZoneForBall(this.ball, n, rect.width, rect.height, {
+          project: point => this.project(point, {}), pointerType,
+          referenceWorld: this.player && this.player.pos,
+          kind: (servePress || serveReadyPress) ? 'serve' : 'rally',
+          tossApex: this.tossApex, tossStartY: this.tossStartY, tableY: PH.TABLE_Y,
+        });
+      }
+
       this.swipe.pressZone = ballZone || { accepted: false, shape: MATCH_RULES.zoneShape,
         radius: MATCH_RULES.pressRadiusPx, distancePx: null, score: null, along: null,
         across: null, reason: 'OUTSIDE_ZONE', pointerType };
-      /* Admission is stamped once, here, from the ball at pointerdown.
-       * Moving into the zone later, landing on the bat, position assist and
-       * CCD are all downstream of this stamp and cannot rewrite it. */
+
+      // Seamless early-serve backswing continuity: if the player begins their
+      // serve gesture during SERVE_READY (one-motion toss+strike) or while the
+      // toss is still rising towards its apex, arm `pendingServeDrop` when the
+      // press is horizontally aligned with the toss column.
+      if ((servePress || serveReadyPress) && !this.swipe.pressZone.accepted) {
+        const rising = serveReadyPress || (this.ball && this.ball.v && this.ball.v.y >= -0.05);
+        if (rising && canArmEarlyServeSwipe(this.project(this.ball.p, {}), n, rect.width, rect.height, pointerType)) {
+          this.swipe.pressZone.pendingServeDrop = true;
+          this.swipe.pressZone.singleGestureToss = serveReadyPress;
+        }
+      } else if (!servePress && !serveReadyPress && !this.swipe.pressZone.accepted &&
+          this.state === GS.RALLY && corridor && corridor.valid) {
+        /* A deep loop/push backswing legitimately starts far below the
+         * meeting point (real players begin the swing a foot under the ball).
+         * Arm it as a `pendingBackswing` when it starts on the ball's lateral
+         * line; it is only ADMITTED later, when the live stroke actually
+         * sweeps inside the corridor (`promotePendingRallyBackswing`). */
+        const pz0 = this.swipe.pressZone;
+        if (Number.isFinite(pz0.across) && Number.isFinite(pz0.along) &&
+            Number.isFinite(pz0.sidePx) && Number.isFinite(pz0.fwdPx) &&
+            Math.abs(pz0.across) <= pz0.sidePx * 2.6 &&
+            pz0.along > pz0.fwdPx && pz0.along <= pz0.fwdPx * 4.5) {
+          pz0.pendingBackswing = true;
+        }
+      }
+
       this.swipe.pressZone.pressX = n.x; this.swipe.pressZone.pressY = n.y;
       this.swipe.pressZone.vw = rect.width; this.swipe.pressZone.vh = rect.height;
       this.swipe.pressZone.pointerId = e.pointerId;
       this.swipe.pressZone.pointerType = pointerType;
-      this.swipe.pressZone.pressT = this.time;
+      this.swipe.pressZone.pressT = tEv;
       if (this.debugRecording && Number.isFinite(e.timeStamp)) this.swipe.pressZone.domTimestamp = e.timeStamp;
       this.swipe.pressZone.pressContactable = !!(this._strike && this._strike.on && this._strike.contactable);
       this.swipe.pressZone.shotId = this.shotId;
-      this.swipe.pressZone.serving = this.state === GS.SERVE_READY || this.state === GS.SERVE_TOSS;
+      this.swipe.pressZone.serving = serveReadyPress || servePress;
       if (this.training && typeof this.training.onPress === 'function') this.training.onPress(this.swipe.pressZone);
       if (typeof this.onPressZone === 'function') this.onPressZone(this.swipe.pressZone, cpGate, servePress);
       if (this.shotJournal) {
-        const attempt = this.shotJournal.create(this.swipe.gestureId, this.time);
+        const attempt = this.shotJournal.create(this.swipe.gestureId, tEv);
         attempt.pressZone = { ...this.swipe.pressZone };
         const win = attempt.pressZone.serving ? 1.15 : .25;
-        attempt.deadline = this.time + win;
-        attempt.deadlineSim = this.strokeTime + win;
+        attempt.deadline = tEv + win;
+        attempt.deadlineSim = simEv + win;
         if (!attempt.pressZone.accepted) attempt.outcome = 'outside';
       }
-      /* Hover aims only. A quick release without a drag becomes a compact
-       * return; a drag keeps its own speed, direction and spin. */
-      this.pointer = n; this.pointerDown = true;
-      this.pointerFine = e.pointerType !== 'touch' && e.pointerType !== 'pen';
-      this.logInput('pointerdown', { pointer: n, pointerId: e.pointerId, buttons: e.buttons, inputType: pointerType,
+      this.pointerDown = true;
+      this.logInput('pointerdown', { pointer: { x: n.x, y: n.y }, pointerId: e.pointerId, buttons: e.buttons, inputType: pointerType,
         dom: this.debugRecording ? domEvent(e) : null,
         outcome: { greenAtPress: !!this.swipe.pressZone.pressContactable,
-          gateAnchor: cpGate ? 'predicted_contact' : 'current_ball', predictedEta: cpGate ? cpGate.t : null } });
+          gateAnchor: corridor && corridor.valid ? 'strike_corridor' : (cpGate ? 'predicted_contact' : 'current_ball'),
+          predictedEta: cpGate ? cpGate.t : null } });
       if (this.debugRecording) this._debugLastPress = { shotId: this.shotId, gestureId: this.swipe.gestureId,
-        green: !!this.swipe.pressZone.pressContactable, accepted: !!this.swipe.pressZone.accepted, time: this.time };
-      if (this.state === GS.SERVE_READY && this.server === 1) this.startToss();
+        green: !!this.swipe.pressZone.pressContactable, accepted: !!this.swipe.pressZone.accepted, time: tEv };
+      if (serveReadyPress) this.startToss();
     };
 
-    /* Where the bat wants to be. Tracked on the WINDOW, not on the canvas:
-     * a cursor that leaves the canvas keeps sending events here, so the bat
-     * keeps following it instead of freezing at the last in-canvas position
-     * (that freeze was the "bat and cursor are kilometres apart" bug). */
     const track = (e) => {
       const n = norm(e);
-      this.pointer = n;
+      this.pointer = { x: n.x, y: n.y };
+      const tEv = evTime(e);
       if (e.pointerType) this.pointerFine = e.pointerType !== 'touch' && e.pointerType !== 'pen';
       if (e.pointerType === 'mouse') {
-        this.mouseTrail = (this.mouseTrail || []).filter(p => this.time - p.t < 0.14);
-        this.mouseTrail.push({ x: n.x, y: n.y, t: this.time });
+        this.mouseTrail = (this.mouseTrail || []).filter(p => tEv - p.t < 0.14);
+        this.mouseTrail.push({ x: n.x, y: n.y, t: tEv });
         if (this.mouseTrail.length > 64) this.mouseTrail.shift();
       }
       this.pointerInside = n.x > 0.001 && n.x < 0.999 && n.y > 0.001 && n.y < 0.999;
@@ -410,15 +481,22 @@ class Game {
     const move = (e) => {
       const p = ptrs.get(e.pointerId);
       if (p) { p.x = e.clientX; p.y = e.clientY; }
+      if (this.swipe.active && activeStrokePointerId !== null && e.pointerId !== activeStrokePointerId) {
+        if (e.cancelable) e.preventDefault();
+        return;
+      }
       const n = track(e);
       if (this.swipe.active && ptrs.size < 2) {
+        const tEv = evTime(e), simEv = evSimTime(tEv);
         const z = this.swipe.pressZone;
         if (z) this.swipe.tapMaxMovePx = Math.max(this.swipe.tapMaxMovePx || 0,
-          Math.hypot((n.x - z.pressX) * z.vw, (n.y - z.pressY) * z.vh));
-        this.swipe.move(n.x, n.y, this.time, this.strokeTime);
+          Math.hypot((n.rawX - z.pressX) * z.vw, (n.rawY - z.pressY) * z.vh));
+        this.swipe.move(n.rawX, n.rawY, tEv, simEv);
+        this.promotePendingServeZone();
+        this.promotePendingRallyBackswing(n);
         const sp = this.swipe.m.speed;
         if (sp > 1.6) this.audio.whoosh(clamp(sp / 4, 0, 1.4));
-        this.logInput('pointermove', { pointer: n, pointerId: e.pointerId, buttons: e.buttons,
+        this.logInput('pointermove', { pointer: { x: n.x, y: n.y }, pointerId: e.pointerId, buttons: e.buttons,
           inputType: e.pointerType || (this.pointerFine === false ? 'touch' : 'mouse'),
           dom: this.debugRecording ? domEvent(e) : null });
       }
@@ -431,38 +509,54 @@ class Game {
         e.preventDefault();
         return;
       }
+      if (activeStrokePointerId !== null && e.pointerId !== activeStrokePointerId) {
+        if (this.debugRecording) this.logInput('pointer_ignored', { dom: domEvent(e), outcome: { reason: 'NON_OWNER_POINTER_RELEASE' } });
+        e.preventDefault(); return;
+      }
       if (ptrs.size >= 1) {
         if (this.debugRecording) this.logInput('pointer_ignored', { dom: domEvent(e), outcome: { reason: 'OTHER_POINTER_STILL_DOWN' } });
         e.preventDefault(); return;
       }
       if (!this.swipe.active) {
+        activeStrokePointerId = null;
         if (this.debugRecording) this.logInput('pointer_ignored', { dom: domEvent(e), outcome: { reason: 'RELEASE_WITHOUT_ACTIVE_PRESS' } });
         this.pointerDown = false; return;
       }
+      activeStrokePointerId = null;
       const n = norm(e);
-      this.pointer = n;
+      const tEv = evTime(e), simEv = evSimTime(tEv);
+      this.pointer = { x: n.x, y: n.y };
       const sw = this.swipe, zone = sw.pressZone;
       if (zone) sw.tapMaxMovePx = Math.max(sw.tapMaxMovePx || 0,
-        Math.hypot((n.x - zone.pressX) * zone.vw, (n.y - zone.pressY) * zone.vh));
-      sw.up(n.x, n.y, this.time, this.strokeTime);
+        Math.hypot((n.rawX - zone.pressX) * zone.vw, (n.rawY - zone.pressY) * zone.vh));
+      this.promotePendingServeZone();
+      // A quick tap-and-release during SERVE_READY is purely the toss trigger,
+      // not an armed pre-swipe; disarm pendingServeDrop if released before apex.
+      if (zone && zone.singleGestureToss && !zone.accepted &&
+          !(this.ball && this.ball.v && this.ball.v.y < 0 && this.tossRiseNow() >= MATCH_RULES.serveTossMinRise - 1e-6)) {
+        zone.pendingServeDrop = false;
+      }
+      sw.up(n.rawX, n.rawY, tEv, simEv);
       this.pointerDown = false;
-      this.swipeReleasedAt = this.time;
-      /* A short, nearly motionless release is an intentional return, not an
-       * invented swipe. It is bound to the incoming shot on which it began;
-       * toss taps, long holds and drags cannot silently become extra hits. */
-      const tapAge = this.time - sw.startT;
+      this.swipeReleasedAt = tEv;
+      const tapAge = tEv - sw.startT;
       const tapSlop = zone && zone.pointerType === 'mouse' ? 10 : 14;
+      const flickMax = CONTACT_CORRIDOR_RULES.compactFlickMaxPx;
       if (zone && !zone.serving && zone.shotId === this.shotId &&
           this.state === GS.RALLY && this.ball.live && this.ball.lastHitBy === -1 &&
-          tapAge >= 0 && tapAge <= .35 && sw.tapMaxMovePx <= tapSlop &&
+          tapAge >= 0 && tapAge <= CONTACT_CORRIDOR_RULES.compactFlickMaxSec &&
           !isRealStroke(sw.lastReleased, false)) {
-        sw.lastReleased = tapStrokeMetrics(sw.lastReleased, zone.pressX, zone.pressY);
+        if (sw.tapMaxMovePx <= tapSlop) {
+          sw.lastReleased = tapStrokeMetrics(sw.lastReleased, zone.pressX, zone.pressY);
+        } else if (zone.accepted && sw.tapMaxMovePx <= flickMax) {
+          sw.lastReleased = compactStrokeMetrics(sw.lastReleased, n.x, n.y);
+        }
       }
       this.updateShotDiagnostics();
-      this.logSwipeRelease({ pointer: n, pointerId: e.pointerId, buttons: e.buttons,
+      this.logSwipeRelease({ pointer: { x: n.x, y: n.y }, pointerId: e.pointerId, buttons: e.buttons,
         inputType: e.pointerType || (this.pointerFine === false ? 'touch' : 'mouse'),
         dom: this.debugRecording ? domEvent(e) : null });
-      this.lastSwipeT = this.time;
+      this.lastSwipeT = tEv;
       e.preventDefault();
     };
 
@@ -479,7 +573,7 @@ class Game {
     c.addEventListener('lostpointercapture', (e) => { if (ptrs.has(e.pointerId)) this.cancelInput('lostpointercapture', e); });
     c.addEventListener('contextmenu', (e) => e.preventDefault());
     // Hover movement follows the bat. A held right button is not a camera command.
-    window.addEventListener('pointermove', (e) => { if (!ptrs.size) track(e); }, { passive: true });
+    window.addEventListener('pointermove', (e) => { if (!ptrs.size && !this.swipe.active) track(e); }, { passive: true });
     window.addEventListener('blur', () => { this.cancelInput('window_blur'); this.setPaused(true); });
     document.addEventListener('visibilitychange', () => {
       if (this.debugRecording) this.logInput('visibility', { outcome: { state: document.visibilityState } });
@@ -577,7 +671,8 @@ class Game {
     this.setSlowmoAllowed(!(this.career.active || this.network.isInMatch));
     this.score = [0, 0]; this.games = [0, 0];
     this.rally = 0; this.bestRally = 0;
-    this.stats = { shots: 0, winners: 0, errors: 0, maxSpeed: 0, maxSpin: 0, byStroke: {}, totalSpin: 0, rallies: 0 };
+    this.stats = { shots: 0, aiShots: 0, winners: 0, errors: 0, blocks: 0, edgeHits: 0, edgeBalls: 0,
+      maxSpeed: 0, maxSpin: 0, byStroke: {}, totalSpin: 0, rallies: 0 };
     this.server = Math.random() < 0.5 ? 1 : -1;
     this.servesLeft = 2;
     this.audio.init(); this.audio.resume();
@@ -696,6 +791,13 @@ class Game {
     this.rallyBounces.length = 0;
     this.serveBounces = 0;
     this.isServeBall = true;
+    this._footZ = PADDLE_STANCE_Z;
+    if (this._cordForgiveUntil) {
+      this._cordForgiveUntil = 0;
+      if (typeof setCaptureForgiveness === 'function') {
+        setCaptureForgiveness(Number.isFinite(this._cordBaseForgive) ? this._cordBaseForgive : 1);
+      }
+    }
     /* Every point begins from the same known state: bat back in the centre,
      * cursor binding re-anchored, no stale intercept from the last rally. */
     this.resetPaddle();
@@ -751,20 +853,105 @@ class Game {
     return { kx: pxX / MATCH_RULES.zoneRefPxPerCmX, ky: pxY / MATCH_RULES.zoneRefPxPerCmY, pxX, pxY };
   }
 
+  /** Multi-anchor 3D post-bounce strike corridor for the current frame. */
+  strikeCorridor() {
+    const b = this.ball, pad = this.player;
+    if (!b || !b.live || b.lastHitBy !== -1 || this.state !== GS.RALLY) return null;
+    if (this._scFrame === this.frame && this._scTime === this.time) return this._sc;
+    this._scFrame = this.frame; this._scTime = this.time;
+    this._sc = solveStrikeCorridor(b, pad, this.rallyBounces, predict, {
+      tableY: PH.TABLE_Y,
+      stanceZ: PADDLE_STANCE_Z,
+      minStepInZ: PADDLE_LIMITS.zStepIn,
+      maxReachZ: PADDLE_LIMITS.zFar,
+      allowVolley: !!(this.training && this.training.frozen),
+    });
+    return this._sc;
+  }
+
+  /** Promote an early-started serve swipe (begun in SERVE_READY or while the
+   *  toss was still rising) once the ball crests its apex and enters the legal
+   *  falling window. Never promotes horizontally off-line presses. */
+  promotePendingServeZone() {
+    const sw = this.swipe;
+    const pz = sw && sw.pressZone;
+    if (!pz || pz.accepted || !pz.pendingServeDrop) return false;
+    if (this.state !== GS.SERVE_TOSS || this.server !== 1 || !this.ball || this.ball.lastHitBy !== 0) return false;
+    const rise = this.tossRiseNow();
+    if (!(this.ball.v && this.ball.v.y < 0 && rise >= MATCH_RULES.serveTossMinRise - 1e-6)) return false;
+    pz.accepted = true;
+    pz.reason = null;
+    pz.pendingServeDrop = false;
+    pz.tossRise = rise;
+    if (this.shotJournal && typeof this.shotJournal.promotePress === 'function') {
+      this.shotJournal.promotePress(sw.gestureId, pz);
+    }
+    return true;
+  }
+
+  /** Promote a deep low-started topspin backswing ONLY when it began on the
+   *  ball's lateral line (`|across| <= 1.15 * sidePx`) and the active upward
+   *  stroke physically sweeps inside the live 3D strike corridor. */
+  promotePendingRallyBackswing(n) {
+    const sw = this.swipe;
+    const pz = sw && sw.pressZone;
+    if (!pz || pz.accepted || !pz.pendingBackswing || !n) return false;
+    if (this.state !== GS.RALLY || !this.ball || !this.ball.live || this.ball.lastHitBy !== -1 || pz.shotId !== this.shotId) return false;
+    if (!sw.m || !(sw.m.dy < -0.04)) return false;
+    const rect = this.canvas ? this.canvas.getBoundingClientRect() : { width: pz.vw || 390, height: pz.vh || 844 };
+    const corridor = this.strikeCorridor();
+    if (!corridor || !corridor.valid) return false;
+    const liveZone = evaluateContactZone(
+      corridor,
+      this.ball,
+      n,
+      rect.width,
+      rect.height,
+      point => this.project(point, {}),
+      point => this.contactGateScale(point, rect),
+      {
+        pointerType: pz.pointerType || 'touch',
+        frozen: !!(this.training && this.training.frozen),
+        referenceWorld: this.player && this.player.pos,
+      }
+    );
+    if (!liveZone || !liveZone.accepted) return false;
+    pz.accepted = true;
+    pz.reason = null;
+    pz.pendingBackswing = false;
+    pz.x = liveZone.x; pz.y = liveZone.y;
+    pz.worldTarget = liveZone.worldTarget;
+    if (liveZone.worldTarget && Number.isFinite(liveZone.worldTarget.z)) {
+      this._footZ = clamp(liveZone.worldTarget.z, PADDLE_LIMITS.zStepIn, PADDLE_LIMITS.zFar);
+    }
+    if (this.shotJournal && typeof this.shotJournal.promotePress === 'function') {
+      this.shotJournal.promotePress(sw.gestureId, pz);
+    }
+    return true;
+  }
+
   /** Where (and in how long) the incoming ball meets the plane the bat stands
-   *  on. One cached prediction per simulated frame; null when nothing is coming. */
+   *  on (or the multi-anchor strike corridor's primary intercept when the ball
+   *  dies short of the baseline). One cached prediction per simulated frame. */
   contactPrediction() {
     const b = this.ball, pad = this.player;
-    if (!b.live || b.lastHitBy !== -1 || !(b.v.z > .2) || this.state !== GS.RALLY) return null;
+    if (!b.live || b.lastHitBy !== -1 || !(b.v.z > .08 || (b.p.z > 0.15 && b.v.z > -0.35)) || this.state !== GS.RALLY) return null;
     if (this._cpFrame === this.frame && this._cpTime === this.time) return this._cp;
     this._cpFrame = this.frame; this._cpTime = this.time;
     const o = this._cpOut || (this._cpOut = {});
     o.reach = null;
+    const stopPlane = Number.isFinite(this._footZ) ? clamp(this._footZ, PADDLE_LIMITS.zStepIn, PADDLE_LIMITS.zFar) : pad.pos.z;
     predict(V3.clone(b.p), V3.clone(b.v), V3.clone(b.w),
-      { dt: PHYS_DT, maxT: 1.6, stopZ: Number.isFinite(this._footZ) ? Math.min(this._footZ, pad.pos.z) : pad.pos.z,
+      { dt: PHYS_DT, maxT: 1.6, stopZ: stopPlane,
         stopDir: 1, stopAtPlane: true, out: o });
-    this._cp = o.reach && Number.isFinite(o.reachT)
-      ? { p: { x: o.reach.x, y: o.reach.y, z: o.reach.z }, t: o.reachT } : null;
+    if (o.reach && Number.isFinite(o.reachT)) {
+      this._cp = { p: { x: o.reach.x, y: o.reach.y, z: o.reach.z }, t: o.reachT };
+      return this._cp;
+    }
+    const sc = this.strikeCorridor();
+    this._cp = sc && sc.valid && sc.primary
+      ? { p: { x: sc.primary.x, y: sc.primary.y, z: sc.primary.z }, t: sc.primary.t }
+      : null;
     return this._cp;
   }
 
@@ -792,11 +979,17 @@ class Game {
     const idx = who > 0 ? 0 : 1;
     this.score[idx]++;
     if (this.shotJournal) this.shotJournal.point(who, reason, this.ball.lastHitBy, this.time);
-    this.lastPoint = { who, reason };
-    this.buzz(who > 0 ? [14, 50, 22] : 42);
+    const lh = this.ball.lastHitBy;
     this.stats.rallies++;
+    this.lastPoint = { who, reason, at: this.time, seq: this.stats.rallies };
+    this.buzz(who > 0 ? [14, 50, 22] : 42);
     if (this.rally > this.bestRally) this.bestRally = this.rally;
-    if (who > 0) this.stats.winners++; else this.stats.errors++;
+    if (who > 0) {
+      if (lh === 1) this.stats.winners++;
+    } else {
+      const ownFault = lh === 1 || (this.isServeBall && this.server === 1 && lh === 0);
+      if (ownFault) this.stats.errors++;
+    }
 
     // why did that happen? one sentence, only when it helps
     this.lastSwipeLate = (this.time - this.lastSwipeT) > 0.75;
@@ -1015,7 +1208,7 @@ class Game {
       if (sid === 'SMASH') vm *= this._careerSmashBoost;
       if (sid === 'COUNTER') vm *= this._careerCounterBoost;
       if (sid === 'CHOP') wm *= this._careerChopBoost;
-      if (sid === 'HOOK' || sid === 'SIDE' || sid === 'SERVE_SIDE') b.w.y *= this._careerSidespinBoost;
+      if (sid === 'HOOK' || sid === 'FADE' || sid === 'SIDE' || sid === 'SERVE_SIDE') b.w.y *= this._careerSidespinBoost;
       if (this._careerDecisiveActive) { vm *= 1 + this._careerDecisiveBoost; this._careerDecisiveActive = false; }
       if (vm !== 1) { b.v.x *= vm; b.v.y *= vm; b.v.z *= vm; }
       if (wm !== 1) { b.w.x *= wm; b.w.y *= wm; b.w.z *= wm; }
@@ -1029,18 +1222,33 @@ class Game {
     // here invalidated its legal serves after they had already been solved.
 
     const speed = V3.len(b.v), spin = V3.len(b.w);
-    this.stats.shots++;
-    this.stats.totalSpin += spin / TAU;
-    if (speed * 3.6 > this.stats.maxSpeed) this.stats.maxSpeed = speed * 3.6;
-    if (spin / TAU > this.stats.maxSpin) this.stats.maxSpin = spin / TAU;
-
     const name = racket.stroke ? racket.stroke.id : 'DRIVE';
-    this.stats.byStroke[name] = (this.stats.byStroke[name] || 0) + 1;
+    if (side > 0) {
+      this.stats.shots++;
+      this.stats.totalSpin += spin / TAU;
+      if (speed * 3.6 > this.stats.maxSpeed) this.stats.maxSpeed = speed * 3.6;
+      if (spin / TAU > this.stats.maxSpin) this.stats.maxSpin = spin / TAU;
+      this.stats.byStroke[name] = (this.stats.byStroke[name] || 0) + 1;
+    } else {
+      this.stats.aiShots = (this.stats.aiShots || 0) + 1;
+    }
 
     /* an off-centre contact sounds like wood, not like rubber */
     const softHit = !!(racket.arch && racket.arch.soft) || (side > 0 && this.lastSweet !== undefined && this.lastSweet < 0.38);
     this.audio.hitRacket(speed, info ? info.contactSlip : 0, softHit);
     if (side > 0 && this.lastSweet !== undefined && this.lastSweet < 0.30) this.buzz(16);
+    if (this.feedback) {
+      this.feedback.execute({
+        quality: quality ?? 0.8,
+        speed,
+        spin: b.w,
+        stroke: racket.stroke,
+        contactPoint: contactP,
+        side,
+        skipBaseHitAudio: true,
+        skipBaseHaptic: true,
+      });
+    }
     /* Контактная вспышка = ВЕРДИКТ ввода (зелёный/жёлтый/красный), как и
      * шлейф. Фирменный цвет удара (stroke.col: оранжевый топспин, синяя
      * подрезка) отсюда удалён — именно он рисовал «синий при свайпе вниз,
@@ -1237,7 +1445,7 @@ class Game {
     const e = eq || this.equip;
     if (!e) return null;
     const c = e.colours;
-    const key = e.bladeId + '|' + e.fhId + '|' + e.bhId;
+    const key = e.bladeId + '|' + e.fhId + '|' + e.bhId + '|' + (e._tintKey || '');
     this._eqCache = this._eqCache || {};
     if (this._eqCache[key]) return this._eqCache[key];
     const ma = S.mat;
@@ -1441,7 +1649,9 @@ class Game {
          * «счастливый» мяч. Базовый forgive восстанавливается в stepPhysics. */
         this.punchSlowmo(0.5, 0.35);
         if (typeof getCaptureForgiveness === 'function' && typeof setCaptureForgiveness === 'function') {
-          this._cordBaseForgive = getCaptureForgiveness();
+          if (!(this._cordForgiveUntil > this.time)) {
+            this._cordBaseForgive = getCaptureForgiveness();
+          }
           setCaptureForgiveness(this._cordBaseForgive * 1.5);
           this._cordForgiveUntil = this.time + 0.9;
         }
@@ -1730,24 +1940,30 @@ class Game {
   validatePressDirection(m) {
     const pz = this.swipe && this.swipe.pressZone;
     if (!pz || !pz.accepted || !m) return this.pressAdmitsBall();
-    // A tap has no path to judge. Its position and the physical contact
-    // checks still apply; only a swipe can fail the direction test.
     if (m.tap === true) return true;
     if (pz.directionOk === true) return true;
     if (pz.directionOk === false) return false;
     if (![pz.x, pz.y, pz.pointerX, pz.pointerY, m.dx, m.dy].every(Number.isFinite)) return true;
+
+    if (pz.anchor === 'contact') {
+      const ok = evaluateStrokeDirection(pz, m);
+      pz.directionOk = ok;
+      if (!ok) {
+        pz.accepted = false; pz.reason = 'WRONG_DIRECTION';
+        if (this.shotJournal && typeof this.shotJournal.rejectPress === 'function')
+          this.shotJournal.rejectPress(this.swipe.gestureId, 'WRONG_DIRECTION', pz);
+        this.logInput('decision', { outcome: { contact: false, reason: 'WRONG_DIRECTION' } });
+      }
+      return ok;
+    }
+
     const toBallX = pz.x - pz.pointerX, toBallY = pz.y - pz.pointerY;
     const swipeX = m.dx * (pz.vw > 0 ? pz.vw : 1), swipeY = m.dy * (pz.vh > 0 ? pz.vh : 1);
     const dist = Math.hypot(toBallX, toBallY), len = Math.hypot(swipeX, swipeY);
     if (dist < 4) { pz.directionDot = 1; pz.directionOk = true; return true; }
     if (!(len > 1e-9)) return false;
     const dot = (swipeX * toBallX + swipeY * toBallY) / (len * dist);
-    /* Линейность в масштабе скорости: медленный свайп игрок ещё может
-     * вести ровно, но быстрый взмах (он же реальный ударный темп настольного
-     * тенниса) — всегда с дугой и задержкой. Чем длиннее/быстрее жест,
-     * тем мягче порог направления: до ~104° для мыши и ~90° для пальца.
-     * Медленные свайпы не меняются вообще. */
-    const fast = len > 0.16;
+    const fast = Math.hypot(m.dx, m.dy) > 0.16;
     const dotLimit = pz.pointerType === 'mouse' ? -0.3 : (fast ? -0.12 : 0);
     pz.directionDot = dot; pz.directionOk = dot > dotLimit;
     if (!pz.directionOk) {
@@ -1884,6 +2100,16 @@ class Game {
     if (!info) { V3.copy(b.v, v0); V3.copy(b.w, w0); return false; }
     V3.addScaled(b.p, b.p, n, PH.R * 0.6);          // отлепить от грани для CCD следующего шага
     b.lastHitBy = 1;
+    this.shotId++;
+    this.rallyBounces.length = 0;
+    this.netTouched = false;
+    if (!this.isServeBall) {
+      this.rally++;
+      if (!this.training && !this.demoMode && this.audio && this.audio.onRallyHit) this.audio.onRallyHit(this.rally, 1);
+    }
+    this.swipe.consumedGestureId = this.swipe.gestureId;
+    this.swipe.consumedAt = this.time;
+    this.swipe.pressZone = null;
     pad.lastHitT = this.time;
     pad.swing = 1;
     const motion = this.paddleMotion || (this.paddleMotion = new PaddleStrokeMotion());
@@ -1893,9 +2119,13 @@ class Game {
     this.msg('СТЕНКА!', 0.7, '#9fd0ff');
     this.buzz([4, 12]);
     this.emitParticles(b.p.x, b.p.y, b.p.z, 5, 0.5, 0.25, 0.010, 0.62, 0.82, 1);
-    if (this.stats) this.stats.blocks = (this.stats.blocks || 0) + 1;
+    if (this.stats) {
+      this.stats.blocks = (this.stats.blocks || 0) + 1;
+      this.stats.shots = (this.stats.shots || 0) + 1;
+      if (this.stats.byStroke) this.stats.byStroke.BLOCK = (this.stats.byStroke.BLOCK || 0) + 1;
+    }
     if (this.shotJournal && typeof this.shotJournal.noteOutcome === 'function')
-      this.shotJournal.noteOutcome('BLOCK', { passive: true });
+      this.shotJournal.noteOutcome('BLOCK');
     this.logInput('contact', { outcome: { contact: true, route: 'passive_block',
       distanceM: V3.dist(b.p, pad.pos) } });
     return true;
@@ -1934,17 +2164,28 @@ class Game {
     if (rect.width > 0 && rect.height > 0) {
       const pointerType = this.pointerFine === false ? 'touch' : 'mouse';
       const servePress = this.state === GS.SERVE_TOSS && this.server === 1;
-      const dummyPointer = { x: 0.5, y: 0.62 };   // only acceptance depends on it, not the shape we draw
+      const dummyPointer = this.pointer && Number.isFinite(this.pointer.x) ? this.pointer : { x: 0.5, y: 0.62 };
       try {
-        const cpGate = !servePress && MATCH_RULES.zoneAnchor === 'contact' ? this.contactPrediction() : null;
-        zone = cpGate
-          ? pressContactZone(this.project(cpGate.p, {}), dummyPointer, rect.width, rect.height, { pointerType, scale: this.contactGateScale(cpGate.p, rect) })
-          : pressZoneForBall(this.ball, dummyPointer, rect.width, rect.height, {
+        if (!servePress && MATCH_RULES.zoneAnchor === 'contact') {
+          const corridor = this.strikeCorridor();
+          zone = evaluateContactZone(
+            corridor,
+            this.ball,
+            dummyPointer,
+            rect.width,
+            rect.height,
+            point => this.project(point, {}),
+            point => this.contactGateScale(point, rect),
+            { pointerType, frozen: !!(this.training && this.training.frozen), referenceWorld: this.player && this.player.pos }
+          );
+        } else {
+          zone = pressZoneForBall(this.ball, dummyPointer, rect.width, rect.height, {
             project: point => this.project(point, {}), pointerType,
             referenceWorld: this.player && this.player.pos,
             kind: servePress ? 'serve' : 'rally',
             tossApex: this.tossApex, tossStartY: this.tossStartY, tableY: PH.TABLE_Y,
           });
+        }
       } catch (e) { zone = null; }
     }
     this._pzpT = this.time; this._pzpCache = zone;
@@ -1966,7 +2207,19 @@ class Game {
        finished or the hand is waiting at the end of the flick. 0.18 s of
        freshness (correct for a rally) dropped a legal toss strike. */
     const liveWin = serving ? 1.15 : 0.18;
-    const deadWin = serving ? 1.15 : 0.25;
+    /* An EARLY swing is a real table-tennis stroke: the hand accelerates
+     * before the ball arrives and the blade is already waiting where it will
+     * meet it. A 0.25 s release window expired mid-backswing and the ball
+     * then passed a perfectly placed racket. The attempt therefore stays
+     * bound to the SHOT it was pressed for (`pressZone.shotId`) and to an
+     * ADMITTED press; a gesture stamped `outside` — or a gesture with no
+     * press stamp at all, which is what the "an old released swipe cannot hit
+     * a later ball" contract exercises — keeps the original 0.25 s and can
+     * never re-arm itself. */
+    const admittedAttempt = !!(sw.pressZone && sw.pressZone.accepted === true &&
+      sw.pressZone.shotId === this.shotId);
+    const deadWin = serving ? 1.15
+      : admittedAttempt ? Math.max(0.25, CONTACT_CORRIDOR_RULES.strokeReleaseWindowSec) : 0.25;
     /* A real swipe can be held in position for a block. Only a fresh sample
        may start that hold: discovering an old motion late must not re-arm it.
        A stationary hold is not a swipe; a tap is recognised on release. */
@@ -2067,6 +2320,9 @@ class Game {
       if (this.pressAdmitsBall() && this.playerStrokeIntent(false)) this.logPressRejection('BOUNCE_ILLEGAL');
       return;
     }
+    if (this.state === GS.SERVE_TOSS && this.server === 1 && b.lastHitBy === 0) {
+      this.promotePendingServeZone();
+    }
     if (!this.pressAdmitsBall()) { this.debugRecording && this.diagnosticPhysicsGate('press_not_admitted'); return; }
 
     // The fixed envelope belongs to the racket, NOT the pointer marker.
@@ -2106,7 +2362,7 @@ class Game {
     if (b.v.z < 0 && b.p.z < pad.pos.z - .35) {
       this.debugRecording && this.diagnosticPhysicsGate('moving_away', { capture: captureSample }); return;
     }
-    if (serveCtx && (b.v.y >= 0 || !(this.tossRiseNow() > MATCH_RULES.serveTossMinRise))) {
+    if (serveCtx && (b.v.y >= 0 || !(this.tossRiseNow() >= MATCH_RULES.serveTossMinRise - 1e-6))) {
       this.debugRecording && this.diagnosticPhysicsGate('serve_not_legal', { tossRise: this.tossRiseNow(), capture: captureSample });
       if (b.v.y < 0) this.logPressRejection('SERVE_TOSS_LOW', { tossRise: this.tossRiseNow() });
       return;
@@ -2118,49 +2374,36 @@ class Game {
       const rad = V3.dist(b.p, spad.pos);
       const serveIn = playerInCaptureRange(b.p, spad.pos, true);
       const serveEdge = !serveIn && playerGraceRange(b.p, spad.pos, true);
-      if (b.v.y < 0 && this.tossRiseNow() > MATCH_RULES.serveTossMinRise && (serveIn || serveEdge)) {
-        /* Подача краем: мяч чуть шире/выше честной сферы всё равно ударяется —
-         * слабо, срезанно, но честно. Чистый пропуск тут ощущался как баг
-         * «мяч не подаётся, хотя в реальности подался бы». */
+      if (b.v.y < 0 && this.tossRiseNow() >= MATCH_RULES.serveTossMinRise - 1e-6 && (serveIn || serveEdge)) {
         hit = { t: 1, x: b.p.x, y: b.p.y, z: b.p.z,
           captureKind: serveIn ? 'serve' : 'serve_edge',
           rad: serveIn ? rad * 0.40 : serveReach, px: spad.pos.x, py: spad.pos.y, pz: spad.pos.z,
           edge: !serveIn };
       }
     } else if (ownBounce) {
-      /* Swipes normally meet at the closest approach; a tap is a short
-       * explicit strike and may fire inside the capture window. An edge-only
-       * approach still waits for the blade rather than striking prematurely.
-       * Both routes use the actual paddle pose at this physics substep. */
       const pp = spad.pos;
       const closing = (b.p.x - pp.x) * b.v.x + (b.p.y - pp.y) * b.v.y +
         (b.p.z - pp.z) * b.v.z;
-      const inside = playerInCaptureRange(b.p, pp);
-      /* Кольцо края: на расстоянии (capture × 1 .. 1.34] жест всё равно
-       * даёт контакт — не ассист, а физически честное срезанное касание:
-       * слабо и по-глупому, но не «тихий промах». */
-      const grazing = !inside && playerGraceRange(b.p, pp);
+      const swept = bladePlaneCapture(b.p, p0, pp, spad.prevPos, spad.normal, false);
+      const inside = playerInCaptureRange(b.p, pp) || swept.ok;
+      const grazing = !inside && (playerGraceRange(b.p, pp) || swept.grace);
       const still = b.v.x * b.v.x + b.v.y * b.v.y + b.v.z * b.v.z < 0.04;
-      const atClosest = MATCH_RULES.contactAtClosest ? closing >= -0.02 : closing <= 0.02;
+      const atClosest = MATCH_RULES.contactAtClosest ? (closing >= -0.02 || swept.t < 0.999) : closing <= 0.02;
       if (this.debugRecording) gateDetail = { inside, grazing, still, closing, atClosest, tap: m.tap === true,
         capture: captureSample, previousBall: inputLogVec(p0),
         paddleStart: inputLogVec(spad.prevPos), paddleEnd: inputLogVec(spad.pos) };
       if ((inside || grazing) && ((m.tap === true && inside) || atClosest || still)) {
-        const dx = b.p.x - p0.x, dy = b.p.y - p0.y, dz = b.p.z - p0.z;
-        const dd = dx * dx + dy * dy + dz * dz;
-        const u = dd > 1e-12
-          ? clamp((-(p0.x - pp.x) * dx - (p0.y - pp.y) * dy - (p0.z - pp.z) * dz) / dd, 0, 1)
-          : 1;
-        const cx = p0.x + dx * u, cy = p0.y + dy * u, cz = p0.z + dz * u;
-        /* Quality is the NORMALISED distance inside the box, on both axes.
-         * `dist2d * 0.35` ignored depth entirely: a ball 30 cm in front of
-         * the blade scored as a dead-centre contact with the full sweet
-         * spot. */
-        const lat = Math.hypot(cx - pp.x, cy - pp.y);
-        const frac = Math.max(lat / reachRadius,
-          Math.abs(cz - pp.z) / MATCH_RULES.depthTolerance);
-        hit = { t: u, x: cx, y: cy, z: cz, captureKind: inside ? 'endpoint' : 'edge',
-          rad: clamp(frac, 0, 1) * reachRadius, px: pp.x, py: pp.y, pz: pp.z,
+        const cx = swept.point ? swept.point.x : b.p.x;
+        const cy = swept.point ? swept.point.y : b.p.y;
+        const cz = swept.point ? swept.point.z : b.p.z;
+        const pxHit = swept.padPoint ? swept.padPoint.x : pp.x;
+        const pyHit = swept.padPoint ? swept.padPoint.y : pp.y;
+        const pzHit = swept.padPoint ? swept.padPoint.z : pp.z;
+        const lat = Number.isFinite(swept.lat) ? swept.lat : Math.hypot(cx - pxHit, cy - pyHit);
+        const dzEff = Number.isFinite(swept.dzEff) ? swept.dzEff : Math.abs(cz - pzHit);
+        const frac = Math.max(lat / reachRadius, dzEff / MATCH_RULES.depthTolerance);
+        hit = { t: swept.t ?? 1, x: cx, y: cy, z: cz, captureKind: inside ? 'endpoint' : 'edge',
+          rad: clamp(frac, 0, 1) * reachRadius, px: pxHit, py: pyHit, pz: pzHit,
           edge: !inside };
       }
     }
@@ -2191,9 +2434,6 @@ class Game {
     // ---- build the stroke from the live gesture --------------------
     let racket, quality;
     if (hit.edge) {
-      /* Край ракетки — НЕ ассист и не решатель мишени: особая физика
-       * срезанного касания (слабо, выше, с диким вращением), чтобы мяч
-       * продолжал розыгрыш вместо бесшумного пролёта мимо ракетки. */
       racket = this._glanceRacket(m, contact, isServeStroke, sideParams);
       quality = GRACE_RULES.quality;
       racket.quality = quality;
@@ -2210,7 +2450,7 @@ class Game {
         powerScale: 1,
         moveYaw: this.padYaw || 0, movePitch: this.padPitch || 0,
         equip: sideParams,
-        spinBias: 'norm',
+        spinBias: this.settings.spinBias || 'norm',
         spinGain: this.settings.spinGain ?? 1, arcSens: this.settings.arcSens ?? 1,
       };
       racket = deriveStroke(m, ctx);
@@ -2390,7 +2630,8 @@ class Game {
     if (!ai.plan) return;
     // the bot only swings at the moment it committed to during the
     // backswing — that is what makes the shot readable in advance
-    if (!ai.readyToStrike(this.time) && V3.dist(b.p, ai.pos) > 0.22) return;
+    const aiSimNow = Number.isFinite(this.strokeTime) ? this.strokeTime : this.time;
+    if (!ai.readyToStrike(aiSimNow) && V3.dist(b.p, ai.pos) > 0.22) return;
     const reach = V3.dist(b.p, ai.pos);
     if (b.p.z > ai.pos.z + 0.08) return;
     if (reach > 0.42) return;
@@ -2554,45 +2795,54 @@ class Game {
      * drawn under the cursor — always, at every preset and aspect ratio.
      * `sens` is the player's sensitivity setting: it scales how far the bat
      * travels per pixel of cursor travel (1 = the exact map). */
-    const sens = clamp(Number.isFinite(MATCH_RULES.sensitivity) ? MATCH_RULES.sensitivity : 1, 0.55, 2.0);
+    const calSpeedK = (this._cal && Number.isFinite(this._cal.padSpeed))
+      ? lerp(0.84, 1.20, clamp(this._cal.padSpeed, 0, 1)) : 1;
+    const sens = clamp((Number.isFinite(MATCH_RULES.sensitivity) ? MATCH_RULES.sensitivity : 1) * calSpeedK, 0.55, 2.0);
     const px = clamp(0.5 + (pt.x - 0.5) * sens, 0, 1);
     const py = clamp(0.5 + (pt.y - 0.5) * sens, 0, 1);
-    /* Depth plane. Standing still the bat lives at the authored stance; a
-     * short ball steps the whole body in by up to ~0.5 m. The projection of
-     * x/y is then taken on the plane the bat is ACTUALLY on, so the parallax
-     * of the step does not move the blade away from the cursor. */
-    let planeZ = PADDLE_STANCE_Z;
+
+    /* Footwork depth plane (`this._footZ`): standing still the bat lives at
+     * PADDLE_STANCE_Z, while an incoming short or deep ball shifts the feet
+     * smoothly toward the optimal strike plane when `autoFootwork` is active. */
+    let wantFootZ = PADDLE_STANCE_Z;
     if (shortBall) {
-      const shortDepth = clamp(Math.min(o.reach ? o.reach.z : this.ball.p.z, this.ball.p.z) - 0.02,
+      wantFootZ = clamp(Math.min(o.reach ? o.reach.z : this.ball.p.z, this.ball.p.z) - 0.02,
         PADDLE_LIMITS.zStepIn, PADDLE_STANCE_Z);
-      planeZ = lerp(PADDLE_STANCE_Z, shortDepth, clamp(pad.stepIn || 0, 0, 1));
+    } else if (MATCH_RULES.autoFootwork && this.state === GS.RALLY && canReachShort) {
+      const pz = this.swipe && this.swipe.pressZone;
+      if (pz && pz.accepted && pz.shotId === this.shotId && pz.worldTarget && Number.isFinite(pz.worldTarget.z)) {
+        wantFootZ = clamp(pz.worldTarget.z, PADDLE_LIMITS.zStepIn, PADDLE_LIMITS.zFar);
+      } else {
+        const sc = this.strikeCorridor();
+        if (sc && sc.valid && Number.isFinite(sc.footZ)) {
+          wantFootZ = clamp(sc.footZ, PADDLE_LIMITS.zStepIn, PADDLE_LIMITS.zFar);
+        }
+      }
     }
-    /* Project onto the plane the blade is ACTUALLY on this frame, not the one
-     * it is heading for: during a step-in the two differ by up to half a
-     * metre, and inverting the wrong plane is a visible parallax offset —
-     * the exact class of "the racket is not where my cursor is" this rewrite
-     * exists to remove. The blade's own depth is the honest inverse. */
-    const projZ = clamp(pad.pos.z, PADDLE_LIMITS.zStepIn, PADDLE_LIMITS.zFar);
-    /* The pointer outranks the footwork assist. A leaned-in blade cannot be
-     * drawn low on the screen — it would pass through the table — so a player
-     * aiming at the bottom of the play area is asked to stand back instead of
-     * being ignored. Without this the cursor ran 21 % of the screen ahead of
-     * the blade for the whole of every short-ball lunge. */
-    let pointerDepth = false;
-    if (planeZ < PADDLE_STANCE_Z) {
-      const safe = depthForPointer(this._liveRig, this.R.aspect(), px, py, planeZ);
-      if (safe > planeZ + 1e-6) { planeZ = safe; pointerDepth = true; }
-    }
-    planeZ = quantizeDepth(planeZ);
-    const t = paddleTargetFromPointer(px, py, 0, 1,
+    this._footZ = expSmooth(Number.isFinite(this._footZ) ? this._footZ : PADDLE_STANCE_Z,
+      wantFootZ, shortBall ? 14 : 11, dt);
+
+    const zFootArg = (shortBall || (MATCH_RULES.autoFootwork && canReachShort && this._footZ < PADDLE_STANCE_Z - 0.02))
+      ? quantizeDepth(this._footZ) : undefined;
+    const t = pointerBladeSolve(
+      this._liveRig,
+      this.R.aspect(),
+      px,
+      py,
       this._ptTarget || (this._ptTarget = { tx: 0, ty: 0, tz: 0 }),
-      { rig: this._liveRig, aspect: this.R.aspect(), z: projZ });
+      { zFoot: zFootArg }
+    );
     let tx = t.tx;
     let ty = t.ty;
-    let tz = planeZ;             // depth is footwork, not pointer aim
+    let tz = t.tz;
+    const pointerDepth = !!t.zByPointer;
+    this._reachFwd = expSmooth(this._reachFwd || 0, t.reachFwd || 0, 9, dt);
+    this._reachTilt = this._reachFwd * REACH_SHELL.arcTilt;
+    if (!pointerDepth && MATCH_RULES.autoFootwork && canReachShort && Number.isFinite(this._footZ) && this._footZ > tz + 0.03) {
+      tz = clamp(this._footZ, PADDLE_LIMITS.zStepIn, PADDLE_LIMITS.zFar);
+    }
+
     // Position follow-through uses the SAME smoothed/clamped target path.
-    // A squared-sine envelope has zero velocity at both ends; never write
-    // an independent visual position over the simulation after its update.
     const ft = this.followThrough;
     if (ft && ft.active) {
       if (this.playerStrokeIntent(this.state === GS.SERVE_TOSS)) ft.active = false;
@@ -2605,27 +2855,7 @@ class Game {
       }
     }
 
-    /* On a new point the bat goes HOME first, and while that window is open
-     * the cursor is deliberately not obeyed. Without this the reset is
-     * cosmetic: the mapping is absolute, so a cursor sitting out at the edge
-     * pulls the bat straight back out on the very next pointermove — mice
-     * emit those constantly. Measured in the headless smoke run before this:
-     * 9 of 29 serves began with the bat up to 0.59 m off centre. The blend
-     * decays over the window, so control is handed back smoothly instead of
-     * snapping, and the cursor and the bat are never permanently divorced. */
     if (this.recenterT > 0) {
-      /* Hold the bat AT the centre for the first three quarters of the window
-       * and hand control back over the last one. Blending from the very first
-       * frame meant a cursor parked off centre only ever dragged the bat
-       * partway home: measured closest approach 0.098-0.212 m on 14 of 49
-       * serves, i.e. the "the bat returns to the centre on every serve"
-       * requirement was visibly not met even though the glide was running. */
-      /* While the window is open the target IS home. A decaying blend looked
-       * gentler but measurably failed: the target gave up on the centre
-       * before the blade could get there (a bat 1.1 m out reached only
-       * 0.33 m), and "the bat returns to the centre on every point" was
-       * false for exactly the quick serves it matters for. The glide itself
-       * is the visible part — the position filter below supplies it. */
       const kHome = 1;
       tx = lerp(tx, PADDLE_HOME.x, kHome);
       ty = lerp(ty, PADDLE_HOME.y, kHome);
@@ -2636,62 +2866,73 @@ class Game {
     // the stroke you choose, not about pixel-hunting a 40 mm sphere
     const serveSlide = this.state === GS.SERVE_TOSS && this.server === 1 &&
       this.ball.lastHitBy === 0 && this.recenterT <= 0;
-    /* Not while the bat is still gliding home: the requirement is that the bat
-     * returns to the centre on EVERY new point, and a player who serves the
-     * instant the point ends would otherwise have the toss assist yank the bat
-     * sideways mid-glide. Measured in the headless matches: 43/45 serves
-     * re-centred, worst 0.234 m off, because the toss slide ran on top of the
-     * re-centring window. Half a second of glide first, then the slide. */
     if (serveSlide) {
       const k = 0.55 + 0.45 * A;
       tx = lerp(tx, this.ball.p.x, k);
       tz = lerp(tz, this.ball.p.z + 0.02, k);
-      /* Stay under the toss even while the serve swipe goes up the screen —
-         that flick is the STROKE, not a command to lift the bat off the ball. */
       const under = this.ball.p.y - 0.04;
       ty = lerp(ty, under, this.ball.v.y < 0 ? k : 0.45 * A);
     }
-    /* The old position assist pulled the blade toward the ball by up to
-     * 0.85 of the distance. That is exactly what a player experiences as
-     * "the racket is not where my cursor is", and with the reach box now
-     * covering the whole table there is nothing left for it to rescue: the
-     * capture radius already forgives a near miss. Only the depth assist
-     * survives, inside the step-in above. */
-    /* The follow-through and the toss slide are the only intentional offsets,
-     * and both are transient. A guard keeps a big swing from painting the
-     * blade off the edge of the play rectangle. */
+
+    /* Rally stroke contact anchor: once an admitted gesture is actively
+     * swinging (`rallyIntent != null`) at an incoming ball, keep the blade on
+     * the ball's post-bounce 3D intercept while the finger draws the stroke's
+     * direction & spin vector across the screen. Never engages during hover,
+     * stationary hold prior to release, or un-admitted presses. */
+    const rallyStrokeActive = !serveSlide && this.recenterT <= 0 &&
+      this.state === GS.RALLY && this.ball.live && this.ball.lastHitBy === -1 &&
+      !(this.isServeBall && this.ball.lastHitBy === -1) &&
+      this.pressAdmitsBall();
+    this._lockDbg = { active: rallyStrokeActive };
+    if (rallyStrokeActive) {
+      const rallyIntent = this.playerStrokeIntent(false);
+      this._lockDbg.intent = !!rallyIntent;
+      if (rallyIntent) {
+        const pz = this.swipe && this.swipe.pressZone;
+        const sc = this.strikeCorridor();
+        let mx = NaN, my = NaN, mz = NaN;
+        const ownBounced = this.rallyBounces.some(s => s > 0);
+        if (ownBounced) {
+          const dtMeet = (this.ball.v.z > 0.25 && Number.isFinite(tz) && tz > this.ball.p.z)
+            ? clamp((tz - this.ball.p.z) / this.ball.v.z, 0, 0.14) : 0;
+          mx = this.ball.p.x + this.ball.v.x * dtMeet;
+          my = this.ball.p.y + this.ball.v.y * dtMeet - 0.5 * PH.G * dtMeet * dtMeet;
+          mz = clamp(this.ball.p.z + this.ball.v.z * dtMeet, PADDLE_LIMITS.zStepIn, PADDLE_LIMITS.zFar);
+        } else if (sc && sc.valid && sc.primary && sc.primary.t <= 0.34) {
+          mx = sc.primary.x; my = sc.primary.y; mz = sc.primary.z;
+        } else if (pz && pz.worldTarget) {
+          mx = pz.worldTarget.x; my = pz.worldTarget.y; mz = pz.worldTarget.z;
+        }
+        this._lockDbg = { ownBounced, mx, my, mz, intent: !!rallyIntent, active: rallyStrokeActive };
+        if (Number.isFinite(mx) && Number.isFinite(my) && Number.isFinite(mz)) {
+          const kLock = ownBounced ? 0.90 : 0.72;
+          tx = lerp(tx, mx, kLock);
+          ty = lerp(ty, my, kLock);
+          tz = lerp(tz, mz, kLock);
+        }
+      }
+    }
+
     if (this.camVPReady) {
       t.tx = tx; t.ty = ty; t.tz = tz;
       clampPaddleToFrustum(this.camVP, t, 0.012);
       tx = t.tx; ty = t.ty; tz = t.tz;
     }
-    /* Limits come from the plane the blade is ON, not the one it is heading
-     * for: during a step-in the target is up to 0.2 m deeper, and clamping
-     * against the deeper plane's (higher) floor made the blade ride up the
-     * table edge for the frames the two disagreed. */
-    const lim = paddleLimitsFor(projZ);
-    tx = clamp(tx, -lim.x, lim.x);
-    ty = clamp(ty, PH.TABLE_Y + lim.yLo, PH.TABLE_Y + lim.yHi);
-    tz = clamp(tz, zNear, PADDLE_LIMITS.zFar);
 
-    // re-centring after a point is a visible glide, not a teleport
-    /* 20, not 13: the glide has to be over before a quick player can strike the
-     * serve, or "the bat returns to the centre" is only true for people who
-     * wait. Still visibly a glide (0.2-0.3 s), not a teleport. */
-    /* 55 is a one-frame follow at 60 Hz. The map is exact, so any slower
-     * filter is visible as the blade trailing the cursor during a fast drag —
-     * the very complaint this rewrite exists to fix. Re-centring has to
-     * actually ARRIVE inside its own 0.3 s window, so it runs at 32: a 1 m
-     * correction lands within 0.15 s, still as a glide and not a teleport. */
-    const rate = this.recenterT > 0 ? 32 : 55;
+    const lim = paddleLimitsFor(clamp(tz, PADDLE_LIMITS.zStepIn, PADDLE_LIMITS.zFar));
+    tx = clamp(clamp(tx, -REACH_SHELL.xHard, REACH_SHELL.xHard), -lim.x, lim.x);
+    ty = clamp(clamp(ty, PH.TABLE_Y + REACH_SHELL.yLoHard, PH.TABLE_Y + REACH_SHELL.yHiHard),
+      PH.TABLE_Y + lim.yLo, PH.TABLE_Y + lim.yHi);
+    tz = clamp(tz, PADDLE_LIMITS.zStepIn, PADDLE_LIMITS.zFar);
+
+    const calRate = (this._cal && Number.isFinite(this._cal.padSmooth))
+      ? lerp(68, 36, clamp(this._cal.padSmooth, 0, 1)) : 55;
+    const rate = this.recenterT > 0 ? 32 : calRate;
+    const zDrive = pointerDepth || this._reachFwd > 1e-4;
+    this._padTarget = { tx, ty, tz, rate, lock: rallyStrokeActive && !!(this.swipe && this.swipe.realGestureId === this.swipe.gestureId), footZ: this._footZ };
     pad.pos.x = expSmooth(pad.pos.x, tx, rate, dt);
     pad.pos.y = expSmooth(pad.pos.y, ty, rate, dt);
-    /* The blade follows the cursor on the plane it stands on, so a depth that
-     * the POINTER asked for must be reached at the same speed as the blade
-     * itself — lagging it is what leaves the blade a row above the cursor for
-     * the length of the transition. Depth asked for by the footwork assist
-     * keeps its slow, visible glide. */
-    pad.pos.z = expSmooth(pad.pos.z, tz, rate * (pointerDepth ? 1 : 0.7), dt);
+    pad.pos.z = expSmooth(pad.pos.z, tz, rate * (zDrive ? 1 : 0.7), dt);
     V3.sub(pad.vel, pad.pos, pad.prevPos);
     V3.mul(pad.vel, pad.vel, 1 / Math.max(dt, 1e-4));
 
@@ -2827,7 +3068,7 @@ class Game {
     if (this.paused || (this.replayer && this.replayer.on)) { w.k = 0; return; }
     if (this.state === GS.SERVE_TOSS && this.server === 1 && b.live && b.lastHitBy === 0) {
       // No ready circle on the paddle and no "hit now" while the toss rises.
-      if (b.v.y < 0 && this.tossRiseNow() > MATCH_RULES.serveTossMinRise) {
+      if (b.v.y < 0 && this.tossRiseNow() >= MATCH_RULES.serveTossMinRise - 1e-6) {
         w.on = true; w.kind = 'serve'; w.t = 0;
         w.contactable = playerInCaptureRange(b.p, pad.pos, true) || playerGraceRange(b.p, pad.pos, true);
         w.ready = w.contactable ? 1 : .4;
@@ -2942,31 +3183,30 @@ class Game {
 
   updateCamera(dt) {
     const aspect = this.R.aspect();
-    /* Pure function of (preset, aspect). It is applied to the live camera the
-     * same frame it is computed — no easing toward a destination — because
-     * the pointer map inverts EXACTLY this projection. Easing meant the bat
-     * was placed for a camera that was still 40 ms away, which is one of the
-     * reasons the cursor and the blade drifted apart during a resize. */
-    const rig = cameraRigFor(this.settings.camera, null, aspect, this.camRig);
+    const rig = cameraRigFor(this.settings.camera, null, aspect, this.camRig, {
+      zoom: this.settings.camZoom,
+      pitch: this.settings.camPitch,
+    });
+    const swayAmt = (this._swayCal !== undefined && Number.isFinite(this._swayCal) && !this.reducedMotion && this.ball && this.ball.live)
+      ? clamp(this.ball.p.x * 0.08 * clamp(this._swayCal, 0, 1), -0.09, 0.09) : 0;
     V3.set(this.camPos, rig.eye.x, rig.eye.y, rig.eye.z);
-    V3.set(this.camLook, rig.look.x, rig.look.y, rig.look.z);
+    V3.set(this.camLook, rig.look.x + swayAmt, rig.look.y, rig.look.z);
     V3.set(this.camPosT, rig.eye.x, rig.eye.y, rig.eye.z);
-    V3.set(this.camLookT, rig.look.x, rig.look.y, rig.look.z);
-    this.fov = this.fovT = rig.fov;
+    V3.set(this.camLookT, rig.look.x + swayAmt, rig.look.y, rig.look.z);
+    this.fovT = rig.fov;
+    if (!Number.isFinite(this.fov) || Math.abs(this.fov - rig.fov) > 8) this.fov = rig.fov;
     this.camShiftY = rig.shiftY;
     this.applyCamera(dt);
 
-    /* HUD and paddle constraints share the actual shifted projection. */
+    /* HUD and paddle constraints share the exact un-pulsed rig projection so
+     * pointerBladeSolve never shifts during impact FOV punches. */
     const lrig = this._liveRig;
-    V3.copy(lrig.eye, this.camPos);
-    V3.copy(lrig.look, this.camLook);
-    lrig.fov = this.fov;
+    V3.set(lrig.eye, rig.eye.x, rig.eye.y, rig.eye.z);
+    V3.set(lrig.look, rig.look.x + swayAmt, rig.look.y, rig.look.z);
+    lrig.fov = rig.fov;
     lrig.shiftY = this.camShiftY;
     this.camVP = rigViewProj(lrig, aspect, this._rigBuf);
     this.camVPReady = true;
-    /* The reading band is authored, not derived from the table: the whole
-     * point of the new framing is that the strip below the play area stays
-     * the same height whatever the device. */
     this.hudBandY = PLAY_BAND_Y;
     const css = PLAY_BAND_Y.toFixed(4);
     if (css !== this._bandCss) {
@@ -3396,11 +3636,14 @@ class Game {
       V3.copy(this.spinIndicator.w, this.ball.w);
       const spinMag = V3.len(this.ball.w);
       if (spinMag > 50) {
-        // Color based on spin type
+        // Color based on spin type relative to ball flight direction:
+        // topspin = orange, backspin = blue-cyan, right/left sidespin = green/violet
+        const travelSign = this.ball.v.z < 0 ? 1 : -1;
+        const topSigned = -travelSign * this.ball.w.x;
         if (Math.abs(this.ball.w.x) > Math.abs(this.ball.w.y)) {
-          this.spinIndicator.color = this.ball.w.x > 0 ? [1, 0.5, 0.1] : [1, 0.2, 0.2];
+          this.spinIndicator.color = topSigned > 0 ? [1, 0.52, 0.12] : [0.22, 0.68, 1];
         } else {
-          this.spinIndicator.color = this.ball.w.y > 0 ? [0.1, 0.8, 0.4] : [0.2, 0.4, 1];
+          this.spinIndicator.color = this.ball.w.y > 0 ? [0.1, 0.85, 0.45] : [0.78, 0.35, 1];
         }
       } else {
         this.spinIndicator.color = [0.8, 0.8, 0.8];
@@ -3409,14 +3652,18 @@ class Game {
       this.spinIndicator.active = false;
     }
 
-    // Update momentum
+    // Update momentum (once per scored point, never per animation frame)
     if (this.settings.momentumBar) {
-      if (this.lastPoint && this.lastPoint.who > 0) {
-        this.momentum.streak++;
-        this.momentum.target = Math.min(1, this.momentum.streak / 5);
-      } else if (this.lastPoint && this.lastPoint.who < 0) {
-        this.momentum.streak = 0;
-        this.momentum.target = 0;
+      const ptSeq = this.lastPoint ? (this.lastPoint.seq || this.lastPoint.at || 1) : 0;
+      if (ptSeq && ptSeq !== this._momentumSeenSeq) {
+        this._momentumSeenSeq = ptSeq;
+        if (this.lastPoint.who > 0) {
+          this.momentum.streak++;
+          this.momentum.target = Math.min(1, this.momentum.streak / 5);
+        } else if (this.lastPoint.who < 0) {
+          this.momentum.streak = 0;
+          this.momentum.target = 0;
+        }
       }
       this.momentum.current = expSmooth(this.momentum.current, this.momentum.target, 3, dtReal);
     }
@@ -3659,13 +3906,16 @@ class Game {
       let col, k;
       const grade = this.ball.trailGrade && this.ball.lastHitBy === 1 ? this.ball.trailGrade : null;
       if (grade) {
-        /* ВЕРДИКТЫ — чистые сигнальные цвета, без примесей:
-         * зелёный = в зону и в тайминг, жёлтый = на грани, красный = мимо */
-        col = { green: [0.18, 1.0, 0.42], yellow: [1.0, 0.80, 0.16], red: [1.0, 0.13, 0.12] }[grade];
+        if (grade === 'green' && Array.isArray(this._customTrailCol)) {
+          col = this._customTrailCol;
+        } else {
+          col = { green: [0.18, 1.0, 0.42], yellow: [1.0, 0.80, 0.16], red: [1.0, 0.13, 0.12] }[grade];
+        }
         k = grade === 'green' ? 1.0 : 0.9;
+      } else if (this.ball.lastHitBy === 1 && Array.isArray(this._customTrailCol)) {
+        col = this._customTrailCol;
+        k = 0.72;
       } else {
-        /* нейтральные полёты (бот, до касания): приглушённый БЕЛЫЙ без
-         * оттенка — никаких синих и оранжевых следов, лишних «языков» цвета */
         col = [0.9, 0.92, 0.95];
         k = 0.4;
       }

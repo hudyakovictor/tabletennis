@@ -133,6 +133,16 @@
         x: p && p.ok ? p.x : 0.5, y: p && p.ok ? p.y : 0.6 });
       return r;
     });
+    wrap(g, '_tryPassiveBlock', function (orig) {
+      const ok = orig.apply(null, [].slice.call(arguments, 1));
+      if (ok && !lobby) {
+        if (att) { att.contact = true; att.sweet = 0.72; flush(); }
+        const p = this.ball && this.ball.p ? this.project(this.ball.p, {}) : null;
+        post('hit', { by: 1, rally: this.rally, kmh: Math.round(V3.len(this.ball.v) * 3.6),
+          stroke: 'BLOCK', sweet: 0.72, x: p && p.ok ? p.x : 0.5, y: p && p.ok ? p.y : 0.6 });
+      }
+      return ok;
+    });
     /* The game pauses itself on window blur. Inside the host that fires every
      * time the player touches a host button (pause, skip, dev) — focus leaves
      * the iframe — and would freeze the drill with no visible reason. In
@@ -383,13 +393,40 @@ const showTip = (text) => { if (text) tip = { text, until: g.time + 4.6 }; };
       g._idleStill = true;              // updatePlayerPaddle не трогает сцену
     };
 
+    const baseTableCol = g.scene && g.scene.mat && g.scene.mat.table && g.scene.mat.table.color
+      ? g.scene.mat.table.color.slice() : null;
+    const applyHostEquip = (eq) => {
+      if (!eq || typeof eq !== 'object' || !g.equip) return;
+      const bladeMap = { 'b-ink': 'b_carb' };
+      const rubberMap = { 'r-coral': 'r_tops', 'r-void': 'r_hyb', 'r-teal': 'r_ctl' };
+      const bId = bladeMap[eq.blade] || 'b_base';
+      const rId = rubberMap[eq.rubber] || 'r_base';
+      g.equip.set(bId, rId, rId);
+      if (eq.blade === 'b-ink') {
+        g.equip.colours.wood = [0.23, 0.26, 0.56];
+        g.equip.colours.grip = [0.12, 0.14, 0.28];
+      }
+      if (eq.rubber === 'r-coral') g.equip.colours.fore = [1.0, 0.29, 0.24];
+      else if (eq.rubber === 'r-void') g.equip.colours.fore = [0.62, 0.42, 1.0];
+      else if (eq.rubber === 'r-teal') g.equip.colours.fore = [0.08, 0.78, 0.71];
+      g.equip._tintKey = [eq.blade || '', eq.rubber || ''].join(':');
+
+      if (eq.trail === 't-gold') g._customTrailCol = [1.0, 0.79, 0.23];
+      else if (eq.trail === 't-coral') g._customTrailCol = [1.0, 0.48, 0.30];
+      else g._customTrailCol = null;
+
+      if (g.scene && g.scene.mat && g.scene.mat.table && baseTableCol) {
+        g.scene.mat.table.color = eq.table === 'tb-neon' ? [0.07, 0.24, 0.38] : baseTableCol.slice();
+      }
+    };
+
     /* ---------------------------- commands -------------------------- */
     window.addEventListener('message', (e) => {
       const m = e.data;
       if (!m || m.__tt !== 1) return;
       // only commands that need a visible, running arena wake it; 'attract'/'quit' just set the scene
       // behind a hidden layer (menus, matchmaking) and must not restart full-rate rendering there
-      if (!['sleep', 'mute', 'quality', 'rm', 'debug', 'hint', 'attract', 'quit', 'quiet', 'pause', 'resume', 'locale', 'missShots'].includes(m.type)) wake();
+      if (!['sleep', 'mute', 'haptics', 'equip', 'quality', 'rm', 'debug', 'hint', 'attract', 'quit', 'quiet', 'pause', 'resume', 'locale', 'missShots'].includes(m.type)) wake();
       switch (m.type) {
         case 'sleep': sleeping = true; break;      // frozen in place: update is skipped, so nothing advances
         case 'wake': break;
@@ -448,6 +485,8 @@ const showTip = (text) => { if (text) tip = { text, until: g.time + 4.6 }; };
           else if (ui) ui.captureDebug = !!m.on;
           break;
         case 'mute': g.settings.sound = !m.on; g.audio.setMuted(!!m.on); break;
+        case 'haptics': g.settings.haptics = !!m.on; break;
+        case 'equip': applyHostEquip(m.equipped || m); break;
         case 'quality': {
           const q = { high: 'high', mid: 'medium', low: 'low' }[m.q] || 'high';
           g.settings.quality = q; g.R.quality = q; g.resize(); break;
@@ -471,7 +510,16 @@ const showTip = (text) => { if (text) tip = { text, until: g.time + 4.6 }; };
            * сила 0.5..1.6 (нейтраль ~45), чувствительность дуги 0.6..1.8 (~33). */
           if (K === 'spinGain') g.settings.spinGain = 0.5 + V * 1.1;
           if (K === 'arcSens') g.settings.arcSens = 0.6 + V * 1.2;
-          if (K === 'trailLen' || K === 'ballSize' || K === 'padSpeed' || K === 'padSmooth') { /* читаются напрямую из g._cal */ }
+          /* Свечение стола: слайдер приходил, но движок его не читал — стол
+           * оставался одинаковым при любом значении. Эмиссия стола теперь
+           * масштабируется, а базовый цвет/текстуру не трогаем. */
+          if (K === 'tableGlow' && g.scene && g.scene.mat && g.scene.mat.table) {
+            const k = clamp(V, 0, 1);
+            g.scene.mat.table = Object.assign({}, g.scene.mat.table, {
+              emissive: [0.018 * k, 0.042 * k, 0.10 * k],
+            });
+          }
+          if (K === 'trailLen' || K === 'ballSize' || K === 'padSpeed' || K === 'padSmooth' || K === 'hintRadius') { /* читаются напрямую из g._cal */ }
           break;
         }
       }

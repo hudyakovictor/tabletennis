@@ -202,7 +202,8 @@ class OpponentAI {
   /** Full reset between matches */
   reset() {
     this.phase = 'IDLE'; this.plan = null; this.commit = null;
-    this.readT = 0; this.seenBallId = -1;
+    this.readT = 0; this.seenBallId = -1; this._seenNetTouched = false; this._tacticRally = 0;
+    this.maxSpeed = this.L.move;
     this.exchange = 0; this.pace = this.L.paceOpen;
     this.tactic = AI_TACTICS.FEEL;
     this.mood = 0; this.pressure = 0; this.handicap = 1;
@@ -459,37 +460,46 @@ class OpponentAI {
         predict(V3.clone(ball.p), V3.clone(ball.v), V3.clone(ball.w),
           { dt: 1 / 240, maxT: interceptT, out: q });
       }
+      const simNow = Number.isFinite(game.strokeTime) ? game.strokeTime : game.time;
       return {
         x: q.end.x,
         y: clamp(q.end.y, PH.TABLE_Y + 0.04, PH.TABLE_Y + 0.80),
         z: clamp(q.end.z, -2.15, -1.00),
-        t: game.time + interceptT,
+        t: simNow + interceptT,
         speed: V3.len(q.endV),
         bounceT: o.landed.t,
         short: o.landed.z > -0.55,
         wide: Math.abs(o.landed.x) > PH.T_HALF_WID * 0.58,
         willLandIn: Math.abs(o.landed.x) <= PH.T_HALF_WID + PH.R,
+        errUnitX: gauss(1),
+        errUnitY: gauss(1),
       };
     }
     if (o.reach) {
+      const simNow = Number.isFinite(game.strokeTime) ? game.strokeTime : game.time;
       return {
         x: o.reach.x, y: clamp(o.reach.y, PH.TABLE_Y + 0.04, PH.TABLE_Y + 0.95),
         z: clamp(o.reach.z, -2.45, -1.05),
-        t: game.time + o.reachT, speed: 8, bounceT: 0, short: false, wide: false,
+        t: simNow + o.reachT, speed: 8, bounceT: 0, short: false, wide: false,
         willLandIn: true,
+        errUnitX: gauss(1),
+        errUnitY: gauss(1),
       };
     }
     return null;
   }
 
-  /** Anticipation noise */
+  /** Anticipation noise — coherent per-shot read error that sharpens as ball approaches */
   noisyTarget(plan, game) {
     const L = this.L;
-    const lead = clamp(plan.t - game.time, 0, 1.2);
-    const blur = L.posErr * (0.45 + lead * 1.25) / this.handicap;
+    const simNow = Number.isFinite(game.strokeTime) ? game.strokeTime : game.time;
+    const lead = clamp(plan.t - simNow, 0, 1.2);
+    const blur = L.posErr * (0.35 + lead * 1.15) / this.handicap;
+    const ex = Number.isFinite(plan.errUnitX) ? plan.errUnitX : 0;
+    const ey = Number.isFinite(plan.errUnitY) ? plan.errUnitY : 0;
     return {
-      x: clamp(plan.x + gauss(blur), -1.12, 1.12),
-      y: clamp(plan.y + gauss(blur * 0.42), PH.TABLE_Y - 0.05, PH.TABLE_Y + 0.96),
+      x: clamp(plan.x + ex * blur, -1.12, 1.12),
+      y: clamp(plan.y + ey * blur * 0.42, PH.TABLE_Y - 0.05, PH.TABLE_Y + 0.96),
       z: clamp(plan.z - 0.055, -2.5, -1.05),
     };
   }
@@ -588,7 +598,7 @@ class OpponentAI {
 
   /** Build a solved stroke without mutating the live ball */
   swing(game) {
-    const now = game.time;
+    const now = Number.isFinite(game.strokeTime) ? game.strokeTime : game.time;
     if (!this.commit || now < this.swingAt) return null;
 
     const ball = game.ball;
@@ -831,7 +841,7 @@ class OpponentAI {
 
   /** Think - main AI update */
   think(game, dt) {
-    const now = game.time;
+    const now = Number.isFinite(game.strokeTime) ? game.strokeTime : game.time;
     const ball = game.ball;
 
     // Update readiness
@@ -839,8 +849,9 @@ class OpponentAI {
     if (!incoming) {
       this.plan = null; this.commit = null; this.phase = 'IDLE';
     }
-    if (incoming && this.seenBallId !== game.shotId) {
+    if (incoming && (this.seenBallId !== game.shotId || !!game.netTouched !== !!this._seenNetTouched)) {
       this.seenBallId = game.shotId;
+      this._seenNetTouched = !!game.netTouched;
       this.plan = null; this.commit = null; this.phase = 'IDLE';
     }
     if (incoming && ball.golden === 'win') {
@@ -870,9 +881,12 @@ class OpponentAI {
       }
     }
 
-    // Update tactic based on rally progression
-    if (game.rally > 0 && game.rally % 5 === 0) {
+    // Update tactic once per rally milestone (not 60 times/sec while rally === 5)
+    if (game.rally > 0 && game.rally % 5 === 0 && this._tacticRally !== game.rally) {
+      this._tacticRally = game.rally;
       this.tactic = this.rollTactic();
+    } else if (game.rally === 0) {
+      this._tacticRally = 0;
     }
 
     // Update pace based on rally
@@ -886,8 +900,9 @@ class OpponentAI {
       const t = this.noisyTarget(this.plan, game);
       V3.copy(this.target, t);
 
-      // Smooth movement
-      const moveRate = clamp(this.L.move * 2.5, 2, 12);
+      // Smooth movement (respects Career maxSpeed slowdown modifier if active)
+      const moveBase = Number.isFinite(this.maxSpeed) && this.maxSpeed > 0 ? this.maxSpeed : this.L.move;
+      const moveRate = clamp(moveBase * 2.5, 2, 12);
       this._moveSmooth.x = expSmooth(this._moveSmooth.x, this.target.x, moveRate, dt);
       this._moveSmooth.y = expSmooth(this._moveSmooth.y, this.target.y, moveRate, dt);
       this._moveSmooth.z = expSmooth(this._moveSmooth.z, this.target.z, moveRate * 0.9, dt);
