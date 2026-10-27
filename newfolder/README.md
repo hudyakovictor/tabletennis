@@ -38,6 +38,23 @@
 8. `08-implementation-plan.md` — этапы и приоритеты.
 9. `09-api-contracts.md` — контракты между зонами и директором.
 10. `10-checklist.md` — чек-лист перед запуском.
+11. `11-latency-netcode.md` — пинг, rollback, интерполяция.
+12. `12-regional-servers.md` — мультирегион, гео-DNS.
+13. `13-telegram-miniapp-latency.md` — пинг в Telegram Mini Apps.
+14. `14-observability-runbooks.md` — мониторинг, алерты, runbooks.
+15. `15-liveops-content-plan.md` — LiveOps, контент-план, сообщество.
+16. `16-legal-player-agreements.md` — ToS, Privacy Policy, согласия.
+
+## CRM и Telegram-бот
+
+Помимо чата с директором, в CRM есть дашборд с ключевыми метриками.
+
+Отдельный Telegram-бот дублирует данные:
+
+- Push: критичные алерты, ежедневная сводка.
+- Pull: команды `/status`, `/ping`, `/errors`, `/players`, `/revenue`, `/ai`, `/fraud`.
+
+Бот позволяет получать основные данные без захода в CRM.
 
 ## Текущее решение по ИИ
 
