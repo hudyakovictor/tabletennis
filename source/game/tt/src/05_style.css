@@ -643,3 +643,13 @@ body:not(.is-playing) #topright{visibility:hidden;pointer-events:none}
 #settings input.rng{flex:1;appearance:none;height:6px;border-radius:3px;background:linear-gradient(90deg,#2ec9ff,#3bf5a0);outline:none}
 #settings input.rng::-webkit-slider-thumb{appearance:none;width:18px;height:18px;border-radius:50%;background:#fff;border:2px solid #2ec9ff;box-shadow:0 2px 8px #000c}
 #settings .bn{font:600 11px/1.2 var(--ui);letter-spacing:.08em;color:#9fb4e8;white-space:nowrap;min-width:120px;text-align:left}
+
+/* Opt-in local diagnostics on the standalone pause screen. */
+#diagMark{position:absolute;bottom:max(14px,env(safe-area-inset-bottom));left:50%;transform:translateX(-50%);z-index:5;border-color:rgba(255,104,92,.65);color:#fff}
+#diagMark[hidden],#diagnosticPreview[hidden],#diagnosticReportLink[hidden],#diagnosticTextButton[hidden],#diagnosticText[hidden]{display:none!important}
+.pause-actions{max-height:68vh;overflow-y:auto;overscroll-behavior:contain;padding:4px}
+.diagnostic-pause{flex-basis:100%;max-width:500px;padding:9px 12px;border:1px solid var(--line);border-radius:12px;background:rgba(3,7,14,.85);text-align:left}
+.diagnostic-pause p{margin:4px 0 8px;color:var(--dim);font:11px/1.45 var(--ui);text-transform:none;letter-spacing:0}
+.diagnostic-pause a{display:inline-flex;align-items:center;text-decoration:none}
+#diagnosticPreview img{display:block;max-width:100%;max-height:34vh;margin:8px auto;border-radius:8px;object-fit:contain;user-select:auto;-webkit-user-select:auto;-webkit-touch-callout:default}
+#diagnosticText{width:100%;min-height:100px;padding:8px;border:1px solid var(--line);background:#0c1522;color:#fff;font:11px/1.4 monospace;user-select:text;-webkit-user-select:text}
