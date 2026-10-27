@@ -1902,6 +1902,62 @@ class Game {
     return true;
   }
 
+  /* Спасение по обещанию экранного гейта. Нажатие допущено и палец держится
+   * внутри живого овала, но 3D-конверт захвата мяч не поймал (экранный гейт
+   * в px и физический цилиндр в метрах — разные модели, это остаточные FAIL
+   * аудита A01/A06/D01). В момент, когда мяч пересекает плоскость биты и
+   * визуально лежит внутри штампа зоны, оформляем СЛАБЫЙ блок: честная
+   * физика отражения без телепорта ракетки. Силовой удар по-прежнему требует
+   * реального замаха — здесь только возврат мяча в розыгрыш. */
+  _tryGateRescue(pad, b, p0, m) {
+    if (!this.swipe || !this.swipe.active) return false;              // только пока палец на стекле
+    const pz = this.swipe.pressZone;
+    if (!pz || pz.accepted !== true || pz.serving || pz.kind === 'serve-toss') return false;
+    if (this.pressConsumed()) return false;
+    if (b.lastHitBy === 1) return false;
+    if (!Array.isArray(this.rallyBounces) || !this.rallyBounces.some((s) => s > 0)) return false; // ITTF 2.07
+    /* У реального взмаха направление уже могло быть отклонено: спасение не
+     * имеет права воскрешать такой жест. У удержания m=null — оно блок. */
+    if (m && !this.validatePressDirection(m)) return false;
+    if (!ContactSystem.gateCoversBall(this, b, pz)) return false;
+    /* Мяч на плоскости биты: пересечение за этот подшаг либо глубина внутри
+     * grace-конверта. Далеко за плоскостью (визуально мимо ракетки) — нет. */
+    const dz = b.p.z - pad.pos.z;
+    const dz0 = p0 && Number.isFinite(p0.z) ? p0.z - pad.pos.z : dz;
+    const crossing = dz0 * dz <= 0 && Math.abs(dz - dz0) < 0.5;
+    const inDepth = Math.abs(dz) <= MATCH_RULES.depthTolerance * GRACE_RULES.depthMul;
+    if (!(crossing || inDepth)) return false;
+    /* Защита от фантома: латеральный разрыв не больше grace-кольца. */
+    const lateral = Math.hypot(b.p.x - pad.pos.x, b.p.y - pad.pos.y);
+    if (lateral > MATCH_RULES.captureRadius * GRACE_RULES.bandMul) return false;
+    const n = V3.norm(V3.new(), pad.normal);
+    if (n.x * b.v.x + n.y * b.v.y + n.z * b.v.z > 0) return false;      // грань отвернута
+    const gripped = playerWristPose(pad.pos, pad.vel, this.settings.hand, { grip: this.settings.grip, forehand: pad.forehand });
+    const rubber = this.equip ? (this.equip.forSide(gripped.forehand ? 1 : -1) || {}) : {};
+    const vR = V3.mul(V3.new(), pad.vel || V3.new(), 0.4);
+    vR.z -= 0.9;                                        // лёгкий выпад навстречу, как у «стенки»
+    const v0 = V3.clone(b.v), w0 = V3.clone(b.w);
+    const info = impactRacket(b.v, b.w, n, vR, GRACE_RULES.quality, rubber);
+    if (!info) { V3.copy(b.v, v0); V3.copy(b.w, w0); return false; }
+    V3.addScaled(b.p, b.p, n, PH.R * 0.6);              // отлепить от грани для следующего CCD
+    b.lastHitBy = 1;
+    pad.lastHitT = this.time;
+    pad.swing = 1;
+    const motion = this.paddleMotion || (this.paddleMotion = new PaddleStrokeMotion());
+    motion.contact(n, pad.roll || 0, 'BLOCK', this.settings.grip, this.settings.hand,
+      gripped.forehand, this.settings.followThrough !== false);
+    if (this.audio && this.audio.hitRacket) this.audio.hitRacket(V3.len(b.v) + 1.2, 0.45, true);
+    this.msg('ДОСТАЛ!', 0.7, '#bfffc8');
+    this.buzz([4, 10]);
+    this.emitParticles(b.p.x, b.p.y, b.p.z, 5, 0.5, 0.25, 0.010, 0.62, 0.82, 1);
+    if (this.stats) this.stats.blocks = (this.stats.blocks || 0) + 1;
+    if (this.shotJournal && typeof this.shotJournal.noteOutcome === 'function')
+      this.shotJournal.noteOutcome('GATE_RESCUE', { lateral, depthGap: Math.abs(dz) });
+    this.logInput('contact', { outcome: { contact: true, route: 'gate_rescue',
+      distanceM: V3.dist(b.p, pad.pos), lateral, depthGap: Math.abs(dz) } });
+    return true;
+  }
+
   /* Пост-верификация итогового удара игрока: та же идея, что у AI
    * (_flightLegal), но с игровой стороны стола. Решатель при ассисте <1
    * может вернуть формально valid удар, который в физике идёт в сетку или
@@ -2085,6 +2141,9 @@ class Game {
        * позицию (стал реальным ударом). Удержание без движения само по себе
        * не отражает мяч; короткий тап распознаётся отдельно при отпускании. */
       if (!serveCtx && this._tryPassiveBlock(pad, b)) { this.debugRecording && this.diagnosticPhysicsGate('passive_block'); return; }
+      /* Удержание без квалифицировавшегося замаха: если нажатие допущено и
+       * мяч визуально внутри живой зоны на плоскости биты — слабый блок. */
+      if (!serveCtx && this._tryGateRescue(pad, b, p0, null)) { this.debugRecording && this.diagnosticPhysicsGate('gate_rescue'); return; }
       this.debugRecording && this.diagnosticPhysicsGate('no_stroke_intent', { serving: serveCtx });
       this.logNoStrokeIntent(serveCtx);
       return;
@@ -2177,6 +2236,9 @@ class Game {
       hit = this.sweepPaddle(spad, p0, b.p, serveCtx ? serveReach : reachRadius);
     }
     if (!hit) {
+      /* 3D-конверт промахнулся, но экранный гейт обещал контакт: спасительный
+       * слабый блок, пока мяч на плоскости биты и визуально внутри штампа. */
+      if (!serveCtx && this._tryGateRescue(pad, b, p0, m)) { this.debugRecording && this.diagnosticPhysicsGate('gate_rescue', gateDetail || {}); return; }
       this.debugRecording && this.diagnosticPhysicsGate('no_intersection', gateDetail || { capture: captureSample });
       this.logNoContactReason(captureSample, serveCtx); return;
     }

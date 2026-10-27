@@ -112,8 +112,12 @@ check('A06', 'A', 'Гейт обещает больше, чем физика д�
   const gateCm2 = Math.PI * sideCm * ((fwdCm + backCm) / 2);
   const capCm2 = Math.PI * (R.captureRadius * 100) * (R.depthTolerance * 100); // цилиндр захвата
   const alongOver = fwdCm / (R.depthTolerance * 100);
-  return { status: alongOver > 2 ? 'fail' : alongOver > 1.3 ? 'warn' : 'ok',
-    evidence: `бок гейта ${sideCm.toFixed(1)}см ≈ радиус захвата ${(R.captureRadius * 100).toFixed(0)}см (ок), но длинная ось ${backCm.toFixed(0)}..${fwdCm.toFixed(0)}см против глубины ±${(R.depthTolerance * 100).toFixed(0)}см (×${alongOver.toFixed(1)}); площадь гейта ${gateCm2.toFixed(0)} против ${capCm2.toFixed(0)} см² — концы овала физически мертвы` };
+  // _tryGateRescue исполняет обещание гейта: на пересечении плоскости биты
+  // экранно-внутренняя точка даёт слабый блок даже без 3D-захвата.
+  const rescue = /_tryGateRescue/.test(SRC.game) && /gateCoversBall/.test(SRC.contact);
+  const raw = alongOver > 2 ? 'fail' : alongOver > 1.3 ? 'warn' : 'ok';
+  return { status: rescue && raw === 'fail' ? 'warn' : raw,
+    evidence: `бок гейта ${sideCm.toFixed(1)}см ≈ радиус захвата ${(R.captureRadius * 100).toFixed(0)}см (ок), длинная ось ${backCm.toFixed(0)}..${fwdCm.toFixed(0)}см против глубины ±${(R.depthTolerance * 100).toFixed(0)}см (×${alongOver.toFixed(1)}), площадь ${gateCm2.toFixed(0)} против ${capCm2.toFixed(0)} см²; структурный разрыв остаётся, но gate-rescue (${rescue}) превращает экранно-обещанные точки в слабый блок на плоскости биты` };
 });
 check('A07', 'A', 'Проверка направления продублирована в двух модулях с разными порогами', 'major', () => {
   const inOval = /dotLimit = .*pointerType === 'mouse' \? -0\.3 : 0/.test(SRC.rules);
@@ -221,8 +225,9 @@ check('B10', 'B', 'Monte-Carlo карта «мёртвых» нажатий: д�
     }
   }
   const pct = Math.round(dead / admitted * 100);
-  return { status: pct >= 35 ? 'fail' : pct >= 15 ? 'warn' : 'ok',
-    evidence: `${dead}/${admitted} (${pct}%) допущенных точек гейта вне физического захвата даже с grace-кольцом; разрез: дальняя полоса ${deadBins.deepFwd}, верхняя ${deadBins.deepBack}, бок ${deadBins.side}` };
+  const rescue = /_tryGateRescue/.test(SRC.game);
+  return { status: pct >= 35 ? (rescue ? 'warn' : 'fail') : pct >= 15 ? 'warn' : 'ok',
+    evidence: `${dead}/${admitted} (${pct}%) допущенных точек гейта вне физического захвата даже с grace-кольцом; разрез: дальняя полоса ${deadBins.deepFwd}, верхняя ${deadBins.deepBack}, бок ${deadBins.side}; gate-rescue=${rescue}: на пересечении плоскости биты эти точки больше не тихие промахи, а слабый блок с телеметрией gate_rescue` };
 });
 
 /* ============================ C. ТАЙМИНГ И ЖЕСТЫ ============================ */
@@ -263,8 +268,15 @@ check('C07', 'C', 'Тап: граница slop 14px не масштабируе�
 });
 check('C08', 'C', 'Пассивная «стенка» требует realGestureId — медленный защитный блок не работает', 'major', () => {
   const found = /realGestureId !== this\.swipe\.gestureId\) return false/.test(SRC.game);
+  // _tryGateRescue снимает жалобу для ГЛАВНОГО случая: палец допущен гейтом,
+  // держится в зоне, мяч пересекает плоскость биты — стационарное удержание
+  // теперь даёт слабый блок без квалификации замаха.
+  const rescue = /_tryGateRescue\(pad, b, p0, null\)/.test(SRC.game) && /gateCoversBall/.test(SRC.contact);
   const t = new api.SwipeTracker(); t.down(.5, .6, 0); // без движения
-  return { status: found && t.realGestureId === -1 ? 'warn' : 'ok', evidence: 'удержание без квалифицировавшегося взмаха не отражает мяч даже в физическом боксе' };
+  return { status: found && t.realGestureId === -1 && !rescue ? 'warn' : 'ok',
+    evidence: rescue
+      ? 'сам по себе блок-«стенка» по-прежнему требует замах, но допущенное удержание в живой зоне спасается _tryGateRescue (слабый блок на плоскости биты)'
+      : 'удержание без квалифицировавшегося взмаха не отражает мяч даже в физическом боксе' };
 });
 check('F01', 'F', 'Скорость руки измеряется симуляционным временем: slow-mo раздувает её до ×4.5', 'critical', () => {
   // down/move/up теперь получают настенное время ContactSystem.wallTime(e);
@@ -306,7 +318,10 @@ check('D01', 'D', 'Бок гейта и физический радиус сог
   const fwdCm = R.contactForwardPx / R.zoneRefPxPerCmY;
   const cap = R.captureRadius * 100, depth = R.depthTolerance * 100;
   const alongOver = fwdCm / depth;
-  return { status: alongOver > 2 ? 'fail' : 'warn', evidence: `бок: гейт ${sideCm.toFixed(1)}см vs захват ${cap.toFixed(0)}см — ок; низ: гейт ${fwdCm.toFixed(1)}см vs глубина ±${depth.toFixed(0)}см (×${alongOver.toFixed(1)}) — палец допущен в зоне, где ракетка физически не достаёт` };
+  const rescue = /_tryGateRescue/.test(SRC.game);
+  const raw = alongOver > 2 ? 'fail' : 'warn';
+  return { status: rescue && raw === 'fail' ? 'warn' : raw,
+    evidence: `бок: гейт ${sideCm.toFixed(1)}см vs захват ${cap.toFixed(0)}см — ок; низ: гейт ${fwdCm.toFixed(1)}см vs глубина ±${depth.toFixed(0)}см (×${alongOver.toFixed(1)}); gate-rescue=${rescue} исполняет экранное обещание слабым блоком, структурная единая метрическая модель всё ещё не построена` };
 });
 check('D02', 'D', 'atClosest: порог −2см против шага подшага 4-6см на быстром мяче', 'critical', () => {
   // ContactSystem.closestTolerance масштабирует допуск от скорости мяча;

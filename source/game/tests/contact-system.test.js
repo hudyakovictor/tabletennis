@@ -184,6 +184,116 @@ test('impactSphere is invariant to a non-unit incoming normal', () => {
   for (const k of ['x', 'y', 'z']) assert.ok(Math.abs(ref.v[k] - scaled.v[k]) < 1e-10, `axis ${k}`);
 });
 
+test('gateCoversBall scores the live ball screen position against the stamped oval', () => {
+  const W = 390, H = 844;
+  const zone = {
+    accepted: true, anchor: 'contact', x: W / 2, y: H / 2, vw: W, vh: H,
+    axisX: 0, axisY: 1, sidePx: 64, fwdPx: 150, backPx: 120, radius: 150,
+  };
+  const game = { project: (p, out = {}) => { out.x = p.x / W; out.y = p.y / H; out.ok = true; return out; } };
+  const ballAt = (px, py) => ({ p: { x: px, y: py, z: 0 } });
+  assert.equal(ContactSystem.gateCoversBall(game, ballAt(W / 2, H / 2 + 100), zone), true);  // внутри fwd
+  assert.equal(ContactSystem.gateCoversBall(game, ballAt(W / 2, H / 2 + 160), zone), false); // дальше fwd
+  assert.equal(ContactSystem.gateCoversBall(game, ballAt(W / 2, H / 2 - 100), zone), true);  // внутри back
+  assert.equal(ContactSystem.gateCoversBall(game, ballAt(W / 2, H / 2 - 130), zone), false); // дальше back
+  assert.equal(ContactSystem.gateCoversBall(game, ballAt(W / 2 + 60, H / 2), zone), true);   // бок на грани
+  assert.equal(ContactSystem.gateCoversBall(game, ballAt(W / 2 + 70, H / 2), zone), false);  // бок шире
+  // круг-фолбэк, когда оси не заштампованы
+  const circle = { accepted: true, x: 100, y: 100, vw: W, vh: H, radius: 50 };
+  assert.equal(ContactSystem.gateCoversBall(game, ballAt(140, 100), circle), true);
+  assert.equal(ContactSystem.gateCoversBall(game, ballAt(160, 100), circle), false);
+  // отклонённый нажим и битная проекция не спасаются
+  assert.equal(ContactSystem.gateCoversBall(game, ballAt(0, 0), { ...zone, accepted: false }), false);
+  const badProj = { project: (p, out = {}) => { out.ok = false; return out; } };
+  assert.equal(ContactSystem.gateCoversBall(badProj, ballAt(0, 0), zone), false);
+});
+
+test('gate rescue turns an admitted stationary hold into a weak block when the ball crosses the blade plane', () => {
+  const { V3, PH, GS } = lib;
+  const g = Object.create(lib.Game.prototype);
+  const W = 390, H = 844;
+  Object.assign(g, {
+    time: 5, state: GS.RALLY, rallyBounces: [1], isServeBall: false,
+    settings: { haptics: false, grip: 'shakehand', hand: 'right', followThrough: true },
+    equip: { forSide: () => null }, stats: {}, msgs: [], sfx: {},
+    ball: { live: true, lastHitBy: -1, p: V3.new(0.02, PH.TABLE_Y + 0.3, 2.25), v: V3.new(0, -0.4, 5), w: V3.new() },
+    player: {
+      pos: V3.new(0, PH.TABLE_Y + 0.3, 2.2), prevPos: V3.new(0, PH.TABLE_Y + 0.3, 2.2),
+      vel: V3.new(0, 0, 0), normal: V3.new(0, 0.15, -1), roll: 0, forehand: true, lastHitT: 0, swing: 0,
+    },
+    swipe: {
+      active: true, gestureId: 4, realGestureId: -1, consumedGestureId: -1, pressZone: null,
+    },
+  });
+  // штамп контакт-гейта вокруг экранной позиции биты; мяч проецируется в центр
+  g.swipe.pressZone = {
+    accepted: true, anchor: 'contact', serving: false, kind: 'rally',
+    x: W / 2, y: H / 2, vw: W, vh: H, axisX: 0, axisY: 1,
+    sidePx: 64, fwdPx: 150, backPx: 120, radius: 150, pointerType: 'touch',
+  };
+  g.project = (p, out = {}) => { out.x = 0.5; out.y = 0.5; out.ok = true; return out; };
+  g.pressConsumed = () => false;
+  g.msg = (t) => g.msgs.push(t); g.buzz = () => {}; g.emitParticles = () => {};
+  g.logInput = () => {}; g.shotJournal = null; g.audio = { hitRacket() {} };
+  const p0 = V3.new(0.02, PH.TABLE_Y + 0.3, 2.15);   // в прошлом подшаге мяч был перед плоскостью
+  const vLen0 = V3.len(g.ball.v);
+  const ok = g._tryGateRescue(g.player, g.ball, p0, null);
+  assert.equal(ok, true, 'rescue accepted for a held press');
+  assert.equal(g.ball.lastHitBy, 1);
+  assert.ok(g.ball.v.z < 0, 'ball returned toward the opponent');
+  assert.ok(V3.len(g.ball.v) < vLen0 * 1.4, 'rescue is a weak block, not a power shot');
+  assert.equal(g.stats.blocks, 1);
+});
+
+test('gate rescue refuses phantoms: outside gate, no bounce, released finger, rejected press', () => {
+  const { V3, PH, GS } = lib;
+  const mk = () => {
+    const g = Object.create(lib.Game.prototype);
+    const W = 390, H = 844;
+    Object.assign(g, {
+      time: 5, state: GS.RALLY, rallyBounces: [1], isServeBall: false,
+      settings: { grip: 'shakehand', hand: 'right', followThrough: true },
+      equip: { forSide: () => null }, stats: {}, msgs: [],
+      ball: { live: true, lastHitBy: -1, p: V3.new(0.02, PH.TABLE_Y + 0.3, 2.25), v: V3.new(0, -0.4, 5), w: V3.new() },
+      player: {
+        pos: V3.new(0, PH.TABLE_Y + 0.3, 2.2), prevPos: V3.new(0, PH.TABLE_Y + 0.3, 2.2),
+        vel: V3.new(0, 0, 0), normal: V3.new(0, 0.15, -1), roll: 0, forehand: true, lastHitT: 0, swing: 0,
+      },
+      swipe: { active: true, gestureId: 4, realGestureId: -1, consumedGestureId: -1, pressZone: null },
+    });
+    g.swipe.pressZone = {
+      accepted: true, anchor: 'contact', serving: false, kind: 'rally',
+      x: W / 2, y: H / 2, vw: W, vh: H, axisX: 0, axisY: 1,
+      sidePx: 64, fwdPx: 150, backPx: 120, radius: 150, pointerType: 'touch',
+    };
+    g.project = (p, out = {}) => { out.x = 0.5; out.y = 0.5; out.ok = true; return out; };
+    g.pressConsumed = () => false;
+    g.msg = () => {}; g.buzz = () => {}; g.emitParticles = () => {};
+    g.logInput = () => {}; g.shotJournal = null; g.audio = { hitRacket() {} };
+    return g;
+  };
+  const p0 = V3.new(0.02, PH.TABLE_Y + 0.3, 2.15);
+  // палец отпущен — тапы судятся своим маршрутом, не спасением
+  const released = mk(); released.swipe.active = false;
+  assert.equal(released._tryGateRescue(released.player, released.ball, p0, null), false);
+  // отклонённый нажим не воскресает
+  const rejected = mk(); rejected.swipe.pressZone.accepted = false;
+  assert.equal(rejected._tryGateRescue(rejected.player, rejected.ball, p0, null), false);
+  // нет своего отскока — волей запрещён (ITTF 2.07)
+  const noBounce = mk(); noBounce.rallyBounces = [];
+  assert.equal(noBounce._tryGateRescue(noBounce.player, noBounce.ball, p0, null), false);
+  // мяч визуально вне штампа зоны
+  const outside = mk();
+  outside.project = (p, out = {}) => { out.x = 0.95; out.y = 0.95; out.ok = true; return out; };
+  assert.equal(outside._tryGateRescue(outside.player, outside.ball, p0, null), false);
+  // латеральный разрыв больше grace-кольца — фантом запрещён
+  const far = mk();
+  far.ball.p = V3.new(0.6, PH.TABLE_Y + 0.3, 2.25);
+  assert.equal(far._tryGateRescue(far.player, far.ball, p0, null), false);
+  // ни один отказ не зарегистрировал контакт
+  for (const x of [released, rejected, noBounce, outside, far]) assert.equal(x.ball.lastHitBy, -1);
+});
+
 test('a second pointer no longer cancels the live stroke (multi-touch grip)', () => {
   // behavior lives in bindInput; assert the supporting tracker contract:
   // cancel() is the only destructive path and it must be explicit

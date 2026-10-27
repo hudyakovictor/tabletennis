@@ -196,6 +196,29 @@ const ContactSystem = {
     return zone.directionOk;
   },
 
+  /* Покрывает ли ЖИВОЙ штамп зоны текущую экранную позицию мяча. Считает тот
+   * же овальный скор, что pressHitZoneOval при допуске нажатия, но по
+   * спроецированному мячу, а не по пальцу. Нужно, чтобы нарисованный овал
+   * не врал: нажатие допущено и мяч визуально внутри зоны — обещание зоны
+   * должно исполняться даже при рассинхроне px-гейта и 3D-захвата. */
+  gateCoversBall(game, ball, zone) {
+    if (!zone || zone.accepted !== true || !ball || !ball.p || !zone.vw || !zone.vh) return false;
+    const screen = game.project(ball.p, {});
+    if (!screen || !screen.ok) return false;
+    const bx = screen.x * zone.vw, by = screen.y * zone.vh;
+    const dx = bx - zone.x, dy = by - zone.y;
+    if (Number.isFinite(zone.axisX) && Number.isFinite(zone.axisY) &&
+        Number.isFinite(zone.sidePx) && zone.sidePx > 0) {
+      const along = dx * zone.axisX + dy * zone.axisY;
+      const across = -dx * zone.axisY + dy * zone.axisX;
+      const longExt = along >= 0 ? zone.fwdPx : zone.backPx;
+      if (!(Number.isFinite(longExt) && longExt > 0)) return false;
+      return Math.hypot(along / longExt, across / zone.sidePx) <= 1;
+    }
+    const r = Number.isFinite(zone.radius) ? zone.radius : 0;
+    return Math.hypot(dx, dy) <= r;
+  },
+
   /* Допуск фазы сближения для endpoint-контакта. Физический подшаг на
    * быстром мяче проходит 4-6 см, поэтому фиксированные -2 см иногда
    * пропускали фазу «ближайшей точки» и полагались только на CCD.
