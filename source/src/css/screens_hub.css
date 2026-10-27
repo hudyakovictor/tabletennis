@@ -39,14 +39,14 @@
 .screen:not(.live) .b3.play{animation:none}
 /* четыре кнопки режимов вместо одной «В бой» */
 .play-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;padding:0 16px}
-.modebtn{--h:auto;height:auto;min-height:78px;flex-direction:row;align-items:center;justify-content:flex-start;gap:12px;padding:12px 14px;text-align:left}
-.modebtn .mb-i{width:40px;height:40px;flex:none;display:grid;place-items:center}
+.modebtn{--h:auto;height:auto;min-height:0;flex-direction:column;align-items:center;justify-content:center;gap:10px;padding:16px 10px 14px;text-align:center}
+.modebtn .mb-i{width:120px;height:120px;flex:none;display:grid;place-items:center}
 .modebtn .mb-i svg,.modebtn .mb-i img{width:100%;height:100%;display:block;border-radius:8px}
-.modebtn .mb-t{flex:1;min-width:0;text-align:left}
+.modebtn .mb-t{flex:none;min-width:0;text-align:center}
 /* текст «наверх»: сначала метка-роль, под ней название режима */
 .modebtn small{display:block;font:800 11px/1 var(--display);color:rgba(255,255,255,.6);text-transform:uppercase;letter-spacing:.12em;margin-bottom:3px}
 .modebtn.dark small{color:rgba(255,255,255,.45)}
-.modebtn b{display:block;font:900 14px/1.1 var(--display);text-transform:uppercase}
+.modebtn b{display:block;font:900 15px/1.1 var(--display);text-transform:uppercase}
 .modebtn.gold{--c1:#FFE066;--c2:#FFB01F;--c3:#FF8A00}
 .modebtn.dark b{color:#fff}
 .friends{margin:12px 14px 0}
