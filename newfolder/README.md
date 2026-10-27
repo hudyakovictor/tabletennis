@@ -44,6 +44,7 @@
 14. `14-observability-runbooks.md` — мониторинг, алерты, runbooks.
 15. `15-liveops-content-plan.md` — LiveOps, контент-план, сообщество.
 16. `16-legal-player-agreements.md` — ToS, Privacy Policy, согласия.
+17. `17-maintenance-push-news-support.md` — техработы, пуши, новости, поддержка.
 
 ## CRM и Telegram-бот
 
@@ -55,6 +56,13 @@
 - Pull: команды `/status`, `/ping`, `/errors`, `/players`, `/revenue`, `/ai`, `/fraud`.
 
 Бот позволяет получать основные данные без захода в CRM.
+
+## Операционные функции
+
+- Режим техработ из админки.
+- Push-уведомления игрокам (Telegram, Web Push, in-app).
+- Раздел «Новости» в клиенте (patch notes, known issues, ивенты).
+- Техподдержка в клиенте с тикетами в админку.
 
 ## Текущее решение по ИИ
 
