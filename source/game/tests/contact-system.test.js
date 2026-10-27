@@ -91,23 +91,32 @@ test('contactPredictionAllowed keeps the contact gate alive at the apex (v.z 0.1
 });
 
 test('direction uses one limit per pointer type, independent of gesture length', () => {
+  // штамп в CSS px: мяч на 60px ЛЕВЕЕ пальца (toBall = -60,0); метрики свайпа в NDC
   const zone = (pointerType) => ({ accepted: true, x: 200, y: 300, pointerX: 260, pointerY: 300, vw: 390, vh: 844, pointerType });
-  // dot = -0.06 geometry: fails the strict 0 limit, must pass the unified -0.12 touch limit
-  const m = { dx: -0.06 / 390, dy: 0 };
+  // геометрия с dot ровно -0.06: sx=6px вдоль +X и ~99.8px вдоль Y (dx/dy — NDC)
+  const dotMinus06 = { dx: 6 / 390, dy: (6 * Math.sqrt(1 / 0.0036 - 1)) / 844 };
+  // раньше строгий предел 0 для коротких жестов это рубил; теперь единый -0.12
   const shortTouch = zone('touch'), longTouch = zone('touch');
-  assert.equal(ContactSystem.directionAllows(shortTouch, m), true);
-  assert.equal(ContactSystem.directionAllows(longTouch, m), true); // no length flip anymore
-  // clearly away swipe still fails
+  assert.equal(ContactSystem.directionAllows(shortTouch, { ...dotMinus06, len: 0.15 }), true);
+  assert.equal(ContactSystem.directionAllows(longTouch, { ...dotMinus06, len: 0.17 }), true); // нет скачка от длины
+  assert.equal(shortTouch.directionDot, longTouch.directionDot);
+  // явный свайп от мяча (dot=-1) по-прежнему отклоняется
   const away = zone('touch');
   assert.equal(ContactSystem.directionAllows(away, { dx: 0.2, dy: 0 }), false);
   assert.equal(away.reason, 'WRONG_DIRECTION');
-  // mouse keeps its more forgiving -0.30 limit
+  // мышь: dot=-0.20 проходит её предел -0.30, но не touch-предел -0.12
+  const dotMinus20 = { dx: 6 / 390, dy: (6 * Math.sqrt(1 / 0.04 - 1)) / 844 };
   const mouse = zone('mouse');
-  assert.equal(ContactSystem.directionAllows(mouse, { dx: -0.2 / 390, dy: 0 }), true);
-  // taps and cached verdicts
+  assert.equal(ContactSystem.directionAllows(mouse, dotMinus20), true);
+  const touch20 = zone('touch');
+  assert.equal(ContactSystem.directionAllows(touch20, dotMinus20), false);
+  // палец почти на мяче (<4px): направление не судится
+  const close = { accepted: true, x: 262, y: 300, pointerX: 260, pointerY: 300, vw: 390, vh: 844, pointerType: 'touch' };
+  assert.equal(ContactSystem.directionAllows(close, { dx: 0.2, dy: 0 }), true);
+  // тапы и кэшированный вердикт
   assert.equal(ContactSystem.directionAllows(zone('touch'), { tap: true }), true);
   const cached = zone('touch'); cached.directionOk = false;
-  assert.equal(ContactSystem.directionAllows(cached, m), false);
+  assert.equal(ContactSystem.directionAllows(cached, dotMinus06), false);
 });
 
 test('SwipeTracker measures gestures in square aspect-corrected units and keeps the true origin', () => {

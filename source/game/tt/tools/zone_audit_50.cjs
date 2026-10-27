@@ -146,7 +146,8 @@ check('B01', 'B', 'Рисуется полный овал, но верхняя �
   const z = api.pressContactZone(center, { x: .5, y: .5 - 100 / H }, W, H, { pointerType: 'touch', scale: { kx: 1, ky: 1 } });
   // решение направления теперь выносит ContactSystem.directionAllows с единым
   // порогом на тип указателя; проверим фактический вердикт, а не ручной dot.
-  const zone = { accepted: true, x: .5, y: .5, pointerX: .5, pointerY: .5 - 100 / H, vw: W, vh: H, pointerType: 'touch' };
+  // штамп зоны живёт в CSS px (pointerX = NDC * width), метрики свайпа — в NDC
+  const zone = { accepted: true, x: W / 2, y: H / 2, pointerX: W / 2, pointerY: H / 2 - 100, vw: W, vh: H, pointerType: 'touch' };
   const awayVerdict = api.ContactSystem.directionAllows(zone, { dx: 0, dy: -120 / H }); // свайп ВВЕРХ, мяч ниже
   const towardVerdict = api.ContactSystem.directionAllows(zone, { dx: 0, dy: 120 / H }); // свайп ВНИЗ к мячу
   // это уже не «скрытая» мёртвая зона: отказ логируется кодом WRONG_DIRECTION,
