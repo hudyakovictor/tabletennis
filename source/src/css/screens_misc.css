@@ -249,6 +249,19 @@ body.rm .rt-phone,body.rm .glr-ball{animation:none}
 .cal-c input[type=range]{flex:1;accent-color:#2EC9FF;height:40px;touch-action:pan-x}
 .cal-v{min-width:26px;text-align:right;font-size:12px;color:#7DF3FF}
 
+/* ---------- история промахов (калибровка) ---------- */
+.miss-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(92px,1fr));gap:9px;padding:2px 14px 4px;max-height:240px;overflow-y:auto}
+.miss-thumb{background:#0c111d;border:1px solid #22304a;border-radius:10px;padding:6px 5px 7px;cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:5px}
+.miss-thumb:active{transform:scale(.96)}
+.miss-thumb img{width:100%;aspect-ratio:1/1;object-fit:cover;border-radius:6px;display:block;image-rendering:auto}
+.miss-thumb small{font-size:9.5px;color:var(--ink3);text-align:center;line-height:1.25;word-break:break-word}
+.miss-actions{display:flex;gap:8px;padding:6px 14px 14px}
+.miss-actions .b3{flex:1;text-align:center}
+.miss-zoom{position:fixed;inset:0;z-index:60;pointer-events:auto;background:rgba(2,4,9,.88);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px}
+.miss-zoom img{max-width:min(86vw,430px);max-height:58vh;border-radius:12px;border:2px solid rgba(46,201,255,.35);box-shadow:0 18px 60px rgba(0,0,0,.6)}
+.miss-zoom .mz-meta{color:#cfe3ff;font-size:12.5px;text-align:center;padding:0 16px;line-height:1.4}
+.miss-zoom .mz-legend{color:var(--ink3);font-size:11px;text-align:center;padding:0 16px;line-height:1.4}
+
 /* второй ряд логотипа игры + спрайтовые иконки кнопок */
 .arena-title .alt{font-size:clamp(12px,3.6vw,15px);letter-spacing:.42em;margin-left:.42em;background:linear-gradient(180deg,#FFE28A,#F5A623);-webkit-background-clip:text;background-clip:text}
 .fab .fic{display:grid;place-items:center;width:34px;height:34px}

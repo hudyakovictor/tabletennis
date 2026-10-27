@@ -12,9 +12,10 @@
  *    hint {on} · debug {on} · mute {on}
  *    slowmo {on}                инспекторское замедление траектории (тумблер)
  *    cal {k, v}                 калибровка оболочки; spinGain/arcSens — закрутка
+ *    missShots {on}             история промахов: скриншоты области клика ±100 px
  *  Game → host:
- *    ready, state, point, hit, serve, matchEnd, train, trainDone, attempt, autoHint, awake,
- *    paused, replayEnd, haptic
+ *    ready, state, point, hit, serve, matchEnd, train, trainDone, attempt, shot, shotdrop,
+ *    autoHint, awake, paused, replayEnd, haptic
  * ===================================================================== */
 'use strict';
 
@@ -40,6 +41,14 @@
      * OFF by default left players guessing ("то рисуется, то не рисуется" =
      * the miss-streak auto-toggle kicking in). Guidance on from ball one. */
     g.hintContact = true;
+
+    /* Скриншоты промахов для истории калибровки: область клика ±100 px
+     * запечатывается сразу после render() (WebGL-буфер жив только внутри
+     * кадра). Хост держит их, пока попытка — промах; контакт — удаляет. */
+    const missCap = createMissShotCapture({
+      getCanvas: () => document.getElementById('gl'),
+      post,
+    });
 
     /* ---------------------------- cinema ---------------------------- */
     let lobby = false;
@@ -227,6 +236,9 @@ const showTip = (text) => { if (text) tip = { text, until: g.time + 4.6 }; };
       if (!att) return;
       if (!lobby && !g.demoMode) {
         post('attempt', att);
+        /* The shot was taken at press time; a real contact means this was
+         * not a miss — the host drops the screenshot. */
+        if (att.contact && att.captureId) post('shotdrop', { id: att.captureId });
         if (!att.training && att.kind === 'rally') {
           if (att.contact) onContact();
           else showTip(onMiss() || missTip(att));
@@ -270,6 +282,17 @@ const showTip = (text) => { if (text) tip = { text, until: g.time + 4.6 }; };
         sig: [MATCH_RULES[(z.pointerType || 'touch') === 'mouse' ? 'contactSideMousePx' : 'contactSideTouchPx'], MATCH_RULES.contactBackPx, MATCH_RULES.contactForwardPx, MATCH_RULES.captureRadius].map((v) => +(+v).toFixed(2)).join('/'),
         ext: z.anchor === 'contact' ? [z.sidePx, z.backPx, z.fwdPx].map((v) => Math.round(v)) : null,
         kx: Number.isFinite(z.kx) ? +z.kx.toFixed(2) : null };
+      /* The click neighborhood for the shell's miss history: captured on the
+       * next rendered frame; dropped again if this attempt becomes a hit.
+       * pressX/pressY are normalized (0..1) — region math wants CSS px. */
+      if (!this.training) {
+        att.captureId = missCap.request({
+          press: { x: z.pressX * z.vw, y: z.pressY * z.vh }, vw: z.vw, vh: z.vh,
+          zone: Number.isFinite(z.x) && Number.isFinite(z.y) ? { x: z.x, y: z.y, radius: z.radius } : null,
+          kind: att.kind, input: att.input, accepted: att.accepted, reason: z.reason || null,
+          dx: att.dx, dy: att.dy,
+        });
+      }
     };
     wrap(g, 'logPressRejection', function (orig, reason, detail) {
       if (att && !att.reason && !att.contact) att.reason = reason;
@@ -280,6 +303,16 @@ const showTip = (text) => { if (text) tip = { text, until: g.time + 4.6 }; };
       if (side > 0 && att) { att.contact = true; att.sweet = +(this.lastSweet || 0).toFixed(2); flush(); }
       return r;
     });
+    /* Miss-shot capture: one frame after the press, while the WebGL drawing
+     * buffer is still valid. Only during live rally/serve states — a paused,
+     * sleeping or replaying frame would show the wrong table position.
+     * Registered before the sleep wrapper below, which then wraps this one. */
+    const origRender = g.render.bind(g);
+    g.render = function (...a) {
+      const r = origRender(...a);
+      if (missCap.hasPending() && (g.state === GS.RALLY || g.state === GS.SERVE_TOSS)) missCap.capture();
+      return r;
+    };
     wrap(g, 'setState', function (orig, st) { if (st !== GS.RALLY && st !== GS.SERVE_TOSS) flush(); return orig(st); });
     wrap(g, 'awardPoint', function (orig, who, reason) {
       if (att && !att.contact && !att.reason) att.reason = 'POINT_' + (who > 0 ? 'WON' : 'LOST');
@@ -428,6 +461,9 @@ const showTip = (text) => { if (text) tip = { text, until: g.time + 4.6 }; };
           if (K === 'trailLen' || K === 'ballSize' || K === 'padSpeed' || K === 'padSmooth') { /* читаются напрямую из g._cal */ }
           break;
         }
+        /* Тумблер истории промахов из настроек оболочки: копить скриншоты
+         * области клика или нет. Не будит игру — affects only future presses. */
+        case 'missShots': missCap.setEnabled(!!m.on); break;
       }
     });
     post('ready', { rules: Object.assign({}, MATCH_RULES), steps: TRAIN_STEPS.map((s) => ({ id: s.id, title: ET(s.title) })) });

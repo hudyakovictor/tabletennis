@@ -26,7 +26,8 @@ const DEFAULT_STATE = {
     null
   ],
   owned: ['r-teal', 'b-ink', 't-coral'], equipped: { rubber: 'r-teal', blade: 'b-ink', trail: 't-coral' },
-  sfx: true, music: true, vibro: true, rm: false, quality: 'high', assist: true, tutorial: true, hint: true, tutorialDone: false
+  sfx: true, music: true, vibro: true, rm: false, quality: 'high', assist: true, tutorial: true, hint: true, tutorialDone: false,
+  missShots: true   // история промахов: скриншоты области клика в настройках калибровки
 };
 /* Шаги миграции: MIGRATIONS[v] переводит сейв версии v в v+1 (мутирует черновик). */
 const MIGRATIONS = {

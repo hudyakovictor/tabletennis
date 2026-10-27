@@ -75,10 +75,16 @@ window.addEventListener('message', (e) => {
     /* вся сохранённая калибровка (включая закрутку) — в движок сразу,
        а не только когда игрок тронет ползунок */
     if (S.cal) for (const k in S.cal) GameHost.send('cal', { k, v: S.cal[k] });
+    /* история промахов: скриншоты области клика (тумблер из настроек) */
+    GameHost.send('missShots', { on: S.missShots !== false });
     const q = GameHost.q; GameHost.q = []; q.forEach((x) => GameHost.frame.contentWindow.postMessage(x, '*'));
   }
   if (m.type === 'haptic') haptic(m.kind);
   if (m.type === 'attempt') ZoneStats.add(m);
+  /* скриншот области клика промахов: пёрвым приходит 'shot' (нажатие),
+     контакт по тому же attempt удаляет его через 'shotdrop' */
+  if (m.type === 'shot') MissShots.add(m);
+  if (m.type === 'shotdrop') MissShots.drop(m.id);
   GameHost.subs.forEach((f) => { try { f(m); } catch (err) { console.error(err); } });
 });
 
@@ -176,6 +182,27 @@ const ZoneStats = {
     }
     return { L, n, hit, out, late, early, recs, side, R };
   }
+};
+
+/* ---------- история промахов: скриншоты области клика ±100 px ----------
+ * При нажатии, которое может стать ударом, движок делает снимок region
+ * (красный крест — клик, зелёное кольцо — зона удара, белая точка — мяч).
+ * Контакт по той же попытке удаляет снимок ('shotdrop'). Хранится последнее
+ * 40 — это диагностика калибровки, а не альбом. */
+const MissShots = {
+  KEY: 'ttu-miss-shots', MAX: 40, mem: [],
+  all() { try { return JSON.parse(localStorage.getItem(this.KEY) || 'null') || this.mem; } catch (e) { return this.mem; } },
+  add(s) {
+    if (!s || !s.id || !s.img) return;
+    const L = this.all(); L.push(s); while (L.length > this.MAX) L.shift();
+    this.mem = L; try { localStorage.setItem(this.KEY, JSON.stringify(L)); } catch (e) {}
+  },
+  drop(id) {
+    const L = this.all(); const i = L.findIndex((s) => s.id === id);
+    if (i >= 0) { L.splice(i, 1); this.mem = L; try { localStorage.setItem(this.KEY, JSON.stringify(L)); } catch (e) {} }
+  },
+  clear() { this.mem = []; try { localStorage.removeItem(this.KEY); } catch (e) {} },
+  misses() { return ZoneStats.all().filter((a) => !a.contact && !a.training).length; },
 };
 
 function copyText(txt) {
