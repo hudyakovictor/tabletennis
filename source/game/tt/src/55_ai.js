@@ -260,6 +260,33 @@ class OpponentAI {
    * still lands in is not an error, so after five escalations the solved
    * racket is returned untouched.
    */
+  /* Доворот готового кадра подачи вокруг вертикальной оси так, чтобы
+   * замеренное predict приземление (второй отскок) ушло из кромочной зоны
+   * к центру. Кадр поворачивается целиком (normal и vR), поэтому удар
+   * сохраняет свой характер; принимается только вариант, который уже по
+   * быстрому rep легален (своя половина -> второй отскок на столе, без
+   * сетки) и подтверждён _flightLegal. Null, если лучше не стало. */
+  _yawServeToWidth(ball, racket, probe, cap, bx0) {
+    const rotY = (v, ang) => {
+      const c = Math.cos(ang), sn = Math.sin(ang);
+      return V3.new(v.x * c + v.z * sn, v.y, -v.x * sn + v.z * c);
+    };
+    let best = null, bestAbs = Math.abs(bx0);
+    for (const a of [0.10, 0.22, 0.38, 0.55]) {
+      for (const dir of [-Math.sign(bx0), Math.sign(bx0)]) {
+        const cand = { ...racket, normal: rotY(racket.normal, dir * a), vR: rotY(racket.vR, dir * a) };
+        const rep = probe(cand);
+        const bx = rep && rep.b2 ? rep.b2.x : null;
+        if (bx === null || Math.abs(bx) >= bestAbs) continue;
+        if (rep.hitNet || !rep.landed || Math.sign(rep.landed.z) !== Math.sign(ball.p.z)) continue;
+        best = cand; bestAbs = Math.abs(bx);
+        if (bestAbs <= cap) break;
+      }
+      if (best && bestAbs <= cap) break;
+    }
+    return best && this._flightLegal(ball, best, true) ? best : null;
+  }
+
   applyExecutionError(game, racket, isServe) {
     if (!racket || racket.valid === false || !game || !game.ball) return racket;
     const L = this.L;
@@ -739,26 +766,52 @@ class OpponentAI {
      * заметно ближе к центру. Только для слабых уровней и боковых подач —
      * сильная прямая подача мастера в угол остаётся законным оружием. */
     if (CAP.vmag <= 6.0 || serveType === 'SERVE_SIDE') {
-      const widthOf = (rk) => {
+      const probe = (rk) => {
         if (!rk || !rk.normal || !rk.vR) return null;
         const v = V3.clone(ball.v), w = V3.clone(ball.w);
         if (!impactRacket(v, w, rk.normal, rk.vR, rk.quality, rk.rubber || {})) return null;
-        const p = V3.addScaled(V3.clone(ball.p), ball.p, rk.normal, PH.R * 1.05);
-        predict(p, v, w, { dt: 1 / 240, maxT: 2.4, stopAfterBounces: 2, out: this._q });
-        return this._q && this._q.b2 ? this._q.b2.x : null;
+        const pp = V3.addScaled(V3.clone(ball.p), ball.p, rk.normal, PH.R * 1.05);
+        const rep = {};
+        predict(pp, v, w, { dt: 1 / 240, maxT: 2.4, stopAfterBounces: 2, out: rep });
+        return rep;
       };
+      const landX = (rep) => (rep && rep.b2 ? rep.b2.x : null);
       const widthCap = PH.T_HALF_WID * (CAP.vmag <= 6.0 ? 0.60 : 0.66);
-      for (let guard = 1; guard <= 4; guard++) {
-        const bx = widthOf(finalRacket);
-        if (bx === null || Math.abs(bx) <= widthCap) break;
-        const pulled = Object.assign({}, racketFromStroke,
-          { aim: { x: aimX * Math.pow(0.45, guard), z: aimZ } });
+      let bx = landX(probe(finalRacket));
+      if (bx !== null && Math.abs(bx) > widthCap) {
+        /* Ступень 1 — прямой доворот кадра вокруг вертикали (дёшево: один
+         * predict на кандидата). Решатель подач — эвристический спуск и
+         * упирается в локальный оптимум (замер: приземление -0.59 при
+         * прицеле -0.15 не чинилось пере-решениями). Доворот normal+vR
+         * единым кадром сохраняет характер удара; легальность принятого
+         * кадра подтверждает _flightLegal. */
+        const yawed = this._yawServeToWidth(ball, finalRacket, probe, widthCap, bx);
+        if (yawed) { finalRacket = yawed; bx = landX(probe(finalRacket)); }
+      }
+      if (bx !== null && Math.abs(bx) > widthCap) {
+        /* Ступень 2 — пере-решение из приглушённого жеста. Не «тот же удар
+         * с другим прицелом»: решатель ищет вокруг АВТОРСКОГО кадра жеста,
+         * и сдвиг одного aim находит тот же широкий оптимум (замер: прицел
+         * 0.34->0.01, а приземление -0.737 неизменно три итерации подряд).
+         * Как в приглушении дикой подачи игрока, гасится сам жест (curl и
+         * боковой замах) — меняется центр поиска, а не только цель. */
+        const k = 0.45;
+        const pulled = deriveStroke({ ...m, curl: (m.curl || 0) * k, right: aimX * k * 0.5 }, serveCtx);
+        pulled.aim = { x: aimX * k, z: aimZ };
+        pulled.vmag = racket.vmag; pulled.normal = racket.normal; pulled.vR = racket.vR;
+        pulled.rubber = racket.rubber; pulled.quality = racket.quality;
+        pulled.stroke = st; pulled.arch = A; pulled.isServe = true;
         let re = refineRacket(ball.p, ball.v, ball.w, pulled, 1, racket.quality);
-        if (!re || re.valid === false) break;
-        if (this.handicap < 1 && re.vR) V3.mul(re.vR, re.vR, 1 - (1 - this.handicap) * 0.45);
-        re = this._ensureLegal(game, re, null, serveType, true);
-        if (!re || re.valid === false) break;
-        finalRacket = re;
+        if (re && re.valid !== false) {
+          if (this.handicap < 1 && re.vR) V3.mul(re.vR, re.vR, 1 - (1 - this.handicap) * 0.45);
+          re = this._ensureLegal(game, re, null, serveType, true);
+          if (re && re.valid !== false) {
+            const bxRe = landX(probe(re));
+            const yawed2 = bxRe !== null && Math.abs(bxRe) > widthCap
+              ? this._yawServeToWidth(ball, re, probe, widthCap, bxRe) : null;
+            finalRacket = yawed2 || re;
+          }
+        }
       }
     }
 
