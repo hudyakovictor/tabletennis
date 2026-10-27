@@ -412,6 +412,64 @@ const { root } = require('./helpers.cjs');
             return true;
           } finally { g.setInspectSlowmo(false);g.cancelInput();g.returnToMenu();g.paused=true; }
         });
+        check('each effective contact-gate semi-axis drives a real swipe through the 3D capture, while a hold stays inert', () => {
+          /* The contact oval is a START stamp, not an invisible hit volume.
+           * Exercise the four effective semi-axes reported by its own scoring
+           * contract. A stationary press at each edge must remain intent-less;
+           * a deliberate route from that edge through the meeting point must
+           * be physically caught by the real paddle. This catches a screen
+           * gate that says green while pointer→blade mapping strands the bat
+           * outside the ball's local capture envelope. */
+          const send=(type,id,x,y)=>{
+            const rect=g.canvas.getBoundingClientRect();
+            g.canvas.dispatchEvent(new PointerEvent(type,{pointerId:id,pointerType:'mouse',button:0,
+              buttons:type==='pointerup'?0:1,clientX:rect.left+x,clientY:rect.top+y,bubbles:true,cancelable:true}));
+          };
+          const prepare=()=>{
+            g.startMatch(0);g.paused=false;g.setState(GS.RALLY);g.server=-1;g.isServeBall=false;
+            g.recenterT=0;g.cancelInput();g.ball.live=false;g.pointer={x:.5,y:.59};g.pointerFine=true;
+            for(let i=0;i<30;i++)g.updatePlayerPaddle(1/60);
+            const pad=g.player.pos;
+            V3.set(g.ball.p,pad.x,pad.y,pad.z-.84);V3.set(g.ball.v,0,.8,4);V3.zero(g.ball.w);
+            g.ball.live=true;g.ball.lastHitBy=-1;g.ball.hist.length=0;g.rallyBounces=[1];
+            g.player.lastHitT=g.time-1;g._acc=0;g.shotJournal.reset();g.updateCamera(0);
+          };
+          try {
+            const axes=[['forward',0,1,z=>z.fwdPx],['back',0,-1,z=>z.backPx],
+              ['right',1,0,z=>z.sidePx],['left',-1,0,z=>z.sidePx]];
+            for(let i=0;i<axes.length;i++) {
+              const [name,sx,sy,extentOf]=axes[i];prepare();
+              const cp=g.contactPrediction(),rect=g.canvas.getBoundingClientRect();
+              if(!cp)return false;
+              const centre=g.project(cp.p,{});
+              const stamp=pressContactZone(centre,centre,rect.width,rect.height,
+                {pointerType:'mouse',scale:g.contactGateScale(cp.p,rect)});
+              const extent=extentOf(stamp),edge=.98*extent;
+              const x0=centre.x*rect.width+sx*edge,y0=centre.y*rect.height+sy*edge;
+              /* End just beyond the centre: the total swipe vector therefore
+               * points from the admitted edge toward the ball for all four
+               * axes, including lateral placement strokes. */
+              const x1=centre.x*rect.width-sx*Math.min(20,extent*.15);
+              const y1=centre.y*rect.height-sy*Math.min(20,extent*.15);
+              const id=110+i;
+              send('pointerdown',id,x0,y0);
+              const zone=g.swipe.pressZone;
+              if(!zone||!zone.accepted||Math.abs(zone.score-.98)>.025||g.playerStrokeIntent(false))
+                throw Error(`${name}: gate edge or stationary hold contract`);
+              for(let k=1;k<=5;k++) {
+                g.update(.025);
+                send('pointermove',id,x0+(x1-x0)*k/5,y0+(y1-y0)*k/5);
+              }
+              send('pointerup',id,x1,y1);
+              if(g.ball.lastHitBy!==1&&!g.playerStrokeIntent(false))throw Error(`${name}: route was not a real stroke`);
+              let frames=0;
+              while(g.ball.lastHitBy===-1&&g.ball.live&&frames++<100)g.update(1/60);
+              if(g.ball.lastHitBy!==1||!g.shotJournal.latest.contact||g.ball.v.z>=0)
+                throw Error(`${name}: admitted route never reached physical capture`);
+            }
+            return true;
+          } finally {g.cancelInput();g.returnToMenu();g.paused=true;}
+        });
         check('clicks cannot volley, linger as held input, or survive cancellation', () => {
           const event=(type)=>{
             const p=g.project(g.player.pos,{}),r=g.canvas.getBoundingClientRect();
@@ -890,6 +948,11 @@ const { root } = require('./helpers.cjs');
           g.player.lastHitT=g.time-1;g.shotJournal.reset();
           const p=g.project(g.ball.p),r=g.canvas.getBoundingClientRect();return {x:r.left+p.x*r.width,y:r.top+p.y*r.height};
         });
+        /* The deterministic in-page audit above is intentionally synchronous.
+         * Yield one visual frame before asking Chromium for a trusted tap, so
+         * its two DOM timestamps measure the tap rather than queued main-thread
+         * work and the test continues to exercise the real short-tap path. */
+        await page.evaluate(()=>new Promise(requestAnimationFrame));
         await page.touchscreen.tap(touchPoint.x,touchPoint.y);
         assert.equal(await page.evaluate(()=>{
           const g=window.__game, tap=g.swipe.lastReleased && g.swipe.lastReleased.tap;

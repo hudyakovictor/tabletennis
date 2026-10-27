@@ -98,7 +98,7 @@ npm run test:browser
 - Полный Node-набор на момент аудита: **244 / 244 pass**.
 - V8/c8-coverage на том же наборе: **60,20%** релевантных исполнимых строк;
   это измерение, а не оценка по количеству тестов.
-- `npm run test:browser`: **183 / 183 checks pass** на desktop и
+- `npm run test:browser`: **185 / 185 checks pass** на desktop и
   эмулируемом touch; `npm run test:diagnostics`: **20 / 20**, а
   `npm run test:missshots`: **8 / 8**. Browser-набор проверяет реальные
   Pointer Events и собранный standalone HTML; это необходимо потому, что
