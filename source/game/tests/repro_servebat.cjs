@@ -2,6 +2,7 @@
 const puppeteer = require('puppeteer-core');
 const chromium = require('@sparticuz/chromium');
 const path = require('path');
+const { enginePage } = require('./helpers.cjs');
 const { pathToFileURL } = require('url');
 
 (async () => {
@@ -13,7 +14,7 @@ const { pathToFileURL } = require('url');
   const page = await browser.newPage();
   page.on('pageerror', e => console.log('PAGEERR', e.message));
   await page.setViewport({ width: 1280, height: 760 });
-  await page.goto(pathToFileURL(path.join(__dirname, '..', 'play/index.html')).href);
+  await page.goto(pathToFileURL(enginePage()).href);
   await page.waitForFunction(() => window.__game && window.__game.R.drawCalls > 0, { timeout: 30000 });
   // SERVE_READY: where does the bat sit?
   await page.evaluate(() => {

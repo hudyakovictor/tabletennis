@@ -3,9 +3,10 @@ const puppeteer = require('puppeteer-core');
 const chromium = require('@sparticuz/chromium');
 const fs = require('fs');
 const path = require('path');
+const { enginePage } = require('./helpers.cjs');
 
 (async () => {
-  const html = 'file://' + path.join(__dirname, '..', 'play/index.html');
+  const html = 'file://' + enginePage();
   const browser = await puppeteer.launch({
     executablePath: await chromium.executablePath(),
     args: [...chromium.args, '--no-sandbox'],

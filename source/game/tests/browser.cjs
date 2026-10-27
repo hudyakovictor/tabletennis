@@ -8,7 +8,7 @@ const { execFileSync } = require('node:child_process');
 const { pathToFileURL } = require('node:url');
 const puppeteer = require('puppeteer-core');
 const chromium = require('@sparticuz/chromium');
-const { root } = require('./helpers.cjs');
+const { root, enginePage } = require('./helpers.cjs');
 (async () => {
   // Minimal Linux images may lack NSS. The Chromium npm package ships it.
   const libs = path.join(os.tmpdir(), 'topspin-browser-libs');
@@ -31,7 +31,7 @@ const { root } = require('./helpers.cjs');
       }, width);
       const errors = [];
       page.on('pageerror', e => errors.push(e.message));
-      await page.goto(pathToFileURL(path.join(root, 'play/index.html')).href);
+      await page.goto(pathToFileURL(enginePage()).href);
       await page.waitForFunction(() => window.__game && window.__game.R.drawCalls > 0);
       // The long synchronous suite used to run before offline music init
       // resolved, hiding exceptions that only happen later in real play.

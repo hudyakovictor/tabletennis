@@ -32,6 +32,9 @@ class EmotionalSystem {
     this.matchPointTriggered = false;
     this.lastBigMoment = 0;
     this._cooldown = 2.0;  // seconds between big moments
+    this._seenPointRallies = 0;
+    this._seenCordShotId = -1;
+    this._seenRallyCallout = 0;
   }
 
   /**
@@ -85,28 +88,10 @@ class EmotionalSystem {
    * Trigger match point atmosphere.
    */
   _triggerMatchPoint() {
-    // Music: increase tension
     if (this.game.music && this.game.music._initialized) {
       this.game.music.targetLayerGain.tension = 0.8;
     }
-
-    // Visual: subtle vignette darkening
-    // Could add CSS class to canvas
-
-    // Text message
-    const isPlayerServing = this.game.server === 1;
-    const msg = isPlayerServing
-      ? 'MATCH POINT — ВАША ПОДАЧА'
-      : 'MATCH POINT — СОПЕРНИК ПОДАЁТ';
-    this.game.msg(msg, 2.0, '#ffd34d', true);
-
-    // Haptic
-    if (navigator.vibrate) {
-      try { navigator.vibrate([10, 30, 10]); } catch (e) {}
-    }
-
-    // Camera: subtle push-in
-    // Could adjust camera target
+    if (this.game.buzz) this.game.buzz([10, 30, 10]);
   }
 
   /**
@@ -153,25 +138,41 @@ class EmotionalSystem {
    */
   _detectBigMoments(g) {
     const now = g.time;
-    if (now - this.lastBigMoment < this._cooldown) return;
-
-    // Big winners
-    if (g.lastShotInfo && g.lastShotInfo.speed > 85) {
-      this._triggerBigMoment('winner', g);
-      this.lastBigMoment = now;
+    const rallies = (g.stats && g.stats.rallies) || 0;
+    if (rallies === 0) {
+      this._seenPointRallies = 0;
+      this._seenRallyCallout = 0;
     }
 
-    // Net cords
-    if (g.netTouched && g.state === GS.RALLY) {
-      this._triggerBigMoment('net_cord', g);
-      this.lastBigMoment = now;
+    // Long-rally excitement milestone (once at 8, 14, 20+ exchanges)
+    if (g.state === GS.RALLY && !g.training && !g.demoMode) {
+      if ((g.rally === 8 || g.rally === 14 || g.rally === 20) && this._seenRallyCallout !== g.rally) {
+        this._seenRallyCallout = g.rally;
+        g.msg(`РОЗЫГРЫШ ×${g.rally}!`, 1.0, '#7fd4ff', false);
+      }
+    } else if (g.state !== GS.RALLY) {
+      this._seenRallyCallout = 0;
     }
 
-    // Edge balls
-    if (g.lastPoint && g.lastPoint.reason === 'РЕБРО СТОЛА!' ||
-        g.lastPoint && g.lastPoint.reason === 'ЗАДНЯЯ КРОМКА!') {
-      this._triggerBigMoment('edge', g);
-      this.lastBigMoment = now;
+    // Net cord — fire ONCE per shotId when netTouched flips true in live RALLY
+    if (g.netTouched && g.state === GS.RALLY && this._seenCordShotId !== g.shotId) {
+      this._seenCordShotId = g.shotId;
+      if (now - this.lastBigMoment >= 0.4) {
+        this._triggerBigMoment('net_cord', g);
+        this.lastBigMoment = now;
+      }
+    }
+
+    // Point-end celebrations — fire ONCE per completed rally, never on stale state
+    if (rallies > this._seenPointRallies && g.lastPoint) {
+      this._seenPointRallies = rallies;
+      if (g.lastPoint.who > 0 && g.lastShotInfo && g.lastShotInfo.speed > 85 && g.ball && g.ball.lastHitBy === 1) {
+        this._triggerBigMoment('winner', g);
+        this.lastBigMoment = now;
+      } else if (g.lastPoint.reason === 'РЕБРО СТОЛА!' || g.lastPoint.reason === 'ЗАДНЯЯ КРОМКА!') {
+        this._triggerBigMoment('edge', g);
+        this.lastBigMoment = now;
+      }
     }
   }
 
@@ -193,54 +194,31 @@ class EmotionalSystem {
   }
 
   /**
-   * Winner moment.
+   * Winner moment (awardPoint already displays the banner).
    */
   _onWinner(g) {
-    // Flash effect
-    g.hitFlash = Math.min(1, g.hitFlash + 0.3);
-
-    // Music spike
+    if (!g.reducedMotion) g.hitFlash = Math.min(1, g.hitFlash + 0.3);
     if (this.game.music && this.game.music._initialized) {
       this.game.music._triggerClimax();
     }
-
-    // Message
-    g.msg('ОЧКО!', 1.2, '#6ee7a8', true);
-
-    // Haptic celebration
-    if (navigator.vibrate && g.settings?.haptics) {
-      try { navigator.vibrate([15, 30, 15, 30]); } catch (e) {}
-    }
+    if (g.buzz) g.buzz([15, 30, 15, 30]);
   }
 
   /**
    * Net cord moment.
    */
   _onNetCord(g) {
-    // Flash
-    g.hitFlash = Math.min(1, g.hitFlash + 0.2);
-
-    // Message
-    g.msg('СЕТКА!', 1.0, '#ffd34d', true);
-
-    // Haptic
-    if (navigator.vibrate && g.settings?.haptics) {
-      try { navigator.vibrate([10, 20, 10]); } catch (e) {}
-    }
+    if (!g.reducedMotion) g.hitFlash = Math.min(1, g.hitFlash + 0.18);
+    if (!g.training) g.msg('ТРОС!', 0.9, '#ffd34d', false);
+    if (g.buzz) g.buzz([10, 20, 10]);
   }
 
   /**
    * Edge ball moment.
    */
   _onEdge(g) {
-    // Flash
-    g.hitFlash = Math.min(1, g.hitFlash + 0.25);
-
-    // Already has message from physics, but enhance
-    // Haptic surprise
-    if (navigator.vibrate && g.settings?.haptics) {
-      try { navigator.vibrate([8, 30, 8]); } catch (e) {}
-    }
+    if (!g.reducedMotion) g.hitFlash = Math.min(1, g.hitFlash + 0.22);
+    if (g.buzz) g.buzz([8, 30, 8]);
   }
 
   /**

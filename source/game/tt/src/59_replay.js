@@ -30,7 +30,10 @@ const BEAUTY = {
   rally(n) { return clamp((n - 4) / 12, 0, 1) * 0.30; },        // 4 shots = 0, 16+ = 0.30
   speed(kmh) { return clamp((kmh - 45) / 65, 0, 1) * 0.17; },   // 45 km/h = 0, 110+ = 0.17
   spin(rps) { return clamp((rps - 45) / 85, 0, 1) * 0.14; },    // 45 rev/s = 0, 130+ = 0.14
-  finish(kind) { return (kind === 'smash' ? 0.14 : kind === 'loop' ? 0.11 : kind === 'fade' || kind === 'hook' ? 0.10 : kind === 'lob' ? 0.09 : 0.03); },
+  finish(kind) {
+    const k = String(kind || '').toLowerCase();
+    return (k === 'smash' ? 0.14 : (k === 'loop' || k === 'counter') ? 0.11 : (k === 'fade' || k === 'hook' || k === 'flick') ? 0.10 : k === 'lob' ? 0.09 : 0.03);
+  },
   clutch(meta) { return (meta.deuce ? 0.10 : 0) + (meta.matchPoint ? 0.09 : 0) + (meta.close ? 0.05 : 0); },
   comeback(meta) { return clamp(meta.deficit / 4, 0, 1) * 0.09; },
   netClip(meta) { return meta.netClip ? 0.05 : 0; },
@@ -49,7 +52,7 @@ class MomentRecorder {
     this.lastClip = null;
   }
 
-  reset() { this.lastClip = null; this.kept.length = 0; this.beginRally(0, null); this.n = 0; this.head = 0; }
+  reset() { this.lastClip = null; this.kept.length = 0; this.beginRally(0, null); this.n = 0; this.head = 0; this.lastT = -Infinity; }
 
   /** called when a rally starts: we remember the score so the filter can
    *  tell "3-0 up, easy point" from "0-4 down, that one" */
@@ -64,6 +67,12 @@ class MomentRecorder {
 
   /** one frame of play: everything the renderer needs to show it again */
   push(t, g) {
+    /* The ring is authored at REPLAY_HZ: the game used to push EVERY rendered
+     * frame (120-144 Hz on a phone), so the 45 s window held 5-6 s of play and
+     * the "keep the whole rally" contract was a lie. The caller throttles too;
+     * this is the authoritative guard. */
+    if (Number.isFinite(this.lastT) && t - this.lastT < 1 / REPLAY_HZ - 1e-6) return false;
+    this.lastT = t;
     const i = this.head * REPLAY_FLOATS, f = this.f;
     const b = g.ball.p, p = g.player.pos, ap = g.aiPaddle.pos;
     f[i] = b.x; f[i + 1] = b.y; f[i + 2] = b.z;
@@ -75,6 +84,7 @@ class MomentRecorder {
     this.head = (this.head + 1) % this.cap;
     if (this.n < this.cap) this.n++;
     this.t = t;
+    return true;
   }
 
   /** @param e {by, stroke, speed, spin, quality, slip} */

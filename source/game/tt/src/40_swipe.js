@@ -16,6 +16,10 @@ class SwipeTracker {
     this.samples = [];          // {x,y,t} normalized screen units (y down)
     this.maxSamples = 64;
     this.startT = 0;
+    this.originX = 0;
+    this.originY = 0;
+    this.originT = 0;
+    this.evictedPathLen = 0;
     this.m = this.blankMetrics();
     this.lastReleased = null;
     /* Which gesture has already been a real swipe (see
@@ -39,6 +43,8 @@ class SwipeTracker {
     this.consumedGestureId = -1; this.consumedAt = -Infinity;
     this.pressZone = null;
     this.active = true; this.startT = t;
+    this.originX = x; this.originY = y; this.originT = t;
+    this.evictedPathLen = 0;
     // Gesture speed uses real time, but its opportunity to meet the ball
     // must age in the same (possibly slowed) time as the ball's physics.
     this.sampleSimTime = Number.isFinite(simTime) ? simTime : null;
@@ -47,11 +53,13 @@ class SwipeTracker {
     this.samples.push({ x, y, t });
     this.m = this.blankMetrics();
     this.m.sx = x; this.m.sy = y; this.m.x = x; this.m.y = y;
+    this.m.samples = 1;
   }
   move(x, y, t, simTime) {
     if (!this.active) return;
     if (Number.isFinite(simTime)) this.sampleSimTime = simTime;
     const s = this.samples, last = s[s.length - 1];
+    if (last && t < last.t) t = last.t;
     if (last && t - last.t < 0.0025) {
       // Several pointer events can arrive between animation frames. Never
       // overwrite the starting point: doing so erased fast drags completely.
@@ -61,7 +69,10 @@ class SwipeTracker {
       return;
     }
     s.push({ x, y, t });
-    if (s.length > this.maxSamples) s.shift();
+    if (s.length > this.maxSamples) {
+      if (s.length >= 2) this.evictedPathLen += Math.hypot(s[1].x - s[0].x, s[1].y - s[0].y);
+      s.shift();
+    }
     this.compute(t);
   }
   /** Abandon the gesture without producing a stroke — used when a second
@@ -71,6 +82,7 @@ class SwipeTracker {
     this.active = false;
     this.realGestureId = -1; this.realAt = 0; this.realAtSim = null;
     this.sampleSimTime = null; this.releaseSimTime = null;
+    this.evictedPathLen = 0;
     this.samples.length = 0;
     this.lastReleased = null;
     this.m = this.blankMetrics();
@@ -79,15 +91,20 @@ class SwipeTracker {
     if (!this.active) return null;
     this.releaseSimTime = Number.isFinite(simTime) ? simTime : null;
     if (Number.isFinite(simTime)) this.sampleSimTime = simTime;
-    /* Тот же лимит, что в move(): без него жест из 64 сэмплов пробивал
-     * буфер до 65, и в массиве оставались точки вне окна скорости. */
     const last = this.samples[this.samples.length - 1];
+    if (last && t < last.t) t = last.t;
     if (last && t - last.t < 0.0025) {
-      if (this.samples.length === 1 && (x !== last.x || y !== last.y)) this.samples.push({ x, y, t });
-      else { last.x = x; last.y = y; last.t = Math.max(last.t, t); }
+      /* Without any move() sample, a zero-dt down+up teleport is a synthetic
+       * tap/glitch, not a real swipe ([SG921]). Keep s.length === 1. */
+      if (this.samples.length > 1) { last.x = x; last.y = y; last.t = Math.max(last.t, t); }
     } else {
       this.samples.push({ x, y, t });
-      if (this.samples.length > this.maxSamples) this.samples.shift();
+      if (this.samples.length > this.maxSamples) {
+        if (this.samples.length >= 2) {
+          this.evictedPathLen += Math.hypot(this.samples[1].x - this.samples[0].x, this.samples[1].y - this.samples[0].y);
+        }
+        this.samples.shift();
+      }
     }
     this.compute(t);
     this.active = false;
@@ -96,22 +113,30 @@ class SwipeTracker {
   }
   compute(now) {
     const s = this.samples, n = s.length, m = this.m;
-    if (n < 2) return m;
-    const a = s[0], b = s[n - 1];
-    m.sx = a.x; m.sy = a.y; m.x = b.x; m.y = b.y;
-    m.dx = b.x - a.x; m.dy = b.y - a.y;
-    m.dist = Math.hypot(m.dx, m.dy);
-    m.dur = Math.max(1e-3, b.t - a.t);
     m.samples = n;
+    if (n < 2) return m;
+    const b = s[n - 1];
+    const ox = Number.isFinite(this.originX) ? this.originX : s[0].x;
+    const oy = Number.isFinite(this.originY) ? this.originY : s[0].y;
+    const ot = Number.isFinite(this.originT) ? this.originT : s[0].t;
+    m.sx = ox; m.sy = oy; m.x = b.x; m.y = b.y;
+    m.dx = b.x - ox; m.dy = b.y - oy;
+    m.dist = Math.hypot(m.dx, m.dy);
+    m.dur = Math.max(0.0025, b.t - ot);
 
     // path length + curl (signed turning, + = counter-clockwise on screen)
-    let pl = 0, curl = 0, jerkAcc = 0, prevSpeed = 0, speedChanges = 0;
+    let pl = this.evictedPathLen || 0, curl = 0, jerkAcc = 0, prevSpeed = 0, speedChanges = 0;
+    let activePeak = 0;
+    const peakCut = b.t - 0.28;
     for (let i = 1; i < n; i++) {
       const px = s[i].x - s[i - 1].x, py = s[i].y - s[i - 1].y;
       const seg = Math.hypot(px, py);
       pl += seg;
-      const dt = Math.max(1e-4, s[i].t - s[i - 1].t);
+      const dt = Math.max(0.0025, s[i].t - s[i - 1].t);
       const sp = seg / dt;
+      if (s[i].t >= peakCut || n <= 8) {
+        if (sp > activePeak) activePeak = sp;
+      }
       if (i > 1) { jerkAcc += Math.abs(sp - prevSpeed); speedChanges++; }
       prevSpeed = sp;
       if (i > 1) {
@@ -130,16 +155,16 @@ class SwipeTracker {
     let i0 = n - 1;
     while (i0 > 0 && b.t - s[i0].t < W) i0--;
     const w = s[i0];
-    const wdt = Math.max(1e-3, b.t - w.t);
+    const wdt = Math.max(0.0025, b.t - w.t);
     const vx = (b.x - w.x) / wdt, vy = (b.y - w.y) / wdt;
     m.speed = Math.hypot(vx, vy);
     m.releaseSpeed = m.speed;
-    if (m.speed > m.peakSpeed) m.peakSpeed = m.speed;
+    m.peakSpeed = Math.max(activePeak, m.speed);
     // 25 ms acceleration (is the hand still accelerating into the ball?)
     let i1 = n - 1; while (i1 > 0 && b.t - s[i1].t < 0.025) i1--;
-    const w1 = s[i1], wdt1 = Math.max(1e-3, b.t - w1.t);
+    const w1 = s[i1], wdt1 = Math.max(0.0025, b.t - w1.t);
     const sp1 = Math.hypot(b.x - w1.x, b.y - w1.y) / wdt1;
-    m.accel = (sp1 - m.speed) / Math.max(wdt1, 1e-3);
+    m.accel = (sp1 - m.speed) / wdt1;
 
     // direction: blend of overall displacement and current velocity
     let dirx = vx, diry = vy;
@@ -219,6 +244,29 @@ function tapStrokeMetrics(metrics, x, y) {
     speed: .8, peakSpeed: .8, releaseSpeed: .8, up: 1, right: 0, curl: 0 };
 }
 
+/** A quick compact wrist flick (14..42 px) inside an admitted contact zone is
+ *  too large for `tapMaxMovePx` (14 px) yet shorter than a full-arm swipe
+ *  (`0.046`). Promote it cleanly into a compact directional counter/block
+ *  instead of dropping it into a dead band (`no_intent`). */
+function compactStrokeMetrics(metrics, x, y) {
+  const dx = Number.isFinite(metrics.dx) ? metrics.dx : 0;
+  const dy = Number.isFinite(metrics.dy) ? metrics.dy : 0;
+  const d = Math.hypot(dx, dy);
+  const right = d > 1e-4 ? clamp(dx / d, -0.75, 0.75) : 0;
+  const up = d > 1e-4 ? clamp(-dy / d, -0.55, 1) : 1;
+  const sp = clamp(Math.max(metrics.peakSpeed || 0, metrics.releaseSpeed || 0, 0.95), 0.85, 1.55);
+  return {
+    ...metrics,
+    tap: true,
+    compactFlick: true,
+    x, y,
+    samples: Math.max(2, metrics.samples || 0),
+    speed: sp, peakSpeed: sp, releaseSpeed: sp,
+    up, right,
+    curl: clamp(metrics.curl || 0, -0.6, 0.6),
+  };
+}
+
 /** A small twitch or hover jitter is not a swipe — a slow, deliberate swing
  * is. A separately recognised tap is a short rally stroke, never a serve. */
 function isRealStroke(m, serving) {
@@ -293,9 +341,9 @@ function classifyStroke(m, ctx, sp01) {
    * ball came back at 25 m/s off a hand that never swung forward. The
    * boundary is the same -0.24 the backspin family uses, so the two rules
    * cannot overlap. */
-  if (hAboveNet > 0.14 && sp01 > 0.52 && u > -0.24 && u < 0.52) return STROKES.SMASH;
+  if (hAboveNet > 0.14 && sp01 > 0.52 && u > -0.28 && u < 0.52) return STROKES.SMASH;
   // downward gestures = backspin family
-  if (u < -0.24) {
+  if (u < -0.28) {
     if (depth > PH.T_HALF_LEN + 0.40 || (fast && m.dist > 0.20)) return STROKES.CHOP;
     if (sp01 < 0.22 && overTable && hAboveTable < 0.35) return STROKES.DROP;
     return STROKES.PUSH;
