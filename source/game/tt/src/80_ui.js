@@ -769,13 +769,16 @@ class UI {
       case 'trail': s.showTrail = v === 'on'; break;
       case 'predict': s.showPredict = v === 'on'; break;
       case 'tele': s.showTele = v === 'on'; $('#spin').classList.toggle('on', s.showTele); break;
-      case 'coach': s.coach = v === 'on'; if (!s.coach) this.hideNote(); break;
+      case 'coach':
+        s.coach = v === 'on';
+        if (g.coach && typeof g.coach.setEnabled === 'function') g.coach.setEnabled(s.coach);
+        if (!s.coach) this.hideNote();
+        break;
       case 'adaptive':
         s.adaptive = v === 'on';
         if (g.director) { g.director.enabled = s.adaptive; if (!s.adaptive) { g.director.reset(); g.ai.setHandicap(1); } }
         break;
       case 'haptics': s.haptics = v === 'on'; if (s.haptics) g.buzz(12); break;
-        break;
       case 'target': s.targetScore = +v; $('#toWin').textContent = v; break;
       /* Калибровка закрутки: ползунки в процентах, хранится множитель. */
       case 'spinGain': s.spinGain = clamp(v / 100, 0.5, 1.6); break;
@@ -1171,10 +1174,14 @@ class UI {
 
   coachRadius(p, x, W, serve) {
     const g = this.game, d = this.dpr;
-    if (serve) return 30 * d;
+    /* The host's «Размер подсказки» calibration slider was posted to the
+     * engine and then ignored: the ring is the one lesson every drill points
+     * at, so its size has to obey the player. 0.72× .. 1.32× around neutral. */
+    const calK = (g._cal && Number.isFinite(g._cal.hintRadius)) ? lerp(0.72, 1.32, clamp(g._cal.hintRadius, 0, 1)) : 1;
+    if (serve) return 30 * d * calK;
     const q = g.project({ x: p.x + MATCH_RULES.captureRadius, y: p.y, z: p.z }, {});
     const r = q && q.ok ? Math.abs(q.x * W - x) : 40 * d;
-    return clamp(r, 22 * d, 64 * d);
+    return clamp(r, 22 * d, 64 * d) * calK;
   }
 
   drawAimTarget(c, W, H, d, side, now) {

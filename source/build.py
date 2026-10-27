@@ -1,5 +1,16 @@
-import base64, re, pathlib, hashlib
-root = pathlib.Path(__file__).parent / 'src'
+#!/usr/bin/env python3
+"""Собрать всё приложение (оболочка + встроенный движок) в ОДИН файл.
+
+    python3 source/build.py              → play/index.html   (единственная сборка в репозитории)
+    python3 source/build.py /tmp/x.html  → указанный путь    (проверка свежести в тестах)
+
+В папке source/ лежат только исходники; готовый HTML живёт только в play/.
+"""
+import base64, re, pathlib, hashlib, sys
+
+SOURCE_DIR = pathlib.Path(__file__).resolve().parent
+REPO = SOURCE_DIR.parent
+root = SOURCE_DIR / 'src'
 html = (root/'index.tpl.html').read_text()
 def b64(p): return 'data:font/woff2;base64,' + base64.b64encode((root/p).read_bytes()).decode()
 CSS_ORDER = ['css/base.css','css/screens_hub.css','css/screens_battle.css','css/screens_meta.css','css/screens_misc.css']
@@ -24,7 +35,7 @@ order = ['core/util.js','core/i18n.js','locales/ru.js','locales/en.js','core/sta
 # --- настоящий движок: собираем game/ и встраиваем как строку для iframe srcdoc ---
 import subprocess, tempfile, os
 gtmp = tempfile.mktemp(suffix='.html')
-subprocess.run(['python3', str(pathlib.Path(__file__).parent/'game'/'tt'/'build.py'), gtmp], check=True, env=dict(os.environ, TT_NO_LOGO='1'))
+subprocess.run(['python3', str(SOURCE_DIR/'game'/'tt'/'build.py'), gtmp], check=True, env=dict(os.environ, TT_NO_LOGO='1'))
 ghtml = open(gtmp, encoding='utf-8').read(); os.remove(gtmp)
 gamejs = 'const GAME_HTML = ' + json.dumps(ghtml, ensure_ascii=False).replace('<', '\\u003c') + ';\n'
 js = gamejs + avjs + illjs + '\n'.join(f'/* ==== {n} ==== */\n' + (root/n).read_text() for n in order if (root/n).exists())
@@ -32,6 +43,7 @@ js = gamejs + avjs + illjs + '\n'.join(f'/* ==== {n} ==== */\n' + (root/n).read_
 shell_fingerprint = hashlib.sha256((html + '\n' + css + '\n' + js).encode('utf-8')).hexdigest()[:12]
 js = 'const SHELL_BUILD = ' + json.dumps('shell ' + shell_fingerprint) + ';\n' + js
 html = html.replace('/*__CSS__*/', css).replace('/*__JS__*/', js)
-out = pathlib.Path(__file__).parent / 'index.html'
+out = pathlib.Path(sys.argv[1]).resolve() if len(sys.argv) > 1 else REPO/'play'/'index.html'
+out.parent.mkdir(parents=True, exist_ok=True)
 out.write_text(html)
 print('built', out, len(html)//1024, 'KB')

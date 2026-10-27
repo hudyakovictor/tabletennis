@@ -264,8 +264,12 @@ function saneN(n) {
   return Number.isFinite(L) && L > 1e-6;
 }
 
-function impactSphere(v, w, n, vSurf, e, mu, et) {
-  if (!saneN(n) || !v || !w) return null;
+const _nUnit = V3.new();
+function impactSphere(v, w, nIn, vSurf, e, mu, et) {
+  if (!saneN(nIn) || !v || !w) return null;
+  const nLen = Math.hypot(nIn.x, nIn.y, nIn.z);
+  _nUnit.x = nIn.x / nLen; _nUnit.y = nIn.y / nLen; _nUnit.z = nIn.z / nLen;
+  const n = _nUnit;
   sanitizeV(v); sanitizeV(w, SPIN_CAP * 2);
   if (vSurf) sanitizeV(vSurf); else vSurf = ZERO3;
   // relative velocity of the ball centre wrt the surface
@@ -492,10 +496,11 @@ function predict(p0, v0, w0, opts = {}) {
   V3.copy(_pp, p0); V3.copy(_pv, v0); V3.copy(_pw, w0);
   sanitizeV(_pp, 40); sanitizeV(_pv); sanitizeV(_pw, SPIN_CAP * 2);
   const out = opts.out || {};
-  out.bounces = 0; out.hitNet = false; out.landed = null; out.b2 = null; out.apex = -1; out.cross = null;
+  out.bounces = 0; out.hitNet = false; out.landed = null; out.b2 = null; out.b3 = null; out.apex = -1; out.cross = null;
   out.planeCross = null; out.netCross = null; out.floor = null;
   out.reachT = -1; out.reach = null; out.path = opts.path || null;
   out.diverged = false; out.edge = 0;
+  const maxPath = opts.maxPath || 400;
   if (out.path) out.path.length = 0;
   let t = 0, prevX = _pp.x, prevY = _pp.y, prevZ = _pp.z;
   let bounceSide = 0;
@@ -504,7 +509,7 @@ function predict(p0, v0, w0, opts = {}) {
     integrateBall(_pp, _pv, _pw, dt);
     t += dt;
     if (!saneV(_pv) || !saneV(_pp)) { out.diverged = true; break; }
-    if (out.path && (out.path.length < 400)) out.path.push(_pp.x, _pp.y, _pp.z);
+    if (out.path && (out.path.length < maxPath)) out.path.push(_pp.x, _pp.y, _pp.z);
     if (_pp.y > out.apex) out.apex = _pp.y;
 
     /* The plane crossing is recorded even when the ball clears the net —
@@ -536,6 +541,7 @@ function predict(p0, v0, w0, opts = {}) {
       out.bounces++;
       if (out.bounces === 1) { out.landed = { x: hit.x, z: hit.z, t, vy: _pv.y, speed: V3.len(_pv) }; bounceSide = Math.sign(hit.z); }
       else if (out.bounces === 2) out.b2 = { x: hit.x, z: hit.z, t, speed: V3.len(_pv) };
+      else if (out.bounces === 3) out.b3 = { x: hit.x, z: hit.z, t, speed: V3.len(_pv) };
       if (opts.stopOnFirstBounce) break;
       /* The serve solver asks for exactly two bounces and nothing else: the
        * rest of the flight (up to 1.5 s of RK4 at 300 Hz) was integrated and

@@ -99,6 +99,10 @@ window.addEventListener('message', (e) => {
     if (GameHost.debug) GameHost.send('debug', { on: true });
     GameHost.send('quality', { q: S.quality });
     GameHost.send('rm', { on: !!S.rm });
+    GameHost.send('mute', { on: S.sfx === false });
+    GameHost.send('haptics', { on: S.vibro !== false });
+    GameHost.send('hint', { on: !!S.hint });
+    if (S.equipped) GameHost.send('equip', { equipped: S.equipped });
     GameHost.send('locale', { lang: I18n.lang });
     /* вся сохранённая калибровка (включая закрутку) — в движок сразу,
        а не только когда игрок тронет ползунок */

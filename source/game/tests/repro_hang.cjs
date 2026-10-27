@@ -4,6 +4,7 @@ const { execFileSync } = require('node:child_process');
 const zlib = require('node:zlib');
 const { pathToFileURL } = require('node:url');
 const puppeteer = require('puppeteer-core');
+const { enginePage } = require('./helpers.cjs');
 const chromium = require('@sparticuz/chromium');
 (async () => {
   const libs = '/tmp/topspin-browser-libs';
@@ -14,7 +15,7 @@ const chromium = require('@sparticuz/chromium');
   await page.setViewport({ width: 390, height: 844, isMobile: true, hasTouch: true });
   const errors = [];
   page.on('pageerror', e => errors.push((e.stack || e.message).split('\n').slice(0,4).join(' | ')));
-  await page.goto(pathToFileURL('/home/user/ttu-v2/game/play/index.html').href);
+  await page.goto(pathToFileURL(enginePage()).href);
   await page.waitForFunction(() => window.__game && window.__game.R.drawCalls > 0, { timeout: 15000 });
   await page.evaluate(() => { const g = window.__game; g.startMatch(1); g.paused = false; });
   // Рендержить по "1 сек" и смотреть time

@@ -3,6 +3,7 @@ const path = require('node:path');
 const zlib = require('node:zlib');
 const { pathToFileURL } = require('node:url');
 const puppeteer = require('puppeteer-core');
+const { enginePage } = require('./helpers.cjs');
 const chromium = require('@sparticuz/chromium');
 (async () => {
   const libs = '/tmp/topspin-browser-libs';
@@ -13,7 +14,7 @@ const chromium = require('@sparticuz/chromium');
   await page.setViewport({ width: 1280, height: 760 });
 
   page.on('pageerror', e => console.log('PAGEERR', e.message));
-  await page.goto(pathToFileURL('/home/user/ttu-v2/game/play/index.html').href);
+  await page.goto(pathToFileURL(enginePage()).href);
   await page.waitForFunction(() => window.__game && window.__game.R.drawCalls > 0, { timeout: 15000 });
   await page.waitForFunction(() => window.__game.music._initialized);
   const r = await page.evaluate(() => {

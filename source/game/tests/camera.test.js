@@ -26,7 +26,7 @@ const NAMES = ['cameraRigFor', 'rigViewProj', 'tabletopBounds', 'tableScreenBoun
   'paddleTargetFromPointer', 'projectPoint', 'unprojectToPlane', 'clampPaddleToFrustum',
   'paddleVisibleOk', 'lensFovDeg', 'horizontalFovDeg', 'rigMargin', 'tableFrameShift',
   'tableTopScreenY', 'PH', 'M4', 'paddleLimitsFor', 'depthForPointer', 'quantizeDepth',
-  'CAM_ADJUST'];
+  'CAM_ADJUST', 'pointerBladeSolve'];
 const lib = load(['10_math.js', '30_physics.js', '57_camera.js'], NAMES);
 
 const VIEWPORTS = [
@@ -267,6 +267,37 @@ test('a portrait screen widens the lens instead of cropping the table', () => {
     assert.equal(wide, P.vfov, '16:9 must use the authored vertical angle');
     assert.ok(tall > wide, 'portrait must widen the vertical angle');
     assert.ok(tall <= 84.0001, 'the lens must not become a fish-eye');
+  }
+});
+
+test('an admitted press owns the depth plane: forceZ keeps the blade on the pointer ray', () => {
+  /* The screen oval and the physical envelope must live on the SAME depth
+   * plane. `forceZ` moves the blade to the depth the press was stamped for
+   * while keeping it under the finger (same ray, same pixel). */
+  for (const [w, h] of VIEWPORTS) {
+    const a = w / h;
+    for (const mode of lib.CAMERA_ORDER) {
+      const rig = lib.cameraRigFor(mode, null, a);
+      const vp = lib.rigViewProj(rig, a);
+      let forced = 0;
+      for (const z of [0.82, 1.10, 1.45]) {
+        const box = lib.reachFor(rig, a, z);
+        for (let i = 0; i <= 4; i++) for (let j = 0; j <= 4; j++) {
+          const px = box.sx0 + (box.sx1 - box.sx0) * i / 4;
+          const py = box.sy0 + (box.sy1 - box.sy0) * j / 4;
+          const t = lib.pointerBladeSolve(rig, a, px, py, { forceZ: z });
+          if (t.forcedZ !== true || t.pinned) continue;   // outside the soft hand shell
+          forced++;
+          assert.equal(t.tz, z, `${mode} ${w}x${h}: blade depth ${t.tz} != forced ${z}`);
+          assert.equal(t.zByPointer, true);
+          const s = lib.projectPoint(vp, { x: t.tx, y: t.ty, z: t.tz }, {});
+          assert.ok(s.ok, `${mode} ${w}x${h}: forced blade is behind the camera`);
+          const e = Math.hypot(s.x - px, s.y - py);
+          assert.ok(e < 2e-3, `${mode} ${w}x${h} z=${z} (${px},${py}): blade off the cursor by ${e}`);
+        }
+      }
+      assert.ok(forced >= 6, `${mode} ${w}x${h}: only ${forced} forced samples`);
+    }
   }
 });
 

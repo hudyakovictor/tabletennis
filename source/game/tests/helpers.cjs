@@ -39,4 +39,30 @@ function load(files, names, extra = {}) {
   vm.runInContext(source + '\n;globalThis.api = {' + names.join(',') + '};', context);
   return { ...context.api, context, saved };
 }
-module.exports = { load, root };
+/* The repository keeps exactly ONE built HTML: <repo>/play/index.html (the
+ * shell build). The standalone engine page it used to ship alongside is a dev
+ * artifact now: it is built on demand into <repo>/build/engine.html (git-
+ * ignored) and rebuilt whenever a source file is newer than it. Browser tests
+ * ask for it here instead of hard-coding a path that no longer exists. */
+const repo = path.resolve(root, '../..');
+const ENGINE_BUILD = path.join(repo, 'build', 'engine.html');
+function newestSourceTime(dir) {
+  let newest = 0;
+  for (const name of fs.readdirSync(dir)) {
+    const p = path.join(dir, name), st = fs.statSync(p);
+    newest = Math.max(newest, st.isDirectory() ? newestSourceTime(p) : st.mtimeMs);
+  }
+  return newest;
+}
+let engineBuilt = null;
+function enginePage() {
+  if (engineBuilt) return engineBuilt;
+  const srcDir = path.join(root, 'tt', 'src');
+  const fresh = fs.existsSync(ENGINE_BUILD) && fs.statSync(ENGINE_BUILD).mtimeMs >= newestSourceTime(srcDir);
+  if (!fresh) {
+    execFileSync('python3', [path.join(root, 'tt', 'build.py'), ENGINE_BUILD],
+      { env: { ...process.env, TT_NO_LOGO: '1' }, stdio: 'inherit' });
+  }
+  return (engineBuilt = ENGINE_BUILD);
+}
+module.exports = { load, root, repo, enginePage, ENGINE_BUILD };

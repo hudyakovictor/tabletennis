@@ -140,7 +140,9 @@ Router.def('result', {
     if (!d.applied) {
       d.applied = true;
       this.r0 = S.rating; this.x0 = S.xp;
-      S.rating += this.delta;
+      /* The ladder has a floor: a long losing run used to drive the rating
+       * negative, and the league badge then showed a number no league owns. */
+      S.rating = Math.max(0, S.rating + this.delta);
       if (d.win) { S.wins++; S.streak++; } else { S.losses++; S.streak = 0; }
       /* форма для formAdjust: последние 8 результатов, победа = 1 */
       S.form = (Array.isArray(S.form) ? S.form : []).concat(d.win ? 1 : 0).slice(-8);
@@ -289,7 +291,14 @@ Router.def('chest', {
     const cells = $$('.sg', sum);
     await Promise.all([c && Wallet.add('coins', c.n, FX.pt(cells[0])), sleep(220).then(() => g && Wallet.add('gems', g.n, FX.pt(cells[1])))]);
     if (this.d.slot !== undefined) { S.chests[this.d.slot] = null; save(); }
-    if (!S.owned.includes('r-coral')) S.owned.push('r-coral'); save();
+    /* The cards the chest SHOWS must actually be granted: the gallery promised
+     * "НОВЫЙ ПРЕДМЕТ" for t-gold and the profile still said «не куплено»,
+     * because nothing but r-coral ever entered the inventory. */
+    for (const it of this.loot) {
+      if (it.k === 'card' && it.item && Catalog.byId(it.item) && !S.owned.includes(it.item)) S.owned.push(it.item);
+    }
+    if (!S.owned.includes('r-coral')) S.owned.push('r-coral');
+    save();
     if (this.phase === 'sum') {
       this.phase = 'done'; $('#choT', el).textContent = t('chest.inBalance')
       sum.insertAdjacentHTML('beforeend', `<button class="b3 green" data-act="done"><span class="shine"></span>${t('common.done')}</button>`);
