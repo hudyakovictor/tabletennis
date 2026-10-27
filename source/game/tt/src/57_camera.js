@@ -244,9 +244,33 @@ function pointerBladeSolve(rig, aspect, px, py, opts) {
    * Это честная граница, а не расхождение — помечаем как пин-зону. */
   if (o.exact && Math.abs(w2.x) > rs.xSoft + 1e-9) { o.exact = false; o.pinned = Math.sign(w2.x); }
   o.tz = z;
+  /* An ADMITTED press knows the depth of the ball it was stamped for. The
+   * shell above is a camera-map heuristic (it keeps the *cursor* inside a
+   * hand-shaped box); it must not overrule the real depth of a live ball.
+   * Without this the screen ray and the ball share a pixel but sit 0.6-0.8 m
+   * apart in Z, so the oval admits the press and the 3D blade still never
+   * enters the ball's physical envelope. The point stays ON THE RAY (under
+   * the finger); only its depth is chosen by the ball, not by the shell. */
+  if (opts && Number.isFinite(opts.forceZ)) {
+    const zf = clamp(opts.forceZ, PADDLE_LIMITS.zStepIn, PADDLE_LIMITS.zFar);
+    const wF = _pbsW6 || (_pbsW6 = {});
+    /* The caller only passes this for a press the gate already ADMITTED, so
+     * the pointer is inside the stamped oval around this very ball: the ray
+     * point at the ball's depth is within a bat-length of it by construction.
+     * Keep it exactly on the ray; the physical limits are applied later by
+     * the game (that clamp is what keeps the blade off the table). */
+    if (unprojectToPlane(rig, aspect, px, py, zf, wF)) {
+      o.tx = wF.x;
+      o.ty = wF.y;
+      o.tz = zf;
+      o.forcedZ = true;
+      o.pinned = Math.abs(wF.x) > rs.xSoft + 1e-9 ? Math.sign(wF.x) : 0;
+      o.exact = !o.pinned;
+    }
+  }
   /* короткий мяч: шаговый ассист может углубить плоскость, но только если
    * указатель там физически достижим (та же проверка, что и у солвера) */
-  if (opts && Number.isFinite(opts.zFoot) && opts.zFoot < o.tz) {
+  if (!o.forcedZ && opts && Number.isFinite(opts.zFoot) && opts.zFoot < o.tz) {
     const yF = yAt(opts.zFoot);
     if (Number.isFinite(yF) && inShell(opts.zFoot, yF)) {
       const wF = _pbsW5 || (_pbsW5 = {});
@@ -262,7 +286,7 @@ function pointerBladeSolve(rig, aspect, px, py, opts) {
   o.zByPointer = Math.abs(o.tz - stance) > 1e-6;
   return o;
 }
-let _pbsW2, _pbsW3, _pbsW4, _pbsW5;
+let _pbsW2, _pbsW3, _pbsW4, _pbsW5, _pbsW6;
 
 function softSat(v, loSoft, hiSoft, loHard, hiHard) {
   if (!Number.isFinite(v)) return (loSoft + hiSoft) * 0.5;

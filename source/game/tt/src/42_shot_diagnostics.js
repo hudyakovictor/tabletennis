@@ -106,12 +106,37 @@ class ShotJournal {
     e.note = tag;
     e.revision++;
   }
+  /** Why an admitted, contact-less attempt failed. Never null for a valid
+   * gesture: the host's miss analysis must always have a word for it. */
+  missReason(entry) {
+    if (!entry) return null;
+    if (!entry.valid) return 'STATIC_CLICK';
+    const c = entry.closest;
+    if (c && Number.isFinite(c.lateral) && Number.isFinite(c.radius)) {
+      return c.lateral > c.radius ? 'TIMING_LATE'
+        : (Number.isFinite(c.depthGap) && Number.isFinite(c.depthLimit) && c.depthGap > c.depthLimit
+          ? 'DEPTH_FAIL' : 'TIMING_EARLY');
+    }
+    return 'TIMING_EARLY';
+  }
   expire(time, simTime) {
     for (const entry of this.records) {
       const expired = Number.isFinite(simTime) && Number.isFinite(entry.deadlineSim)
         ? simTime > entry.deadlineSim : time > entry.deadline;
       if (!entry.contact && entry.outcome === 'pending' && expired) {
         entry.outcome = entry.valid ? 'no_contact' : 'rejected'; entry.revision++;
+        /* An admitted press that produced no contact must never reach the
+         * host as a reason-less miss: the analysis screen literally had
+         * nothing to say about the four "finger was in the oval" reports.
+         * Classify from the closest capture sample the gesture ever saw,
+         * falling back to "too early" when the ball never came near. */
+        if (!entry.reason) entry.reason = this.missReason(entry);
+      } else if (!entry.contact && entry.outcome === 'rejected' && !entry.reason) {
+        /* An admitted press that never became a real stroke (no movement) is
+         * not a mystery miss: it is exactly STATIC_CLICK. This branch is what
+         * the hold-in-place gesture took on the short balls — accepted, no
+         * contact, and previously no word in the report. */
+        entry.reason = this.missReason(entry); entry.revision++;
       }
     }
   }
@@ -164,7 +189,9 @@ class ShotJournal {
     } else if (who < 0 && lastHitBy <= 0 && (!this.latest || this.latest.contact)) {
       const missed = this.create(null, time); missed.outcome = 'no_swipe';
     } else if (this.latest && !this.latest.contact && this.latest.outcome === 'pending') {
-      this.latest.outcome = this.latest.valid ? 'no_contact' : 'rejected'; this.latest.revision++;
+      this.latest.outcome = this.latest.valid ? 'no_contact' : 'rejected';
+      if (!this.latest.reason) this.latest.reason = this.missReason(this.latest);
+      this.latest.revision++;
     }
     this.flight = null; // a later rally must not rewrite this point
   }
