@@ -8,7 +8,7 @@ SRC = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'src')
 REPO = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 OUT = sys.argv[1] if len(sys.argv) > 1 else os.path.join(REPO, 'build', 'engine.html')
 
-JS_ORDER = ['03_i18n.js','10_math.js','12_match_rules.js','20_gl.js','25_career.js','27_network.js','30_physics.js','38_paddle_motion.js','40_swipe.js','42_shot_diagnostics.js','43_input_telemetry.js','44_diagnostics.js','44_miss_shots.js','50_audio.js',
+JS_ORDER = ['03_i18n.js','10_math.js','12_match_rules.js','20_gl.js','25_career.js','27_network.js','30_physics.js','38_paddle_motion.js','40_swipe.js','42_shot_diagnostics.js','43_input_telemetry.js','44_diagnostics.js','44_miss_shots.js','45_perf.js','50_audio.js',
             '55_ai.js','56_rig.js','57_camera.js','58_coach.js','59_replay.js','60_scene.js','61_particles.js','62_arena.js',
             '65_train.js','75_feedback.js','75_music.js','76_emotion.js','81_uiAnim.js','84_racket.js',
             '86_meta.js','70_game.js','80_ui.js','90_boot.js','92_embed.js']
@@ -40,10 +40,10 @@ for f in JS_ORDER:
     js_parts.append(f"/* ====== {f} ====== */\n"+s)
 js="\n\n".join(js_parts)
 
-# Arena photo textures (stands + LED boards) inlined like the brand logo.
-# Scene falls back to procedural textures when these are absent.
-ARENA_ASSETS = {'stands': 'stands.jpg', 'abibos': 'banner-abibos.jpg', 'roflex': 'banner-roflex.jpg',
-                'NUKE': 'banner-NUKE.jpg', 'pumba': 'banner-pumba.jpg'}
+# Arena photo texture (the stands). Sponsor boards are gone from the scene,
+# so their JPEGs are no longer inlined: ~170 KB off the bundle.
+# Scene falls back to a procedural texture when the file is absent.
+ARENA_ASSETS = {'stands': 'stands.jpg'}
 arena = {}
 if not os.environ.get('TT_NO_ARENA'):
     for key, fn in ARENA_ASSETS.items():

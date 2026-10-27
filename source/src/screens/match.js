@@ -2,16 +2,22 @@ Router.def('match', {
   full: true, mood: 'battle', game: true,
   render() {
     const o = PEOPLE[BATTLE.opp]; const T = TARGET[MODE.id] || 11;
+    /* Свободная игра: табло не считает очки — вместо цифр бесконечность,
+       матч не заканчивается, результат и рейтинг не пишутся. */
+    const free = MODE.id === 'free';
+    const D = diffOf(S.diff);
     return `<div class="mx cine">
       <div class="mx-bars"><i></i><i></i></div>
       <div class="m-vig"></div>
       <div class="sb safe-top">
         <div class="sb-in">
           <div class="sbp me">${Art.avatar('me', 38)}<span class="sbn"><b>${S.name.split(' ')[0]}</b><i class="srv" data-srv="1">${t('match.serve')}</i></span></div>
-          <div class="sbs"><span class="d me num" id="scP">0</span><span class="colon">:</span><span class="d op num" id="scO">0</span></div>
+          ${free ? `<div class="sbs free"><span class="d">∞</span></div>`
+            : `<div class="sbs"><span class="d me num" id="scP">0</span><span class="colon">:</span><span class="d op num" id="scO">0</span></div>`}
           <div class="sbp op"><span class="sbn r"><b>${o.s.split(' ').pop()}</b><i class="srv" data-srv="-1">${t('match.serve')}</i></span>${Art.avatar('p' + BATTLE.opp, 38)}</div>
         </div>
-        <div class="sb-sub"><span class="cap">${t(MODE.tk)} · ${t('match.to', { n: T })}</span></div>
+        <div class="sb-sub"><span class="cap">${t(MODE.tk)} · ${free ? t('match.freeNoScore') : t('match.to', { n: T })}</span>
+          <span class="ai-lvl" data-l="${D.id}" title="${t('diff.botLevel')}">${D.name}</span></div>
       </div>
       <button class="ib m-pause pe" data-act="pause" aria-label="${t('match.pause')}">${Art.icon('pause', { c: '#fff', sw: 2.6 })}</button>
       <button class="ib m-slowmo pe" data-act="slowmo" aria-label="${t('match.slowmo')}" aria-pressed="false">${Art.icon('clock', { c: '#fff', sw: 2.4 })}<span>${t('match.slowmo')}</span></button>
@@ -23,7 +29,7 @@ Router.def('match', {
       <div class="m-serve">${Art.icon('paddle', { c: '#FFB3A6' })}<span>${t('match.serveHint')}</span></div>
       <div class="mx-intro">
         <div class="lt op" style="--c1:${o.c[0]};--c2:${o.c[1]}">${Art.avatar('p' + BATTLE.opp, 56)}<span><small>${o.club} · ${fmt(o.r)}</small><b>${o.n}</b></span></div>
-        <div class="mx-chip"><span>${t(MODE.tk)}</span><b>${t('match.matchTo', { n: T })}</b></div>
+        <div class="mx-chip"><span>${t(MODE.tk)}</span><b>${free ? t('match.freeNoScore') : t('match.matchTo', { n: T })}</b></div>
         <div class="lt me" style="--c1:#FF7A4D;--c2:#B4161E"><span><small>${S.club} · ${fmt(S.rating)}</small><b>${S.name}</b></span>${Art.avatar('me', 56)}</div>
       </div>
       <div class="vs-count mx-count"></div>
@@ -69,7 +75,11 @@ Router.def('match', {
      * пролетал в 1.8 раза быстрее, чем считает человек */
     for (const n of ['3', '2', '1']) { c.innerHTML = `<b>${n}</b>`; Sfx.count(1); haptic('medium'); await sleep(980); if (!this.alive) return; }
     c.innerHTML = `<b class="go">${t('match.go')}</b>`; Sfx.count(0); haptic('heavy'); flash('#fff', .25, 260);
-    GameHost.send('match', { diff: clamp((LDIFF[leagueOf(S.rating).id] ?? 1) + (MODE.id === 'quick' ? -1 : 0) + formAdjust(), 0, 4), target: TARGET[MODE.id] || 11, hint: !!S.hint });
+    /* free: движок держит freePlay — очки разыгрываются, счёт не растёт.
+       Уровень бота (S.diff) и тренд последних матчей уходят в движок явно:
+       бот больше не захардкожен на «ПРО», а форма игрока не двигает уровень
+       целиком — только ±4 % агрессии/точности между матчами. */
+    GameHost.send('match', { diff: clamp(Math.round(S.diff ?? 1), 0, 3), trend: aiTrend(), target: TARGET[MODE.id] || 11, hint: !!S.hint, free: MODE.id === 'free' });
     GameHost.send('quiet', { on: false });
     mx.classList.remove('bars', 'cine'); mx.classList.add('live'); this.st.live = true;
     await sleep(520); c.innerHTML = '';
@@ -111,34 +121,43 @@ Router.def('match', {
       st.maxRally = Math.max(st.maxRally, m.rally || 0); rallyEl.classList.remove('on', 'fire');
       const win = m.who > 0; st.p = m.score[0]; st.o = m.score[1]; st.seq.push(win ? 1 : -1);
       if (st.server > 0) { st.servePts++; if (win) st.serveWon++; }
-      el.querySelector('#scP').textContent = st.p; el.querySelector('#scO').textContent = st.o;
-      const sc = el.querySelector(win ? '#scP' : '#scO'); sc.classList.remove('flip'); void sc.offsetWidth; sc.classList.add('flip');
+      /* В свободной игре цифр на табло нет — обновлять нечего. */
+      const scP = el.querySelector('#scP'), scO = el.querySelector('#scO');
+      if (scP) scP.textContent = st.p; if (scO) scO.textContent = st.o;
+      const sc = el.querySelector(win ? '#scP' : '#scO');
+      if (sc) { sc.classList.remove('flip'); void sc.offsetWidth; sc.classList.add('flip'); }
+      const free = MODE.id === 'free';
       const vig = el.querySelector('.m-vig');
       if (win) {
         Sfx.point(); haptic('success');
         /* очко засчитывается счётом, анимацией «flip» и баннером с причиной —
          * конфетти над цифрой посреди розыгрыша не нужны */
-        const why = REASON(1, m.reason); this.banner(`<b>${t('match.point')}</b>${why ? `<small>${why}</small>` : ''}`, 'win');
+        const why = REASON(1, m.reason);
+        if (free) { if (why) this.banner(`<b>${why}</b>`, 'win'); }
+        else this.banner(`<b>${t('match.point')}</b>${why ? `<small>${why}</small>` : ''}`, 'win');
       } else {
         Sfx.lose(); haptic('error'); FX.shake(5, 220);
-        this.banner(`<b>${REASON(-1, m.reason)}</b><small>${t('match.pointToOpp')}</small>`, 'lose');
+        this.banner(`<b>${REASON(-1, m.reason)}</b>${free ? '' : `<small>${t('match.pointToOpp')}</small>`}`, 'lose');
       }
-      vig.classList.toggle('mp', !!m.matchPoint);
-      if (m.matchPoint && !m.winner) this.later(() => { this.banner(`<b>${t('match.matchball')}</b><small>${m.matchPoint > 0 ? t('match.matchballSub') : t('match.matchballOpp')}</small>`, 'mp', 1300); Sfx.rise(.5); haptic('warning'); }, 1150);
+      vig.classList.toggle('mp', !free && !!m.matchPoint);
+      if (!free && m.matchPoint && !m.winner) this.later(() => { this.banner(`<b>${t('match.matchball')}</b><small>${m.matchPoint > 0 ? t('match.matchballSub') : t('match.matchballOpp')}</small>`, 'mp', 1300); Sfx.rise(.5); haptic('warning'); }, 1150);
     }
     if (m.type === 'paused' && m.v && !m.host && !Sheet.cur && !st.over) this.pause(true);
-    if (m.type === 'matchEnd') this.finish(m);
+    /* В свободной игре движок матч не завершает — но если придёт, показывать
+       итог с нулевым счётом нельзя. */
+    if (m.type === 'matchEnd' && MODE.id !== 'free') this.finish(m);
   },
   pause(fromGame) {
     if (this.st.over) return;
     GameHost.send('pause');
-    Sheet.open(`<div class="h1" style="margin:4px 4px 6px">${t('match.pause')}</div><p class="dim" style="margin:0 4px 16px;font-size:12.5px">${t('match.pauseScore', { p: this.st.p, o: this.st.o })}</p>
+    const free = MODE.id === 'free';
+    Sheet.open(`<div class="h1" style="margin:4px 4px 6px">${t('match.pause')}</div><p class="dim" style="margin:0 4px 16px;font-size:12.5px">${free ? t('match.freePause') : t('match.pauseScore', { p: this.st.p, o: this.st.o })}</p>
       <div style="display:grid;gap:12px"><button class="b3 green block" data-a="resume"><span class="shine"></span>${Art.icon('play', { c: '#fff' })}${t('common.resume')}</button>
       <button class="b3 dark block" data-a="screenshot">${t('debug.screenshot')}</button>
       <button class="b3 dark block" data-a="diagnostics">${t('debug.title')}</button>
       <button class="b3 dark block" data-a="train">${Art.icon('target', { c: '#fff' })}${t('match.training')}</button>
       <button class="b3 dark block" data-a="settings">${Art.icon('gear', { c: '#fff' })}${t('nav.settings')}</button>
-      <button class="b3 coral block sm" data-a="quit">${t('match.surrender')}</button></div>`, {
+      <button class="b3 coral block sm" data-a="quit">${free ? t('match.exitFree') : t('match.surrender')}</button></div>`, {
       onOpen: (w) => w.addEventListener('click', (e) => {
         const a = e.target.closest('[data-a]'); if (!a) return;
         if (a.dataset.a === 'resume') Sheet.close();
@@ -146,7 +165,11 @@ Router.def('match', {
         if (a.dataset.a === 'screenshot') diagnosticsSheet({ focusScreenshot: true });
         if (a.dataset.a === 'diagnostics') diagnosticsSheet();
         if (a.dataset.a === 'train') { this.st.over = true; Sheet.close(true); Router.go('train', { data: { then: 'hub' } }); }
-        if (a.dataset.a === 'quit') { Sheet.close(true); this.finish({ won: false, quit: true, score: [this.st.p, this.st.o] }); }
+        if (a.dataset.a === 'quit') {
+          Sheet.close(true);
+          if (free) this.exitFree();
+          else this.finish({ won: false, quit: true, score: [this.st.p, this.st.o] });
+        }
       })
     });
     this.watchSheets();
@@ -202,6 +225,15 @@ Router.def('match', {
       await done; if (!this.alive) return;
     }
     Router.go('result', { data: res });
+  },
+  /* Свободная игра заканчивается только выходом: ни итога, ни рейтинга, ни
+     миссий — просто назад в хаб. */
+  exitFree() {
+    const st = this.st; if (st.done) return; st.over = true; st.done = true;
+    TGX.guard(false);
+    if (this._mo) { this._mo.disconnect(); this._mo = null; }
+    toast(t('match.freeExitToast'), 'target');
+    Router.go('hub');
   },
   leave() {
     this.alive = false; this.off && this.off(); this.timers.forEach(clearTimeout); clearTimeout(this.bt);

@@ -29,7 +29,7 @@ illjs = 'const ILL = ' + json.dumps(ill) + ';\n'
 order = ['core/util.js','core/i18n.js','locales/ru.js','locales/en.js','core/state.js','core/platform.js','core/audio.js','core/ui_core.js','core/dev.js',
          'data/leagues.js','ui/art.js','ui/fx.js','services/economy.js','ui/bg.js','engine2d/engine.js',
          'ui/ui.js','services/miss_shots.js','services/game_host.js','services/diagnostics.js','services/career.js',
-         'screens/hub.js','screens/settings.js','screens/matchmaking.js','screens/battle_common.js',
+         'screens/hub.js','screens/settings.js','screens/matchmaking.js','screens/online.js','screens/battle_common.js',
          'screens/match.js','screens/training.js','screens/result.js',
          'ui/item_art.js','data/catalog.js','screens/shop.js','data/season.js','screens/pass.js','screens/ranks.js','screens/profile.js','main.js']
 # --- настоящий движок: собираем game/ и встраиваем как строку для iframe srcdoc ---

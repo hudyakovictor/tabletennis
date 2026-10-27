@@ -9,6 +9,10 @@
 const MISS_SHOT_HALF = 350;  // CSS pixels on each side of the initial press
 const MISS_SHOT_SIZES = Object.freeze([20, 100, 300, 350, 400]);
 const MISS_SHOT_JPEG = 0.88;
+/* Длинная сторона снимка. Кадр ±350 CSS px на DPR 2 — это 1400² пикселей:
+ * drawImage с WebGL-канваса (синхронный readback) + JPEG на таком размере
+ * стоят десятки мс на телефоне. 900 px хватает галерее с запасом. */
+const MISS_SHOT_MAX_PX = 900;
 
 function missShotRect(press, vw, vh, half = MISS_SHOT_HALF) {
   if (!press || ![press.x, press.y, vw, vh, half].every(Number.isFinite) ||
@@ -88,8 +92,11 @@ function createMissShotCapture(opts = {}) {
     return null;
   }
 
-  function capture() {
+  function capture(expectId) {
     const p = pending; if (!p) return null;
+    // Отложенный захват обязан проверить, что кадр ещё тот: пока он ждал
+    // свободного тика, игрок мог нажать снова и перезаписать pending.
+    if (expectId && p.id !== expectId) return null;
     try {
       const cv = getCanvas();
       if (!cv || !cv.width || !cv.height) throw new Error('Game canvas unavailable');
@@ -98,8 +105,9 @@ function createMissShotCapture(opts = {}) {
       // device DPR at reduced graphics quality). Downsampling to CSS pixels
       // and then enlarging the preview made small captures visibly blocky.
       const renderX = cv.width / p.vw, renderY = cv.height / p.vh;
-      c2.width = Math.max(1, Math.round(p.w * renderX));
-      c2.height = Math.max(1, Math.round(p.h * renderY));
+      const fit = Math.min(1, MISS_SHOT_MAX_PX / Math.max(p.w * renderX, p.h * renderY));
+      c2.width = Math.max(1, Math.round(p.w * renderX * fit));
+      c2.height = Math.max(1, Math.round(p.h * renderY * fit));
       const ctx = c2.getContext && c2.getContext('2d'); if (!ctx) throw new Error('2D canvas unavailable');
       // x and y scales can differ slightly when the renderer rounds sizes.
       const draw = (src) => {

@@ -1,17 +1,24 @@
 const MISS_SHOT_SIZES = [350, 300, 400, 100, 20];
+/* Калибровка сгруппирована по смыслу: длинный плоский список из 16 ползунков
+   не читается. Почти всё читается движком напрямую из g._cal, поэтому
+   значение применяется на лету — перезапускать матч не нужно. */
 const CAL = [
-  { k: 'camHeight', tk: 'cal.camHeight', dk: 'cal.camHeightD', min: 0, max: 100, def: 50 },
-  { k: 'camZoom', tk: 'cal.camZoom', dk: 'cal.camZoomD', min: 0, max: 100, def: 50 },
-  { k: 'camSway', tk: 'cal.camSway', dk: 'cal.camSwayD', min: 0, max: 100, def: 40 },
-  { k: 'padSpeed', tk: 'cal.padSpeed', dk: 'cal.padSpeedD', min: 0, max: 100, def: 55 },
-  { k: 'padSmooth', tk: 'cal.padSmooth', dk: 'cal.padSmoothD', min: 0, max: 100, def: 35 },
-  { k: 'ballSize', tk: 'cal.ballSize', dk: 'cal.ballSizeD', min: 0, max: 100, def: 50 },
-  { k: 'trailLen', tk: 'cal.trailLen', dk: 'cal.trailLenD', min: 0, max: 100, def: 45 },
-  { k: 'tableGlow', tk: 'cal.tableGlow', dk: 'cal.tableGlowD', min: 0, max: 100, def: 50 },
-  { k: 'flytime', tk: 'cal.flytime', dk: 'cal.flytimeD', min: 0, max: 100, def: 50 },
-  { k: 'hintRadius', tk: 'cal.hintRadius', dk: 'cal.hintRadiusD', min: 0, max: 100, def: 60 },
-  { k: 'spinGain', tk: 'cal.spinGain', dk: 'cal.spinGainD', min: 0, max: 100, def: 45 },
-  { k: 'arcSens', tk: 'cal.arcSens', dk: 'cal.arcSensD', min: 0, max: 100, def: 33 }
+  { g: 'camera', k: 'camHeight', tk: 'cal.camHeight', dk: 'cal.camHeightD', min: 0, max: 100, def: 50 },
+  { g: 'camera', k: 'camZoom', tk: 'cal.camZoom', dk: 'cal.camZoomD', min: 0, max: 100, def: 50 },
+  { g: 'camera', k: 'camSway', tk: 'cal.camSway', dk: 'cal.camSwayD', min: 0, max: 100, def: 40 },
+  { g: 'racket', k: 'padSpeed', tk: 'cal.padSpeed', dk: 'cal.padSpeedD', min: 0, max: 100, def: 55 },
+  { g: 'racket', k: 'padSmooth', tk: 'cal.padSmooth', dk: 'cal.padSmoothD', min: 0, max: 100, def: 35 },
+  { g: 'racket', k: 'fingerTrail', tk: 'cal.fingerTrail', dk: 'cal.fingerTrailD', min: 0, max: 100, def: 55 },
+  { g: 'strike', k: 'spinGain', tk: 'cal.spinGain', dk: 'cal.spinGainD', min: 0, max: 100, def: 45 },
+  { g: 'strike', k: 'arcSens', tk: 'cal.arcSens', dk: 'cal.arcSensD', min: 0, max: 100, def: 33 },
+  { g: 'strike', k: 'tossHeight', tk: 'cal.tossHeight', dk: 'cal.tossHeightD', min: 0, max: 100, def: 45 },
+  { g: 'ball', k: 'ballSize', tk: 'cal.ballSize', dk: 'cal.ballSizeD', min: 0, max: 100, def: 50 },
+  { g: 'ball', k: 'trailLen', tk: 'cal.trailLen', dk: 'cal.trailLenD', min: 0, max: 100, def: 45 },
+  { g: 'ball', k: 'flytime', tk: 'cal.flytime', dk: 'cal.flytimeD', min: 0, max: 100, def: 50 },
+  { g: 'ball', k: 'tableGlow', tk: 'cal.tableGlow', dk: 'cal.tableGlowD', min: 0, max: 100, def: 50 },
+  { g: 'help', k: 'hintRadius', tk: 'cal.hintRadius', dk: 'cal.hintRadiusD', min: 0, max: 100, def: 60 },
+  { g: 'help', k: 'hintGlow', tk: 'cal.hintGlow', dk: 'cal.hintGlowD', min: 0, max: 100, def: 65 },
+  { g: 'help', k: 'slowmoDepth', tk: 'cal.slowmoDepth', dk: 'cal.slowmoDepthD', min: 0, max: 100, def: 60 }
 ];
 
 /* The original gallery uses ttu-miss-shots. Display legacy and new records
@@ -48,20 +55,29 @@ function zoomMissShot(w, s, previousFocus) {
 }
 
 function openSettings() {
-  S.missShots = S.missShots !== false;
+  // Дефолт — только для нового сейва: раньше эта строка включала галерею
+  // обратно при каждом открытии настроек, и выключить её было невозможно.
+  if (S.missShots === undefined) S.missShots = true;
   S.missShotHalf = MISS_SHOT_SIZES.includes(+S.missShotHalf) ? +S.missShotHalf : 350;
   const row = (k, t, i, d) => `<div class="srow"><span class="si">${Art.icon(i, { c: '#9BE8FF' })}</span><span class="st"><b>${t}</b><small>${d}</small></span><button class="tgl ${S[k] ? 'on' : ''}" data-k="${k}" aria-label="${t}" aria-pressed="${!!S[k]}"></button></div>`;
   S.cal = S.cal || {};
-  const cal = CAL.map((c) => { const v = S.cal[c.k] !== undefined ? S.cal[c.k] : c.def; return `<div class="calrow"><div class="cal-t"><b>${t(c.tk)}</b><small>${t(c.dk)}</small></div><div class="cal-c"><input type="range" min="${c.min}" max="${c.max}" value="${v}" data-cal="${c.k}" aria-label="${t(c.tk)}"><span class="cal-v num" data-calv="${c.k}">${v}</span></div></div>`; }).join('');
+  let lastCalGroup = null;
+  const cal = CAL.map((c) => {
+    const v = S.cal[c.k] !== undefined ? S.cal[c.k] : c.def;
+    const head = c.g !== lastCalGroup ? (lastCalGroup = c.g, `<div class="cal-grp">${t('cal.g.' + c.g)}</div>`) : '';
+    return `${head}<div class="calrow"><div class="cal-t"><b>${t(c.tk)}</b><small>${t(c.dk)}</small></div><div class="cal-c"><input type="range" min="${c.min}" max="${c.max}" value="${v}" data-cal="${c.k}" aria-label="${t(c.tk)}"><span class="cal-v num" data-calv="${c.k}">${v}</span></div></div>`;
+  }).join('');
   Sheet.open(`<div class="h1" style="margin:4px 4px 14px">${t('set.title')}</div>
     <div class="pnl sgroup">${row('sfx', t('set.sfx'), 'sound', t('set.sfxD'))}${row('vibro', t('set.vibro'), 'vibe', t('set.vibroD'))}${row('hint', t('set.hint'), 'target', t('set.hintD'))}${row('rm', t('set.rm'), 'motion', t('set.rmD'))}</div>
+    <div class="cap" style="margin:18px 4px 8px">${t('set.diff')} <small class="dim" style="text-transform:none;font-weight:400;font-size:11px">${t('set.diffHint')}</small></div>
+    <div class="seg" id="dseg"><span class="pill"></span>${DIFFS.map((d) => `<button data-v="${d.id}" class="${S.diff === d.id ? 'on' : ''}">${t(d.tk)}</button>`).join('')}</div>
     <div class="cap" style="margin:18px 4px 8px">${t('set.quality')}</div>
     <div class="seg" id="qseg"><span class="pill"></span>${['high', 'mid', 'low'].map((q) => `<button data-v="${q}" class="${S.quality === q ? 'on' : ''}">${{ high: t('quality.high'), mid: t('quality.mid'), low: t('quality.low') }[q]}</button>`).join('')}</div>
     <div class="cap" style="margin:18px 4px 8px">${t('set.language')}</div>
     <div class="seg" id="langseg"><span class="pill"></span>${I18n.LANGS.map((L) => `<button data-v="${L.id}" class="${I18n.lang === L.id ? 'on' : ''}">${L.name}</button>`).join('')}</div>
     <div class="pnl sgroup" style="margin-top:10px"><div class="srow"><span class="si">${Art.icon('expand', { c: '#9BE8FF' })}</span><span class="st"><b>${t('set.fullscreen')}</b><small>${t('set.fullscreenD')}</small></span><button class="b3 dark sm" data-a="fs" style="margin-left:auto">${t('set.fullscreenBtn')}</button></div></div>
     <div class="cap" style="margin:18px 4px 8px">${t('set.calib')} <small class="dim" style="text-transform:none;font-weight:400;font-size:11px">${t('set.calibHint')}</small></div>
-    <details class="pnl calib"><summary class="cal-sum">${Art.icon('target', { c: '#9BE8FF' })} ${t('set.calibOpen', { n: CAL.length })}</summary><div class="cal-list">${cal}</div></details>
+    <details class="pnl calib"><summary class="cal-sum">${Art.icon('target', { c: '#9BE8FF' })} ${t('set.calibOpen', { n: CAL.length })}</summary><div class="cal-list">${cal}</div><div class="cal-foot"><button class="b3 dark sm block" data-a="calReset">${t('set.calibReset')}</button></div></details>
     <div class="cap" style="margin:18px 4px 8px">${t('set.missesTitle')} <small class="dim" style="text-transform:none;font-weight:400;font-size:11px">${t('set.missesHint')}</small></div>
     <div class="pnl sgroup miss-gallery">
       ${row('missShots', t('set.missesSave'), 'target', t('set.missesSaveD'))}
@@ -97,6 +113,17 @@ function openSettings() {
       };
       refreshMisses();
       w.addEventListener('click', (e) => {
+        const calReset = e.target.closest('[data-a=calReset]');
+        if (calReset) {
+          CAL.forEach((c) => {
+            S.cal[c.k] = c.def;
+            const r = w.querySelector(`[data-cal="${c.k}"]`); if (r) r.value = c.def;
+            const v = w.querySelector(`[data-calv="${c.k}"]`); if (v) v.textContent = c.def;
+            GameHost.ready && GameHost.send('cal', { k: c.k, v: c.def });
+          });
+          save(); haptic('select'); Sfx.soft(); toast(t('set.calibResetDone'), 'target');
+          return;
+        }
         const thumb = e.target.closest('.miss-thumb');
         if (thumb) { zoomMissShot(w, displayedShots[+thumb.dataset.shotIndex], thumb); return; }
         const row = e.target.closest('.srow'); const toggle = e.target.closest('.tgl') || (row && row.querySelector('.tgl')); if (!toggle) return;
@@ -129,6 +156,14 @@ function openSettings() {
         GameHost.ready && GameHost.send('cal', { k: r.dataset.cal, v: +r.value });
       });
       UI.seg($('#qseg', w), (v) => setQuality(v));
+      /* Уровень бота — тот же выбор, что и в хабе: профиль (S.diff), звук,
+       * тост. WTF отдельно предупреждает и вспыхивает. */
+      UI.seg($('#dseg', w), (v) => {
+        S.diff = clamp(+v, 0, DIFFS.length - 1); save();
+        const D = diffOf(S.diff);
+        if (D.id === 3) { flash('#FF69D8', .3, 240); toast(t('diff.wtfWarn'), 'target'); }
+        else toast(t('diff.changed', { name: t(D.tk) }), 'target');
+      });
       UI.seg($('#langseg', w), (v) => I18n.setLang(v));
       const fsBtn = w.querySelector('[data-a=fs]');
       fsBtn && fsBtn.addEventListener('click', () => TGX.toggleFullscreen());

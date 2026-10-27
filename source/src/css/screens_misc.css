@@ -242,6 +242,10 @@ body.rm .rt-phone,body.rm .glr-ball{animation:none}
 .calib summary::-webkit-details-marker{display:none}
 .calib summary svg{width:20px;height:20px}
 .cal-list{padding:2px 14px 16px;display:grid;gap:12px}
+.cal-grp{margin:8px 0 -2px;font:800 10.5px/1 var(--display);letter-spacing:.14em;text-transform:uppercase;color:rgba(155,232,255,.7)}
+.cal-grp:first-child{margin-top:2px}
+.cal-foot{padding:0 14px 16px}
+.cal-foot .block{width:100%}
 .calrow{display:grid;gap:6px}
 .cal-t b{display:block;font-size:13px}
 .cal-t small{display:block;font-size:11px;color:var(--ink3);line-height:1.35;margin-top:1px}

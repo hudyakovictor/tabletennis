@@ -1,27 +1,15 @@
 /* =====================================================================
- *  ARENA DRESSING — трибуны и LED-борта.
+ *  ARENA DRESSING — только стены зала с трибуной.
  *
- *  Конструкция (mobile-first, ноль лишней геометрии):
- *   - зал — существующие 4 стены, но с текстурой трибун вместо градиента:
- *     тёмная картинка как MeshBasicMaterial (unlit-путь шейдера нам не
- *     подходит — он не умножает текстуру на цвет, поэтому трибуны идут
- *     обычным lit-материалом с подавленным tint ~0x30 и туманом сцены);
- *   - ограждение — 4 низких блока (коробка + светящаяся плоскость внутрь)
- *     с баннерами брендов; нижний край трибун прячется за бортами;
- *  Фото-текстуры кладёт сборка: tt/build.py инлайнит tt/assets/*.jpg
- *  в window.__TT_ARENA. Без них (тесты, TT_NO_ARENA) сцена рисует
- *  процедурные фолбэки ниже — арена никогда не остаётся голой.
+ *  Спортивные баннеры, LED-борта по периметру и потолочные панели убраны:
+ *  это были десятки лишних quads с additive-материалами и текстурами
+ *  (плюс ~170 КБ JPEG в бандле), а игроку из камеры за столом они только
+ *  мешали читать мяч.
+ *
+ *  Фото-текстура трибуны кладётся сборкой: tt/build.py инлайнит
+ *  tt/assets/stands.jpg в window.__TT_ARENA. Без неё (тесты, TT_NO_ARENA)
+ *  сцена рисует процедурный фолбэк ниже — стена не остаётся голой.
  * ===================================================================== */
-
-/* Бренды бортов: id = ключ в __TT_ARENA и имя файла banner-<id>.jpg.
- * Порядок важен: Scene раскладывает их по сторонам [дальняя, ближняя,
- * левая, правая]. font/fg/bg — только для процедурного фолбэка. */
-const ARENA_BRANDS = [
-  { id: 'roflex', text: 'Roflex', bg: '#043a20', fg: '#e9c95c', font: '700 150px Georgia, "Times New Roman", serif' },
-  { id: 'pumba', text: 'Pumba', bg: '#c01030', fg: '#ffffff', font: '800 152px Arial, Helvetica, sans-serif' },
-  { id: 'abibos', text: 'Abibos', bg: '#0a0a0c', fg: '#ffffff', font: '800 152px Arial, Helvetica, sans-serif' },
-  { id: 'NUKE', text: 'NUKE', bg: '#0a0a0c', fg: '#ffffff', font: '900 italic 160px Arial, Helvetica, sans-serif' },
-];
 
 /* Процедурные трибуны: тёмный зал и тысячи тусклых голов-точек,
  * без светильников и прожекторных лучей. Рисуется один раз в канвас 2048×256 —
@@ -42,19 +30,6 @@ function texStandsFallback() {
     g.fillStyle = `rgba(${v * 1.1 | 0},${v * 1.25 | 0},${v * 1.7 | 0},${0.5 + Math.random() * 0.5})`;
     g.fillRect(Math.random() * W, y, 1.6, 1.3);
   }
-  return c;
-}
-
-/* Процедурный LED-борт одного бренда: фон, сетка диодов и имя —
- * повторяет характер листа-исходника, пока не подгрузилось фото. */
-function texBrandFallback(brand) {
-  const W = 1024, H = 256, c = cv(W, H), g = c.getContext('2d');
-  g.fillStyle = brand.bg; g.fillRect(0, 0, W, H);
-  g.fillStyle = 'rgba(0,0,0,0.16)';
-  for (let y = 4; y < H; y += 8) for (let x = 4; x < W; x += 8) g.fillRect(x, y, 2.4, 2.4);
-  g.font = brand.font; g.textAlign = 'center'; g.textBaseline = 'middle';
-  g.fillStyle = brand.fg;
-  g.fillText(brand.text, W / 2, H / 2 + 8);
   return c;
 }
 

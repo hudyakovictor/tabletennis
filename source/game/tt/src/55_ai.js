@@ -34,46 +34,43 @@
  * ------------------------------------------------------------------- */
 const AI_LEVELS = [
   {
-    id: 0, name: 'НОВИЧОК', tag: 'ROOKIE', elo: 900, style: 'PUSHER',
-    react: 0.38, move: 1.55, posErr: 0.28, skill: 0.30, spinRead: 0.16,
-    aggro: 0.06, variety: 0.35,
+    id: 0, name: 'EASY', tag: 'EASY', ru: 'ЛЁГКИЙ', elo: 900, style: 'PUSHER',
+    react: 0.42, move: 1.7, posErr: 0.30, skill: 0.32, spinRead: 0.18,
+    aggro: 0.08, variety: 0.30,
     vmagMin: 2.0, vmagMax: 3.8, paceOpen: 0.16, paceRamp: 0.02, paceMax: 0.32,
-    windup: 0.38, errBase: 0.38, errPress: 0.16, deepness: 0.48, placeSkill: 0.12,
-    counterRate: 0.01, smashRate: 0.0, dropRate: 0.02,
+    windup: 0.38, errBase: 0.37, errPress: 0.16, deepness: 0.48, placeSkill: 0.12,
+    counterRate: 0.01, smashRate: 0.01, dropRate: 0.02,
   },
   {
-    id: 1, name: 'ЛЮБИТЕЛЬ', tag: 'AMATEUR', elo: 1400, style: 'ALLROUND',
-    react: 0.26, move: 2.5, posErr: 0.15, skill: 0.58, spinRead: 0.45,
-    aggro: 0.24, variety: 0.60,
+    id: 1, name: 'MEDIUM', tag: 'MEDIUM', ru: 'СРЕДНИЙ', elo: 1400, style: 'ALLROUND',
+    react: 0.28, move: 2.55, posErr: 0.16, skill: 0.58, spinRead: 0.45,
+    aggro: 0.25, variety: 0.60,
     vmagMin: 3.2, vmagMax: 6.8, paceOpen: 0.26, paceRamp: 0.045, paceMax: 0.62,
-    windup: 0.30, errBase: 0.20, errPress: 0.09, deepness: 0.70, placeSkill: 0.36,
+    windup: 0.30, errBase: 0.19, errPress: 0.09, deepness: 0.70, placeSkill: 0.36,
     counterRate: 0.08, smashRate: 0.20, dropRate: 0.05,
   },
   {
-    id: 2, name: 'ПРО', tag: 'PRO', elo: 1900, style: 'ALLROUND',
-    react: 0.185, move: 3.5, posErr: 0.082, skill: 0.79, spinRead: 0.72,
-    aggro: 0.44, variety: 0.78,
-    vmagMin: 5.0, vmagMax: 10.8, paceOpen: 0.38, paceRamp: 0.075, paceMax: 0.90,
-    windup: 0.235, errBase: 0.062, errPress: 0.055, deepness: 0.86, placeSkill: 0.64,
+    id: 2, name: 'HARD', tag: 'HARD', ru: 'СЛОЖНЫЙ', elo: 1900, style: 'ATTACK',
+    react: 0.17, move: 3.8, posErr: 0.06, skill: 0.79, spinRead: 0.72,
+    aggro: 0.54, variety: 0.78,
+    vmagMin: 5.0, vmagMax: 12.0, paceOpen: 0.38, paceRamp: 0.075, paceMax: 0.90,
+    windup: 0.235, errBase: 0.075, errPress: 0.055, deepness: 0.86, placeSkill: 0.64,
     counterRate: 0.26, smashRate: 0.58, dropRate: 0.08,
   },
   {
-    id: 3, name: 'МАСТЕР СПОРТА', tag: 'MASTER', elo: 2300, style: 'ATTACK',
-    react: 0.145, move: 4.3, posErr: 0.052, skill: 0.885, spinRead: 0.87,
-    aggro: 0.60, variety: 0.84,
-    vmagMin: 5.8, vmagMax: 13.2, paceOpen: 0.44, paceRamp: 0.090, paceMax: 1.0,
-    windup: 0.195, errBase: 0.054, errPress: 0.040, deepness: 0.90, placeSkill: 0.80,
-    counterRate: 0.40, smashRate: 0.74, dropRate: 0.09,
-  },
-  {
-    id: 4, name: 'ЛЕГЕНДА', tag: 'LEGEND', elo: 2700, style: 'ATTACK',
-    react: 0.108, move: 5.2, posErr: 0.032, skill: 0.95, spinRead: 0.95,
-    aggro: 0.74, variety: 0.90,
-    vmagMin: 6.6, vmagMax: 15.4, paceOpen: 0.50, paceRamp: 0.105, paceMax: 1.0,
-    windup: 0.165, errBase: 0.030, errPress: 0.028, deepness: 0.94, placeSkill: 0.90,
-    counterRate: 0.54, smashRate: 0.86, dropRate: 0.10,
+    id: 3, name: 'WTF', tag: 'WTF', ru: 'WTF', elo: 2700, style: 'ATTACK',
+    react: 0.09, move: 5.8, posErr: 0.023, skill: 0.95, spinRead: 0.965,
+    aggro: 0.82, variety: 0.90,
+    vmagMin: 6.6, vmagMax: 16.2, paceOpen: 0.50, paceRamp: 0.105, paceMax: 1.0,
+    windup: 0.165, errBase: 0.017, errPress: 0.019, errPressAbs: true, deepness: 0.94, placeSkill: 0.94,
+    counterRate: 0.66, smashRate: 0.92, dropRate: 0.135,
   },
 ];
+
+/* Удары, которые считаются АТАКОЙ для серии агрессии. Бот не может лупить
+ * ими подряд бесконечно: со третьего атакующего мяча к шансу ошибки
+ * добавляется 1.5 %, и так до +4 %. Подставка/подрезка/свеча серию рвут. */
+const AI_ATTACK_STROKES = new Set(['SMASH', 'COUNTER', 'LOOP', 'DRIVE', 'FLICK']);
 
 /* ---------------------------------------------------------------------
  *  TACTICS
@@ -91,11 +88,10 @@ const AI_TACTICS = {
  * tame clamp. The complaint was real: a mail-slot serve + topspin kick is a
  * fair weapon only against someone who covers the table width by design. */
 const AI_SERVE_CAPS = [
-  { vmag: 4.4, orbit: PH.T_HALF_WID * 0.44, kick: 0.40 },  // НОВИЧОК
-  { vmag: 6.0, orbit: PH.T_HALF_WID * 0.55, kick: 0.55 },  // ЛЮБИТЕЛЬ
-  { vmag: 8.0, orbit: PH.T_HALF_WID * 0.62, kick: 0.75 },  // ПРО
-  { vmag: 9.6, orbit: PH.T_HALF_WID * 0.70, kick: 0.85 },  // МАСТЕР
-  { vmag: 11.0, orbit: PH.T_HALF_WID * 0.80, kick: 0.95 }, // ЛЕГЕНДА
+  { vmag: 4.4, orbit: PH.T_HALF_WID * 0.44, kick: 0.40 },  // EASY
+  { vmag: 6.0, orbit: PH.T_HALF_WID * 0.55, kick: 0.55 },  // MEDIUM
+  { vmag: 9.6, orbit: PH.T_HALF_WID * 0.70, kick: 0.85 },  // HARD
+  { vmag: 11.0, orbit: PH.T_HALF_WID * 0.80, kick: 0.95 }, // WTF
 ];
 
 const AI_BACKSWING = {
@@ -162,7 +158,11 @@ class OpponentAI {
     this.mood = 0;
     this.pressure = 0;
     this.handicap = 1;
-    this.stats = { shots: 0, errors: 0, winners: 0, sumSpeed: 0, maxSpeed: 0 };
+    /* Серия агрессии (атакующих ударов подряд) и тренд игрока между
+     * матчами — оба читаются в ошибке/тактике, оба живут вне розыгрыша. */
+    this.aggrStreak = 0;
+    this.trendRaw = 0;
+    this.stats = OpponentAI._blankStats();
 
     // Home position
     this.home = V3.new(0, PH.TABLE_Y + 0.25, -1.45);
@@ -185,18 +185,77 @@ class OpponentAI {
     // Prediction cache
     this._pred = {};
     this._q = {};
+    /* Чтение траектории и решение разведены: _percept — прогноз, по которому
+     * бот двигается, _reactUntil — дедлайн реакции уровня. */
+    this._percept = null;
+    this._reactUntil = -Infinity;
+    this._lastShort = false;
     /* Tests inject a deterministic stream here; the game never does. */
     this.rng = null;
   }
 
   _rand() { return this.rng ? this.rng() : Math.random(); }
 
+  /* Симметричное и нормальное распределения из ТОГО ЖЕ потока, что _rand.
+   * Глобальные rnd()/rndSym()/gauss() живут на Math.random: пока тактика и
+   * выбор удара шли через них, матч нельзя было повторить, а юнит-тест —
+   * проверить. */
+  _sym(a) { return (this._rand() * 2 - 1) * a; }
+  _gauss() {
+    const u = Math.max(this._rand(), 1e-6);
+    return Math.sqrt(-2 * Math.log(u)) * Math.cos(TAU * this._rand());
+  }
+
+  /** Счётчики, которые сбрасываются на матч (и на точку — в game.stats они тоже есть) */
+  static _blankStats() {
+    return {
+      shots: 0, errors: 0, winners: 0, sumSpeed: 0, maxSpeed: 0,
+      net: 0, long: 0,                    // фасовка ошибок: 50/50 в сетку / длинные
+      sumOut: 0, maxOut: 0, outN: 0,      // скорость ОТВЕТА (не входящего мяча)
+      sumRatio: 0, ratioN: 0,             // сила ответа / сила прилёта
+      pressureErr: 0, errPos: null, aggrErr: 0,
+      byStroke: {},
+    };
+  }
+
   /** Set level and update parameters */
   setLevel(idx) {
-    this.levelIndex = clamp(idx, 0, AI_LEVELS.length - 1);
+    /* Приводим индекс к числу: из UI уровень приходит и строкой ('2'), а
+     * строка ломала сравнение levelIndex === AI_LEVELS.length - 1 в тренде. */
+    const n = Math.round(Number(idx));
+    this.levelIndex = clamp(Number.isFinite(n) ? n : 0, 0, AI_LEVELS.length - 1);
     this.L = AI_LEVELS[this.levelIndex];
     this.maxSpeed = this.L.move;
     this.pace = this.L.paceOpen;
+  }
+
+  /** Адаптация между матчами: -1 (игрок проигрывает) … +1 (игрок выигрывает).
+   *  Внутри розыгрыша её нет и быть не может — это «резиновая сложность».
+   *  Сила правки: ±4 % к агрессии и точности, у WTF — не больше ±2 %,
+   *  чтобы уровень оставался приколом, а не подкрученным ботом. */
+  setTrend(v) { this.trendRaw = clamp(Number(v) || 0, -1, 1); }
+
+  _trendAmp() {
+    const cap = this.levelIndex === AI_LEVELS.length - 1 ? 0.02 : 0.04;
+    return clamp(this.trendRaw, -1, 1) * cap;
+  }
+
+  /** Сводка матча по боту: уровень, ошибки (сетка/длинный), скорость
+   *  ответа и его отношение к прилёту, баланс ударов, давление в момент
+   *  ошибки. Уходит в аналитику оболочки вместе с matchEnd (см. 92_embed). */
+  telemetry() {
+    const s = this.stats, n = Math.max(1, s.outN);
+    const by = {};
+    for (const k of Object.keys(s.byStroke)) by[k] = s.byStroke[k];
+    return {
+      level: this.levelIndex, name: this.L.name, style: this.L.style,
+      shots: s.shots, errors: s.errors, net: s.net, long: s.long,
+      avgOut: +(s.sumOut / n).toFixed(2), maxOut: +s.maxOut.toFixed(2),
+      ratio: +(s.sumRatio / Math.max(1, s.ratioN)).toFixed(2),
+      pressureErr: +(s.pressureErr / Math.max(1, s.errors)).toFixed(2),
+      aggrErr: s.aggrErr, errPos: s.errPos || null,
+      byStroke: by, trend: +this.trendRaw.toFixed(2),
+    };
   }
 
   /** Full reset between matches */
@@ -207,7 +266,9 @@ class OpponentAI {
     this.exchange = 0; this.pace = this.L.paceOpen;
     this.tactic = AI_TACTICS.FEEL;
     this.mood = 0; this.pressure = 0; this.handicap = 1;
-    this.stats = { shots: 0, errors: 0, winners: 0, sumSpeed: 0, maxSpeed: 0 };
+    this.aggrStreak = 0;
+    this._percept = null; this._reactUntil = -Infinity; this._lastShort = false;
+    this.stats = OpponentAI._blankStats();
     V3.copy(this.target, this.home);
     V3.copy(this.pos, this.home);
     V3.set(this.faceNormal, 0, 0, 1);
@@ -228,6 +289,7 @@ class OpponentAI {
     this.mood = clamp(this.mood + (who > 0 ? -0.22 : 0.18), -1, 1);
     this.tactic = this.rollTactic();
     this.backswingPose = null;
+    this.aggrStreak = 0;
   }
 
   /** Scoreboard awareness */
@@ -292,8 +354,18 @@ class OpponentAI {
     if (!racket || racket.valid === false || !game || !game.ball) return racket;
     const L = this.L;
     const pressure = isServe ? 0 : clamp(this.pressure, 0, 1);
-    const rate = clamp((isServe ? L.errBase / 3 : L.errBase + L.errPress * pressure)
-      / Math.max(this.handicap, 0.70), 0, 0.85);
+    /* Базовый процент уровня — не единственная причина ошибки. К нему
+     * добавляются те же условия, что и у человека: очень быстрый мяч (+3–5 %),
+     * короткий мяч у сетки (+2 %) и собственная серия атаки (+1.5–4 %).
+     * У WTF errPress — АБСОЛЮТНЫЙ процент под давлением (1.7 % → 1.9 %),
+     * иначе шкала уехала бы в 3.6 % и «почти идеальный» перестал бы им быть. */
+    const inSpeed = isServe ? 0 : V3.len(game.ball.v);
+    const fastAdd = isServe ? 0 : clamp((inSpeed - 14) / 6, 0, 1) * 0.05;
+    const shortAdd = isServe || !this._lastShort ? 0 : 0.02;
+    const streakAdd = isServe ? 0 : clamp((this.aggrStreak - 2) * 0.015, 0, 0.04);
+    const base = isServe ? L.errBase / 3
+      : (L.errPressAbs ? lerp(L.errBase, L.errPress, pressure) : L.errBase + L.errPress * pressure);
+    const rate = clamp((base + fastAdd + shortAdd + streakAdd) / Math.max(this.handicap, 0.70), 0, 0.85);
     if (this._rand() >= rate) return racket;
     const b = game.ball;
     const isFault = (rk) => {
@@ -315,7 +387,8 @@ class OpponentAI {
       return o.hitNet || !o.landed || o.landed.z < 0 ||
         o.landed.z > PH.T_HALF_LEN + 0.005 || Math.abs(o.landed.x) > PH.T_HALF_WID + 0.005;
     };
-    const kind = this._rand() < 0.55 ? 'net' : 'long';
+    /* Честная монетка: половина ошибок — в сетку, половина — длинные. */
+    const kind = this._rand() < 0.50 ? 'net' : 'long';
     for (let step = 1; step <= 5; step++) {
       const bad = Object.assign({}, racket);
       if (kind === 'net') {
@@ -327,6 +400,15 @@ class OpponentAI {
       }
       if (isFault(bad)) {
         this.stats.errors++;
+        if (kind === 'net') this.stats.net++; else this.stats.long++;
+        this.stats.pressureErr += pressure;
+        if (this.aggrStreak > this.stats.aggrErr) this.stats.aggrErr = this.aggrStreak;
+        /* Где и под каким давлением родилась ошибка — для телеметрии матча. */
+        const bp = game.ball.p;
+        this.stats.errPos = {
+          x: +bp.x.toFixed(2), z: +bp.z.toFixed(2), speed: Math.round(inSpeed * 3.6),
+          px: game.player && game.player.pos ? +game.player.pos.x.toFixed(2) : null,
+        };
         bad.aiError = kind;
         return bad;
       }
@@ -419,8 +501,8 @@ class OpponentAI {
 
   rollTactic() {
     const L = this.L;
-    const r = Math.random();
-    const aggro = clamp(L.aggro + this.mood * 0.12 - this.pressure * 0.10, 0, 1);
+    const r = this._rand();
+    const aggro = clamp(L.aggro + this.mood * 0.12 - this.pressure * 0.10 + this._trendAmp(), 0, 1);
     if (L.style === 'PUSHER') return r < 0.72 ? AI_TACTICS.SAFE : AI_TACTICS.FEEL;
     if (r < 0.26 - aggro * 0.16) return AI_TACTICS.SAFE;
     if (r < 0.62 - aggro * 0.22) return AI_TACTICS.FEEL;
@@ -461,6 +543,9 @@ class OpponentAI {
           { dt: 1 / 240, maxT: interceptT, out: q });
       }
       const simNow = Number.isFinite(game.strokeTime) ? game.strokeTime : game.time;
+      /* Короткий мяч у сетки — ещё один честный источник ошибки (см.
+       * applyExecutionError): его читают один раз на мяч, здесь. */
+      this._lastShort = o.landed.z > -0.55;
       return {
         x: q.end.x,
         y: clamp(q.end.y, PH.TABLE_Y + 0.04, PH.TABLE_Y + 0.80),
@@ -471,21 +556,23 @@ class OpponentAI {
         short: o.landed.z > -0.55,
         wide: Math.abs(o.landed.x) > PH.T_HALF_WID * 0.58,
         willLandIn: Math.abs(o.landed.x) <= PH.T_HALF_WID + PH.R,
-        errUnitX: gauss(1),
-        errUnitY: gauss(1),
+        errUnitX: this._gauss(),
+        errUnitY: this._gauss(),
       };
     }
     if (o.reach) {
       const simNow = Number.isFinite(game.strokeTime) ? game.strokeTime : game.time;
+      this._lastShort = false;
       return {
         x: o.reach.x, y: clamp(o.reach.y, PH.TABLE_Y + 0.04, PH.TABLE_Y + 0.95),
         z: clamp(o.reach.z, -2.45, -1.05),
         t: simNow + o.reachT, speed: 8, bounceT: 0, short: false, wide: false,
         willLandIn: true,
-        errUnitX: gauss(1),
-        errUnitY: gauss(1),
+        errUnitX: this._gauss(),
+        errUnitY: this._gauss(),
       };
     }
+    this._lastShort = false;
     return null;
   }
 
@@ -519,8 +606,8 @@ class OpponentAI {
     const inSpeed = plan.speed;
     const deepMe = plan.z < -PH.T_HALF_LEN - 0.52;
     const aggro = clamp((L.aggro * 0.7 + T.risk * 0.5) * (0.85 + this.pace * 0.3)
-      + this.mood * 0.08 - this.pressure * 0.07, 0, 1.1);
-    const r = Math.random();
+      + this.mood * 0.08 - this.pressure * 0.07 + this._trendAmp() * 0.8, 0, 1.1);
+    const r = this._rand();
 
     if (hNet > 0.17 && inSpeed < 13.5) {
       if (r < L.smashRate * (0.55 + aggro * 0.6)) return 'SMASH';
@@ -548,7 +635,7 @@ class OpponentAI {
     if (heavyTop && r < L.counterRate + aggro * 0.2) return 'COUNTER';
 
     if (L.style === 'PUSHER' && r < 0.55 - aggro * 0.3) return 'PUSH';
-    if (r < 0.07 * L.variety * T.wide) return Math.random() < 0.5 ? 'HOOK' : 'FADE';
+    if (r < 0.07 * L.variety * T.wide) return this._rand() < 0.5 ? 'HOOK' : 'FADE';
     if (r < 0.07 * L.variety * T.wide + 0.08 * (1 - aggro)) return 'PUSH';
 
     if (r < 0.34 + aggro * 0.46) return 'LOOP';
@@ -559,10 +646,10 @@ class OpponentAI {
   pickTarget(game, plan, archId) {
     const L = this.L, T = this.tactic;
     const px = game.player.pos.x;
-    const playerSide = sign(px || rndSym(1));
-    const skill = L.placeSkill * this.handicap;
+    const playerSide = sign(px || this._sym(1));
+    const skill = clamp(L.placeSkill * this.handicap + this._trendAmp(), 0, 1);
 
-    const roll = Math.random();
+    const roll = this._rand();
     let wantX;
     if (roll < 0.16 + (1 - skill) * 0.25) {
       wantX = px * 0.85;
@@ -573,23 +660,31 @@ class OpponentAI {
     } else if (roll < 0.75 - skill * 0.25) {
       wantX = playerSide * 0.85;
     } else {
-      wantX = rndSym(0.80);
+      wantX = this._sym(0.80);
     }
 
     let wantZ;
     if (this.pace > 0.85) {
-      wantZ = -PH.T_HALF_LEN * (0.65 + 0.30 * rnd());
+      wantZ = -PH.T_HALF_LEN * (0.65 + 0.30 * this._rand());
     } else if (T.depth > 0.7) {
-      wantZ = -PH.T_HALF_LEN * (0.50 + 0.40 * rnd());
+      wantZ = -PH.T_HALF_LEN * (0.50 + 0.40 * this._rand());
     } else {
-      wantZ = lerp(-0.55, -PH.T_HALF_LEN * 0.75, T.depth + 0.2 * rnd());
+      wantZ = lerp(-0.55, -PH.T_HALF_LEN * 0.75, T.depth + 0.2 * this._rand());
     }
 
     if (plan.wide && roll < 0.4 + T.wide * 0.4) {
-      wantX = playerSide * sign(wantX || 1) * (0.75 + 0.20 * rnd());
+      wantX = playerSide * sign(wantX || 1) * (0.75 + 0.20 * this._rand());
     }
 
     return { x: wantX, z: Math.abs(wantZ) };
+  }
+
+  /** Серия агрессии: атакующий удар копит счётчик, любой другой его рвёт.
+   *  Отдельным методом — чтобы штраф к ошибке можно было проверить тестом,
+   *  не собирая целый swing с решателем ракетки. */
+  noteStroke(archId) {
+    this.aggrStreak = AI_ATTACK_STROKES.has(archId) ? this.aggrStreak + 1 : 0;
+    return this.aggrStreak;
   }
 
   /* ==================================================================
@@ -634,6 +729,10 @@ class OpponentAI {
      * verify against the real flight and climb down to a safer archetype
      * if the first answer was hot garbage (solver extremes, mostly). */
     racket = this._ensureLegal(game, racket, plan, archId, false);
+    /* Серия агрессии: атака копит счётчик, защита его рвёт. Именно его
+     * applyExecutionError читает как растущий штраф к ошибке — бот не может
+     * лупить смашами подряд без права на промах. */
+    this.noteStroke(archId);
     /* Perfect on paper is not perfect on the table: the solved stroke can
      * still be misexecuted (net cord of the wrong kind, long sail). */
     racket = this.applyExecutionError(game, racket, false);
@@ -648,6 +747,17 @@ class OpponentAI {
     this.stats.shots++;
     this.stats.sumSpeed += V3.len(ball.v);
     if (V3.len(ball.v) > this.stats.maxSpeed) this.stats.maxSpeed = V3.len(ball.v);
+    this.stats.byStroke[archId] = (this.stats.byStroke[archId] || 0) + 1;
+    /* Скорость ОТВЕТА и её отношение к прилётевшему мячу — телеметрия
+     * «бот не бьёт вдвое сильнее без ограничений»: меряем тем же импульсом,
+     * который применит игра. */
+    const vv = V3.clone(ball.v), ww = V3.clone(ball.w), inc = V3.len(ball.v);
+    if (impactRacket(vv, ww, racket.normal, racket.vR, racket.quality, racket.rubber || {})) {
+      const out = V3.len(vv);
+      this.stats.sumOut += out; this.stats.outN++;
+      if (out > this.stats.maxOut) this.stats.maxOut = out;
+      if (inc > 0.5) { this.stats.sumRatio += out / inc; this.stats.ratioN++; }
+    }
     this.strokeHistory.push({ archId, time: now, quality: racket.quality });
     if (this.strokeHistory.length > 50) this.strokeHistory.shift();
 
@@ -660,7 +770,7 @@ class OpponentAI {
     const L = this.L;
 
     // Pick serve type based on context
-    const r = Math.random();
+    const r = this._rand();
     let serveType;
     if (r < 0.35) serveType = 'SERVE_TOP';
     else if (r < 0.60) serveType = 'SERVE_BACK';
@@ -673,7 +783,7 @@ class OpponentAI {
     const CAP = AI_SERVE_CAPS[this.levelIndex] || AI_SERVE_CAPS[0];
 
     // Aim — inside the orbit, biased middle; no more mail-slot corners on rookie
-    let aimX = clamp(rndSym(0.50), -CAP.orbit, CAP.orbit);
+    let aimX = clamp(this._sym(0.50), -CAP.orbit, CAP.orbit);
     /* КРАЙ СТОЛА — НЕ ЦЕЛЬ. Слабая подача (НОВИЧОК/ЛЮБИТЕЛЬ, vmag <= 6) и
      * любая сильная боковая прицеливаются не шире половины полуширины:
      * слабый мяч с кромки уходит в аут от малейшей ошибки исполнения, а
@@ -687,7 +797,7 @@ class OpponentAI {
       const safeX = PH.T_HALF_WID * (CAP.vmag <= 6.0 ? 0.44 : 0.48);
       aimX = clamp(aimX, -safeX, safeX);
     }
-    const aimZ = PH.T_HALF_LEN * (0.55 + 0.35 * rnd());
+    const aimZ = PH.T_HALF_LEN * (0.55 + 0.35 * this._rand());
 
     const racket = makeRacket(-1, serveType, {
       elev: A.elev,
@@ -847,12 +957,12 @@ class OpponentAI {
     // Update readiness
     const incoming = ball.live && ball.lastHitBy === 1 && ball.v.z < 0;
     if (!incoming) {
-      this.plan = null; this.commit = null; this.phase = 'IDLE';
+      this.plan = null; this.commit = null; this.phase = 'IDLE'; this._percept = null;
     }
     if (incoming && (this.seenBallId !== game.shotId || !!game.netTouched !== !!this._seenNetTouched)) {
       this.seenBallId = game.shotId;
       this._seenNetTouched = !!game.netTouched;
-      this.plan = null; this.commit = null; this.phase = 'IDLE';
+      this.plan = null; this.commit = null; this.phase = 'IDLE'; this._percept = null;
     }
     if (incoming && ball.golden === 'win') {
       /* A PERFECT input (green trail) is not a ball you can play: the bot is
@@ -860,24 +970,39 @@ class OpponentAI {
        * nothing separates a pixel-perfect hit from a flail, and the user
        * explicitly called this out: "идеальный удар должен быть в
        * большинстве случаев гол". ~88% of green hits come flagged 'win'. */
-      this.plan = null; this.commit = null; this.phase = 'IDLE';
+      this.plan = null; this.commit = null; this.phase = 'IDLE'; this._percept = null;
       if (this.anim.lean < 0.5) this.anim.lean = 0.5;
       return;
     }
     if (incoming && this.phase === 'IDLE') {
-      this.plan = this.computePlan(game);
-      if (this.plan) {
-        this.plan.archId = this.pickStroke(game, this.plan);
-        this.plan.aim = this.pickTarget(game, this.plan, this.plan.archId);
-        this.commit = this.plan;
-        this.swingAt = this.plan.t;
-        this.readT = now;
-        this.phase = 'READY';
-        this.backswingStart = now;
-        this.backswingPose = {
-          pos: V3.new(this.target.x, this.target.y, this.target.z),
-          windup: 0,
-        };
+      /* ГЛАЗА И РУКИ РАЗДЕЛЕНЫ. Прогноз траектории бот строит сразу — по нему
+       * он едет к точке встречи. А РЕШЕНИЕ по удару ждёт реакцию уровня
+       * (L.react): до этого дедлайна ракетка не начинает замах. Раньше поле
+       * react не читал НИКТО, и все уровни видели мяч в момент отрыва от
+       * ракетки игрока — на WTF это 90 мс, на EASY — 420 мс.
+       * Опоздав по-настоящему (мяч быстрее реакции), бот не получает
+       * подарка: swingAt уже в прошлом и настоящая физика решает за него. */
+      if (!this._percept) {
+        this._percept = this.computePlan(game);
+        if (this._percept) this._reactUntil = now + Math.max(0.08, this.L.react);
+      }
+      const p = this._percept;
+      if (p) {
+        this.plan = p;                       // цель перемещения — ещё без удара
+        if (now >= this._reactUntil) {
+          p.archId = this.pickStroke(game, p);
+          p.aim = this.pickTarget(game, p, p.archId);
+          this.commit = p;
+          this.swingAt = p.t;
+          this.readT = now;
+          this.phase = 'READY';
+          this.backswingStart = now;
+          this.backswingPose = {
+            pos: V3.new(this.target.x, this.target.y, this.target.z),
+            windup: 0,
+          };
+          this._percept = null;
+        }
       }
     }
 
@@ -896,7 +1021,9 @@ class OpponentAI {
     }
 
     // Move towards target with smooth interpolation
-    if (this.plan && this.phase !== 'IDLE') {
+    /* Движение — по прогнозу (plan), а не по решению: во время реакции
+     * уровня бот уже выезжает к мячу, но ещё не выбрал удар. */
+    if (this.plan) {
       const t = this.noisyTarget(this.plan, game);
       V3.copy(this.target, t);
 
@@ -921,7 +1048,7 @@ class OpponentAI {
     }
 
     // Swing timing
-    if (this.plan && this.phase !== 'IDLE') {
+    if (this.plan && this.commit) {
       const timeToContact = this.commit.t - now;
       if (timeToContact < 0.35 && timeToContact > 0) {
         // Wind-up phase

@@ -63,6 +63,10 @@ function boot() {
     if (start === 'result') Router.go('result', { data: Demo.result(true) });
     else if (start === 'chest') Router.go('chest', { data: { kind: 'gold' } });
     else Router.go(start);
+  } else if (/^[A-Za-z0-9]{5}$/.test(new URLSearchParams(location.search).get('room') || '')) {
+    /* ссылка ?room=КОД ведёт сразу в онлайн-лобби: друг не ищет кнопку, а
+     * команда join встанет в очередь GameHost и уйдёт движку, когда тот будет готов */
+    Router.go('online');
   } else Router.go('splash');
   window.addEventListener('resize', () => { try { FX.resize(); BG.resize(); } catch (e) {} });
 }

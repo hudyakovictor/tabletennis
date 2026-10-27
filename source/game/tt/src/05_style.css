@@ -105,6 +105,15 @@ h3.sec::after{content:"";flex:1;height:1px;background:var(--line)}
   border-color:var(--acc);box-shadow:0 0 0 1px rgba(57,198,255,.3) inset,0 6px 22px rgba(57,198,255,.16)}
 .opt b{display:block;font-size:13px;font-weight:750;letter-spacing:.02em}
 .opt small{display:block;font-size:11px;color:var(--dim);margin-top:2px;line-height:1.25}
+/* WTF — БОССОВЫЙ уровень: фиолетово-красная кромка в меню и отдельное
+   имя в HUD. Это единственный уровень, который разрешено подсвечивать. */
+.opt.wtf b{background:linear-gradient(90deg,#ff4bd8,#ff4b3e);-webkit-background-clip:text;
+  background-clip:text;color:transparent}
+.opt.wtf.sel{border-color:#ff4bd8;
+  background:linear-gradient(180deg,rgba(255,75,216,.22),rgba(255,75,62,.10));
+  box-shadow:0 0 0 1px rgba(255,75,216,.35) inset,0 6px 22px rgba(255,75,216,.22)}
+body[data-ai-lvl="3"] #oppName{color:#ff69d8;text-shadow:0 0 14px rgba(255,75,216,.55)}
+body[data-ai-lvl="3"] #scoreSideB .sb-pts{color:#ff9ee8}
 .sl{display:flex;align-items:center;gap:11px;margin:9px 0;min-height:44px}
 .sl label{font-size:12px;color:var(--txt);width:134px;flex:0 0 auto;letter-spacing:.02em;line-height:1.3}
 .sl label small{display:block;font-size:10.5px;color:var(--dim);margin-top:3px;font-weight:450}

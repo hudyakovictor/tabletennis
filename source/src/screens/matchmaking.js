@@ -63,6 +63,7 @@ Router.def('vs', {
   full: true, mood: 'battle',
   render() {
     const o = PEOPLE[BATTLE.opp]; const Lo = leagueOf(o.r), Lm = leagueOf(S.rating);
+    const D = diffOf(S.diff);
     const stat = (l, a, b) => `<div class="vs-st"><b class="num">${a}</b><span>${l}</span><b class="num">${b}</b><i style="--a:${a / (a + b)}"></i></div>`;
     return `<div class="vs">
       <div class="vs-half top" style="--c1:${o.c[0]};--c2:${o.c[1]}">
@@ -74,6 +75,7 @@ Router.def('vs', {
         <div class="vs-info"><span class="vs-badge">${Art.badge(Lm, 44)}</span><b class="h-display">${S.name.split(' ')[0]}</b><span class="mut">${S.club} · <b class="num">${fmt(S.rating)}</b></span></div>
       </div>
       <div class="vs-mid"><div class="vs-logo"><span class="v">V</span><span class="s">S</span></div></div>
+      <div class="vs-diff${D.id === 3 ? ' wtf' : ''}" style="--c:${D.c}">${t('diff.botLevel')} · <b>${D.name}</b></div>
       <div class="vs-stats pnl">${stat(t('vs.winrate'), Math.round(S.wins / (S.wins + S.losses) * 100), o.wr)}${stat(t('vs.streak'), S.streak, 2)}${stat(t('vs.bestRally'), S.bestRally, 19)}</div>
     </div>`;
   },

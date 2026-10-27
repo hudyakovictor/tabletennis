@@ -1,6 +1,7 @@
 node_modules/
 .cache/
 test-results/
+temporary/
 __pycache__/
 .DS_Store
 инфо1.md/
