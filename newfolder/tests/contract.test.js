@@ -225,3 +225,29 @@ test('SPA navigation matches the server-side tab catalogue', () => {
   const serverTabs = NAV_TABS.map((t) => t.id);
   assert.deepEqual(uiTabs.sort(), serverTabs.sort(), 'SPA views and NAV_TABS diverged');
 });
+
+/* -------------------------------------------------------------------------- */
+/* 6. Documentation drift                                                     */
+/* -------------------------------------------------------------------------- */
+
+test('every endpoint documented for the game client exists in the client API', () => {
+  const doc = read(path.join(ROOT, '19-client-integration-guide.md'));
+  const routes = parseRoutes().filter((r) => r.file === 'src/routes/clientRoutes.js' || r.file === 'src/server.js');
+
+  const documented = new Set();
+  for (const m of doc.matchAll(/\b(GET|POST|PUT|PATCH|DELETE)\s+`?(\/api\/client\/v1\/[A-Za-z0-9/:._-]+)/g)) {
+    documented.add(`${m[1]} ${m[2].replace(/[:][A-Za-z0-9_]+$/, 'x')}`);
+  }
+  assert.ok(documented.size >= 10, 'the integration guide should document the whole client surface');
+
+  const missing = [];
+  for (const entry of documented) {
+    const [verb, pathname] = entry.split(' ');
+    const ok = routes.some((route) => {
+      if (route.verbs && !route.verbs.includes(verb)) return false;
+      return route.literal ? route.literal === pathname : route.regex.test(pathname);
+    });
+    if (!ok) missing.push(entry);
+  }
+  assert.deepEqual(missing, [], `19-client-integration-guide.md documents endpoints the API does not serve:\n${missing.join('\n')}`);
+});
