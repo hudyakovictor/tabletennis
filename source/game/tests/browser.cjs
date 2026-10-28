@@ -18,7 +18,9 @@ const { root, enginePage } = require('./helpers.cjs');
     execFileSync('tar', ['xf', '-', '-C', libs], { input: zlib.brotliDecompressSync(fs.readFileSync(archive)) });
   }
   const browser = await puppeteer.launch({ executablePath: process.env.CHROME_BIN || await chromium.executablePath(),
-    args: chromium.args, headless: true,
+    args: process.env.CHROME_BIN ? ['--no-sandbox', '--enable-unsafe-swiftshader',
+      '--use-gl=angle', '--use-angle=swiftshader', '--autoplay-policy=no-user-gesture-required'] : chromium.args,
+    headless: true,
     env: { ...process.env, LD_LIBRARY_PATH: [path.join(libs, 'lib'), process.env.LD_LIBRARY_PATH].filter(Boolean).join(':') } });
   let count = 0;
   try {
@@ -301,6 +303,7 @@ const { root, enginePage } = require('./helpers.cjs');
         check('touch play cannot move the camera: no drag, no wheel, no two fingers', () => {
           g.startMatch(2);g.server=-1;g.prepServe();
           g.updateCamera(1/60);
+          g.fov=g.fovT;g.updateCamera(0); // settle any previous hit's lens pulse
           const before={eye:{...g.camPos},look:{...g.camLook},fov:g.fov,shift:g.camShiftY};
           g.ui.setInputMode('touch');
           // Use the real input handlers, but synthetic pointer IDs cannot be captured.
@@ -365,17 +368,17 @@ const { root, enginePage } = require('./helpers.cjs');
               if(kind==='swipe' && !cp)throw Error('missing predicted contact');
               const p=g.project(kind==='click'?g.player.pos:cp.p,{}),x=p.x*rect.width,y=p.y*rect.height;
               send('pointerdown',x,kind==='swipe'?y+50:y,pointerType);
-              if(!g.swipe.pressZone || !g.swipe.pressZone.accepted)throw Error(`${scale}/${pointerType}/${kind}: press rejected`);
+              const press=g.swipe.pressZone || (g.shotJournal.latest && g.shotJournal.latest.pressZone);
+              if(!press || !press.accepted)throw Error(`${scale}/${pointerType}/${kind}: press rejected`);
               if(kind==='swipe') {
                 g.update(.025);send('pointermove',x,y+25,pointerType);
                 g.update(.025);send('pointermove',x,y,pointerType);g.update(.025);
               } else {
-                g.update(.025);g.update(.025);
-                if(g.ball.lastHitBy!==-1)throw Error('a stationary hold hit before release');
+                if(g.ball.lastHitBy!==1 || g.anticipation.active)
+                  throw Error(`${scale}/${pointerType}: the click waited for release or animation`);
               }
               send('pointerup',x,y,pointerType);
-              const released=g.time;
-              if(!g.playerStrokeIntent(false))throw Error(`${scale}/${pointerType}/${kind}: no input intent`);
+              if(g.ball.lastHitBy!==1 && !g.playerStrokeIntent(false))throw Error(`${scale}/${pointerType}/${kind}: no input intent`);
               let frames=0;
               while(g.ball.lastHitBy===-1 && g.ball.live && frames++<100)g.update(1/60);
               if(g.ball.lastHitBy!==1 || !g.shotJournal.latest.contact || g.ball.v.z>=0)
@@ -386,11 +389,40 @@ const { root, enginePage } = require('./helpers.cjs');
                 if(flight.hitNet || !flight.landed || flight.landed.z>=0)
                   throw Error(`${scale}/${pointerType}: a centred tap did not return the ball onto the far court`);
               }
-              if(scale<1 && kind==='swipe' && g.time-released<=.25)
-                throw Error('slowmo regression did not exercise the old real-time expiry');
+              if(kind==='swipe' && g.shotJournal.latest.contact.incoming.gesture.tap)
+                throw Error(`${scale}/${pointerType}: a swipe backswing was stolen by a tap`);
             }
             return true;
           } finally { g.setInspectSlowmo(false);g.cancelInput();g.returnToMenu();g.paused=true; }
+        });
+        check('one early released serve swipe completes on mouse and touch, including slowmo', () => {
+          const send=(type,x,y,pointerType) => {
+            const r=g.canvas.getBoundingClientRect();
+            g.canvas.dispatchEvent(new PointerEvent(type,{pointerId:81,pointerType,button:0,
+              buttons:type==='pointerup'?0:1,clientX:r.left+x,clientY:r.top+y,bubbles:true,cancelable:true}));
+          };
+          try {
+            for(const pointerType of ['mouse','touch']) for(const scale of [1,.3]) {
+              g.startMatch(0);g.server=1;g.prepServe();g.paused=false;g.recenterT=0;
+              g.setInspectSlowmo(scale<1);g.timeScale=scale;g.targetTimeScale=scale;g._acc=0;
+              g.update(1/60);
+              const p=g.project(g.ball.p,{}),r=g.canvas.getBoundingClientRect(),x=p.x*r.width,y=p.y*r.height;
+              send('pointerdown',x,y+50,pointerType);
+              g.update(.04);send('pointermove',x,y-50,pointerType);
+              g.update(.04);send('pointerup',x,y-50,pointerType);
+              if(g.ball.lastHitBy!==0 || g.ball.v.y<=0 || !g.swipe.pressZone.pendingServeDrop)
+                throw Error(`${pointerType}/${scale}: the early serve swipe was discarded`);
+              for(let i=0;i<180 && g.ball.lastHitBy!==1;i++)g.update(1/60);
+              const shot=g.shotJournal.latest;
+              if(g.ball.lastHitBy!==1 || g.state!==GS.RALLY || !shot.contact || !shot.contact.incoming.pressZone.singleGestureToss)
+                throw Error(`${pointerType}/${scale}: one gesture did not complete the serve`);
+              const flight=predict(V3.clone(g.ball.p),V3.clone(g.ball.v),V3.clone(g.ball.w),
+                {dt:PH.SIM_DT,maxT:2.2,stopAfterBounces:2,out:{}});
+              if(flight.hitNet || !flight.landed || flight.landed.z<=0 || !flight.b2 || flight.b2.z>=0)
+                throw Error(`${pointerType}/${scale}: the saved swipe produced an illegal serve`);
+            }
+            return true;
+          } finally {g.setInspectSlowmo(false);g.cancelInput();g.returnToMenu();g.paused=true;}
         });
         check('clicks cannot volley, linger as held input, or survive cancellation', () => {
           const event=(type)=>{
@@ -403,22 +435,23 @@ const { root, enginePage } = require('./helpers.cjs');
             event('pointerdown');event('pointerup');g.tryPlayerHit(V3.clone(g.ball.p));
             if(g.ball.lastHitBy!==-1)return false; // no volley before our bounce
             incomingBall();g.paused=false;
+            g.ball.p.z-=.84; // a hold begun before contact must not arm a future tap
             event('pointerdown');g.time+=.5;g.strokeTime+=.5;event('pointerup');
             if(g.playerStrokeIntent(false))return false;
+            V3.copy(g.ball.p,g.player.pos);
             g.tryPlayerHit(V3.clone(g.ball.p));if(g.ball.lastHitBy!==-1)return false;
             incomingBall();g.paused=false;
+            g.ball.p.z-=.84;
             event('pointerdown');event('pointercancel');event('pointerup');
+            V3.copy(g.ball.p,g.player.pos);
             g.tryPlayerHit(V3.clone(g.ball.p));return g.ball.lastHitBy===-1;
           } finally {g.cancelInput();g.returnToMenu();g.paused=true;}
         });
-        check('a tap does not fire early on the depth-only edge of the capture zone', () => {
+        check('automatic endpoint tap waits for the paddle depth band, not the depth-only grace edge', () => {
           incomingBall();g.paused=false;g.ball.p.z=g.player.pos.z-.30;V3.set(g.ball.v,0,0,5);
-          const p=g.project(g.player.pos,{}),r=g.canvas.getBoundingClientRect();
-          const event=type=>g.canvas.dispatchEvent(new PointerEvent(type,{pointerId:62,pointerType:'mouse',button:0,
-            buttons:type==='pointerup'?0:1,clientX:r.left+p.x*r.width,clientY:r.top+p.y*r.height,bubbles:true,cancelable:true}));
           try {
-            event('pointerdown');event('pointerup');
-            if(!g.swipe.pressZone || !g.swipe.pressZone.accepted || !g.playerStrokeIntent(false))return false;
+            g.swipe.down(.5,.6,g.time-.05);g.swipe.up(.5,.6,g.time);
+            g.swipe.lastReleased=tapStrokeMetrics(g.swipe.lastReleased,.5,.6);g.swipeReleasedAt=g.time;
             const start=V3.clone(g.ball.p);g.tryPlayerHit(start);
             if(g.ball.lastHitBy!==-1)return false;
             g.ball.p.z=g.player.pos.z-.20;g.tryPlayerHit(start);
@@ -427,11 +460,9 @@ const { root, enginePage } = require('./helpers.cjs');
         });
         check('endpoint collision uses the paddle pose at the current physics substep', () => {
           incomingBall();g.paused=false;
-          const p=g.project(g.player.pos,{}),rect=g.canvas.getBoundingClientRect();
-          const event=(type)=>g.canvas.dispatchEvent(new PointerEvent(type,{pointerId:51,pointerType:'mouse',button:0,
-            buttons:type==='pointerup'?0:1,clientX:rect.left+p.x*rect.width,clientY:rect.top+p.y*rect.height,bubbles:true,cancelable:true}));
           try {
-            event('pointerdown');event('pointerup');
+            g.swipe.down(.5,.6,g.time-.05);g.swipe.up(.5,.6,g.time);
+            g.swipe.lastReleased=tapStrokeMetrics(g.swipe.lastReleased,.5,.6);g.swipeReleasedAt=g.time;
             if(!g.playerStrokeIntent(false))return false;
             const far=V3.clone(g.player.pos);far.x+=1;
             g._subPad={pos:far,prevPos:V3.clone(far),normal:V3.clone(g.player.normal)};
@@ -616,7 +647,7 @@ const { root, enginePage } = require('./helpers.cjs');
         check('bad persisted settings are bounded and unknown keys ignored', () => {
           const raw = JSON.parse('{"assist":-20,"volume":999,"sensitivity":"bad","difficulty":99,"camera":"missing","quality":"broken","targetScore":0,"__proto__":{"evil":true},"unknown":123}');
           g.profile.data.settings=raw; g.loadSettings();
-          return g.settings.assist===.85 && g.settings.volume===1 && g.settings.difficulty===4 &&
+          return g.settings.assist===.85 && g.settings.volume===1 && g.settings.difficulty===AI_LEVELS.length-1 &&
             CAMERA_ORDER.includes(g.settings.camera) && [5,11,21].includes(g.settings.targetScore) &&
             !g.settings.evil && !g.settings.unknown && Number.isFinite(g.settings.sensitivity);
         });
@@ -807,7 +838,7 @@ const { root, enginePage } = require('./helpers.cjs');
         g.setState(GS.RALLY);g.server=-1;g.isServeBall=false;g.recenterT=0;g.rallyBounces=[1];
         V3.set(g.player.pos,0,1.05,1.5);V3.copy(g.player.prevPos,g.player.pos);V3.set(g.player.normal,0,0,-1);
         V3.copy(g.ball.p,g.player.pos);V3.set(g.ball.v,0,0,6);V3.zero(g.ball.w);g.ball.live=true;g.ball.lastHitBy=-1;
-        g.player.lastHitT=g.time-1;g.shotJournal.reset();
+        g.player.lastHitT=g.time-1;g.shotJournal.reset();g.stats.shots=0;
         const p=g.project(g.ball.p),rect=g.canvas.getBoundingClientRect();return {x:rect.x+p.x*rect.width,y:rect.y+p.y*rect.height};
       });
       await page.mouse.move(aimPoint.x+70,aimPoint.y);await page.mouse.down();
@@ -819,22 +850,26 @@ const { root, enginePage } = require('./helpers.cjs');
         g.tryPlayerHit(V3.clone(g.ball.p));return g.ball.lastHitBy===-1 && g.shotJournal.latest.outcome==='outside';
       }),true,'outside real pointer-down must not be rescued by moving into the zone or by CCD');
       await page.mouse.move(aimPoint.x,aimPoint.y);await page.mouse.down();
+      assert.equal(await page.evaluate(()=>{
+        const g=window.__game,shot=g.shotJournal.latest;
+        return g.ball.lastHitBy===1 && g.ball.v.z<0 && g.stats.shots===1 &&
+          !!shot.contact && shot.contact.incoming.gesture.tap && !g.anticipation.active;
+      }),true,'real mouse press must return the ball before release or a game update');
       await page.evaluate(()=>window.__game.time+=.1);await page.mouse.up();
       assert.equal(await page.evaluate(()=>{
-        const g=window.__game, accepted=g.swipe.pressZone.accepted, tap=g.swipe.lastReleased && g.swipe.lastReleased.tap;
-        g.tryPlayerHit(V3.clone(g.ball.p));
-        const hit=accepted && tap && g.ball.lastHitBy===1 && g.shotJournal.latest.contact;
+        const g=window.__game,shot=g.shotJournal.latest;
+        const hit=shot.pressZone.accepted && shot.contact.incoming.gesture.tap && g.ball.lastHitBy===1 && g.stats.shots===1;
         // The same click cannot return another ball without a fresh press.
         g.ball.lastHitBy=-1;g.rallyBounces=[1];V3.copy(g.ball.p,g.player.pos);V3.set(g.ball.v,0,0,6);
         g.tryPlayerHit(V3.clone(g.ball.p));
         return !!hit && g.ball.lastHitBy===-1;
       }),true,'inside a legal capture window a quick click returns the ball exactly once');
-      await page.mouse.move(aimPoint.x,aimPoint.y);await page.mouse.down();
+      await page.mouse.move(aimPoint.x,aimPoint.y+80);await page.mouse.down();
       await page.evaluate(()=>window.__game.time+=.05);await page.mouse.move(aimPoint.x,aimPoint.y-70,{steps:4});
       await page.evaluate(()=>window.__game.time+=.05);await page.mouse.up();
       assert.equal(await page.evaluate(()=>{
-        const g=window.__game;if(!g.swipe.pressZone || !g.swipe.pressZone.accepted)return false;
-        g.tryPlayerHit(V3.clone(g.ball.p));const hit=g.ball.lastHitBy===1;
+        const g=window.__game,shot=g.shotJournal.latest;
+        const hit=g.ball.lastHitBy===1 && shot.contact && !shot.contact.incoming.gesture.tap;
         g.update=g._testUpdate;delete g._testUpdate;return hit;
       }),true,'inside real pointer-down plus fresh motion can make a physical hit');
       count++;console.log(`PASS ${width}x${height}: real clicks and swipes hit once inside the capture window; outside starts stay rejected`);
@@ -845,14 +880,19 @@ const { root, enginePage } = require('./helpers.cjs');
           g.setPaused(false);g.setState(GS.RALLY);g.server=-1;g.isServeBall=false;g.recenterT=0;g.rallyBounces=[1];
           V3.set(g.player.pos,0,1.05,1.5);V3.copy(g.player.prevPos,g.player.pos);V3.set(g.player.normal,0,0,-1);
           V3.copy(g.ball.p,g.player.pos);V3.set(g.ball.v,0,0,6);V3.zero(g.ball.w);g.ball.live=true;g.ball.lastHitBy=-1;
-          g.player.lastHitT=g.time-1;g.shotJournal.reset();
+          g.player.lastHitT=g.time-1;g.shotJournal.reset();g.stats.shots=0;
           const p=g.project(g.ball.p),r=g.canvas.getBoundingClientRect();return {x:r.left+p.x*r.width,y:r.top+p.y*r.height};
         });
-        await page.touchscreen.tap(touchPoint.x,touchPoint.y);
+        const touch=await page.touchscreen.touchStart(touchPoint.x,touchPoint.y);
         assert.equal(await page.evaluate(()=>{
-          const g=window.__game, tap=g.swipe.lastReleased && g.swipe.lastReleased.tap;
-          g.tryPlayerHit(V3.clone(g.ball.p));
-          const ok=!!tap && g.ball.lastHitBy===1 && g.ball.v.z<0;
+          const g=window.__game,shot=g.shotJournal.latest;
+          return g.ball.lastHitBy===1 && g.ball.v.z<0 && g.stats.shots===1 &&
+            !!shot.contact && shot.contact.incoming.gesture.tap && !g.anticipation.active;
+        }),true,'actual touch must return the ball while the finger is still down');
+        await touch.end();
+        assert.equal(await page.evaluate(()=>{
+          const g=window.__game,shot=g.shotJournal.latest;
+          const ok=!!shot.contact && shot.contact.incoming.gesture.tap && g.ball.lastHitBy===1 && g.ball.v.z<0 && g.stats.shots===1;
           g.update=g._testUpdate;delete g._testUpdate;return ok;
         }),true,'an actual touch tap returns a legal incoming ball toward the opponent');
         count++;console.log(`PASS ${width}x${height}: actual touchscreen tap returns the ball`);
@@ -998,19 +1038,21 @@ const { root, enginePage } = require('./helpers.cjs');
         g.server=-1;g.isServeBall=false;g.recenterT=0;g.rallyBounces=[1];
         V3.set(g.player.pos,0,1.05,1.5);V3.copy(g.player.prevPos,g.player.pos);V3.set(g.player.normal,0,0,-1);
         V3.copy(g.ball.p,g.player.pos);V3.set(g.ball.v,0,0,6);V3.zero(g.ball.w);g.ball.live=true;g.ball.lastHitBy=-1;
-        g.player.lastHitT=g.time-1;g.shotJournal.reset();
+        g.player.lastHitT=g.time-1;g.shotJournal.reset();g.stats.shots=0;
         // Finish any cinematic camera interpolation before targeting the canvas.
         g.updateCamera(4);g.updateCamera(0);
         const p=g.project(g.ball.p),r=g.canvas.getBoundingClientRect();return {x:r.left+p.x*r.width,y:r.top+p.y*r.height};
       });
-      if(width<600)await page.touchscreen.tap(bounds.x+point.x,bounds.y+point.y);
-      else await page.mouse.click(bounds.x+point.x,bounds.y+point.y);
+      let touch;
+      if(width<600)touch=await page.touchscreen.touchStart(bounds.x+point.x,bounds.y+point.y);
+      else {await page.mouse.move(bounds.x+point.x,bounds.y+point.y);await page.mouse.down();}
       assert.equal(await frame.evaluate(()=>{
-        const g=window.__game, tap=g.swipe.lastReleased && g.swipe.lastReleased.tap;
-        const admitted=g.swipe.pressZone && g.swipe.pressZone.accepted;
-        g.tryPlayerHit(V3.clone(g.ball.p));
-        return !!tap && admitted && g.ball.lastHitBy===1 && g.ball.v.z<0 && g.ball.trailGrade==='yellow';
-      }),true,`shipped shell ${width}x${height}: actual click/tap returns the ball with slowmo enabled`);
+        const g=window.__game,shot=g.shotJournal.latest;
+        return !!shot.contact && shot.contact.incoming.gesture.tap && shot.pressZone.accepted &&
+          g.ball.lastHitBy===1 && g.ball.v.z<0 && g.ball.trailGrade==='yellow' && g.stats.shots===1;
+      }),true,`shipped shell ${width}x${height}: the press returns the ball before release, with slowmo enabled`);
+      if(touch)await touch.end();else await page.mouse.up();
+      assert.equal(await frame.evaluate(()=>window.__game.stats.shots),1,'release must not repeat the shell contact');
       assert.deepEqual(errors,[],`shipped shell ${width}x${height}: uncaught exceptions`);
       count++;console.log(`PASS ${width}x${height}: shipped shell, slowmo control and actual click/tap through iframe`);
       await page.close();

@@ -235,11 +235,10 @@ const ARCH = {
   SERVE_FAST: { elev: -13, contact: 24, speed: 1.12, lat: 0.60, back: false },
 };
 
-/** A released, deliberate click/tap is a compact, neutral return. It is
- * created only by the pointer handler after distinguishing it from a drag;
- * holding still, hovering, a toss tap and raw tracker samples are not shots. */
-function tapStrokeMetrics(metrics, x, y) {
-  return { ...metrics, tap: true, sx: x, sy: y, x, y, dx: 0, dy: 0,
+/** A deliberate contact tap is a compact, neutral stroke. Only the pointer
+ * handler can admit it; a toss tap, hover or raw stationary hold is not a shot. */
+function tapStrokeMetrics(metrics, x, y, serving = false) {
+  return { ...metrics, tap: true, serveTap: serving, sx: x, sy: y, x, y, dx: 0, dy: 0,
     dist: 0, pathLen: 0, samples: Math.max(2, metrics.samples || 0),
     speed: .8, peakSpeed: .8, releaseSpeed: .8, up: 1, right: 0, curl: 0 };
 }
@@ -267,11 +266,11 @@ function compactStrokeMetrics(metrics, x, y) {
   };
 }
 
-/** A small twitch or hover jitter is not a swipe — a slow, deliberate swing
- * is. A separately recognised tap is a short rally stroke, never a serve. */
+/** A small twitch or hover jitter is not a swipe. A contact tap is admitted
+ * separately, and can serve only when stamped for a legal falling toss. */
 function isRealStroke(m, serving) {
   if (!m || !Number.isFinite(m.samples) || m.samples < 2) return false;
-  if (m.tap === true) return !serving && Number.isFinite(m.sx) && Number.isFinite(m.sy);
+  if (m.tap === true) return (!serving || m.serveTap === true) && Number.isFinite(m.sx) && Number.isFinite(m.sy);
   const minPath = serving ? 0.019 : 0.046;
   const minDist = serving ? 0.014 : 0.034;
   const minSp = serving ? 0.12 : 0.30;
@@ -326,10 +325,12 @@ function classifyStroke(m, ctx, sp01) {
     const bend = m.dist > 0.001 ? (m.pathLen || 0) / m.dist : 0;
     /* Медленный сильный подъём — это свеча (LOB), даже если рука дрогнула
      * дугой: закрутка без темпа всё равно не полетит, а украденная свеча
-     * ломает защиту. Быстрая дуга при любом направлении хорды — закрутка. */
+     * ломает защиту. Быстрая дуга при любом направлении хорды — закрутка.
+     * Порог curl=0.55/arcSens (было 0.85) — палец на телефоне не рисует
+     * идеальную C: реалистичная дуга даёт 0.5–0.7 рад. */
     const lobLift = slow && u > 0.70;
-    if (!lobLift && Math.abs(m.curl) >= 0.85 / arcSens && m.dist >= 0.028 &&
-      (bend >= 1.30 || (m.straightness <= 0.74 && Math.abs(m.curl) >= 1.15 / arcSens))) {
+    if (!lobLift && Math.abs(m.curl) >= 0.55 / arcSens && m.dist >= 0.028 &&
+      (bend >= 1.15 || (m.straightness <= 0.74 && Math.abs(m.curl) >= 0.90 / arcSens))) {
       return m.curl < 0 ? STROKES.HOOK : STROKES.FADE;
     }
   }

@@ -478,6 +478,7 @@ class Game {
       if (this.debugRecording) this._debugLastPress = { shotId: this.shotId, gestureId: this.swipe.gestureId,
         green: !!this.swipe.pressZone.pressContactable, accepted: !!this.swipe.pressZone.accepted, time: tEv };
       if (serveReadyPress) this.startToss();
+      else this.tryInputHit(tapStrokeMetrics(this.swipe.m, n.x, n.y, servePress));
     };
 
     const track = (e) => {
@@ -515,6 +516,7 @@ class Game {
         this.logInput('pointermove', { pointer: { x: n.x, y: n.y }, pointerId: e.pointerId, buttons: e.buttons,
           inputType: e.pointerType || (this.pointerFine === false ? 'touch' : 'mouse'),
           dom: this.debugRecording ? domEvent(e) : null });
+        this.tryInputHit(this.swipe.m);
       }
       if (e.cancelable) e.preventDefault();
     };
@@ -546,25 +548,27 @@ class Game {
       if (zone) sw.tapMaxMovePx = Math.max(sw.tapMaxMovePx || 0,
         Math.hypot((n.rawX - zone.pressX) * zone.vw, (n.rawY - zone.pressY) * zone.vh));
       this.promotePendingServeZone();
-      // A quick tap-and-release during SERVE_READY is purely the toss trigger,
-      // not an armed pre-swipe; disarm pendingServeDrop if released before apex.
-      if (zone && zone.singleGestureToss && !zone.accepted &&
-          !(this.ball && this.ball.v && this.ball.v.y < 0 && this.tossRiseNow() >= MATCH_RULES.serveTossMinRise - 1e-6)) {
+      sw.up(n.rawX, n.rawY, tEv, simEv);
+      // Only a stationary toss tap is disarmed. A completed early serve swipe
+      // must survive release and meet the ball when the toss starts falling.
+      if (zone && zone.singleGestureToss && !isRealStroke(sw.lastReleased, true)) {
         zone.pendingServeDrop = false;
       }
-      sw.up(n.rawX, n.rawY, tEv, simEv);
       this.pointerDown = false;
       this.swipeReleasedAt = tEv;
       const tapAge = tEv - sw.startT;
       const tapSlop = zone && zone.pointerType === 'mouse' ? 10 : 14;
       const flickMax = CONTACT_CORRIDOR_RULES.compactFlickMaxPx;
-      if (zone && !zone.serving && zone.shotId === this.shotId &&
-          this.state === GS.RALLY && this.ball.live && this.ball.lastHitBy === -1 &&
+      const rallyTap = this.state === GS.RALLY && this.ball.live && this.ball.lastHitBy === -1;
+      const serveTap = zone && zone.serving && !zone.singleGestureToss &&
+        this.state === GS.SERVE_TOSS && this.server === 1 && this.ball.live && this.ball.lastHitBy === 0 &&
+        this.ball.v.y < 0 && this.tossRiseNow() >= MATCH_RULES.serveTossMinRise - 1e-6;
+      if (zone && zone.shotId === this.shotId && (rallyTap || serveTap) &&
           tapAge >= 0 && tapAge <= CONTACT_CORRIDOR_RULES.compactFlickMaxSec &&
-          !isRealStroke(sw.lastReleased, false)) {
+          !isRealStroke(sw.lastReleased, !!serveTap)) {
         if (sw.tapMaxMovePx <= tapSlop) {
-          sw.lastReleased = tapStrokeMetrics(sw.lastReleased, zone.pressX, zone.pressY);
-        } else if (zone.accepted && sw.tapMaxMovePx <= flickMax) {
+          sw.lastReleased = tapStrokeMetrics(sw.lastReleased, zone.pressX, zone.pressY, !!serveTap);
+        } else if (!zone.serving && zone.accepted && sw.tapMaxMovePx <= flickMax) {
           sw.lastReleased = compactStrokeMetrics(sw.lastReleased, n.x, n.y);
         }
       }
@@ -573,6 +577,7 @@ class Game {
         inputType: e.pointerType || (this.pointerFine === false ? 'touch' : 'mouse'),
         dom: this.debugRecording ? domEvent(e) : null });
       this.lastSwipeT = tEv;
+      this.tryInputHit(sw.lastReleased);
       e.preventDefault();
     };
 
@@ -994,6 +999,14 @@ class Game {
 
   /* ---------------------------- scoring ---------------------------- */
   awardPoint(who, reason) {
+    /* Гость в онлайне не ведёт счёт: хост единственный источник очков. Собственная
+     * физика гостя может определить финал розыгрыша иначе и счёт разойдётся.
+     * Гостю достаточно остановить мяч — следующий point-пакет синхронизирует счёт. */
+    if (this.network.isInMatch && !this.network.isHost) {
+      this.ball.live = false; this.ball.hist.length = 0;
+      this.ball.trailGrade = null; this.ball.golden = null;
+      return;
+    }
     if (this.debugRecording) {
       this.logInput('point', { outcome: { winner: who, reason } });
       const press = this._debugLastPress;
@@ -1043,6 +1056,9 @@ class Game {
     const deuce = this.score[0] >= this.settings.targetScore - 1 && this.score[1] >= this.settings.targetScore - 1;
     this.servesLeft--;
     if (deuce || this.servesLeft <= 0) { this.server = -this.server; this.servesLeft = deuce ? 1 : 2; }
+    /* Онлайн-матч: хост всегда подаёт (подача гостя ещё не сведена, см. TODO),
+     * поэтому после ротации подача всегда возвращается хосту. */
+    if (this.network.isInMatch) { this.server = 1; this.servesLeft = 2; }
 
     this.audio.point(who > 0);
     /* Драма момента — текстом в том же баннере у табло и ростом толпы,
@@ -1192,11 +1208,12 @@ class Game {
    *  timingErr = how far the fastest part of the swipe was from the contact.
    *  Green needs BOTH to be truly human-hard (≈<25 px, ≈<50 ms) — that is
    *  the shot that should (almost) always be a point. */
-  hitInputGrade() {
+  hitInputGrade(metrics) {
     const pz = this.swipe.pressZone, S = this.swipe.samples;
     // A click is a deliberately simple return, not a failed swipe and not an
     // "ideal" power shot with its near-guaranteed winner bonus.
-    if (pz && pz.accepted && this.swipe.lastReleased && this.swipe.lastReleased.tap) return 'yellow';
+    const m = metrics || (this.swipe.active ? this.swipe.m : this.swipe.lastReleased);
+    if (pz && pz.accepted && m && m.tap) return 'yellow';
     if (!pz || pz.accepted !== true || !Number.isFinite(pz.distancePx) || !S || S.length < 3) return 'red';
     let peak = 0, peakT = null;
     for (let i = 1; i < S.length; i++) {
@@ -1220,7 +1237,7 @@ class Game {
     if (side === 1) {
       if (this.demoMode) { b_gradeAssign(this, null); }
       else {
-        const grade = this.hitInputGrade();
+        const grade = this.hitInputGrade(racket.contactInput && racket.contactInput.gesture);
         b_gradeAssign(this, grade);
         if (grade === 'green' && !this.training)
           this.msg('ИДЕАЛЬНО!', 1.1, '#7CFF9E');
@@ -2406,7 +2423,38 @@ class Game {
     this.logInput('physics_gate', { outcome: { stage, ...detail } });
   }
 
-  tryPlayerHit(p0) {
+  /** Resolve fresh input against the current ball, not a smoothed paddle pose
+   * or a later animation frame. Misses leave the gesture free to become a swipe. */
+  tryInputHit(m) {
+    const b = this.ball, pad = this.player, zone = this.swipe && this.swipe.pressZone;
+    const serving = this.state === GS.SERVE_TOSS && this.server === 1 && b.lastHitBy === 0;
+    if (this.paused || !b.live || this.recenterT > 0 || !zone || !zone.accepted ||
+        zone.shotId !== this.shotId ||
+        this.time - pad.lastHitT <= .09 || !isRealStroke(m, serving) ||
+        !(serving || (this.state === GS.RALLY && b.lastHitBy === -1))) return;
+    if (m.tap === true) {
+      const p = this.project(b.p, {}), rect = this.canvas.getBoundingClientRect();
+      if (!p.ok || Math.hypot((this.pointer.x - p.x) * rect.width, (this.pointer.y - p.y) * rect.height)
+          > CONTACT_CORRIDOR_RULES.tapContactRadiusPx) return;
+    }
+    const calSpeed = this._cal && Number.isFinite(this._cal.padSpeed)
+      ? lerp(.84, 1.20, clamp(this._cal.padSpeed, 0, 1)) : 1;
+    const sens = clamp(MATCH_RULES.sensitivity * calSpeed, .55, 2);
+    const target = pointerBladeSolve(this._liveRig, this.R.aspect(),
+      clamp(.5 + (this.pointer.x - .5) * sens, 0, 1),
+      clamp(.5 + (this.pointer.y - .5) * sens, 0, 1),
+      { forceZ: quantizeDepth(b.p.z) });
+    if (this.camVPReady) clampPaddleToFrustum(this.camVP, target, .012);
+    const lim = paddleLimitsFor(target.tz);
+    const pos = V3.new(clamp(target.tx, -Math.min(REACH_SHELL.xHard, lim.x), Math.min(REACH_SHELL.xHard, lim.x)),
+      clamp(target.ty, PH.TABLE_Y + Math.max(REACH_SHELL.yLoHard, lim.yLo),
+        PH.TABLE_Y + Math.min(REACH_SHELL.yHiHard, lim.yHi)), target.tz);
+    keepPaddleAboveTable(pos, pad.normal, pad.roll || 0, PH.TABLE_Y, PH.T_HALF_WID, PH.T_HALF_LEN);
+    if (!playerInCaptureRange(b.p, pos, serving) && !playerGraceRange(b.p, pos, serving)) return;
+    this.tryPlayerHit(V3.clone(b.p), m, { pos, prevPos: pos, normal: pad.normal });
+  }
+
+  tryPlayerHit(p0, inputMetrics = null, inputPad = null) {
     const pad = this.player, b = this.ball;
     if (!b.live) return;
     /* The point is over. A ball still in the air during the point-end pause
@@ -2432,7 +2480,7 @@ class Game {
     const serveReach = MATCH_RULES.serveCaptureRadius;
 
     const serveCtx = this.state === GS.SERVE_TOSS && this.server === 1 && b.lastHitBy === 0;
-    const sw = this.swipe, m = this.playerStrokeIntent(serveCtx);
+    const sw = this.swipe, m = inputMetrics || this.playerStrokeIntent(serveCtx);
     if (!m) {
       /* Палец держит ракетку без замаха — «стенка»: пассивный блок с честной
        * физикой отражения, но только когда ЭТОТ же жест уже вывел ракетку в
@@ -2458,10 +2506,10 @@ class Game {
       return;
     }
     const endpointEligible = serveCtx || (b.lastHitBy === -1 && (this.rallyBounces.some(s => s > 0) || b.p.z >= .50));
-    const spad = this.staticPad(pad);
+    const spad = inputPad || this.staticPad(pad);
     const captureSample = measureCaptureAllowance(spad, p0, b.p, serveCtx, endpointEligible);
     if (captureSample && this.shotJournal) this.shotJournal.observeCapture(sw.gestureId, captureSample, this.time);
-    if (b.v.z < 0 && b.p.z < pad.pos.z - .35) {
+    if (b.v.z < 0 && b.p.z < spad.pos.z - .35) {
       this.debugRecording && this.diagnosticPhysicsGate('moving_away', { capture: captureSample }); return;
     }
     if (serveCtx && (b.v.y >= 0 || !(this.tossRiseNow() >= MATCH_RULES.serveTossMinRise - 1e-6))) {
@@ -2494,7 +2542,7 @@ class Game {
       if (this.debugRecording) gateDetail = { inside, grazing, still, closing, atClosest, tap: m.tap === true,
         capture: captureSample, previousBall: inputLogVec(p0),
         paddleStart: inputLogVec(spad.prevPos), paddleEnd: inputLogVec(spad.pos) };
-      if ((inside || grazing) && ((m.tap === true && inside) || atClosest || still)) {
+      if ((inside || grazing) && (inputPad || (m.tap === true && inside) || atClosest || still)) {
         const cx = swept.point ? swept.point.x : b.p.x;
         const cy = swept.point ? swept.point.y : b.p.y;
         const cz = swept.point ? swept.point.z : b.p.z;
@@ -2523,8 +2571,9 @@ class Game {
 
     const isServeStroke = this.isServeBall && b.lastHitBy === 0 && this.server === 1;
     const contact = V3.new(hit.x, hit.y, hit.z);
-    const forehand = paddleForehand(pad.pos.x, this.settings.hand, pad.forehand);
-    const grip = playerWristPose(pad.pos, pad.vel, this.settings.hand, { grip: this.settings.grip, forehand });
+    const strokePos = inputPad ? inputPad.pos : pad.pos;
+    const forehand = paddleForehand(strokePos.x, this.settings.hand, pad.forehand);
+    const grip = playerWristPose(strokePos, pad.vel, this.settings.hand, { grip: this.settings.grip, forehand });
     const sideParams = this.equip.forSide(grip.forehand ? 1 : -1);
     const radius = MATCH_RULES.sweetRadius;
     const sweet = clamp((1 - hit.rad / reachRadius) * (sideParams.sweet || this.equip.sweetK), 0, 1);
@@ -2638,9 +2687,11 @@ class Game {
       this.logInput('contact', { outcome: { contact: true, route: hit.captureKind || 'ccd',
         distancePx, distanceM: captureSample ? captureSample.distance : V3.dist(b.p, pad.pos),
         pressToContactMs: this.swipe.pressZone && Number.isFinite(this.swipe.pressZone.pressT)
-          ? (this.time - this.swipe.pressZone.pressT) * 1000 : null } });
+          ? Math.max(0, this.time - this.swipe.pressZone.pressT) * 1000 : null } });
     }
     pad.lastHitT = this.time;
+    this.anticipation.active = false;
+    V3.zero(this.anticipation.visualOffset);
     if (hit.edge) {
       /* Видимая пометка краевого контакта — короткая и НЕ праздничная:
        * никаких эффектов поверх мяча, только слово на табло сообщений и
@@ -2657,6 +2708,7 @@ class Game {
      * never reached; the AI already snaps its paddle to the contact. prevPos is
      * moved too, so the next frame does not read the snap as 20 m/s of bat. */
     V3.copy(pad.pos, contact);
+    pad.forehand = forehand;
     V3.copy(pad.prevPos, pad.pos);
     V3.copy(pad.prev, pad.pos);
     V3.copy(b.p, contact);
@@ -2718,6 +2770,9 @@ class Game {
 
   tryAiHit() {
     if (this.training) return;           // the feeder never returns the ball
+    /* В онлайн-матче удары соперника приходят как 'guestHit'-сообщения,
+     * а не через ботовы план; здесь ловить нечего. */
+    if (this.network.isInMatch) return;
     /* The point is over: the bot may not touch a ball that is only still
      * flying through the point-end pause. Its plan used to survive the point
      * and pull the next serve into a phantom backswing. */
@@ -3566,7 +3621,7 @@ class Game {
     /* Калибровка «Скорость мяча» (flytime 0..1): общий темп матча,
      * тренировочная насадка. Регламентную физику не трогает — это
      * честное замедление времени как у существующего slow-mo. */
-    const ft = (this._cal && this._cal.flytime !== undefined) ? (1.18 - this._cal.flytime * 0.4) : 1;
+    const ft = (this._cal && this._cal.flytime !== undefined) ? (0.78 + this._cal.flytime * 0.4) : 1;
     this.timeScale = expSmooth(this.timeScale, this.targetTimeScale * ft, 9, dtReal);
 
     if (this.demoMode && !this.paused) {

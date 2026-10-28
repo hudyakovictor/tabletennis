@@ -493,10 +493,12 @@ const showTip = (text) => { if (text) tip = { text, until: g.time + 4.6 }; };
         /* Оба игрока стартуют по одному сигналу реле. Физика считается на
          * хосте, гость присылает положение ракетки; уровень 2 — не «бот вместо
          * соперника», а качество отскока дальней ракетки, которую ведут руками. */
+        cine.mode = null; lastSph = null;   // остановить attract-камеру
         g.inspectSlowmo = false; lobby = false;
         g.settings.targetScore = 11; g.freePlay = false;
         resetAssist(); g.hintContact = false;
         g.startMatch(2);
+        if (net.isHost) g.server = 1;        // хост всегда первый подаёт
         onlineHud(true);
         netSay('match', { side: net.side });
       });
