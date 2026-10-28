@@ -1049,13 +1049,17 @@ async function handleClientRoute(db, req, pathname, urlObj, body, clientIp) {
   // Leaderboard (`GET /api/client/v1/leaderboard`)
   if (req.method === 'GET' && pathname === '/api/client/v1/leaderboard') {
     const limit = Math.min(50, Math.max(1, asInt(urlObj.searchParams.get('limit')) ?? 20));
+    /* Порядок полностью детерминирован: равный рейтинг и равные победы
+     * разрешаются по player_id, иначе два запроса могли вернуть разные места
+     * для одинаковых игроков, а `me.rank` разошёлся бы со списком. */
+    const ORDER = 'p.rating DESC, p.wins DESC, p.updated_at ASC, p.player_id ASC';
     const rows = db
       .prepare(
         `SELECT p.player_id, pl.display_name, p.rating, p.level, p.wins, p.losses
            FROM player_progress p
            JOIN players pl ON pl.id = p.player_id
           WHERE pl.status = 'active'
-          ORDER BY p.rating DESC, p.wins DESC, p.updated_at ASC
+          ORDER BY ${ORDER}
           LIMIT ?`
       )
       .all(limit);
@@ -1070,9 +1074,13 @@ async function handleClientRoute(db, req, pathname, urlObj, body, clientIp) {
             `SELECT COUNT(*) AS n
                FROM player_progress p
                JOIN players pl ON pl.id = p.player_id
-              WHERE pl.status = 'active' AND (p.rating > ? OR (p.rating = ? AND p.wins > ?))`
+              WHERE pl.status = 'active'
+                AND (p.rating > ?
+                     OR (p.rating = ? AND p.wins > ?)
+                     OR (p.rating = ? AND p.wins = ?
+                         AND (p.updated_at < ? OR (p.updated_at = ? AND p.player_id < ?))))`
           )
-          .get(mine.rating, mine.rating, mine.wins);
+          .get(mine.rating, mine.rating, mine.wins, mine.rating, mine.wins, mine.updated_at, mine.updated_at, auth.sub);
         me = { rank: Number(better.n) + 1, playerId: auth.sub, ...progressJson(mine) };
       }
     }

@@ -130,6 +130,7 @@ I18n.add('ru', {
   'pass.premiumText': 'Откроет 20 премиум-наград сезона, включая <b>эпический сундук</b> и накладку <b>{item}</b>.',
   'ranks.world': 'Мир', 'ranks.club': 'Клуб', 'ranks.title': 'Рейтинг', 'ranks.you': 'Ты',
   'ranks.seasonChip': 'Сезон: {left}', 'ranks.topPct': 'топ 4% · {club}',
+  'ranks.place': 'место {pos}', 'ranks.live': 'доска сервера', 'ranks.localNote': 'локальная доска · офлайн',
   'profile.matches': 'Матчи', 'profile.wins': 'Победы', 'profile.winrate': 'Винрейт',
   'profile.rating30': 'Рейтинг · 30 дней', 'profile.style': 'Стиль игры',
   'profile.styleBy': { one: ' · по {n} матчу', few: ' · по {n} матчам', many: ' · по {n} матчам', other: ' · по {n} матчам' },

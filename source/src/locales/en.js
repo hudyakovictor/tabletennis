@@ -131,6 +131,7 @@ I18n.add('en', {
   'pass.premiumText': 'Unlocks 20 premium season rewards, including an <b>epic chest</b> and the <b>{item}</b> rubber.',
   'ranks.world': 'World', 'ranks.club': 'Club', 'ranks.title': 'Rating', 'ranks.you': 'You',
   'ranks.seasonChip': 'Season: {left}', 'ranks.topPct': 'top 4% · {club}',
+  'ranks.place': 'rank {pos}', 'ranks.live': 'server board', 'ranks.localNote': 'local board · offline',
   'profile.matches': 'Matches', 'profile.wins': 'Wins', 'profile.winrate': 'Win rate',
   'profile.rating30': 'Rating · 30 days', 'profile.style': 'Play style',
   'profile.styleBy': { one: ' · from {n} match', other: ' · from {n} matches' },

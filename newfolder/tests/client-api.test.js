@@ -364,6 +364,45 @@ describe('Game client API — CORS, auth and progress', () => {
       assert.equal(res.json.me.playerId, playerId);
     });
 
+    it('gives tied players the same order every time and a rank that matches the list', async () => {
+      /* Три игрока с одинаковым рейтингом и одинаковыми победами: место не
+       * должно зависеть от порядка строк в базе, иначе клиент покажет игрока в
+       * списке на 5-м месте, а строкой «вы» — на 3-м. */
+      const twins = [];
+      for (const n of [1, 2, 3]) {
+        const session = await loginPlayer(`tg_tie_${n}_${Date.now()}`);
+        twins.push(session);
+      }
+      for (const session of twins) {
+        const r = await rawRequest(baseUrl, 'POST', '/api/client/v1/matches', {
+          body: {
+            matchId: `mt_tie_${session.playerId}`,
+            playerScore: 11,
+            opponentScore: 5,
+            durationMs: 240000,
+            opponentRating: 1000,
+            mode: 'career',
+          },
+          headers: { Authorization: `Bearer ${session.playerToken}` },
+        });
+        assert.equal(r.status, 200, r.text);
+      }
+      const seen = [];
+      for (const session of twins) {
+        const res = await rawRequest(baseUrl, 'GET', '/api/client/v1/leaderboard?limit=50', {
+          headers: { Authorization: `Bearer ${session.playerToken}` },
+        });
+        assert.equal(res.status, 200);
+        seen.push(res.json);
+      }
+      assert.deepEqual(seen[0].entries, seen[1].entries, 'порядок доски должен быть стабильным');
+      for (const board of seen) {
+        const row = board.entries.find((e) => e.playerId === board.me.playerId);
+        assert.ok(row, 'своя строка должна быть в списке');
+        assert.equal(board.me.rank, row.rank, 'me.rank обязан совпадать с местом в списке');
+      }
+    });
+
     it('serves match rules and economy limits for the client', async () => {
       const res = await clientCall('GET', '/api/client/v1/config');
       assert.equal(res.status, 200);
