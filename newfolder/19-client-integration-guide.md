@@ -1,193 +1,329 @@
-# Руководство по подключению будущего игрового клиента к Admin CRM (`v2.0`)
+# Подключение игрового клиента к TOPSPIN ARENA CRM (`v3.0`)
 
-Документ предназначен для интеграции **будущего чистого рерайта клиента TOPSPIN ARENA** (Telegram Mini App / WebGL / Mobile Web) с серверным контуром `newfolder/`.
+Документ — единственный источник истины по стыку «клиент ↔ сервер» для будущего рерайта клиента (Telegram Mini App / WebGL / Mobile Web).
+Он описывает **то, что реально реализовано** в `newfolder/src/routes/clientRoutes.js` и `newfolder/src/server.js` (проверено `tests/platform.test.js`), а не планируемое поведение.
 
-> **Железный архитектурный инвариант (`01-architecture.md`):**  
-> Игровой клиент общается **только** с публичным игровым контуром `/api/client/v1/*` и WebSocket-шлюзом `/ws/client`.  
-> Клиент **никогда** не получает API-ключи, системные промпты, сводки ИИ-зон или доступ к `/api/admin/*` (запросы с игровых доменов на `/api/admin/*` жёстко блокируются сервером с кодом `403 FORBIDDEN_ADMIN_ORIGIN`).
+> **Инвариант (`01-architecture.md`).** Клиент общается только с `/api/client/v1/*` и `/ws/client`. Запросы к `/api/admin/*` с игрового origin отклоняются (`403 FORBIDDEN_ADMIN_ORIGIN`). Клиент никогда не получает API-ключи провайдеров, промпты, сводки ИИ-зон и не упоминает ИИ в интерфейсе — вся аналитика живёт на сервере.
+
+**Версия контракта:** 3.0 · **Дата:** 2026-10-28 · **Совместимость:** ломающих изменений относительно 2.0 нет, добавлены уведомления, WS-тикет, дедупликация телеметрии и вложенный блок `maintenance`.
 
 ---
 
-## 1. Схема жизненного цикла клиентской сессии
+## 1. Базовая модель
+
+| Свойство | Значение |
+|---|---|
+| База | `https://<регион>.game.topspin.arena` (локально `http://0.0.0.0:4100`) |
+| Формат | `application/json; charset=utf-8`, UTF-8, camelCase в ответах |
+| Аутентификация | `Authorization: Bearer <playerToken>` (JWT 7 дней, роль `player`) |
+| Идемпотентность | `Idempotency-Key: <uuid>` на любом `POST`, который меняет состояние |
+| Язык ошибок | машинный `error` + человекочитаемый `message` на русском |
+| Регион | определяется по IP/заголовкам; при `CN` без ICP-лицензии — `451` |
+| Ретраи | `GET` — с экспоненциальной задержкой; `POST` — только с тем же `Idempotency-Key` |
+
+Клиент **не** хранит серверные секреты, **не** вычисляет авторитетных результатов матча и **не** отправляет собственные «очки» — только телеметрию свайпов с `clientEventId`.
+
+---
+
+## 2. Жизненный цикл сессии
 
 ```text
-[1. Старт TMA / Web]
-       │
-       ▼
-GET /api/client/v1/bootstrap          ──► Получить 35 полей MATCH_RULES, A/B вариант,
-       │                                  статус техработ, пуши, новости, региональный узел,
-       │                                  порог предупреждения пинга (>100 мс) и правила возраста
-       ▼
-POST /api/client/v1/auth/telegram     ──► Передать Telegram.WebApp.initData (HMAC-SHA256),
-       │                                  получить playerToken и playerId
-       ▼
-POST /api/client/v1/legal/consent     ──► При первом входе / смене версии документов передать
-       │                                  возраст и явные opt-in согласия (COPPA 13 / GDPR-K 16 / 152-ФЗ 14)
-       ▼
-POST /api/client/v1/session/start     ──► Начать сессию (или восстановить при обрыве через affinityToken);
-       │                                  при техработах для НОВЫХ матчей вернётся HTTP 503
-       ▼
-WS  /ws/client?affinity=<token>       ──► Держать соединение (keep-alive 25с, бинарные и JSON кадры,
-       │                                  измерение RTT в реальном времени)
-       ▼
-POST /api/client/v1/telemetry/inputs  ──► Пакетная отправка телеметрии свайпов каждые 3–5 сек
-       │                                  (проходит 6-точечную серверную проверку физики и свежести свайпа)
-       ▼
-POST /api/client/v1/telemetry/session-end ──► Финальные FPS, p50/p95 RTT, флаги краша и WebGL loss
+[1] GET  /api/client/v1/bootstrap          правила, A/B, техработы, пуши, новости, возрастной гейт
+[2] POST /api/client/v1/auth/telegram      initData → playerToken + playerId
+[3] POST /api/client/v1/legal/consent      возраст и opt-in (при первом входе и смене версии документа)
+[4] POST /api/client/v1/session/start      старт матча или реконнект по affinityToken
+[5] POST /api/client/v1/ws/ticket          одноразовый тикет на 60 с
+[6] WS   /ws/client?ticket=<ticket>        realtime: welcome, keep-alive 25 с, RTT
+[7] POST /api/client/v1/telemetry/inputs   пакеты свайпов каждые 3–5 с (дедупликация по clientEventId)
+[8] POST /api/client/v1/telemetry/session-end   FPS p5, RTT p50/p95, crash, WebGL loss
 ```
+
+Порядок 1→4 обязателен. Шаг 5 можно выполнять параллельно с 4, но **не раньше** получения `sessionId`.
 
 ---
 
-## 2. Контракты REST-эндпоинтов клиента (`/api/client/v1/*`)
+## 3. REST-эндпоинты
 
-### 2.1. `GET /api/client/v1/bootstrap`
-Вызывается до входа в матч. Для игроков из юрисдикции `CN` при отсутствии лицензии ICP (`CN_ICP_LICENSED != 1`) сервер возвращает **`451 Unavailable For Legal Reasons`**.
+### 3.1 `GET /api/client/v1/ping`
+Дешёвый health-check и измерение RTT до узла.
 
-Пример ответа `200 OK`:
+```json
+{ "pong": true, "clientSentTs": 0, "serverTs": 1793187723446, "region": "RU", "nodeId": "ru-msk-tma-01", "warnThresholdMs": 100 }
+```
+
+### 3.2 `GET /api/client/v1/bootstrap`
+Вызывается до входа в матч. Не требует токена (если он есть — учитывается для A/B).
+
 ```json
 {
-  "serverTimeUtc": "2026-10-28T09:00:00.000Z",
+  "serverTimeUtc": "2026-10-28T11:42:03.433Z",
   "region": "RU",
   "recommendedEndpoint": {
-    "nodeId": "ru-msk-tma-01",
-    "code": "ru-msk-1",
-    "wsUrl": "wss://msk.game.topspin.arena/ws/client",
-    "targetRttMs": 38
+    "nodeId": "ru-msk-tma-01", "code": "ru-msk-1", "label": "РФ + СНГ (Москва / Питер)",
+    "wsUrl": "wss://msk.game.topspin.arena/ws/client", "active": true,
+    "rollout": "immediate", "targetRttMs": 38
   },
   "wsEndpoint": "/ws/client",
   "pingThresholds": {
-    "excellentMaxMs": 35,
-    "goodMaxMs": 65,
-    "playableRollbackMaxMs": 100,
-    "warnClientThresholdMs": 100,
-    "poorWarnMaxMs": 150
+    "excellentMaxMs": 35, "goodMaxMs": 65, "playableRollbackMaxMs": 100,
+    "warnClientThresholdMs": 100, "poorWarnMaxMs": 150,
+    "excellentMs": 35, "goodMs": 65, "warnMs": 100, "unacceptablePvpMs": 150
   },
-  "ageGate": {
-    "minAgeWithoutParentalConsent": 14,
-    "law": "152-ФЗ / ГК РФ"
-  },
+  "ageGate": { "minAgeWithoutParentalConsent": 14, "law": "152-ФЗ / ГК РФ" },
   "maintenance": {
-    "enabled": false,
-    "bannerRu": "",
-    "etaIso": null
+    "enabled": false, "bannerRu": "", "bannerEn": "", "etaIso": null,
+    "allowActiveMatchesFinishGraceSec": 180, "blockNewMatchesHttp503": false,
+    "updatedAt": "2026-10-26T11:33:18.542Z"
   },
-  "matchRules": {
-    "version": 4,
-    "zoneShape": "oval",
-    "pressRadiusPx": 96,
-    "ovalForwardMaxPx": 120,
-    "contactSideTouchPx": 64
-  },
-  "abVariant": "oval_touch_plus8_treatment",
-  "notifications": [],
-  "news": [],
-  "legalDocuments": []
+  "matchRules": { "version": 4, "zoneShape": "oval", "pressRadiusPx": 96, "...": "35 полей MATCH_RULES v4" },
+  "abVariant": "control",
+  "notifications": [ { "id": "…", "priority": "important", "pinned": 1, "title_ru": "…" } ],
+  "news": [ { "id": "…", "category": "update", "title_ru": "…", "published": 1 } ],
+  "legalDocuments": [ { "docType": "tos", "version": "1.4", "lang": "ru", "title": "Условия использования" } ]
 }
 ```
 
-### 2.2. `POST /api/client/v1/auth/telegram`
-Проверяет криптографическую подпись `window.Telegram.WebApp.initData` по спецификации Telegram (`HMAC_SHA256("WebAppData", BOT_TOKEN)`).
+* `matchRules` — **эффективные** правила: базовый профиль + патч A/B-варианта. Клиент обязан применить их целиком и отправлять `rulesVersion` в телеметрии.
+* `maintenance.enabled = true` означает: новые матчи блокируются, но активная партия доигрывается (`allowActiveMatchesFinishGraceSec`).
+* Регион `CN` без `CN_ICP_LICENSED=1` → `451 Unavailable For Legal Reasons`.
 
-Тело запроса:
+### 3.3 `POST /api/client/v1/auth/telegram`
+```json
+{ "initData": "query_id=…&user=%7B…%7D&auth_date=…&hash=…", "installSource": "telegram_ads", "installCampaign": "autumn_cup", "installCreative": "cr_video_1" }
+```
+Сервер проверяет HMAC-SHA256 `initData` (включая `auth_date`), создаёт игрока при первом входе, возвращает:
+
+```json
+{ "ok": true, "playerId": "plr_0091", "displayName": "Player_1091", "region": "RU",
+  "recommendedEndpoint": { "nodeId": "ru-msk-tma-01", "wsUrl": "wss://…" }, "playerToken": "eyJhbGciOi…" }
+```
+Ошибки: `401 INVALID_TELEGRAM_INIT_DATA`, `403 ACCOUNT_BANNED` (`reason`), `429 RATE_LIMITED` (30 попыток/мин на IP).
+
+### 3.4 `POST /api/client/v1/legal/consent`
+Обязателен до первого матча и при смене `docVersion`.
+
+```json
+{ "docType": "tos", "docVersion": "1.4", "declaredAge": 14,
+  "parentalConsent": false, "analyticsOptIn": true, "marketingOptIn": false }
+```
+Ответ `200`:
+```json
+{ "ok": true, "id": "9eb5f09f-…", "consentedAt": "2026-10-28T11:42:05.872Z",
+  "ageGate": { "valid": true, "isMinor": false, "requiresParentalConsent": false, "minAge": 14, "law": "152-ФЗ / ГК РФ" } }
+```
+`403` с `ageGate.requiresParentalConsent = true` — клиент обязан запросить подтверждение опекуна и повторить с `parentalConsent: true`. Возрастные пороги: `US 13`, `EU 16`, `RU 14`, иначе `13`.
+
+### 3.5 `POST /api/client/v1/session/start`
+Новый матч:
+```json
+{ "platform": "tma_android", "deviceFingerprint": "stable-per-install-hash", "region": "RU" }
+```
+Реконнект (после переключения сети или сворачивания TMA):
+```json
+{ "affinityToken": "<токен из предыдущего ответа>", "platform": "tma_android" }
+```
+Успех `201`:
+```json
+{ "ok": true, "reconnected": false, "sessionId": "ses_df30257999de7fa8", "region": "RU",
+  "nodeId": "ru-msk-tma-01", "wsEndpoint": "/ws/client", "affinityToken": "eyJhbGciOi…" }
+```
+Реконнект возвращает `200` с `reconnected: true` и тем же `sessionId`; **новый** `affinityToken` не выдаётся — используйте прежний.
+
+Коды: `401 PLAYER_AUTH_REQUIRED`, `403 PLAYER_RESTRICTED` (`status: banned|suspended`), `404 PLAYER_NOT_FOUND`, `429 SESSION_START_RATE_LIMITED` (20/мин на игрока).
+
+**Техработы (`503`)** — единственный случай, когда новый матч запрещён:
+```json
+{ "error": "MAINTENANCE_ACTIVE", "matchmakingBlocked": true, "retryAfterSec": 60,
+  "bannerRu": "Обновляем серверы — вернёмся через 15 минут", "bannerEn": "Updating servers — back in 15 minutes", "etaIso": "2026-10-28T12:05:00.000Z",
+  "maintenance": { "enabled": true, "bannerRu": "…", "bannerEn": "…", "etaIso": "…",
+                   "retryAfterSec": 60, "allowActiveMatchesFinishGraceSec": 180 } }
+```
+Заголовок `Retry-After: 60`. Клиент показывает баннер и **не** ретраит чаще, чем указано.
+
+### 3.6 `POST /api/client/v1/ws/ticket`
+Долгоживущий `playerToken` в URL WebSocket попадать не должен — прокси и CDN логируют query string. Тикет живёт 60 секунд и одноразовый.
+
+```json
+{ "sessionId": "ses_df30257999de7fa8", "affinityToken": "eyJhbGciOi…" }
+```
+```json
+{ "ok": true, "ticket": "9kQ…", "expiresAt": "2026-10-28T11:44:05.000Z",
+  "wsEndpoint": "/ws/client?ticket=9kQ…", "nodeId": "ru-msk-tma-01", "keepAliveSec": 25 }
+```
+
+### 3.7 `POST /api/client/v1/telemetry/inputs`
+Пакет свайпов каждые 3–5 секунд. Лимит `120` пакетов/мин на IP; превышение — `429 TELEMETRY_RATE_LIMITED` + `Retry-After`.
+
 ```json
 {
-  "initData": "query_id=...&user=%7B%22id%22%3A123456%7D&auth_date=1793178000&hash=...",
-  "installSource": "telegram_ads",
-  "installCampaign": "tma_spin_masters_q4",
-  "installCreative": "cr_tma_spin_video"
+  "sessionId": "ses_df30257999de7fa8",
+  "events": [{
+    "clientEventId": "evt_01J8…", "ts": "2026-10-28T11:43:02.120Z",
+    "pointerType": "touch", "grip": "shakehand", "hand": "right", "isServe": false,
+    "tableZone": "deep_bh", "hasFreshSwipe": true, "swipeStraightness": 0.91,
+    "along": 0.62, "across": -0.34, "accepted": false, "contact": false,
+    "rejectCode": "OUTSIDE_ZONE", "strokeType": "backhand",
+    "ballSpeed": 16.4, "spin": 152, "reactionMs": 268, "sweetSpotDist": 0.21,
+    "rulesVersion": 4, "abVariant": "control"
+  }]
 }
 ```
-Ответ возвращает `playerToken` (передавать в заголовке `Authorization: Bearer <playerToken>`).
 
-### 2.3. `POST /api/client/v1/legal/consent` (Возрастной фильтр и явный Opt-In)
-Клиент обязан показать чекбоксы согласия **снятыми по умолчанию** (`analyticsOptIn: false`, `marketingOptIn: false`) и передать возраст игрока:
-- **РФ (`RU`)**: до `14` лет без `parentalConsent: true` вернётся `403 PARENTAL_CONSENT_REQUIRED` (`152-ФЗ / ГК РФ`).
-- **ЕС (`EU`)**: до `16` лет без `parentalConsent: true` вернётся `403 PARENTAL_CONSENT_REQUIRED` (`GDPR-K`).
-- **США (`US`)**: до `13` лет без `parentalConsent: true` вернётся `403 PARENTAL_CONSENT_REQUIRED` (`COPPA`).
+**Поля события.** Принимаются и `camelCase`, и `snake_case` (`clientEventId` = `client_event_id`, `tableZone` = `table_zone`, `rejectCode` = `reject_code`, `ballSpeed`, `reactionMs`, `isServe`, `hasFreshSwipe`, `swipeStraightness`, `strokeType`, `sweetSpotDist`, `rulesVersion`, `abVariant`, `isGrace`, `eventId`). camelCase предпочтителен для JS-клиента.
 
-### 2.4. `POST /api/client/v1/session/start` и Reconnect Session Affinity
-- **Новая сессия**: передаётся `{ "playerId": "...", "platform": "tma_ios" | "tma_android" | "web_desktop", "deviceFingerprint": "..." }`.
-  В ответе (`201 Created`) приходит подписанный `affinityToken` и `sessionId`.
-- **Реконнект при смене Wi-Fi -> LTE или кратковременных техработах**: клиент передаёт `{ "playerId": "...", "affinityToken": "<сохранённый токен>" }`. Сервер проверяет HMAC-подпись и возвращает `200 OK` (`reconnected: true`), **даже если параллельно включился режим техработ** (чтобы текущая партия корректно доигралась!).
-- **Блокировка новых матчей в техработы**: если `affinityToken` не передан и включён `maintenance_mode`, сервер возвращает `503 Service Unavailable` с текстом баннера и `etaIso`.
+| Поле | Тип | Обязательно | Комментарий |
+|---|---|---|---|
+| `clientEventId` | string `[A-Za-z0-9_.:-]{1,64}` | да, для exactly-once | ключ дедупликации в рамках `sessionId` |
+| `ts` | ISO-8601 | да | серверное время не подменяется, но `ts` валидируется |
+| `along`, `across` | number | да | нормализованные координаты контакта (−1…1) |
+| `accepted` | bool | да | решение клиента; сервер проверит независимо |
+| `contact` | bool | да | `true` только при `accepted` |
+| `hasFreshSwipe` | bool | да | без свежего свайпа `accepted=true` — нарушение |
+| `rejectCode` | string | при `accepted=false` | один из 10 кодов `MATCH_RULES v4` |
+| `reactionMs` | number | желательно | участвует в детекторах фрода |
+| `ballSpeed`, `spin` | number | желательно | проверяются на согласованность с позицией |
+| `rulesVersion`, `abVariant` | number/string | да | какие правила реально применялись |
 
-### 2.5. `POST /api/client/v1/telemetry/inputs` (Пакетная отправка ударов и свайпов)
-Клиент буферизует события нажатий/свайпов и отправляет пакет раз в 3–5 секунд (до 200 событий в пакете).
-
-Пример валидного пакета:
+Ответ:
 ```json
-{
-  "sessionId": "ses_01ab23cd45ef6789",
-  "events": [
-    {
-      "ts": "2026-10-28T09:02:11.420Z",
-      "pointer_type": "touch",
-      "grip": "shakehand",
-      "hand": "right",
-      "is_serve": false,
-      "table_zone": "deep_bh",
-      "has_fresh_swipe": true,
-      "swipe_straightness": 0.84,
-      "along": -34.5,
-      "across": 22.0,
-      "accepted": true,
-      "contact": true,
-      "is_grace": false,
-      "reject_code": null,
-      "stroke_type": "backhand_flick",
-      "ball_speed": 16.8,
-      "spin": 340.5,
-      "reaction_ms": 218.0,
-      "sweet_spot_dist": 0.14,
-      "rules_version": 4,
-      "ab_variant": "oval_touch_plus8_treatment"
-    }
-  ]
-}
+{ "ok": true, "acceptedCount": 18, "dedupedCount": 0, "rejectedCount": 1, "serverTs": 1793187730123 }
 ```
+* `acceptedCount` — сколько строк реально вставлено; `dedupedCount` — сколько отброшено как повтор (повторная отправка того же `clientEventId` даёт `acceptedCount: 0, dedupedCount: N`).
+* `422 INVALID_TELEMETRY_BATCH` + `reasons[]` — все события отклонены валидатором физики.
+* Пакет с нарушениями инвариантов создаёт фрод-кейс `packet_tamper_attempt` (`risk_score 0.86`) для **человеческого** разбора; автобана нет.
 
-#### Обязательные справочники движка:
-1. **`table_zone` (6 зон стола)**: `'short_bh'`, `'short_mid'`, `'short_fh'`, `'deep_bh'`, `'deep_mid'`, `'deep_fh'`.
-2. **`reject_code` (10 канонических причин отказа из `12_match_rules.js`)**:
-   - `'OUTSIDE_ZONE'`
-   - `'NO_FRESH_SWIPE'`
-   - `'STATIC_CLICK'`
-   - `'DEPTH_FAIL'`
-   - `'TIMING_LATE'`
-   - `'TIMING_EARLY'`
-   - `'CONSUMED'`
-   - `'SERVE_TOSS_LOW'`
-   - `'WRONG_DIRECTION'`
-   - `'BOUNCE_ILLEGAL'`
+Правила, которые сервер проверяет сам (клиент обязан им следовать, чтобы не попасть в отклонённые): `contact` без `accepted`, `accepted` без свежего свайпа, код отказа при `accepted=true`, неизвестный код отказа, контакт вне позиции ракетки при скорости мяча > 1, координаты вне допустимых диапазонов.
 
-#### 6 инвариантов серверного анти-тампер валидатора (`src/security/validator.js`):
-Пакет отклоняется (`422`), а сессия помечается антифрод-сигналом `packet_tamper_attempt` (на ручную проверку администратору), если нарушено любое из условий:
-1. Частота событий превышает `25 событий/сек` в скользящем секундном окне.
-2. Скорость мяча `> 38.0 м/с`, вращение `|spin| > 1150 рад/с` или реакция `< 15 мс`.
-3. Временная метка `ts` из будущего (`> +60с`) или немонотонна.
-4. Заявлен `contact: true`, но смещение ракетки `|along| > 260 px` или `|across| > 180 px`.
-5. Заявлен `accepted: true` при `has_fresh_swipe: false`.
-6. Заявлен `accepted: true` одновременно с ненулевым `reject_code`.
+### 3.8 `POST /api/client/v1/telemetry/session-end`
+```json
+{ "sessionId": "ses_…", "rttP50Ms": 48, "rttP95Ms": 79, "avgFps": 58.7, "p5Fps": 39, "crashed": false, "webglLost": false }
+```
+Эти значения питают зону Ops (FPS, RTT-коридоры, краш-рейт) и дашборд «здоровье клиента».
 
-### 2.6. `POST /api/client/v1/support/tickets` (Обращения в поддержку со скриншотом)
-Позволяет игроку прямо из меню паузы отправить баг-репорт или вопрос по платежу со скриншотом (`data:image/png;base64,...`) и автоматическим контекстом (`sessionId`, `rttMs`, `platform`, `rulesVersion`). Критичные тикеты мгновенно эскалируются дежурному в Telegram-бот.
+### 3.9 Поддержка
+
+`POST /api/client/v1/support/tickets`
+```json
+{ "sessionId": "ses_…", "category": "bug", "priority": "high",
+  "subject": "Не срабатывает удар с бэкхенда", "message": "На дальнем левом углу…",
+  "screenshotName": "deep_bh.png", "screenshotDataUrl": "data:image/png;base64,…",
+  "clientContext": { "platform": "tma_android", "rttMs": 74, "grip": "shakehand", "hand": "right", "rulesVersion": 4 } }
+```
+`201` → `{ ok: true, ticket: { id, status: "open", priority, sla_due_at, linked_incident_id } }`. Скриншот ≤ 40 000 символов data-URL; при совпадении контекста с активным инцидентом тикет линкуется автоматически.
+
+`GET /api/client/v1/support/tickets` — список тикетов игрока.
+`GET /api/client/v1/support/tickets/:id` — тред:
+```json
+{ "id": "…", "subject": "…", "status": "answered", "priority": "high", "category": "bug",
+  "createdAt": "…", "updatedAt": "…", "slaDueAt": "…",
+  "messages": [ { "role": "player|admin", "body": "…", "attachmentName": "deep_bh.png", "createdAt": "…" } ],
+  "statusHistory": [ { "to": "answered", "at": "…", "note": "…" } ] }
+```
+Чужой тикет → `404` (не `403`, чтобы не подтверждать существование объекта).
+
+### 3.10 Уведомления и новости
+
+`GET /api/client/v1/notifications` — **единая лента**: пуши администратора всегда первыми (`pinned`, `important`), затем новости.
+```json
+{ "items": [
+    { "id": "…", "kind": "push", "priority": "critical", "pinned": true, "important": true,
+      "title": "…", "titleEn": "…", "body": "…", "bodyEn": "…", "createdAt": "…", "expiresAt": "…", "dismissible": true },
+    { "id": "…", "kind": "news", "priority": "normal", "pinned": false, "important": false,
+      "category": "update", "title": "…", "body": "…", "createdAt": "…", "dismissible": false } ],
+  "pinnedCount": 1, "unreadCount": 1, "serverTimeUtc": "…" }
+```
+`POST /api/client/v1/notifications/:id/dismiss` → `{ ok: true }`; закрытый пуш больше не возвращается (таблица `notification_dismissals`). Новости не закрываются.
+
+`GET /api/client/v1/news?category=update&limit=20` — архив патчноутов.
 
 ---
 
-## 3. Низколатентный WebSocket-протокол `/ws/client` (`13-telegram-miniapp-latency.md`)
+## 4. WebSocket `/ws/client`
 
-Подключение:
-```javascript
-const ws = new WebSocket(`${location.origin.replace(/^http/, 'ws')}/ws/client?affinity=${encodeURIComponent(affinityToken)}`);
-ws.binaryType = 'arraybuffer';
+```
+wss://<node>/ws/client?ticket=<одноразовый тикет>       // основной путь
+wss://<node>/ws/client?affinity=<affinityToken>         // реконнект активной партии
+```
+Без валидного тикета/affinity сервер отвечает `401` и закрывает соединение.
+
+**Первый кадр (text/JSON):**
+```json
+{ "type": "welcome", "serverTs": 1793187723446, "sessionId": "ses_…", "playerId": "plr_0091",
+  "region": "RU", "nodeId": "ru-msk-tma-01", "keepAliveSec": 25, "warnThresholdMs": 100,
+  "ticketValidated": true, "reconnectedSessionId": null }
 ```
 
-1. **Приветственный кадр (`welcome`)**: сразу после `101 Switching Protocols` сервер присылает `serverTs`, `nodeId`, `keepAliveSec: 25` и `warnThresholdMs: 100`.
-2. **Keep-Alive в Telegram WebView**: каждые **25 секунд** сервер отправляет RFC 6455 `Ping` (`0x09`), чтобы мобильный NAT оператора и Telegram Mini App не усыпляли соединение между розыгрышами.
-3. **Компактные бинарные кадры (`0x02`)**: клиент может слать бинарный буфер состояния/ввода; сервер без аллокации JSON возвращает 8-байтный `BigUInt64BE` серверный таймстамп + заголовок пакета.
-4. **Клиентская индикация пинга (`13-telegram-miniapp-latency.md`)**:
-   - `< 35 мс` — зелёный индикатор (идеально)
-   - `35–65 мс` — зелёный (целевой диапазон TMA)
-   - `65–100 мс` — жёлтый (включить клиентский rollback-буфер предсказания)
-   - **`> 100 мс` (`100–150 мс`)** — показать ненавязчивое предупреждение о нестабильной сети
-   - `> 150 мс` — предложить одиночный режим против ИИ вместо рейтингового PvP
+| Правило | Значение |
+|---|---|
+| Keep-alive | сервер шлёт ping каждые **25 с** (диапазон ТЗ 20–30 с) |
+| Клиентский ping | раз в 5 с для измерения RTT; тишина > 45 с → переподключение |
+| Backoff | 0.5 → 1 → 2 → 4 → 8 с, максимум 8 с, снова с новым тикетом |
+| Размер кадра | входящий буфер ограничен 128 КБ, превышение — разрыв |
+| Формат | текстовые JSON-кадры для управления, бинарные — для сжатых дельт физики |
+| RTT-коридоры | `<35` отлично · `35–65` хорошо · `65–100` играбельно (rollback) · `100–150` предупреждение клиенту · `>150` PvP запрещён |
+| Предсказание | клиент симулирует 60 Гц локально и реконсилирует по серверному состоянию; авторитетен сервер |
+
+Клиент **не** отправляет результат матча и не считает очки экономики.
+
+---
+
+## 5. Ошибки и лимиты
+
+| HTTP | `error` | Когда | Что делать клиенту |
+|---|---|---|---|
+| 401 | `PLAYER_AUTH_REQUIRED` | нет/истёк `playerToken` | повторить `/auth/telegram` |
+| 401 | `INVALID_TELEGRAM_INIT_DATA` | подпись/`auth_date` неверны | переоткрыть Mini App |
+| 403 | `ACCOUNT_BANNED` | бан | показать причину, выйти |
+| 403 | `PLAYER_RESTRICTED` | заморозка | показать статус |
+| 403 | `AGE_CONSENT_REQUIRED` | нет согласия/опекуна | экран согласий |
+| 404 | `SESSION_NOT_FOUND` / `TICKET_NOT_FOUND` | объект чужой или удалён | начать новую сессию |
+| 422 | `INVALID_TELEMETRY_BATCH` | физика/инварианты | логировать `reasons[]`, не ретраить бесконечно |
+| 429 | `RATE_LIMITED`, `TELEMETRY_RATE_LIMITED`, `SESSION_START_RATE_LIMITED` | превышен лимит | ждать `Retry-After` / `retryAfterSec` |
+| 451 | `REGION_BLOCKED` | `CN` без ICP | экран недоступности |
+| 503 | `MAINTENANCE_ACTIVE` | техработы | баннер + `Retry-After` |
+
+Лимиты по умолчанию: телеметрия `120` пакетов/мин на IP, старт сессии `20`/мин на игрока, вход `30`/мин на IP, админ-API `240`/мин.
+
+---
+
+## 6. Чек-лист реализации клиента
+
+1. **Правила не хардкодить.** `matchRules` приходит из `bootstrap`, версия — из `matchRules.version`; при расхождении версий сервер считает телеметрию по своей версии и помечает событие.
+2. **`clientEventId` генерировать до отправки** (UUID/ULID) и хранить в очереди — это делает повтор безопасным.
+3. **Оффлайн-очередь.** Пакеты складывать в IndexedDB, отправлять по 20–50 событий, при `429`/`503` — по `Retry-After`.
+4. **Свежесть свайпа.** `hasFreshSwipe` отражает реальное движение; попытка «докрутить» даёт фрод-кейс.
+5. **RTT.** Мерить по `ping` и WS-кадрам, показывать предупреждение после 100 мс, отключать PvP после 150 мс.
+6. **Реконнект.** Хранить `affinityToken` в памяти вкладки; при возврате из фона — `session/start` с ним, затем новый WS-тикет.
+7. **Техработы.** Обрабатывать `503` как штатный режим: баннер, ETA, запрет новых матчей, разрешение доиграть текущий.
+8. **Скриншоты тикетов** сжимать до ≤ 40 000 символов data-URL.
+9. **Никаких обращений к `/api/admin/*`** и никаких упоминаний ИИ/зон в UI.
+10. **Согласия** — блокирующий экран, `declaredAge` не подставлять по умолчанию без действия игрока.
+
+---
+
+## 7. Проверка контракта локально
+
+```bash
+cd newfolder
+npm run seed:reset && npm start        # http://0.0.0.0:4100
+curl -s localhost:4100/api/client/v1/ping
+curl -s localhost:4100/api/client/v1/bootstrap | head -c 600
+curl -s -X POST localhost:4100/api/client/v1/session/start \
+  -H 'content-type: application/json' \
+  -d '{"playerId":"plr_0091","platform":"tma_android","deviceFingerprint":"dev-1"}'
+```
+Автоматическая проверка стыка: `npm test -- tests/platform.test.js` (WS-тикет, дедупликация, техработы, тикет-тред).
+
+---
+
+## 8. Что изменилось относительно v2.0
+
+| Область | v2.0 | v3.0 |
+|---|---|---|
+| Уведомления | только `notifications` в bootstrap | единая лента + `dismiss`, пуши выше новостей |
+| WebSocket | `?affinity=` | одноразовый `?ticket=` (60 с) + `affinity` для реконнекта |
+| Телеметрия | только `snake_case`, без дедупликации | оба диалекта, `clientEventId`, `dedupedCount` |
+| Техработы | плоский `503` | `Retry-After` + вложенный `maintenance` с ETA |
+| Поддержка | создание тикета | + список, тред, история статусов |
+| Идемпотентность | не описана | `Idempotency-Key` на мутациях |
+| Ошибки | текстовые | машинные `error` + `retryAfterSec` |
