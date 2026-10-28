@@ -45,9 +45,11 @@ Router.def('ranks', {
         /* Своя строка уже в топе — второй раз её не добавляем. */
         return real.some((x) => x.me) ? real : real.concat([me]);
       }
-      const list = PEOPLE.map((p, i) => ({ ...p, key: 'p' + i })).sort((a, b) => b.r - a.r).map((x, i) => ({ ...x, pos: i + 1 }));
-      list.push({ ...meRow, pos: 1284 });
-      return list;
+      /* Офлайн: место считаем по тому же списку, который показываем. Раньше
+       * тут стояло выдуманное «1 284» — игрок видел место, которого у него
+       * никто не считал. */
+      const list = PEOPLE.map((p, i) => ({ ...p, key: 'p' + i })).concat([meRow]).sort((a, b) => b.r - a.r);
+      return list.map((x, i) => ({ ...x, pos: i + 1 }));
     }
     const base = PEOPLE.map((p, i) => ({ ...p, key: 'p' + i }));
     const list = tab === 'friends' ? base.filter((_, i) => [0, 1, 3, 5].includes(i)) : base.filter((_, i) => [0, 2, 4].includes(i));
@@ -55,17 +57,22 @@ Router.def('ranks', {
   },
   body(tab) {
     const real = tab === 'world' && !!serverBoard();
+    /* Подпись есть у каждого списка: для мира — источник, для друзей и клуба
+     * — честное «сервер их пока не знает», чтобы демо-игроки не выглядели
+     * живым рейтингом. */
+    const note = tab === 'world' ? (real ? t('ranks.live') : t('ranks.localNote'))
+      : t(tab === 'friends' ? 'ranks.friendsLocal' : 'ranks.clubLocal');
     const list = this.data(tab); const top = list.filter((x) => x.pos <= 3); const rest = list.filter((x) => x.pos > 3 && !(tab === 'world' && x.me));
     const order = [top[1], top[0], top[2]].filter(Boolean);
     const me = list.find((x) => x.me);
-    return `${tab === 'world' ? `<div class="rk-note">${real ? t('ranks.live') : t('ranks.localNote')}</div>` : ''}<div class="podium">${order.map((p) => `<div class="pod p${p.pos}">
+    return `<div class="rk-note">${note}</div><div class="podium">${order.map((p) => `<div class="pod p${p.pos}">
         <div class="pd-av">${p.pos === 1 ? `<span class="crown">${Art.icon('crown', { c: '#FFC93A', fill: '#FFC93A' })}</span>` : ''}${Art.avatar(p.key, p.pos === 1 ? 78 : 62, { ring: ['', '#FFC93A', '#DDE6FF', '#E3A06B'][p.pos] })}</div>
         <b class="pd-n">${rkEsc(p.s)}</b><span class="pd-r num">${Art.trophy(14)}${fmt(p.r)}</span>
         <div class="pd-col"><span class="num">${p.pos}</span></div></div>`).join('')}</div>
       <div class="lb">${rest.map((p, i) => `<div class="lrow ${p.me ? 'me' : ''}" style="--d:${i}">
         <span class="lp num">${p.pos}</span>${Art.avatar(p.key, 40)}<span class="ln"><b>${rkEsc(p.s)}</b><small>${rkEsc(p.club)}</small></span>
-        ${real ? '' : `<span class="lch ${i % 3 === 1 ? 'dn' : 'up'}">${i % 3 === 1 ? '▼' : '▲'}${(i * 7 % 5) + 1}</span>`}<span class="lr num">${Art.badge(leagueOf(p.r), 18)}${fmt(p.r)}</span></div>`).join('')}</div>
-      ${tab === 'world' && me && (me.pos > 3 || !real) ? `<div class="lrow me sticky"><span class="lp num">${fmt(me.pos)}</span>${Art.avatar('me', 40)}<span class="ln"><b>${t('ranks.you')}</b><small>${real ? t('ranks.place', { pos: fmt(me.pos) }) : t('ranks.topPct', { club: S.club })}</small></span>${real ? '' : '<span class="lch up">▲38</span>'}<span class="lr num">${Art.badge(leagueOf(me.r), 18)}${fmt(me.r)}</span></div>` : ''}`;
+        <span class="lr num">${Art.badge(leagueOf(p.r), 18)}${fmt(p.r)}</span></div>`).join('')}</div>
+      ${tab === 'world' && me && (me.pos > 3 || !real) ? `<div class="lrow me sticky"><span class="lp num">${fmt(me.pos)}</span>${Art.avatar('me', 40)}<span class="ln"><b>${t('ranks.you')}</b><small>${real ? t('ranks.place', { pos: fmt(me.pos) }) : t('ranks.localPlace', { pos: fmt(me.pos) })}</small></span><span class="lr num">${Art.badge(leagueOf(me.r), 18)}${fmt(me.r)}</span></div>` : ''}`;
   },
   render() {
     /* Фильтр стоит ПЕРВЫМ (важнее заголовка), плитки ниже собраны в одну
