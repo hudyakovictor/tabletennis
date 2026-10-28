@@ -21,3 +21,16 @@ const LEAGUES = [
 const leagueOf = (r) => { let L = LEAGUES[0]; for (const l of LEAGUES) if (r >= l.min) L = l; return L; };
 const nextLeague = (r) => LEAGUES.find((l) => l.min > r) || null;
 const leagueName = (L) => t(L.k);
+
+/* Шаг рейтинга — та же формула Эло, что и на сервере (`eloK` и `maxRatingDelta`
+ * в `newfolder/src/routes/clientRoutes.js`). Раньше клиент брал фиксированные
+ * +24/−18: профиль считал одно число, сервер — другое, и после синхронизации
+ * они уже никогда не сходились. Константы сверяет `tests/state.test.cjs`.
+ * Неизвестный соперник = 1000: тот же дефолт, что у сервера. */
+const ELO_K = 32, ELO_MAX = 64, ELO_UNKNOWN = 1000;
+const ratingDelta = (rating, opponentRating, win) => {
+  const mine = Number(rating) || 0;
+  const opp = Number.isFinite(Number(opponentRating)) ? Number(opponentRating) : ELO_UNKNOWN;
+  const expected = 1 / (1 + 10 ** ((opp - mine) / 400));
+  return Math.max(-ELO_MAX, Math.min(ELO_MAX, Math.round(ELO_K * ((win ? 1 : 0) - expected))));
+};

@@ -54,17 +54,32 @@ const Progress = {
     this.flush();
   },
 
-  /** Серверные числа не откатывают локальные: офлайн-игра могла уйти вперёд. */
-  merge(p) {
+  /** Серверные числа не откатывают локальные: офлайн-игра могла уйти вперёд.
+   *  Рейтинг — исключение: он считается на сервере, а клиент только повторяет
+   *  ту же формулу для офлайна. Когда очередь пуста, сервер знает про игрока
+   *  всё, и его числа берутся точь-в-точь: иначе в профиле и на доске рейтинга
+   *  у одного игрока два разных рейтинга. Уровень, опыт и валюта остаются
+   *  «только вверх» — их копит клиент. */
+  merge(p, exact = false) {
     if (!p) return;
-    const take = (key, field) => {
+    let changed = false;
+    const take = (key, field, serverOwned = false) => {
       const v = Number(p[key]);
-      if (Number.isFinite(v) && v > (Number(S[field]) || 0)) S[field] = v;
+      if (!Number.isFinite(v)) return;
+      if (exact && serverOwned) { if (S[field] !== v) { S[field] = v; changed = true; } }
+      else if (v > (Number(S[field]) || 0)) { S[field] = v; changed = true; }
     };
-    take('level', 'level'); take('rating', 'rating'); take('wins', 'wins');
-    take('losses', 'losses'); take('streak', 'streak'); take('bestRally', 'bestRally');
+    take('level', 'level'); take('rating', 'rating', true); take('wins', 'wins', true);
+    take('losses', 'losses', true); take('streak', 'streak', true); take('bestRally', 'bestRally');
     take('coins', 'coins'); take('gems', 'gems');
     save();
+    /* Открытый экран показывал старые числа — перерисовываем те, что подписаны
+     * на серверные данные (`live` в Router.def). Пачка ответов из очереди даёт
+     * одну перерисовку, а не по одной на каждый матч. */
+    if (changed && typeof Router !== 'undefined' && Router.cur) {
+      clearTimeout(this.repaintAt);
+      this.repaintAt = setTimeout(() => Router.repaint(), 150);
+    }
   },
 
   async pull() {
@@ -73,7 +88,8 @@ const Progress = {
     if (!r.ok || !r.json) return;
     this.online = true;
     this.playerId = r.json.player && r.json.player.playerId;
-    this.merge(r.json.progress);
+    /* Очередь ещё не отправлена — серверные числа неполные, берём максимум. */
+    this.merge(r.json.progress, !this.pending);
   },
 
   async boot() {
@@ -145,8 +161,10 @@ const Progress = {
        * что стоит за ней. Такие факты отбрасываем и идём дальше. */
       if (r.status === 409 || r.status === 422) { list.shift(); this.saveQ(list); continue; }
       if (!r.ok) { this.online = r.status < 500; return; }
-      if (r.json && r.json.progress) this.merge(r.json.progress);
       list.shift(); this.saveQ(list);
+      /* Ответ на последний факт — это и есть всё, что сервер знает: только
+       * теперь его рейтинг точный. */
+      if (r.json && r.json.progress) this.merge(r.json.progress, !list.length);
     }
   }
 };
