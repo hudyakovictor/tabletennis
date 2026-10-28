@@ -43,6 +43,7 @@ export async function render(container, ctx) {
       </div>
       <div class="page-actions">
         <button class="btn btn-sm btn-outline" id="export-players">${icon('download')} CSV</button>
+        <button class="btn btn-sm btn-outline" id="flagged-matches">${icon('shield')} Матчи с флагами</button>
         <button class="btn btn-sm btn-outline" id="by-id">${icon('search')} Найти по ID</button>
       </div>
     </div>
@@ -138,6 +139,32 @@ export async function render(container, ctx) {
   qs('#export-players', container).addEventListener('click', () => {
     downloadFile('/api/admin/exports/players.csv', `topspin-players-${new Date().toISOString().slice(0, 10)}.csv`);
   });
+  qs('#flagged-matches', container).addEventListener('click', async () => {
+    try {
+      const res = await api.get('/api/admin/matches?suspicious=1&pageSize=50');
+      const items = res.items || [];
+      openDrawer({
+        title: 'Матчи с флагами доверия',
+        eyebrow: `${num(res.total || 0)} шт. · решает человек, автоматических банов нет`,
+        wide: true,
+        body: items.length
+          ? table({
+              rows: items,
+              rowKey: 'id',
+              columns: [
+                { label: 'Игрок', render: (r) => `<a href="#/players?player=${encodeURIComponent(r.player_id)}">${esc(r.display_name || r.player_id)}</a>` },
+                { label: 'Счёт', render: (r) => `<b>${num(r.player_score)}:${num(r.opponent_score)}</b> <span class="dim">${esc(r.mode)}</span>` },
+                { label: 'Длительность', align: 'right', render: (r) => ms(r.duration_ms) },
+                { label: 'Δ рейтинг', align: 'right', render: (r) => `${Number(r.rating_delta) > 0 ? '+' : ''}${num(r.rating_delta)}` },
+                { label: 'Флаги', render: (r) => (r.flags || []).map((f) => `<span class="badge badge-danger">${esc(f)}</span>`).join(' ') },
+                { label: 'Когда', align: 'right', render: (r) => `<span class="dim">${esc(timeAgo(r.created_at))}</span>` },
+              ],
+            })
+          : emptyState({ title: 'Флагов нет', text: 'Сервер не нашёл подозрительных матчей' }),
+        actions: [{ label: 'Закрыть', variant: 'btn-ghost' }],
+      });
+    } catch (err) { toastError(err); }
+  });
   qs('#by-id', container).addEventListener('click', async () => {
     const id = await promptDialog({ title: 'Открыть игрока', label: 'ID игрока', placeholder: 'plr_0091', confirmLabel: 'Открыть' });
     if (id) openPlayer(id.trim(), ctx);
@@ -159,6 +186,58 @@ function consentSummary(consents) {
   };
 }
 
+/* Значение для input[type=number]: без пробелов-разделителей, иначе браузер
+ * считает строку невалидной и оставляет поле пустым. */
+function rawValue(value) {
+  const n = Number(value);
+  return Number.isFinite(n) ? String(n) : '0';
+}
+
+/* Серверный прогресс и журнал матчей. Монеты и гемы здесь — числа сервера, а не
+ * клиента: пока кошелёк живёт в сейве, расхождение должно быть видно оператору,
+ * а не выясняться из жалобы. Флаги доверия (§3.13) — очередь на ручную проверку. */
+function progressBlock(progress, matches, totals, canEdit) {
+  if (!progress) {
+    return `<div><div class="field-label mb-8">Прогресс и матчи</div>
+      <div class="dim">сервер ещё не получал прогресс этого игрока</div></div>`;
+  }
+  return `<div>
+    <div class="row wrap mb-8">
+      <span class="field-label">Прогресс и матчи</span>
+      <span class="badge badge-neutral">уровень ${num(progress.level)}</span>
+      <span class="badge badge-neutral">рейтинг ${num(progress.rating)}</span>
+      <span class="badge badge-neutral">побед/поражений ${num(progress.wins)}/${num(progress.losses)}</span>
+      <span class="badge badge-neutral">серия ${num(progress.streak)}</span>
+      <span class="badge badge-neutral">лучший розыгрыш ${num(progress.best_rally)}</span>
+      <span class="badge badge-neutral">монет ${num(progress.coins)} · гемов ${num(progress.gems)}</span>
+      ${Number(totals.suspicious) > 0 ? `<span class="badge badge-danger">флагов доверия: ${num(totals.suspicious)}</span>` : ''}
+    </div>
+    ${matches.length ? table({
+      rows: matches.slice(0, 8),
+      rowKey: 'id',
+      columns: [
+        { label: 'Счёт', render: (r) => `<b>${num(r.player_score)}:${num(r.opponent_score)}</b> <span class="dim">${esc(r.mode)}</span>` },
+        { label: 'Длительность', align: 'right', render: (r) => ms(r.duration_ms) },
+        { label: 'Δ рейтинг', align: 'right', render: (r) => `<span class="${Number(r.rating_delta) < 0 ? 'trend-down' : ''}">${Number(r.rating_delta) > 0 ? '+' : ''}${num(r.rating_delta)}</span>` },
+        { label: 'Флаги', render: (r) => (r.suspicious
+          ? (r.flags || []).map((f) => `<span class="badge badge-danger">${esc(f)}</span>`).join(' ')
+          : '<span class="dim">—</span>') },
+        { label: 'Когда', align: 'right', render: (r) => `<span class="dim">${esc(timeAgo(r.created_at))}</span>` },
+      ],
+    }) : '<div class="dim">матчей на сервере нет</div>'}
+    ${canEdit ? `<div class="field-row">
+      <!-- Голые числа: input[type=number] отвергает «1 001» из num() и показывает пустое поле. -->
+      <label class="field"><span class="field-label">Уровень</span><input id="pp-level" type="number" min="1" max="99" value="${rawValue(progress.level)}" /></label>
+      <label class="field"><span class="field-label">Рейтинг</span><input id="pp-rating" type="number" min="0" max="3000" value="${rawValue(progress.rating)}" /></label>
+      <label class="field"><span class="field-label">Монеты</span><input id="pp-coins" type="number" min="0" value="${rawValue(progress.coins)}" /></label>
+      <label class="field"><span class="field-label">Гемы</span><input id="pp-gems" type="number" min="0" value="${rawValue(progress.gems)}" /></label>
+    </div>
+    <label class="field"><span class="field-label">Причина правки (в аудит)</span>
+      <input id="pp-reason" placeholder="Например: возврат сохранения после сбоя клиента" /></label>
+    <div class="callout">${icon('shield')} Правка пишется в hash-chain аудит с значениями до и после и уведомляет Ops. Потолки: уровень 1–99, рейтинг 0–3000.</div>` : ''}
+  </div>`;
+}
+
 async function openPlayer(id, ctx) {
   try {
     const d = await api.get(`/api/admin/players/${encodeURIComponent(id)}`);
@@ -168,6 +247,7 @@ async function openPlayer(id, ctx) {
     const canSanction = can('players:sanction');
     const canErase = can('players:erase');
     const canExport = can('players:export');
+    const canProgress = can('players:progress');
     const banned = p.status === 'banned' || p.status === 'suspended';
 
     openDrawer({
@@ -207,6 +287,8 @@ async function openPlayer(id, ctx) {
               </dl>
             </div>
           </div>
+
+          ${progressBlock(d.progress, d.recentMatches || [], d.matchTotals || {}, canProgress)}
 
           <div>
             <div class="field-label mb-8">Сессии</div>
@@ -302,6 +384,41 @@ async function openPlayer(id, ctx) {
             try {
               await api.post(`/api/admin/players/${id}/erase`, { reason: 'Запрос субъекта данных (152-ФЗ)' }, { idempotencyKey: `gdpr-${id}` });
               toast('Данные игрока удалены', { type: 'success' });
+              ctx.refresh();
+            } catch (err) { toastError(err); }
+          },
+        }] : []),
+        ...(canProgress && d.progress ? [{
+          label: 'Правка прогресса',
+          variant: 'btn-outline',
+          close: false,
+          onClick: async ({ close }) => {
+            const cur = d.progress || {};
+            const reason = qs('#pp-reason').value.trim();
+            if (reason.length < 5) { toast('Укажите причину правки (мин. 5 символов)', { type: 'warn' }); return; }
+            const patch = {};
+            const pick = (sel, key) => {
+              const el = qs(sel);
+              if (!el) return;
+              const v = Number(el.value);
+              if (Number.isFinite(v) && v !== Number(cur[key])) patch[key] = v;
+            };
+            pick('#pp-level', 'level');
+            pick('#pp-rating', 'rating');
+            pick('#pp-coins', 'coins');
+            pick('#pp-gems', 'gems');
+            const changed = Object.keys(patch);
+            if (!changed.length) { toast('Ни одно значение не изменилось', { type: 'warn' }); return; }
+            const ok = await confirmDialog({
+              title: 'Изменить прогресс?',
+              text: `Будут записаны: ${changed.map((k) => `${k} → ${patch[k]}`).join(', ')}. Правка попадёт в аудит, клиент получит числа сервера при следующем сохранении.`,
+              confirmLabel: 'Записать',
+            });
+            if (!ok) return;
+            try {
+              await api.post(`/api/admin/players/${id}/progress`, { ...patch, reason }, { idempotencyKey: `progress-${id}-${Date.now()}` });
+              toast('Прогресс обновлён', { type: 'success', text: 'Запись добавлена в аудит' });
+              close();
               ctx.refresh();
             } catch (err) { toastError(err); }
           },
