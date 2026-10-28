@@ -1,4 +1,4 @@
-import { api, downloadFile } from '../core/api.js';
+import { api, downloadFile, downloadJson } from '../core/api.js';
 import { esc, num, pct, money, timeAgo, dateTime, compact } from '../core/format.js';
 import {
   qs, qsa, kpi, card, table, statusBadge, zoneBadge, skeleton, emptyState, openDrawer,
@@ -10,10 +10,16 @@ import { can } from '../core/store.js';
 export async function render(container, ctx) {
   const tab = ctx.query.tab || 'audit';
   if (!container.dataset.loaded) container.innerHTML = skeleton('page');
-  const data = await api.get('/api/admin/governance');
+  const [data, legal] = await Promise.all([
+    api.get('/api/admin/governance'),
+    // Legal/DSAR data is a second aggregate: loaded only for the tab that needs it,
+    // so opening the audit log does not pay for the consent statistics.
+    tab === 'legal' ? api.get('/api/admin/legal') : Promise.resolve(null),
+  ]);
   if (ctx.isStale()) return;
   container.dataset.loaded = '1';
   container._data = data;
+  container._legal = legal;
 
   const audit = data.audit || {};
   container.innerHTML = `
@@ -35,10 +41,10 @@ export async function render(container, ctx) {
     </div>
 
     <div class="tabs mb-16">
-      ${[['audit', 'Аудит'], ['ai', 'AI-политика'], ['compliance', 'Комплаенс'], ['roles', 'Роли'], ['readiness', 'Готовность']]
+      ${[['audit', 'Аудит'], ['legal', 'Право и приватность'], ['ai', 'AI-политика'], ['compliance', 'Комплаенс'], ['roles', 'Роли'], ['readiness', 'Готовность']]
         .map(([v, l]) => `<button type="button" class="tab ${tab === v ? 'active' : ''}" data-tab="${v}">${l}</button>`).join('')}
     </div>
-    <div id="tab-body">${renderTab(tab, data)}</div>
+    <div id="tab-body">${renderTab(tab, data, legal)}</div>
   `;
 
   qsa('[data-tab]', container).forEach((btn) => btn.addEventListener('click', () => {
@@ -60,7 +66,8 @@ export async function render(container, ctx) {
   bindTab(container, ctx);
 }
 
-function renderTab(tab, d) {
+function renderTab(tab, d, legal) {
+  if (tab === 'legal') return legalTab(legal || {}, d);
   if (tab === 'ai') return aiTab(d);
   if (tab === 'compliance') return complianceTab(d);
   if (tab === 'roles') return rolesTab(d);
@@ -176,6 +183,219 @@ function complianceTab(d) {
     </div>`;
 }
 
+/* ------------------------------ ПРАВО / DSAR ------------------------------ */
+
+const DOC_LABELS = {
+  tos: 'Условия использования',
+  privacy_policy: 'Политика конфиденциальности',
+  eula: 'Лицензионное соглашение',
+  cookie_policy: 'Cookie Policy',
+};
+const REQUEST_LABELS = { export: 'Доступ (экспорт)', erasure: 'Удаление' };
+const SOURCE_LABELS = { operator: 'оператор', player_client: 'из клиента' };
+
+/** Deadline bar: green → amber → red as the 30-day statutory clock runs out. */
+function slaBar(request) {
+  const requested = new Date(request.requested_at).getTime();
+  const due = new Date(request.due_at).getTime();
+  const now = Date.now();
+  const elapsedPct = Math.min(100, Math.max(0, ((now - requested) / Math.max(1, due - requested)) * 100));
+  const tone = request.isOverdue ? 'danger' : request.daysLeft <= 5 ? 'warn' : 'ok';
+  const label = request.isOverdue
+    ? `просрочен на ${Math.max(1, Math.ceil((now - due) / 86400000))} дн.`
+    : `${request.daysLeft} дн. до срока`;
+  const hints = {
+    ok: 'Срок соблюдается',
+    warn: 'Срок подходит к концу',
+    danger: 'Срок 152-ФЗ / GDPR нарушен',
+  };
+  return `<div class="sla" title="${esc(hints[tone])}">
+      <span class="sla-track"><span class="sla-fill ${tone}" style="width:${elapsedPct.toFixed(1)}%"></span></span>
+      <span class="sla-label ${tone}">${esc(label)}</span>
+    </div>`;
+}
+
+function legalTab(legal, d) {
+  const queue = legal.privacyQueue || {};
+  const requests = legal.privacyRequests || [];
+  const openRequests = requests.filter((r) => r.isOpen);
+  const docs = legal.documents || [];
+  const dpa = legal.dpaRegistry || [];
+  const ageGates = legal.ageGateRules || {};
+  const consents = legal.consentStats || [];
+  const retention = legal.retention || d.compliance || {};
+  const canHandle = can('players:erase');
+  const canIntake = can('players:read');
+
+  const regionRows = consents.map((c, i) => ({ id: `${c.region}-${i}`, ...c }));
+  const gateRows = Object.entries(ageGates).map(([region, rule]) => ({
+    id: region,
+    region,
+    minAge: rule.minAgeWithoutParentalConsent,
+    law: rule.law,
+  }));
+
+  return `<div class="grid grid-4 mb-16">
+      ${kpi({ label: 'Открытых запросов', value: num(queue.open || 0), sub: `срок ${num(queue.slaDays || 30)} дн.`, tone: (queue.open || 0) > 0 ? 'warn' : '' })}
+      ${kpi({ label: 'Просрочено', value: num(queue.overdue || 0), sub: 'нарушение срока', tone: (queue.overdue || 0) > 0 ? 'danger' : '' })}
+      ${kpi({ label: 'Истекают ≤ 5 дней', value: num(queue.dueSoon || 0), sub: 'требуют внимания' })}
+      ${kpi({ label: 'Обработано', value: num((queue.completed || 0) + (queue.rejected || 0)), sub: `отклонено: ${num(queue.rejected || 0)}` })}
+    </div>
+
+    <div class="grid grid-12">
+      <section class="card col-8">
+        <div class="card-head">
+          <div><h3>Запросы субъектов ПДн</h3><div class="dim">Право на доступ и право на удаление: 30 дней по 152-ФЗ и GDPR Art. 12(3)</div></div>
+          ${canIntake ? `<button class="btn btn-sm btn-primary" id="new-dsar">${icon('plus')} Запрос</button>` : ''}
+        </div>
+        <div class="card-body flush">
+          ${openRequests.length
+            ? `<div class="list">${openRequests.map((r) => `<div class="list-row dsar-row">
+                <span class="status-dot ${r.isOverdue ? 'critical' : r.daysLeft <= 5 ? 'warning' : 'ok'}"></span>
+                <div class="list-main">
+                  <span class="list-title">${esc(REQUEST_LABELS[r.request_type] || r.request_type)} · <code>${esc(r.player_id)}</code></span>
+                  <span class="list-sub">${esc(r.region)} · ${esc(SOURCE_LABELS[r.source] || r.source || 'оператор')} · создан ${esc(dateTime(r.requested_at))} · статус ${esc(r.status)}</span>
+                  ${slaBar(r)}
+                </div>
+                <div class="row">
+                  ${canHandle ? `<button class="btn btn-sm btn-ghost" data-dsar-start="${esc(r.id)}">В работу</button>
+                  <button class="btn btn-sm btn-outline" data-dsar-fulfil="${esc(r.id)}" data-dsar-type="${esc(r.request_type)}">
+                    ${r.request_type === 'export' ? 'Выгрузить' : 'Удалить ПДн'}</button>
+                  <button class="btn btn-sm btn-ghost" data-dsar-reject="${esc(r.id)}">Отклонить</button>` : '<span class="dim">только просмотр</span>'}
+                </div>
+              </div>`).join('')}</div>`
+            : emptyState({ iconName: 'check', title: 'Открытых запросов нет', text: 'Поступают из клиента и вручную от оператора; срок начинает идти с момента создания.' })}
+        </div>
+      </section>
+
+      <section class="card col-4">
+        <div class="card-head"><h3>Документы</h3></div>
+        <div class="card-body flush">
+          ${docs.length ? docs.map((doc) => `<div class="list-row">
+              <div class="list-main">
+                <span class="list-title">${esc(DOC_LABELS[doc.doc_type] || doc.doc_type)}</span>
+                <span class="list-sub">${esc(doc.lang.toUpperCase())} · v${esc(doc.version)} · ${esc(dateTime(doc.published_at))}${doc.requires_reconsent ? ' · требует пере-согласия' : ''}</span>
+              </div>
+              <button class="btn btn-sm btn-ghost" data-doc="${esc(doc.id)}">Открыть</button>
+            </div>`).join('') : emptyState({ title: 'Документов нет' })}
+        </div>
+      </section>
+
+      <section class="card col-6">
+        <div class="card-head"><div><h3>Возрастные гейты и сроки хранения</h3><div class="dim">Порог согласия опекуна зависит от региона игрока</div></div></div>
+        <div class="card-body flush">
+          ${table({
+            rows: gateRows,
+            rowKey: 'id',
+            columns: [
+              { label: 'Регион', render: (r) => `<span class="badge badge-neutral">${esc(r.region)}</span>` },
+              { label: 'Без согласия опекуна', align: 'right', render: (r) => `${num(r.minAge)} лет` },
+              { label: 'Правовая база', render: (r) => `<span class="dim">${esc(r.law || '—')}</span>` },
+            ],
+          })}
+          <div class="card-body stack" style="border-top:1px solid var(--border)">
+            <div class="row-between"><span class="muted">Input-события</span><strong>${num(retention.inputEventsDays || 90)} дн.</strong></div>
+            <div class="row-between"><span class="muted">Телеметрия и ИИ</span><strong>${num(retention.telemetryDays || retention.retentionTelemetryDays || 180)} дн.</strong></div>
+            <div class="row-between"><span class="muted">Чат директора</span><strong>${num(retention.directorChatDays || retention.retentionDirectorDays || 365)} дн.</strong></div>
+            <div class="row-between"><span class="muted">Срок ответа на запрос</span><strong>${num(retention.deletionSlaDays || queue.slaDays || 30)} дн.</strong></div>
+          </div>
+        </div>
+      </section>
+
+      <section class="card col-6">
+        <div class="card-head"><div><h3>Статистика согласий</h3><div class="dim">По регионам: сколько согласий, несовершеннолетних с опекуном, opt-in</div></div></div>
+        <div class="card-body flush">
+          ${regionRows.length ? table({
+            rows: regionRows,
+            rowKey: 'id',
+            columns: [
+              { label: 'Регион', render: (r) => `<span class="badge badge-neutral">${esc(r.region)}</span>` },
+              { label: 'Согласий', align: 'right', render: (r) => num(r.consents_count) },
+              { label: 'Несоверш. с опекуном', align: 'right', render: (r) => num(r.minors_with_parental_consent) },
+              { label: 'Аналитика', align: 'right', render: (r) => pct(((r.analytics_opt_in_count || 0) / Math.max(1, r.consents_count)) * 100, 0) },
+              { label: 'Маркетинг', align: 'right', render: (r) => pct(((r.marketing_opt_in_count || 0) / Math.max(1, r.consents_count)) * 100, 0) },
+            ],
+          }) : emptyState({ title: 'Согласий нет' })}
+        </div>
+      </section>
+
+      <section class="card col-12">
+        <div class="card-head"><div><h3>Реестр DPA с провайдерами</h3><div class="dim">Без подписанного DPA и zero-retention ПДн в модель не отправляются</div></div></div>
+        <div class="card-body flush">
+          ${dpa.length ? table({
+            rows: dpa.map((r) => ({ id: r.provider, ...r })),
+            rowKey: 'id',
+            columns: [
+              { label: 'Провайдер', render: (r) => `<code>${esc(r.provider)}</code>` },
+              { label: 'Страна', render: (r) => esc(r.country) },
+              { label: 'DPA', render: (r) => statusBadge(r.dpa_status === 'signed' ? 'ok' : 'warning', r.dpa_status) },
+              { label: 'Zero retention', render: (r) => (r.zero_data_retention ? statusBadge('ok', 'да') : statusBadge('danger', 'нет')) },
+              { label: 'ПДн разрешены', render: (r) => (r.pii_allowed ? statusBadge('warn', 'да') : statusBadge('ok', 'нет')) },
+              { label: 'Примечание', render: (r) => `<span class="dim">${esc(r.notes || '')}</span>` },
+            ],
+          }) : emptyState({ title: 'Реестр пуст' })}
+        </div>
+      </section>
+    </div>`;
+}
+
+function openDsarIntakeDialog(ctx) {
+  openDrawer({
+    title: 'Новый запрос субъекта ПДн',
+    eyebrow: '30 дней с момента регистрации',
+    body: `<form class="stack" id="dsar-form">
+        <label class="field"><span class="field-label">ID игрока</span>
+          <input name="playerId" required placeholder="plr_0091" autocomplete="off" /></label>
+        <label class="field"><span class="field-label">Тип запроса</span>
+          <select name="requestType">
+            <option value="export">Доступ — выдать копию данных</option>
+            <option value="erasure">Удаление — стереть ПДн</option>
+          </select></label>
+        <label class="field"><span class="field-label">Основание / канал поступления</span>
+          <textarea name="reason" placeholder="Письмо на privacy@, тикет поддержки, запрос из клиента"></textarea></label>
+        <div class="alert">${icon('clock')} Срок 30 дней. Запрос появится в очереди и попадёт в аудит; удаление выполняет человек.</div>
+      </form>`,
+    actions: [
+      { label: 'Отмена', variant: 'btn-ghost' },
+      {
+        label: 'Зарегистрировать',
+        variant: 'btn-primary',
+        close: false,
+        onClick: async ({ close }) => {
+          const fd = new FormData(qs('#dsar-form'));
+          const playerId = String(fd.get('playerId') || '').trim();
+          if (!playerId) { toast('Укажите ID игрока', { type: 'warn' }); return; }
+          try {
+            await api.post('/api/admin/privacy/requests', {
+              playerId,
+              requestType: fd.get('requestType'),
+              reason: fd.get('reason'),
+            }, { idempotencyKey: `dsar-${playerId}-${fd.get('requestType')}-${Date.now()}` });
+            toast('Запрос зарегистрирован', { type: 'success' });
+            close();
+            ctx.refresh();
+          } catch (err) { toastError(err); }
+        },
+      },
+    ],
+  });
+}
+
+function openLegalDocument(container, docId) {
+  const doc = ((container._legal || {}).documents || []).find((d) => d.id === docId);
+  if (!doc) return;
+  openDrawer({
+    title: DOC_LABELS[doc.doc_type] || doc.doc_type,
+    eyebrow: `${doc.lang.toUpperCase()} · v${doc.version} · ${dateTime(doc.published_at)}`,
+    wide: true,
+    body: `<div class="stack">
+        ${doc.requires_reconsent ? `<div class="alert alert-warn">${icon('alert')} Публикация этой версии требует повторного согласия игроков.</div>` : ''}
+        <pre class="code-block" style="max-height:60vh;white-space:pre-wrap">${esc(doc.content_md || '')}</pre>
+      </div>`,
+    actions: [{ label: 'Закрыть', variant: 'btn-ghost' }],
+  });
+}
+
 function rolesTab(d) {
   const roles = d.roles || [];
   return `<div class="grid grid-12">
@@ -239,6 +459,73 @@ function barRowsLocal(items) {
 }
 
 function bindTab(container, ctx) {
+  const legal = container._legal || {};
+
+  qs('#new-dsar', container)?.addEventListener('click', () => openDsarIntakeDialog(ctx));
+
+  run(container, '[data-doc]', (node) => openLegalDocument(container, node.dataset.doc));
+
+  run(container, '[data-dsar-start]', async (node) => {
+    try {
+      await api.post(`/api/admin/privacy/requests/${node.dataset.dsarStart}/start`, {}, {
+        idempotencyKey: `dsar-start-${node.dataset.dsarStart}`,
+      });
+      toast('Запрос взят в работу', { type: 'success' });
+      ctx.refresh();
+    } catch (err) { toastError(err); }
+  });
+
+  run(container, '[data-dsar-fulfil]', async (node) => {
+    const id = node.dataset.dsarFulfil;
+    const isErase = node.dataset.dsarType === 'erasure';
+    const request = (legal.privacyRequests || []).find((r) => r.id === id) || {};
+    const ok = await confirmDialog({
+      title: isErase ? 'Удалить персональные данные?' : 'Выдать копию данных игроку?',
+      text: isErase
+        ? 'ПДн будут стёрты в основной и архивной БД. Платёжные записи сохранятся обезличенными — этого требует налоговый учёт. Действие необратимо.'
+        : 'Будет сформирован полный пакет данных субъекта (ст. 15 GDPR / 152-ФЗ) и зафиксирован факт выдачи.',
+      confirmLabel: isErase ? 'Удалить ПДн' : 'Выгрузить',
+      danger: isErase,
+      details: `<dl class="kv"><dt>Игрок</dt><dd><code>${esc(request.player_id || '')}</code></dd>
+        <dt>Срок</dt><dd>${esc(request.due_at ? dateTime(request.due_at) : '—')}</dd></dl>`,
+      requireText: isErase ? 'УДАЛИТЬ' : '',
+    });
+    if (!ok) return;
+    try {
+      const res = await api.post(`/api/admin/privacy/requests/${id}/fulfil`, {}, {
+        idempotencyKey: `dsar-fulfil-${id}`,
+      });
+      if (res.dataPackage) {
+        downloadJson(res.dataPackage, `dsar-${request.player_id || id}.json`);
+        toast('Пакет данных сформирован и скачан', { type: 'success' });
+      } else {
+        toast('ПДн удалены, запрос закрыт', { type: 'success' });
+      }
+      ctx.refresh();
+    } catch (err) { toastError(err); }
+  });
+
+  run(container, '[data-dsar-reject]', async (node) => {
+    const reason = await promptDialog({
+      title: 'Отклонить запрос',
+      label: 'Правовое основание отказа',
+      placeholder: 'Например: запрос не идентифицирован, документ не подтверждает личность',
+      confirmLabel: 'Отклонить',
+      danger: true,
+      required: true,
+      minLength: 5,
+      hint: 'Отказ фиксируется в аудите и доступен при проверке регулятора.',
+    });
+    if (!reason) return;
+    try {
+      await api.post(`/api/admin/privacy/requests/${node.dataset.dsarReject}/reject`, { reason }, {
+        idempotencyKey: `dsar-reject-${node.dataset.dsarReject}`,
+      });
+      toast('Запрос отклонён', { type: 'success' });
+      ctx.refresh();
+    } catch (err) { toastError(err); }
+  });
+
   run(container, '[data-csv]', (node) => {
     downloadFile(`/api/admin/exports/${node.dataset.csv}.csv`, `topspin-${node.dataset.csv}-${new Date().toISOString().slice(0, 10)}.csv`);
   });

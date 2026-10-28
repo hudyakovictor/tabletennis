@@ -350,6 +350,39 @@ async function seedDatabaseIfEmpty(db, force = false) {
     sessions.push({ id: sid, playerId: p.id, region: p.region, platform: plat, startHoursAgo: hoursAgo });
   }
 
+  // 6b. Seed the DSAR queue: every state a legal operator must be able to see.
+  // One healthy, one near the deadline, one already overdue and one closed — an
+  // empty queue on a demo would hide exactly the SLA mechanic the screen exists for.
+  const insPrivacy = db.prepare(
+    `INSERT INTO privacy_requests
+       (id, player_id, region, request_type, status, reason, requested_at, due_at, completed_at,
+        processed_by, source, notes, rejection_reason, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+  );
+  const dsarSla = 30;
+  const dsarDaysAgo = (days) => isoAgo(days * 24);
+  const dsarDue = (days) => isoAhead((dsarSla - days) * 24);
+  insPrivacy.run(
+    'dsar_seed_export_ok', 'plr_0007', 'RU', 'export', 'pending',
+    'Прошу копию моих данных для проверки', dsarDaysAgo(3), dsarDue(3), null, null,
+    'player_client', 'intake: player_client', null, dsarDaysAgo(3)
+  );
+  insPrivacy.run(
+    'dsar_seed_erasure_due_soon', 'plr_0011', 'EU', 'erasure', 'in_progress',
+    'GDPR Art. 17: удаление аккаунта и связанных данных', dsarDaysAgo(27), dsarDue(27), null,
+    'owner@topspin.arena', 'operator', 'intake: owner@topspin.arena', null, dsarDaysAgo(2)
+  );
+  insPrivacy.run(
+    'dsar_seed_export_overdue', 'plr_0019', 'RU', 'export', 'pending',
+    'Повторный запрос после обращения в поддержку', dsarDaysAgo(41), dsarDue(41), null, null,
+    'player_client', 'intake: player_client', null, dsarDaysAgo(41)
+  );
+  insPrivacy.run(
+    'dsar_seed_erasure_done', 'plr_0023', 'RU', 'erasure', 'completed',
+    'Удаление по обращению в поддержку', dsarDaysAgo(20), dsarDue(20),
+    dsarDaysAgo(18), 'owner@topspin.arena', 'operator', null, null, dsarDaysAgo(18)
+  );
+
   // 7. Seed 1,850+ Input Events across all 6 table zones, grips, hands, and 10 reject codes
   const insInput = db.prepare(
     `INSERT INTO input_events

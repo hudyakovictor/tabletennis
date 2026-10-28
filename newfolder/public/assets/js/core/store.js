@@ -26,6 +26,7 @@ export function canAny(permissions) {
 export async function login(username, password) {
   const res = await api.post('/api/admin/auth/login', { username, password });
   applySession(res);
+  if (res.expiresAt) scheduleSessionKeepAlive(res.expiresAt, res.sessionTtlSec);
   return res;
 }
 
@@ -40,7 +41,91 @@ export async function loadMe() {
   const res = await api.get('/api/admin/auth/me');
   applySession(res);
   state.unread = res.unreadNotifications || 0;
+  if (res.session?.expiresAt) scheduleSessionKeepAlive(res.session.expiresAt, res.session.ttlSec);
   return res;
+}
+
+/* ------------------------ Session keep-alive ------------------------ */
+// A CRM session lives 12 hours. Without renewal the operator is thrown out
+// mid-incident and loses the screen they were on; with silent renewal they are
+// never interrupted, and the "expiring" banner only appears if renewal fails.
+const keepAlive = {
+  timer: null,
+  warnTimer: null,
+  expiresAt: null,
+  lifetimeMs: 12 * 3600 * 1000,
+  refreshing: false,
+  visibilityBound: false,
+};
+
+export function sessionExpiresAt() {
+  return keepAlive.expiresAt;
+}
+
+export function stopSessionKeepAlive() {
+  clearTimeout(keepAlive.timer);
+  clearInterval(keepAlive.warnTimer);
+  keepAlive.timer = null;
+  keepAlive.warnTimer = null;
+  keepAlive.expiresAt = null;
+  window.dispatchEvent(new CustomEvent('crm:session', { detail: { expiresAt: null, warning: false } }));
+}
+
+async function renewSession() {
+  if (keepAlive.refreshing) return null;
+  keepAlive.refreshing = true;
+  try {
+    const res = await api.post('/api/admin/auth/refresh', {});
+    scheduleSessionKeepAlive(res.expiresAt, res.sessionTtlSec);
+    applySession(res);
+    window.dispatchEvent(new CustomEvent('crm:session', { detail: { expiresAt: keepAlive.expiresAt, warning: false, renewed: true } }));
+    return res;
+  } finally {
+    keepAlive.refreshing = false;
+  }
+}
+
+/**
+ * Renames the session 25% before it expires and every time the tab comes back from
+ * the background with less than half of its lifetime left (a sleeping laptop does
+ * not fire timers, so the timer alone is not enough).
+ */
+export function scheduleSessionKeepAlive(expiresAt, ttlSec = 12 * 3600) {
+  stopSessionKeepAlive();
+  const expiresMs = expiresAt ? new Date(expiresAt).getTime() : Date.now() + ttlSec * 1000;
+  keepAlive.expiresAt = new Date(expiresMs).toISOString();
+  const lifetime = Math.max(60_000, ttlSec * 1000);
+  keepAlive.lifetimeMs = lifetime;
+  const delay = Math.max(30_000, Math.min(lifetime * 0.75, expiresMs - Date.now() - 60_000));
+
+  keepAlive.timer = setTimeout(() => {
+    renewSession().catch(() => {
+      // A failed renewal is not fatal: the next request will 401 and the shell
+      // will ask for a password again. Do not spam the operator with toasts.
+    });
+  }, delay);
+
+  keepAlive.warnTimer = setInterval(() => {
+    const msLeft = expiresMs - Date.now();
+    window.dispatchEvent(new CustomEvent('crm:session', {
+      detail: { expiresAt: keepAlive.expiresAt, warning: msLeft < 10 * 60 * 1000, msLeft },
+    }));
+  }, 60_000);
+
+  if (typeof document !== 'undefined') {
+    if (!keepAlive.visibilityBound) {
+      keepAlive.visibilityBound = true;
+      document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState !== 'visible' || !keepAlive.expiresAt) return;
+        const msLeft = new Date(keepAlive.expiresAt).getTime() - Date.now();
+        if (msLeft < keepAlive.lifetimeMs * 0.5) renewSession().catch(() => {});
+      });
+    }
+  }
+}
+
+export async function refreshSessionNow() {
+  return renewSession();
 }
 
 export async function logout() {

@@ -160,6 +160,12 @@ const COLUMN_MIGRATIONS = Object.freeze([
   ['admin_users', 'is_active', 'INTEGER NOT NULL DEFAULT 1'],
   ['admin_users', 'disabled_at', 'TEXT'],
   ['admin_users', 'disabled_by', 'TEXT'],
+  // DSAR queue: deadline, provenance and rejection reason must survive restarts.
+  ['privacy_requests', 'due_at', 'TEXT'],
+  ['privacy_requests', 'source', 'TEXT'],
+  ['privacy_requests', 'notes', 'TEXT'],
+  ['privacy_requests', 'rejection_reason', 'TEXT'],
+  ['privacy_requests', 'updated_at', 'TEXT'],
 ]);
 
 function tableColumns(db, table) {
@@ -263,63 +269,233 @@ function moveExpiredDirectorChatToArchiveDb(db = getDb(), referenceNow = new Dat
  * - director_chat: active window 48-72h -> separate archive DB -> purged after 365 days
  * - payments: retained anonymized per accounting law
  */
-function runRetentionCleanup(db = getDb(), referenceNow = new Date()) {
+/**
+ * Retention policy (90 / 180 / 365 days, `16-legal-player-agreements.md`).
+ *
+ * `dryRun` counts exactly the rows each rule *would* delete without touching them.
+ * That matters because the policy is destructive and irreversible: an operator must
+ * be able to see "this will drop 1 818 input events" before pressing the button,
+ * not read it in a runbook afterwards.
+ */
+function runRetentionCleanup(db = getDb(), referenceNow = new Date(), { dryRun = false } = {}) {
   const cutoffIso = (days) => new Date(referenceNow.getTime() - days * 86400 * 1000).toISOString();
   const c90 = cutoffIso(RETENTION_DAYS.inputLogs);
   const c180 = cutoffIso(RETENTION_DAYS.telemetrySessions);
   const c365 = cutoffIso(RETENTION_DAYS.directorChatArchive);
-
-  const archMove = moveExpiredDirectorChatToArchiveDb(db, referenceNow);
   const archDb = getArchiveDb(db);
 
-  const rInput = db.prepare('DELETE FROM input_events WHERE ts < ?').run(c90);
-  const rMetrics = db.prepare('DELETE FROM telemetry_metrics WHERE bucket_ts < ?').run(c180);
-  const rSess = db.prepare('DELETE FROM sessions WHERE started_at < ?').run(c180);
-  const rAi = db.prepare('DELETE FROM ai_requests WHERE created_at < ?').run(c180);
-  const rQuar = db.prepare('DELETE FROM ai_quarantine WHERE created_at < ?').run(c180);
-  const rSum = db.prepare('DELETE FROM zone_summaries WHERE created_at < ?').run(c180);
-  const rChatPurge = archDb.prepare('DELETE FROM archived_director_chat WHERE created_at < ?').run(c365);
+  const rules = [
+    { key: 'deletedInputEvents', table: 'input_events', column: 'ts', cutoff: c90, days: RETENTION_DAYS.inputLogs, db },
+    { key: 'deletedTelemetryMetrics', table: 'telemetry_metrics', column: 'bucket_ts', cutoff: c180, days: RETENTION_DAYS.telemetrySessions, db },
+    { key: 'deletedSessions', table: 'sessions', column: 'started_at', cutoff: c180, days: RETENTION_DAYS.telemetrySessions, db },
+    { key: 'deletedAiRequests', table: 'ai_requests', column: 'created_at', cutoff: c180, days: RETENTION_DAYS.telemetrySessions, db },
+    { key: 'deletedQuarantine', table: 'ai_quarantine', column: 'created_at', cutoff: c180, days: RETENTION_DAYS.telemetrySessions, db },
+    { key: 'deletedOldSummaries', table: 'zone_summaries', column: 'created_at', cutoff: c180, days: RETENTION_DAYS.telemetrySessions, db },
+    { key: 'deletedOldDirectorChat', table: 'archived_director_chat', column: 'created_at', cutoff: c365, days: RETENTION_DAYS.directorChatArchive, db: archDb },
+  ];
 
-  return {
-    deletedInputEvents: Number(rInput.changes || 0),
-    deletedTelemetryMetrics: Number(rMetrics.changes || 0),
-    deletedSessions: Number(rSess.changes || 0),
-    deletedAiRequests: Number(rAi.changes || 0),
-    deletedQuarantine: Number(rQuar.changes || 0),
-    deletedOldSummaries: Number(rSum.changes || 0),
-    archivedDirectorChat: archMove.movedCount,
-    deletedOldDirectorChat: Number(rChatPurge.changes || 0),
+  const report = {
+    dryRun: Boolean(dryRun),
+    evaluatedAt: referenceNow.toISOString(),
+    policy: {
+      inputEventsDays: RETENTION_DAYS.inputLogs,
+      telemetryDays: RETENTION_DAYS.telemetrySessions,
+      directorChatDays: RETENTION_DAYS.directorChatArchive,
+      deletionSlaDays: RETENTION_DAYS.deletionSlaDays,
+    },
+    rules: [],
   };
+
+  if (dryRun) {
+    for (const rule of rules) {
+      const row = rule.db
+        .prepare(`SELECT COUNT(*) AS c FROM ${rule.table} WHERE ${rule.column} < ?`)
+        .get(rule.cutoff);
+      report.rules.push({
+        key: rule.key,
+        table: rule.table,
+        retentionDays: rule.days,
+        cutoffIso: rule.cutoff,
+        rowsAffected: Number(row?.c || 0),
+      });
+    }
+    // Moving chat to the archive DB is not destructive, but an operator should still
+    // see how much will migrate before it disappears from the active table.
+    const pendingMove = db
+      .prepare(`SELECT COUNT(*) AS c FROM director_chat WHERE created_at < ?`)
+      .get(cutoffIso(CONFIG.directorSlidingWindowHours ? CONFIG.directorSlidingWindowHours : 72));
+    report.archivedDirectorChat = Number(pendingMove?.c || 0);
+    report.totalRowsAffected = report.rules.reduce((sum, r) => sum + r.rowsAffected, 0);
+    return report;
+  }
+
+  const archMove = moveExpiredDirectorChatToArchiveDb(db, referenceNow);
+  for (const rule of rules) {
+    const res = rule.db.prepare(`DELETE FROM ${rule.table} WHERE ${rule.column} < ?`).run(rule.cutoff);
+    report.rules.push({
+      key: rule.key,
+      table: rule.table,
+      retentionDays: rule.days,
+      cutoffIso: rule.cutoff,
+      rowsAffected: Number(res.changes || 0),
+    });
+  }
+  // Keep the flat, historical shape as well: existing callers and the demo scripts
+  // read `deletedInputEvents` etc. directly.
+  for (const rule of report.rules) report[rule.key] = rule.rowsAffected;
+  report.archivedDirectorChat = archMove.movedCount;
+  report.totalRowsAffected = report.rules.reduce((sum, r) => sum + r.rowsAffected, 0);
+  return report;
+}
+
+/**
+ * Backup / restore lifecycle (`10-checklist.md` → DR & Backups).
+ *
+ * Design notes, because "we make backups" is not the same as "we can restore":
+ *  - `VACUUM INTO` gives a consistent snapshot while the DB is live (WAL);
+ *  - every backup is opened read-only and checked twice: `PRAGMA integrity_check`
+ *    and the audit `head_hash`, so a truncated or silently older snapshot is
+ *    detected at creation time rather than during an outage;
+ *  - rotation keeps `keepDaily` newest backups plus the newest backup of every
+ *    month, so a policy can never delete the only copy from last month.
+ */
+
+const BACKUP_PREFIX = 'crm-backup-';
+
+function listBackups(backupDir = CONFIG.backupDir) {
+  if (!fs.existsSync(backupDir)) return [];
+  return fs
+    .readdirSync(backupDir)
+    .filter((name) => name.startsWith(BACKUP_PREFIX) && name.endsWith('.sqlite'))
+    .map((name) => {
+      const full = path.join(backupDir, name);
+      const stat = fs.statSync(full);
+      const match = name.match(/crm-backup-(\d{4})-(\d{2})-(\d{2})T(\d{2})-(\d{2})-(\d{2})-(\d{3})Z\.sqlite$/);
+      // The creation time is encoded in the file name and is authoritative:
+      // copying a snapshot to another host (`rsync`, S3, a restore drill) rewrites
+      // mtime, and rotation must not then treat last month's copy as the newest.
+      const createdFromName = match
+        ? `${match[1]}-${match[2]}-${match[3]}T${match[4]}:${match[5]}:${match[6]}.${match[7]}Z`
+        : null;
+      return {
+        file: name,
+        sizeBytes: stat.size,
+        createdAt: createdFromName || stat.mtime.toISOString(),
+        monthKey: match ? `${match[1]}-${match[2]}` : 'unknown',
+      };
+    })
+    .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+}
+
+/**
+ * Opens a backup strictly read-only (no WAL side files are created next to it) and
+ * reports whether it is a usable snapshot of *this* installation.
+ */
+function verifyBackupFile(filePath, { expectedHeadHash = null } = {}) {
+  if (!fs.existsSync(filePath)) {
+    return { ok: false, file: path.basename(filePath), error: 'BACKUP_NOT_FOUND' };
+  }
+  let probe = null;
+  try {
+    probe = new DatabaseSync(filePath, { readOnly: true });
+    const integrity = probe.prepare('PRAGMA integrity_check').get()?.integrity_check || 'unknown';
+    const hasAudit = probe
+      .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'audit_logs'")
+      .get();
+    const headRow = hasAudit
+      ? probe.prepare('SELECT entry_hash FROM audit_logs ORDER BY rowid DESC LIMIT 1').get()
+      : null;
+    const tables = probe
+      .prepare("SELECT COUNT(*) AS c FROM sqlite_master WHERE type = 'table'")
+      .get()?.c || 0;
+    const players = hasAudit ? probe.prepare('SELECT COUNT(*) AS c FROM players').get()?.c || 0 : 0;
+    const headHash = headRow?.entry_hash || null;
+    const matchesHead = expectedHeadHash ? headHash === expectedHeadHash : null;
+    return {
+      ok: integrity === 'ok' && (matchesHead !== false),
+      file: path.basename(filePath),
+      fullPath: filePath,
+      sizeBytes: fs.statSync(filePath).size,
+      integrity,
+      tables,
+      players,
+      headHash,
+      expectedHeadHash,
+      matchesHead,
+      error: integrity === 'ok' ? null : 'INTEGRITY_CHECK_FAILED',
+    };
+  } catch (err) {
+    return { ok: false, file: path.basename(filePath), error: err.message || 'BACKUP_UNREADABLE' };
+  } finally {
+    if (probe) probe.close();
+  }
+}
+
+function currentAuditHead(db) {
+  try {
+    return db.prepare('SELECT entry_hash FROM audit_logs ORDER BY rowid DESC LIMIT 1').get()?.entry_hash || null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Rotation: keep the newest `keepDaily` snapshots plus the newest snapshot of each
+ * distinct month. Returns the removed file names so the caller can audit them.
+ */
+function pruneBackups({ keepDaily = 14, backupDir = CONFIG.backupDir } = {}) {
+  const all = listBackups(backupDir);
+  const keep = new Set(all.slice(0, Math.max(1, keepDaily)).map((b) => b.file));
+  const monthsSeen = new Set();
+  for (const backup of all) {
+    if (keep.has(backup.file)) {
+      monthsSeen.add(backup.monthKey);
+      continue;
+    }
+    if (!monthsSeen.has(backup.monthKey)) {
+      keep.add(backup.file);
+      monthsSeen.add(backup.monthKey);
+    }
+  }
+  const removed = [];
+  for (const backup of all) {
+    if (keep.has(backup.file)) continue;
+    try {
+      fs.unlinkSync(path.join(backupDir, backup.file));
+      removed.push(backup.file);
+    } catch {
+      /* a file locked by another process is retried on the next run */
+    }
+  }
+  return { kept: all.length - removed.length, removed };
 }
 
 /**
  * Atomic Hot Backup & Integrity Verification (`10-checklist.md` -> DR & Backups)
  */
-function createHotBackup(db = getDb(), customBackupDir = null) {
+function createHotBackup(db = getDb(), customBackupDir = null, { keepDaily = 14 } = {}) {
   const backupDir = customBackupDir || CONFIG.backupDir;
   fs.mkdirSync(backupDir, { recursive: true });
   const stamp = new Date().toISOString().replace(/[:.]/g, '-');
-  const backupFile = path.join(backupDir, `crm-backup-${stamp}.sqlite`);
-  const escapedPath = backupFile.replace(/'/g, "''");
+  const backupFile = path.join(backupDir, `${BACKUP_PREFIX}${stamp}.sqlite`);
 
-  db.exec(`VACUUM INTO '${escapedPath}'`);
+  db.exec(`VACUUM INTO '${backupFile.replace(/'/g, "''")}'`);
 
-  const checkDb = new DatabaseSync(backupFile);
-  let integrity = 'unknown';
-  try {
-    const row = checkDb.prepare('PRAGMA integrity_check').get();
-    integrity = row?.integrity_check || 'ok';
-  } finally {
-    checkDb.close();
-  }
+  const expectedHeadHash = currentAuditHead(db);
+  const verified = verifyBackupFile(backupFile, { expectedHeadHash });
+  const rotation = pruneBackups({ keepDaily, backupDir });
 
-  const stat = fs.statSync(backupFile);
   return {
-    ok: integrity === 'ok',
+    ok: verified.ok,
     backupFile: path.basename(backupFile),
     fullPath: backupFile,
-    sizeBytes: stat.size,
-    integrity,
+    sizeBytes: verified.sizeBytes,
+    integrity: verified.integrity,
+    headHash: verified.headHash,
+    matchesHead: verified.matchesHead,
+    tables: verified.tables,
+    players: verified.players,
+    rotation,
     createdAt: new Date().toISOString(),
   };
 }
@@ -332,5 +508,9 @@ module.exports = {
   moveExpiredDirectorChatToArchiveDb,
   runRetentionCleanup,
   createHotBackup,
+  listBackups,
+  verifyBackupFile,
+  pruneBackups,
+  currentAuditHead,
   applySchemaMigrations,
 };

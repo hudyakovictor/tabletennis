@@ -5,7 +5,7 @@
  */
 
 const crypto = require('node:crypto');
-const { CONFIG, ROLES, MATCH_RULES_V4, REGION_ENDPOINTS, PING_THRESHOLDS } = require('../config');
+const { CONFIG, ROLES, MATCH_RULES_V4, REGION_ENDPOINTS, PING_THRESHOLDS, RETENTION_DAYS } = require('../config');
 const { runRetentionCleanup } = require('../db/database');
 const { ZONE_ALLOWED_TABLES, DIRECTOR_ALLOWED_TABLES } = require('../db/isolation');
 const {
@@ -103,6 +103,7 @@ const {
   createLiveopsEvent,
 } = require('../services/liveops');
 const { runReadinessChecklist, triggerDisasterRecoveryBackup } = require('../services/readiness');
+const { listPrivacyRequests, privacyQueueSummary } = require('../services/privacy');
 const { handlePlatformRoutes, observabilityExtras, ticketSlaSummary } = require('./platformRoutes');
 
 async function handleAdminRoute(db, req, pathname, urlObj, body, clientIp, res = null) {
@@ -208,6 +209,7 @@ async function handleAdminRoute(db, req, pathname, urlObj, body, clientIp, res =
         token,
         csrfToken: session.csrfToken,
         expiresAt: session.expiresAt,
+        sessionTtlSec: 12 * 3600,
         user: {
           id: row.id,
           username: row.username,
@@ -266,6 +268,10 @@ async function handleAdminRoute(db, req, pathname, urlObj, body, clientIp, res =
         session: {
           id: principal.sid || null,
           expiresAt: principal.sessionExpiresAt || null,
+          ttlSec: 12 * 3600,
+          renewalRecommendedAt: principal.sessionExpiresAt
+            ? new Date(new Date(principal.sessionExpiresAt).getTime() - 3 * 3600 * 1000).toISOString()
+            : null,
           authSource: principal.authSource,
           legacy: Boolean(principal.legacy),
         },
@@ -314,6 +320,7 @@ async function handleAdminRoute(db, req, pathname, urlObj, body, clientIp, res =
         token,
         csrfToken,
         expiresAt: new Date(now.getTime() + 12 * 3600 * 1000).toISOString(),
+        sessionTtlSec: 12 * 3600,
         user: {
           id: principal.sub,
           username: principal.username,
@@ -2050,7 +2057,15 @@ async function dispatchAdmin(db, { req, res, pathname, urlObj, body, clientIp, p
         ageGateRules: AGE_GATE_RULES,
         cnIcpLicensed: CONFIG.cnIcpLicensed,
         consentStats,
-        privacyRequests: db.prepare('SELECT * FROM privacy_requests ORDER BY requested_at DESC LIMIT 30').all(),
+        // Queue + deadline accounting, not just the last 30 closed rows.
+        privacyRequests: listPrivacyRequests(db, { status: 'all', limit: 50 }),
+        privacyQueue: privacyQueueSummary(db),
+        retention: {
+          inputEventsDays: RETENTION_DAYS.inputLogs,
+          telemetryDays: RETENTION_DAYS.telemetrySessions,
+          directorChatDays: RETENTION_DAYS.directorChatArchive,
+          deletionSlaDays: RETENTION_DAYS.deletionSlaDays,
+        },
       },
     };
   }
@@ -2131,6 +2146,12 @@ async function dispatchAdmin(db, { req, res, pathname, urlObj, body, clientIp, p
   if (req.method === 'POST' && pathname === '/api/admin/system/retention') {
     const denied = guard(P.SYSTEM_RETENTION);
     if (denied) return denied;
+    // `dryRun` is a first-class mode, not a query flag: the policy deletes input
+    // events irreversibly, so the operator must be able to count first and decide
+    // second. A dry run is deliberately NOT audited as an execution.
+    if (body.dryRun === true) {
+      return { status: 200, json: { ok: true, preview: runRetentionCleanup(db, new Date(), { dryRun: true }) } };
+    }
     const cleanup = runRetentionCleanup(db);
     writeAuditLog(db, {
       actorRole: principal.role,
@@ -2140,6 +2161,7 @@ async function dispatchAdmin(db, { req, res, pathname, urlObj, body, clientIp, p
       applied: cleanup,
       ipHash,
     });
+    publish('retention', { totalRowsAffected: cleanup.totalRowsAffected });
     return { status: 200, json: { ok: true, cleanup } };
   }
 
