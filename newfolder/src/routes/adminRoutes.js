@@ -867,6 +867,25 @@ async function dispatchAdmin(db, { req, res, pathname, urlObj, body, clientIp, p
       )
       .get(playerId, playerId);
 
+    /* Игровой прогресс: то, что видит сервер, а не только клиент. Матчи с флагами
+     * доверия (§3.13) выносятся наверх — это очередь для ручной проверки. */
+    const progress = db.prepare('SELECT * FROM player_progress WHERE player_id = ?').get(playerId) || null;
+    const recentMatches = db
+      .prepare(
+        `SELECT id, mode, opponent_name, opponent_rating, player_score, opponent_score, win,
+                rating_before, rating_delta, duration_ms, suspicious, flags_json, created_at
+         FROM matches WHERE player_id = ? ORDER BY created_at DESC LIMIT 20`
+      )
+      .all(playerId)
+      .map((m) => ({ ...m, flags: parseJsonColumn(m.flags_json, []), flags_json: undefined }));
+    const matchTotals = db
+      .prepare(
+        `SELECT COUNT(*) AS total, COALESCE(SUM(win), 0) AS wins,
+                COALESCE(SUM(suspicious), 0) AS suspicious, COALESCE(AVG(duration_ms), 0) AS avg_duration_ms
+         FROM matches WHERE player_id = ?`
+      )
+      .get(playerId);
+
     return {
       status: 200,
       json: {
@@ -877,6 +896,14 @@ async function dispatchAdmin(db, { req, res, pathname, urlObj, body, clientIp, p
           lifetimeUsd: +Number(totals.lifetime_usd || 0).toFixed(2),
           lastSeenAt: player.last_seen_at,
         },
+        progress,
+        recentMatches,
+        matchTotals: {
+          total: Number(matchTotals.total || 0),
+          wins: Number(matchTotals.wins || 0),
+          suspicious: Number(matchTotals.suspicious || 0),
+          avgDurationMs: Math.round(Number(matchTotals.avg_duration_ms || 0)),
+        },
         sessions,
         payments,
         consents,
@@ -884,6 +911,70 @@ async function dispatchAdmin(db, { req, res, pathname, urlObj, body, clientIp, p
         fraudCases,
       },
     };
+  }
+
+  // =========================================================================
+  // Manual progress correction: support refunds a lost save, fraud removes an
+  // inflated rating. Every field is optional, every change lands in the audit
+  // chain with before/after, and above the hard ceilings nothing is accepted —
+  // an operator must not be able to type “rating 3000” by accident.
+  // =========================================================================
+  const playerProgressMatch = pathname.match(/^\/api\/admin\/players\/([^/]+)\/progress$/);
+  if (req.method === 'POST' && playerProgressMatch) {
+    const denied = guard(P.PLAYERS_PROGRESS);
+    if (denied) return denied;
+    const playerId = playerProgressMatch[1];
+    const player = db.prepare('SELECT id, display_name FROM players WHERE id = ?').get(playerId);
+    if (!player) return { status: 404, json: { error: 'PLAYER_NOT_FOUND' } };
+
+    const reason = String(body.reason || '').trim().slice(0, 400);
+    if (reason.length < 5) {
+      return { status: 400, json: { error: 'REASON_REQUIRED', message: 'Укажите причину правки (мин. 5 символов)' } };
+    }
+
+    const LIMITS = { level: [1, 99], xp: [0, 100_000], rating: [0, 3000], coins: [0, 10_000_000], gems: [0, 1_000_000] };
+    const next = {};
+    for (const [field, [min, max]] of Object.entries(LIMITS)) {
+      if (body[field] === undefined) continue;
+      const v = Number(body[field]);
+      if (!Number.isFinite(v) || v < min || v > max) {
+        return { status: 400, json: { error: 'VALUE_OUT_OF_RANGE', field, min, max } };
+      }
+      next[field] = Math.trunc(v);
+    }
+    const fields = Object.keys(next);
+    if (!fields.length) return { status: 400, json: { error: 'NOTHING_TO_UPDATE' } };
+
+    const now = new Date().toISOString();
+    db.prepare('INSERT OR IGNORE INTO player_progress (player_id, created_at, updated_at) VALUES (?, ?, ?)')
+      .run(playerId, now, now);
+    const before = db.prepare('SELECT * FROM player_progress WHERE player_id = ?').get(playerId);
+    const column = { level: 'level', xp: 'xp', rating: 'rating', coins: 'coins', gems: 'gems' };
+    db.prepare(
+      `UPDATE player_progress SET ${fields.map((f) => `${column[f]} = ?`).join(', ')}, updated_at = ? WHERE player_id = ?`
+    ).run(...fields.map((f) => next[f]), now, playerId);
+    const after = db.prepare('SELECT * FROM player_progress WHERE player_id = ?').get(playerId);
+
+    writeAuditLog(db, {
+      actorRole: principal.role,
+      actorId: principal.username,
+      action: 'player.progress.correct',
+      targetType: 'player_progress',
+      targetId: playerId,
+      proposed: Object.fromEntries(fields.map((f) => [f, before[f]])),
+      applied: Object.fromEntries(fields.map((f) => [f, after[f]])),
+      dataRefs: ['player_progress'],
+      ipHash,
+    });
+    publish('progress', { playerId, corrected: fields, by: principal.username });
+    notify(db, {
+      kind: 'player',
+      severity: 'warning',
+      title: `Правка прогресса ${player.display_name || playerId}`,
+      body: `${fields.join(', ')} · ${reason}`,
+      link: `#/players?player=${playerId}`,
+    });
+    return { status: 200, json: { ok: true, playerId, progress: after, changed: fields } };
   }
 
   const playerStatusMatch = pathname.match(/^\/api\/admin\/players\/([^/]+)\/status$/);
@@ -1444,6 +1535,53 @@ async function dispatchAdmin(db, { req, res, pathname, urlObj, body, clientIp, p
       link: '#/overview',
     });
     return { status: 200, json: { ok: true, id: propId, status: nextStatus, appliedEffect } };
+  }
+
+  // -------------------------------------------------------------------------
+  // Match journal: a trust flag is useless if nobody can see it
+  // -------------------------------------------------------------------------
+  if (req.method === 'GET' && pathname === '/api/admin/matches') {
+    const denied = guard(P.PLAYERS_READ);
+    if (denied) return denied;
+    const list = parseListQuery(urlObj, {
+      allowedSort: ['created_at', 'duration_ms', 'rating_delta', 'player_score'],
+      defaultSort: 'created_at',
+      defaultOrder: 'desc',
+    });
+    const where = [];
+    const params = [];
+    const playerId = String(urlObj.searchParams.get('playerId') || '').slice(0, 64);
+    if (playerId) {
+      where.push('m.player_id = ?');
+      params.push(playerId);
+    }
+    const mode = String(urlObj.searchParams.get('mode') || '').slice(0, 24);
+    if (mode) {
+      where.push('m.mode = ?');
+      params.push(mode);
+    }
+    const suspicious = String(urlObj.searchParams.get('suspicious') || '');
+    if (suspicious === '1' || suspicious === 'true') where.push('m.suspicious = 1');
+    if (suspicious === '0' || suspicious === 'false') where.push('m.suspicious = 0');
+    const fromWhereSql = `FROM matches m JOIN players p ON p.id = m.player_id${where.length ? ` WHERE ${where.join(' AND ')}` : ''}`;
+    const total = countTotal(db, fromWhereSql, params);
+    const items = db
+      .prepare(
+        `SELECT m.id, m.player_id, p.display_name, m.mode, m.opponent_name, m.opponent_rating,
+                m.player_score, m.opponent_score, m.win, m.rating_before, m.rating_delta,
+                m.duration_ms, m.suspicious, m.flags_json, m.created_at
+         ${fromWhereSql}
+         ORDER BY m.${list.sort} ${list.order.toUpperCase()} LIMIT ? OFFSET ?`
+      )
+      .all(...params, list.pageSize, list.offset)
+      .map((m) => ({ ...m, flags: parseJsonColumn(m.flags_json, []), flags_json: undefined }));
+    return {
+      status: 200,
+      json: {
+        ...listResponse(items, { ...list, total }),
+        suspiciousCount: countTotal(db, "FROM matches WHERE suspicious = 1"),
+      },
+    };
   }
 
   // -------------------------------------------------------------------------

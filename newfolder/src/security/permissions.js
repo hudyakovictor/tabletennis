@@ -68,6 +68,9 @@ const PERMISSIONS = Object.freeze({
   PLAYERS_EXPORT: 'players:export',
   PLAYERS_ERASE: 'players:erase',
   PLAYERS_SANCTION: 'players:sanction',
+  // Ручная правка прогресса (уровень, рейтинг, кошелёк) — отдельное право: это не
+  // санкция и не чтение, а вмешательство в игровые числа, и оно всегда в аудит.
+  PLAYERS_PROGRESS: 'players:progress',
   LEGAL_READ: 'legal:read',
 
   // Governance & platform
@@ -146,6 +149,7 @@ const ADMIN_ALL = Object.freeze([
   P.PLAYERS_EXPORT,
   P.PLAYERS_ERASE,
   P.PLAYERS_SANCTION,
+  P.PLAYERS_PROGRESS,
   P.LEGAL_READ,
   P.GOVERNANCE_READ,
   P.AI_CONFIGURE,
