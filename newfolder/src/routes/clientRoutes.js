@@ -1,0 +1,433 @@
+'use strict';
+
+/**
+ * Game Client API (`/api/client/v1/*`) — Zero AI Exposure, TMA Low-Latency & Session Affinity
+ * (01-architecture.md, 04-security.md, 09-api-contracts.md, 13-telegram-miniapp-latency.md, 16-legal, 17-maintenance)
+ *
+ * Strict Guarantee:
+ * - Responses contain ZERO mentions of AI, LLMs, zone summaries, prompts, or provider keys.
+ * - Enforces regional residency (CN ICP block), regional age gate (US:13 / EU:16 / RU:14),
+ *   6-point physics/swipe/frequency telemetry validation, and TMA session affinity on reconnect.
+ */
+
+const crypto = require('node:crypto');
+const { CONFIG, MATCH_RULES_V4, PING_THRESHOLDS } = require('../config');
+const {
+  signPlayerToken,
+  authenticatePlayerRequest,
+  signSessionAffinityToken,
+  verifySessionAffinityToken,
+  hashIdentifier,
+} = require('../security/auth');
+const {
+  checkRateLimit,
+  resolveDataResidency,
+  verifyTelegramInitData,
+  validateInputTelemetryBatch,
+} = require('../security/validator');
+const {
+  getMaintenanceState,
+  listPushNotifications,
+  listNewsPosts,
+  listLegalDocuments,
+  recordPlayerConsent,
+  createSupportTicket,
+  listSupportTickets,
+} = require('../services/liveops');
+
+function getActiveClientRules(db) {
+  const row = db
+    .prepare('SELECT version, rules_json FROM match_rules_versions WHERE is_active = 1 ORDER BY version DESC LIMIT 1')
+    .get();
+  return row ? JSON.parse(row.rules_json) : MATCH_RULES_V4;
+}
+
+function deterministicAbAssignment(playerId, db) {
+  const exp = db
+    .prepare("SELECT slug, rules_patch_json FROM ab_experiments WHERE status = 'running' ORDER BY created_at DESC LIMIT 1")
+    .get();
+  if (!exp || !playerId) return { variant: 'control', patch: {} };
+  const hashByte = crypto.createHash('sha256').update(`${playerId}:${exp.slug}`).digest()[0];
+  const isTreatment = hashByte % 2 === 1;
+  return {
+    experimentSlug: exp.slug,
+    variant: isTreatment ? `${exp.slug}_treatment` : `${exp.slug}_control`,
+    patch: isTreatment ? JSON.parse(exp.rules_patch_json || '{}') : {},
+  };
+}
+
+async function handleClientRoute(db, req, pathname, urlObj, body, clientIp) {
+  const ipHash = hashIdentifier(clientIp);
+  const residency = resolveDataResidency(req, body?.countryCode || urlObj.searchParams.get('country'));
+
+  // Enforce CN PIPL block when ICP license is absent (05-legal-rf-sanctions.md)
+  if (residency.blocked) {
+    return {
+      status: 451,
+      json: {
+        error: 'REGION_UNAVAILABLE_LEGAL',
+        region: residency.countryCode,
+        reason: residency.blockReason,
+      },
+    };
+  }
+
+  // Ultra-lightweight RTT probe (`GET /api/client/v1/ping`) for TMA `<35ms / 35-65ms / >100ms` measurement
+  if (req.method === 'GET' && pathname === '/api/client/v1/ping') {
+    const clientSentTs = Number(urlObj.searchParams.get('t') || 0);
+    return {
+      status: 200,
+      json: {
+        pong: true,
+        clientSentTs,
+        serverTs: Date.now(),
+        region: residency.region,
+        nodeId: residency.recommendedEndpoint.nodeId,
+        warnThresholdMs: PING_THRESHOLDS.warnClientThresholdMs,
+      },
+    };
+  }
+
+  // Client Bootstrap Config (`GET /api/client/v1/bootstrap`)
+  if (req.method === 'GET' && pathname === '/api/client/v1/bootstrap') {
+    const playerAuth = authenticatePlayerRequest(req);
+    const baseRules = getActiveClientRules(db);
+    const ab = deterministicAbAssignment(playerAuth?.sub || null, db);
+    const effectiveRules = { ...baseRules, ...ab.patch };
+    const maintenance = getMaintenanceState(db);
+    const pushes = listPushNotifications(db, { activeOnly: true });
+    const news = listNewsPosts(db, { publishedOnly: true }).slice(0, 10);
+    const legalDocs = listLegalDocuments(db).map((d) => ({
+      docType: d.doc_type,
+      version: d.version,
+      lang: d.lang,
+      title: d.title,
+    }));
+
+    return {
+      status: 200,
+      json: {
+        serverTimeUtc: new Date().toISOString(),
+        region: residency.region,
+        recommendedEndpoint: residency.recommendedEndpoint,
+        wsEndpoint: '/ws/client',
+        pingThresholds: PING_THRESHOLDS,
+        ageGate: residency.ageGate,
+        maintenance,
+        matchRules: effectiveRules,
+        abVariant: ab.variant,
+        notifications: pushes,
+        news,
+        legalDocuments: legalDocs,
+      },
+    };
+  }
+
+  // Telegram Mini App Auth (`POST /api/client/v1/auth/telegram`)
+  if (req.method === 'POST' && pathname === '/api/client/v1/auth/telegram') {
+    const rl = checkRateLimit(`tma_auth:${ipHash}`, 30);
+    if (!rl.allowed) return { status: 429, json: { error: 'RATE_LIMITED' } };
+
+    const tgCheck = verifyTelegramInitData(body.initData || '');
+    if (!tgCheck.valid) {
+      return { status: 401, json: { error: 'INVALID_TELEGRAM_INIT_DATA', message: tgCheck.error } };
+    }
+
+    const extHash = hashIdentifier(`tg_${tgCheck.telegramId}`);
+    let player = db.prepare('SELECT * FROM players WHERE external_id_hash = ?').get(extHash);
+    const nowIso = new Date().toISOString();
+
+    if (!player) {
+      const newId = `plr_${crypto.randomBytes(6).toString('hex')}`;
+      db.prepare(
+        `INSERT INTO players
+         (id, external_id_hash, display_name, region, install_source, install_campaign, install_creative, status, created_at, last_seen_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, 'active', ?, ?)`
+      ).run(
+        newId,
+        extHash,
+        tgCheck.username,
+        residency.region,
+        String(body.installSource || tgCheck.startParam || 'organic_tma').slice(0, 48),
+        body.installCampaign ? String(body.installCampaign).slice(0, 64) : null,
+        body.installCreative ? String(body.installCreative).slice(0, 64) : null,
+        nowIso,
+        nowIso
+      );
+      player = db.prepare('SELECT * FROM players WHERE id = ?').get(newId);
+    } else {
+      if (player.status === 'banned') {
+        return { status: 403, json: { error: 'ACCOUNT_BANNED', reason: player.ban_reason || 'Fair play violation' } };
+      }
+      db.prepare('UPDATE players SET last_seen_at = ? WHERE id = ?').run(nowIso, player.id);
+    }
+
+    const playerToken = signPlayerToken({ playerId: player.id, region: player.region });
+    return {
+      status: 200,
+      json: {
+        ok: true,
+        playerId: player.id,
+        displayName: player.display_name,
+        region: player.region,
+        recommendedEndpoint: residency.recommendedEndpoint,
+        playerToken,
+      },
+    };
+  }
+
+  // Legal Consent with Regional Age Gate (`POST /api/client/v1/legal/consent`)
+  if (req.method === 'POST' && pathname === '/api/client/v1/legal/consent') {
+    const playerAuth = authenticatePlayerRequest(req);
+    const playerId = playerAuth?.sub || String(body.playerId || '').slice(0, 64);
+    if (!playerId) return { status: 401, json: { error: 'PLAYER_AUTH_REQUIRED' } };
+
+    const res = recordPlayerConsent(db, {
+      playerId,
+      region: residency.region,
+      docType: body.docType || 'tos',
+      docVersion: body.docVersion || '1.3',
+      declaredAge: body.declaredAge ?? 18,
+      parentalConsent: Boolean(body.parentalConsent),
+      analyticsOptIn: Boolean(body.analyticsOptIn),
+      marketingOptIn: Boolean(body.marketingOptIn),
+      ipHash,
+    });
+    if (!res.ok) {
+      return { status: 403, json: res };
+    }
+    return { status: 200, json: res };
+  }
+
+  // Session Start & TMA Reconnect Session Affinity (`POST /api/client/v1/session/start`)
+  if (req.method === 'POST' && pathname === '/api/client/v1/session/start') {
+    const playerAuth = authenticatePlayerRequest(req);
+    const playerId = playerAuth?.sub || String(body.playerId || '').slice(0, 64);
+    if (!playerId) return { status: 401, json: { error: 'PLAYER_AUTH_REQUIRED' } };
+
+    const sessRl = checkRateLimit(`sess_start:${playerId}`, CONFIG.rateLimits.sessionStartsPerMinute);
+    if (!sessRl.allowed) return { status: 429, json: { error: 'SESSION_START_RATE_LIMITED' } };
+
+    // Reconnect path: verify HMAC session affinity token so active matches survive TMA network switch AND maintenance!
+    if (body.affinityToken) {
+      const aff = verifySessionAffinityToken(body.affinityToken);
+      if (aff && aff.sid && aff.sub === playerId) {
+        const existingSession = db.prepare('SELECT * FROM sessions WHERE id = ? AND player_id = ?').get(aff.sid, playerId);
+        if (existingSession && !existingSession.ended_at) {
+          return {
+            status: 200,
+            json: {
+              ok: true,
+              reconnected: true,
+              sessionId: existingSession.id,
+              nodeId: aff.nodeId,
+              region: aff.region,
+              affinityToken: body.affinityToken,
+            },
+          };
+        }
+      }
+    }
+
+    // New session check: block new matches with HTTP 503 during Maintenance Mode (17-maintenance-push-news-support.md)
+    const maint = getMaintenanceState(db);
+    if (maint.enabled) {
+      return {
+        status: 503,
+        json: {
+          error: 'MAINTENANCE_ACTIVE',
+          bannerRu: maint.bannerRu,
+          bannerEn: maint.bannerEn,
+          etaIso: maint.etaIso,
+        },
+      };
+    }
+
+    const pRow = db.prepare('SELECT id, status, region FROM players WHERE id = ?').get(playerId);
+    if (!pRow) return { status: 404, json: { error: 'PLAYER_NOT_FOUND' } };
+    if (pRow.status === 'banned' || pRow.status === 'suspended') {
+      return { status: 403, json: { error: 'PLAYER_RESTRICTED', status: pRow.status } };
+    }
+
+    const sessionId = `ses_${crypto.randomBytes(8).toString('hex')}`;
+    const platform = ['tma_ios', 'tma_android', 'web_desktop'].includes(body.platform) ? body.platform : 'tma_ios';
+    const deviceHash = hashIdentifier(body.deviceFingerprint || `${playerId}:${platform}`);
+    const nowIso = new Date().toISOString();
+    const nodeId = residency.recommendedEndpoint.nodeId;
+
+    const affinityToken = signSessionAffinityToken({
+      sessionId,
+      playerId,
+      region: residency.region,
+      nodeId,
+    });
+
+    db.prepare(
+      `INSERT INTO sessions
+       (id, player_id, region, platform, device_hash, ip_hash, affinity_token, started_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(sessionId, playerId, residency.region, platform, deviceHash, ipHash, affinityToken, nowIso);
+
+    return {
+      status: 201,
+      json: {
+        ok: true,
+        reconnected: false,
+        sessionId,
+        region: residency.region,
+        nodeId,
+        wsEndpoint: '/ws/client',
+        affinityToken,
+      },
+    };
+  }
+
+  // Batch Input Telemetry Ingestion (`POST /api/client/v1/telemetry/inputs`)
+  if (req.method === 'POST' && pathname === '/api/client/v1/telemetry/inputs') {
+    const rl = checkRateLimit(`telemetry:${ipHash}`, CONFIG.rateLimits.clientTelemetryPerMinute);
+    if (!rl.allowed) return { status: 429, json: { error: 'TELEMETRY_RATE_LIMITED' } };
+
+    const sessionId = String(body.sessionId || '');
+    const session = db.prepare('SELECT id, player_id, region FROM sessions WHERE id = ?').get(sessionId);
+    if (!session) return { status: 404, json: { error: 'SESSION_NOT_FOUND' } };
+
+    const check = validateInputTelemetryBatch(body.events || []);
+
+    if (check.tamperDetected && check.rejectedEvents.length > 0) {
+      // Flag packet tampering into `fraud_cases` for human review (never auto-ban!)
+      db.prepare(
+        `INSERT INTO fraud_cases (id, player_id, region, risk_score, case_type, signals_json, status, created_at)
+         VALUES (?, ?, ?, 0.86, 'packet_tamper_attempt', ?, 'open', ?)`
+      ).run(
+        crypto.randomUUID(),
+        session.player_id,
+        session.region,
+        JSON.stringify({
+          sessionId,
+          rejectedCount: check.rejectedEvents.length,
+          sampleReasons: check.rejectedEvents.slice(0, 5),
+        }),
+        new Date().toISOString()
+      );
+    }
+
+    if (check.validEvents.length === 0 && check.rejectedEvents.length > 0) {
+      return {
+        status: 422,
+        json: {
+          ok: false,
+          error: 'INVALID_TELEMETRY_BATCH',
+          acceptedCount: 0,
+          rejectedCount: check.rejectedEvents.length,
+          reasons: check.rejectedEvents.slice(0, 10),
+        },
+      };
+    }
+
+    const ins = db.prepare(
+      `INSERT INTO input_events
+       (session_id, player_id, ts, pointer_type, grip, hand, is_serve, table_zone, has_fresh_swipe, swipe_straightness,
+        along, across, accepted, contact, is_grace, reject_code, stroke_type, ball_speed, spin, reaction_ms, sweet_spot_dist, rules_version, ab_variant)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    );
+    const tx = db.transaction((rows) => {
+      for (const ev of rows) {
+        ins.run(
+          session.id,
+          session.player_id,
+          ev.ts,
+          ev.pointer_type,
+          ev.grip,
+          ev.hand,
+          ev.is_serve,
+          ev.table_zone,
+          ev.has_fresh_swipe,
+          ev.swipe_straightness,
+          ev.along,
+          ev.across,
+          ev.accepted,
+          ev.contact,
+          ev.is_grace,
+          ev.reject_code,
+          ev.stroke_type,
+          ev.ball_speed,
+          ev.spin,
+          ev.reaction_ms,
+          ev.sweet_spot_dist,
+          ev.rules_version,
+          ev.ab_variant
+        );
+      }
+    });
+    tx(check.validEvents);
+
+    return {
+      status: 200,
+      json: {
+        ok: true,
+        acceptedCount: check.validEvents.length,
+        rejectedCount: check.rejectedEvents.length,
+      },
+    };
+  }
+
+  // Session End Summary (`POST /api/client/v1/telemetry/session-end`)
+  if (req.method === 'POST' && pathname === '/api/client/v1/telemetry/session-end') {
+    const sessionId = String(body.sessionId || '');
+    const session = db.prepare('SELECT id FROM sessions WHERE id = ?').get(sessionId);
+    if (!session) return { status: 404, json: { error: 'SESSION_NOT_FOUND' } };
+
+    db.prepare(
+      `UPDATE sessions
+       SET rtt_p50_ms = ?, rtt_p95_ms = ?, avg_fps = ?, p5_fps = ?, crashed = ?, webgl_lost = ?, ended_at = ?
+       WHERE id = ?`
+    ).run(
+      Number.isFinite(Number(body.rttP50Ms)) ? Number(body.rttP50Ms) : 42,
+      Number.isFinite(Number(body.rttP95Ms)) ? Number(body.rttP95Ms) : 85,
+      Number.isFinite(Number(body.avgFps)) ? Number(body.avgFps) : 60,
+      Number.isFinite(Number(body.p5Fps)) ? Number(body.p5Fps) : 54,
+      body.crashed ? 1 : 0,
+      body.webglLost ? 1 : 0,
+      new Date().toISOString(),
+      sessionId
+    );
+    return { status: 200, json: { ok: true } };
+  }
+
+  // Player Support Tickets (`POST /api/client/v1/support/tickets` & `GET /api/client/v1/support/tickets`)
+  if (req.method === 'POST' && pathname === '/api/client/v1/support/tickets') {
+    const rl = checkRateLimit(`ticket:${ipHash}`, 12);
+    if (!rl.allowed) return { status: 429, json: { error: 'SUPPORT_RATE_LIMITED' } };
+
+    const playerAuth = authenticatePlayerRequest(req);
+    const playerId = playerAuth?.sub || String(body.playerId || '').slice(0, 64) || null;
+
+    const ticket = await createSupportTicket(db, {
+      playerId,
+      region: residency.region,
+      sessionId: body.sessionId || null,
+      category: body.category || 'bug',
+      priority: body.priority || null,
+      subject: body.subject || 'Обращение из игры',
+      message: body.message || '',
+      screenshotName: body.screenshotName || null,
+      screenshotDataUrl: body.screenshotDataUrl || null,
+      clientContext: body.clientContext || {},
+    });
+
+    return { status: 201, json: { ok: true, ticket } };
+  }
+
+  if (req.method === 'GET' && pathname === '/api/client/v1/support/tickets') {
+    const playerAuth = authenticatePlayerRequest(req);
+    const playerId = playerAuth?.sub || urlObj.searchParams.get('playerId');
+    if (!playerId) return { status: 401, json: { error: 'PLAYER_AUTH_REQUIRED' } };
+    return { status: 200, json: { tickets: listSupportTickets(db, { playerId }) } };
+  }
+
+  return null;
+}
+
+module.exports = {
+  handleClientRoute,
+};
