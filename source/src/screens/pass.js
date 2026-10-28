@@ -1,6 +1,9 @@
 Router.def('pass', {
   mood: 'violet',
   render() {
+    /* Сезон кончился — пас больше не продаём: обещать премиум закрытого
+     * сезона нельзя. Остаток времени считается от даты старта. */
+    const over = seasonOver();
     const cell = (r, lane, l) => {
       const claimed = S.claimed[lane].includes(l); const reached = l <= S.passLvl; const locked = lane === 'p' && !S.premium;
       const st = claimed ? 'claimed' : reached && !locked ? 'ready' : 'future';
@@ -12,12 +15,12 @@ Router.def('pass', {
     return `${UI.hud()}<div class="scroll" id="passScroll">
       <div class="pass-hero rise" style="--d:0">
         <i class="ph-ill" style="background-image:url('${ILL.pass_hero}')"></i><i class="ph-shade"></i>
-        <span class="chip violet">${Art.icon('clock', { c: '#D9C6FF' })} ${t('pass.left', { left: t('season.left') })}</span>
+        <span class="chip violet">${Art.icon('clock', { c: '#D9C6FF' })} ${over ? t('season.over') : t('pass.left', { left: seasonLeftText() })}</span>
         <div class="ph-t"><span class="cap">${t('pass.seasonLine', { s: SEASON.n, n: SEASON.days })}</span><b class="h-display">${t('pass.title')}</b></div>
         <div class="ph-lv"><span class="phl"><span class="num">${S.passLvl}</span></span><div style="flex:1"><div class="cap" style="margin-bottom:6px">${t('pass.level')}</div><div class="bar"><i style="--p:${S.passXp / 100}"></i><span class="lbl">${S.passXp} / 100 XP</span></div></div></div>
 
       </div>
-      ${S.premium ? '' : `<div class="pass-cta rise" style="--d:1"><span class="pcta-i">${Art.icon('crown', { c: '#3A1A00', fill: '#3A1A00' })}</span><div><b>${t('pass.premium')}</b><small>${t('pass.premiumSub', { n: 35 })}</small></div><button class="b3 sm" data-act="premium"><span class="shine"></span>⭐ 349</button></div>`}
+      ${S.premium ? '' : `<div class="pass-cta rise" style="--d:1"><span class="pcta-i">${Art.icon('crown', { c: '#3A1A00', fill: '#3A1A00' })}</span><div><b>${t('pass.premium')}</b><small>${t('pass.premiumSub', { n: 35 })}</small></div>${over ? `<span class="dim" style="font-size:11px;text-align:right;max-width:96px">${t('pass.seasonClosed')}</span>` : `<button class="b3 sm" data-act="premium"><span class="shine"></span>⭐ 349</button>`}</div>`}
       <div class="track-h rise" style="--d:2"><span>${t('pass.free')}</span><span></span><span class="gold">${t('pass.premiumShort')}</span></div>
       <div class="track">
         <div class="tline"><i style="height:${(S.passLvl - .5) / PASS.length * 100}%"></i></div>
