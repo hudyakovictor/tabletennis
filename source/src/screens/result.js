@@ -95,6 +95,9 @@ Router.def('result', {
       { on: d.win, tk: 'result.win' }, { on: d.stats.perfect >= 3, tk: 'medal.perfect' }, { on: d.stats.maxRally >= 8, tk: 'medal.rally' }
     ];
     this.medals = medals;
+    /* Награду решаем здесь, а применяем в mount: экран обязан показывать ровно
+     * то, что игрок получит. Сундук обещаем только при свободном слоте. */
+    this.loot = d.win ? { coins: 90, chest: (S.chests || []).some((c) => !c) } : null;
     const L = leagueOf(S.rating), N = nextLeague(S.rating);
     /* Ход матча: кумулятивная разница очков по ходу серии — видно, кто вёл
      * и где был перелом. Аналитическая зрелищность без единого лишнего
@@ -127,8 +130,7 @@ Router.def('result', {
       </div>
       <div class="res-cards">
         ${d.quests && d.quests.length ? `<div class="pnl rc" style="--d:4"><span class="rcb">${Art.icon('target', { c: '#9BE8FF' })}</span><div class="rcm"><span class="cap">${t('result.questDone')}</span><b>${d.quests.map((q) => q.t).join(' · ')}</b><small class="dim">${t('result.questReward')}</small></div></div>` : ''}
-        ${d.win ? `<div class="pnl rc loot" style="--d:4"><span class="lc">${Art.chest('silver', 64)}</span><div class="rcm"><span class="cap">${t('result.reward')}</span><b>${Art.chestName('silver')} ${t('chest.word')}</b><small class="dim">${t('result.chestSent')}</small></div><span class="lcoin">${Art.coin(30)}<b class="num">+90</b></span></div>`
-          : ''}
+        ${this.loot ? `<div class="pnl rc loot" style="--d:4"><span class="lc">${this.loot.chest ? Art.chest('silver', 64) : Art.coin(64)}</span><div class="rcm"><span class="cap">${t('result.reward')}</span><b>${this.loot.chest ? `${Art.chestName('silver')} ${t('chest.word')}` : t('result.rewardCoins')}</b>${this.loot.chest ? `<small class="dim">${t('result.chestSent')}</small>` : ''}</div><span class="lcoin">${Art.coin(30)}<b class="num">+${this.loot.coins}</b></span></div>` : ''}
       </div>
       <div class="res-btns"><button class="b3 dark" data-act="again">${Art.icon('refresh', { c: '#fff' })}${t('result.rematch')}</button><button class="b3 ${d.win ? '' : 'cyan'}" data-act="next"><span class="shine"></span>${t('common.next')}</button></div>
       ${analysisSheet(d)}
@@ -156,6 +158,15 @@ Router.def('result', {
       this.xv = Math.min(S.xp + add, S.xpMax); this.xpBar = Math.min(1, (S.xp + add) / S.xpMax);
       S.xp += add; this.lvlUp = false;
       if (S.xp >= S.xpMax) { S.xp -= S.xpMax; S.level++; this.lvlUp = true; }
+      /* Награда за победу — здесь, а не в конце анимации: ранний тап «Далее»
+       * терял монеты и сундук, которые экран уже пообещал. */
+      if (this.loot) {
+        S.coins += this.loot.coins;
+        if (this.loot.chest) {
+          const slot = S.chests.findIndex((c) => !c);
+          if (slot >= 0) S.chests[slot] = { id: 'c' + Date.now(), kind: 'silver', state: 'locked' };
+        }
+      }
       save();
       /* В сеть уходят только факты (матч и закрытая ступень) и только после
        * того, как локальные числа записаны: без сервера экран не меняется. */
@@ -202,10 +213,11 @@ Router.def('result', {
       tickNumber(el.querySelector('#rXp'), this.x0, this.xv, 800);
       el.querySelector('#rXpBar').style.setProperty('--p', this.xpBar);
       await sleep(900); if (!this.alive) return;
-      if (d.win) {
-        const lc = el.querySelector('.lcoin'); Wallet.add('coins', 90, FX.pt(lc));
-        const empty = S.chests.findIndex((c) => !c); if (empty >= 0) { S.chests[empty] = { id: 'c' + Date.now(), kind: 'silver', state: 'locked' }; save(); }
-        const lch = el.querySelector('.lc'); lch.classList.add('drop');
+      if (this.loot) {
+        /* Баланс уже начислен в mount — здесь только дорожка монет. */
+        const lc = el.querySelector('.lcoin'), lch = el.querySelector('.lc');
+        if (lc) Wallet.show('coins', this.loot.coins, FX.pt(lc));
+        if (lch) lch.classList.add('drop');
       }
       res.classList.add('t4');
       if (d.unlocked && d.unlocked.length) { await sleep(700); await achievementPops(d.unlocked, () => this.alive); }
