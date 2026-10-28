@@ -72,4 +72,4 @@ function boot() {
 }
 if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot); else boot();
 // Telegram SDK грузится async — переинициализируем, когда появится
-window.addEventListener('load', () => { if (TGX.w) TGX.init(); });
+window.addEventListener('load', () => { if (TGX.w) TGX.init(); try { Progress.boot(); } catch (e) {} });

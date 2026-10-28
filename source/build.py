@@ -27,7 +27,7 @@ illjs = 'const ILL = ' + json.dumps(ill) + ';\n'
 # данные, потом UI-примитивы и сервисы, экраны — последними, boot в конце.
 # Файл, отсутствующий в этом списке, в сборку НЕ попадёт.
 order = ['core/util.js','core/i18n.js','locales/ru.js','locales/en.js','core/state.js','core/platform.js','core/audio.js','core/ui_core.js','core/dev.js',
-         'data/leagues.js','ui/art.js','ui/fx.js','services/economy.js','ui/bg.js','engine2d/engine.js',
+         'data/leagues.js','ui/art.js','ui/fx.js','services/economy.js','services/api.js','services/progress.js','ui/bg.js','engine2d/engine.js',
          'ui/ui.js','services/miss_shots.js','services/game_host.js','services/diagnostics.js','services/career.js',
          'screens/hub.js','screens/settings.js','screens/matchmaking.js','screens/online.js','screens/battle_common.js',
          'screens/match.js','screens/training.js','screens/result.js',
@@ -38,7 +38,10 @@ gtmp = tempfile.mktemp(suffix='.html')
 subprocess.run(['python3', str(SOURCE_DIR/'game'/'tt'/'build.py'), gtmp], check=True, env=dict(os.environ, TT_NO_LOGO='1'))
 ghtml = open(gtmp, encoding='utf-8').read(); os.remove(gtmp)
 gamejs = 'const GAME_HTML = ' + json.dumps(ghtml, ensure_ascii=False).replace('<', '\\u003c') + ';\n'
-js = gamejs + avjs + illjs + '\n'.join(f'/* ==== {n} ==== */\n' + (root/n).read_text() for n in order if (root/n).exists())
+# Адрес API вшивается в бандл: клиент — статический файл, переменные окружения
+# на хостинге ему недоступны. Пустое значение — штатный режим «только локально».
+api_base = os.environ.get('TT_API_BASE', '').strip()
+js = 'const TT_API_BASE = ' + json.dumps(api_base) + ';\n' + gamejs + avjs + illjs + '\n'.join(f'/* ==== {n} ==== */\n' + (root/n).read_text() for n in order if (root/n).exists())
 # Identify the actual shell independently of the embedded engine build.
 shell_fingerprint = hashlib.sha256((html + '\n' + css + '\n' + js).encode('utf-8')).hexdigest()[:12]
 js = 'const SHELL_BUILD = ' + json.dumps('shell ' + shell_fingerprint) + ';\n' + js

@@ -152,6 +152,14 @@ Router.def('result', {
       S.xp += add; this.lvlUp = false;
       if (S.xp >= S.xpMax) { S.xp -= S.xpMax; S.level++; this.lvlUp = true; }
       save();
+      /* В сеть уходят только факты (матч и закрытая ступень) и только после
+       * того, как локальные числа записаны: без сервера экран не меняется. */
+      if (typeof Progress !== 'undefined' && d.durationMs > 0) {
+        const o = PEOPLE[d.opp] || {};
+        Progress.match({ me: d.me, op: d.op, durationMs: d.durationMs, mode: d.mode,
+          oppRating: o.r, oppName: o.s, bestRally: d.stats.maxRally });
+        if (this.lvlUp) Progress.level({ level: S.level, durationMs: d.durationMs, xp: S.xp });
+      }
     }
     BG.mood(d.win ? 'gold' : 'lose');
     el.querySelector('[data-act=next]').addEventListener('click', () => Router.go('hub'));
