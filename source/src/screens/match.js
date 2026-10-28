@@ -195,6 +195,10 @@ Router.def('match', {
     el.querySelector('.m-serve').classList.remove('on'); el.querySelector('.m-vig').classList.remove('mp');
     clearTimeout(this.bt); this.later(() => el.querySelector('.m-banner').classList.remove('on'), 500);
     const res = { win, me: m.score ? m.score[0] : st.p, op: m.score ? m.score[1] : st.o, opp: BATTLE.opp,
+      /* Длительность и режим — факты для сервера: он проверяет правдоподобие
+       * и сам считает рейтинг, а не верит присланному «я выиграл». */
+      durationMs: Math.max(0, Date.now() - (BATTLE.t0 || Date.now())),
+      mode: (MODE && MODE.id) || 'career',
       stats: { hits: st.hits, perfect: st.perfect, smash: st.smash, maxRally: Math.max(st.maxRally, m.bestRally || 0),
         acc: m.stats && m.stats.shots ? clamp(Math.round(100 - (m.stats.errors || 0) / Math.max(1, m.stats.shots) * 100), 0, 100) : 0 },
       coach: ZoneStats.matchSummary(BATTLE.t0 || 0, win) };
