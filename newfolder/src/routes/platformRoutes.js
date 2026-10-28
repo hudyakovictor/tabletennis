@@ -387,7 +387,9 @@ async function handlePlatformRoutes(ctx) {
     if (denied) return denied;
 
     const users = db
-      .prepare('SELECT id, username, role, display_name, last_login_at, created_at FROM admin_users ORDER BY created_at ASC')
+      .prepare(
+        'SELECT id, username, role, display_name, last_login_at, created_at, is_active, disabled_at, disabled_by FROM admin_users ORDER BY created_at ASC'
+      )
       .all()
       .map((u) => ({ ...u, email: u.username, name: u.display_name, isActive: true }));
     const sessions = db
@@ -476,7 +478,9 @@ async function handlePlatformRoutes(ctx) {
     const denied = guard(P.USERS_MANAGE);
     if (denied) return denied;
     const users = db
-      .prepare('SELECT id, username, role, display_name, last_login_at, created_at FROM admin_users ORDER BY created_at ASC')
+      .prepare(
+        'SELECT id, username, role, display_name, last_login_at, created_at, is_active, disabled_at, disabled_by FROM admin_users ORDER BY created_at ASC'
+      )
       .all()
       .map((u) => ({ ...u, email: u.username, name: u.display_name, is_active: 1 }));
     return { status: 200, json: { items: users, users, roles: Object.values(ROLES).map((r) => ({ id: r, name: ROLE_LABELS[r] || r })) } };
@@ -514,34 +518,87 @@ async function handlePlatformRoutes(ctx) {
   if (method === 'PATCH' && userMatch) {
     const denied = guard(P.USERS_MANAGE);
     if (denied) return denied;
-    const target = db.prepare('SELECT id, username, role FROM admin_users WHERE id = ?').get(userMatch[1]);
+    const target = db
+      .prepare('SELECT id, username, role, display_name, is_active FROM admin_users WHERE id = ?')
+      .get(userMatch[1]);
     if (!target) return { status: 404, json: { error: 'USER_NOT_FOUND' } };
+
+    // ---- validate the whole request first: a rejected field must not leave the
+    // account half-updated (the previous build changed the role, then refused a
+    // short password, so the caller saw 400 while the role had already moved).
     const nextRole = body.role ? String(body.role) : target.role;
-    if (!Object.values(ROLES).includes(nextRole) || nextRole === ROLES.PLAYER) return { status: 400, json: { error: 'ROLE_INVALID' } };
+    if (!Object.values(ROLES).includes(nextRole) || nextRole === ROLES.PLAYER) {
+      return { status: 400, json: { error: 'ROLE_INVALID', message: 'Неизвестная или недоступная роль' } };
+    }
+    const newPassword = body.password === undefined || body.password === null ? '' : String(body.password);
+    if (newPassword && newPassword.length < 12) {
+      return { status: 400, json: { error: 'PASSWORD_TOO_SHORT', message: 'Пароль должен быть не короче 12 символов' } };
+    }
+    const wantsDisable = body.isActive === false;
+    const wantsEnable = body.isActive === true;
+    if (wantsDisable) {
+      if (target.id === principal.sub) {
+        return { status: 409, json: { error: 'CANNOT_DISABLE_SELF', message: 'Нельзя отключить собственную учётную запись' } };
+      }
+      // Lockout guard: at least one active administrator must remain.
+      const activeAdmins = db
+        .prepare("SELECT COUNT(*) AS c FROM admin_users WHERE role = ? AND COALESCE(is_active, 1) = 1 AND id <> ?")
+        .get(ROLES.ADMIN, target.id);
+      if (Number(activeAdmins.c) === 0) {
+        return { status: 409, json: { error: 'LAST_ADMIN_PROTECTED', message: 'Нельзя отключить последнего активного администратора' } };
+      }
+    }
+
     const displayName = body.name || body.displayName;
-    db.prepare('UPDATE admin_users SET role = ?, display_name = COALESCE(?, display_name) WHERE id = ?').run(
+    const nowIso = new Date().toISOString();
+    const revokeSessions = () =>
+      db
+        .prepare('UPDATE admin_sessions SET revoked_at = ? WHERE actor_id = ? AND revoked_at IS NULL')
+        .run(nowIso, target.username);
+
+    db.prepare(
+      'UPDATE admin_users SET role = ?, display_name = COALESCE(?, display_name), is_active = ?, disabled_at = ?, disabled_by = ? WHERE id = ?'
+    ).run(
       nextRole,
       displayName ? String(displayName).slice(0, 120) : null,
+      wantsDisable ? 0 : wantsEnable ? 1 : Number(target.is_active ?? 1),
+      wantsDisable ? nowIso : wantsEnable ? null : target.is_active === 0 ? nowIso : null,
+      wantsDisable ? principal.username : wantsEnable ? null : target.is_active === 0 ? 'unknown' : null,
       target.id
     );
-    if (body.password) {
-      if (String(body.password).length < 12) return { status: 400, json: { error: 'PASSWORD_TOO_SHORT' } };
-      db.prepare('UPDATE admin_users SET password_hash = ? WHERE id = ?').run(hashPassword(String(body.password)), target.id);
+    if (newPassword) {
+      db.prepare('UPDATE admin_users SET password_hash = ? WHERE id = ?').run(hashPassword(newPassword), target.id);
     }
-    if (body.isActive === false) {
-      db.prepare('UPDATE admin_sessions SET revoked_at = ? WHERE actor_id = ? AND revoked_at IS NULL').run(new Date().toISOString(), target.username);
-    }
+    // Disabling and password rotation both invalidate existing sessions: the whole
+    // point is that a stolen cookie stops working now, not in 12 hours.
+    if (wantsDisable || newPassword) revokeSessions();
+
     writeAuditLog(db, {
       actorRole: principal.role,
       actorId: principal.username,
-      action: 'admin.user.updated',
+      action: wantsDisable ? 'admin.user.disabled' : wantsEnable ? 'admin.user.enabled' : 'admin.user.updated',
       targetType: 'admin_users',
       targetId: target.id,
-      applied: { role: nextRole, passwordRotated: Boolean(body.password), deactivated: body.isActive === false },
+      applied: {
+        role: nextRole,
+        previousRole: target.role,
+        passwordRotated: Boolean(newPassword),
+        deactivated: wantsDisable,
+        sessionsRevoked: wantsDisable || Boolean(newPassword),
+      },
       ipHash,
     });
-    publish('user', { id: target.id, username: target.username, role: nextRole, action: 'updated' });
-    return { status: 200, json: { ok: true, id: target.id, role: nextRole } };
+    publish('user', { id: target.id, username: target.username, role: nextRole, action: wantsDisable ? 'disabled' : 'updated' });
+    return {
+      status: 200,
+      json: {
+        ok: true,
+        id: target.id,
+        role: nextRole,
+        isActive: !wantsDisable,
+        sessionsRevoked: wantsDisable || Boolean(newPassword),
+      },
+    };
   }
 
   /* ------------------------- Governance export shortcut ----------------------- */

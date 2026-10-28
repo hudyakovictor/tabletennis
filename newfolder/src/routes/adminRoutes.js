@@ -141,9 +141,23 @@ async function handleAdminRoute(db, req, pathname, urlObj, body, clientIp, res =
     }
 
     const row = db
-      .prepare('SELECT id, username, password_hash, role, display_name FROM admin_users WHERE lower(username) = ?')
+      .prepare('SELECT id, username, password_hash, role, display_name, is_active FROM admin_users WHERE lower(username) = ?')
       .get(username);
-    if (!row || !verifyPassword(password, row.password_hash)) {
+    // A disabled account is reported as such *after* the password check, so the
+    // endpoint cannot be used to enumerate account states without the password.
+    const passwordOk = Boolean(row) && verifyPassword(password, row.password_hash);
+    if (passwordOk && Number(row.is_active) === 0) {
+      writeAuditLog(db, {
+        actorRole: 'anonymous',
+        actorId: username,
+        action: 'admin.login.disabled_account',
+        targetType: 'admin_users',
+        targetId: row.id,
+        ipHash,
+      });
+      return { status: 403, json: { error: 'ACCOUNT_DISABLED', message: 'Доступ отключён администратором' } };
+    }
+    if (!row || !passwordOk) {
       recordFailedLoginAttempt(loginKey);
       writeAuditLog(db, {
         actorRole: 'anonymous',
