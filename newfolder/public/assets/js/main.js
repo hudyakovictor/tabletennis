@@ -7,6 +7,7 @@ import {
 import {
   state, can, login, loadMe, loadMeta, logout, startStream, stopStream,
   loadNotifications, markAllRead, toggleTheme, currentTheme,
+  refreshSessionNow, sessionExpiresAt, stopSessionKeepAlive,
 } from './core/store.js';
 import { startRouter, navigate } from './core/router.js';
 
@@ -90,7 +91,9 @@ async function enterApp() {
   });
   startStream();
   loadNotifications().then(renderNotificationBadge).catch(() => {});
+  restoreRoute();
   startRouter(renderRoute);
+  renderSessionBar({ expiresAt: sessionExpiresAt() });
 }
 
 function paintUser() {
@@ -194,6 +197,7 @@ async function renderRoute(route) {
   closeOverlays();
   setActiveNav(tab);
   state.activeTab = tab;
+  rememberRoute(route);
 
   const token = ++routeToken;
   const outlet = qs('#view');
@@ -234,6 +238,95 @@ export function requestRefresh() {
   renderRoute(currentRoute);
 }
 
+/* --------------------------- Deep-link restore --------------------------- */
+// The route lives in the hash, so a reload already lands on the same screen.
+// After an expiry-and-sign-in cycle the hash may be empty (the login screen
+// clears overlays, not the hash) — then we fall back to the last screen the
+// operator actually worked on, so they never lose context.
+const LAST_ROUTE_KEY = 'topspin.crm.lastRoute';
+
+function rememberRoute(route) {
+  try {
+    if (!route?.tab || !VIEWS[route.tab]) return;
+    const query = new URLSearchParams(route.query || {}).toString();
+    localStorage.setItem(LAST_ROUTE_KEY, `#/${route.tab}${query ? `?${query}` : ''}`);
+  } catch { /* private mode — deep links still work through the URL bar */ }
+}
+
+function restoreRoute() {
+  try {
+    if (location.hash && location.hash !== '#/' && location.hash !== '#') return false;
+    const saved = localStorage.getItem(LAST_ROUTE_KEY);
+    if (!saved || !saved.startsWith('#/')) return false;
+    const tab = saved.slice(2).split('?')[0].split('/')[0];
+    if (!VIEWS[tab] || !canTab(tab)) return false;
+    history.replaceState(null, '', saved);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/* ---------------------------- Session banner ---------------------------- */
+let sessionRecovering = false;
+
+function renderSessionBar(detail = {}) {
+  const bar = qs('#session-bar');
+  if (!bar) return;
+  const expiresAt = detail.expiresAt ?? sessionExpiresAt();
+  if (!expiresAt) {
+    bar.classList.add('hidden');
+    return;
+  }
+  const msLeft = new Date(expiresAt).getTime() - Date.now();
+  const critical = detail.failed || msLeft < 5 * 60 * 1000;
+  if (!critical && !detail.warning) {
+    bar.classList.add('hidden');
+    return;
+  }
+  const minutes = Math.max(1, Math.round(msLeft / 60000));
+  bar.dataset.tone = critical ? 'danger' : 'warn';
+  qs('#session-text').textContent = detail.failed
+    ? 'Не удалось продлить сессию автоматически — сохраните работу и продлите вручную'
+    : `Сессия истечёт через ${minutes} мин — продлите, чтобы не потерять экран`;
+  qs('#session-refresh').disabled = sessionRecovering;
+  bar.classList.remove('hidden');
+}
+
+/** One silent renewal attempt; only if it fails do we ask for a password. */
+async function recoverSession(reason) {
+  if (sessionRecovering) return false;
+  sessionRecovering = true;
+  const bar = qs('#session-bar');
+  if (bar && reason === 'expired') {
+    qs('#session-text').textContent = 'Восстанавливаем сессию…';
+    bar.dataset.tone = 'warn';
+    qs('#session-refresh').disabled = true;
+    bar.classList.remove('hidden');
+  }
+  try {
+    await refreshSessionNow();
+    renderSessionBar({ expiresAt: sessionExpiresAt() });
+    if (reason === 'expired') {
+      await renderRoute(currentRoute);
+      toast('Сессия продлена — вы остались на текущем экране');
+    }
+    return true;
+  } catch {
+    renderSessionBar({ failed: true });
+    if (reason === 'expired') {
+      stopSessionKeepAlive();
+      stopStream();
+      showLogin('Сессия истекла — войдите снова');
+    }
+    return false;
+  } finally {
+    sessionRecovering = false;
+    const refresh = qs('#session-refresh');
+    if (refresh) refresh.disabled = false;
+  }
+}
+
 /* ============================ Global chrome ============================ */
 function bindGlobalChrome() {
   qs('#reveal-password')?.addEventListener('click', () => {
@@ -261,6 +354,7 @@ function bindGlobalChrome() {
   });
 
   qs('#logout-btn').addEventListener('click', async () => {
+    stopSessionKeepAlive();
     await logout();
     showLogin();
   });
@@ -318,9 +412,22 @@ function bindGlobalChrome() {
     if (!e.target.closest('.notif-wrap')) qs('#notif-popover').classList.add('hidden');
   });
 
-  window.addEventListener('crm:auth-expired', () => {
-    stopStream();
-    showLogin('Сессия истекла — войдите снова');
+  window.addEventListener('crm:auth-expired', async () => {
+    // The boot-time `/auth/me` probe also answers 401; there is nothing to renew
+    // before the operator has signed in, so ignore it instead of hitting refresh.
+    if (!state.user || sessionRecovering) return;
+    // A 401 is usually an expired token, not a lost login: try one silent
+    // renewal so a long-running screen survives, and only then ask again.
+    const ok = await recoverSession('expired');
+    if (!ok) {
+      stopStream();
+      showLogin('Сессия истекла — войдите снова');
+    }
+  });
+  window.addEventListener('crm:session', (e) => renderSessionBar(e.detail || {}));
+  qs('#session-refresh')?.addEventListener('click', async () => {
+    const ok = await recoverSession('manual');
+    if (ok) toast('Сессия продлена');
   });
   window.addEventListener('crm:live', (e) => {
     const chip = qs('#live-chip');

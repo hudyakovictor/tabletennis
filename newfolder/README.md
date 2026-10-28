@@ -29,8 +29,8 @@ npm start              # http://0.0.0.0:4100
 ## Проверки качества
 
 ```bash
-npm test        # 32/32: 8 сценарных тестов ТЗ + 18 платформенных (сессии, CSRF, RBAC, SLA, SSE, ключи зон, разборы) + 6 контрактных
-npm run test:ui # 33/33: jsdom исполняет настоящие ES-модули против живого сервера — 12 вкладок, deep-links, drawers, a11y-аудит DOM
+npm test        # 40/40: 8 сценарных тестов ТЗ + 18 платформенных (сессии, CSRF, RBAC, SLA, SSE, ключи зон, разборы) + 6 контрактных + 8 S1 (retention dry-run, бэкапы, DSAR, эскалация планировщика)
+npm run test:ui # 40/40: jsdom исполняет настоящие ES-модули против живого сервера — 12 вкладок, deep-links, drawers, a11y-аудит DOM, продление сессии
 npm run test:all
 ```
 
@@ -46,20 +46,21 @@ npm run test:all
 | `src/server.js` | HTTP-сервер, CSP без inline-скриптов, origin-guard, маршрутизация admin/client, нативный WebSocket `/ws/client` (тикет/affinity, keep-alive 25 с) |
 | `src/routes/adminRoutes.js` | 2 126 строк доменных маршрутов: auth, зоны, HITL, директор, фрод, игроки, LiveOps, аудит |
 | `src/routes/platformRoutes.js` | governance, settings, diagnostics, операторы CRM, silences, SLO |
-| `src/routes/clientRoutes.js` | публичный контракт `/api/client/v1/*` (17 эндпоинтов) |
+| `src/routes/clientRoutes.js` | публичный контракт `/api/client/v1/*` (12 маршрутов, включая приём запросов субъекта ПДн) |
 | `src/routes/query.js` | единая пагинация, whitelisted сортировка, CSV с защитой от формул |
 | `tests/contract.test.js` | статический контракт UI ↔ API ↔ документация: права, маршруты, `data-*`, DOM-id, вкладки, клиентские эндпоинты из док. 19 |
 | `src/security/` | scrypt + JWT, реестр сессий, CSRF double-submit, 52 гранулярных права, 6-точечный валидатор физики, hash-chain аудит, AES-256-GCM хранилище ключей провайдеров |
-| `src/db/` | SQLite (WAL, 45 таблиц), forward-only миграции, архивация чата, seed, retention 90/180/365 |
+| `src/db/` | SQLite (WAL, 45 таблиц), forward-only миграции, архивация чата, seed, retention 90/180/365 с dry-run, бэкап `VACUUM INTO` + read-only проверка + ротация |
 | `src/ai/` | 5 изолированных зон + директор, бюджеты токенов, кэш промптов, batch −50 %, JSON Schema и карантин |
-| `src/services/` | event bus + SSE, уведомления с дедупликацией, планировщик (12 задач), LiveOps/SLA, наблюдаемость, readiness, Telegram read-only |
+| `src/services/` | event bus + SSE, уведомления с дедупликацией, планировщик (14 задач, эскалация падений в инцидент), LiveOps/SLA, наблюдаемость, readiness, Telegram read-only, DSAR-очередь (`privacy.js`) |
+| `tests/s1-ops.test.js` | retention «dry-run = реальные удаления», целостность и ротация бэкапов, жизненный цикл DSAR, эскалация планировщика |
 
 ### Интерфейс (6 600 строк, без CDN и фреймворков)
 
 `public/index.html` — разметка без inline-скриптов; `public/assets/app.js` — bootstrap с pre-paint темы и панелью фатальной ошибки; `public/assets/js/core/*` — API-клиент (cookie + CSRF + идемпотентность), store, UI-компоненты, графики (sparkline, donut, теплокарта на canvas), роутер; `public/assets/js/views/*` — 12 экранов; `public/assets/styles.css` — дизайн-система v3 (тёмная и светлая темы, токены, адаптив, `prefers-reduced-motion`, печать).
 
 Экраны: Обзор, Директор, Ops, Fraud, Balance, Market, Lab, Наблюдаемость, LiveOps, Игроки, Управление, Настройки.
-Возможности: живой поток SSE, ⌘/Ctrl+K палитра по всем объектам, экспорт CSV, уведомления с переходом к объекту, карточки игрока/тикета/фрод-кейса, управление сессиями и планировщиком.
+Возможности: живой поток SSE, ⌘/Ctrl+K палитра по всем объектам, экспорт CSV, уведомления с переходом к объекту, карточки игрока/тикета/фрод-кейса, управление сессиями и планировщиком, тихое продление сессии с баннером «истекает через N мин», вкладки «Право и приватность» (очередь DSAR с SLA) и «Бэкапы и хранение» (проверка восстановимости и dry-run политики).
 
 ## Документация
 

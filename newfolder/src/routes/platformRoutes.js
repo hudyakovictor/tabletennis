@@ -20,6 +20,16 @@ const { computeGoldenSignals } = require('../services/observability');
 const { schedulerStatus } = require('../services/scheduler');
 const { runReadinessChecklist } = require('../services/readiness');
 const { publish } = require('../services/eventBus');
+const { listBackups, verifyBackupFile, currentAuditHead, runRetentionCleanup } = require('../db/database');
+const {
+  createPrivacyRequest,
+  getPrivacyRequest,
+  listPrivacyRequests,
+  privacyQueueSummary,
+  markInProgress,
+  fulfilPrivacyRequest,
+  rejectPrivacyRequest,
+} = require('../services/privacy');
 
 const SERVER_STARTED_AT = Date.now();
 
@@ -232,6 +242,178 @@ function observabilityExtras(db) {
 async function handlePlatformRoutes(ctx) {
   const { db, req, pathname, urlObj, body, principal, ipHash, guard } = ctx;
   const method = req.method;
+
+  /* ------------------------------ Backups (DR) ------------------------------ */
+  // The backup *creation* route stays in `adminRoutes` next to the readiness check;
+  // here we expose the part that makes it usable: what exists, and can it be restored.
+  if (method === 'GET' && pathname === '/api/admin/system/backups') {
+    const denied = guard(P.SYSTEM_READ);
+    if (denied) return denied;
+    const backups = listBackups();
+    return {
+      status: 200,
+      json: {
+        ok: true,
+        backupDir: CONFIG.backupDir.replace(CONFIG.rootDir, ''),
+        count: backups.length,
+        totalBytes: backups.reduce((sum, b) => sum + b.sizeBytes, 0),
+        items: backups,
+        retentionHint: 'Хранятся 14 последних снимков + по одному за каждый месяц',
+        latestVerified: urlObj.searchParams.get('verify') === '1' && backups.length
+          ? verifyBackupFile(`${CONFIG.backupDir}/${backups[0].file}`, { expectedHeadHash: currentAuditHead(db) })
+          : null,
+      },
+    };
+  }
+
+  const backupVerifyMatch = pathname.match(/^\/api\/admin\/system\/backups\/([^/]+)\/verify$/);
+  if (method === 'POST' && backupVerifyMatch) {
+    const denied = guard(P.SYSTEM_BACKUP);
+    if (denied) return denied;
+    const file = decodeURIComponent(backupVerifyMatch[1]);
+    // Path traversal guard: only a bare file name from our own backup directory.
+    if (file.includes('/') || file.includes('..') || !file.endsWith('.sqlite')) {
+      return { status: 400, json: { error: 'INVALID_BACKUP_NAME' } };
+    }
+    const result = verifyBackupFile(`${CONFIG.backupDir}/${file}`, { expectedHeadHash: currentAuditHead(db) });
+    writeAuditLog(db, {
+      actorRole: principal.role,
+      actorId: principal.username,
+      action: 'system.backup.verified',
+      targetType: 'sqlite_backup',
+      targetId: file,
+      applied: { ok: result.ok, integrity: result.integrity, matchesHead: result.matchesHead },
+      ipHash,
+    });
+    // Verification *ran*: a negative report is still a successful operation, so it
+    // is 200 with `ok:false` + reason. Only a missing file is an error — 409 used to
+    // turn "this snapshot is stale" into a generic failure toast in the UI.
+    return { status: result.error === 'BACKUP_NOT_FOUND' ? 404 : 200, json: result };
+  }
+
+  /* --------------------------- Retention dry-run ---------------------------- */
+  if (method === 'GET' && pathname === '/api/admin/system/retention/preview') {
+    const denied = guard(P.SYSTEM_READ);
+    if (denied) return denied;
+    return { status: 200, json: { ok: true, preview: runRetentionCleanup(db, new Date(), { dryRun: true }) } };
+  }
+
+  /* ------------------------- DSAR / privacy requests ------------------------- */
+  if (method === 'GET' && pathname === '/api/admin/privacy/requests') {
+    const denied = guard(P.PLAYERS_READ);
+    if (denied) return denied;
+    const status = String(urlObj.searchParams.get('status') || 'open');
+    if (!['open', 'all', 'pending', 'in_progress', 'completed', 'rejected'].includes(status)) {
+      return { status: 400, json: { error: 'STATUS_INVALID' } };
+    }
+    return {
+      status: 200,
+      json: { ok: true, items: listPrivacyRequests(db, { status }), summary: privacyQueueSummary(db) },
+    };
+  }
+
+  if (method === 'POST' && pathname === '/api/admin/privacy/requests') {
+    const denied = guard(P.PLAYERS_READ);
+    if (denied) return denied;
+    const created = createPrivacyRequest(db, {
+      playerId: body.playerId,
+      requestType: body.requestType,
+      source: 'operator',
+      reason: body.reason || null,
+      createdBy: principal.username,
+    });
+    if (!created.ok) {
+      const status = created.code === 'PLAYER_NOT_FOUND' ? 404 : created.code === 'REQUEST_ALREADY_OPEN' ? 409 : 400;
+      return { status, json: { error: created.code, requestId: created.requestId } };
+    }
+    writeAuditLog(db, {
+      actorRole: principal.role,
+      actorId: principal.username,
+      action: 'privacy.request.created',
+      targetType: 'privacy_requests',
+      targetId: created.request.id,
+      applied: { playerId: body.playerId, requestType: created.request.request_type, dueAt: created.request.due_at },
+      ipHash,
+    });
+    publish('privacy', { id: created.request.id, type: created.request.request_type, action: 'created' });
+    return { status: 201, json: { ok: true, request: created.request } };
+  }
+
+  const privacyMatch = pathname.match(/^\/api\/admin\/privacy\/requests\/([^/]+)(?:\/(start|fulfil|reject))?$/);
+  if (privacyMatch && (method === 'GET' || method === 'POST')) {
+    const denied = guard(method === 'GET' ? P.PLAYERS_READ : P.PLAYERS_ERASE);
+    if (denied) return denied;
+    const [, requestId, action] = privacyMatch;
+
+    if (method === 'GET' && !action) {
+      const request = getPrivacyRequest(db, requestId);
+      if (!request) return { status: 404, json: { error: 'REQUEST_NOT_FOUND' } };
+      return { status: 200, json: { ok: true, request } };
+    }
+
+    if (method === 'POST' && action === 'start') {
+      const res = markInProgress(db, requestId, principal.username);
+      if (!res.ok) return { status: res.code === 'REQUEST_NOT_FOUND' ? 404 : 409, json: { error: res.code } };
+      writeAuditLog(db, {
+        actorRole: principal.role,
+        actorId: principal.username,
+        action: 'privacy.request.started',
+        targetType: 'privacy_requests',
+        targetId: requestId,
+        ipHash,
+      });
+      return { status: 200, json: { ok: true, request: res.request } };
+    }
+
+    if (method === 'POST' && action === 'fulfil') {
+      const res = fulfilPrivacyRequest(db, requestId, { actor: principal.username });
+      if (!res.ok) {
+        const status = res.code === 'REQUEST_NOT_FOUND' || res.code === 'PLAYER_NOT_FOUND' ? 404 : 409;
+        return { status, json: { error: res.code } };
+      }
+      writeAuditLog(db, {
+        actorRole: principal.role,
+        actorId: principal.username,
+        action: `privacy.request.${res.request.request_type}_fulfilled`,
+        targetType: 'privacy_requests',
+        targetId: requestId,
+        targetIdAlt: res.request.player_id,
+        applied: { status: res.request.status, completedAt: res.request.completed_at },
+        dataRefs: ['players', 'player_consents', 'sessions', 'payments', 'support_tickets'],
+        ipHash,
+      });
+      publish('privacy', { id: requestId, action: 'fulfilled', type: res.request.request_type });
+      return {
+        status: 200,
+        json: {
+          ok: true,
+          request: res.request,
+          // The export payload is the legal artefact; erasure returns its checklist.
+          ...(res.dataPackage ? { dataPackage: res.dataPackage } : {}),
+          ...(res.erasure ? { erasure: res.erasure } : {}),
+        },
+      };
+    }
+
+    if (method === 'POST' && action === 'reject') {
+      const res = rejectPrivacyRequest(db, requestId, { reason: body.reason, actor: principal.username });
+      if (!res.ok) {
+        const status = res.code === 'REQUEST_NOT_FOUND' ? 404 : res.code === 'REASON_REQUIRED' ? 422 : 409;
+        return { status, json: { error: res.code } };
+      }
+      writeAuditLog(db, {
+        actorRole: principal.role,
+        actorId: principal.username,
+        action: 'privacy.request.rejected',
+        targetType: 'privacy_requests',
+        targetId: requestId,
+        applied: { reason: String(body.reason || '').slice(0, 500) },
+        ipHash,
+      });
+      return { status: 200, json: { ok: true, request: res.request } };
+    }
+    return null;
+  }
 
   /* ------------------------------ Maintenance GET ------------------------------ */
   if (method === 'GET' && pathname === '/api/admin/maintenance') {

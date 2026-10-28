@@ -272,6 +272,70 @@ const JOBS = Object.freeze([
     },
   },
   {
+    name: 'db_backup',
+    cadenceSec: 24 * 3600,
+    utcHour: 2,
+    description: 'Ночной горячий бэкап (VACUUM INTO) с проверкой целостности и ротацией',
+    handler: async (db) => {
+      const { createHotBackup } = require('../db/database');
+      const backup = createHotBackup(db);
+      if (!backup.ok) {
+        notify(db, {
+          kind: 'backup',
+          severity: 'critical',
+          title: 'Бэкап создан, но не прошёл проверку',
+          body: `Файл ${backup.backupFile}: integrity=${backup.integrity}, head=${backup.matchesHead ? 'совпадает' : 'не совпадает'}`,
+          link: '#/settings?tab=diagnostics',
+          fingerprint: `backup_failed:${new Date().toISOString().slice(0, 10)}`,
+          dedupeWindowSec: 12 * 3600,
+        });
+      }
+      return {
+        status: backup.ok ? 'ok' : 'failed',
+        detail: {
+          file: backup.backupFile,
+          sizeBytes: backup.sizeBytes,
+          integrity: backup.integrity,
+          matchesHead: backup.matchesHead,
+          removed: backup.rotation.removed.length,
+        },
+      };
+    },
+  },
+  {
+    name: 'dsar_sla_sweep',
+    cadenceSec: 6 * 3600,
+    description: 'Контроль 30-дневного срока запросов субъектов ПДн (эскалация, не удаление)',
+    handler: async (db) => {
+      const { listPrivacyRequests } = require('./privacy');
+      const open = listPrivacyRequests(db, { status: 'open', limit: 500 });
+      const overdue = open.filter((r) => r.isOverdue);
+      const dueSoon = open.filter((r) => !r.isOverdue && r.daysLeft != null && r.daysLeft <= 5);
+      if (overdue.length) {
+        notify(db, {
+          kind: 'privacy',
+          severity: 'critical',
+          title: `Просрочено запросов ПДн: ${overdue.length}`,
+          body: 'Срок 30 дней истёк — требуется немедленная обработка',
+          link: '#/governance?tab=legal',
+          fingerprint: `dsar_overdue:${new Date().toISOString().slice(0, 10)}`,
+          dedupeWindowSec: 12 * 3600,
+        });
+      } else if (dueSoon.length) {
+        notify(db, {
+          kind: 'privacy',
+          severity: 'warning',
+          title: `Запросы ПДн истекают: ${dueSoon.length}`,
+          body: `Ближайший срок — ${dueSoon[0].due_at.slice(0, 10)}`,
+          link: '#/governance?tab=legal',
+          fingerprint: `dsar_due_soon:${new Date().toISOString().slice(0, 10)}`,
+          dedupeWindowSec: 12 * 3600,
+        });
+      }
+      return { status: 'ok', detail: { open: open.length, overdue: overdue.length, dueSoon: dueSoon.length } };
+    },
+  },
+  {
     name: 'notifications_prune',
     cadenceSec: 24 * 3600,
     description: 'Ротация центра уведомлений (прочитанные старше 30 дней)',
@@ -338,6 +402,64 @@ function recordRunEnd(db, run, { jobName, status, detail, error = null, duration
     finishedAt,
     jobName
   );
+
+  // Escalation (SRE): a job that fails three times in a row is no longer "a flaky
+  // run", it is an outage nobody noticed. Backoff alone is silent by design, so we
+  // open exactly one incident per streak and close it on the next success.
+  if (status === 'failed' && failures >= 3) escalate(db, jobName, job, error, failures);
+  if (status === 'ok' && Number(row.consecutive_failures || 0) >= 3) deescalate(db, jobName);
+}
+
+const SCHEDULER_RUNBOOK = 'rb-5xx-spike.md';
+
+function escalate(db, jobName, job, error, failures) {
+  const fingerprint = `scheduler_down:${jobName}`;
+  const already = db
+    .prepare("SELECT id FROM incidents WHERE status != 'resolved' AND title LIKE ? LIMIT 1")
+    .get(`%${jobName}%`);
+  if (already) return already.id;
+  try {
+    const { createIncident } = require('./observability');
+    const inc = createIncident(db, {
+      severity: 'critical',
+      zone: 'ops',
+      title: `Задача ${jobName} падает ${failures} раз подряд`,
+      description: `Джоб «${jobName}» (${job.description || 'без описания'}) не выполняется. Последняя ошибка: ${String(error || 'нет').slice(0, 400)}. Backoff уже применён; требуется ручная проверка.`,
+      runbookSlug: SCHEDULER_RUNBOOK,
+    });
+    notify(db, {
+      kind: 'scheduler',
+      severity: 'critical',
+      title: `Сбой планировщика: ${jobName}`,
+      body: `${failures} подряд неудачных запусков`,
+      link: '#/settings?tab=scheduler',
+      fingerprint,
+      dedupeWindowSec: 6 * 3600,
+    });
+    return inc.id;
+  } catch {
+    return null;
+  }
+}
+
+function deescalate(db, jobName) {
+  const open = db
+    .prepare("SELECT id FROM incidents WHERE status != 'resolved' AND title LIKE ?")
+    .all(`%${jobName}%`);
+  if (!open.length) return 0;
+  const nowIso = new Date().toISOString();
+  const stmt = db.prepare("UPDATE incidents SET status = 'resolved', resolved_at = ? WHERE id = ?");
+  for (const row of open) stmt.run(nowIso, row.id);
+  notify(db, {
+    kind: 'scheduler',
+    severity: 'info',
+    title: `Планировщик восстановлен: ${jobName}`,
+    body: `Задача снова выполняется успешно, инцидент закрыт (${open.length})`,
+    link: '#/settings?tab=scheduler',
+    fingerprint: `scheduler_up:${jobName}`,
+    dedupeWindowSec: 3600,
+  });
+  return open.length;
 }
 
 async function runJob(db, jobName, { trigger = 'manual', force = false } = {}) {

@@ -24,6 +24,7 @@ const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'topspin-ui-'));
 const nativeFetch = globalThis.fetch;
 const errors = [];
 const apiFailures = [];
+const refreshCalls = [];
 const warnings = [];
 
 function fail(where, err) {
@@ -115,8 +116,10 @@ window.fetch = async (input, init = {}) => {
   if (cookieJar) headers.cookie = cookieJar;
   const res = await nativeFetch(url, { ...init, headers, redirect: 'manual' });
   setCookieHeader(res.headers.getSetCookie?.() || []);
+  if (url.endsWith('/api/admin/auth/refresh')) refreshCalls.push(res.status);
   // `/auth/me` answering 401 before login is the probe itself, not a failure.
-  const expectedProbe = res.status === 401 && url.endsWith('/api/admin/auth/me');
+  // A 401 from `/auth/refresh` is the recovery probe failing on purpose.
+  const expectedProbe = res.status === 401 && (url.endsWith('/api/admin/auth/me') || url.endsWith('/api/admin/auth/refresh'));
   if (url.includes('/api/') && res.status >= 400 && !expectedProbe) {
     apiFailures.push(`${String(init.method || 'GET').padEnd(6)} ${res.status} ${url.replace(BASE, '')}`);
   }
@@ -289,23 +292,38 @@ async function main() {
     }
   }
 
-  // Deep links and drawers.
+  // Deep links and drawers. Each link also names the content it must actually show:
+  // a tab that renders a shell and no data used to pass the old length check.
   const deepLinks = [
-    ['#/governance?tab=roles', 'governance roles tab'],
-    ['#/governance?tab=readiness', 'governance readiness tab'],
-    ['#/settings?tab=scheduler', 'settings scheduler tab'],
-    ['#/settings?tab=sessions', 'settings sessions tab'],
-    ['#/observability?tab=slo', 'observability slo tab'],
-    ['#/observability?tab=postmortems', 'observability postmortems tab'],
-    ['#/liveops?tab=news', 'liveops news tab'],
-    ['#/liveops?tab=maintenance', 'liveops maintenance tab'],
+    ['#/governance?tab=roles', 'governance roles tab', ['Матрица', 'прав']],
+    ['#/governance?tab=readiness', 'governance readiness tab', ['Готовность']],
+    ['#/settings?tab=scheduler', 'settings scheduler tab', ['Планировщик']],
+    ['#/settings?tab=sessions', 'settings sessions tab', ['Сесси']],
+    ['#/settings?tab=backups', 'settings backups tab', ['Хранятся', 'Сделать бэкап', 'политик']],
+    ['#/governance?tab=legal', 'governance legal tab', ['Запросы субъектов ПДн', 'срок', 'Право']],
+    ['#/observability?tab=slo', 'observability slo tab', ['SLO']],
+    ['#/observability?tab=postmortems', 'observability postmortems tab', ['Без обвинений', 'Разборов']],
+    ['#/liveops?tab=news', 'liveops news tab', ['Новост']],
+    ['#/liveops?tab=maintenance', 'liveops maintenance tab', ['Техработ']],
   ];
-  for (const [hash, label] of deepLinks) {
+  for (const [hash, label, must = []] of deepLinks) {
     const before = errors.length;
     window.location.hash = hash;
     await sleep(700);
-    const text = (document.getElementById('view')?.textContent || '').trim();
-    results.push([label, errors.length === before && text.length > 100]);
+    const outlet = document.getElementById('view');
+    const text = (outlet?.textContent || '').trim();
+    const missing = must.filter((needle) => !text.includes(needle));
+    results.push([
+      label,
+      errors.length === before && text.length > 100 && missing.length === 0,
+      missing.length ? `missing: ${missing.join(', ')}` : undefined,
+    ]);
+    if (process.env.UI_SMOKE_DUMP) {
+      const slug = label.replace(/[^a-z0-9]+/gi, '-');
+      fs.mkdirSync(process.env.UI_SMOKE_DUMP, { recursive: true });
+      fs.writeFileSync(path.join(process.env.UI_SMOKE_DUMP, `${slug}.txt`), (outlet?.innerHTML || ''));
+      fs.writeFileSync(path.join(process.env.UI_SMOKE_DUMP, `${slug}.text`), text);
+    }
   }
 
   /* ------------------------------ interactions ------------------------------ */
@@ -346,6 +364,43 @@ async function main() {
     await closeWithEscape('drawer-overlay');
   } else {
     results.push(['role permission drawer lists capabilities', false, 'no role buttons']);
+  }
+
+  // Governance → legal: the DSAR intake drawer must be usable (a queue with no
+  // intake would be a read-only screen pretending to be a workflow).
+  window.location.hash = '#/governance?tab=legal';
+  await sleep(900);
+  const intakeBtn = document.getElementById('new-dsar');
+  if (intakeBtn) {
+    intakeBtn.dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
+    await waitFor(() => overlayOpen('drawer-overlay') && (document.getElementById('drawer-body').textContent || '').length > 60,
+      { label: 'dsar intake drawer', timeout: 4000 });
+    const intakeText = document.getElementById('drawer-body').textContent || '';
+    const hasTypeChoice = /Доступ/.test(intakeText) && /Удаление/.test(intakeText)
+      && Boolean(document.querySelector('#drawer-body select[name="requestType"]'));
+    auditA11y('dsar intake', document.getElementById('drawer-overlay'));
+    results.push(['dsar intake drawer offers export and erasure', hasTypeChoice, `${intakeText.length} chars`]);
+    await closeWithEscape('drawer-overlay');
+  } else {
+    results.push(['dsar intake drawer offers export and erasure', false, 'no #new-dsar button']);
+  }
+
+  // Settings → backups: verifying a snapshot must open the recovery report, not a toast.
+  window.location.hash = '#/settings?tab=backups';
+  await sleep(1000);
+  const verifyBtn = document.querySelector('#view [data-verify-backup]');
+  if (verifyBtn) {
+    verifyBtn.dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
+    await waitFor(() => overlayOpen('drawer-overlay') && /integrity/i.test(document.getElementById('drawer-body').textContent || ''),
+      { label: 'backup verification drawer', timeout: 8000 });
+    const verifyText = document.getElementById('drawer-body').textContent || '';
+    auditA11y('backup verification', document.getElementById('drawer-overlay'));
+    results.push(['backup verification reports integrity and audit head',
+      /integrity_check/.test(verifyText) && /head_hash/.test(verifyText) && /таблиц/.test(verifyText),
+      `${verifyText.length} chars`]);
+    await closeWithEscape('drawer-overlay');
+  } else {
+    results.push(['backup verification reports integrity and audit head', false, 'no [data-verify-backup] button']);
   }
 
   // LiveOps → maintenance dialog must render the 503 contract before anything is applied.
@@ -393,6 +448,48 @@ async function main() {
     results.push(['palette search results', (document.getElementById('palette-body')?.textContent || '').length > 0]);
     document.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
   }
+
+  // ---- A3: silent session renewal, recovery banner, deep-link restore ----------
+  window.location.hash = '#/governance?tab=legal';
+  await sleep(600);
+  const beforeExpiry = refreshCalls.length;
+  window.dispatchEvent(new window.CustomEvent('crm:auth-expired'));
+  await sleep(1200);
+  const appVisible = !document.getElementById('app').classList.contains('hidden');
+  const loginHidden = document.getElementById('login-screen').classList.contains('hidden');
+  const stillOnLegal = window.location.hash.includes('governance') && window.location.hash.includes('legal');
+  results.push([
+    'expired session renews silently instead of kicking the operator out',
+    appVisible && loginHidden && stillOnLegal && refreshCalls.slice(beforeExpiry).includes(200),
+    `refresh=${refreshCalls.slice(beforeExpiry).join(',') || 'none'} hash=${window.location.hash}`,
+  ]);
+
+  // The renewal strip appears only when the session is genuinely close to ending.
+  const sessionBar = document.getElementById('session-bar');
+  window.dispatchEvent(new window.CustomEvent('crm:session', {
+    detail: { expiresAt: new Date(Date.now() + 8 * 60 * 1000).toISOString(), warning: true },
+  }));
+  const warnShown = !sessionBar.classList.contains('hidden') && sessionBar.dataset.tone === 'warn';
+  window.dispatchEvent(new window.CustomEvent('crm:session', {
+    detail: { expiresAt: new Date(Date.now() + 3 * 60 * 1000).toISOString(), warning: true },
+  }));
+  const dangerShown = !sessionBar.classList.contains('hidden') && sessionBar.dataset.tone === 'danger';
+  window.dispatchEvent(new window.CustomEvent('crm:session', {
+    detail: { expiresAt: new Date(Date.now() + 10 * 3600 * 1000).toISOString(), warning: false },
+  }));
+  results.push([
+    'session banner escalates warn → danger → hidden after renewal',
+    warnShown && dangerShown && sessionBar.classList.contains('hidden'),
+    `warn=${warnShown} danger=${dangerShown} hidden=${sessionBar.classList.contains('hidden')}`,
+  ]);
+
+  // Deep-link restore: a reload with no hash returns to the last worked-on screen.
+  const remembered = localStorage.getItem('topspin.crm.lastRoute') || '';
+  results.push([
+    'last visited screen is remembered for deep-link restore',
+    remembered.startsWith('#/'),
+    remembered || 'empty',
+  ]);
 
   results.push(['no accessibility gaps in rendered views', a11yIssues.length === 0]);
   results.push(['no failed API calls', apiFailures.length === 0]);

@@ -525,12 +525,18 @@ CREATE TABLE IF NOT EXISTS privacy_requests (
   player_id TEXT NOT NULL,
   region TEXT NOT NULL DEFAULT 'RU',
   request_type TEXT NOT NULL, -- export | erasure
-  status TEXT NOT NULL DEFAULT 'completed',
+  status TEXT NOT NULL DEFAULT 'completed', -- pending | in_progress | completed | rejected
   reason TEXT,
   requested_at TEXT NOT NULL,
+  due_at TEXT,               -- requested_at + 30 days (152-ФЗ / GDPR Art. 12(3))
   completed_at TEXT,
-  processed_by TEXT
+  processed_by TEXT,
+  source TEXT,               -- operator | player_client
+  notes TEXT,
+  rejection_reason TEXT,
+  updated_at TEXT
 );
+CREATE INDEX IF NOT EXISTS idx_privacy_requests_status ON privacy_requests(status, due_at);
 
 CREATE TABLE IF NOT EXISTS audit_logs (
   id INTEGER PRIMARY KEY AUTOINCREMENT,

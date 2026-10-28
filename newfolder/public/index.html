@@ -157,6 +157,14 @@
         </div>
       </header>
 
+      <!-- Session recovery strip: shown only when the session is about to end or
+           an automatic renewal failed. Never blocks the workspace. -->
+      <div class="session-bar hidden" id="session-bar" role="status" aria-live="polite">
+        <span data-icon="clock"></span>
+        <span class="session-text" id="session-text">Сессия скоро истечёт</span>
+        <button type="button" class="btn btn-sm btn-outline" id="session-refresh">Продлить</button>
+      </div>
+
       <main class="outlet" id="main-outlet" tabindex="-1" aria-live="polite">
         <div id="view" class="view"></div>
       </main>

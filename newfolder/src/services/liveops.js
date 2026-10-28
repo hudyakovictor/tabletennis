@@ -549,7 +549,7 @@ function exportPlayerDataPackage(db, playerId) {
  * Full Right-to-Erasure (`<=30d` SLA, executed immediately on admin confirmation)
  * Scrubs PII across active SQLite AND `director-archive.sqlite` while preserving anonymized financial records!
  */
-function executeRightToErasure(db, { playerId, reason = 'GDPR / 152-ФЗ erasure request', processedBy }) {
+function executeRightToErasure(db, { playerId, reason = 'GDPR / 152-ФЗ erasure request', processedBy, recordRequest = true, dueAt = null }) {
   const player = db.prepare('SELECT * FROM players WHERE id = ?').get(playerId);
   if (!player) return null;
 
@@ -589,10 +589,25 @@ function executeRightToErasure(db, { playerId, reason = 'GDPR / 152-ФЗ erasure
        WHERE id = ?`
     ).run(nowIso, playerId);
 
-    db.prepare(
-      `INSERT INTO privacy_requests (id, player_id, region, request_type, status, reason, requested_at, completed_at, processed_by)
-       VALUES (?, ?, ?, 'erasure', 'completed', ?, ?, ?, ?)`
-    ).run(reqId, playerId, player.region || CONFIG.primaryRegion, reason, nowIso, nowIso, processedBy);
+    // `recordRequest: false` is used when the erasure fulfils an existing DSAR row:
+    // writing a second "completed erasure" would duplicate the subject's history.
+    if (recordRequest) {
+      db.prepare(
+        `INSERT INTO privacy_requests
+           (id, player_id, region, request_type, status, reason, requested_at, due_at, completed_at, processed_by, source, updated_at)
+         VALUES (?, ?, ?, 'erasure', 'completed', ?, ?, ?, ?, ?, 'operator', ?)`
+      ).run(
+        reqId,
+        playerId,
+        player.region || CONFIG.primaryRegion,
+        reason,
+        nowIso,
+        dueAt || nowIso,
+        nowIso,
+        processedBy,
+        nowIso
+      );
+    }
   });
 
   tx();

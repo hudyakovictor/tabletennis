@@ -94,6 +94,25 @@ export function newIdempotencyKey(prefix = 'ui') {
   return `${prefix}-${rand}`;
 }
 
+/**
+ * Saves an in-memory JSON payload (e.g. a DSAR export) as a file.
+ * `downloadFile` streams from a URL; this one is for data the server already
+ * returned inside a JSON envelope, so the operator does not have to make a
+ * second, differently-authenticated request for the same artefact.
+ */
+export function downloadJson(data, filename) {
+  const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename || 'export.json';
+  a.rel = 'noopener';
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
 /** Authenticated file download that keeps the httpOnly cookie out of javascript. */
 export function downloadFile(path, filename) {
   const a = document.createElement('a');

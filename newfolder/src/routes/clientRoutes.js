@@ -37,6 +37,7 @@ const {
 } = require('../services/liveops');
 const { publish } = require('../services/eventBus');
 const { notify } = require('../services/notifications');
+const { createPrivacyRequest } = require('../services/privacy');
 
 function getActiveClientRules(db) {
   const row = db
@@ -496,6 +497,71 @@ async function handleClientRoute(db, req, pathname, urlObj, body, clientIp) {
           at: e.created_at,
           note: e.note,
         })),
+      },
+    };
+  }
+
+  // =========================================================================
+  // Data-subject requests (16-legal-player-agreements.md, GDPR Art. 15/17).
+  // A player may ask for their data or ask to be forgotten *from the client*:
+  // making them write an email is exactly what regulators treat as "not readily
+  // available". Intake only creates a queued request; a human fulfils it and the
+  // 30-day clock starts immediately.
+  // =========================================================================
+  if (req.method === 'POST' && pathname === '/api/client/v1/privacy/request') {
+    const rl = checkRateLimit(`privacy:${ipHash}`, 5);
+    if (!rl.allowed) return { status: 429, json: { error: 'RATE_LIMITED', retryAfterSec: 60 } };
+
+    const playerAuth = authenticatePlayerRequest(req);
+    const playerId = playerAuth?.sub || String(body.playerId || '').slice(0, 64);
+    if (!playerId) return { status: 401, json: { error: 'PLAYER_AUTH_REQUIRED' } };
+
+    const created = createPrivacyRequest(db, {
+      playerId,
+      requestType: String(body.requestType || '').trim(),
+      source: 'player_client',
+      reason: body.reason ? String(body.reason).slice(0, 500) : null,
+    });
+    if (!created.ok) {
+      const status =
+        created.code === 'PLAYER_NOT_FOUND' ? 404 : created.code === 'REQUEST_ALREADY_OPEN' ? 409 : 400;
+      return {
+        status,
+        json: {
+          error: created.code,
+          requestId: created.requestId || null,
+          message:
+            created.code === 'REQUEST_ALREADY_OPEN'
+              ? 'Запрос такого типа уже принят и обрабатывается'
+              : created.code === 'REQUEST_TYPE_INVALID'
+              ? 'Допустимые типы: export, erasure'
+              : 'Игрок не найден',
+        },
+      };
+    }
+
+    // No AI, no internals: the player sees what happens next and by when.
+    notify(db, {
+      kind: 'privacy',
+      severity: 'warning',
+      title: `Запрос ПДн: ${created.request.request_type}`,
+      body: `Игрок ${playerId} · срок ${created.request.due_at.slice(0, 10)}`,
+      link: '#/governance?tab=legal',
+    });
+    return {
+      status: 201,
+      json: {
+        ok: true,
+        requestId: created.request.id,
+        type: created.request.request_type,
+        status: created.request.status,
+        requestedAt: created.request.requested_at,
+        dueAt: created.request.due_at,
+        slaDays: created.request.slaDays,
+        message:
+          created.request.request_type === 'export'
+            ? 'Запрос на доступ принят. Данные будут переданы в течение 30 дней.'
+            : 'Запрос на удаление принят. Данные будут удалены в течение 30 дней.',
       },
     };
   }

@@ -2,7 +2,7 @@ import { api } from '../core/api.js';
 import { esc, num, timeAgo, dateTime, compact, statusLabel } from '../core/format.js';
 import {
   qs, qsa, kpi, card, table, statusBadge, zoneBadge, skeleton, emptyState, openDrawer,
-  toast, toastError, run, confirmDialog, meter,
+  toast, toastError, run, confirmDialog, meter, setBusy, promptDialog,
 } from '../core/ui.js';
 import { icon } from '../core/icons.js';
 import { can } from '../core/store.js';
@@ -13,18 +13,25 @@ const TABS = [
   ['users', 'Пользователи'],
   ['sessions', 'Сессии'],
   ['providers', 'AI-провайдеры'],
+  ['backups', 'Бэкапы и хранение'],
 ];
 
 export async function render(container, ctx) {
   const tab = TABS.some(([t]) => t === ctx.query.tab) ? ctx.query.tab : 'system';
   if (!container.dataset.loaded) container.innerHTML = skeleton('page');
-  const [data, meta] = await Promise.all([
+  const [data, meta, backups, retention] = await Promise.all([
     api.get('/api/admin/settings'),
     api.get('/api/admin/system/meta').catch(() => ({})),
+    // Only the tab that shows them pays for them; the dry run is cheap but must
+    // always reflect the current data, so it is evaluated on every open.
+    tab === 'backups' ? api.get('/api/admin/system/backups').catch(() => null) : Promise.resolve(null),
+    tab === 'backups' ? api.get('/api/admin/system/retention/preview').catch(() => null) : Promise.resolve(null),
   ]);
   if (ctx.isStale()) return;
   container.dataset.loaded = '1';
   container._data = data;
+  container._backups = backups;
+  container._retention = retention;
 
   const jobs = data.jobs || data.scheduler?.jobs || [];
   const sessions = data.sessions || [];
@@ -53,7 +60,7 @@ export async function render(container, ctx) {
     <div class="tabs mb-16">
       ${TABS.map(([v, l]) => `<button type="button" class="tab ${tab === v ? 'active' : ''}" data-tab="${v}">${l}</button>`).join('')}
     </div>
-    <div id="tab-body">${renderTab(tab, data, meta, jobs, sessions, users, zones)}</div>
+    <div id="tab-body">${renderTab(tab, data, meta, jobs, sessions, users, zones, { backups, retention })}</div>
   `;
 
   qsa('[data-tab]', container).forEach((btn) => btn.addEventListener('click', () => {
@@ -90,7 +97,8 @@ export async function render(container, ctx) {
   bindTab(container, ctx, data, zones);
 }
 
-function renderTab(tab, d, meta, jobs, sessions, users, zones) {
+function renderTab(tab, d, meta, jobs, sessions, users, zones, extra = {}) {
+  if (tab === 'backups') return backupsTab(extra.backups, extra.retention);
   if (tab === 'scheduler') return schedulerTab(jobs, d.scheduler);
   if (tab === 'users') return usersTab(users, d.roles || []);
   if (tab === 'sessions') return sessionsTab(sessions);
@@ -181,6 +189,98 @@ function schedulerTab(jobs, scheduler) {
     </section>`;
 }
 
+function formatBytes(bytes) {
+  const value = Number(bytes) || 0;
+  if (value >= 1024 * 1024 * 1024) return `${num(value / (1024 ** 3), 2)} ГБ`;
+  if (value >= 1024 * 1024) return `${num(value / (1024 ** 2), 1)} МБ`;
+  if (value >= 1024) return `${num(value / 1024, 0)} КБ`;
+  return `${num(value)} Б`;
+}
+
+function backupsTab(backups, retention) {
+  const list = (backups && backups.items) || [];
+  const latestVerified = (backups && backups.latestVerified) || null;
+  const preview = (retention && retention.preview) || null;
+  const latest = list[0] || null;
+  const totalBytes = (backups && backups.totalBytes) || 0;
+  const canBackup = can('system:backup');
+  const canRetain = can('system:retention');
+
+  return `<div class="grid grid-4 mb-16">
+      ${kpi({ label: 'Снимков БД', value: num(list.length), sub: backups?.backupDir || 'data/backups' })}
+      ${kpi({ label: 'Объём', value: formatBytes(totalBytes), sub: 'все снимки' })}
+      ${kpi({ label: 'Последний', value: latest ? timeAgo(latest.createdAt) : '—', sub: latest ? formatBytes(latest.sizeBytes) : 'бэкапов нет', tone: latest ? '' : 'warn' })}
+      ${kpi({ label: 'К удалению по ретеншену', value: num(preview?.totalRowsAffected || 0), sub: 'строк по политике 90/180/365' })}
+    </div>
+
+    <div class="grid grid-12">
+      <section class="card col-8">
+        <div class="card-head">
+          <div><h3>Горячие бэкапы</h3><div class="dim">VACUUM INTO + integrity_check + сверка head_hash аудита. Хранятся 14 последних и по одному за каждый месяц</div></div>
+          <div class="row">
+            ${canBackup ? `<button class="btn btn-sm btn-outline" id="backup-verify-latest">${icon('shield')} Проверить последний</button>
+            <button class="btn btn-sm btn-primary" id="backup-now">${icon('download')} Сделать бэкап</button>` : ''}
+          </div>
+        </div>
+        <div class="card-body flush">
+          ${list.length ? table({
+            rows: list,
+            rowKey: 'file',
+            columns: [
+              { label: 'Файл', render: (r) => `<code class="truncate" style="display:inline-block;max-width:280px">${esc(r.file)}</code>` },
+              { label: 'Создан', render: (r) => `<span class="dim">${esc(dateTime(r.createdAt))}</span>` },
+              { label: 'Размер', align: 'right', render: (r) => formatBytes(r.sizeBytes) },
+              { label: '', align: 'right', render: (r) => (canBackup ? `<button class="btn btn-sm btn-ghost" data-verify-backup="${esc(r.file)}">Проверить</button>` : '') },
+            ],
+          }) : emptyState({ iconName: 'database', title: 'Бэкапов нет', text: 'Ночная задача db_backup создаёт снимок в 02:00 UTC; можно сделать вручную.' })}
+        </div>
+      </section>
+
+      <section class="card col-4">
+        <div class="card-head"><div><h3>Проверка восстановления</h3><div class="dim">Снимок открывается read-only</div></div></div>
+        <div class="card-body stack">
+          <p class="muted">Проверка отвечает на вопрос «из этого файла действительно можно поднять CRM»: целостность страниц, число таблиц, совпадение вершины hash-цепочки аудита.</p>
+          ${latestVerified
+            ? `<div class="row-between"><span class="muted">Последний снимок на момент загрузки</span>
+                 <span class="badge ${latestVerified.ok ? 'badge-ok' : 'badge-danger'}">${latestVerified.ok ? 'пригоден' : 'непригоден'}</span></div>
+               <div class="row-between"><span class="muted">integrity_check</span><strong>${esc(latestVerified.integrity || '—')}</strong></div>
+               <div class="row-between"><span class="muted">head_hash аудита</span><strong>${latestVerified.matchesHead === false ? 'расходится' : 'совпадает'}</strong></div>`
+            : `<div class="alert alert-warn">${icon('alert')} Проверка восстановления не выполнялась в этой сессии. «Проверить» открывает файл read-only — это единственный способ узнать, что из него можно поднять CRM.</div>`}
+          <div class="alert alert-info">${icon('shield')} Полный регламент восстановления — <code>runbooks/rb-dr-backup-restore.md</code>.</div>
+        </div>
+      </section>
+
+      <section class="card col-12">
+        <div class="card-head">
+          <div><h3>Политика хранения</h3><div class="dim">Ничего не удаляется без предварительного подсчёта — dry-run выполняется всегда перед применением</div></div>
+          <div class="row">
+            ${canRetain ? `<button class="btn btn-sm btn-outline" id="retention-preview">${icon('refresh')} Пересчитать</button>
+            <button class="btn btn-sm btn-danger" id="retention-run">Применить политику</button>` : ''}
+          </div>
+        </div>
+        <div class="card-body flush">
+          ${preview ? `<div class="list">${(preview.rules || []).map((r) => `<div class="list-row">
+              <span class="status-dot ${r.rowsAffected > 0 ? 'warning' : 'ok'}"></span>
+              <div class="list-main">
+                <span class="list-title"><code>${esc(r.table)}</code> · старше ${num(r.retentionDays)} дн.</span>
+                <span class="list-sub">отсечка ${esc(dateTime(r.cutoffIso))}</span>
+              </div>
+              <span class="badge ${r.rowsAffected > 0 ? 'badge-warn' : 'badge-neutral'}">${num(r.rowsAffected)} строк</span>
+            </div>`).join('')}
+            <div class="list-row">
+              <span class="status-dot info"></span>
+              <div class="list-main"><span class="list-title">Архивация чата Директора</span><span class="list-sub">перенос в отдельную архивную БД, затем очистка по ${num(preview.policy?.directorChatDays || 365)} дн.</span></div>
+              <span class="badge badge-neutral">${num(preview.archivedDirectorChat || 0)} сообщений</span>
+            </div></div>
+            <div class="card-body row-between" style="border-top:1px solid var(--border)">
+              <span class="muted">Итого будет затронуто строк</span>
+              <strong class="tnum">${num(preview.totalRowsAffected || 0)}</strong>
+            </div>` : emptyState({ title: 'Нет данных предпросмотра' })}
+        </div>
+      </section>
+    </div>`;
+}
+
 function usersTab(users, roles) {
   return `<section class="card">
       <div class="card-head"><div><h3>Операторы CRM</h3><div class="dim">Восемь ролей из матрицы прав: владелец и семь изолированных сервисных ролей</div></div></div>
@@ -263,6 +363,87 @@ function providersTab(zones, meta) {
 }
 
 function bindTab(container, ctx, data, zones) {
+  qs('#backup-now', container)?.addEventListener('click', async (event) => {
+    const btn = event.currentTarget;
+    setBusy(btn, true);
+    try {
+      const res = await api.post('/api/admin/system/backup', {}, { idempotencyKey: `backup-${Date.now()}` });
+      if (res.ok) {
+        toast('Бэкап создан и проверен', {
+          type: 'success',
+          text: `${res.backupFile} · ${formatBytes(res.sizeBytes)} · head_hash ${res.matchesHead ? 'совпадает' : 'НЕ совпадает'}`,
+        });
+      } else {
+        toast('Бэкап не прошёл проверку', { type: 'error', text: `integrity: ${res.integrity}` });
+      }
+      ctx.refresh();
+    } catch (err) { toastError(err); } finally { setBusy(btn, false); }
+  });
+
+  async function verifyBackup(file) {
+    // Verification is read-only and must reflect the file *now*: caching the
+    // response under an idempotency key would replay an old "цел" verdict.
+    try {
+      const res = await api.post(`/api/admin/system/backups/${encodeURIComponent(file)}/verify`, {});
+      showVerification(res, file);
+    } catch (err) { toastError(err); }
+  }
+
+  function showVerification(res, file) {
+    openDrawer({
+      title: res.ok ? 'Снимок пригоден для восстановления' : 'Снимок повреждён',
+      eyebrow: file,
+      body: `<div class="stack">
+          <div class="metric-inline">
+            <div><span class="mv">${esc(res.integrity || '—')}</span><span class="ml">integrity_check</span></div>
+            <div><span class="mv">${num(res.tables || 0)}</span><span class="ml">таблиц</span></div>
+            <div><span class="mv">${num(res.players || 0)}</span><span class="ml">игроков</span></div>
+            <div><span class="mv">${res.matchesHead ? 'OK' : '—'}</span><span class="ml">head_hash аудита</span></div>
+          </div>
+          <dl class="kv">
+            <dt>Ожидаемый head</dt><dd><code>${esc(String(res.expectedHeadHash || '—').slice(0, 24))}…</code></dd>
+            <dt>В снимке</dt><dd><code>${esc(String(res.headHash || '—').slice(0, 24))}…</code></dd>
+          </dl>
+          ${res.ok ? '' : '<div class="alert alert-danger">Восстанавливать из этого файла нельзя — сделайте новый снимок.</div>'}
+        </div>`,
+      actions: [{ label: 'Закрыть', variant: 'btn-ghost' }],
+    });
+  }
+
+  qs('#backup-verify-latest', container)?.addEventListener('click', () => {
+    const latest = ((container._backups || {}).items || [])[0];
+    if (!latest) { toast('Бэкапов нет', { type: 'warn' }); return; }
+    verifyBackup(latest.file);
+  });
+
+  run(container, '[data-verify-backup]', (node) => verifyBackup(node.dataset.verifyBackup));
+
+  qs('#retention-preview', container)?.addEventListener('click', () => ctx.refresh());
+
+  qs('#retention-run', container)?.addEventListener('click', async () => {
+    const preview = (container._retention || {}).preview || {};
+    const ok = await confirmDialog({
+      title: 'Применить политику хранения?',
+      text: 'Будут безвозвратно удалены данные старше установленных сроков. Платёжные записи и аудит не затрагиваются.',
+      confirmLabel: 'Удалить',
+      danger: true,
+      details: `<dl class="kv"><dt>Input-события</dt><dd>${num((preview.rules || []).find((r) => r.table === 'input_events')?.rowsAffected || 0)}</dd>
+        <dt>Телеметрия</dt><dd>${num((preview.rules || []).find((r) => r.table === 'telemetry_metrics')?.rowsAffected || 0)}</dd>
+        <dt>Сессии</dt><dd>${num((preview.rules || []).find((r) => r.table === 'sessions')?.rowsAffected || 0)}</dd>
+        <dt>Всего</dt><dd><strong>${num(preview.totalRowsAffected || 0)}</strong></dd></dl>`,
+      requireText: 'УДАЛИТЬ',
+    });
+    if (!ok) return;
+    try {
+      const res = await api.post('/api/admin/system/retention', {}, { idempotencyKey: `retention-${Date.now()}` });
+      toast('Политика применена', {
+        type: 'success',
+        text: `удалено строк: ${num(res.cleanup?.totalRowsAffected || 0)}`,
+      });
+      ctx.refresh();
+    } catch (err) { toastError(err); }
+  });
+
   run(container, '[data-run-job]', async (node) => {
     node.disabled = true;
     try {
