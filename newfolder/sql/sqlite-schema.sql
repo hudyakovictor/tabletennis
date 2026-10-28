@@ -558,6 +558,8 @@ CREATE TABLE IF NOT EXISTS audit_logs (
   created_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_audit_created ON audit_logs(created_at DESC);
+-- Restore checks ask "is this snapshot's head still part of the live chain?"
+CREATE INDEX IF NOT EXISTS idx_audit_hash ON audit_logs(entry_hash);
 CREATE INDEX IF NOT EXISTS idx_audit_actor ON audit_logs(actor_id, created_at DESC);
 
 -- ============================================================================

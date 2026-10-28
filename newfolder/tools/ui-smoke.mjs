@@ -396,7 +396,7 @@ async function main() {
     const verifyText = document.getElementById('drawer-body').textContent || '';
     auditA11y('backup verification', document.getElementById('drawer-overlay'));
     results.push(['backup verification reports integrity and audit head',
-      /integrity_check/.test(verifyText) && /head_hash/.test(verifyText) && /таблиц/.test(verifyText),
+      /integrity_check/.test(verifyText) && /Head снимка/.test(verifyText) && /цепочк/i.test(verifyText) && /таблиц/.test(verifyText),
       `${verifyText.length} chars`]);
     await closeWithEscape('drawer-overlay');
   } else {

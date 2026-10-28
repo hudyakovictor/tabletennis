@@ -260,7 +260,7 @@ async function handlePlatformRoutes(ctx) {
         items: backups,
         retentionHint: 'Хранятся 14 последних снимков + по одному за каждый месяц',
         latestVerified: urlObj.searchParams.get('verify') === '1' && backups.length
-          ? verifyBackupFile(`${CONFIG.backupDir}/${backups[0].file}`, { expectedHeadHash: currentAuditHead(db) })
+          ? verifyBackupFile(`${CONFIG.backupDir}/${backups[0].file}`, { expectedHeadHash: currentAuditHead(db), liveDb: db })
           : null,
       },
     };
@@ -275,14 +275,20 @@ async function handlePlatformRoutes(ctx) {
     if (file.includes('/') || file.includes('..') || !file.endsWith('.sqlite')) {
       return { status: 400, json: { error: 'INVALID_BACKUP_NAME' } };
     }
-    const result = verifyBackupFile(`${CONFIG.backupDir}/${file}`, { expectedHeadHash: currentAuditHead(db) });
+    const result = verifyBackupFile(`${CONFIG.backupDir}/${file}`, { expectedHeadHash: currentAuditHead(db), liveDb: db });
     writeAuditLog(db, {
       actorRole: principal.role,
       actorId: principal.username,
       action: 'system.backup.verified',
       targetType: 'sqlite_backup',
       targetId: file,
-      applied: { ok: result.ok, integrity: result.integrity, matchesHead: result.matchesHead },
+      applied: {
+        ok: result.ok,
+        integrity: result.integrity,
+        matchesHead: result.matchesHead,
+        chainContains: result.chainContains,
+        auditEntriesBehind: result.auditEntriesBehind,
+      },
       ipHash,
     });
     // Verification *ran*: a negative report is still a successful operation, so it
