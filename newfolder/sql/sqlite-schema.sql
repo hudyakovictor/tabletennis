@@ -687,3 +687,43 @@ CREATE TABLE IF NOT EXISTS ws_tickets (
   expires_at TEXT NOT NULL,
   used_at TEXT
 );
+
+-- ============================================================================
+-- Game progress (19-client-integration-guide.md §3.12)
+-- Mirrors the client save `ttu-v2` but is authoritative: the client reports
+-- facts (level, duration, score), the server keeps the numbers it can check.
+-- ============================================================================
+CREATE TABLE IF NOT EXISTS player_progress (
+  player_id TEXT PRIMARY KEY REFERENCES players(id) ON DELETE CASCADE,
+  level INTEGER NOT NULL DEFAULT 1 CHECK (level BETWEEN 1 AND 99),
+  xp INTEGER NOT NULL DEFAULT 0 CHECK (xp >= 0),
+  rating INTEGER NOT NULL DEFAULT 1000 CHECK (rating >= 0),
+  matches INTEGER NOT NULL DEFAULT 0 CHECK (matches >= 0),
+  wins INTEGER NOT NULL DEFAULT 0 CHECK (wins >= 0),
+  losses INTEGER NOT NULL DEFAULT 0 CHECK (losses >= 0),
+  streak INTEGER NOT NULL DEFAULT 0,
+  best_rally INTEGER NOT NULL DEFAULT 0 CHECK (best_rally >= 0),
+  coins INTEGER NOT NULL DEFAULT 0 CHECK (coins >= 0),
+  gems INTEGER NOT NULL DEFAULT 0 CHECK (gems >= 0),
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_progress_rating ON player_progress(rating DESC, wins DESC);
+
+CREATE TABLE IF NOT EXISTS matches (
+  id TEXT PRIMARY KEY,
+  player_id TEXT NOT NULL REFERENCES players(id) ON DELETE CASCADE,
+  mode TEXT NOT NULL DEFAULT 'career',
+  opponent_name TEXT,
+  opponent_rating INTEGER,
+  player_score INTEGER NOT NULL CHECK (player_score >= 0),
+  opponent_score INTEGER NOT NULL CHECK (opponent_score >= 0),
+  win INTEGER NOT NULL CHECK (win IN (0, 1)),
+  rating_before INTEGER NOT NULL,
+  rating_delta INTEGER NOT NULL DEFAULT 0,
+  duration_ms INTEGER NOT NULL CHECK (duration_ms >= 0),
+  rules_version INTEGER,
+  client_version TEXT,
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_matches_player ON matches(player_id, created_at DESC);

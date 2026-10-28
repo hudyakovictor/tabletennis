@@ -38,6 +38,7 @@ const {
 const { publish } = require('../services/eventBus');
 const { notify } = require('../services/notifications');
 const { createPrivacyRequest } = require('../services/privacy');
+const { lookup: idemLookup, save: idemSave, hashRequest } = require('../services/idempotency');
 
 function getActiveClientRules(db) {
   const row = db
@@ -58,6 +59,72 @@ function deterministicAbAssignment(playerId, db) {
     variant: isTreatment ? `${exp.slug}_treatment` : `${exp.slug}_control`,
     patch: isTreatment ? JSON.parse(exp.rules_patch_json || '{}') : {},
   };
+}
+
+/* ---------------------------------------------------------------------------
+ * Game progress (19-client-integration-guide.md §3.12)
+ *
+ * Правило доверия: клиент присылает факты — уровень, длительность, счёт, — а
+ * не результат («я выиграл, дай 500 монет»). Сервер проверяет правдоподобие,
+ * сам считает рейтинг по Эло и сам начисляет награду за уровень. Полный
+ * реплей-контроль — следующий этап; здесь лимиты, монотонность и потолки.
+ * ------------------------------------------------------------------------- */
+const PROGRESS_LIMITS = Object.freeze({
+  maxLevel: 99,
+  minLevelMs: 15_000, // уровень короче 15 с физически невозможен
+  minLevelMsPerLevel: 1_500, // порог растёт со ступенькой: 15 с + 1.5 с × level
+  maxXpPerLevel: 10_000,
+  maxLevelJump: 5, // оффлайн-очередь может принести пачку, но не «1 → 60»
+  maxBestRally: 200,
+  minMatchMs: 25_000, // матч до 11 очков быстрее 25 с не разыгрывается (11:0 за ~30 с — норма)
+  maxMatchMs: 3 * 3600_000,
+  maxScore: 99,
+  eloK: 32,
+  maxRatingDelta: 64,
+  coinsPerLevel: 150, // те же числа, что показывает LevelUp в клиенте
+  gemsPerLevel: 20,
+});
+
+function asInt(value) {
+  const n = Number(value);
+  return Number.isFinite(n) ? Math.trunc(n) : null;
+}
+
+function progressJson(row) {
+  return {
+    level: row.level,
+    xp: row.xp,
+    rating: row.rating,
+    matches: row.matches,
+    wins: row.wins,
+    losses: row.losses,
+    streak: row.streak,
+    bestRally: row.best_rally,
+    coins: row.coins,
+    gems: row.gems,
+    updatedAt: row.updated_at,
+  };
+}
+
+function readProgress(db, playerId) {
+  return db.prepare('SELECT * FROM player_progress WHERE player_id = ?').get(playerId) || null;
+}
+
+/* Прогресс создаётся лениво: игрок, вошедший до появления таблицы, получает
+ * дефолтную строку при первом чтении, а не 404. */
+function ensureProgress(db, playerId) {
+  const existing = readProgress(db, playerId);
+  if (existing) return existing;
+  const now = new Date().toISOString();
+  db.prepare('INSERT OR IGNORE INTO player_progress (player_id, created_at, updated_at) VALUES (?, ?, ?)')
+    .run(playerId, now, now);
+  return readProgress(db, playerId);
+}
+
+function eloDelta(rating, opponentRating, win) {
+  const expected = 1 / (1 + 10 ** ((opponentRating - rating) / 400));
+  const raw = Math.round(PROGRESS_LIMITS.eloK * ((win ? 1 : 0) - expected));
+  return Math.max(-PROGRESS_LIMITS.maxRatingDelta, Math.min(PROGRESS_LIMITS.maxRatingDelta, raw));
 }
 
 async function handleClientRoute(db, req, pathname, urlObj, body, clientIp) {
@@ -692,6 +759,292 @@ async function handleClientRoute(db, req, pathname, urlObj, body, clientIp) {
         publishedAt: n.created_at,
       }));
     return { status: 200, json: { posts, count: posts.length } };
+  }
+
+  // =========================================================================
+  // Game progress, matches, leaderboard and runtime config (§3.12)
+  // =========================================================================
+
+  // Profile and progress (`GET /api/client/v1/me`)
+  if (req.method === 'GET' && pathname === '/api/client/v1/me') {
+    const auth = authenticatePlayerRequest(req);
+    if (!auth) return { status: 401, json: { error: 'PLAYER_AUTH_REQUIRED' } };
+
+    const player = db
+      .prepare('SELECT id, display_name, region, status, ban_reason, created_at FROM players WHERE id = ?')
+      .get(auth.sub);
+    if (!player) return { status: 404, json: { error: 'PLAYER_NOT_FOUND' } };
+    if (player.status === 'banned') {
+      return { status: 403, json: { error: 'ACCOUNT_BANNED', reason: player.ban_reason || null } };
+    }
+    if (player.status !== 'active') {
+      return { status: 403, json: { error: 'PLAYER_RESTRICTED', status: player.status } };
+    }
+
+    const progress = ensureProgress(db, player.id);
+    return {
+      status: 200,
+      json: {
+        ok: true,
+        player: {
+          playerId: player.id,
+          displayName: player.display_name,
+          region: player.region,
+          status: player.status,
+          createdAt: player.created_at,
+        },
+        progress: progressJson(progress),
+        rewards: { coinsPerLevel: PROGRESS_LIMITS.coinsPerLevel, gemsPerLevel: PROGRESS_LIMITS.gemsPerLevel },
+        serverTimeUtc: new Date().toISOString(),
+      },
+    };
+  }
+
+  // Level completion (`POST /api/client/v1/progress/level-complete`)
+  if (req.method === 'POST' && pathname === '/api/client/v1/progress/level-complete') {
+    const auth = authenticatePlayerRequest(req);
+    if (!auth) return { status: 401, json: { error: 'PLAYER_AUTH_REQUIRED' } };
+
+    const rl = checkRateLimit(`progress:${auth.sub}`, 30);
+    if (!rl.allowed) {
+      return {
+        status: 429,
+        json: { error: 'RATE_LIMITED', retryAfterSec: rl.retryAfterSec },
+        headers: { 'Retry-After': String(rl.retryAfterSec) },
+      };
+    }
+
+    const idemKey = String(req.headers['idempotency-key'] || '') || null;
+    const idem = idemLookup(db, idemKey, auth.sub, hashRequest('POST', pathname, body));
+    if (idem.state === 'conflict') return { status: idem.status, json: idem.json };
+    if (idem.state === 'replay') return { status: idem.status, json: idem.json };
+
+    const current = ensureProgress(db, auth.sub);
+    const level = asInt(body.level);
+    const durationMs = asInt(body.durationMs);
+    const xp = body.xp === undefined ? null : asInt(body.xp);
+    const reasons = [];
+
+    if (level === null || level < 1 || level > PROGRESS_LIMITS.maxLevel) reasons.push('LEVEL_OUT_OF_RANGE');
+    if (durationMs === null || durationMs < 0) reasons.push('DURATION_INVALID');
+    if (xp !== null && (xp < 0 || xp > PROGRESS_LIMITS.maxXpPerLevel)) reasons.push('XP_OUT_OF_RANGE');
+    if (!reasons.length && level < current.level) reasons.push('LEVEL_REGRESSION');
+    if (!reasons.length && level > current.level + PROGRESS_LIMITS.maxLevelJump) reasons.push('LEVEL_JUMP');
+    const minDurationMs = PROGRESS_LIMITS.minLevelMs + PROGRESS_LIMITS.minLevelMsPerLevel * Math.max(1, level || 1);
+    if (!reasons.length && durationMs < minDurationMs) reasons.push('LEVEL_TOO_FAST');
+
+    if (reasons.length) {
+      return { status: 422, json: { error: 'IMPLAUSIBLE_RESULT', reasons, minDurationMs } };
+    }
+
+    /* Награда — число сервера, а не клиента: сколько ступенек реально прошло,
+     * столько и начислено. Клиент только показывает то, что вернул ответ. */
+    const levels = level - current.level;
+    const coins = levels * PROGRESS_LIMITS.coinsPerLevel;
+    const gems = levels * PROGRESS_LIMITS.gemsPerLevel;
+    const now = new Date().toISOString();
+    db.prepare(
+      `UPDATE player_progress
+          SET level = ?, xp = ?, coins = coins + ?, gems = gems + ?, updated_at = ?
+        WHERE player_id = ?`
+    ).run(level, xp === null ? current.xp : Math.max(current.xp, xp), coins, gems, now, auth.sub);
+
+    const updated = readProgress(db, auth.sub);
+    const json = {
+      ok: true,
+      progress: progressJson(updated),
+      rewards: { coins, gems },
+      serverTimeUtc: now,
+    };
+    idemSave(db, idemKey, auth.sub, 'POST', pathname, body, 200, json);
+    publish('progress', { playerId: auth.sub, level: updated.level, coins, gems });
+    return { status: 200, json };
+  }
+
+  // Match result (`POST /api/client/v1/matches`)
+  if (req.method === 'POST' && pathname === '/api/client/v1/matches') {
+    const auth = authenticatePlayerRequest(req);
+    if (!auth) return { status: 401, json: { error: 'PLAYER_AUTH_REQUIRED' } };
+
+    const rl = checkRateLimit(`matches:${auth.sub}`, 40);
+    if (!rl.allowed) {
+      return {
+        status: 429,
+        json: { error: 'RATE_LIMITED', retryAfterSec: rl.retryAfterSec },
+        headers: { 'Retry-After': String(rl.retryAfterSec) },
+      };
+    }
+
+    const idemKey = String(req.headers['idempotency-key'] || '') || null;
+    const idem = idemLookup(db, idemKey, auth.sub, hashRequest('POST', pathname, body));
+    if (idem.state === 'conflict') return { status: idem.status, json: idem.json };
+    if (idem.state === 'replay') return { status: idem.status, json: idem.json };
+
+    const playerScore = asInt(body.playerScore);
+    const opponentScore = asInt(body.opponentScore);
+    const durationMs = asInt(body.durationMs);
+    const opponentRating = Math.min(3000, Math.max(100, asInt(body.opponentRating) ?? 1000));
+    const mode = /^[a-z_]{3,24}$/.test(String(body.mode || '')) ? String(body.mode) : 'career';
+    const clientMatchId = /^[A-Za-z0-9_.:-]{6,64}$/.test(String(body.matchId || '')) ? String(body.matchId) : null;
+
+    const reasons = [];
+    const badScore = (v) => v === null || v < 0 || v > PROGRESS_LIMITS.maxScore;
+    if (badScore(playerScore) || badScore(opponentScore)) reasons.push('SCORE_INVALID');
+    if (!reasons.length && playerScore === opponentScore) reasons.push('NO_WINNER');
+    if (!reasons.length && (durationMs === null || durationMs < PROGRESS_LIMITS.minMatchMs || durationMs > PROGRESS_LIMITS.maxMatchMs)) {
+      reasons.push('DURATION_INVALID');
+    }
+    if (reasons.length) {
+      return { status: 422, json: { error: 'IMPLAUSIBLE_RESULT', reasons, minDurationMs: PROGRESS_LIMITS.minMatchMs } };
+    }
+
+    const matchId = clientMatchId || `mt_${crypto.randomBytes(8).toString('hex')}`;
+    const existing = db.prepare('SELECT * FROM matches WHERE id = ?').get(matchId);
+    if (existing) {
+      if (existing.player_id !== auth.sub) {
+        return { status: 409, json: { error: 'MATCH_ID_CONFLICT' } };
+      }
+      /* Повторная отправка того же матча (ретрай, второй таб) не должна
+       * второй раз менять рейтинг — возвращаем сохранённый результат. */
+      const progress = ensureProgress(db, auth.sub);
+      return {
+        status: 200,
+        json: {
+          ok: true,
+          replay: true,
+          matchId,
+          result: { win: !!existing.win, ratingBefore: existing.rating_before, ratingDelta: existing.rating_delta, rating: progress.rating },
+          progress: progressJson(progress),
+          serverTimeUtc: new Date().toISOString(),
+        },
+      };
+    }
+
+    const current = ensureProgress(db, auth.sub);
+    const win = playerScore > opponentScore;
+    const ratingBefore = current.rating;
+    const ratingDelta = eloDelta(ratingBefore, opponentRating, win);
+    const ratingAfter = Math.max(0, ratingBefore + ratingDelta);
+    const bestRally = Math.min(
+      PROGRESS_LIMITS.maxBestRally,
+      Math.max(current.best_rally, asInt(body.bestRally) ?? 0)
+    );
+    const now = new Date().toISOString();
+
+    db.transaction((row) => {
+      db.prepare(
+        `UPDATE player_progress
+            SET rating = ?, matches = matches + 1, wins = wins + ?, losses = losses + ?,
+                streak = ?, best_rally = ?, updated_at = ?
+          WHERE player_id = ?`
+      ).run(ratingAfter, win ? 1 : 0, win ? 0 : 1, win ? row.streak + 1 : 0, bestRally, now, auth.sub);
+      db.prepare(
+        `INSERT INTO matches
+           (id, player_id, mode, opponent_name, opponent_rating, player_score, opponent_score,
+            win, rating_before, rating_delta, duration_ms, rules_version, client_version, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      ).run(
+        matchId,
+        auth.sub,
+        mode,
+        String(body.opponentName || '').slice(0, 48) || null,
+        opponentRating,
+        playerScore,
+        opponentScore,
+        win ? 1 : 0,
+        ratingBefore,
+        ratingDelta,
+        durationMs,
+        asInt(body.rulesVersion),
+        String(body.clientVersion || '').slice(0, 32) || null,
+        now
+      );
+    })(current);
+
+    const updated = readProgress(db, auth.sub);
+    publish('match', { playerId: auth.sub, matchId, win, ratingDelta, mode });
+    const json = {
+      ok: true,
+      replay: false,
+      matchId,
+      result: { win, ratingBefore, ratingDelta, rating: updated.rating },
+      progress: progressJson(updated),
+      serverTimeUtc: now,
+    };
+    idemSave(db, idemKey, auth.sub, 'POST', pathname, body, 200, json);
+    return { status: 200, json };
+  }
+
+  // Leaderboard (`GET /api/client/v1/leaderboard`)
+  if (req.method === 'GET' && pathname === '/api/client/v1/leaderboard') {
+    const limit = Math.min(50, Math.max(1, asInt(urlObj.searchParams.get('limit')) ?? 20));
+    const rows = db
+      .prepare(
+        `SELECT p.player_id, pl.display_name, p.rating, p.level, p.wins, p.losses
+           FROM player_progress p
+           JOIN players pl ON pl.id = p.player_id
+          WHERE pl.status = 'active'
+          ORDER BY p.rating DESC, p.wins DESC, p.updated_at ASC
+          LIMIT ?`
+      )
+      .all(limit);
+
+    const auth = authenticatePlayerRequest(req);
+    let me = null;
+    if (auth) {
+      const mine = readProgress(db, auth.sub);
+      if (mine) {
+        const better = db
+          .prepare(
+            `SELECT COUNT(*) AS n
+               FROM player_progress p
+               JOIN players pl ON pl.id = p.player_id
+              WHERE pl.status = 'active' AND (p.rating > ? OR (p.rating = ? AND p.wins > ?))`
+          )
+          .get(mine.rating, mine.rating, mine.wins);
+        me = { rank: Number(better.n) + 1, playerId: auth.sub, ...progressJson(mine) };
+      }
+    }
+
+    return {
+      status: 200,
+      json: {
+        ok: true,
+        scope: 'global',
+        entries: rows.map((r, i) => ({
+          rank: i + 1,
+          playerId: r.player_id,
+          name: r.display_name,
+          rating: r.rating,
+          level: r.level,
+          wins: r.wins,
+          losses: r.losses,
+        })),
+        me,
+        serverTimeUtc: new Date().toISOString(),
+      },
+    };
+  }
+
+  // Runtime config (`GET /api/client/v1/config`) — balance without a deploy
+  if (req.method === 'GET' && pathname === '/api/client/v1/config') {
+    const rules = getActiveClientRules(db);
+    return {
+      status: 200,
+      json: {
+        ok: true,
+        contractVersion: 1,
+        matchRules: rules,
+        rewards: { coinsPerLevel: PROGRESS_LIMITS.coinsPerLevel, gemsPerLevel: PROGRESS_LIMITS.gemsPerLevel },
+        limits: {
+          maxLevel: PROGRESS_LIMITS.maxLevel,
+          maxLevelJump: PROGRESS_LIMITS.maxLevelJump,
+          minMatchMs: PROGRESS_LIMITS.minMatchMs,
+        },
+        maintenance: getMaintenanceState(db),
+        serverTimeUtc: new Date().toISOString(),
+      },
+    };
   }
 
   return null;

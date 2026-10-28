@@ -38,6 +38,42 @@ CREATE TABLE IF NOT EXISTS players.players (
   last_seen_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+-- Game progress: server-owned numbers, client reports checkable facts only
+CREATE TABLE IF NOT EXISTS players.player_progress (
+  player_id TEXT PRIMARY KEY REFERENCES players.players(id) ON DELETE CASCADE,
+  level INTEGER NOT NULL DEFAULT 1 CHECK (level BETWEEN 1 AND 99),
+  xp INTEGER NOT NULL DEFAULT 0 CHECK (xp >= 0),
+  rating INTEGER NOT NULL DEFAULT 1000 CHECK (rating >= 0),
+  matches INTEGER NOT NULL DEFAULT 0 CHECK (matches >= 0),
+  wins INTEGER NOT NULL DEFAULT 0 CHECK (wins >= 0),
+  losses INTEGER NOT NULL DEFAULT 0 CHECK (losses >= 0),
+  streak INTEGER NOT NULL DEFAULT 0,
+  best_rally INTEGER NOT NULL DEFAULT 0 CHECK (best_rally >= 0),
+  coins INTEGER NOT NULL DEFAULT 0 CHECK (coins >= 0),
+  gems INTEGER NOT NULL DEFAULT 0 CHECK (gems >= 0),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_progress_rating ON players.player_progress(rating DESC, wins DESC);
+
+CREATE TABLE IF NOT EXISTS players.matches (
+  id TEXT PRIMARY KEY,
+  player_id TEXT NOT NULL REFERENCES players.players(id) ON DELETE CASCADE,
+  mode TEXT NOT NULL DEFAULT 'career',
+  opponent_name TEXT,
+  opponent_rating INTEGER,
+  player_score INTEGER NOT NULL CHECK (player_score >= 0),
+  opponent_score INTEGER NOT NULL CHECK (opponent_score >= 0),
+  win INTEGER NOT NULL CHECK (win IN (0, 1)),
+  rating_before INTEGER NOT NULL,
+  rating_delta INTEGER NOT NULL DEFAULT 0,
+  duration_ms INTEGER NOT NULL CHECK (duration_ms >= 0),
+  rules_version INTEGER,
+  client_version TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_matches_player ON players.matches(player_id, created_at DESC);
+
 -- Anonymized Zone Projections (Zero PII granted to AI zones)
 CREATE OR REPLACE VIEW balance.v_balance_players AS
   SELECT id AS player_id, region, status FROM players.players WHERE status <> 'deleted';

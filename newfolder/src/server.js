@@ -38,6 +38,21 @@ const MIME_TYPES = Object.freeze({
   '.ico': 'image/x-icon',
 });
 
+/* Разрешён ли этому Origin читать игровой API. Отражать Origin без проверки
+ * нельзя: `/api/client/v1/*` отдаёт профиль и прогресс по bearer-токену, и
+ * открытый CORS позволяет любому сайту читать ответы игрока. */
+function isAllowedClientOrigin(origin) {
+  if (!origin || origin === 'null') return false;
+  if (CONFIG.clientAllowedOrigins.includes(origin)) return true;
+  if (CONFIG.env === 'production') return false;
+  try {
+    const u = new URL(origin);
+    return u.protocol === 'http:' && (u.hostname === 'localhost' || u.hostname === '127.0.0.1');
+  } catch {
+    return false;
+  }
+}
+
 function buildSecurityHeaders(req, pathname) {
   // Note: allow Arena preview iframe embedding when `CRM_STRICT_FRAME_GUARD` is not forced,
   // while keeping strict script-src 'self' and object-src 'none' (04-security.md).
@@ -80,10 +95,15 @@ function buildSecurityHeaders(req, pathname) {
         headers['Vary'] = 'Origin';
       }
     } else if (pathname.startsWith('/api/client/v1/')) {
-      headers['Access-Control-Allow-Origin'] = origin;
-      headers['Access-Control-Allow-Methods'] = 'GET, POST, OPTIONS';
-      headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization, X-Geo-Country';
+      /* Vary ставим всегда: ответ для разрешённого домена кэшируется
+       * отдельно от ответа без CORS-заголовков. */
       headers['Vary'] = 'Origin';
+      if (sameHostOrigin || isAllowedClientOrigin(origin)) {
+        headers['Access-Control-Allow-Origin'] = origin;
+        headers['Access-Control-Allow-Methods'] = 'GET, POST, OPTIONS';
+        headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization, Idempotency-Key, X-Geo-Country';
+        headers['Access-Control-Expose-Headers'] = 'Idempotent-Replayed, Retry-After';
+      }
     }
   }
   return headers;
