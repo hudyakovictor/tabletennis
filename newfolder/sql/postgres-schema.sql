@@ -70,9 +70,12 @@ CREATE TABLE IF NOT EXISTS players.matches (
   duration_ms INTEGER NOT NULL CHECK (duration_ms >= 0),
   rules_version INTEGER,
   client_version TEXT,
+  suspicious BOOLEAN NOT NULL DEFAULT FALSE,
+  flags_json TEXT,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 CREATE INDEX IF NOT EXISTS idx_matches_player ON players.matches(player_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_matches_suspicious ON players.matches(suspicious, created_at DESC);
 
 -- Anonymized Zone Projections (Zero PII granted to AI zones)
 CREATE OR REPLACE VIEW balance.v_balance_players AS

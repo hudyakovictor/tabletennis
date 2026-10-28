@@ -724,6 +724,9 @@ CREATE TABLE IF NOT EXISTS matches (
   duration_ms INTEGER NOT NULL CHECK (duration_ms >= 0),
   rules_version INTEGER,
   client_version TEXT,
+  suspicious INTEGER NOT NULL DEFAULT 0 CHECK (suspicious IN (0, 1)),
+  flags_json TEXT,
   created_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_matches_player ON matches(player_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_matches_suspicious ON matches(suspicious, created_at DESC);
