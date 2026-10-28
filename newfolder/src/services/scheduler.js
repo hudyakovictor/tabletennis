@@ -26,6 +26,22 @@ const { pruneNotifications } = require('./notifications');
 
 const RUNNING = new Set();
 
+/* Очередь флагов доверия (19-client-integration-guide.md §3.13). Флаг одного матча —
+ * сигнал, флаг одного и того же игрока каждый час — повод открыть карточку.
+ * Автоматических санкций здесь нет: задача только зовёт человека. */
+const FLAG_SWEEP_WINDOW_H = 24;
+const FLAG_SWEEP_THRESHOLD = 3;
+const FLAG_SWEEP_CRITICAL = 10;
+
+function parseFlags(raw) {
+  try {
+    const value = JSON.parse(raw || '[]');
+    return Array.isArray(value) ? value : [];
+  } catch {
+    return [];
+  }
+}
+
 function nextAligned(now, cadenceSec) {
   // Align daily jobs to a wall-clock minute instead of drifting from boot time.
   const base = new Date(now.getTime() + cadenceSec * 1000);
@@ -333,6 +349,48 @@ const JOBS = Object.freeze([
         });
       }
       return { status: 'ok', detail: { open: open.length, overdue: overdue.length, dueSoon: dueSoon.length } };
+    },
+  },
+  {
+    name: 'match_flag_sweep',
+    cadenceSec: 3600,
+    description: 'Очередь флагов доверия: игрок с несколькими подозрительными матчами за сутки — на глаза человеку',
+    handler: async (db) => {
+      const since = new Date(Date.now() - FLAG_SWEEP_WINDOW_H * 3600 * 1000).toISOString();
+      const rows = db
+        .prepare(
+          `SELECT m.player_id, p.display_name, p.status, m.flags_json
+             FROM matches m JOIN players p ON p.id = m.player_id
+            WHERE m.suspicious = 1 AND m.created_at >= ?`
+        )
+        .all(since);
+
+      const players = new Map();
+      for (const row of rows) {
+        if (row.status === 'banned' || row.status === 'deleted') continue;
+        const entry = players.get(row.player_id) || { name: row.display_name, matches: 0, flags: new Map() };
+        entry.matches += 1;
+        for (const flag of parseFlags(row.flags_json)) entry.flags.set(flag, (entry.flags.get(flag) || 0) + 1);
+        players.set(row.player_id, entry);
+      }
+
+      const noisy = [...players.entries()].filter(([, e]) => e.matches >= FLAG_SWEEP_THRESHOLD);
+      let notified = 0;
+      for (const [playerId, entry] of noisy) {
+        const breakdown = [...entry.flags.entries()].map(([flag, n]) => `${flag} ×${n}`).join(' · ');
+        const created = notify(db, {
+          kind: 'fraud',
+          severity: entry.matches >= FLAG_SWEEP_CRITICAL ? 'critical' : 'warning',
+          title: `Флаги доверия у игрока ${entry.name || playerId}: ${entry.matches}`,
+          body: `${entry.matches} подозрительных матчей за ${FLAG_SWEEP_WINDOW_H} ч · ${breakdown}`,
+          link: `#/players?player=${encodeURIComponent(playerId)}`,
+          fingerprint: `match_flags:${playerId}`,
+          dedupeWindowSec: FLAG_SWEEP_WINDOW_H * 3600,
+        });
+        if (created) notified += 1;
+      }
+
+      return { status: 'ok', detail: { matches: rows.length, players: players.size, notified } };
     },
   },
   {
