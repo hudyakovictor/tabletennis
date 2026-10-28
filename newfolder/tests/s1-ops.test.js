@@ -260,16 +260,48 @@ describe('S1 · retention, backups and DSAR', () => {
     assert.ok(fs.existsSync(path.join(backupDir, created.backupFile)));
 
     // Read-only verification must not create WAL/SHM side files next to the snapshot.
-    const verified = verifyBackupFile(path.join(backupDir, created.backupFile), { expectedHeadHash: head });
+    const verified = verifyBackupFile(path.join(backupDir, created.backupFile), { expectedHeadHash: head, liveDb: db });
     assert.equal(verified.ok, true);
     assert.equal(verified.matchesHead, true);
+    assert.equal(verified.chainContains, true);
     assert.ok(verified.tables > 20);
+    assert.equal(verified.auditEntriesBehind, 0);
     assert.ok(!fs.existsSync(`${path.join(backupDir, created.backupFile)}-wal`));
 
-    // A backup taken before the head moved must be flagged, not silently accepted.
-    const stale = verifyBackupFile(path.join(backupDir, created.backupFile), { expectedHeadHash: 'deadbeef' });
-    assert.equal(stale.matchesHead, false);
-    assert.equal(stale.ok, false);
+    // The CRM writes audit entries continuously (the backup itself writes one), so a
+    // good snapshot stops *equalling* the head within seconds. That is not a defect:
+    // what matters is that its head is an ancestor of the live chain.
+    const afterBackup = `hash-after-backup-${Date.now()}`;
+    db.prepare(
+      `INSERT INTO audit_logs (region, actor_role, actor_id, action, entry_hash, created_at)
+       VALUES ('RU', 'admin', 'test', 'system.test.after_backup', ?, ?)`
+    ).run(afterBackup, new Date().toISOString());
+    const aged = verifyBackupFile(path.join(backupDir, created.backupFile), {
+      expectedHeadHash: afterBackup,
+      liveDb: db,
+    });
+    assert.equal(aged.matchesHead, false, 'the tip moved, so equality must not hold');
+    assert.equal(aged.chainContains, true, 'but the snapshot is still a prefix of the chain');
+    assert.ok(aged.auditEntriesBehind >= 1);
+    assert.equal(aged.ok, true, 'an older-but-consistent snapshot is restorable');
+
+    // A snapshot whose head is unknown to the live chain (foreign install, rewound
+    // or tampered journal) is not restorable — and that *is* an error.
+    db.exec('BEGIN');
+    db.prepare('DELETE FROM audit_logs WHERE entry_hash = ?').run(created.headHash);
+    const rewound = verifyBackupFile(path.join(backupDir, created.backupFile), {
+      expectedHeadHash: currentAuditHead(db),
+      liveDb: db,
+    });
+    assert.equal(rewound.chainContains, false);
+    assert.equal(rewound.ok, false);
+    assert.equal(rewound.error, 'AUDIT_HEAD_NOT_IN_CHAIN');
+    db.exec('ROLLBACK');
+
+    // Without a live database the check degrades to integrity only, and says so.
+    const orphan = verifyBackupFile(path.join(backupDir, created.backupFile));
+    assert.equal(orphan.chainContains, null);
+    assert.equal(orphan.ok, true);
 
     // Truncated / corrupted files are the classic restore-time surprise.
     const tampered = path.join(tmpDir, 'crm-backup-2020-01-01T00-00-00-000Z.sqlite');

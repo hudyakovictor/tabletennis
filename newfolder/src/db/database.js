@@ -388,10 +388,31 @@ function listBackups(backupDir = CONFIG.backupDir) {
 }
 
 /**
+ * Where a snapshot's audit head sits in the live chain.
+ *
+ * Equality with the current head is the wrong question: the CRM writes audit
+ * entries continuously (the backup itself writes one), so a perfectly good
+ * snapshot stops "matching the head" within seconds. What matters for a restore
+ * is that the snapshot's head is an *ancestor* of the current head — then the
+ * snapshot is a consistent prefix and no audit entry was invented or rewound.
+ */
+function auditChainPosition(liveDb, headHash) {
+  if (!liveDb || !headHash) return { contains: null, rowsBehind: null };
+  try {
+    const row = liveDb.prepare('SELECT rowid AS rid FROM audit_logs WHERE entry_hash = ? LIMIT 1').get(headHash);
+    if (!row) return { contains: false, rowsBehind: null };
+    const behind = liveDb.prepare('SELECT COUNT(*) AS c FROM audit_logs WHERE rowid > ?').get(row.rid)?.c || 0;
+    return { contains: true, rowsBehind: Number(behind) };
+  } catch {
+    return { contains: null, rowsBehind: null };
+  }
+}
+
+/**
  * Opens a backup strictly read-only (no WAL side files are created next to it) and
  * reports whether it is a usable snapshot of *this* installation.
  */
-function verifyBackupFile(filePath, { expectedHeadHash = null } = {}) {
+function verifyBackupFile(filePath, { expectedHeadHash = null, liveDb = null } = {}) {
   if (!fs.existsSync(filePath)) {
     return { ok: false, file: path.basename(filePath), error: 'BACKUP_NOT_FOUND' };
   }
@@ -411,8 +432,14 @@ function verifyBackupFile(filePath, { expectedHeadHash = null } = {}) {
     const players = hasAudit ? probe.prepare('SELECT COUNT(*) AS c FROM players').get()?.c || 0 : 0;
     const headHash = headRow?.entry_hash || null;
     const matchesHead = expectedHeadHash ? headHash === expectedHeadHash : null;
+    const chain = auditChainPosition(liveDb, headHash);
+    // A snapshot whose head is unknown to the live chain is either foreign (a
+    // different installation) or was tampered with — both make it useless for DR.
+    const chainOk = chain.contains !== false;
     return {
-      ok: integrity === 'ok' && (matchesHead !== false),
+      // `ok` answers "is this restorable": integrity plus chain ancestry. Whether the
+      // snapshot is the *tip* is reported separately and is informational only.
+      ok: integrity === 'ok' && chainOk,
       file: path.basename(filePath),
       fullPath: filePath,
       sizeBytes: fs.statSync(filePath).size,
@@ -422,7 +449,14 @@ function verifyBackupFile(filePath, { expectedHeadHash = null } = {}) {
       headHash,
       expectedHeadHash,
       matchesHead,
-      error: integrity === 'ok' ? null : 'INTEGRITY_CHECK_FAILED',
+      chainContains: chain.contains,
+      auditEntriesBehind: chain.rowsBehind,
+      error:
+        integrity !== 'ok'
+          ? 'INTEGRITY_CHECK_FAILED'
+          : chainOk
+            ? null
+            : 'AUDIT_HEAD_NOT_IN_CHAIN',
     };
   } catch (err) {
     return { ok: false, file: path.basename(filePath), error: err.message || 'BACKUP_UNREADABLE' };
@@ -482,7 +516,7 @@ function createHotBackup(db = getDb(), customBackupDir = null, { keepDaily = 14 
   db.exec(`VACUUM INTO '${backupFile.replace(/'/g, "''")}'`);
 
   const expectedHeadHash = currentAuditHead(db);
-  const verified = verifyBackupFile(backupFile, { expectedHeadHash });
+  const verified = verifyBackupFile(backupFile, { expectedHeadHash, liveDb: db });
   const rotation = pruneBackups({ keepDaily, backupDir });
 
   return {
@@ -493,6 +527,8 @@ function createHotBackup(db = getDb(), customBackupDir = null, { keepDaily = 14 
     integrity: verified.integrity,
     headHash: verified.headHash,
     matchesHead: verified.matchesHead,
+    chainContains: verified.chainContains,
+    auditEntriesBehind: verified.auditEntriesBehind,
     tables: verified.tables,
     players: verified.players,
     rotation,

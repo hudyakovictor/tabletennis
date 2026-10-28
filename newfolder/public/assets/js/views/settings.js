@@ -244,7 +244,8 @@ function backupsTab(backups, retention) {
             ? `<div class="row-between"><span class="muted">Последний снимок на момент загрузки</span>
                  <span class="badge ${latestVerified.ok ? 'badge-ok' : 'badge-danger'}">${latestVerified.ok ? 'пригоден' : 'непригоден'}</span></div>
                <div class="row-between"><span class="muted">integrity_check</span><strong>${esc(latestVerified.integrity || '—')}</strong></div>
-               <div class="row-between"><span class="muted">head_hash аудита</span><strong>${latestVerified.matchesHead === false ? 'расходится' : 'совпадает'}</strong></div>`
+               <div class="row-between"><span class="muted">head_hash в цепочке аудита</span>
+                 <strong>${latestVerified.chainContains === false ? 'НЕ найден' : latestVerified.auditEntriesBehind ? `да, отстаёт на ${num(latestVerified.auditEntriesBehind)}` : 'да, вершина'}</strong></div>`
             : `<div class="alert alert-warn">${icon('alert')} Проверка восстановления не выполнялась в этой сессии. «Проверить» открывает файл read-only — это единственный способ узнать, что из него можно поднять CRM.</div>`}
           <div class="alert alert-info">${icon('shield')} Полный регламент восстановления — <code>runbooks/rb-dr-backup-restore.md</code>.</div>
         </div>
@@ -398,13 +399,16 @@ function bindTab(container, ctx, data, zones) {
             <div><span class="mv">${esc(res.integrity || '—')}</span><span class="ml">integrity_check</span></div>
             <div><span class="mv">${num(res.tables || 0)}</span><span class="ml">таблиц</span></div>
             <div><span class="mv">${num(res.players || 0)}</span><span class="ml">игроков</span></div>
-            <div><span class="mv">${res.matchesHead ? 'OK' : '—'}</span><span class="ml">head_hash аудита</span></div>
+            <div><span class="mv">${res.chainContains === false ? 'нет' : 'да'}</span><span class="ml">head в цепочке</span></div>
           </div>
           <dl class="kv">
-            <dt>Ожидаемый head</dt><dd><code>${esc(String(res.expectedHeadHash || '—').slice(0, 24))}…</code></dd>
-            <dt>В снимке</dt><dd><code>${esc(String(res.headHash || '—').slice(0, 24))}…</code></dd>
+            <dt>Head снимка</dt><dd><code>${esc(String(res.headHash || '—').slice(0, 24))}…</code></dd>
+            <dt>Текущий head</dt><dd><code>${esc(String(res.expectedHeadHash || '—').slice(0, 24))}…</code></dd>
+            <dt>Записей аудита после снимка</dt><dd>${res.auditEntriesBehind === null || res.auditEntriesBehind === undefined ? '—' : num(res.auditEntriesBehind)}</dd>
           </dl>
-          ${res.ok ? '' : '<div class="alert alert-danger">Восстанавливать из этого файла нельзя — сделайте новый снимок.</div>'}
+          ${res.ok
+            ? `<div class="alert alert-info">${icon('info')} Снимок — корректный префикс журнала: он отстаёт на ${num(res.auditEntriesBehind || 0)} записей аудита, и это нормально — CRM пишет аудит постоянно. Восстановление потеряет только эти записи.</div>`
+            : `<div class="alert alert-danger">Восстанавливать из этого файла нельзя: ${esc(res.error === 'AUDIT_HEAD_NOT_IN_CHAIN' ? 'его head отсутствует в текущей цепочке аудита — это чужой или повреждённый снимок' : 'не пройдена проверка целостности')}.</div>`}
         </div>`,
       actions: [{ label: 'Закрыть', variant: 'btn-ghost' }],
     });
