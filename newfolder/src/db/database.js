@@ -155,6 +155,11 @@ const COLUMN_MIGRATIONS = Object.freeze([
   ['ai_zone_configs', 'api_key_fingerprint', 'TEXT'],
   ['ai_zone_configs', 'api_key_updated_at', 'TEXT'],
   ['ai_zone_configs', 'api_key_updated_by', 'TEXT'],
+  // Account lifecycle: an operator must be switchable off without deleting the row,
+  // otherwise the audit trail of their past actions loses its subject.
+  ['admin_users', 'is_active', 'INTEGER NOT NULL DEFAULT 1'],
+  ['admin_users', 'disabled_at', 'TEXT'],
+  ['admin_users', 'disabled_by', 'TEXT'],
 ]);
 
 function tableColumns(db, table) {

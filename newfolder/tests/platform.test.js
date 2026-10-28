@@ -416,6 +416,64 @@ describe('Platform & governance (v3)', () => {
     assert.equal(afterRow.api_key_encrypted, null);
   });
 
+  it('operator lifecycle: validation is atomic, disabling kills access and cannot lock everyone out', async () => {
+    const suffix = Date.now();
+    const email = `ops-${suffix}@topspin.arena`;
+    const created = await adminCall('POST', '/api/admin/users', {
+      email,
+      password: 'OperatorPass2026!',
+      role: 'ai_zone_ops',
+      name: 'Ops operator',
+    });
+    assert.equal(created.status, 201);
+    const id = created.json.id;
+
+    // A rejected password must not leave the role half-updated.
+    const rejected = await adminCall('PATCH', `/api/admin/users/${id}`, { role: 'ai_zone_lab', password: 'short' });
+    assert.equal(rejected.status, 400);
+    assert.equal(rejected.json.error, 'PASSWORD_TOO_SHORT');
+    const stillOps = db.prepare('SELECT role FROM admin_users WHERE id = ?').get(id);
+    assert.equal(stillOps.role, 'ai_zone_ops', 'role must not change when the request is rejected');
+
+    // The operator can log in, then the owner disables the account.
+    const operatorLogin = await loginAs(email, 'OperatorPass2026!');
+    assert.equal(operatorLogin.status, 200);
+    const operatorCsrf = operatorLogin.jar.get('topspin_csrf');
+
+    const disabled = await adminCall('PATCH', `/api/admin/users/${id}`, { isActive: false });
+    assert.equal(disabled.status, 200);
+    assert.equal(disabled.json.isActive, false);
+    assert.equal(disabled.json.sessionsRevoked, true);
+
+    // Existing session is revoked and a fresh login is refused with a clear code.
+    const staleSession = await rawRequest(baseUrl, 'GET', '/api/admin/auth/me', {
+      headers: { cookie: operatorLogin.jar.header() },
+    });
+    assert.equal(staleSession.status, 401);
+    const relogin = await loginAs(email, 'OperatorPass2026!');
+    assert.equal(relogin.status, 403);
+    assert.equal(relogin.json.error, 'ACCOUNT_DISABLED');
+
+    // Wrong password on a disabled account must not reveal the account state.
+    const wrongPassword = await loginAs(email, 'DefinitelyWrong2026!');
+    assert.equal(wrongPassword.status, 401);
+    assert.equal(wrongPassword.json.error, 'INVALID_CREDENTIALS');
+
+    // Re-enabling restores access.
+    const enabled = await adminCall('PATCH', `/api/admin/users/${id}`, { isActive: true });
+    assert.equal(enabled.status, 200);
+    assert.equal((await loginAs(email, 'OperatorPass2026!')).status, 200);
+
+    // Lockout guards: no self-disable, no disabling the last active administrator.
+    const me = await adminCall('GET', '/api/admin/auth/me');
+    const self = await adminCall('PATCH', `/api/admin/users/${me.json.user.id}`, { isActive: false });
+    assert.equal(self.status, 409);
+    assert.equal(self.json.error, 'CANNOT_DISABLE_SELF');
+    assert.ok(operatorCsrf, 'csrf token should have been issued to the operator');
+
+    db.prepare('DELETE FROM admin_users WHERE id = ?').run(id);
+  });
+
   it('post-mortems: an incident is required, validation happens before the insert', async () => {
     const missing = await adminCall('POST', '/api/admin/postmortems', { summary: 'Разбор без инцидента' });
     assert.equal(missing.status, 400);

@@ -191,6 +191,12 @@ function usersTab(users, roles) {
           columns: [
             { label: 'Пользователь', render: (r) => `<div class="list-title">${esc(r.email || r.username)}</div><div class="list-sub">${esc(r.name || r.display_name || '—')}</div>` },
             { label: 'Роль', render: (r) => `<span class="badge badge-brand">${esc(r.role)}</span>` },
+            {
+              label: 'Доступ',
+              render: (r) => (Number(r.is_active ?? 1) === 1
+                ? '<span class="badge badge-ok">активен</span>'
+                : `<span class="badge badge-danger">отключён</span> <span class="dim">${esc(r.disabled_at ? timeAgo(r.disabled_at) : '')}</span>`),
+            },
             { label: 'Прав', align: 'right', render: (r) => num((roles.find((x) => x.id === r.role)?.permissions || []).length) },
             { label: 'Последний вход', align: 'right', render: (r) => `<span class="dim">${r.last_login_at ? esc(timeAgo(r.last_login_at)) : 'никогда'}</span>` },
             { label: 'Создан', align: 'right', render: (r) => `<span class="dim">${esc(dateTime(r.created_at))}</span>` },
@@ -344,9 +350,10 @@ function bindTab(container, ctx, data, zones) {
 
 function openUserDialog(ctx, user = null, roles = []) {
   const roleOptions = roles.length ? roles : [{ id: 'admin', name: 'Администратор' }];
+  const active = user ? Number(user.is_active ?? 1) === 1 : true;
   openDrawer({
     title: user ? `Пользователь ${user.email || user.username}` : 'Новый пользователь',
-    eyebrow: user ? user.role : 'наименьшие привилегии',
+    eyebrow: user ? `${user.role}${active ? '' : ' · доступ отключён'}` : 'наименьшие привилегии',
     body: `<form class="stack" id="user-form">
         <label class="field"><span class="field-label">Email</span><input name="email" type="email" required value="${esc(user?.email || user?.username || '')}" ${user ? 'readonly' : ''} /></label>
         <label class="field"><span class="field-label">Имя</span><input name="name" value="${esc(user?.name || user?.display_name || '')}" /></label>
@@ -354,7 +361,9 @@ function openUserDialog(ctx, user = null, roles = []) {
           <select name="role">${roleOptions.map((r) => `<option value="${r.id}" ${user?.role === r.id ? 'selected' : ''}>${esc(r.name || r.id)}</option>`).join('')}</select></label>
         <label class="field"><span class="field-label">${user ? 'Новый пароль (необязательно)' : 'Пароль'}</span>
           <input name="password" type="password" minlength="12" ${user ? '' : 'required'} />
-          <span class="field-hint">Минимум 12 символов; хэш — scrypt с солью и timing-safe сравнением.</span></label>
+          <span class="field-hint">Минимум 12 символов; хэш — scrypt с солью и timing-safe сравнением. Смена пароля отзывает все сессии.</span></label>
+        ${user ? `<label class="row" style="gap:8px"><input type="checkbox" id="user-disabled" ${active ? '' : 'checked'} />
+            <span class="dim">Доступ отключён: вход и активные сессии блокируются немедленно</span></label>` : ''}
       </form>`,
     actions: [
       { label: 'Отмена', variant: 'btn-ghost' },
@@ -366,9 +375,10 @@ function openUserDialog(ctx, user = null, roles = []) {
           const fd = new FormData(qs('#user-form'));
           const payload = { name: fd.get('name'), role: fd.get('role') };
           if (fd.get('password')) payload.password = fd.get('password');
+          if (user) payload.isActive = !qs('#user-disabled')?.checked;
           try {
             if (user) await api.patch(`/api/admin/users/${user.id}`, payload);
-            else await api.post('/api/admin/users', { email: fd.get('email'), ...payload }, { idempotencyKey: `user-${fd.get('email')}` });
+            else await api.post('/api/admin/users', { ...payload, email: fd.get('email'), username: fd.get('email') });
             toast(user ? 'Пользователь обновлён' : 'Пользователь создан', { type: 'success' });
             close();
             ctx.refresh();

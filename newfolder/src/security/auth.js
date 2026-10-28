@@ -146,6 +146,10 @@ function authenticateAdminRequest(req, db = null, { allowLegacy = CONFIG.env !==
   if (!payload || payload.typ !== 'admin') return null;
 
   if (db) {
+    // A disabled operator loses access immediately, including via a bearer token
+    // that has not expired yet — deactivation must not wait for the 12h TTL.
+    const account = db.prepare('SELECT is_active FROM admin_users WHERE id = ?').get(payload.sub);
+    if (account && Number(account.is_active) === 0) return null;
     if (payload.sid) {
       const session = getActiveSession(db, payload.sid);
       if (!session) return null;

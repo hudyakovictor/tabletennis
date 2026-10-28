@@ -13,6 +13,9 @@ CREATE TABLE IF NOT EXISTS admin_users (
   role TEXT NOT NULL DEFAULT 'admin',
   display_name TEXT NOT NULL,
   last_login_at TEXT,
+  is_active INTEGER NOT NULL DEFAULT 1,
+  disabled_at TEXT,
+  disabled_by TEXT,
   created_at TEXT NOT NULL
 );
 
