@@ -72,6 +72,10 @@ const Progress = {
     take('level', 'level'); take('rating', 'rating', true); take('wins', 'wins', true);
     take('losses', 'losses', true); take('streak', 'streak', true); take('bestRally', 'bestRally');
     take('coins', 'coins'); take('gems', 'gems');
+    /* История рейтинга живёт только на клиенте, сервер шлёт одно число. Когда
+     * очередь пуста — это число и есть сегодняшняя точка графика: иначе кривая
+     * в профиле расходится с подписью над ней. */
+    if (exact && Number.isFinite(Number(p.rating))) ratingCorrect(Number(p.rating));
     save();
     /* Открытый экран показывал старые числа — перерисовываем те, что подписаны
      * на серверные данные (`live` в Router.def). Пачка ответов из очереди даёт

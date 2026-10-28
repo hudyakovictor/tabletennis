@@ -11,9 +11,11 @@ const path = require('node:path');
 const vm = require('node:vm');
 
 const source = fs.readFileSync(path.join(__dirname, '../src/data/leagues.js'), 'utf8');
-const context = vm.createContext({ t: (k) => k });
-vm.runInContext(source + '\n;globalThis.api = { ratingDelta, ELO_K, ELO_MAX, ELO_UNKNOWN };', context);
-const { ratingDelta, ELO_K, ELO_MAX, ELO_UNKNOWN } = context.api;
+/* `S` и `save` — те же имена, что в бандле: история рейтинга живёт в сейве. */
+const S = { hist: [] };
+const context = vm.createContext({ t: (k) => k, S, save: () => 0 });
+vm.runInContext(source + '\n;globalThis.api = { ratingDelta, ELO_K, ELO_MAX, ELO_UNKNOWN, ratingNote, ratingCorrect, ratingSeries, ratingHasHistory, histDay, HIST_DAYS };', context);
+const { ratingDelta, ELO_K, ELO_MAX, ELO_UNKNOWN, ratingNote, ratingCorrect, ratingSeries, ratingHasHistory, histDay, HIST_DAYS } = context.api;
 
 const serverSource = fs.readFileSync(
   path.join(__dirname, '../../newfolder/src/routes/clientRoutes.js'),
@@ -58,4 +60,56 @@ test('ничья по силе не даёт целого скачка боль�
     const d = Math.abs(ratingDelta(r, r, true));
     assert.ok(d <= 16, `равный соперник: ${d} при рейтинге ${r}`);
   }
+});
+
+/* График в профиле рисуется по истории из сейва. Раньше он был синусоидой
+ * с подписью «+231»: тесты ниже держат серию честной — одна точка на день,
+ * без дней, которых не было. */
+const DAY = 864e5;
+const today = histDay(Date.now());
+
+/* Массивы из vm — чужой realm: перед сравнением приводим к своим. */
+const list = (a) => Array.from(a);
+
+test('без истории графика нет — вместо кривой пустое состояние', () => {
+  S.hist = [];
+  assert.deepEqual(list(ratingSeries()), []);
+  assert.equal(ratingHasHistory(), false);
+});
+
+test('один матч — две точки за сегодня: рейтинг до и после', () => {
+  S.hist = [];
+  ratingNote(1032, 1000);
+  assert.deepEqual(list(ratingSeries().map((p) => p.r)), [1000, 1032], 'отправная точка — рейтинг до матча');
+  assert.equal(ratingHasHistory(), true, 'есть от чего строить кривую');
+  ratingNote(1064, 1032);
+  assert.deepEqual(list(ratingSeries().map((p) => p.r)), [1000, 1032, 1064], 'матчи одного дня — история за сегодня');
+});
+
+test('серия по дням: пустые дни тянут предыдущее значение', () => {
+  S.hist = [{ t: today - 2 * DAY + 36e5, r: 1000 }, { t: today - DAY + 36e5, r: 1016 }];
+  ratingNote(1032, 1016);
+  const series = ratingSeries(30);
+  assert.equal(series.length, 3, 'три известных дня — три точки');
+  assert.deepEqual(list(series.map((p) => p.r)), [1000, 1016, 1032]);
+  assert.equal(series[2].t, today, 'последняя точка — сегодня');
+  assert.ok(series.every((p, i) => i === 0 || p.t > series[i - 1].t), 'дни по возрастанию');
+});
+
+test('точки старше 30 дней не тянутся дальше, первая точка дня — рейтинг до матча', () => {
+  S.hist = [{ t: today - 40 * DAY, r: 900 }, { t: today - 39 * DAY, r: 950 }];
+  ratingNote(1000, 980);
+  assert.ok(S.hist.every((p) => p.t >= today - HIST_DAYS * DAY), 'старше окна — выброшено');
+  assert.deepEqual(list(S.hist.map((p) => p.r)), [980, 1000], 'первая точка дня — рейтинг ДО матча');
+  assert.deepEqual(list(ratingSeries().map((p) => p.r)), [980, 1000]);
+});
+
+test('ответ сервера правит сегодняшнюю точку, а не добавляет новую', () => {
+  S.hist = [{ t: today - DAY + 36e5, r: 1000 }, { t: today + 1, r: 1048 }];
+  ratingCorrect(1040);
+  assert.equal(S.hist.length, 2, 'одна точка на день');
+  assert.equal(S.hist[1].r, 1040, 'сегодняшняя точка стала серверной');
+  assert.equal(ratingSeries()[1].r, 1040, 'график показывает серверное число');
+  ratingCorrect('не число');
+  assert.equal(S.hist.length, 2, 'мусор с сервера историю не трогает');
 });

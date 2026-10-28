@@ -34,3 +34,76 @@ const ratingDelta = (rating, opponentRating, win) => {
   const expected = 1 / (1 + 10 ** ((opp - mine) / 400));
   return Math.max(-ELO_MAX, Math.min(ELO_MAX, Math.round(ELO_K * ((win ? 1 : 0) - expected))));
 };
+
+/* ---------- история рейтинга (график в профиле) ---------- */
+/* График «Рейтинг · 30 дней» рисовал синусоиду и подписывал её «+231»: число
+ * бралось из ниоткуда. Теперь в сейве лежат настоящие точки [{t, r}] — по одной
+ * на матч, а серия по дням собирается из них. Нет истории — график честно
+ * говорит, что её нет, а не рисует красивую кривую. */
+const HIST_DAYS = 30, HIST_CAP = 300;
+/* Начало суток: график дневной, поэтому точка — это «рейтинг на конец дня». */
+const histDay = (ts) => { const d = new Date(ts); d.setHours(0, 0, 0, 0); return d.getTime(); };
+const histClean = () => (Array.isArray(S.hist) ? S.hist : [])
+  .filter((p) => p && Number.isFinite(Number(p.t)) && Number.isFinite(Number(p.r)))
+  .map((p) => ({ t: Number(p.t), r: Number(p.r) }))
+  .sort((a, b) => a.t - b.t);
+const histTrim = () => {
+  const from = histDay(Date.now()) - HIST_DAYS * 864e5;
+  S.hist = histClean().filter((p) => p.t >= from).slice(-HIST_CAP);
+};
+/* Матч закончился: добавляем точку. `from` — рейтинг ДО матча: первая точка
+ * дня даёт отправную точку, иначе «+N» считался бы от уже начисленного. */
+const ratingNote = (rating, from) => {
+  const v = Math.round(Number(rating));
+  if (!Number.isFinite(v)) return;
+  const h = histClean();
+  const today = histDay(Date.now());
+  const had = h.some((p) => histDay(p.t) === today);
+  if (!had && Number.isFinite(Number(from))) h.push({ t: Date.now() - 1, r: Math.round(Number(from)) });
+  const last = h[h.length - 1];
+  if (last && last.r !== v) h.push({ t: Date.now(), r: v });
+  else if (!had) h.push({ t: Date.now(), r: v });
+  S.hist = h;
+  histTrim();
+  save();
+};
+/* Сервер прислал рейтинг: он главнее. Сегодняшняя точка переписывается,
+ * а не дублируется — иначе каждый синк плодил бы точку в истории. */
+const ratingCorrect = (rating) => {
+  const v = Math.round(Number(rating));
+  if (!Number.isFinite(v)) return;
+  const h = histClean();
+  const today = histDay(Date.now());
+  const last = h[h.length - 1];
+  if (last && histDay(last.t) === today) last.r = v;
+  else h.push({ t: Date.now(), r: v });
+  S.hist = h;
+  histTrim();
+  save();
+};
+/* Серия для графика: по точке на день, пустые дни тянут предыдущее значение.
+ * Дни до первой записи не показываем — их не было, придумывать нечего. */
+const ratingSeries = (days = HIST_DAYS) => {
+  const h = histClean();
+  if (!h.length) return [];
+  const first = histDay(h[0].t), out = [];
+  const d = new Date(histDay(Date.now()));
+  d.setDate(d.getDate() - (days - 1));
+  for (let k = 0; k < days; k++) {
+    const t = d.getTime();
+    if (t >= first) {
+      let r = h[0].r;
+      for (const p of h) { if (histDay(p.t) <= t) r = p.r; else break; }
+      out.push({ t, r });
+    }
+    d.setDate(d.getDate() + 1);
+  }
+  /* Всё известное — сегодняшние матчи: показываем их как есть, а не одну точку. */
+  if (out.length < 2) {
+    const today = histDay(Date.now());
+    const todayPts = h.filter((p) => histDay(p.t) === today);
+    if (todayPts.length >= 2) return todayPts;
+  }
+  return out;
+};
+const ratingHasHistory = () => ratingSeries().length >= 2;

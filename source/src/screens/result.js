@@ -145,6 +145,9 @@ Router.def('result', {
       /* The ladder has a floor: a long losing run used to drive the rating
        * negative, and the league badge then showed a number no league owns. */
       S.rating = Math.max(0, S.rating + this.delta);
+      /* Точка в историю рейтинга: профиль рисует график по ней, а не по
+       * синусоиде. Второй аргумент — рейтинг до матча, отправная точка дня. */
+      ratingNote(S.rating, this.r0);
       if (d.win) { S.wins++; S.streak++; } else { S.losses++; S.streak = 0; }
       /* форма (aiTrend в battle_common.js) — последние 8 результатов, победа = 1:
        * по ней бот понимает тренд МЕЖДУ матчами, а не внутри розыгрыша */
