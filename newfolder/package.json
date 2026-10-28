@@ -1,0 +1,19 @@
+{
+  "name": "topspin-arena-crm",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "TOPSPIN ARENA — admin CRM: telemetry, 5 AI zones, director chat, fraud, liveops, Telegram bot",
+  "engines": { "node": ">=22.5.0" },
+  "scripts": {
+    "start": "node server/index.js",
+    "dev": "node --watch server/index.js",
+    "test": "node --test server/tests/*.test.js",
+    "seed": "node tools/seed-cli.js",
+    "smoke": "node tools/smoke.js",
+    "ingest:example": "node tools/ingest-example.js",
+    "db:path": "node -e \"console.log(require('node:path').resolve(process.env.CRM_DB_PATH||'data/crm.sqlite'))\""
+  },
+  "dependencies": {},
+  "devDependencies": {}
+}
