@@ -21,6 +21,8 @@ const { getDb, openDatabase, runRetentionCleanup } = require('./db/database');
 const { seedDatabaseIfEmpty } = require('./db/seed');
 const { verifySessionAffinityToken } = require('./security/auth');
 const { setActiveWsClientsCount, recordHttpRequestMetric } = require('./services/observability');
+const { startScheduler } = require('./services/scheduler');
+const { ensureBootstrapAdmin } = require('./security/auth');
 const { handleAdminRoute } = require('./routes/adminRoutes');
 const { handleClientRoute } = require('./routes/clientRoutes');
 
@@ -72,7 +74,9 @@ function buildSecurityHeaders(req, pathname) {
         headers['Access-Control-Allow-Origin'] = origin;
         headers['Access-Control-Allow-Credentials'] = 'true';
         headers['Access-Control-Allow-Methods'] = 'GET, POST, PUT, PATCH, DELETE, OPTIONS';
-        headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization';
+        headers['Access-Control-Allow-Headers'] =
+          'Content-Type, Authorization, X-CSRF-Token, Idempotency-Key, Last-Event-ID';
+        headers['Access-Control-Expose-Headers'] = 'Idempotent-Replayed, Retry-After';
         headers['Vary'] = 'Origin';
       }
     } else if (pathname.startsWith('/api/client/v1/')) {
@@ -178,7 +182,7 @@ function decodeWsFrames(buffer) {
   return { frames, remaining: buffer.subarray(offset) };
 }
 
-function attachClientWebSocketGateway(server) {
+function attachClientWebSocketGateway(server, db) {
   const wsSockets = new Set();
   server.closeWsSockets = () => {
     for (const s of wsSockets) {
@@ -213,6 +217,32 @@ function attachClientWebSocketGateway(server) {
 
     const affinityToken = urlObj.searchParams.get('affinity');
     const affinity = affinityToken ? verifySessionAffinityToken(affinityToken) : null;
+    const ticket = urlObj.searchParams.get('ticket');
+
+    // Admission control: the socket is never open to anonymous peers. Either a
+    // single-use 60s ticket (preferred; never leaks the long player token into a URL
+    // captured by proxies) or a valid signed session-affinity token is required.
+    let ticketInfo = null;
+    if (ticket) {
+      const row = db
+        ? db
+            .prepare('SELECT * FROM ws_tickets WHERE id = ? AND used_at IS NULL AND expires_at > ?')
+            .get(ticket, new Date().toISOString())
+        : null;
+      if (row) {
+        ticketInfo = row;
+        try {
+          db.prepare('UPDATE ws_tickets SET used_at = ? WHERE id = ?').run(new Date().toISOString(), ticket);
+        } catch {
+          /* ignore */
+        }
+      }
+    }
+    if (!ticketInfo && !affinity) {
+      socket.write('HTTP/1.1 401 Unauthorized\r\nConnection: close\r\n\r\n');
+      socket.destroy();
+      return;
+    }
 
     socket.write(
       [
@@ -232,10 +262,14 @@ function attachClientWebSocketGateway(server) {
     const welcomeJson = JSON.stringify({
       type: 'welcome',
       serverTs: Date.now(),
-      reconnectedSessionId: affinity?.sid || null,
+      reconnectedSessionId: affinity?.sid || ticketInfo?.session_id || null,
+      sessionId: affinity?.sid || ticketInfo?.session_id || null,
+      playerId: affinity?.sub || ticketInfo?.player_id || null,
+      region: affinity?.region || ticketInfo?.region || CONFIG.primaryRegion,
       nodeId: affinity?.nodeId || 'ru-msk-tma-01',
       keepAliveSec: 25,
       warnThresholdMs: PING_THRESHOLDS.warnClientThresholdMs,
+      ticketValidated: Boolean(ticketInfo),
     });
     socket.write(encodeWsFrame(0x01, Buffer.from(welcomeJson, 'utf8')));
 
@@ -375,7 +409,8 @@ function createCrmApp(customDb = null) {
 
       if (pathname.startsWith('/api/admin/')) {
         const body = await readJsonBody(req);
-        const result = await handleAdminRoute(db, req, pathname, urlObj, body, clientIp);
+        const result = await handleAdminRoute(db, req, pathname, urlObj, body, clientIp, res);
+        if (result && result.handled) return;
         if (!result) {
           sendResponse(404, { error: 'NOT_FOUND', path: pathname });
           return;
@@ -419,12 +454,36 @@ function createCrmApp(customDb = null) {
       });
       res.end(content);
     } catch (err) {
-      const code = err.statusCode || 500;
-      sendResponse(code, { error: err.message || 'Internal Server Error' });
+      // Error boundary. A 4xx raised intentionally by a handler keeps its message
+      // (it is written for the operator); an unexpected 5xx must never leak SQLite
+      // text, stack traces or file paths — the client gets a correlation id and the
+      // detail goes to the log and to the error metric instead.
+      const status = Number(err.statusCode) || 500;
+      if (status >= 500) {
+        const requestId = crypto.randomUUID();
+        console.error(`[crm] ${requestId} ${req.method} ${pathname} → ${err.stack || err.message}`);
+        try {
+          recordHttpRequestMetric({
+            method: req.method,
+            pathname,
+            statusCode: status,
+            durationMs: 0,
+          });
+        } catch {
+          /* metrics must never mask the original failure */
+        }
+        sendResponse(status, {
+          error: err.code || 'INTERNAL_ERROR',
+          message: 'Внутренняя ошибка сервера. Сообщите идентификатор запроса поддержке.',
+          requestId,
+        });
+        return;
+      }
+      sendResponse(status, { error: err.code || 'REQUEST_FAILED', message: err.message || 'Bad Request' });
     }
   });
 
-  attachClientWebSocketGateway(server);
+  attachClientWebSocketGateway(server, db);
 
   return { server, db };
 }
@@ -432,9 +491,12 @@ function createCrmApp(customDb = null) {
 async function startMainServer() {
   const db = getDb();
   await seedDatabaseIfEmpty(db, false);
+  ensureBootstrapAdmin(db);
   runRetentionCleanup(db);
 
   const { server } = createCrmApp(db);
+  const stopScheduler = process.env.CRM_SCHEDULER_DISABLED === '1' ? () => {} : startScheduler(db);
+  server.on('close', stopScheduler);
 
   const timer = setInterval(() => {
     try {
@@ -447,7 +509,7 @@ async function startMainServer() {
 
   server.listen(CONFIG.port, CONFIG.host, () => {
     console.log(
-      `[TOPSPIN ARENA Admin CRM v2] Listening on http://${CONFIG.host}:${CONFIG.port} (Primary Region: ${CONFIG.primaryRegion}, WS: /ws/client)`
+      `[TOPSPIN ARENA Admin CRM v3] Listening on http://${CONFIG.host}:${CONFIG.port} (Region: ${CONFIG.primaryRegion}, WS: /ws/client, SSE: /api/admin/stream)`
     );
   });
   return server;

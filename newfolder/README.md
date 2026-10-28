@@ -1,37 +1,82 @@
-# TOPSPIN ARENA — Admin CRM & Isolated AI Analytics Platform (`v2.0`)
+# TOPSPIN ARENA — Admin CRM & Isolated AI Analytics Platform (`v3.0`)
 
-Полная реализация административной панели, 5 изолированных ИИ-зон, слоя Директора, SRE-наблюдаемости, LiveOps, антифрода, юридического контура 152-ФЗ/GDPR и низколатентного шлюза для будущего игрового клиента строго по всем 15 документам ТЗ (`01..10, 13..17`).
+Административная панель настольного тенниса: 5 изолированных ИИ-зон, слой Директора, SRE-наблюдаемость, LiveOps, антифрод, правовой контур 152-ФЗ/GDPR и низколатентный шлюз для будущего игрового клиента.
+Реализация соответствует 15 документам ТЗ (`01..10, 13..17`) и дополнена слоем платформы v3: серверные сессии, CSRF, идемпотентность, SSE, планировщик, уведомления, SLO, silences, карточка игрока 360°, экспорт CSV.
 
-> **Важно:** Демо-клиент в `source/` и `play/` намеренно не затрагивался. Все серверные API и WebSocket-шлюз `/ws/client` полностью готовы к подключению будущего переписанного с нуля клиента по инструкции [`19-client-integration-guide.md`](./19-client-integration-guide.md).
+> **Демо-клиент в `source/` и `play/` намеренно не изменялся.** Он будет переписан с нуля; серверная часть уже готова к подключению — контракт описан в [`19-client-integration-guide.md`](./19-client-integration-guide.md) (`v3.0`).
 
-## Структура каталога `newfolder/`
-
-- `01-architecture.md` .. `10-checklist.md`, `13-telegram-miniapp-latency.md` .. `17-maintenance-push-news-support.md` — 15 исходных документов ТЗ
-- `18-audit-15-factors-95.md` — **Инженерный аудит реализации по 15 факторам ТЗ (`96.9 / 100`, каждый фактор `>= 96/100`)**
-- `19-client-integration-guide.md` — **Полная спецификация подключения будущего игрового клиента (REST + RFC 6455 WebSocket `/ws/client`)**
-- `20-admin-crm-manual.md` — **Руководство владельца и оператора Admin CRM**
-- `sql/sqlite-schema.sql` — Встроенная схема SQLite (WAL) с обезличенными SQL Views (`v_balance_players`, `v_fraud_players`, `v_market_players`)
-- `sql/postgres-schema.sql` — 8-схемная миграция PostgreSQL с ролевой изоляцией (`REVOKE ALL ON SCHEMA players` для всех ИИ-ролей)
-- `src/`
-  - `config.js` — 35 параметров `MATCH_RULES_V4`, 10 `PRESS_REJECTION_REASONS`, 6 зон стола, 9 региональных узлов TMA, пороги пинга, возрастные фильтры и 8 ролей RBAC
-  - `db/{database,isolation,seed,seed-cli,retention-cli}.js` — Основная БД + отдельная архивная БД `director-archive.sqlite`, горячий бэкап `VACUUM INTO` и шлюзы строгой изоляции
-  - `security/{auth,validator,promptGuard,jsonSchema,audit}.js` — `scrypt`, защита от брутфорса, 6-точечный валидатор физики и свежести свайпа, защита от prompt injection, JSON Schema карантин и неизменяемый аудит
-  - `ai/prompts/{ops,fraud,balance,market,lab,director}.js` — Изолированные промпты каждой зоны и 4-блочный шаблон Директора
-  - `ai/{providers,director}.js` & `ai/zones/{opsZone,fraudZone,balanceZone,marketZone,labZone}.js` — Квоты токенов, кэш промптов, Batch `-50%`, цепочка резервных провайдеров и 5 аналитических зон
-  - `services/{observability,telegramBot,liveops,readiness}.js` — 4 золотых сигнала SRE, `2σ` аномалии, Read-Only Telegram-бот с `Ack`, LiveOps, 152-ФЗ/GDPR и 23 проверки готовности
-  - `routes/{adminRoutes,clientRoutes}.js` & `server.js` — HTTP API + нативный RFC 6455 WebSocket `/ws/client`
-- `runbooks/` — 5 операционных регламентов (включая `rb-dr-backup-restore.md`)
-- `public/` — Веб-интерфейс Admin CRM без внешних CDN и без inline-скриптов (`CSP: script-src 'self'`)
-- `tests/crm.test.js` — Полный интеграционный набор проверок по всем 15 факторам ТЗ (`8/8 PASS`)
-
-## Команды запуска и проверки
+## Быстрый старт
 
 ```bash
 cd newfolder
-npm run seed:reset   # Инициализация / сброс демо-данных, сводок 5 ИИ-зон и архивной БД
-npm run retention    # Запуск очистки 90 / 180 / 365 дней и архивации чата >72ч
-npm test             # Прогон всех интеграционных тестов по 15 факторам ТЗ
-npm start            # Запуск сервера Admin CRM на 0.0.0.0:4100
+npm run seed:reset     # демо-данные: 120 игроков, 268 сессий, 1818 событий ввода, 5 зон, тикеты, фрод-кейсы
+npm start              # http://0.0.0.0:4100
 ```
 
-Вход в веб-панель: `owner@topspin.arena` / `TopspinAdmin2026!`.
+Вход: `owner@topspin.arena` / `TopspinAdmin2026!` (bootstrap-админ, роль `admin`).
+
+Переменные окружения — в `.env.example`. Ключевое:
+
+| Переменная | Назначение |
+|---|---|
+| `PORT`, `HOST` | адрес сервера (по умолчанию `4100`, `0.0.0.0`) |
+| `ADMIN_ALLOWED_ORIGINS` | список origin’ов CRM через запятую; обязателен за reverse-proxy |
+| `CRM_DB_PATH`, `CRM_ARCHIVE_DB_PATH` | основная и архивная БД (чат директора >72 ч) |
+| `CRM_SCHEDULER_DISABLED=1` | не запускать планировщик (используется тестами) |
+| `BOOTSTRAP_ADMIN_EMAIL`, `BOOTSTRAP_ADMIN_PASSWORD` | первичный владелец |
+| `ZONE_*_DAILY_TOKEN_LIMIT`, `ZONE_*_API_KEY` | лимиты и ключи провайдеров по зонам |
+
+## Проверки качества
+
+```bash
+npm test        # 40/40: 8 сценарных тестов ТЗ + 18 платформенных (сессии, CSRF, RBAC, SLA, SSE, ключи зон, разборы) + 6 контрактных + 8 S1 (retention dry-run, бэкапы, DSAR, эскалация планировщика)
+npm run test:ui # 40/40: jsdom исполняет настоящие ES-модули против живого сервера — 12 вкладок, deep-links, drawers, a11y-аудит DOM, продление сессии
+npm run test:all
+```
+
+`npm test` работает без интернета и без зависимостей (`node:test`). `npm run test:ui` требует `jsdom` (devDependency) — это единственный dev-пакет.
+
+## Что внутри
+
+### Сервер (12 000 строк, 0 runtime-зависимостей, Node ≥ 22.5)
+
+| Модуль | Содержимое |
+|---|---|
+| `src/config.js` | 35 полей `MATCH_RULES_V4`, 10 кодов отказа, 6 зон стола, 9 узлов TMA, пороги пинга, возрастные гейты, 8 ролей, лимиты и ретеншн |
+| `src/server.js` | HTTP-сервер, CSP без inline-скриптов, origin-guard, маршрутизация admin/client, нативный WebSocket `/ws/client` (тикет/affinity, keep-alive 25 с) |
+| `src/routes/adminRoutes.js` | 2 126 строк доменных маршрутов: auth, зоны, HITL, директор, фрод, игроки, LiveOps, аудит |
+| `src/routes/platformRoutes.js` | governance, settings, diagnostics, операторы CRM, silences, SLO |
+| `src/routes/clientRoutes.js` | публичный контракт `/api/client/v1/*` (12 маршрутов, включая приём запросов субъекта ПДн) |
+| `src/routes/query.js` | единая пагинация, whitelisted сортировка, CSV с защитой от формул |
+| `tests/contract.test.js` | статический контракт UI ↔ API ↔ документация: права, маршруты, `data-*`, DOM-id, вкладки, клиентские эндпоинты из док. 19 |
+| `src/security/` | scrypt + JWT, реестр сессий, CSRF double-submit, 52 гранулярных права, 6-точечный валидатор физики, hash-chain аудит, AES-256-GCM хранилище ключей провайдеров |
+| `src/db/` | SQLite (WAL, 45 таблиц), forward-only миграции, архивация чата, seed, retention 90/180/365 с dry-run, бэкап `VACUUM INTO` + read-only проверка + ротация |
+| `src/ai/` | 5 изолированных зон + директор, бюджеты токенов, кэш промптов, batch −50 %, JSON Schema и карантин |
+| `src/services/` | event bus + SSE, уведомления с дедупликацией, планировщик (14 задач, эскалация падений в инцидент), LiveOps/SLA, наблюдаемость, readiness, Telegram read-only, DSAR-очередь (`privacy.js`) |
+| `tests/s1-ops.test.js` | retention «dry-run = реальные удаления», целостность и ротация бэкапов, жизненный цикл DSAR, эскалация планировщика |
+
+### Интерфейс (6 600 строк, без CDN и фреймворков)
+
+`public/index.html` — разметка без inline-скриптов; `public/assets/app.js` — bootstrap с pre-paint темы и панелью фатальной ошибки; `public/assets/js/core/*` — API-клиент (cookie + CSRF + идемпотентность), store, UI-компоненты, графики (sparkline, donut, теплокарта на canvas), роутер; `public/assets/js/views/*` — 12 экранов; `public/assets/styles.css` — дизайн-система v3 (тёмная и светлая темы, токены, адаптив, `prefers-reduced-motion`, печать).
+
+Экраны: Обзор, Директор, Ops, Fraud, Balance, Market, Lab, Наблюдаемость, LiveOps, Игроки, Управление, Настройки.
+Возможности: живой поток SSE, ⌘/Ctrl+K палитра по всем объектам, экспорт CSV, уведомления с переходом к объекту, карточки игрока/тикета/фрод-кейса, управление сессиями и планировщиком, тихое продление сессии с баннером «истекает через N мин», вкладки «Право и приватность» (очередь DSAR с SLA) и «Бэкапы и хранение» (проверка восстановимости и dry-run политики).
+
+## Документация
+
+| Документ | Содержание |
+|---|---|
+| `01`–`08`, `10`, `13`–`17` | исходное ТЗ: архитектура, зоны, директор, безопасность, право, схема, провайдеры, план, чек-лист, TMA-латентность, SRE, LiveOps, договоры, поддержка |
+| `09-api-contracts.md` | контракты API (дополнено v3) |
+| `18-audit-15-factors-95.md` | инженерный аудит по 15 факторам ТЗ |
+| `19-client-integration-guide.md` | **v3.0** — полный контракт клиента: REST, WS, ошибки, лимиты, чек-лист миграции |
+| `20-admin-crm-manual.md` | руководство владельца и оператора |
+| `21-code-review-30-analyses.ru.md` | **30 разборов кода и документов**: находки, решения, приоритеты |
+| `22-roadmap.ru.md` | **план доработок**: фазы A–D, объёмы, критерии готовности, риски |
+| `runbooks/` | операционные регламенты (инциденты, DR-восстановление, деградация провайдера) |
+
+## Границы ответственности
+
+* ИИ **только предлагает**; баны, экономика, публикация правил, пуши и уведомления игрокам — исключительно действия человека с записью в аудит.
+* Игровой клиент не имеет доступа к `/api/admin/*`, ключам провайдеров, сводкам зон; ИИ не упоминается в клиенте.
+* PII не покидает регион резидентности; удаление по 152-ФЗ необратимо и сохраняет платёжные записи без привязки к личности.

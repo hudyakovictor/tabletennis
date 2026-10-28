@@ -5,7 +5,7 @@
  */
 
 const crypto = require('node:crypto');
-const { CONFIG, ROLES, MATCH_RULES_V4, REGION_ENDPOINTS, PING_THRESHOLDS } = require('../config');
+const { CONFIG, ROLES, MATCH_RULES_V4, REGION_ENDPOINTS, PING_THRESHOLDS, RETENTION_DAYS } = require('../config');
 const { runRetentionCleanup } = require('../db/database');
 const { ZONE_ALLOWED_TABLES, DIRECTOR_ALLOWED_TABLES } = require('../db/isolation');
 const {
@@ -15,12 +15,39 @@ const {
   hasPermission,
   buildSessionCookie,
   clearSessionCookie,
+  buildCsrfCookie,
+  clearCsrfCookie,
+  createAdminSession,
+  revokeAdminSession,
+  listAdminSessions,
+  verifyCsrf,
+  parseCookies,
   checkLoginAttemptLimit,
   recordFailedLoginAttempt,
   clearLoginAttempts,
 } = require('../security/auth');
-const { writeAuditLog, hashIdentifier } = require('../security/audit');
+const { writeAuditLog, hashIdentifier, verifyAuditChain } = require('../security/audit');
+const {
+  PERMISSIONS: P,
+  hasPermission: roleHas,
+  canReadZone,
+  canRunZone,
+  deny,
+  permissionsForRole,
+  navigationForRole,
+} = require('../security/permissions');
 const { checkRateLimit } = require('../security/validator');
+const { publish, subscribe, replaySince, stats: busStats } = require('../services/eventBus');
+const {
+  notify,
+  listNotifications,
+  unreadCount,
+  markRead,
+  markAllRead,
+} = require('../services/notifications');
+const { schedulerStatus, runJob, setJobEnabled, ensureJobs } = require('../services/scheduler');
+const idempotency = require('../services/idempotency');
+const { parseListQuery, listResponse, countTotal, parseJsonColumn, toCsv, csvResult } = require('./query');
 const { ZONE_SUMMARY_JSON_SCHEMA, DIRECTOR_RESPONSE_JSON_SCHEMA } = require('../security/jsonSchema');
 
 const { listAllZonesStatus, updateZoneConfig } = require('../ai/providers');
@@ -76,8 +103,10 @@ const {
   createLiveopsEvent,
 } = require('../services/liveops');
 const { runReadinessChecklist, triggerDisasterRecoveryBackup } = require('../services/readiness');
+const { listPrivacyRequests, privacyQueueSummary } = require('../services/privacy');
+const { handlePlatformRoutes, observabilityExtras, ticketSlaSummary } = require('./platformRoutes');
 
-async function handleAdminRoute(db, req, pathname, urlObj, body, clientIp) {
+async function handleAdminRoute(db, req, pathname, urlObj, body, clientIp, res = null) {
   const ipHash = hashIdentifier(clientIp);
   const rl = checkRateLimit(`admin:${ipHash}`, CONFIG.rateLimits.adminApiPerMinute);
   if (!rl.allowed) {
@@ -85,7 +114,7 @@ async function handleAdminRoute(db, req, pathname, urlObj, body, clientIp) {
   }
 
   // -------------------------------------------------------------------------
-  // Public Admin Auth Endpoints (with 5-attempt / 5-min brute-force limiter)
+  // Public Admin Auth Endpoint (5-attempt / 5-min brute-force limiter)
   // -------------------------------------------------------------------------
   if (req.method === 'POST' && pathname === '/api/admin/auth/login') {
     const username = String(body.username || '').trim().toLowerCase();
@@ -103,6 +132,7 @@ async function handleAdminRoute(db, req, pathname, urlObj, body, clientIp) {
       });
       return {
         status: 429,
+        headers: { 'Retry-After': String(attemptCheck.retryAfterSec || 60) },
         json: {
           error: 'TOO_MANY_LOGIN_ATTEMPTS',
           retryAfterSec: attemptCheck.retryAfterSec,
@@ -112,9 +142,23 @@ async function handleAdminRoute(db, req, pathname, urlObj, body, clientIp) {
     }
 
     const row = db
-      .prepare('SELECT id, username, password_hash, role, display_name FROM admin_users WHERE lower(username) = ?')
+      .prepare('SELECT id, username, password_hash, role, display_name, is_active FROM admin_users WHERE lower(username) = ?')
       .get(username);
-    if (!row || !verifyPassword(password, row.password_hash)) {
+    // A disabled account is reported as such *after* the password check, so the
+    // endpoint cannot be used to enumerate account states without the password.
+    const passwordOk = Boolean(row) && verifyPassword(password, row.password_hash);
+    if (passwordOk && Number(row.is_active) === 0) {
+      writeAuditLog(db, {
+        actorRole: 'anonymous',
+        actorId: username,
+        action: 'admin.login.disabled_account',
+        targetType: 'admin_users',
+        targetId: row.id,
+        ipHash,
+      });
+      return { status: 403, json: { error: 'ACCOUNT_DISABLED', message: 'Доступ отключён администратором' } };
+    }
+    if (!row || !passwordOk) {
       recordFailedLoginAttempt(loginKey);
       writeAuditLog(db, {
         actorRole: 'anonymous',
@@ -129,51 +173,59 @@ async function handleAdminRoute(db, req, pathname, urlObj, body, clientIp) {
     clearLoginAttempts(loginKey);
     db.prepare('UPDATE admin_users SET last_login_at = ? WHERE id = ?').run(new Date().toISOString(), row.id);
 
+    const actor = { id: row.id, username: row.username, role: row.role };
+    const session = createAdminSession(db, {
+      actor,
+      ipHash,
+      userAgent: req.headers['user-agent'] || null,
+    });
     const token = signToken({
       sub: row.id,
       username: row.username,
       role: row.role,
       displayName: row.display_name,
+      sid: session.sid,
     });
 
     writeAuditLog(db, {
       actorRole: row.role,
       actorId: row.username,
       action: 'admin.login.success',
-      targetType: 'admin_users',
-      targetId: row.id,
+      targetType: 'admin_sessions',
+      targetId: session.sid,
+      applied: { expiresAt: session.expiresAt },
       ipHash,
     });
+    publish('session', { event: 'login', username: row.username, role: row.role });
 
     const isSecure = req.headers['x-forwarded-proto'] === 'https';
     return {
       status: 200,
-      headers: { 'Set-Cookie': buildSessionCookie(token, isSecure) },
+      headers: {
+        'Set-Cookie': [buildSessionCookie(token, isSecure), buildCsrfCookie(session.csrfToken, isSecure)],
+      },
       json: {
         ok: true,
         token,
+        csrfToken: session.csrfToken,
+        expiresAt: session.expiresAt,
+        sessionTtlSec: 12 * 3600,
         user: {
           id: row.id,
           username: row.username,
           role: row.role,
           displayName: row.display_name,
+          permissions: permissionsForRole(row.role),
+          navigation: navigationForRole(row.role),
         },
       },
-    };
-  }
-
-  if (req.method === 'POST' && pathname === '/api/admin/auth/logout') {
-    return {
-      status: 200,
-      headers: { 'Set-Cookie': clearSessionCookie() },
-      json: { ok: true },
     };
   }
 
   // -------------------------------------------------------------------------
   // Require Authenticated RBAC Principal for all subsequent `/api/admin/*`
   // -------------------------------------------------------------------------
-  const principal = authenticateAdminRequest(req);
+  const principal = authenticateAdminRequest(req, db);
   if (!principal) {
     return { status: 401, json: { error: 'UNAUTHORIZED', message: 'Требуется вход администратора' } };
   }
@@ -181,6 +233,23 @@ async function handleAdminRoute(db, req, pathname, urlObj, body, clientIp) {
   // Reject any accidental player token attempting to call `/api/admin/*` (04-security.md)
   if (principal.role === ROLES.PLAYER) {
     return { status: 403, json: { error: 'FORBIDDEN_PLAYER_ROLE', message: 'Токен игрока не имеет доступа к CRM' } };
+  }
+
+  if (req.method === 'POST' && pathname === '/api/admin/auth/logout') {
+    if (principal.sid) revokeAdminSession(db, principal.sid);
+    writeAuditLog(db, {
+      actorRole: principal.role,
+      actorId: principal.username,
+      action: 'admin.logout',
+      targetType: 'admin_sessions',
+      targetId: principal.sid || null,
+      ipHash,
+    });
+    return {
+      status: 200,
+      headers: { 'Set-Cookie': [clearSessionCookie(), clearCsrfCookie()] },
+      json: { ok: true },
+    };
   }
 
   if (req.method === 'GET' && pathname === '/api/admin/auth/me') {
@@ -193,26 +262,723 @@ async function handleAdminRoute(db, req, pathname, urlObj, body, clientIp) {
           username: principal.username,
           role: principal.role,
           displayName: principal.displayName,
+          permissions: permissionsForRole(principal.role),
+          navigation: navigationForRole(principal.role),
+        },
+        session: {
+          id: principal.sid || null,
+          expiresAt: principal.sessionExpiresAt || null,
+          ttlSec: 12 * 3600,
+          renewalRecommendedAt: principal.sessionExpiresAt
+            ? new Date(new Date(principal.sessionExpiresAt).getTime() - 3 * 3600 * 1000).toISOString()
+            : null,
+          authSource: principal.authSource,
+          legacy: Boolean(principal.legacy),
+        },
+        unreadNotifications: unreadCount(db, principal.role),
+      },
+    };
+  }
+
+  if (req.method === 'POST' && pathname === '/api/admin/auth/refresh') {
+    const isSecure = req.headers['x-forwarded-proto'] === 'https';
+    const now = new Date();
+    let sid = principal.sid;
+    let csrfToken = null;
+    if (sid) {
+      csrfToken = crypto.randomBytes(24).toString('base64url');
+      const csrfHash = crypto.createHash('sha256').update(csrfToken).digest('hex');
+      db.prepare('UPDATE admin_sessions SET csrf_hash = ?, last_seen_at = ?, expires_at = ? WHERE id = ?').run(
+        csrfHash,
+        now.toISOString(),
+        new Date(now.getTime() + 12 * 3600 * 1000).toISOString(),
+        sid
+      );
+    } else {
+      const created = createAdminSession(db, {
+        actor: { id: principal.sub, username: principal.username, role: principal.role },
+        ipHash,
+        userAgent: req.headers['user-agent'] || null,
+      });
+      sid = created.sid;
+      csrfToken = created.csrfToken;
+    }
+    const token = signToken({
+      sub: principal.sub,
+      username: principal.username,
+      role: principal.role,
+      displayName: principal.displayName,
+      sid,
+    });
+    const cookies = [buildSessionCookie(token, isSecure)];
+    if (csrfToken) cookies.push(buildCsrfCookie(csrfToken, isSecure));
+    return {
+      status: 200,
+      headers: { 'Set-Cookie': cookies },
+      json: {
+        ok: true,
+        token,
+        csrfToken,
+        expiresAt: new Date(now.getTime() + 12 * 3600 * 1000).toISOString(),
+        sessionTtlSec: 12 * 3600,
+        user: {
+          id: principal.sub,
+          username: principal.username,
+          role: principal.role,
+          displayName: principal.displayName,
+          permissions: permissionsForRole(principal.role),
+          navigation: navigationForRole(principal.role),
         },
       },
     };
   }
 
-  const requireAdmin = () => {
-    if (!hasPermission(principal.role, 'zones:read_all')) {
+  // -------------------------------------------------------------------------
+  // CSRF (double-submit + server-side hash) & replay-safe mutations
+  // -------------------------------------------------------------------------
+  const MUTATING = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
+  const isMutating = MUTATING.has(req.method);
+
+  if (isMutating && pathname !== '/api/admin/auth/logout') {
+    const cookies = parseCookies(req.headers['cookie']);
+    if (!verifyCsrf(db, req, principal, cookies)) {
+      writeAuditLog(db, {
+        actorRole: principal.role,
+        actorId: principal.username,
+        action: 'security.csrf_rejected',
+        targetType: 'admin_sessions',
+        targetId: principal.sid || null,
+        ipHash,
+      });
       return {
         status: 403,
-        json: { error: 'FORBIDDEN_RBAC', message: `Роль ${principal.role} не имеет прав владельца/администратора` },
+        json: {
+          error: 'CSRF_TOKEN_INVALID',
+          message: 'Недействительный CSRF-токен. Обновите страницу и войдите повторно.',
+        },
       };
     }
-    return null;
-  };
+  }
+
+  const idemKey = isMutating ? String(req.headers['idempotency-key'] || '').trim().slice(0, 128) : '';
+  if (idemKey) {
+    const hit = idempotency.lookup(
+      db,
+      idemKey,
+      principal.sub,
+      idempotency.hashRequest(req.method, pathname, body)
+    );
+    if (hit.state === 'replay') {
+      return { status: hit.status, headers: { 'Idempotent-Replayed': 'true' }, json: hit.json };
+    }
+    if (hit.state === 'conflict') return hit;
+  }
+
+  const result = await dispatchAdmin(db, { req, res, pathname, urlObj, body, clientIp, principal, ipHash });
+
+  if (idemKey && result && Number(result.status) < 500) {
+    idempotency.save(
+      db,
+      idemKey,
+      principal.sub,
+      req.method,
+      pathname,
+      body,
+      result.status,
+      result.json || { rawTextIgnored: Boolean(result.rawText) }
+    );
+  }
+  return result;
+}
+
+/**
+ * Authenticated dispatcher. Every branch below runs only after:
+ * JWT verified -> session registry valid -> role not `player` -> CSRF verified.
+ */
+async function dispatchAdmin(db, { req, res, pathname, urlObj, body, clientIp, principal, ipHash }) {
+  const guard = (perm) => deny(principal.role, perm);
+
+  // =========================================================================
+  // Platform meta: capabilities, feature flags and the operator's own scope
+  // =========================================================================
+  if (req.method === 'GET' && pathname === '/api/admin/system/meta') {
+    return {
+      status: 200,
+      json: {
+        ok: true,
+        version: '3.0.0',
+        serverTimeUtc: new Date().toISOString(),
+        region: CONFIG.primaryRegion,
+        environment: CONFIG.env,
+        wsGateway: '/ws/client',
+        streamEndpoint: '/api/admin/stream',
+        migrations: db.__migrations || [],
+        features: {
+          sseStream: true,
+          scheduler: process.env.CRM_SCHEDULER_DISABLED !== '1',
+          idempotency: true,
+          auditHashChain: true,
+          serverSessions: true,
+          csrf: true,
+          notifications: true,
+        },
+        retentionDays: { inputLogs: 90, telemetry: 180, aiLogs: 180, directorChat: 365 },
+        rateLimits: CONFIG.rateLimits,
+        permissions: permissionsForRole(principal.role),
+        navigation: navigationForRole(principal.role),
+        role: principal.role,
+      },
+    };
+  }
+
+  // =========================================================================
+  // Session management: list & revoke (stolen laptop scenario)
+  // =========================================================================
+  if (req.method === 'GET' && pathname === '/api/admin/auth/sessions') {
+    const denied = guard(P.SESSIONS_MANAGE);
+    if (denied) return denied;
+    const sessions = listAdminSessions(db, principal.sub).map((s) => ({
+      id: s.id,
+      createdAt: s.created_at,
+      lastSeenAt: s.last_seen_at,
+      expiresAt: s.expires_at,
+      revokedAt: s.revoked_at,
+      ipHash: s.ip_hash,
+      current: s.id === principal.sid,
+      active: !s.revoked_at && new Date(s.expires_at) > new Date(),
+    }));
+    return { status: 200, json: { sessions } };
+  }
+
+  if (req.method === 'POST' && pathname === '/api/admin/auth/sessions/revoke') {
+    const denied = guard(P.SESSIONS_MANAGE);
+    if (denied) return denied;
+    const targetId = String(body.sessionId || '');
+    if (!targetId) return { status: 400, json: { error: 'SESSION_ID_REQUIRED' } };
+    const ok = revokeAdminSession(db, targetId, principal.sub);
+    if (ok) {
+      writeAuditLog(db, {
+        actorRole: principal.role,
+        actorId: principal.username,
+        action: 'admin.session.revoked',
+        targetType: 'admin_sessions',
+        targetId,
+        ipHash,
+      });
+    }
+    publish('session', { event: 'revoked', sessionId: targetId });
+    return { status: ok ? 200 : 404, json: { ok, sessionId: targetId } };
+  }
+
+  // =========================================================================
+  // Operator Notification Center
+  // =========================================================================
+  if (req.method === 'GET' && pathname === '/api/admin/notifications') {
+    const denied = guard(P.NOTIFICATIONS_READ);
+    if (denied) return denied;
+    const unreadOnly = urlObj.searchParams.get('unread') === '1';
+    return {
+      status: 200,
+      json: {
+        items: listNotifications(db, {
+          role: principal.role,
+          unreadOnly,
+          limit: Number(urlObj.searchParams.get('limit') || 60),
+        }),
+        unread: unreadCount(db, principal.role),
+      },
+    };
+  }
+
+  if (req.method === 'POST' && pathname === '/api/admin/notifications/read') {
+    const denied = guard(P.NOTIFICATIONS_READ);
+    if (denied) return denied;
+    const changed = markRead(db, body.ids || body.id || [], principal.username);
+    return { status: 200, json: { ok: true, changed, unread: unreadCount(db, principal.role) } };
+  }
+
+  if (req.method === 'POST' && pathname === '/api/admin/notifications/read-all') {
+    const denied = guard(P.NOTIFICATIONS_READ);
+    if (denied) return denied;
+    const changed = markAllRead(db, principal.username, principal.role);
+    return { status: 200, json: { ok: true, changed, unread: 0 } };
+  }
+
+  // =========================================================================
+  // Live stream (Server-Sent Events) — replaces blind polling of the dashboard
+  // =========================================================================
+  if (req.method === 'GET' && pathname === '/api/admin/stream') {
+    if (!res) return { status: 500, json: { error: 'STREAM_UNSUPPORTED' } };
+    res.writeHead(200, {
+      'Content-Type': 'text/event-stream; charset=utf-8',
+      'Cache-Control': 'no-cache, no-transform',
+      Connection: 'keep-alive',
+      'X-Accel-Buffering': 'no',
+    });
+    const send = (event) => {
+      try {
+        res.write(`id: ${event.id}\nevent: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`);
+      } catch {
+        /* socket gone */
+      }
+    };
+    res.write('retry: 4000\n\n');
+    for (const ev of replaySince(req.headers['last-event-id'])) send(ev);
+    send({ id: 0, type: 'hello', at: new Date().toISOString(), payload: { role: principal.role, bus: busStats() } });
+    const unsubscribe = subscribe(send);
+    const heartbeat = setInterval(() => {
+      try {
+        res.write(`: keep-alive ${Date.now()}\n\n`);
+      } catch {
+        /* ignore */
+      }
+    }, 20_000);
+    heartbeat.unref?.();
+    const close = () => {
+      clearInterval(heartbeat);
+      unsubscribe();
+      try {
+        res.end();
+      } catch {
+        /* ignore */
+      }
+    };
+    req.on('close', close);
+    req.on('error', close);
+    return { handled: true };
+  }
+
+  // =========================================================================
+  // Scheduler (documented cadences of all 5 zones + platform jobs)
+  // =========================================================================
+  if (req.method === 'GET' && pathname === '/api/admin/scheduler') {
+    const denied = guard(P.SCHEDULER_READ);
+    if (denied) return denied;
+    ensureJobs(db);
+    return { status: 200, json: schedulerStatus(db) };
+  }
+
+  const jobRunMatch = pathname.match(/^\/api\/admin\/scheduler\/([a-z0-9_]+)\/run$/);
+  if (req.method === 'POST' && jobRunMatch) {
+    const denied = guard(P.SCHEDULER_MANAGE);
+    if (denied) return denied;
+    const jobName = jobRunMatch[1];
+    const result = await runJob(db, jobName, { trigger: 'manual', force: Boolean(body.force) });
+    writeAuditLog(db, {
+      actorRole: principal.role,
+      actorId: principal.username,
+      action: 'system.scheduler.job_run',
+      targetType: 'scheduler_jobs',
+      targetId: jobName,
+      applied: { ok: result.ok, status: result.status || result.error || null },
+      ipHash,
+    });
+    return { status: result.ok ? 200 : 400, json: result };
+  }
+
+  const jobToggleMatch = pathname.match(/^\/api\/admin\/scheduler\/([a-z0-9_]+)\/toggle$/);
+  if (req.method === 'POST' && jobToggleMatch) {
+    const denied = guard(P.SCHEDULER_MANAGE);
+    if (denied) return denied;
+    const jobName = jobToggleMatch[1];
+    const enabled = Boolean(body.enabled);
+    const ok = setJobEnabled(db, jobName, enabled);
+    writeAuditLog(db, {
+      actorRole: principal.role,
+      actorId: principal.username,
+      action: 'system.scheduler.job_toggled',
+      targetType: 'scheduler_jobs',
+      targetId: jobName,
+      applied: { enabled },
+      ipHash,
+    });
+    return { status: ok ? 200 : 404, json: { ok, jobName, enabled } };
+  }
+
+  // =========================================================================
+  // Tamper-evident audit verification
+  // =========================================================================
+  if (req.method === 'GET' && pathname === '/api/admin/audit/verify') {
+    const denied = guard(P.AUDIT_VERIFY);
+    if (denied) return denied;
+    const result = verifyAuditChain(db);
+    writeAuditLog(db, {
+      actorRole: principal.role,
+      actorId: principal.username,
+      action: 'audit.chain.verified',
+      targetType: 'audit_logs',
+      applied: { valid: result.valid, checked: result.checked },
+      ipHash,
+    });
+    return { status: 200, json: result };
+  }
+
+  // =========================================================================
+  // Global operator search (Cmd/Ctrl+K)
+  // =========================================================================
+  if (req.method === 'GET' && pathname === '/api/admin/search') {
+    const denied = guard(P.SEARCH_GLOBAL);
+    if (denied) return denied;
+    const q = String(urlObj.searchParams.get('q') || '').trim().slice(0, 80);
+    if (q.length < 2) return { status: 200, json: { q, groups: [] } };
+    const like = `%${q}%`;
+    const groups = [];
+
+    if (roleHas(principal.role, P.PLAYERS_READ)) {
+      groups.push({
+        type: 'player',
+        label: 'Игроки',
+        items: db
+          .prepare(
+            `SELECT id, display_name AS title, region || ' · ' || status AS subtitle
+             FROM players WHERE id LIKE ? OR display_name LIKE ? ORDER BY last_seen_at DESC LIMIT 5`
+          )
+          .all(like, like)
+          .map((r) => ({ ...r, link: `#/players?player=${r.id}` })),
+      });
+    }
+    if (roleHas(principal.role, P.LIVEOPS_TICKETS)) {
+      groups.push({
+        type: 'ticket',
+        label: 'Тикеты',
+        items: db
+          .prepare(
+            `SELECT id, subject AS title, status || ' · ' || priority AS subtitle
+             FROM support_tickets WHERE subject LIKE ? OR id LIKE ? ORDER BY updated_at DESC LIMIT 5`
+          )
+          .all(like, like)
+          .map((r) => ({ ...r, link: `#/liveops?ticket=${r.id}` })),
+      });
+    }
+    if (roleHas(principal.role, P.OBSERVABILITY_READ)) {
+      groups.push({
+        type: 'incident',
+        label: 'Инциденты',
+        items: db
+          .prepare(
+            `SELECT id, title, status || ' · ' || severity AS subtitle FROM incidents
+             WHERE title LIKE ? ORDER BY created_at DESC LIMIT 5`
+          )
+          .all(like)
+          .map((r) => ({ ...r, link: `#/observability?incident=${r.id}` })),
+      });
+    }
+    if (roleHas(principal.role, P.HITL_DECIDE)) {
+      groups.push({
+        type: 'proposal',
+        label: 'Решения HITL',
+        items: db
+          .prepare(
+            `SELECT id, title, zone || ' · ' || status AS subtitle FROM action_proposals
+             WHERE title LIKE ? OR rationale LIKE ? ORDER BY created_at DESC LIMIT 5`
+          )
+          .all(like, like)
+          .map((r) => ({ ...r, link: `#/overview?proposal=${r.id}` })),
+      });
+    }
+    if (roleHas(principal.role, P.LIVEOPS_NEWS)) {
+      groups.push({
+        type: 'news',
+        label: 'Новости',
+        items: db
+          .prepare(`SELECT id, title_ru AS title, category AS subtitle FROM news_posts WHERE title_ru LIKE ? LIMIT 5`)
+          .all(like)
+          .map((r) => ({ ...r, link: `#/liveops?tab=news&news=${r.id}` })),
+      });
+    }
+    return { status: 200, json: { q, groups: groups.filter((g) => g.items.length) } };
+  }
+
+  // =========================================================================
+  // CSV exports (formula-injection safe) for offline analysis
+  // =========================================================================
+  const exportMatch = pathname.match(/^\/api\/admin\/exports\/([a-z_]+)\.csv$/);
+  if (req.method === 'GET' && exportMatch) {
+    const denied = guard(P.EXPORTS_READ);
+    if (denied) return denied;
+    const dataset = exportMatch[1];
+    const stamp = new Date().toISOString().slice(0, 10);
+    let columns = null;
+    let rows = [];
+    if (dataset === 'audit' && roleHas(principal.role, P.AUDIT_READ)) {
+      columns = [
+        { key: 'id' }, { key: 'created_at' }, { key: 'region' }, { key: 'actor_role' }, { key: 'actor_id' },
+        { key: 'action' }, { key: 'target_type' }, { key: 'target_id' }, { key: 'provider' }, { key: 'model' },
+        { key: 'tokens_used' }, { key: 'entry_hash' },
+      ];
+      rows = db.prepare('SELECT * FROM audit_logs ORDER BY id DESC LIMIT 5000').all();
+    } else if (dataset === 'players' && roleHas(principal.role, P.PLAYERS_READ)) {
+      columns = [
+        { key: 'id' }, { key: 'display_name' }, { key: 'region' }, { key: 'status' }, { key: 'install_source' },
+        { key: 'install_campaign' }, { key: 'created_at' }, { key: 'last_seen_at' },
+      ];
+      rows = db.prepare('SELECT * FROM players ORDER BY last_seen_at DESC LIMIT 5000').all();
+    } else if (dataset === 'tickets' && roleHas(principal.role, P.LIVEOPS_TICKETS)) {
+      columns = [
+        { key: 'id' }, { key: 'player_id' }, { key: 'region' }, { key: 'category' }, { key: 'priority' },
+        { key: 'subject' }, { key: 'status' }, { key: 'sla_due_at' }, { key: 'first_response_minutes' },
+        { key: 'created_at' }, { key: 'updated_at' },
+      ];
+      rows = db.prepare('SELECT * FROM support_tickets ORDER BY created_at DESC LIMIT 5000').all();
+    } else if (dataset === 'incidents' && roleHas(principal.role, P.OBSERVABILITY_READ)) {
+      columns = [
+        { key: 'id' }, { key: 'severity' }, { key: 'zone' }, { key: 'title' }, { key: 'status' },
+        { key: 'runbook_slug' }, { key: 'created_at' }, { key: 'ack_at' }, { key: 'resolved_at' },
+      ];
+      rows = db.prepare('SELECT * FROM incidents ORDER BY created_at DESC LIMIT 5000').all();
+    } else if (dataset === 'proposals' && roleHas(principal.role, P.HITL_DECIDE)) {
+      columns = [
+        { key: 'id' }, { key: 'zone' }, { key: 'action_type' }, { key: 'title' }, { key: 'confidence' },
+        { key: 'status' }, { key: 'decided_by' }, { key: 'created_at' }, { key: 'decided_at' },
+      ];
+      rows = db.prepare('SELECT * FROM action_proposals ORDER BY created_at DESC LIMIT 5000').all();
+    } else if (dataset === 'campaigns' && roleHas(principal.role, P.ZONE_MARKET_READ)) {
+      columns = [
+        { key: 'id' }, { key: 'source' }, { key: 'campaign' }, { key: 'creative' }, { key: 'spend_usd' },
+        { key: 'installs' }, { key: 'paying_users' }, { key: 'revenue_d30_usd' }, { key: 'updated_at' },
+      ];
+      rows = db.prepare('SELECT * FROM marketing_campaigns ORDER BY spend_usd DESC LIMIT 5000').all();
+    } else if (dataset === 'fraud_cases' && roleHas(principal.role, P.FRAUD_REVIEW)) {
+      columns = [
+        { key: 'id' }, { key: 'player_id' }, { key: 'region' }, { key: 'risk_score' }, { key: 'case_type' },
+        { key: 'status' }, { key: 'reviewed_by' }, { key: 'created_at' }, { key: 'reviewed_at' },
+      ];
+      rows = db.prepare('SELECT * FROM fraud_cases ORDER BY created_at DESC LIMIT 5000').all();
+    }
+
+    if (!columns) return { status: 404, json: { error: 'EXPORT_DATASET_NOT_FOUND_OR_FORBIDDEN', dataset } };
+
+    writeAuditLog(db, {
+      actorRole: principal.role,
+      actorId: principal.username,
+      action: 'export.csv.generated',
+      targetType: 'export',
+      targetId: dataset,
+      applied: { rows: rows.length },
+      ipHash,
+    });
+    return csvResult(`topspin-${dataset}-${stamp}.csv`, toCsv(columns, rows));
+  }
+
+  // =========================================================================
+  // Zone summary history (trend instead of a single "latest" snapshot)
+  // =========================================================================
+  const zoneHistoryMatch = pathname.match(/^\/api\/admin\/zones\/(ops|fraud|balance|market|lab)\/summaries$/);
+  if (req.method === 'GET' && zoneHistoryMatch) {
+    const zone = zoneHistoryMatch[1];
+    if (!canReadZone(principal.role, zone)) {
+      return { status: 403, json: { error: 'FORBIDDEN_ZONE_ISOLATION', zone } };
+    }
+    const limit = Math.min(50, Math.max(1, Number(urlObj.searchParams.get('limit') || 12)));
+    const rows = db
+      .prepare('SELECT id, status, summary_json, created_at FROM zone_summaries WHERE zone = ? ORDER BY created_at DESC LIMIT ?')
+      .all(zone, limit)
+      .map((r) => ({
+        id: r.id,
+        status: r.status,
+        createdAt: r.created_at,
+        summary: parseJsonColumn(r.summary_json, {}),
+      }));
+    return { status: 200, json: { zone, summaries: rows } };
+  }
+
+  // =========================================================================
+  // Fraud queue: paginated, filterable, with human review trail
+  // =========================================================================
+  if (req.method === 'GET' && pathname === '/api/admin/fraud/cases') {
+    if (!canReadZone(principal.role, 'fraud')) {
+      return { status: 403, json: { error: 'FORBIDDEN_ZONE_ISOLATION', zone: 'fraud' } };
+    }
+    const list = parseListQuery(urlObj, {
+      allowedSort: ['risk_score', 'created_at', 'reviewed_at'],
+      defaultSort: 'risk_score',
+      defaultOrder: 'desc',
+    });
+    const status = String(urlObj.searchParams.get('status') || 'all');
+    const where = ['1=1'];
+    const params = [];
+    if (status !== 'all') {
+      where.push('status = ?');
+      params.push(status);
+    }
+    if (list.q) {
+      where.push('(id LIKE ? OR player_id LIKE ? OR case_type LIKE ?)');
+      params.push(`%${list.q}%`, `%${list.q}%`, `%${list.q}%`);
+    }
+    const whereSql = `FROM fraud_cases WHERE ${where.join(' AND ')}`;
+    const total = countTotal(db, whereSql, params);
+    const items = db
+      .prepare(`SELECT * ${whereSql} ORDER BY ${list.sort} ${list.order.toUpperCase()} LIMIT ? OFFSET ?`)
+      .all(...params, list.pageSize, list.offset)
+      .map((c) => ({
+        ...c,
+        signals: parseJsonColumn(c.signals_json, []),
+        reviews: db
+          .prepare('SELECT * FROM fraud_case_reviews WHERE case_id = ? ORDER BY created_at DESC LIMIT 5')
+          .all(c.id),
+      }));
+    return {
+      status: 200,
+      json: {
+        ...listResponse(items, { ...list, total }),
+        statusCounts: db
+          .prepare('SELECT status, COUNT(*) AS c FROM fraud_cases GROUP BY status')
+          .all()
+          .reduce((acc, r) => ({ ...acc, [r.status]: Number(r.c) }), {}),
+      },
+    };
+  }
+
+  // =========================================================================
+  // Player 360: one screen for support, fraud, legal and revenue context
+  // =========================================================================
+  const playerDetailMatch = pathname.match(/^\/api\/admin\/players\/([^/]+)$/);
+  if (req.method === 'GET' && playerDetailMatch) {
+    const denied = guard(P.PLAYERS_READ);
+    if (denied) return denied;
+    const playerId = playerDetailMatch[1];
+    const player = db.prepare('SELECT * FROM players WHERE id = ?').get(playerId);
+    if (!player) return { status: 404, json: { error: 'PLAYER_NOT_FOUND' } };
+
+    const sessions = db
+      .prepare(
+        `SELECT id, platform, region, avg_fps, p5_fps, rtt_p50_ms, rtt_p95_ms, crashed, webgl_lost, started_at, ended_at
+         FROM sessions WHERE player_id = ? ORDER BY started_at DESC LIMIT 20`
+      )
+      .all(playerId);
+    const payments = db
+      .prepare('SELECT id, amount_usd, currency, provider, item_sku, status, risk_flag, created_at FROM payments WHERE player_id = ? ORDER BY created_at DESC LIMIT 20')
+      .all(playerId);
+    const consents = db
+      .prepare('SELECT * FROM player_consents WHERE player_id = ? ORDER BY consented_at DESC LIMIT 10')
+      .all(playerId);
+    const tickets = db
+      .prepare('SELECT id, subject, status, priority, category, sla_due_at, created_at FROM support_tickets WHERE player_id = ? ORDER BY created_at DESC LIMIT 10')
+      .all(playerId);
+    const fraudCases = db
+      .prepare('SELECT id, risk_score, case_type, status, created_at FROM fraud_cases WHERE player_id = ? ORDER BY created_at DESC LIMIT 10')
+      .all(playerId);
+    const totals = db
+      .prepare(
+        `SELECT COUNT(*) AS sessions_count,
+                COALESCE(SUM(avg_fps), 0) AS fps_sum,
+                COALESCE((SELECT SUM(amount_usd) FROM payments WHERE player_id = ? AND status = 'succeeded'), 0) AS lifetime_usd
+         FROM sessions WHERE player_id = ?`
+      )
+      .get(playerId, playerId);
+
+    return {
+      status: 200,
+      json: {
+        player,
+        metrics: {
+          sessions: Number(totals.sessions_count || 0),
+          avgFps: totals.sessions_count ? Math.round(Number(totals.fps_sum) / Number(totals.sessions_count)) : null,
+          lifetimeUsd: +Number(totals.lifetime_usd || 0).toFixed(2),
+          lastSeenAt: player.last_seen_at,
+        },
+        sessions,
+        payments,
+        consents,
+        tickets,
+        fraudCases,
+      },
+    };
+  }
+
+  const playerStatusMatch = pathname.match(/^\/api\/admin\/players\/([^/]+)\/status$/);
+  if (req.method === 'POST' && playerStatusMatch) {
+    const denied = guard(P.PLAYERS_SANCTION);
+    if (denied) return denied;
+    const playerId = playerStatusMatch[1];
+    const nextStatus = String(body.status || '');
+    if (!['active', 'suspended', 'banned'].includes(nextStatus)) {
+      return { status: 400, json: { error: 'INVALID_STATUS' } };
+    }
+    const reason = String(body.reason || '').trim().slice(0, 400);
+    if (nextStatus !== 'active' && reason.length < 5) {
+      return { status: 400, json: { error: 'REASON_REQUIRED', message: 'Укажите причину санкции (мин. 5 символов)' } };
+    }
+    const player = db.prepare('SELECT id, status, display_name FROM players WHERE id = ?').get(playerId);
+    if (!player) return { status: 404, json: { error: 'PLAYER_NOT_FOUND' } };
+    db.prepare('UPDATE players SET status = ?, ban_reason = ? WHERE id = ?').run(
+      nextStatus,
+      nextStatus === 'active' ? null : reason,
+      playerId
+    );
+    writeAuditLog(db, {
+      actorRole: principal.role,
+      actorId: principal.username,
+      action: `player.status.${nextStatus}`,
+      targetType: 'players',
+      targetId: playerId,
+      proposed: { previousStatus: player.status },
+      applied: { status: nextStatus, reason },
+      dataRefs: ['players'],
+      ipHash,
+    });
+    publish('player', { playerId, status: nextStatus, by: principal.username });
+    notify(db, {
+      kind: 'player',
+      severity: nextStatus === 'banned' ? 'warning' : 'info',
+      title: `Санкция по игроку ${player.display_name || playerId}: ${nextStatus}`,
+      body: reason,
+      link: `#/players?player=${playerId}`,
+    });
+    return { status: 200, json: { ok: true, playerId, status: nextStatus } };
+  }
+
+  // =========================================================================
+  // Support ticket detail & explicit status transition
+  // =========================================================================
+  const ticketDetailMatch = pathname.match(/^\/api\/admin\/tickets\/([^/]+)$/);
+  if (req.method === 'GET' && ticketDetailMatch) {
+    const denied = guard(P.LIVEOPS_TICKETS);
+    if (denied) return denied;
+    const { getSupportTicketById } = require('../services/liveops');
+    const ticket = getSupportTicketById(db, ticketDetailMatch[1]);
+    if (!ticket) return { status: 404, json: { error: 'TICKET_NOT_FOUND' } };
+    return { status: 200, json: ticket };
+  }
+
+  const ticketStatusMatch = pathname.match(/^\/api\/admin\/tickets\/([^/]+)\/status$/);
+  if (req.method === 'POST' && ticketStatusMatch) {
+    const denied = guard(P.LIVEOPS_TICKETS);
+    if (denied) return denied;
+    const nextStatus = String(body.status || '');
+    if (!['open', 'in_progress', 'answered', 'closed'].includes(nextStatus)) {
+      return { status: 400, json: { error: 'INVALID_STATUS' } };
+    }
+    const prev = db.prepare('SELECT status FROM support_tickets WHERE id = ?').get(ticketStatusMatch[1]);
+    if (!prev) return { status: 404, json: { error: 'TICKET_NOT_FOUND' } };
+    const nowIso = new Date().toISOString();
+    db.prepare('UPDATE support_tickets SET status = ?, updated_at = ? WHERE id = ?').run(nowIso, nowIso, ticketStatusMatch[1]);
+    require('../services/liveops').recordTicketStatusEvent?.(db, {
+      ticketId: ticketStatusMatch[1],
+      fromStatus: prev.status,
+      toStatus: nextStatus,
+      actor: principal.username,
+      note: String(body.note || '').slice(0, 200),
+    });
+    publish('ticket', { ticketId: ticketStatusMatch[1], status: nextStatus });
+    writeAuditLog(db, {
+      actorRole: principal.role,
+      actorId: principal.username,
+      action: 'support.ticket.status_changed',
+      targetType: 'support_tickets',
+      targetId: ticketStatusMatch[1],
+      applied: { from: prev.status, to: nextStatus },
+      ipHash,
+    });
+    return { status: 200, json: { ok: true, status: nextStatus } };
+  }
+
 
   // -------------------------------------------------------------------------
   // Executive Overview & Morning Digest
   // -------------------------------------------------------------------------
   if (req.method === 'GET' && pathname === '/api/admin/overview') {
-    const denied = requireAdmin();
+    const denied = guard(P.DASHBOARD_READ);
     if (denied) return denied;
 
     const zonesStatus = listAllZonesStatus(db);
@@ -259,7 +1025,7 @@ async function handleAdminRoute(db, req, pathname, urlObj, body, clientIp) {
   }
 
   if (req.method === 'GET' && pathname === '/api/admin/digest/morning') {
-    const denied = requireAdmin();
+    const denied = guard(P.DASHBOARD_READ);
     if (denied) return denied;
     return { status: 200, json: buildMorningDigest(db) };
   }
@@ -309,9 +1075,10 @@ async function handleAdminRoute(db, req, pathname, urlObj, body, clientIp) {
 
   const runZoneMatch = pathname.match(/^\/api\/admin\/zones\/(ops|fraud|balance|market|lab)\/run$/);
   if (req.method === 'POST' && runZoneMatch) {
-    const denied = requireAdmin();
-    if (denied) return denied;
     const zone = runZoneMatch[1];
+    if (!canRunZone(principal.role, zone)) {
+      return { status: 403, json: { error: 'FORBIDDEN_ZONE_RUN', zone, role: principal.role } };
+    }
     const runners = {
       ops: runOpsZoneAnalysis,
       fraud: runFraudZoneAnalysis,
@@ -337,6 +1104,22 @@ async function handleAdminRoute(db, req, pathname, urlObj, body, clientIp) {
       tokensUsed: latestReq ? Number(latestReq.prompt_tokens) + Number(latestReq.completion_tokens) : 0,
       ipHash,
     });
+    publish('zone', {
+      zone,
+      status: res?.summary?.status || 'ok',
+      findings: res?.summary?.findings?.length || 0,
+      summaryId: res?.summaryId || null,
+    });
+    if (res?.summary?.status === 'critical') {
+      notify(db, {
+        kind: 'zone',
+        severity: 'critical',
+        title: `Зона ${zone.toUpperCase()}: критическая сводка`,
+        body: res.summary.summary || 'Требуется решение владельца',
+        link: `#/${zone}`,
+        fingerprint: `zone_critical:${zone}:${res.summaryId || ''}`,
+      });
+    }
     return { status: 200, json: res };
   }
 
@@ -344,7 +1127,7 @@ async function handleAdminRoute(db, req, pathname, urlObj, body, clientIp) {
   // Lab Read-Only Benchmark Runner / Importer & A/B Experiment Creator
   // -------------------------------------------------------------------------
   if (req.method === 'POST' && pathname === '/api/admin/lab/run-suite') {
-    const denied = requireAdmin();
+    const denied = guard(P.ZONE_LAB_RUN);
     if (denied) return denied;
     const run = importOrRunLabSuite(db, {
       suite: body.suite || 'noise',
@@ -364,7 +1147,7 @@ async function handleAdminRoute(db, req, pathname, urlObj, body, clientIp) {
   }
 
   if (req.method === 'POST' && pathname === '/api/admin/lab/experiments') {
-    const denied = requireAdmin();
+    const denied = guard(P.LAB_EXPERIMENT);
     if (denied) return denied;
     const id = crypto.randomUUID();
     const slug = String(body.slug || `exp_${Date.now()}`).replace(/[^a-z0-9_-]/gi, '').slice(0, 48);
@@ -396,7 +1179,7 @@ async function handleAdminRoute(db, req, pathname, urlObj, body, clientIp) {
   // Balance: Human-Confirmed MATCH_RULES Publication (02-ai-zones.md, 08-implementation-plan.md)
   // -------------------------------------------------------------------------
   if (req.method === 'POST' && pathname === '/api/admin/balance/rules') {
-    const denied = requireAdmin();
+    const denied = guard(P.RULES_PUBLISH);
     if (denied) return denied;
 
     const currentRow = db
@@ -458,7 +1241,7 @@ async function handleAdminRoute(db, req, pathname, urlObj, body, clientIp) {
   // -------------------------------------------------------------------------
   const fraudReviewMatch = pathname.match(/^\/api\/admin\/fraud\/cases\/([^/]+)\/review$/);
   if (req.method === 'POST' && fraudReviewMatch) {
-    const denied = requireAdmin();
+    const denied = guard(P.FRAUD_REVIEW);
     if (denied) return denied;
 
     const caseId = fraudReviewMatch[1];
@@ -485,6 +1268,20 @@ async function handleAdminRoute(db, req, pathname, urlObj, body, clientIp) {
       );
     }
 
+    db.prepare(
+      `INSERT INTO fraud_case_reviews (id, case_id, reviewer, verdict, player_action, note, risk_score_before, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(
+      crypto.randomUUID(),
+      caseId,
+      principal.username,
+      verdict,
+      playerAction,
+      reviewNote,
+      Number(existing.risk_score || 0),
+      nowIso
+    );
+
     writeAuditLog(db, {
       actorRole: principal.role,
       actorId: principal.username,
@@ -497,6 +1294,14 @@ async function handleAdminRoute(db, req, pathname, urlObj, body, clientIp) {
       ipHash,
     });
 
+    publish('fraud', { caseId, verdict, playerAction, by: principal.username });
+    notify(db, {
+      kind: 'fraud',
+      severity: verdict === 'confirmed_fraud' ? 'warning' : 'info',
+      title: `Кейс ${caseId.slice(0, 8)} разобран: ${verdict === 'confirmed_fraud' ? 'подтверждён' : 'ложное срабатывание'}`,
+      body: reviewNote || `Действие по игроку: ${playerAction}`,
+      link: `#/fraud?case=${caseId}`,
+    });
     return { status: 200, json: { ok: true, caseId, verdict, playerAction } };
   }
 
@@ -504,18 +1309,50 @@ async function handleAdminRoute(db, req, pathname, urlObj, body, clientIp) {
   // Closed 4-Step HITL Proposals Decision Loop across ALL 5 Zones (08-implementation-plan.md)
   // -------------------------------------------------------------------------
   if (req.method === 'GET' && pathname === '/api/admin/proposals') {
-    const denied = requireAdmin();
+    const denied = guard(P.DASHBOARD_READ);
     if (denied) return denied;
+    const list = parseListQuery(urlObj, {
+      allowedSort: ['created_at', 'confidence', 'status', 'zone'],
+      defaultSort: 'created_at',
+      defaultOrder: 'desc',
+    });
+    const statusFilter = String(urlObj.searchParams.get('status') || 'all');
+    const where = ['1=1'];
+    const params = [];
+    if (statusFilter !== 'all') {
+      where.push('status = ?');
+      params.push(statusFilter);
+    }
+    if (list.q) {
+      where.push('(title LIKE ? OR rationale LIKE ? OR zone LIKE ?)');
+      params.push(`%${list.q}%`, `%${list.q}%`, `%${list.q}%`);
+    }
+    const whereSql = `FROM action_proposals WHERE ${where.join(' AND ')}`;
+    const total = countTotal(db, whereSql, params);
     const rows = db
-      .prepare('SELECT * FROM action_proposals ORDER BY CASE status WHEN \'pending\' THEN 0 ELSE 1 END, created_at DESC LIMIT 40')
-      .all()
-      .map((r) => ({ ...r, payload: JSON.parse(r.payload_json || '{}') }));
-    return { status: 200, json: { proposals: rows } };
+      .prepare(
+        `SELECT * ${whereSql}
+         ORDER BY CASE status WHEN 'pending' THEN 0 ELSE 1 END, ${list.sort} ${list.order.toUpperCase()}
+         LIMIT ? OFFSET ?`
+      )
+      .all(...params, list.pageSize, list.offset)
+      .map((r) => ({ ...r, payload: parseJsonColumn(r.payload_json, {}) }));
+    return {
+      status: 200,
+      json: {
+        proposals: rows,
+        ...listResponse(rows, { ...list, total }),
+        statusCounts: db
+          .prepare('SELECT status, COUNT(*) AS c FROM action_proposals GROUP BY status')
+          .all()
+          .reduce((acc, r) => ({ ...acc, [r.status]: Number(r.c) }), {}),
+      },
+    };
   }
 
   const propMatch = pathname.match(/^\/api\/admin\/proposals\/([^/]+)\/decide$/);
   if (req.method === 'POST' && propMatch) {
-    const denied = requireAdmin();
+    const denied = guard(P.HITL_DECIDE);
     if (denied) return denied;
     const propId = propMatch[1];
     const prop = db.prepare('SELECT * FROM action_proposals WHERE id = ?').get(propId);
@@ -598,6 +1435,14 @@ async function handleAdminRoute(db, req, pathname, urlObj, body, clientIp) {
       ipHash,
     });
 
+    publish('proposal', { id: propId, zone: prop.zone, title: prop.title, status: nextStatus });
+    notify(db, {
+      kind: 'proposal',
+      severity: nextStatus === 'applied' ? 'warning' : 'info',
+      title: `Решение HITL ${nextStatus === 'applied' ? 'применено' : 'отклонено'}: ${prop.title}`,
+      body: `Зона ${prop.zone}. ${comment || JSON.stringify(appliedEffect).slice(0, 180)}`,
+      link: '#/overview',
+    });
     return { status: 200, json: { ok: true, id: propId, status: nextStatus, appliedEffect } };
   }
 
@@ -605,44 +1450,64 @@ async function handleAdminRoute(db, req, pathname, urlObj, body, clientIp) {
   // Players Directory, GDPR/152-ФЗ Export & Right-to-Erasure
   // -------------------------------------------------------------------------
   if (req.method === 'GET' && pathname === '/api/admin/players') {
-    const denied = requireAdmin();
+    const denied = guard(P.PLAYERS_READ);
     if (denied) return denied;
     const q = String(urlObj.searchParams.get('q') || '').trim();
     const region = String(urlObj.searchParams.get('region') || '').trim();
     const status = String(urlObj.searchParams.get('status') || '').trim();
 
-    let sql = `
-      SELECT p.id, p.display_name, p.region, p.install_source, p.install_campaign, p.status, p.ban_reason, p.created_at, p.last_seen_at,
-             COUNT(DISTINCT s.id) AS sessions_count,
-             COALESCE(ROUND(SUM(CASE WHEN pay.status = 'succeeded' THEN pay.amount_usd ELSE 0 END), 2), 0) AS total_iap_usd
-      FROM players p
-      LEFT JOIN sessions s ON s.player_id = p.id
-      LEFT JOIN payments pay ON pay.player_id = p.id
-      WHERE 1=1
-    `;
+    const list = parseListQuery(urlObj, {
+      allowedSort: ['last_seen_at', 'created_at', 'status', 'region', 'display_name'],
+      defaultSort: 'last_seen_at',
+      defaultOrder: 'desc',
+    });
+    const where = ['1=1'];
     const params = [];
     if (q) {
-      sql += ' AND (p.id LIKE ? OR p.display_name LIKE ? OR p.install_campaign LIKE ?)';
+      where.push('(p.id LIKE ? OR p.display_name LIKE ? OR p.install_campaign LIKE ?)');
       params.push(`%${q}%`, `%${q}%`, `%${q}%`);
     }
     if (region && region !== 'all') {
-      sql += ' AND p.region = ?';
+      where.push('p.region = ?');
       params.push(region);
     }
     if (status && status !== 'all') {
-      sql += ' AND p.status = ?';
+      where.push('p.status = ?');
       params.push(status);
     }
-    sql += ' GROUP BY p.id ORDER BY p.last_seen_at DESC LIMIT 80';
-
-    const players = db.prepare(sql).all(...params);
+    const whereSql = `FROM players p WHERE ${where.join(' AND ')}`;
+    const total = countTotal(db, whereSql, params);
+    const players = db
+      .prepare(
+        `SELECT p.id, p.display_name, p.region, p.install_source, p.install_campaign, p.status, p.ban_reason,
+                p.created_at, p.last_seen_at,
+                (SELECT COUNT(*) FROM sessions s WHERE s.player_id = p.id) AS sessions_count,
+                COALESCE((SELECT ROUND(SUM(amount_usd), 2) FROM payments pay
+                          WHERE pay.player_id = p.id AND pay.status = 'succeeded'), 0) AS total_iap_usd
+         ${whereSql}
+         ORDER BY p.${list.sort} ${list.order.toUpperCase()} LIMIT ? OFFSET ?`
+      )
+      .all(...params, list.pageSize, list.offset);
     const privacyRequests = db.prepare('SELECT * FROM privacy_requests ORDER BY requested_at DESC LIMIT 20').all();
-    return { status: 200, json: { players, privacyRequests } };
+    const statusCounts = db
+      .prepare('SELECT status, COUNT(*) AS c FROM players GROUP BY status')
+      .all()
+      .reduce((acc, r) => ({ ...acc, [r.status]: Number(r.c) }), {});
+    return {
+      status: 200,
+      json: {
+        players,
+        items: players,
+        privacyRequests,
+        statusCounts,
+        ...listResponse(players, { ...list, total }),
+      },
+    };
   }
 
   const playerExportMatch = pathname.match(/^\/api\/admin\/players\/([^/]+)\/export$/);
   if (req.method === 'GET' && playerExportMatch) {
-    const denied = requireAdmin();
+    const denied = guard(P.PLAYERS_EXPORT);
     if (denied) return denied;
     const pkg = exportPlayerDataPackage(db, playerExportMatch[1]);
     if (!pkg) return { status: 404, json: { error: 'PLAYER_NOT_FOUND' } };
@@ -660,7 +1525,7 @@ async function handleAdminRoute(db, req, pathname, urlObj, body, clientIp) {
 
   const playerEraseMatch = pathname.match(/^\/api\/admin\/players\/([^/]+)\/erase$/);
   if (req.method === 'POST' && playerEraseMatch) {
-    const denied = requireAdmin();
+    const denied = guard(P.PLAYERS_ERASE);
     if (denied) return denied;
     const res = executeRightToErasure(db, {
       playerId: playerEraseMatch[1],
@@ -678,6 +1543,7 @@ async function handleAdminRoute(db, req, pathname, urlObj, body, clientIp) {
       dataRefs: ['players', 'sessions', 'input_events', 'payments', 'director-archive.sqlite'],
       ipHash,
     });
+    publish('privacy', { playerId: playerEraseMatch[1], action: 'erasure' });
     return { status: 200, json: res };
   }
 
@@ -685,20 +1551,20 @@ async function handleAdminRoute(db, req, pathname, urlObj, body, clientIp) {
   // Director Chat (48–72h Sliding Window + Separate Archive DB + Priorities)
   // -------------------------------------------------------------------------
   if (req.method === 'GET' && pathname === '/api/admin/director/context') {
-    const denied = requireAdmin();
+    const denied = guard(P.DIRECTOR_READ);
     if (denied) return denied;
     const timeRange = urlObj.searchParams.get('time_range') || 'last_72h';
     return { status: 200, json: getDirectorContext(db, timeRange) };
   }
 
   if (req.method === 'GET' && pathname === '/api/admin/director/archive') {
-    const denied = requireAdmin();
+    const denied = guard(P.DIRECTOR_ARCHIVE);
     if (denied) return denied;
     return { status: 200, json: { archivedMessages: getArchivedDirectorChat(db, 60) } };
   }
 
   if (req.method === 'POST' && pathname === '/api/admin/director/priorities') {
-    const denied = requireAdmin();
+    const denied = guard(P.DIRECTOR_PRIORITIES);
     if (denied) return denied;
     const priorities = updateDirectorPriorities(db, body.priorities || []);
     writeAuditLog(db, {
@@ -714,7 +1580,7 @@ async function handleAdminRoute(db, req, pathname, urlObj, body, clientIp) {
   }
 
   if (req.method === 'POST' && pathname === '/api/admin/director/ask') {
-    const denied = requireAdmin();
+    const denied = guard(P.DIRECTOR_CHAT);
     if (denied) return denied;
     const res = await askDirector(db, {
       ownerId: principal.username,
@@ -745,7 +1611,7 @@ async function handleAdminRoute(db, req, pathname, urlObj, body, clientIp) {
   // AI Governance, Token Caps, Quarantine & Formal JSON Schema Contracts
   // -------------------------------------------------------------------------
   if (req.method === 'GET' && pathname === '/api/admin/ai/zones') {
-    const denied = requireAdmin();
+    const denied = guard(P.GOVERNANCE_READ);
     if (denied) return denied;
     const quarantine = db.prepare('SELECT * FROM ai_quarantine ORDER BY created_at DESC LIMIT 25').all();
     return {
@@ -768,16 +1634,26 @@ async function handleAdminRoute(db, req, pathname, urlObj, body, clientIp) {
 
   const aiCfgMatch = pathname.match(/^\/api\/admin\/ai\/zones\/(ops|fraud|balance|market|lab|director)\/config$/);
   if (req.method === 'POST' && aiCfgMatch) {
-    const denied = requireAdmin();
+    const denied = guard(P.AI_CONFIGURE);
     if (denied) return denied;
     const zone = aiCfgMatch[1];
-    const updated = updateZoneConfig(db, zone, body);
+    let updated;
+    try {
+      updated = updateZoneConfig(db, zone, { ...body, actorUsername: principal.username });
+    } catch (err) {
+      if (err.code && String(err.code).startsWith('API_KEY_')) {
+        return { status: 422, json: { error: err.code, message: err.message } };
+      }
+      throw err;
+    }
     writeAuditLog(db, {
       actorRole: principal.role,
       actorId: principal.username,
       action: `ai.zone.${zone}.config_updated`,
       targetType: 'ai_zone_configs',
       targetId: zone,
+      // The plaintext key is never audited — only its fingerprint prefix, which is
+      // enough to prove *which* key was active without being a credential.
       applied: {
         provider: updated.provider,
         fallbackProvider: updated.fallbackProvider,
@@ -786,9 +1662,13 @@ async function handleAdminRoute(db, req, pathname, urlObj, body, clientIp) {
         zeroRetention: updated.zeroRetention,
         batchMode: updated.batchMode,
         enabled: updated.enabled,
+        ...(updated.keyChange
+          ? { apiKey: { action: updated.keyChange.action, fingerprint: updated.keyChange.to } }
+          : {}),
       },
       ipHash,
     });
+    publish('ai_config', { zone, provider: updated.provider, model: updated.model });
     return { status: 200, json: { ok: true, config: { ...updated, apiKey: undefined } } };
   }
 
@@ -796,7 +1676,7 @@ async function handleAdminRoute(db, req, pathname, urlObj, body, clientIp) {
   // Observability, Incidents, Runbooks, Post-Mortems & Read-Only Telegram Bot
   // -------------------------------------------------------------------------
   if (req.method === 'GET' && pathname === '/api/admin/observability') {
-    const denied = requireAdmin();
+    const denied = guard(P.OBSERVABILITY_READ);
     if (denied) return denied;
     return {
       status: 200,
@@ -808,13 +1688,14 @@ async function handleAdminRoute(db, req, pathname, urlObj, body, clientIp) {
         postmortems: listPostmortems(db),
         regionEndpoints: REGION_ENDPOINTS,
         pingThresholds: PING_THRESHOLDS,
+        ...observabilityExtras(db),
       },
     };
   }
 
   const rbMatch = pathname.match(/^\/api\/admin\/runbooks\/([^/]+)$/);
   if (req.method === 'GET' && rbMatch) {
-    const denied = requireAdmin();
+    const denied = guard(P.OBSERVABILITY_READ);
     if (denied) return denied;
     const rb = getRunbookBySlug(rbMatch[1]);
     if (!rb) return { status: 404, json: { error: 'RUNBOOK_NOT_FOUND' } };
@@ -822,7 +1703,7 @@ async function handleAdminRoute(db, req, pathname, urlObj, body, clientIp) {
   }
 
   if (req.method === 'POST' && pathname === '/api/admin/incidents') {
-    const denied = requireAdmin();
+    const denied = guard(P.INCIDENTS_MANAGE);
     if (denied) return denied;
     const inc = createIncident(db, {
       severity: body.severity,
@@ -844,12 +1725,21 @@ async function handleAdminRoute(db, req, pathname, urlObj, body, clientIp) {
       applied: { severity: inc.severity, zone: inc.zone, tgPush },
       ipHash,
     });
+    notify(db, {
+      kind: 'incident',
+      severity: inc.severity,
+      title: `Инцидент: ${inc.title}`,
+      body: inc.description || '',
+      link: '#/observability',
+      fingerprint: `incident:${inc.id}`,
+    });
+    publish('incident', { id: inc.id, severity: inc.severity, zone: inc.zone, title: inc.title, status: inc.status });
     return { status: 201, json: { ok: true, incident: inc, telegramAlert: tgPush } };
   }
 
   const incStatusMatch = pathname.match(/^\/api\/admin\/incidents\/([^/]+)\/status$/);
   if (req.method === 'POST' && incStatusMatch) {
-    const denied = requireAdmin();
+    const denied = guard(P.INCIDENTS_MANAGE);
     if (denied) return denied;
     const updated = updateIncidentStatus(db, incStatusMatch[1], {
       action: body.action,
@@ -864,12 +1754,25 @@ async function handleAdminRoute(db, req, pathname, urlObj, body, clientIp) {
       applied: { status: updated?.status },
       ipHash,
     });
+    publish('incident', { id: incStatusMatch[1], status: updated?.status, action: body.action });
     return { status: 200, json: { ok: true, incident: updated } };
   }
 
   if (req.method === 'POST' && pathname === '/api/admin/postmortems') {
-    const denied = requireAdmin();
+    const denied = guard(P.POSTMORTEMS_CREATE);
     if (denied) return denied;
+    // A post-mortem is always attached to an incident: validate before inserting so a
+    // missing id surfaces as a clear 400/404 instead of a NOT NULL constraint 500.
+    const incidentId = String(body.incidentId || '').trim();
+    if (!incidentId) {
+      return { status: 400, json: { error: 'INCIDENT_REQUIRED', message: 'Укажите инцидент для постмортема' } };
+    }
+    if (!db.prepare('SELECT id FROM incidents WHERE id = ?').get(incidentId)) {
+      return { status: 404, json: { error: 'INCIDENT_NOT_FOUND', message: 'Инцидент не найден' } };
+    }
+    if (!String(body.summary || '').trim()) {
+      return { status: 422, json: { error: 'SUMMARY_REQUIRED', message: 'Blameless-резюме обязательно' } };
+    }
     const pm = createPostmortem(db, {
       incidentId: body.incidentId,
       summary: body.summary,
@@ -893,13 +1796,13 @@ async function handleAdminRoute(db, req, pathname, urlObj, body, clientIp) {
   }
 
   if (req.method === 'POST' && pathname === '/api/admin/telegram/command') {
-    const denied = requireAdmin();
+    const denied = guard(P.BOT_READ);
     if (denied) return denied;
     return { status: 200, json: executeReadOnlyBotCommand(db, body.command) };
   }
 
   if (req.method === 'POST' && pathname === '/api/admin/telegram/callback') {
-    const denied = requireAdmin();
+    const denied = guard(P.INCIDENTS_MANAGE);
     if (denied) return denied;
     const res = handleTelegramCallbackQuery(db, {
       callbackData: body.callbackData,
@@ -923,7 +1826,7 @@ async function handleAdminRoute(db, req, pathname, urlObj, body, clientIp) {
   // Maintenance, Priority Push, Full News CRUD, Tickets, Feedback, Patches & Calendar
   // -------------------------------------------------------------------------
   if (req.method === 'GET' && pathname === '/api/admin/liveops') {
-    const denied = requireAdmin();
+    const denied = guard(P.LIVEOPS_READ);
     if (denied) return denied;
     return {
       status: 200,
@@ -935,19 +1838,29 @@ async function handleAdminRoute(db, req, pathname, urlObj, body, clientIp) {
         feedback: listPlayerFeedback(db),
         patches: listPatchPipeline(db),
         calendar: listLiveopsCalendar(db),
+        ticketSla: ticketSlaSummary(db),
       },
     };
   }
 
   if (req.method === 'POST' && pathname === '/api/admin/maintenance') {
-    const denied = requireAdmin();
+    const denied = guard(P.LIVEOPS_MAINTENANCE);
     if (denied) return denied;
     const state = setMaintenanceState(db, {
       enabled: body.enabled,
       bannerRu: body.bannerRu,
       bannerEn: body.bannerEn,
       etaIso: body.etaIso,
+      graceSec: body.allowActiveMatchesFinishGraceSec,
       actorUsername: principal.username,
+    });
+    publish('maintenance', state);
+    notify(db, {
+      kind: 'maintenance',
+      severity: state.enabled ? 'warning' : 'info',
+      title: state.enabled ? 'Включён режим технических работ' : 'Технические работы завершены',
+      body: state.bannerRu || '',
+      link: '#/liveops',
     });
     writeAuditLog(db, {
       actorRole: principal.role,
@@ -962,7 +1875,7 @@ async function handleAdminRoute(db, req, pathname, urlObj, body, clientIp) {
   }
 
   if (req.method === 'POST' && pathname === '/api/admin/pushes') {
-    const denied = requireAdmin();
+    const denied = guard(P.LIVEOPS_PUSH);
     if (denied) return denied;
     const push = createPushNotification(db, {
       priority: body.priority,
@@ -984,11 +1897,12 @@ async function handleAdminRoute(db, req, pathname, urlObj, body, clientIp) {
       applied: { priority: push.priority, pinned: push.pinned, segment: push.segment },
       ipHash,
     });
+    publish('push', { id: push.id, priority: push.priority, title: push.title_ru });
     return { status: 201, json: { ok: true, push } };
   }
 
   if (req.method === 'POST' && pathname === '/api/admin/news') {
-    const denied = requireAdmin();
+    const denied = guard(P.LIVEOPS_NEWS);
     if (denied) return denied;
     const post = createNewsPost(db, {
       category: body.category,
@@ -1009,12 +1923,13 @@ async function handleAdminRoute(db, req, pathname, urlObj, body, clientIp) {
       applied: { category: post.category, titleRu: post.title_ru },
       ipHash,
     });
+    publish('news', { id: post.id, category: post.category, title: post.title_ru, published: post.published });
     return { status: 201, json: { ok: true, post } };
   }
 
   const newsIdMatch = pathname.match(/^\/api\/admin\/news\/([^/]+)$/);
   if ((req.method === 'PUT' || req.method === 'PATCH') && newsIdMatch) {
-    const denied = requireAdmin();
+    const denied = guard(P.LIVEOPS_NEWS);
     if (denied) return denied;
     const updated = updateNewsPost(db, newsIdMatch[1], body);
     if (!updated) return { status: 404, json: { error: 'NEWS_NOT_FOUND' } };
@@ -1031,7 +1946,7 @@ async function handleAdminRoute(db, req, pathname, urlObj, body, clientIp) {
   }
 
   if (req.method === 'DELETE' && newsIdMatch) {
-    const denied = requireAdmin();
+    const denied = guard(P.LIVEOPS_NEWS);
     if (denied) return denied;
     deleteNewsPost(db, newsIdMatch[1]);
     writeAuditLog(db, {
@@ -1047,7 +1962,7 @@ async function handleAdminRoute(db, req, pathname, urlObj, body, clientIp) {
 
   const ticketReplyMatch = pathname.match(/^\/api\/admin\/tickets\/([^/]+)\/reply$/);
   if (req.method === 'POST' && ticketReplyMatch) {
-    const denied = requireAdmin();
+    const denied = guard(P.LIVEOPS_TICKETS);
     if (denied) return denied;
     const updatedTicket = replyToSupportTicket(db, ticketReplyMatch[1], {
       adminUsername: principal.username,
@@ -1064,11 +1979,12 @@ async function handleAdminRoute(db, req, pathname, urlObj, body, clientIp) {
       applied: { status: updatedTicket.status },
       ipHash,
     });
+    publish('ticket', { ticketId: ticketReplyMatch[1], status: updatedTicket.status, replied: true });
     return { status: 200, json: { ok: true, ticket: updatedTicket } };
   }
 
   if (req.method === 'POST' && pathname === '/api/admin/feedback') {
-    const denied = requireAdmin();
+    const denied = guard(P.LIVEOPS_FEEDBACK);
     if (denied) return denied;
     const item = createOrUpdateFeedbackItem(db, body);
     writeAuditLog(db, {
@@ -1084,7 +2000,7 @@ async function handleAdminRoute(db, req, pathname, urlObj, body, clientIp) {
   }
 
   if (req.method === 'POST' && pathname === '/api/admin/patches') {
-    const denied = requireAdmin();
+    const denied = guard(P.LIVEOPS_PATCHES);
     if (denied) return denied;
     const patch = createPatchRelease(db, body);
     writeAuditLog(db, {
@@ -1100,7 +2016,7 @@ async function handleAdminRoute(db, req, pathname, urlObj, body, clientIp) {
   }
 
   if (req.method === 'POST' && pathname === '/api/admin/liveops/events') {
-    const denied = requireAdmin();
+    const denied = guard(P.LIVEOPS_NEWS);
     if (denied) return denied;
     const ev = createLiveopsEvent(db, body);
     writeAuditLog(db, {
@@ -1119,7 +2035,7 @@ async function handleAdminRoute(db, req, pathname, urlObj, body, clientIp) {
   // Legal Compliance, DPA Registry, Audit Logs & Launch Readiness / DR Backup
   // -------------------------------------------------------------------------
   if (req.method === 'GET' && pathname === '/api/admin/legal') {
-    const denied = requireAdmin();
+    const denied = guard(P.LEGAL_READ);
     if (denied) return denied;
     const consentStats = db
       .prepare(
@@ -1141,53 +2057,78 @@ async function handleAdminRoute(db, req, pathname, urlObj, body, clientIp) {
         ageGateRules: AGE_GATE_RULES,
         cnIcpLicensed: CONFIG.cnIcpLicensed,
         consentStats,
-        privacyRequests: db.prepare('SELECT * FROM privacy_requests ORDER BY requested_at DESC LIMIT 30').all(),
+        // Queue + deadline accounting, not just the last 30 closed rows.
+        privacyRequests: listPrivacyRequests(db, { status: 'all', limit: 50 }),
+        privacyQueue: privacyQueueSummary(db),
+        retention: {
+          inputEventsDays: RETENTION_DAYS.inputLogs,
+          telemetryDays: RETENTION_DAYS.telemetrySessions,
+          directorChatDays: RETENTION_DAYS.directorChatArchive,
+          deletionSlaDays: RETENTION_DAYS.deletionSlaDays,
+        },
       },
     };
   }
 
   if (req.method === 'GET' && pathname === '/api/admin/audit') {
-    const denied = requireAdmin();
+    const denied = guard(P.AUDIT_READ);
     if (denied) return denied;
     const format = urlObj.searchParams.get('format');
-    const logs = db.prepare('SELECT * FROM audit_logs ORDER BY created_at DESC LIMIT 200').all();
-    if (format === 'csv') {
-      const header = 'id,created_at,region,actor_role,actor_id,action,target_type,target_id,provider,model,tokens_used\n';
-      const rows = logs
-        .map((l) =>
-          [
-            l.id,
-            l.created_at,
-            l.region,
-            l.actor_role,
-            `"${String(l.actor_id || '').replace(/"/g, '""')}"`,
-            l.action,
-            l.target_type,
-            l.target_id || '',
-            l.provider || '',
-            l.model || '',
-            l.tokens_used || 0,
-          ].join(',')
-        )
-        .join('\n');
-      return {
-        status: 200,
-        contentType: 'text/csv; charset=utf-8',
-        headers: { 'Content-Disposition': 'attachment; filename="topspin-audit-logs.csv"' },
-        rawText: header + rows,
-      };
+    const list = parseListQuery(urlObj, {
+      allowedSort: ['created_at', 'id', 'tokens_used'],
+      defaultSort: 'created_at',
+      defaultOrder: 'desc',
+    });
+    const where = ['1=1'];
+    const params = [];
+    if (list.q) {
+      where.push('(action LIKE ? OR actor_id LIKE ? OR target_id LIKE ? OR target_type LIKE ?)');
+      params.push(`%${list.q}%`, `%${list.q}%`, `%${list.q}%`, `%${list.q}%`);
     }
-    return { status: 200, json: { logs } };
+    const actionFilter = String(urlObj.searchParams.get('action') || '').trim();
+    if (actionFilter) {
+      where.push('action LIKE ?');
+      params.push(`${actionFilter}%`);
+    }
+    const actorFilter = String(urlObj.searchParams.get('actor') || '').trim();
+    if (actorFilter) {
+      where.push('actor_id = ?');
+      params.push(actorFilter);
+    }
+    const whereSql = `FROM audit_logs WHERE ${where.join(' AND ')}`;
+    const total = countTotal(db, whereSql, params);
+    const logs = db
+      .prepare(`SELECT * ${whereSql} ORDER BY ${list.sort} ${list.order.toUpperCase()} LIMIT ? OFFSET ?`)
+      .all(...params, list.pageSize, list.offset);
+    if (format === 'csv') {
+      const allLogs = db.prepare(`SELECT * ${whereSql} ORDER BY id DESC LIMIT 5000`).all(...params);
+      const csvColumns = [
+        { key: 'id' }, { key: 'created_at' }, { key: 'region' }, { key: 'actor_role' }, { key: 'actor_id' },
+        { key: 'action' }, { key: 'target_type' }, { key: 'target_id' }, { key: 'provider' }, { key: 'model' },
+        { key: 'tokens_used' }, { key: 'entry_hash' },
+      ];
+      return csvResult(`topspin-audit-logs-${new Date().toISOString().slice(0, 10)}.csv`, toCsv(csvColumns, allLogs));
+    }
+    return {
+      status: 200,
+      json: {
+        logs,
+        items: logs,
+        actors: db.prepare('SELECT actor_id, actor_role, COUNT(*) AS c FROM audit_logs GROUP BY actor_id ORDER BY c DESC LIMIT 20').all(),
+        chain: { algorithm: 'sha256', headHash: logs[0]?.entry_hash || null },
+        ...listResponse(logs, { ...list, total }),
+      },
+    };
   }
 
   if (req.method === 'GET' && pathname === '/api/admin/system/readiness') {
-    const denied = requireAdmin();
+    const denied = guard(P.SYSTEM_READ);
     if (denied) return denied;
     return { status: 200, json: runReadinessChecklist(db) };
   }
 
   if (req.method === 'POST' && pathname === '/api/admin/system/backup') {
-    const denied = requireAdmin();
+    const denied = guard(P.SYSTEM_BACKUP);
     if (denied) return denied;
     const backup = triggerDisasterRecoveryBackup(db);
     writeAuditLog(db, {
@@ -1203,8 +2144,14 @@ async function handleAdminRoute(db, req, pathname, urlObj, body, clientIp) {
   }
 
   if (req.method === 'POST' && pathname === '/api/admin/system/retention') {
-    const denied = requireAdmin();
+    const denied = guard(P.SYSTEM_RETENTION);
     if (denied) return denied;
+    // `dryRun` is a first-class mode, not a query flag: the policy deletes input
+    // events irreversibly, so the operator must be able to count first and decide
+    // second. A dry run is deliberately NOT audited as an execution.
+    if (body.dryRun === true) {
+      return { status: 200, json: { ok: true, preview: runRetentionCleanup(db, new Date(), { dryRun: true }) } };
+    }
     const cleanup = runRetentionCleanup(db);
     writeAuditLog(db, {
       actorRole: principal.role,
@@ -1214,8 +2161,23 @@ async function handleAdminRoute(db, req, pathname, urlObj, body, clientIp) {
       applied: cleanup,
       ipHash,
     });
+    publish('retention', { totalRowsAffected: cleanup.totalRowsAffected });
     return { status: 200, json: { ok: true, cleanup } };
   }
+
+  // Platform, governance, operator accounts and silences live in their own module.
+  const platformResult = await handlePlatformRoutes({
+    db,
+    req,
+    pathname,
+    urlObj,
+    body,
+    clientIp,
+    principal,
+    ipHash,
+    guard,
+  });
+  if (platformResult) return platformResult;
 
   return null;
 }

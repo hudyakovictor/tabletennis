@@ -16,6 +16,7 @@
 const crypto = require('node:crypto');
 const { CONFIG, AI_ZONES } = require('../config');
 const { buildIsolatedDataBlock } = require('../security/promptGuard');
+const { decryptSecret, encryptSecret, fingerprintSecret, maskSecret, validateProviderKey } = require('../security/secrets');
 
 const PROVIDER_ENDPOINTS = Object.freeze({
   openrouter: 'https://openrouter.ai/api/v1/chat/completions',
@@ -31,14 +32,46 @@ function estimateTokens(text) {
   return Math.max(12, Math.ceil(String(text || '').length / 3.8));
 }
 
+/**
+ * Resolves the effective key for a zone. Precedence is deliberate:
+ * `env` (secret manager / orchestrator) → `vault` (encrypted in ai_zone_configs) → none.
+ * `keySource` is part of the contract so an operator can see *why* a rotation did
+ * not change behaviour, instead of guessing.
+ */
+function resolveZoneKey(staticCfg, row) {
+  if (staticCfg.apiKey) {
+    return {
+      apiKey: staticCfg.apiKey,
+      keySource: 'env',
+      keyFingerprint: fingerprintSecret(staticCfg.apiKey),
+      keyMasked: maskSecret(staticCfg.apiKey),
+      keyUpdatedAt: null,
+    };
+  }
+  const decrypted = decryptSecret(row ? row.api_key_encrypted : null);
+  if (decrypted) {
+    return {
+      apiKey: decrypted,
+      keySource: 'vault',
+      keyFingerprint: row.api_key_fingerprint || fingerprintSecret(decrypted),
+      keyMasked: maskSecret(decrypted),
+      keyUpdatedAt: row.api_key_updated_at || null,
+    };
+  }
+  return { apiKey: '', keySource: 'none', keyFingerprint: null, keyMasked: null, keyUpdatedAt: null };
+}
+
 function getZoneRuntimeConfig(db, zone) {
   const staticCfg = AI_ZONES[zone];
   if (!staticCfg) throw new Error(`Unknown AI zone: ${zone}`);
   const row = db
     .prepare(
-      'SELECT zone, provider, fallback_provider, model, daily_token_limit, zero_retention, batch_mode, enabled, updated_at FROM ai_zone_configs WHERE zone = ?'
+      `SELECT zone, provider, fallback_provider, model, daily_token_limit, zero_retention, batch_mode, enabled,
+              api_key_encrypted, api_key_fingerprint, api_key_updated_at, api_key_updated_by, updated_at
+         FROM ai_zone_configs WHERE zone = ?`
     )
     .get(zone);
+  const key = resolveZoneKey(staticCfg, row);
   return {
     zone,
     role: staticCfg.role,
@@ -51,8 +84,13 @@ function getZoneRuntimeConfig(db, zone) {
     zeroRetention: row ? Boolean(row.zero_retention) : Boolean(staticCfg.zeroRetention),
     batchMode: row ? Boolean(row.batch_mode) : Boolean(staticCfg.batchMode),
     enabled: row ? Boolean(row.enabled) : true,
-    apiKey: staticCfg.apiKey || '',
-    hasApiKey: Boolean(staticCfg.apiKey),
+    apiKey: key.apiKey,
+    hasApiKey: Boolean(key.apiKey),
+    keySource: key.keySource,
+    keyFingerprint: key.keyFingerprint,
+    keyMasked: key.keyMasked,
+    keyUpdatedAt: key.keyUpdatedAt,
+    keyUpdatedBy: row ? row.api_key_updated_by || null : null,
   };
 }
 
@@ -282,7 +320,7 @@ function listAllZonesStatus(db) {
         : null;
     return {
       ...cfg,
-      apiKey: undefined, // Never leak API keys!
+      apiKey: undefined, // Never leak API keys — only source/fingerprint/mask leave the process.
       usedTokens: usage.usedTokens,
       cachedTokensToday: usage.cachedTokens,
       remainingTokens: Math.max(0, cfg.dailyTokenLimit - usage.usedTokens),
@@ -296,7 +334,7 @@ function listAllZonesStatus(db) {
   });
 }
 
-function updateZoneConfig(db, zone, { provider, fallbackProvider, model, dailyTokenLimit, zeroRetention, batchMode, enabled }) {
+function updateZoneConfig(db, zone, { provider, fallbackProvider, model, dailyTokenLimit, zeroRetention, batchMode, enabled, apiKey, clearApiKey, actorUsername }) {
   const allowedProviders = new Set([
     'local_statistical',
     'openrouter',
@@ -319,24 +357,65 @@ function updateZoneConfig(db, zone, { provider, fallbackProvider, model, dailyTo
   const nextBatch = batchMode === undefined ? (current.batchMode ? 1 : 0) : batchMode ? 1 : 0;
   const nextEnabled = enabled === undefined ? (current.enabled ? 1 : 0) : enabled ? 1 : 0;
 
-  db.prepare(
-    `UPDATE ai_zone_configs
-     SET provider = ?, fallback_provider = ?, model = ?, daily_token_limit = ?,
-         zero_retention = ?, batch_mode = ?, enabled = ?, updated_at = ?
-     WHERE zone = ?`
-  ).run(
-    nextProvider,
-    nextFallback,
-    nextModel,
-    nextLimit,
-    nextZeroRet,
-    nextBatch,
-    nextEnabled,
-    new Date().toISOString(),
-    zone
-  );
+  const nowIso = new Date().toISOString();
 
-  return getZoneRuntimeConfig(db, zone);
+  // Key rotation is a separate concern from tuning the zone: validate before any
+  // write, so a rejected key never leaves the zone half-updated.
+  let keyWrite = null;
+  if (clearApiKey) {
+    keyWrite = { encrypted: null, fingerprint: null, from: current.keyFingerprint, action: 'cleared' };
+  } else if (apiKey !== undefined && apiKey !== null && String(apiKey).trim() !== '') {
+    const check = validateProviderKey(apiKey);
+    if (!check.ok) {
+      const err = new Error(check.message);
+      err.code = check.error;
+      throw err;
+    }
+    keyWrite = {
+      encrypted: encryptSecret(check.value),
+      fingerprint: fingerprintSecret(check.value),
+      from: current.keyFingerprint,
+      action: 'rotated',
+    };
+  }
+
+  if (keyWrite) {
+    db.prepare(
+      `UPDATE ai_zone_configs
+       SET provider = ?, fallback_provider = ?, model = ?, daily_token_limit = ?,
+           zero_retention = ?, batch_mode = ?, enabled = ?,
+           api_key_encrypted = ?, api_key_fingerprint = ?, api_key_updated_at = ?, api_key_updated_by = ?,
+           updated_at = ?
+       WHERE zone = ?`
+    ).run(
+      nextProvider,
+      nextFallback,
+      nextModel,
+      nextLimit,
+      nextZeroRet,
+      nextBatch,
+      nextEnabled,
+      keyWrite.encrypted,
+      keyWrite.fingerprint,
+      nowIso,
+      actorUsername || null,
+      nowIso,
+      zone
+    );
+  } else {
+    db.prepare(
+      `UPDATE ai_zone_configs
+       SET provider = ?, fallback_provider = ?, model = ?, daily_token_limit = ?,
+           zero_retention = ?, batch_mode = ?, enabled = ?, updated_at = ?
+       WHERE zone = ?`
+    ).run(nextProvider, nextFallback, nextModel, nextLimit, nextZeroRet, nextBatch, nextEnabled, nowIso, zone);
+  }
+
+  const updated = getZoneRuntimeConfig(db, zone);
+  if (keyWrite) {
+    updated.keyChange = { action: keyWrite.action, from: keyWrite.from, to: keyWrite.fingerprint, at: nowIso };
+  }
+  return updated;
 }
 
 module.exports = {

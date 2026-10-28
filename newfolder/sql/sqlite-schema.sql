@@ -13,6 +13,9 @@ CREATE TABLE IF NOT EXISTS admin_users (
   role TEXT NOT NULL DEFAULT 'admin',
   display_name TEXT NOT NULL,
   last_login_at TEXT,
+  is_active INTEGER NOT NULL DEFAULT 1,
+  disabled_at TEXT,
+  disabled_by TEXT,
   created_at TEXT NOT NULL
 );
 
@@ -103,6 +106,7 @@ CREATE INDEX IF NOT EXISTS idx_telemetry_metric_ts ON telemetry_metrics(metric_n
 -- ============================================================================
 CREATE TABLE IF NOT EXISTS input_events (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
+  client_event_id TEXT,
   session_id TEXT NOT NULL,
   player_id TEXT,
   ts TEXT NOT NULL,
@@ -130,6 +134,9 @@ CREATE TABLE IF NOT EXISTS input_events (
 CREATE INDEX IF NOT EXISTS idx_input_ts ON input_events(ts);
 CREATE INDEX IF NOT EXISTS idx_input_zone ON input_events(table_zone, accepted);
 CREATE INDEX IF NOT EXISTS idx_input_player ON input_events(player_id, accepted);
+-- Idempotent telemetry: a retried client batch can never double-count a stroke
+CREATE UNIQUE INDEX IF NOT EXISTS uq_input_client_event ON input_events(session_id, client_event_id)
+  WHERE client_event_id IS NOT NULL;
 
 CREATE TABLE IF NOT EXISTS match_rules_versions (
   version INTEGER PRIMARY KEY,
@@ -259,6 +266,10 @@ CREATE TABLE IF NOT EXISTS ai_zone_configs (
   zero_retention INTEGER NOT NULL DEFAULT 1,
   batch_mode INTEGER NOT NULL DEFAULT 0,
   enabled INTEGER NOT NULL DEFAULT 1,
+  api_key_encrypted TEXT,
+  api_key_fingerprint TEXT,
+  api_key_updated_at TEXT,
+  api_key_updated_by TEXT,
   updated_at TEXT NOT NULL
 );
 
@@ -410,6 +421,9 @@ CREATE TABLE IF NOT EXISTS support_tickets (
   linked_incident_id TEXT,
   screenshot_meta_json TEXT,
   client_context_json TEXT NOT NULL DEFAULT '{}',
+  first_response_at TEXT,
+  first_response_minutes INTEGER,
+  sla_due_at TEXT,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );
@@ -511,12 +525,18 @@ CREATE TABLE IF NOT EXISTS privacy_requests (
   player_id TEXT NOT NULL,
   region TEXT NOT NULL DEFAULT 'RU',
   request_type TEXT NOT NULL, -- export | erasure
-  status TEXT NOT NULL DEFAULT 'completed',
+  status TEXT NOT NULL DEFAULT 'completed', -- pending | in_progress | completed | rejected
   reason TEXT,
   requested_at TEXT NOT NULL,
+  due_at TEXT,               -- requested_at + 30 days (152-ФЗ / GDPR Art. 12(3))
   completed_at TEXT,
-  processed_by TEXT
+  processed_by TEXT,
+  source TEXT,               -- operator | player_client
+  notes TEXT,
+  rejection_reason TEXT,
+  updated_at TEXT
 );
+CREATE INDEX IF NOT EXISTS idx_privacy_requests_status ON privacy_requests(status, due_at);
 
 CREATE TABLE IF NOT EXISTS audit_logs (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -533,6 +553,137 @@ CREATE TABLE IF NOT EXISTS audit_logs (
   model TEXT,
   tokens_used INTEGER NOT NULL DEFAULT 0,
   ip_hash TEXT,
+  prev_hash TEXT,
+  entry_hash TEXT,
   created_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_audit_created ON audit_logs(created_at DESC);
+-- Restore checks ask "is this snapshot's head still part of the live chain?"
+CREATE INDEX IF NOT EXISTS idx_audit_hash ON audit_logs(entry_hash);
+CREATE INDEX IF NOT EXISTS idx_audit_actor ON audit_logs(actor_id, created_at DESC);
+
+-- ============================================================================
+-- Domain 9 (v3): Session security, CSRF, Idempotency, Scheduler, Alerting,
+-- Notification Center, Fraud review history & client push dismissals.
+-- These tables close the "operator ergonomics + provable governance" gap:
+-- every mutation is replay-safe, every alert is deduplicable, and every admin
+-- session is individually revocable.
+-- ============================================================================
+
+-- Server-side admin session registry: JWT carries `sid`; revocation is instant.
+CREATE TABLE IF NOT EXISTS admin_sessions (
+  id TEXT PRIMARY KEY,
+  actor_id TEXT NOT NULL,
+  username TEXT NOT NULL,
+  role TEXT NOT NULL,
+  ip_hash TEXT,
+  ua_hash TEXT,
+  csrf_hash TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  last_seen_at TEXT NOT NULL,
+  expires_at TEXT NOT NULL,
+  revoked_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_admin_sessions_actor ON admin_sessions(actor_id, revoked_at);
+
+-- Replay-safe admin mutations (`Idempotency-Key` header on POST/PUT/PATCH/DELETE)
+CREATE TABLE IF NOT EXISTS idempotency_keys (
+  key TEXT PRIMARY KEY,
+  endpoint TEXT NOT NULL,
+  actor_id TEXT NOT NULL,
+  request_hash TEXT NOT NULL,
+  status_code INTEGER NOT NULL,
+  response_json TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  expires_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_idempotency_expiry ON idempotency_keys(expires_at);
+
+-- Cadence engine for the 5 zones + platform jobs (02-ai-zones.md cadences)
+CREATE TABLE IF NOT EXISTS scheduler_jobs (
+  job_name TEXT PRIMARY KEY,
+  zone TEXT,
+  cadence_sec INTEGER NOT NULL,
+  enabled INTEGER NOT NULL DEFAULT 1,
+  last_run_at TEXT,
+  last_finished_at TEXT,
+  last_status TEXT,
+  last_duration_ms INTEGER,
+  last_error TEXT,
+  next_run_at TEXT NOT NULL,
+  consecutive_failures INTEGER NOT NULL DEFAULT 0,
+  per_run_token_budget INTEGER NOT NULL DEFAULT 0,
+  updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS job_runs (
+  id TEXT PRIMARY KEY,
+  job_name TEXT NOT NULL,
+  trigger TEXT NOT NULL DEFAULT 'schedule', -- schedule | manual
+  status TEXT NOT NULL,                     -- running | ok | skipped | failed
+  detail_json TEXT NOT NULL DEFAULT '{}',
+  started_at TEXT NOT NULL,
+  finished_at TEXT,
+  duration_ms INTEGER
+);
+CREATE INDEX IF NOT EXISTS idx_job_runs_name ON job_runs(job_name, started_at DESC);
+
+-- Alert silencing: fingerprint = stable hash of (rule, zone, title)
+CREATE TABLE IF NOT EXISTS alert_silences (
+  id TEXT PRIMARY KEY,
+  fingerprint TEXT NOT NULL,
+  reason TEXT NOT NULL,
+  created_by TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  expires_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_alert_silence_fp ON alert_silences(fingerprint, expires_at);
+
+-- Operator notification center (SSE-backed, deduplicated, role-scoped)
+CREATE TABLE IF NOT EXISTS admin_notifications (
+  id TEXT PRIMARY KEY,
+  fingerprint TEXT,
+  kind TEXT NOT NULL,       -- incident | proposal | zone | ticket | maintenance | system | audit
+  severity TEXT NOT NULL DEFAULT 'info',
+  title TEXT NOT NULL,
+  body TEXT NOT NULL DEFAULT '',
+  link_hash TEXT,
+  target_roles_json TEXT NOT NULL DEFAULT '[]',
+  read_at TEXT,
+  read_by TEXT,
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_admin_notif_unread ON admin_notifications(read_at, created_at DESC);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_admin_notif_fp ON admin_notifications(fingerprint) WHERE fingerprint IS NOT NULL;
+
+-- Human-only fraud review history (zero auto-bans; full sanction trail)
+CREATE TABLE IF NOT EXISTS fraud_case_reviews (
+  id TEXT PRIMARY KEY,
+  case_id TEXT NOT NULL,
+  reviewer TEXT NOT NULL,
+  verdict TEXT NOT NULL,
+  player_action TEXT NOT NULL DEFAULT 'none',
+  note TEXT NOT NULL DEFAULT '',
+  risk_score_before REAL,
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_fraud_reviews_case ON fraud_case_reviews(case_id, created_at DESC);
+
+-- Player-side dismissal of priority pushes (17-maintenance-push-news-support.md)
+CREATE TABLE IF NOT EXISTS notification_dismissals (
+  player_id TEXT NOT NULL,
+  notification_id TEXT NOT NULL,
+  dismissed_at TEXT NOT NULL,
+  PRIMARY KEY (player_id, notification_id)
+);
+
+-- Short-lived WebSocket admission tickets (never reuse the long player token)
+CREATE TABLE IF NOT EXISTS ws_tickets (
+  id TEXT PRIMARY KEY,
+  player_id TEXT NOT NULL,
+  session_id TEXT,
+  region TEXT NOT NULL DEFAULT 'RU',
+  issued_at TEXT NOT NULL,
+  expires_at TEXT NOT NULL,
+  used_at TEXT
+);
