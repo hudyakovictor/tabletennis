@@ -265,6 +265,72 @@
 
 Сам пакет данных при экспорте игрок получает не через этот эндпоинт, а по регламенту поддержки (пакет данных формируется оператором); клиент не должен обещать «скачивание сейчас».
 
+### 3.12 Прогресс, матчи, лидерборд и конфиг
+
+Добавлено в `v3.1` для действующего клиента (сборка `play/index.html`). Клиент продолжает считать игру локально и хранит сейв `ttu-v2`; сервер получает **факты** и ведёт те числа, которые может проверить сам.
+
+**Правило доверия.** Клиент присылает `level`, `durationMs`, счёт и `matchId` — но не рейтинг, не валюту и не «я выиграл». Рейтинг считается на сервере по Эло (`K=32`, потолок ±64), награда за уровень начисляется по числу реально пройденных ступенек (`150` монет и `20` гемов за ступень). Полный реплей-контроль — следующий этап; сейчас действуют лимиты и монотонность.
+
+#### `GET /api/client/v1/me`
+Требует `Authorization: Bearer <playerToken>`.
+```json
+{ "ok": true,
+  "player": { "playerId": "plr_0091", "displayName": "Player_1091", "region": "RU", "status": "active", "createdAt": "…" },
+  "progress": { "level": 2, "xp": 400, "rating": 1018, "matches": 3, "wins": 2, "losses": 1,
+                "streak": 1, "bestRally": 12, "coins": 300, "gems": 40, "updatedAt": "…" },
+  "rewards": { "coinsPerLevel": 150, "gemsPerLevel": 20 },
+  "serverTimeUtc": "…" }
+```
+Коды: `401 PLAYER_AUTH_REQUIRED`, `403 ACCOUNT_BANNED` (`reason`), `403 PLAYER_RESTRICTED` (`status`), `404 PLAYER_NOT_FOUND`. Прогресс создаётся лениво: первый вход даёт `level=1, rating=1000, coins=0`.
+
+#### `POST /api/client/v1/progress/level-complete`
+```json
+{ "level": 2, "durationMs": 60000, "xp": 400 }
+```
+Проверки: `1 ≤ level ≤ 99`; `level` не меньше текущего; прыжок не больше `5` ступенек за запрос (оффлайн-очередь); `durationMs ≥ 15000 + 1500 × level`. Награда — в ответе, а не в запросе.
+```json
+{ "ok": true, "progress": { "level": 2, "coins": 150, "gems": 20, "…": "…" },
+  "rewards": { "coins": 150, "gems": 20 }, "serverTimeUtc": "…" }
+```
+Отказ `422 IMPLAUSIBLE_RESULT` с `reasons` (`LEVEL_TOO_FAST`, `LEVEL_REGRESSION`, `LEVEL_JUMP`, `LEVEL_OUT_OF_RANGE`, `XP_OUT_OF_RANGE`) и `minDurationMs`. `429 RATE_LIMITED` — 30 запросов/мин на игрока.
+
+#### `POST /api/client/v1/matches`
+```json
+{ "matchId": "mt_01J8…", "mode": "career", "playerScore": 11, "opponentScore": 8,
+  "durationMs": 150000, "opponentRating": 1050, "opponentName": "Kai",
+  "bestRally": 12, "rulesVersion": 4, "clientVersion": "shell abc123" }
+```
+`matchId` клиент генерирует сам — повтор с тем же id не начисляет второй раз (`replay: true`), чужой id → `409 MATCH_ID_CONFLICT`. Проверки: счёт `0…99`, ничья запрещена, `25000 ≤ durationMs ≤ 3 ч`.
+```json
+{ "ok": true, "replay": false, "matchId": "mt_01J8…",
+  "result": { "win": true, "ratingBefore": 1000, "ratingDelta": 18, "rating": 1018 },
+  "progress": { "…": "…" }, "serverTimeUtc": "…" }
+```
+Отказ `422 IMPLAUSIBLE_RESULT` (`SCORE_INVALID`, `NO_WINNER`, `DURATION_INVALID`). `429 RATE_LIMITED` — 40 запросов/мин.
+
+#### `GET /api/client/v1/leaderboard?limit=20`
+Без токена — топ; с токеном добавляется `me` со своим местом.
+```json
+{ "ok": true, "scope": "global",
+  "entries": [ { "rank": 1, "playerId": "plr_0007", "name": "Player_1007", "rating": 1310, "level": 9, "wins": 24, "losses": 6 } ],
+  "me": { "rank": 41, "level": 2, "rating": 1018, "wins": 2, "losses": 1, "…": "…" },
+  "serverTimeUtc": "…" }
+```
+`limit` ограничен `1…50`. В выдачу попадают только `status = active`.
+
+#### `GET /api/client/v1/config`
+Действующие правила боя и экономика — чтобы менять баланс без деплоя клиента.
+```json
+{ "ok": true, "contractVersion": 1,
+  "matchRules": { "version": 4, "captureRadius": 0.34, "…": "35 полей" },
+  "rewards": { "coinsPerLevel": 150, "gemsPerLevel": 20 },
+  "limits": { "maxLevel": 99, "maxLevelJump": 5, "minMatchMs": 25000 },
+  "maintenance": { "enabled": false, "…": "…" }, "serverTimeUtc": "…" }
+```
+
+#### Как это использует действующий клиент
+`source/src/services/api.js` — единственная точка запросов (таймаут 8 с, `Idempotency-Key`, bearer из `ttu-auth`); `source/src/services/progress.js` — очередь фактов в `localStorage` (`ttu-sync`, до 40 записей) и слияние серверных чисел «только вверх», чтобы офлайн-прогресс не откатывался. Адрес API вшивается при сборке (`TT_API_BASE`), потому что бандл статический; `?api=` перекрывает его для локальной отладки. Без `TT_API_BASE` клиент работает полностью локально — это штатный режим.
+
 ---
 
 ## 4. WebSocket `/ws/client`

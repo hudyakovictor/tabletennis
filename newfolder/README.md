@@ -3,7 +3,7 @@
 Административная панель настольного тенниса: 5 изолированных ИИ-зон, слой Директора, SRE-наблюдаемость, LiveOps, антифрод, правовой контур 152-ФЗ/GDPR и низколатентный шлюз для будущего игрового клиента.
 Реализация соответствует 15 документам ТЗ (`01..10, 13..17`) и дополнена слоем платформы v3: серверные сессии, CSRF, идемпотентность, SSE, планировщик, уведомления, SLO, silences, карточка игрока 360°, экспорт CSV.
 
-> **Демо-клиент в `source/` и `play/` намеренно не изменялся.** Он будет переписан с нуля; серверная часть уже готова к подключению — контракт описан в [`19-client-integration-guide.md`](./19-client-integration-guide.md) (`v3.0`).
+> **Действующий клиент в `source/` и `play/` дооснащается, а не переписывается.** Сборка `play/index.html` теперь умеет говорить с этим сервером: `source/src/services/api.js` (единственная точка запросов) и `source/src/services/progress.js` (очередь фактов + слияние прогресса). Адрес API вшивается при сборке, CORS игрового API — по белому списку (`CLIENT_ALLOWED_ORIGINS`). Контракт — [`19-client-integration-guide.md`](./19-client-integration-guide.md) (`v3.1`, §3.12).
 
 ## Быстрый старт
 
@@ -29,7 +29,7 @@ npm start              # http://0.0.0.0:4100
 ## Проверки качества
 
 ```bash
-npm test        # 40/40: 8 сценарных тестов ТЗ + 18 платформенных (сессии, CSRF, RBAC, SLA, SSE, ключи зон, разборы) + 6 контрактных + 8 S1 (retention dry-run, бэкапы, DSAR, эскалация планировщика)
+npm test        # 59/59: 8 сценарных тестов ТЗ + 18 платформенных (сессии, CSRF, RBAC, SLA, SSE, ключи зон, разборы) + 6 контрактных + 8 S1 (retention dry-run, бэкапы, DSAR, эскалация планировщика) + 19 клиентского API (CORS-граница, подпись initData, прогресс, матчи, лидерборд, конфиг)
 npm run test:ui # 40/40: jsdom исполняет настоящие ES-модули против живого сервера — 12 вкладок, deep-links, drawers, a11y-аудит DOM, продление сессии
 npm run test:all
 ```
@@ -46,7 +46,7 @@ npm run test:all
 | `src/server.js` | HTTP-сервер, CSP без inline-скриптов, origin-guard, маршрутизация admin/client, нативный WebSocket `/ws/client` (тикет/affinity, keep-alive 25 с) |
 | `src/routes/adminRoutes.js` | 2 126 строк доменных маршрутов: auth, зоны, HITL, директор, фрод, игроки, LiveOps, аудит |
 | `src/routes/platformRoutes.js` | governance, settings, diagnostics, операторы CRM, silences, SLO |
-| `src/routes/clientRoutes.js` | публичный контракт `/api/client/v1/*` (12 маршрутов, включая приём запросов субъекта ПДн) |
+| `src/routes/clientRoutes.js` | публичный контракт `/api/client/v1/*` (17 маршрутов: профиль и прогресс `/me`, `/progress/level-complete`, `/matches`, `/leaderboard`, `/config` + приём запросов субъекта ПДн) |
 | `src/routes/query.js` | единая пагинация, whitelisted сортировка, CSV с защитой от формул |
 | `tests/contract.test.js` | статический контракт UI ↔ API ↔ документация: права, маршруты, `data-*`, DOM-id, вкладки, клиентские эндпоинты из док. 19 |
 | `src/security/` | scrypt + JWT, реестр сессий, CSRF double-submit, 52 гранулярных права, 6-точечный валидатор физики, hash-chain аудит, AES-256-GCM хранилище ключей провайдеров |

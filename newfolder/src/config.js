@@ -265,6 +265,17 @@ const CONFIG = Object.freeze({
     .split(',')
     .map((s) => s.trim())
     .filter(Boolean),
+  /* Игровой клиент — статический бандл на Vercel, API живёт здесь. Поэтому
+   * CORS игрового API — белый список, а не «отражаем любой Origin»: иначе
+   * любой сайт читает ответы от имени игрока. localhost/127.0.0.1 разрешены
+   * только вне production (клиент в разработке поднимают любым статическим
+   * сервером на свободном порту). */
+  clientAllowedOrigins: (
+    process.env.CLIENT_ALLOWED_ORIGINS || 'https://tabletennis-indexhtml.vercel.app'
+  )
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean),
   rateLimits: {
     adminApiPerMinute: 240,
     clientTelemetryPerMinute: 120,
