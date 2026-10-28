@@ -249,14 +249,30 @@ describe('Game client API — CORS, auth and progress', () => {
       assert.ok(res.json.reasons.includes('DURATION_INVALID'));
     });
 
-    it('rejects a draw', async () => {
-      const res = await clientCall('POST', '/api/client/v1/matches', {
+    it('rejects scores that table tennis cannot produce', async () => {
+      const draw = await clientCall('POST', '/api/client/v1/matches', {
         playerScore: 11,
         opponentScore: 11,
         durationMs: 120_000,
       });
-      assert.equal(res.status, 422);
-      assert.ok(res.json.reasons.includes('NO_WINNER'));
+      assert.equal(draw.status, 422);
+      assert.ok(draw.json.reasons.includes('SCORE_MARGIN'), '11:11 has no winner and no two-point gap');
+
+      const unfinished = await clientCall('POST', '/api/client/v1/matches', {
+        playerScore: 5,
+        opponentScore: 3,
+        durationMs: 120_000,
+      });
+      assert.equal(unfinished.status, 422);
+      assert.ok(unfinished.json.reasons.includes('INCOMPLETE_SCORE'), 'a set ends only at 11+');
+
+      const lopsided = await clientCall('POST', '/api/client/v1/matches', {
+        playerScore: 20,
+        opponentScore: 3,
+        durationMs: 120_000,
+      });
+      assert.equal(lopsided.status, 422);
+      assert.ok(lopsided.json.reasons.includes('SCORE_MARGIN'), 'past 11 the gap must be exactly two');
     });
 
     it('computes the rating itself and does not double-count a replay', async () => {
@@ -298,6 +314,41 @@ describe('Game client API — CORS, auth and progress', () => {
       assert.ok(res.json.result.ratingDelta < 0);
       assert.equal(res.json.progress.losses, 1);
       assert.equal(res.json.progress.streak, 0);
+    });
+
+    /* Флаги доверия считаются на сервере и не мешают принять матч: порядок тестов
+     * важен — к этому моменту у игрока уже есть история матчей. */
+    it('accepts a deuce score (12:10) and does not flag it', async () => {
+      const deuce = await clientCall('POST', '/api/client/v1/matches', {
+        matchId: 'mt_deuce_0001',
+        playerScore: 12,
+        opponentScore: 10,
+        durationMs: 60_000,
+        opponentRating: 1000,
+      });
+      assert.equal(deuce.status, 200, deuce.text);
+      assert.equal(deuce.json.trust.suspicious, false, 'an honest deuce is not flagged');
+    });
+
+    it('flags a fast finish and a repeated result without rejecting them', async () => {
+      /* 11:4 за 30 с — счёт допустим, но темп невозможен: матч принимается и помечается. */
+      const fast = await clientCall('POST', '/api/client/v1/matches', {
+        matchId: 'mt_fast_0001',
+        playerScore: 11,
+        opponentScore: 4,
+        durationMs: 30_000,
+        opponentRating: 1000,
+      });
+      assert.equal(fast.status, 200, 'a flag is not a rejection');
+      assert.equal(fast.json.trust.suspicious, true);
+      assert.ok(fast.json.trust.flags.includes('FAST_FINISH'));
+
+      const body = { mode: 'career', playerScore: 11, opponentScore: 6, durationMs: 200_000, opponentRating: 1000 };
+      const first = await clientCall('POST', '/api/client/v1/matches', { ...body, matchId: 'mt_rep_0001' });
+      assert.equal(first.status, 200, first.text);
+      const second = await clientCall('POST', '/api/client/v1/matches', { ...body, matchId: 'mt_rep_0002' });
+      assert.equal(second.status, 200, second.text);
+      assert.ok(second.json.trust.flags.includes('REPEATED_RESULT'));
     });
   });
 

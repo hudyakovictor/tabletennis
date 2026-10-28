@@ -81,6 +81,9 @@ const PROGRESS_LIMITS = Object.freeze({
   maxScore: 99,
   eloK: 32,
   maxRatingDelta: 64,
+  minPointMs: 2_500, // очко быстрее 2.5 с в среднем не разыгрывается — повод для флага, не для отказа
+  rapidClimbRating: 256, // +256 рейтинга за час — аномалия для ручной проверки
+  rapidClimbWindowMs: 3600_000,
   coinsPerLevel: 150, // те же числа, что показывает LevelUp в клиенте
   gemsPerLevel: 20,
 });
@@ -125,6 +128,57 @@ function eloDelta(rating, opponentRating, win) {
   const expected = 1 / (1 + 10 ** ((opponentRating - rating) / 400));
   const raw = Math.round(PROGRESS_LIMITS.eloK * ((win ? 1 : 0) - expected));
   return Math.max(-PROGRESS_LIMITS.maxRatingDelta, Math.min(PROGRESS_LIMITS.maxRatingDelta, raw));
+}
+
+/* Счёт по правилам настольного тенниса: до 11 с разницей 2, дальше — «больше-меньше»
+ * с ровно двумя очками перевеса (12:10, 13:11). 11:10 и 20:3 не бывает, и такой
+ * матч не принимается: это уже не подозрение, а невозможный результат. */
+function scoreReasons(playerScore, opponentScore) {
+  const high = Math.max(playerScore, opponentScore);
+  const low = Math.min(playerScore, opponentScore);
+  if (high < 11) return ['INCOMPLETE_SCORE'];
+  if (high - low < 2) return ['SCORE_MARGIN'];
+  if (high > 11 && high - low !== 2) return ['SCORE_MARGIN'];
+  return [];
+}
+
+/* Флаги доверия — не приговор: матч принимается, но помечается для CRM, потому что
+ * «слишком быстро», «тот же результат подряд» и «+256 рейтинга за час» видит только
+ * сервер. Автоматических банов нет: решение принимает человек по этим флагам. */
+function matchFlags(db, playerId, { playerScore, opponentScore, durationMs }) {
+  const flags = [];
+  const points = playerScore + opponentScore;
+  if (durationMs < points * PROGRESS_LIMITS.minPointMs) flags.push('FAST_FINISH');
+
+  const last = db
+    .prepare('SELECT player_score, opponent_score, duration_ms FROM matches WHERE player_id = ? ORDER BY created_at DESC LIMIT 1')
+    .get(playerId);
+  if (
+    last &&
+    last.player_score === playerScore &&
+    last.opponent_score === opponentScore &&
+    Math.abs(Number(last.duration_ms) - durationMs) <= 1_000
+  ) {
+    flags.push('REPEATED_RESULT');
+  }
+
+  const since = new Date(Date.now() - PROGRESS_LIMITS.rapidClimbWindowMs).toISOString();
+  const climb = db
+    .prepare('SELECT COALESCE(SUM(rating_delta), 0) AS d FROM matches WHERE player_id = ? AND created_at >= ? AND rating_delta > 0')
+    .get(playerId, since);
+  if (Number(climb.d) >= PROGRESS_LIMITS.rapidClimbRating) flags.push('RAPID_CLIMB');
+
+  return flags;
+}
+
+function matchTrust(row) {
+  let flags = [];
+  try {
+    flags = row.flags_json ? JSON.parse(row.flags_json) : [];
+  } catch {
+    flags = [];
+  }
+  return { suspicious: !!row.suspicious, flags: Array.isArray(flags) ? flags : [] };
 }
 
 async function handleClientRoute(db, req, pathname, urlObj, body, clientIp) {
@@ -890,7 +944,7 @@ async function handleClientRoute(db, req, pathname, urlObj, body, clientIp) {
     const reasons = [];
     const badScore = (v) => v === null || v < 0 || v > PROGRESS_LIMITS.maxScore;
     if (badScore(playerScore) || badScore(opponentScore)) reasons.push('SCORE_INVALID');
-    if (!reasons.length && playerScore === opponentScore) reasons.push('NO_WINNER');
+    if (!reasons.length) reasons.push(...scoreReasons(playerScore, opponentScore));
     if (!reasons.length && (durationMs === null || durationMs < PROGRESS_LIMITS.minMatchMs || durationMs > PROGRESS_LIMITS.maxMatchMs)) {
       reasons.push('DURATION_INVALID');
     }
@@ -914,6 +968,7 @@ async function handleClientRoute(db, req, pathname, urlObj, body, clientIp) {
           replay: true,
           matchId,
           result: { win: !!existing.win, ratingBefore: existing.rating_before, ratingDelta: existing.rating_delta, rating: progress.rating },
+          trust: matchTrust(existing),
           progress: progressJson(progress),
           serverTimeUtc: new Date().toISOString(),
         },
@@ -922,6 +977,7 @@ async function handleClientRoute(db, req, pathname, urlObj, body, clientIp) {
 
     const current = ensureProgress(db, auth.sub);
     const win = playerScore > opponentScore;
+    const flags = matchFlags(db, auth.sub, { playerScore, opponentScore, durationMs });
     const ratingBefore = current.rating;
     const ratingDelta = eloDelta(ratingBefore, opponentRating, win);
     const ratingAfter = Math.max(0, ratingBefore + ratingDelta);
@@ -941,8 +997,9 @@ async function handleClientRoute(db, req, pathname, urlObj, body, clientIp) {
       db.prepare(
         `INSERT INTO matches
            (id, player_id, mode, opponent_name, opponent_rating, player_score, opponent_score,
-            win, rating_before, rating_delta, duration_ms, rules_version, client_version, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+            win, rating_before, rating_delta, duration_ms, rules_version, client_version,
+            suspicious, flags_json, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       ).run(
         matchId,
         auth.sub,
@@ -957,17 +1014,31 @@ async function handleClientRoute(db, req, pathname, urlObj, body, clientIp) {
         durationMs,
         asInt(body.rulesVersion),
         String(body.clientVersion || '').slice(0, 32) || null,
+        flags.length ? 1 : 0,
+        flags.length ? JSON.stringify(flags) : null,
         now
       );
     })(current);
 
     const updated = readProgress(db, auth.sub);
     publish('match', { playerId: auth.sub, matchId, win, ratingDelta, mode });
+    if (flags.length) {
+      publish('match.flagged', { playerId: auth.sub, matchId, flags });
+      notify(db, {
+        kind: 'fraud',
+        severity: 'info',
+        title: `Матч с флагами доверия: ${flags.join(', ')}`,
+        body: `${playerScore}:${opponentScore} за ${Math.round(durationMs / 1000)} с · игрок ${auth.sub}`,
+        link: `#/players?player=${auth.sub}`,
+        fingerprint: `match_flag:${matchId}`,
+      });
+    }
     const json = {
       ok: true,
       replay: false,
       matchId,
       result: { win, ratingBefore, ratingDelta, rating: updated.rating },
+      trust: { suspicious: flags.length > 0, flags },
       progress: progressJson(updated),
       serverTimeUtc: now,
     };

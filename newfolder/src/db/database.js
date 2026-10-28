@@ -166,6 +166,10 @@ const COLUMN_MIGRATIONS = Object.freeze([
   ['privacy_requests', 'notes', 'TEXT'],
   ['privacy_requests', 'rejection_reason', 'TEXT'],
   ['privacy_requests', 'updated_at', 'TEXT'],
+  // Anti-cheat verdicts on a saved match (19-client-integration-guide.md §3.13):
+  // a trust decision must survive the next deploy, not be recomputed from memory.
+  ['matches', 'suspicious', 'INTEGER NOT NULL DEFAULT 0'],
+  ['matches', 'flags_json', 'TEXT'],
 ]);
 
 function tableColumns(db, table) {
