@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>TOPSPIN ARENA — Admin CRM &amp; AI Control Center</title>
+  <link rel="stylesheet" href="/assets/styles.css" />
+</head>
+<body>
+  <!-- Login Screen -->
+  <section id="login-screen" class="login-screen">
+    <div class="login-card">
+      <div class="brand-badge">TOPSPIN ARENA · ADMIN CRM v2.0</div>
+      <h1>Панель управления и ИИ-аналитики</h1>
+      <p class="muted">
+        Изолированная архитектура 5 зон ИИ + слой Директора · Строгий RBAC (8 ролей) · 152-ФЗ / GDPR · Нулевой автобан
+      </p>
+      <form id="login-form" class="form-stack" autocomplete="on">
+        <label>
+          <span>Логин администратора (Email)</span>
+          <input id="login-username" name="username" type="email" value="owner@topspin.arena" required />
+        </label>
+        <label>
+          <span>Пароль</span>
+          <input id="login-password" name="password" type="password" value="TopspinAdmin2026!" required />
+        </label>
+        <div id="login-error" class="alert-error hidden"></div>
+        <button type="submit" class="btn btn-primary btn-block">Войти в контур управления</button>
+      </form>
+      <div class="login-hint">
+        Демо-доступ владельца предзаполнен: <code>owner@topspin.arena</code> / <code>TopspinAdmin2026!</code>
+      </div>
+    </div>
+  </section>
+
+  <!-- Authenticated CRM Shell -->
+  <div id="crm-shell" class="crm-shell hidden">
+    <aside class="sidebar">
+      <div class="sidebar-header">
+        <div class="logo-dot"></div>
+        <div>
+          <div class="sidebar-title">TOPSPIN ARENA</div>
+          <div class="sidebar-sub">Admin CRM · RU Primary</div>
+        </div>
+      </div>
+
+      <nav id="sidebar-nav" class="sidebar-nav">
+        <button type="button" data-tab="overview" class="nav-btn active">📊 Обзор &amp; HITL</button>
+        <button type="button" data-tab="director" class="nav-btn">🧠 Чат с Директором</button>
+        <div class="nav-group-label">5 ИЗОЛИРОВАННЫХ ИИ-ЗОН</div>
+        <button type="button" data-tab="ops" class="nav-btn">⚡ Зона 1 · Ops &amp; RTT</button>
+        <button type="button" data-tab="fraud" class="nav-btn">🛡️ Зона 2 · Fraud (8 детекторов)</button>
+        <button type="button" data-tab="balance" class="nav-btn">🎯 Зона 3 · Balance &amp; Стол</button>
+        <button type="button" data-tab="market" class="nav-btn">📈 Зона 4 · Market &amp; Экономика</button>
+        <button type="button" data-tab="lab" class="nav-btn">🧪 Зона 5 · Lab &amp; A/B</button>
+        <div class="nav-group-label">ОПЕРАЦИИ И ЮРКОНТУР</div>
+        <button type="button" data-tab="observability" class="nav-btn">📡 SRE, Runbooks &amp; Бот</button>
+        <button type="button" data-tab="liveops" class="nav-btn">🚀 LiveOps, Пуши, Тикеты</button>
+        <button type="button" data-tab="players" class="nav-btn">👥 Игроки &amp; 152-ФЗ / GDPR</button>
+        <button type="button" data-tab="governance" class="nav-btn">🔐 ИИ-квоты, Чек-лист &amp; Аудит</button>
+      </nav>
+
+      <div class="sidebar-footer">
+        <div id="current-user-label" class="user-chip">owner@topspin.arena</div>
+        <button id="logout-btn" type="button" class="btn btn-ghost btn-sm">Выйти</button>
+      </div>
+    </aside>
+
+    <main class="main-area">
+      <header class="topbar">
+        <div>
+          <h2 id="page-title">Сводный контур владельца (Executive Overview)</h2>
+          <div id="page-subtitle" class="muted">Светофор 5 изолированных зон, золотые сигналы SRE, чек-лист запуска и подтверждение решений HITL</div>
+        </div>
+        <div class="topbar-actions">
+          <span id="maint-pill" class="status-pill status-ok">Серверы открыты</span>
+          <button id="refresh-current-btn" type="button" class="btn btn-secondary btn-sm">↻ Обновить</button>
+        </div>
+      </header>
+
+      <div id="toast-bar" class="toast-bar hidden"></div>
+      <div id="tab-container" class="tab-container"></div>
+    </main>
+  </div>
+
+  <!-- Modal for Runbooks / JSON Schemas / Player Export -->
+  <div id="modal-backdrop" class="modal-backdrop hidden">
+    <div class="modal-card">
+      <div class="modal-header">
+        <h3 id="modal-title">Детали</h3>
+        <button id="modal-close-btn" type="button" class="btn btn-ghost btn-sm">✕ Закрыть</button>
+      </div>
+      <pre id="modal-body" class="modal-pre"></pre>
+    </div>
+  </div>
+
+  <script src="/assets/app.js"></script>
+</body>
+</html>
