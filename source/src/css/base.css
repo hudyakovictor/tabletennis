@@ -211,6 +211,9 @@ body.in-tg{--sat:0px;--sab:0px} /* внутри Telegram env() дублируе�
 .screen.live .pop{animation:popin .6s var(--spring) forwards;animation-delay:calc(var(--d,0) * 70ms + 100ms)}
 /* перерисовка по серверным данным: без входной хореографии, сразу в конечном виде */
 .screen.repaint .rise,.screen.repaint .pop,.screen.repaint .trow{animation:none;opacity:1;transform:none}
+/* график уже был нарисован до перерисовки — не заставляем его рисоваться заново */
+.screen.repaint .ch-line{stroke-dashoffset:0}
+.screen.repaint .ch-area{opacity:1}
 @keyframes popin{to{opacity:1;transform:none}}
 
 /* ---------------- sheets ---------------- */

@@ -11,13 +11,16 @@
    уровень 1. Всё остальное зарабатывается матчами (см. сложность формы в
    screens/match.js). */
 const SAVE_KEY = 'ttu-v2';
-const SAVE_VERSION = 4;
+const SAVE_VERSION = 5;
 const DEFAULT_STATE = {
   v: SAVE_VERSION, lang: null,
   name: 'Anton Spin', nick: '@anton_tt', club: 'Spin Lab',
   coins: 1840, gems: 46, level: 1, xp: 0, xpMax: 1800,
   rating: 1000, wins: 0, losses: 0, streak: 0, bestRally: 0,
   form: [],
+  /* История рейтинга для графика в профиле: [{t, r}], 30 дней. Раньше график
+     был синусоидой с подписью «+231» — красиво и неправда. */
+  hist: [],
   passLvl: 7, passXp: 60, premium: false, claimed: { f: [1, 2, 3, 4, 5], p: [] },
   chests: [
     { id: 'c1', kind: 'silver', state: 'ready' },
@@ -50,7 +53,10 @@ const MIGRATIONS = {
   2: (s) => { s.missShotHalf = 350; },
   /* v3 → v4: уровень бота выбирает игрок (4 ступеньки: EASY/MEDIUM/HARD/WTF).
      Старые сейвы получают СРЕДНИЙ — тот же темп, что и прежний «ПРО-на-единицу». */
-  3: (s) => { if (!Number.isFinite(s.diff)) s.diff = 1; }
+  3: (s) => { if (!Number.isFinite(s.diff)) s.diff = 1; },
+  /* v4 → v5: история рейтинга. Старые сейвы получают пустую — график честно
+     покажет, что истории нет, а не нарисует выдуманную кривую. */
+  4: (s) => { if (!Array.isArray(s.hist)) s.hist = []; }
 };
 const Store = {
   ok: (() => { try { const k = '__t'; localStorage.setItem(k, '1'); localStorage.removeItem(k); return true; } catch (e) { return false; } })(),
@@ -68,6 +74,7 @@ const Store = {
     draft.v = SAVE_VERSION;
     /* форма важнее значений: недостающие ветки добираем из дефолтов */
     if (!Array.isArray(draft.form)) draft.form = [];
+    if (!Array.isArray(draft.hist)) draft.hist = [];
     if (!draft.claimed || typeof draft.claimed !== 'object') draft.claimed = structuredClone(DEFAULT_STATE.claimed);
     if (!Array.isArray(draft.claimed.f)) draft.claimed.f = [];
     if (!Array.isArray(draft.claimed.p)) draft.claimed.p = [];

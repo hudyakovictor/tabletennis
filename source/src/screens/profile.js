@@ -5,9 +5,8 @@ Router.def('profile', {
   live: true,
   render() {
     const L = leagueOf(S.rating); const total = S.wins + S.losses; const wr = total ? Math.round(S.wins / total * 100) : null;
-    // рейтинг за 30 дней
-    let r = S.rating - 240; const pts = [...Array(30)].map((_, i) => (r += Math.sin(i * 1.3) * 22 + 9 + (i > 24 ? 6 : 0)));
-    pts[29] = S.rating; this.pts = pts;
+    /* Рейтинг: настоящая история из сейва (data/leagues.js), а не синусоида. */
+    const series = ratingSeries(30); this.series = series; this.pts = series.map((p) => p.r);
     const sk = Career.radar(); this.sk = sk;
     const ach = ACH.map((a) => [t(a.tk), a.i, !!Career.got[a.id], t(a.dk)]); const achN = ach.filter((a) => a[2]).length;
     const eq = (k) => ALL_ITEMS.find((x) => x.id === S.equipped[k]) || null;
@@ -23,8 +22,7 @@ Router.def('profile', {
         <div class="pnl pst rise" style="--d:2"><span class="cap">${t('profile.wins')}</span><b class="num txt-gold" data-n="${S.wins}">0</b></div>
         <div class="pnl pst ring rise" style="--d:3"><svg viewBox="0 0 60 60"><circle cx="30" cy="30" r="25" fill="none" stroke="rgba(0,0,0,.45)" stroke-width="7"/>${wr === null ? '' : `<circle class="wr" cx="30" cy="30" r="25" fill="none" stroke="url(#wrg)" stroke-width="7" stroke-linecap="round" stroke-dasharray="157" stroke-dashoffset="157" data-o="${157 * (1 - wr / 100)}"/>`}<defs><linearGradient id="wrg"><stop offset="0" stop-color="#3BF5A0"/><stop offset="1" stop-color="#2EC9FF"/></linearGradient></defs></svg><b class="num">${wr === null ? '—' : wr + '%'}</b><span class="cap">${t('profile.winrate')}</span></div>
       </div>
-      <div class="pnl chart rise" style="--d:4"><div class="ch-h"><span class="cap">${t('profile.rating30')}</span><b class="num" id="chVal">${fmt(S.rating)}</b><em class="up">+${Math.round(S.rating - pts[0])}</em></div>
-        <div class="ch-wrap" id="chWrap">${this.chart(pts)}</div></div>
+      ${this.ratingPanel()}
       ${this.technique()}
       <div class="pnl skills rise" style="--d:5"><span class="cap">${t('profile.style')}${Career.c.m ? t('profile.styleBy', { n: Career.c.m }) : t('profile.stylePlay')}</span><div class="sk-wrap">${this.radar(sk)}</div></div>
       <div class="sec-title rise" style="--d:6"><span class="h2">${Art.icon('trophy')}${t('profile.achievements')}</span><span class="dim" style="font-size:11.5px">${achN} / ${ach.length}</span></div>
@@ -52,6 +50,18 @@ Router.def('profile', {
       <div class="tq-bars">${bars}</div>
       <div class="tq-leg"><span><i class="w"></i>${t('profile.legendWin')}</span><span><i></i>${t('profile.legendLose')}</span><span>${t('profile.lastMatches', { n: M.length })}</span></div>
       <p class="tq-note">${top ? t('profile.techOften', { what: KEY[top[0]], a: top[1], b: M.length }) : t('profile.techClean')}</p></div>`;
+  },
+  /* График рейтинга. Пока известно меньше двух точек, честнее сказать «истории
+     пока нет», чем рисовать линию из одного значения. Подпись «сегодня» —
+     когда вся история уместилась в один день. */
+  ratingPanel() {
+    const pts = this.pts;
+    if (pts.length < 2) return `<div class="pnl tq empty rise" style="--d:4"><span class="cap">${t('profile.rating30')}</span><p>${t('profile.ratingEmpty')}</p></div>`;
+    const today = histDay(Date.now());
+    const cap = histDay(this.series[0].t) === today ? t('profile.ratingToday') : t('profile.rating30');
+    const d = pts[pts.length - 1] - pts[0];
+    return `<div class="pnl chart rise" style="--d:4"><div class="ch-h"><span class="cap">${cap}</span><b class="num" id="chVal">${fmt(S.rating)}</b>${d ? `<em class="${d > 0 ? 'up' : 'dn'}">${d > 0 ? '+' : ''}${d}</em>` : ''}</div>
+      <div class="ch-wrap" id="chWrap">${this.chart(pts)}</div></div>`;
   },
   chart(pts) {
     const W = 330, H = 120, min = Math.min(...pts) - 10, max = Math.max(...pts) + 10;
@@ -82,10 +92,11 @@ Router.def('profile', {
     setTimeout(() => {
       $$('[data-n]', el).forEach((b) => tickNumber(b, 0, +b.dataset.n, 1100));
       const wr = el.querySelector('.wr'); if (wr) { wr.style.transition = 'stroke-dashoffset 1.3s cubic-bezier(.16,1,.3,1)'; wr.style.strokeDashoffset = wr.dataset.o; }
-      el.querySelector('.chart').classList.add('go'); el.querySelector('.skills').classList.add('go');
+      el.querySelector('.chart')?.classList.add('go'); el.querySelector('.skills').classList.add('go');
     }, 450);
-    // скраб по графику
-    const wrap = el.querySelector('#chWrap'); const svg = wrap.querySelector('svg'); const val = el.querySelector('#chVal');
+    // скраб по графику (если история есть)
+    const wrap = el.querySelector('#chWrap'); if (!wrap) return;
+    const svg = wrap.querySelector('svg'); const val = el.querySelector('#chVal');
     const dot = svg.querySelector('.ch-dot'), cur = svg.querySelector('.ch-cur'); const pts = this.pts;
     const scrub = (e) => { const r = svg.getBoundingClientRect(); const t = clamp((e.clientX - r.left) / r.width, 0, 1); const i = Math.round(t * (pts.length - 1)); const x = this.cX(i), y = this.cY(pts[i]);
       dot.setAttribute('cx', x); dot.setAttribute('cy', y); cur.setAttribute('x1', x); cur.setAttribute('x2', x); cur.setAttribute('opacity', 1); if (val.textContent !== fmt(pts[i])) { val.textContent = fmt(Math.round(pts[i])); haptic('select'); } };
