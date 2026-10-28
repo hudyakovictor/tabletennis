@@ -27,7 +27,7 @@ function getMaintenanceState(db) {
   return { ...JSON.parse(row.value_json), updatedAt: row.updated_at };
 }
 
-function setMaintenanceState(db, { enabled, bannerRu, bannerEn, etaIso, actorUsername }) {
+function setMaintenanceState(db, { enabled, bannerRu, bannerEn, etaIso, graceSec, actorUsername }) {
   const nowIso = new Date().toISOString();
   const prev = getMaintenanceState(db);
   const next = {
@@ -41,7 +41,9 @@ function setMaintenanceState(db, { enabled, bannerRu, bannerEn, etaIso, actorUse
       bannerEn ||
       (enabled ? 'Scheduled maintenance is in progress. Active matches can finish; new matchmaking is paused.' : ''),
     etaIso: etaIso || null,
-    allowActiveMatchesFinishGraceSec: 180,
+    allowActiveMatchesFinishGraceSec: Number.isFinite(Number(graceSec))
+      ? Math.max(0, Math.min(1800, Number(graceSec)))
+      : prev.allowActiveMatchesFinishGraceSec || 180,
     blockNewMatchesHttp503: Boolean(enabled),
   };
 
@@ -230,10 +232,15 @@ async function createSupportTicket(
     });
   }
 
+  // SLA per priority (17-maintenance-push-news-support.md): critical 30m, high 2h, normal 8h, low 24h
+  const SLA_MINUTES = { critical: 30, high: 120, normal: 480, low: 1440 };
+  const slaDueAt = new Date(Date.now() + (SLA_MINUTES[computedPriority] || 480) * 60_000).toISOString();
+
   db.prepare(
     `INSERT INTO support_tickets
-     (id, player_id, region, session_id, category, priority, subject, status, linked_incident_id, screenshot_meta_json, client_context_json, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, 'open', ?, ?, ?, ?, ?)`
+     (id, player_id, region, session_id, category, priority, subject, status, linked_incident_id,
+      screenshot_meta_json, client_context_json, sla_due_at, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, 'open', ?, ?, ?, ?, ?, ?)`
   ).run(
     id,
     playerId,
@@ -245,6 +252,7 @@ async function createSupportTicket(
     linkedIncidentId,
     screenshotMeta,
     JSON.stringify(clientContext || {}),
+    slaDueAt,
     nowIso,
     nowIso
   );
@@ -361,7 +369,17 @@ function replyToSupportTicket(db, ticketId, { adminUsername, body, nextStatus = 
        VALUES (?, ?, 'admin', ?, ?, ?)`
     ).run(crypto.randomUUID(), ticketId, adminUsername, String(body).slice(0, 3000), nowIso);
   }
-  db.prepare(`UPDATE support_tickets SET status = ?, updated_at = ? WHERE id = ?`).run(validStatus, nowIso, ticketId);
+  // First human response seals the SLA clock exactly once (replies never overwrite it).
+  db.prepare(
+    `UPDATE support_tickets
+     SET status = ?, updated_at = ?,
+         first_response_at = COALESCE(first_response_at, ?),
+         first_response_minutes = COALESCE(
+           first_response_minutes,
+           CAST((julianday(?) - julianday(created_at)) * 24 * 60 AS INTEGER)
+         )
+     WHERE id = ?`
+  ).run(validStatus, nowIso, nowIso, nowIso, ticketId);
   if (prev.status !== validStatus) {
     recordTicketStatusEvent(db, {
       ticketId,
@@ -531,7 +549,7 @@ function exportPlayerDataPackage(db, playerId) {
  * Full Right-to-Erasure (`<=30d` SLA, executed immediately on admin confirmation)
  * Scrubs PII across active SQLite AND `director-archive.sqlite` while preserving anonymized financial records!
  */
-function executeRightToErasure(db, { playerId, reason = 'GDPR / 152-ФЗ erasure request', processedBy }) {
+function executeRightToErasure(db, { playerId, reason = 'GDPR / 152-ФЗ erasure request', processedBy, recordRequest = true, dueAt = null }) {
   const player = db.prepare('SELECT * FROM players WHERE id = ?').get(playerId);
   if (!player) return null;
 
@@ -571,10 +589,25 @@ function executeRightToErasure(db, { playerId, reason = 'GDPR / 152-ФЗ erasure
        WHERE id = ?`
     ).run(nowIso, playerId);
 
-    db.prepare(
-      `INSERT INTO privacy_requests (id, player_id, region, request_type, status, reason, requested_at, completed_at, processed_by)
-       VALUES (?, ?, ?, 'erasure', 'completed', ?, ?, ?, ?)`
-    ).run(reqId, playerId, player.region || CONFIG.primaryRegion, reason, nowIso, nowIso, processedBy);
+    // `recordRequest: false` is used when the erasure fulfils an existing DSAR row:
+    // writing a second "completed erasure" would duplicate the subject's history.
+    if (recordRequest) {
+      db.prepare(
+        `INSERT INTO privacy_requests
+           (id, player_id, region, request_type, status, reason, requested_at, due_at, completed_at, processed_by, source, updated_at)
+         VALUES (?, ?, ?, 'erasure', 'completed', ?, ?, ?, ?, ?, 'operator', ?)`
+      ).run(
+        reqId,
+        playerId,
+        player.region || CONFIG.primaryRegion,
+        reason,
+        nowIso,
+        dueAt || nowIso,
+        nowIso,
+        processedBy,
+        nowIso
+      );
+    }
   });
 
   tx();
@@ -634,6 +667,7 @@ module.exports = {
   getSupportTicketById,
   listSupportTickets,
   replyToSupportTicket,
+  recordTicketStatusEvent,
   listPlayerFeedback,
   createOrUpdateFeedbackItem,
   listPatchPipeline,
