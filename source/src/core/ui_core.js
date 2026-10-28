@@ -112,6 +112,22 @@ const Router = {
     if (mode === 'wipe') await Wipe.reveal();
     this.busy = false;
   },
+  repaint() {
+    /* Перерисовать текущий экран на месте: без перехода, без стека, без истории.
+     * Нужно экранам с серверными числами (`live: true`) — они рисуются раньше,
+     * чем придёт ответ сети, и иначе показывали бы устаревшие цифры. Позиция
+     * прокрутки сохраняется: ответ не должен выдёргивать игрока наверх. */
+    const d = this.screens[this.cur]; if (!d || !d.live) return false;
+    const el = $('#screens .screen.current'); if (!el) return false;
+    const sc = el.querySelector('.scroll'); const top = sc ? sc.scrollTop : 0;
+    /* Без входной хореографии: игрок уже на экране, контент не должен
+     * выезжать заново — меняются только числа. */
+    el.classList.add('repaint');
+    el.innerHTML = d.render();
+    try { d.mount && d.mount(el); } catch (e) { console.error(e); }
+    const sc2 = el.querySelector('.scroll'); if (sc2) sc2.scrollTop = top;
+    return true;
+  },
   back() {
     if (Sheet.cur) { Sheet.close(); return; }
     const d = this.screens[this.cur]; if (d && d.onBack) { d.onBack(); return; }

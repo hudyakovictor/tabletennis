@@ -88,7 +88,9 @@ Router.def('result', {
   get mood() { return 'gold'; },
   render(d) {
     d = d || Demo.result(true); this.d = d; const o = PEOPLE[d.opp];
-    const delta = d.win ? 24 : -18; this.delta = delta;
+    /* Дельта — по той же формуле Эло, что и на сервере: иначе экран показал бы
+     * одно число, а профиль после синхронизации — другое. */
+    const delta = ratingDelta(S.rating, o && o.r, d.win); this.delta = delta;
     const medals = [
       { on: d.win, tk: 'result.win' }, { on: d.stats.perfect >= 3, tk: 'medal.perfect' }, { on: d.stats.maxRally >= 8, tk: 'medal.rally' }
     ];

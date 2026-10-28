@@ -1,5 +1,8 @@
 Router.def('profile', {
   mood: 'arena',
+  /* Числа профиля приходят с сервера: пока ответ в пути, рисуем локальные,
+   * а когда они сменятся — экран перерисует Progress.merge. */
+  live: true,
   render() {
     const L = leagueOf(S.rating); const total = S.wins + S.losses; const wr = total ? Math.round(S.wins / total * 100) : null;
     // рейтинг за 30 дней
