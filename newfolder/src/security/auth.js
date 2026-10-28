@@ -342,6 +342,24 @@ function ensureBootstrapAdmin(db) {
     'Владелец TOPSPIN ARENA',
     new Date().toISOString()
   );
+  // The creation of the first owner is the root of the trust chain: an installation
+  // whose audit log starts with a login (or with nothing at all) cannot answer
+  // "who had owner rights from the beginning". Required lazily to avoid a cycle
+  // (audit.js is loaded by routes, auth.js by everything).
+  try {
+    const { writeAuditLog } = require('./audit');
+    writeAuditLog(db, {
+      actorRole: 'system',
+      actorId: 'bootstrap',
+      action: 'admin.user.bootstrap_created',
+      targetType: 'admin_users',
+      targetId: id,
+      applied: { username: CONFIG.adminEmail.toLowerCase(), role: ROLES.ADMIN, source: 'environment bootstrap' },
+    });
+  } catch {
+    // A missing audit table must not block the first boot; the diagnostics screen
+    // reports an empty chain explicitly.
+  }
   return id;
 }
 

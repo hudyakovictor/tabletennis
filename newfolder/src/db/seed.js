@@ -886,6 +886,22 @@ async function seedDatabaseIfEmpty(db, force = false) {
     isoAgo(2.98)
   );
 
+  // Demo data is a system action, not an operator decision — record it once so the
+  // audit trail starts with a legible genesis instead of an unexplained dataset.
+  try {
+    const { writeAuditLog } = require('../security/audit');
+    writeAuditLog(db, {
+      actorRole: 'system',
+      actorId: 'seed',
+      action: 'system.seed.completed',
+      targetType: 'database',
+      targetId: 'demo_dataset',
+      applied: { players: players.length, sessions: sessions.length, mode: force ? 'force-reset' : 'initial' },
+    });
+  } catch {
+    /* seeding must not fail because auditing is unavailable */
+  }
+
   return {
     seeded: true,
     players: players.length,
