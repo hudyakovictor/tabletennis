@@ -149,6 +149,12 @@ const COLUMN_MIGRATIONS = Object.freeze([
   ['audit_logs', 'entry_hash', 'TEXT'],
   ['admin_sessions', 'csrf_hash', "TEXT NOT NULL DEFAULT ''"],
   ['sessions', 'ws_ticket_id', 'TEXT'],
+  // Encrypted provider keys live next to their zone config; the plaintext never
+  // reaches the database and the encryption key is derived from the environment.
+  ['ai_zone_configs', 'api_key_encrypted', 'TEXT'],
+  ['ai_zone_configs', 'api_key_fingerprint', 'TEXT'],
+  ['ai_zone_configs', 'api_key_updated_at', 'TEXT'],
+  ['ai_zone_configs', 'api_key_updated_by', 'TEXT'],
 ]);
 
 function tableColumns(db, table) {

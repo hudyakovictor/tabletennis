@@ -14,13 +14,12 @@ const crypto = require('node:crypto');
 const { CONFIG, ROLES, DATA_RESIDENCY_MAP, AGE_GATE_RULES, RETENTION_DAYS, AI_ZONES } = require('../config');
 const { PERMISSIONS: P, ROLE_PERMISSIONS, permissionsForRole, navigationForRole, hasPermission } = require('../security/permissions');
 const { hashPassword } = require('../security/auth');
-const { writeAuditLog, hashIdentifier, verifyAuditChain } = require('../security/audit');
+const { writeAuditLog, verifyAuditChain } = require('../security/audit');
 const { listAllZonesStatus } = require('../ai/providers');
-const { computeGoldenSignals, evaluateBaselineAnomalies, listRunbooks, listIncidents } = require('../services/observability');
+const { computeGoldenSignals } = require('../services/observability');
 const { schedulerStatus } = require('../services/scheduler');
 const { runReadinessChecklist } = require('../services/readiness');
 const { publish } = require('../services/eventBus');
-const { notify } = require('../services/notifications');
 
 const SERVER_STARTED_AT = Date.now();
 

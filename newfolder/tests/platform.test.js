@@ -364,6 +364,58 @@ describe('Platform & governance (v3)', () => {
     assert.ok(diagnostics.json.memoryMb > 0);
   });
 
+  it('zone keys: encrypted at rest, never serialized, validated and audited on rotation', async () => {
+    const secret = `sk-test-${Math.random().toString(36).slice(2, 10)}-4f2a`;
+
+    // Before rotation the zone has no key and the reason is explicit.
+    const before = await adminCall('GET', '/api/admin/settings');
+    const zoneBefore = before.json.providers.find((z) => z.zone === 'ops');
+    assert.equal(zoneBefore.keySource, 'none');
+    assert.equal(zoneBefore.hasApiKey, false);
+
+    // A malformed key is rejected before anything is written.
+    const bad = await adminCall('POST', '/api/admin/ai/zones/ops/config', { apiKey: 'Bearer sk-1234567890' });
+    assert.equal(bad.status, 422);
+    assert.equal(bad.json.error, 'API_KEY_HAS_SCHEME');
+    const tooShort = await adminCall('POST', '/api/admin/ai/zones/ops/config', { apiKey: 'abc' });
+    assert.equal(tooShort.status, 422);
+    assert.equal(tooShort.json.error, 'API_KEY_TOO_SHORT');
+
+    const stored = await adminCall('POST', '/api/admin/ai/zones/ops/config', { apiKey: secret });
+    assert.equal(stored.status, 200);
+    assert.ok(!('apiKey' in stored.json.config), 'plaintext key must never be returned');
+    assert.equal(stored.json.config.keySource, 'vault');
+    assert.equal(stored.json.config.keyChange.action, 'rotated');
+
+    // The database holds ciphertext only, and the ciphertext is not the secret.
+    const row = db.prepare('SELECT api_key_encrypted, api_key_fingerprint FROM ai_zone_configs WHERE zone = ?').get('ops');
+    assert.match(row.api_key_encrypted, /^v1:[A-Za-z0-9_-]+:[A-Za-z0-9_-]+:[A-Za-z0-9_-]+$/);
+    assert.ok(!row.api_key_encrypted.includes(secret));
+    assert.equal(row.api_key_fingerprint.length, 12);
+
+    // The zone resolves the key back for real provider calls.
+    const { getZoneRuntimeConfig } = require('../src/ai/providers');
+    assert.equal(getZoneRuntimeConfig(db, 'ops').apiKey, secret);
+    assert.equal(getZoneRuntimeConfig(db, 'ops').keyMasked.endsWith(secret.slice(-4)), true);
+
+    // Rotation is in the hash chain with a fingerprint, never the key itself.
+    const audit = db
+      .prepare("SELECT applied_json FROM audit_logs WHERE action = 'ai.zone.ops.config_updated' ORDER BY created_at DESC LIMIT 1")
+      .get();
+    assert.ok(audit.applied_json.includes(row.api_key_fingerprint));
+    assert.ok(!audit.applied_json.includes(secret));
+
+    // Isolation: a sibling zone is untouched and still keyless.
+    assert.equal(getZoneRuntimeConfig(db, 'fraud').keySource, 'none');
+
+    // Clearing the key returns the zone to the local fallback.
+    const cleared = await adminCall('POST', '/api/admin/ai/zones/ops/config', { clearApiKey: true });
+    assert.equal(cleared.status, 200);
+    assert.equal(cleared.json.config.keySource, 'none');
+    const afterRow = db.prepare('SELECT api_key_encrypted FROM ai_zone_configs WHERE zone = ?').get('ops');
+    assert.equal(afterRow.api_key_encrypted, null);
+  });
+
   it('CSV export neutralizes formula injection and serves a stable header', async () => {
     const marker = `=cmd|' /C calc'!A0-${Date.now()}`;
     db.prepare(

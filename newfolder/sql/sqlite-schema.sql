@@ -263,6 +263,10 @@ CREATE TABLE IF NOT EXISTS ai_zone_configs (
   zero_retention INTEGER NOT NULL DEFAULT 1,
   batch_mode INTEGER NOT NULL DEFAULT 0,
   enabled INTEGER NOT NULL DEFAULT 1,
+  api_key_encrypted TEXT,
+  api_key_fingerprint TEXT,
+  api_key_updated_at TEXT,
+  api_key_updated_by TEXT,
   updated_at TEXT NOT NULL
 );
 

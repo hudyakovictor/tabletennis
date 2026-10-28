@@ -64,14 +64,14 @@ function parseRoutes() {
 
       const exact = line.match(/pathname\s*===\s*'([^']+)'/);
       if (exact) {
-        routes.push({ verb: verbHere || 'ANY', literal: exact[1], file: relPath });
+        routes.push({ verbs: verbHere ? [verbHere] : null, literal: exact[1], file: relPath });
         continue;
       }
 
       const named = line.match(/const\s+(\w+)\s*=\s*pathname\.match\(\s*\/(.+)\/\s*\)/);
       if (named) {
         try {
-          const entry = { verb: verbHere || 'ANY', regex: new RegExp(named[2]), file: relPath };
+          const entry = { verbs: verbHere ? [verbHere] : null, regex: new RegExp(named[2]), file: relPath };
           routes.push(entry);
           symbols.set(named[1], entry);
         } catch {
@@ -80,24 +80,42 @@ function parseRoutes() {
       }
     }
 
-    // Bind verbs to named matches: `if (req.method === 'POST' && incMatch) {`
+    // Bind verbs to named matches, including multi-verb conditions such as
+    // `if ((req.method === 'PUT' || req.method === 'PATCH') && newsIdMatch) {`.
     for (const line of lines) {
-      const bound = line.match(/method\s*===\s*'(GET|POST|PUT|PATCH|DELETE)'[\s\S]*?&&\s*(\w+)/);
-      if (bound && symbols.has(bound[2]) && symbols.get(bound[2]).verb === 'ANY') {
-        symbols.get(bound[2]).verb = bound[1];
-      }
+      const target = line.match(/&&\s*(\w+)\s*\)?\s*\{?\s*$/);
+      if (!target || !symbols.has(target[1])) continue;
+      const entry = symbols.get(target[1]);
+      if (entry.verbs) continue;
+      const verbs = Array.from(line.matchAll(/method\s*===\s*'(GET|POST|PUT|PATCH|DELETE)'/g)).map((m) => m[1]);
+      if (verbs.length) entry.verbs = Array.from(new Set(verbs));
     }
   }
   return routes;
 }
+
+/**
+ * Template literals are *not* skipped: `${x}` becomes one path segment, because the
+ * real bug class is `/zones/${zone}/config` vs `/ai/zones/${zone}/config` — an
+ * endpoint that exists only in the UI's head. A regex route such as
+ * `^\\/api\\/admin\\/zones\\/(ops|fraud)…` may still constrain a segment, so a dynamic
+ * call is accepted when the route matches for *any* plausible sample value.
+ */
+const SEGMENT_SAMPLES = ['x', 'ops', 'fraud', 'plr_0091', 'tkt_demo_001', 'inc_1', 'job_1', 'rb_1'];
 
 function spaApiCalls() {
   const calls = [];
   for (const file of spaFiles) {
     const src = read(file);
     for (const m of src.matchAll(/api\.(get|post|put|patch|delete)\(\s*(['"`])([\s\S]*?)\2/g)) {
-      if (m[3].includes('${')) continue;
-      calls.push({ file: rel(file), verb: m[1].toUpperCase(), url: m[3] });
+      const raw = m[3].split('?')[0];
+      const verb = m[1].toUpperCase();
+      if (raw.includes('${')) {
+        const samples = SEGMENT_SAMPLES.map((sample) => raw.replace(/\$\{[^}]*\}/g, sample));
+        calls.push({ file: rel(file), verb, samples, raw });
+      } else {
+        calls.push({ file: rel(file), verb, samples: [raw], raw });
+      }
     }
   }
   return calls;
@@ -128,12 +146,13 @@ test('every literal SPA API call resolves to an existing route and verb', () => 
 
   const unresolved = [];
   for (const call of spaApiCalls()) {
-    const clean = call.url.split('?')[0];
-    const ok = routes.some((route) => {
-      if (route.verb !== 'ANY' && call.verb !== route.verb) return false;
-      return route.literal ? route.literal === clean : route.regex.test(clean);
-    });
-    if (!ok) unresolved.push(`${call.verb} ${clean} (${call.file})`);
+    const ok = call.samples.some((sample) =>
+      routes.some((route) => {
+        if (route.verbs && !route.verbs.includes(call.verb)) return false;
+        return route.literal ? route.literal === sample : route.regex.test(sample);
+      })
+    );
+    if (!ok) unresolved.push(`${call.verb} ${call.raw} (${call.file})`);
   }
   const unique = Array.from(new Set(unresolved));
   assert.deepEqual(unique, [], `SPA calls routes the API does not serve:\n${unique.join('\n')}`);

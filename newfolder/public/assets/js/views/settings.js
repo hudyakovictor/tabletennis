@@ -219,7 +219,7 @@ function sessionsTab(sessions) {
 function providersTab(zones, meta) {
   return `<div class="grid grid-12">
       <section class="card col-8">
-        <div class="card-head"><div><h3>AI-провайдеры по зонам</h3><div class="dim">Ключ хранится только на сервере; в интерфейсе — флаг наличия</div></div></div>
+        <div class="card-head"><div><h3>AI-провайдеры по зонам</h3><div class="dim">Ключ шифруется на сервере; в интерфейсе — источник, маска и отпечаток</div></div></div>
         <div class="card-body flush">
           ${table({
             rows: zones,
@@ -228,7 +228,14 @@ function providersTab(zones, meta) {
               { label: 'Зона', render: (r) => zoneBadge(r.zone) },
               { label: 'Провайдер', render: (r) => `<code>${esc(r.provider || '—')}</code>` },
               { label: 'Модель', render: (r) => `<span class="dim truncate" style="display:inline-block;max-width:220px">${esc(r.model || '—')}</span>` },
-              { label: 'Ключ', render: (r) => (r.hasApiKey ? '<span class="badge badge-ok">настроен</span>' : '<span class="badge badge-warn">fallback</span>') },
+              {
+                label: 'Ключ',
+                render: (r) => {
+                  if (!r.hasApiKey) return '<span class="badge badge-warn">fallback</span>';
+                  const source = r.keySource === 'env' ? 'env' : 'vault';
+                  return `<span class="badge badge-ok">${source}</span> <code class="dim">${esc(r.keyMasked || '')}</code>`;
+                },
+              },
               { label: 'Лимит/сутки', align: 'right', render: (r) => compact(r.dailyTokenLimit || 0) },
               { label: 'Использовано', align: 'right', render: (r) => `${compact(r.usedTokens || 0)} <span class="dim">(${num(r.utilizationPct || 0, 1)}%)</span>` },
               { label: '', align: 'right', render: (r) => (can('ai:configure') ? `<button class="btn btn-sm btn-ghost" data-provider="${esc(r.zone)}">Ключ</button>` : '') },
@@ -280,32 +287,54 @@ function bindTab(container, ctx, data, zones) {
 
   run(container, '[data-provider]', (node) => {
     const zone = node.dataset.provider;
+    const row = (zones || []).find((z) => z.zone === zone) || {};
+    const envManaged = row.keySource === 'env';
     openDrawer({
       title: `Ключ провайдера · ${zone}`,
-      eyebrow: 'секрет не отображается',
+      eyebrow: envManaged ? 'источник: переменная окружения' : row.hasApiKey ? 'источник: зашифрованное хранилище' : 'ключ не задан',
       body: `<div class="stack">
-          <label class="field"><span class="field-label">Новый API-ключ</span>
-            <input id="api-key" type="password" autocomplete="off" placeholder="вставьте ключ" />
-            <span class="field-hint">Ключ шифруется на сервере и никогда не возвращается в API. Пустое значение удалит ключ.</span></label>
-          <div class="alert alert-warn">${icon('alert')} Смена ключа влияет только на свою зону — изоляция ключей обязательна по ТЗ.</div>
+          <dl class="kv">
+            <dt>Провайдер / модель</dt><dd><code>${esc(row.provider || '—')}</code> · ${esc(row.model || '—')}</dd>
+            <dt>Текущий ключ</dt><dd>${row.hasApiKey ? `<code>${esc(row.keyMasked || '—')}</code> <span class="dim">отпечаток ${esc(row.keyFingerprint || '—')}</span>` : 'не задан'}</dd>
+            <dt>Обновлён</dt><dd>${row.keyUpdatedAt ? `${esc(dateTime(row.keyUpdatedAt))} · ${esc(row.keyUpdatedBy || '—')}` : '—'}</dd>
+          </dl>
+          ${envManaged
+            ? `<div class="alert alert-warn">${icon('alert')} Ключ задан переменной <code>ZONE_${zone.toUpperCase()}_API_KEY</code> и имеет приоритет над хранилищем: ротация через интерфейс не изменит поведение, пока переменная не удалена в окружении.</div>`
+            : `<label class="field"><span class="field-label">Новый API-ключ</span>
+                <input id="api-key" type="password" autocomplete="off" placeholder="вставьте ключ" />
+                <span class="field-hint">Ключ шифруется AES-256-GCM и никогда не возвращается в API. Пустое поле — ключ не меняется.</span></label>
+              <label class="row" style="gap:8px"><input type="checkbox" id="api-key-clear" ${row.hasApiKey ? '' : 'disabled'} />
+                <span class="dim">Удалить сохранённый ключ (зона уйдёт в fallback)</span></label>`}
+          <div class="alert">${icon('lock')} Смена ключа влияет только на свою зону — изоляция ключей обязательна по ТЗ.</div>
         </div>`,
-      actions: [
-        { label: 'Отмена', variant: 'btn-ghost' },
-        {
-          label: 'Сохранить',
-          variant: 'btn-primary',
-          close: false,
-          onClick: async ({ close }) => {
-            const apiKey = qs('#api-key').value.trim();
-            try {
-              await api.post(`/api/admin/zones/${zone}/config`, { apiKey }, { idempotencyKey: `key-${zone}-${Date.now()}` });
-              toast(apiKey ? 'Ключ сохранён' : 'Ключ удалён', { type: 'success' });
-              close();
-              ctx.refresh();
-            } catch (err) { toastError(err); }
-          },
-        },
-      ],
+      actions: envManaged
+        ? [{ label: 'Закрыть', variant: 'btn-ghost' }]
+        : [
+            { label: 'Отмена', variant: 'btn-ghost' },
+            {
+              label: 'Сохранить',
+              variant: 'btn-primary',
+              close: false,
+              onClick: async ({ close }) => {
+                const apiKey = (qs('#api-key')?.value || '').trim();
+                const clearApiKey = Boolean(qs('#api-key-clear')?.checked);
+                if (!apiKey && !clearApiKey) { toast('Введите ключ или отметьте удаление', { type: 'warn' }); return; }
+                try {
+                  await api.post(
+                    `/api/admin/ai/zones/${zone}/config`,
+                    clearApiKey ? { clearApiKey: true } : { apiKey },
+                    { idempotencyKey: `key-${zone}-${Date.now()}` }
+                  );
+                  toast(clearApiKey ? 'Ключ удалён' : 'Ключ сохранён', { type: 'success' });
+                  close();
+                  ctx.refresh();
+                } catch (err) {
+                  if (err && (err.status === 422 || err.code)) toast(err.message || 'Ключ отклонён', { type: 'error' });
+                  else toastError(err);
+                }
+              },
+            },
+          ],
     });
   });
 

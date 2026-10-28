@@ -18,7 +18,6 @@ const {
   buildCsrfCookie,
   clearCsrfCookie,
   createAdminSession,
-  getActiveSession,
   revokeAdminSession,
   listAdminSessions,
   verifyCsrf,
@@ -1617,13 +1616,23 @@ async function dispatchAdmin(db, { req, res, pathname, urlObj, body, clientIp, p
     const denied = guard(P.AI_CONFIGURE);
     if (denied) return denied;
     const zone = aiCfgMatch[1];
-    const updated = updateZoneConfig(db, zone, body);
+    let updated;
+    try {
+      updated = updateZoneConfig(db, zone, { ...body, actorUsername: principal.username });
+    } catch (err) {
+      if (err.code && String(err.code).startsWith('API_KEY_')) {
+        return { status: 422, json: { error: err.code, message: err.message } };
+      }
+      throw err;
+    }
     writeAuditLog(db, {
       actorRole: principal.role,
       actorId: principal.username,
       action: `ai.zone.${zone}.config_updated`,
       targetType: 'ai_zone_configs',
       targetId: zone,
+      // The plaintext key is never audited — only its fingerprint prefix, which is
+      // enough to prove *which* key was active without being a credential.
       applied: {
         provider: updated.provider,
         fallbackProvider: updated.fallbackProvider,
@@ -1632,6 +1641,9 @@ async function dispatchAdmin(db, { req, res, pathname, urlObj, body, clientIp, p
         zeroRetention: updated.zeroRetention,
         batchMode: updated.batchMode,
         enabled: updated.enabled,
+        ...(updated.keyChange
+          ? { apiKey: { action: updated.keyChange.action, fingerprint: updated.keyChange.to } }
+          : {}),
       },
       ipHash,
     });
