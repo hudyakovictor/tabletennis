@@ -230,10 +230,15 @@ async function createSupportTicket(
     });
   }
 
+  // SLA per priority (17-maintenance-push-news-support.md): critical 30m, high 2h, normal 8h, low 24h
+  const SLA_MINUTES = { critical: 30, high: 120, normal: 480, low: 1440 };
+  const slaDueAt = new Date(Date.now() + (SLA_MINUTES[computedPriority] || 480) * 60_000).toISOString();
+
   db.prepare(
     `INSERT INTO support_tickets
-     (id, player_id, region, session_id, category, priority, subject, status, linked_incident_id, screenshot_meta_json, client_context_json, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, 'open', ?, ?, ?, ?, ?)`
+     (id, player_id, region, session_id, category, priority, subject, status, linked_incident_id,
+      screenshot_meta_json, client_context_json, sla_due_at, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, 'open', ?, ?, ?, ?, ?, ?)`
   ).run(
     id,
     playerId,
@@ -245,6 +250,7 @@ async function createSupportTicket(
     linkedIncidentId,
     screenshotMeta,
     JSON.stringify(clientContext || {}),
+    slaDueAt,
     nowIso,
     nowIso
   );
@@ -361,7 +367,17 @@ function replyToSupportTicket(db, ticketId, { adminUsername, body, nextStatus = 
        VALUES (?, ?, 'admin', ?, ?, ?)`
     ).run(crypto.randomUUID(), ticketId, adminUsername, String(body).slice(0, 3000), nowIso);
   }
-  db.prepare(`UPDATE support_tickets SET status = ?, updated_at = ? WHERE id = ?`).run(validStatus, nowIso, ticketId);
+  // First human response seals the SLA clock exactly once (replies never overwrite it).
+  db.prepare(
+    `UPDATE support_tickets
+     SET status = ?, updated_at = ?,
+         first_response_at = COALESCE(first_response_at, ?),
+         first_response_minutes = COALESCE(
+           first_response_minutes,
+           CAST((julianday(?) - julianday(created_at)) * 24 * 60 AS INTEGER)
+         )
+     WHERE id = ?`
+  ).run(validStatus, nowIso, nowIso, nowIso, ticketId);
   if (prev.status !== validStatus) {
     recordTicketStatusEvent(db, {
       ticketId,
@@ -634,6 +650,7 @@ module.exports = {
   getSupportTicketById,
   listSupportTickets,
   replyToSupportTicket,
+  recordTicketStatusEvent,
   listPlayerFeedback,
   createOrUpdateFeedbackItem,
   listPatchPipeline,

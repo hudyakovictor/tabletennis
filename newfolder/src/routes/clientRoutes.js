@@ -32,8 +32,12 @@ const {
   listLegalDocuments,
   recordPlayerConsent,
   createSupportTicket,
+  getSupportTicketById,
   listSupportTickets,
 } = require('../services/liveops');
+const { publish } = require('../services/eventBus');
+const { notify } = require('../services/notifications');
+const { getZoneRuntimeConfig } = require('../ai/providers');
 
 function getActiveClientRules(db) {
   const row = db
@@ -234,11 +238,23 @@ async function handleClientRoute(db, req, pathname, urlObj, body, clientIp) {
     if (maint.enabled) {
       return {
         status: 503,
+        headers: { 'Retry-After': '60' },
         json: {
           error: 'MAINTENANCE_ACTIVE',
+          matchmakingBlocked: true,
           bannerRu: maint.bannerRu,
           bannerEn: maint.bannerEn,
           etaIso: maint.etaIso,
+          retryAfterSec: 60,
+          // Nested form so a client can render the banner without branching.
+          maintenance: {
+            enabled: true,
+            bannerRu: maint.bannerRu,
+            bannerEn: maint.bannerEn,
+            etaIso: maint.etaIso,
+            retryAfterSec: 60,
+            allowActiveMatchesFinishGraceSec: maint.allowActiveMatchesFinishGraceSec,
+          },
         },
       };
     }
@@ -285,7 +301,13 @@ async function handleClientRoute(db, req, pathname, urlObj, body, clientIp) {
   // Batch Input Telemetry Ingestion (`POST /api/client/v1/telemetry/inputs`)
   if (req.method === 'POST' && pathname === '/api/client/v1/telemetry/inputs') {
     const rl = checkRateLimit(`telemetry:${ipHash}`, CONFIG.rateLimits.clientTelemetryPerMinute);
-    if (!rl.allowed) return { status: 429, json: { error: 'TELEMETRY_RATE_LIMITED' } };
+    if (!rl.allowed) {
+      return {
+        status: 429,
+        headers: { 'Retry-After': String(rl.retryAfterSec || 5) },
+        json: { error: 'TELEMETRY_RATE_LIMITED', retryAfterSec: rl.retryAfterSec || 5 },
+      };
+    }
 
     const sessionId = String(body.sessionId || '');
     const session = db.prepare('SELECT id, player_id, region FROM sessions WHERE id = ?').get(sessionId);
@@ -324,15 +346,20 @@ async function handleClientRoute(db, req, pathname, urlObj, body, clientIp) {
       };
     }
 
+    // `INSERT OR IGNORE` + unique (session_id, client_event_id) makes a retried batch
+    // byte-for-byte idempotent: a lost 200 response can never double-count a stroke.
     const ins = db.prepare(
-      `INSERT INTO input_events
-       (session_id, player_id, ts, pointer_type, grip, hand, is_serve, table_zone, has_fresh_swipe, swipe_straightness,
+      `INSERT OR IGNORE INTO input_events
+       (client_event_id, session_id, player_id, ts, pointer_type, grip, hand, is_serve, table_zone, has_fresh_swipe, swipe_straightness,
         along, across, accepted, contact, is_grace, reject_code, stroke_type, ball_speed, spin, reaction_ms, sweet_spot_dist, rules_version, ab_variant)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     );
+    let inserted = 0;
+    let deduped = 0;
     const tx = db.transaction((rows) => {
       for (const ev of rows) {
-        ins.run(
+        const res = ins.run(
+          ev.client_event_id || null,
           session.id,
           session.player_id,
           ev.ts,
@@ -357,6 +384,8 @@ async function handleClientRoute(db, req, pathname, urlObj, body, clientIp) {
           ev.rules_version,
           ev.ab_variant
         );
+        if (Number(res.changes || 0) > 0) inserted += 1;
+        else deduped += 1;
       }
     });
     tx(check.validEvents);
@@ -365,8 +394,10 @@ async function handleClientRoute(db, req, pathname, urlObj, body, clientIp) {
       status: 200,
       json: {
         ok: true,
-        acceptedCount: check.validEvents.length,
+        acceptedCount: inserted,
+        dedupedCount: deduped,
         rejectedCount: check.rejectedEvents.length,
+        serverTs: Date.now(),
       },
     };
   }
@@ -415,6 +446,15 @@ async function handleClientRoute(db, req, pathname, urlObj, body, clientIp) {
       clientContext: body.clientContext || {},
     });
 
+    publish('ticket', { ticketId: ticket.id, status: ticket.status, priority: ticket.priority });
+    notify(db, {
+      kind: 'ticket',
+      severity: ticket.priority === 'critical' ? 'critical' : ticket.priority === 'high' ? 'warning' : 'info',
+      title: `Новое обращение: ${ticket.subject}`,
+      body: `Категория ${ticket.category} · SLA до ${ticket.sla_due_at || '—'}`,
+      link: `#/liveops?ticket=${ticket.id}`,
+      fingerprint: `ticket_new:${ticket.id}`,
+    });
     return { status: 201, json: { ok: true, ticket } };
   }
 
@@ -423,6 +463,170 @@ async function handleClientRoute(db, req, pathname, urlObj, body, clientIp) {
     const playerId = playerAuth?.sub || urlObj.searchParams.get('playerId');
     if (!playerId) return { status: 401, json: { error: 'PLAYER_AUTH_REQUIRED' } };
     return { status: 200, json: { tickets: listSupportTickets(db, { playerId }) } };
+  }
+
+  // Player-side ticket thread & status (`GET /api/client/v1/support/tickets/:id`)
+  const clientTicketMatch = pathname.match(/^\/api\/client\/v1\/support\/tickets\/([^/]+)$/);
+  if (req.method === 'GET' && clientTicketMatch) {
+    const playerAuth = authenticatePlayerRequest(req);
+    const playerId = playerAuth?.sub || urlObj.searchParams.get('playerId');
+    if (!playerId) return { status: 401, json: { error: 'PLAYER_AUTH_REQUIRED' } };
+    const ticket = getSupportTicketById(db, clientTicketMatch[1]);
+    if (!ticket || ticket.player_id !== playerId) {
+      return { status: 404, json: { error: 'TICKET_NOT_FOUND' } };
+    }
+    return {
+      status: 200,
+      json: {
+        id: ticket.id,
+        subject: ticket.subject,
+        status: ticket.status,
+        priority: ticket.priority,
+        category: ticket.category,
+        createdAt: ticket.created_at,
+        updatedAt: ticket.updated_at,
+        slaDueAt: ticket.sla_due_at,
+        messages: ticket.messages.map((m) => ({
+          role: m.sender_role,
+          body: m.body,
+          attachmentName: m.attachment_name,
+          createdAt: m.created_at,
+        })),
+        statusHistory: ticket.statusHistory.map((e) => ({
+          to: e.to_status,
+          at: e.created_at,
+          note: e.note,
+        })),
+      },
+    };
+  }
+
+  // =========================================================================
+  // Unified notification feed (17-maintenance-push-news-support.md):
+  // admin pushes are ALWAYS pinned above regular news and visually distinct.
+  // =========================================================================
+  if (req.method === 'GET' && pathname === '/api/client/v1/notifications') {
+    const playerAuth = authenticatePlayerRequest(req);
+    const playerId = playerAuth?.sub || String(urlObj.searchParams.get('playerId') || '').slice(0, 64);
+    if (!playerId) return { status: 401, json: { error: 'PLAYER_AUTH_REQUIRED' } };
+
+    const dismissed = new Set(
+      db.prepare('SELECT notification_id FROM notification_dismissals WHERE player_id = ?')
+        .all(playerId)
+        .map((r) => r.notification_id)
+    );
+    const pushes = listPushNotifications(db, { activeOnly: true })
+      .filter((p) => !dismissed.has(p.id))
+      .map((p) => ({
+        id: p.id,
+        kind: 'push',
+        priority: p.priority === 'normal' ? 'important' : p.priority,
+        pinned: true,
+        important: true,
+        title: p.title_ru,
+        titleEn: p.title_en,
+        body: p.body_ru,
+        bodyEn: p.body_en,
+        createdAt: p.created_at,
+        expiresAt: p.expires_at,
+        dismissible: true,
+      }));
+    const news = listNewsPosts(db, { publishedOnly: true })
+      .filter((n) => !dismissed.has(n.id))
+      .slice(0, 30)
+      .map((n) => ({
+        id: n.id,
+        kind: 'news',
+        priority: 'normal',
+        pinned: false,
+        important: false,
+        category: n.category,
+        title: n.title_ru,
+        titleEn: n.title_en,
+        body: n.body_ru,
+        bodyEn: n.body_en,
+        createdAt: n.created_at,
+        dismissible: false,
+      }));
+    return {
+      status: 200,
+      json: {
+        // Pushes strictly first: client renders this array top-down.
+        items: [...pushes, ...news],
+        pinnedCount: pushes.length,
+        unreadCount: pushes.length,
+        serverTimeUtc: new Date().toISOString(),
+      },
+    };
+  }
+
+  const dismissMatch = pathname.match(/^\/api\/client\/v1\/notifications\/([^/]+)\/dismiss$/);
+  if (req.method === 'POST' && dismissMatch) {
+    const playerAuth = authenticatePlayerRequest(req);
+    const playerId = playerAuth?.sub || String(body.playerId || '').slice(0, 64);
+    if (!playerId) return { status: 401, json: { error: 'PLAYER_AUTH_REQUIRED' } };
+    db.prepare(
+      'INSERT OR IGNORE INTO notification_dismissals (player_id, notification_id, dismissed_at) VALUES (?, ?, ?)'
+    ).run(playerId, dismissMatch[1], new Date().toISOString());
+    return { status: 200, json: { ok: true, notificationId: dismissMatch[1] } };
+  }
+
+  // =========================================================================
+  // WebSocket admission ticket (short-lived, single-use) — the long-lived player
+  // token must never appear in a WS URL, where proxies log it.
+  // =========================================================================
+  if (req.method === 'POST' && pathname === '/api/client/v1/ws/ticket') {
+    const playerAuth = authenticatePlayerRequest(req);
+    let playerId = playerAuth?.sub || null;
+    let sessionId = String(body.sessionId || '') || null;
+    let nodeId = residency.recommendedEndpoint?.nodeId || null;
+
+    if (!playerId && body.affinityToken) {
+      const aff = verifySessionAffinityToken(body.affinityToken);
+      if (aff) {
+        playerId = aff.sub;
+        sessionId = aff.sid;
+        nodeId = aff.nodeId;
+      }
+    }
+    if (!playerId) return { status: 401, json: { error: 'PLAYER_AUTH_REQUIRED' } };
+
+    const ticketId = crypto.randomBytes(24).toString('base64url');
+    const now = new Date();
+    const expiresAt = new Date(now.getTime() + 60_000).toISOString();
+    db.prepare(
+      'INSERT INTO ws_tickets (id, player_id, session_id, region, issued_at, expires_at) VALUES (?, ?, ?, ?, ?, ?)'
+    ).run(ticketId, playerId, sessionId, residency.region, now.toISOString(), expiresAt);
+    return {
+      status: 201,
+      json: {
+        ok: true,
+        ticket: ticketId,
+        expiresAt,
+        wsEndpoint: `/ws/client?ticket=${encodeURIComponent(ticketId)}`,
+        nodeId,
+        keepAliveSec: 25,
+      },
+    };
+  }
+
+  // `GET /api/client/v1/news?limit=` — patch notes and known issues archive
+  if (req.method === 'GET' && pathname === '/api/client/v1/news') {
+    const limit = Math.min(50, Math.max(1, Number(urlObj.searchParams.get('limit') || 20)));
+    const category = String(urlObj.searchParams.get('category') || 'all');
+    const posts = listNewsPosts(db, { publishedOnly: true })
+      .filter((n) => category === 'all' || n.category === category)
+      .slice(0, limit)
+      .map((n) => ({
+        id: n.id,
+        category: n.category,
+        title: n.title_ru,
+        titleEn: n.title_en,
+        body: n.body_ru,
+        bodyEn: n.body_en,
+        publishedAt: n.created_at,
+      }));
+    return { status: 200, json: { posts, count: posts.length } };
   }
 
   return null;

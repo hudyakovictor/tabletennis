@@ -1,98 +1,211 @@
 <!DOCTYPE html>
-<html lang="ru">
+<html lang="ru" data-theme="dark">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>TOPSPIN ARENA — Admin CRM &amp; AI Control Center</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <meta name="color-scheme" content="dark light" />
+  <meta name="description" content="TOPSPIN ARENA Admin CRM — операционный центр настольного тенниса" />
+  <title>TOPSPIN ARENA · Admin CRM</title>
   <link rel="stylesheet" href="/assets/styles.css" />
 </head>
 <body>
-  <!-- Login Screen -->
-  <section id="login-screen" class="login-screen">
-    <div class="login-card">
-      <div class="brand-badge">TOPSPIN ARENA · ADMIN CRM v2.0</div>
-      <h1>Панель управления и ИИ-аналитики</h1>
-      <p class="muted">
-        Изолированная архитектура 5 зон ИИ + слой Директора · Строгий RBAC (8 ролей) · 152-ФЗ / GDPR · Нулевой автобан
-      </p>
-      <form id="login-form" class="form-stack" autocomplete="on">
-        <label>
-          <span>Логин администратора (Email)</span>
-          <input id="login-username" name="username" type="email" value="owner@topspin.arena" required />
-        </label>
-        <label>
-          <span>Пароль</span>
-          <input id="login-password" name="password" type="password" value="TopspinAdmin2026!" required />
-        </label>
-        <div id="login-error" class="alert-error hidden"></div>
-        <button type="submit" class="btn btn-primary btn-block">Войти в контур управления</button>
-      </form>
-      <div class="login-hint">
-        Демо-доступ владельца предзаполнен: <code>owner@topspin.arena</code> / <code>TopspinAdmin2026!</code>
+  <a class="skip-link" href="#main-outlet">Перейти к содержимому</a>
+
+  <!-- ===================== Login ===================== -->
+  <section id="login-screen" class="login" aria-labelledby="login-title">
+    <div class="login-visual" aria-hidden="true">
+      <div class="login-orbit orbit-1"></div>
+      <div class="login-orbit orbit-2"></div>
+      <div class="login-brand">
+        <span class="logo-mark logo-mark-lg"></span>
+        <span class="login-brand-name">TOPSPIN<span>ARENA</span></span>
       </div>
+      <h1 class="login-headline">Операционный центр<br /><em>настольного тенниса</em></h1>
+      <p class="login-lead">
+        Пять изолированных аналитических контуров, слой директора, SRE-наблюдаемость,
+        LiveOps и юридический контур в одном рабочем месте.
+      </p>
+      <ul class="login-facts">
+        <li><strong>5</strong><span>изолированных зон</span></li>
+        <li><strong>8</strong><span>ролей RBAC</span></li>
+        <li><strong>0</strong><span>автобанов</span></li>
+      </ul>
+      <div class="login-footnote">152-ФЗ · GDPR · COPPA · zero-retention провайдеры</div>
+    </div>
+
+    <div class="login-panel">
+      <form id="login-form" class="login-card" novalidate>
+        <div class="login-card-head">
+          <span class="logo-mark"></span>
+          <div>
+            <h2 id="login-title">Вход в контур управления</h2>
+            <p class="muted">Доступ только для администраторов и владельца</p>
+          </div>
+        </div>
+
+        <label class="field">
+          <span class="field-label">Логин</span>
+          <input id="login-username" name="username" type="email" autocomplete="username"
+                 value="owner@topspin.arena" required spellcheck="false" />
+        </label>
+
+        <label class="field">
+          <span class="field-label">Пароль</span>
+          <span class="field-input-wrap">
+            <input id="login-password" name="password" type="password" autocomplete="current-password"
+                   value="TopspinAdmin2026!" required />
+            <button type="button" class="field-reveal" id="reveal-password" aria-label="Показать пароль">Показать</button>
+          </span>
+        </label>
+
+        <div id="login-error" class="alert alert-danger hidden" role="alert"></div>
+
+        <button type="submit" class="btn btn-primary btn-block btn-lg" id="login-submit">
+          Войти
+        </button>
+
+        <div class="login-hint">
+          Демо-доступ предзаполнен. После 5 неверных попыток вход блокируется на 5 минут.
+        </div>
+      </form>
     </div>
   </section>
 
-  <!-- Authenticated CRM Shell -->
-  <div id="crm-shell" class="crm-shell hidden">
-    <aside class="sidebar">
-      <div class="sidebar-header">
-        <div class="logo-dot"></div>
-        <div>
-          <div class="sidebar-title">TOPSPIN ARENA</div>
-          <div class="sidebar-sub">Admin CRM · RU Primary</div>
-        </div>
+  <!-- ===================== App shell ===================== -->
+  <div id="app" class="app hidden">
+    <div class="sidebar-scrim" id="sidebar-scrim" hidden></div>
+
+    <aside class="sidebar" id="sidebar" aria-label="Основная навигация">
+      <div class="sidebar-head">
+        <a class="brand" href="#/overview" aria-label="TOPSPIN ARENA Admin">
+          <span class="logo-mark"></span>
+          <span class="brand-text">
+            <span class="brand-name">TOPSPIN<span>ARENA</span></span>
+            <span class="brand-sub">Admin CRM</span>
+          </span>
+        </a>
+        <button type="button" class="icon-btn sidebar-collapse" id="sidebar-collapse" aria-label="Свернуть меню">
+          <span data-icon="collapse"></span>
+        </button>
       </div>
 
-      <nav id="sidebar-nav" class="sidebar-nav">
-        <button type="button" data-tab="overview" class="nav-btn active">📊 Обзор &amp; HITL</button>
-        <button type="button" data-tab="director" class="nav-btn">🧠 Чат с Директором</button>
-        <div class="nav-group-label">5 ИЗОЛИРОВАННЫХ ИИ-ЗОН</div>
-        <button type="button" data-tab="ops" class="nav-btn">⚡ Зона 1 · Ops &amp; RTT</button>
-        <button type="button" data-tab="fraud" class="nav-btn">🛡️ Зона 2 · Fraud (8 детекторов)</button>
-        <button type="button" data-tab="balance" class="nav-btn">🎯 Зона 3 · Balance &amp; Стол</button>
-        <button type="button" data-tab="market" class="nav-btn">📈 Зона 4 · Market &amp; Экономика</button>
-        <button type="button" data-tab="lab" class="nav-btn">🧪 Зона 5 · Lab &amp; A/B</button>
-        <div class="nav-group-label">ОПЕРАЦИИ И ЮРКОНТУР</div>
-        <button type="button" data-tab="observability" class="nav-btn">📡 SRE, Runbooks &amp; Бот</button>
-        <button type="button" data-tab="liveops" class="nav-btn">🚀 LiveOps, Пуши, Тикеты</button>
-        <button type="button" data-tab="players" class="nav-btn">👥 Игроки &amp; 152-ФЗ / GDPR</button>
-        <button type="button" data-tab="governance" class="nav-btn">🔐 ИИ-квоты, Чек-лист &amp; Аудит</button>
-      </nav>
+      <div class="sidebar-env">
+        <span class="env-dot"></span>
+        <span class="env-label">RU · Москва</span>
+        <span class="env-tag" id="env-tag">primary</span>
+      </div>
 
-      <div class="sidebar-footer">
-        <div id="current-user-label" class="user-chip">owner@topspin.arena</div>
-        <button id="logout-btn" type="button" class="btn btn-ghost btn-sm">Выйти</button>
+      <nav id="nav" class="nav" aria-label="Разделы"></nav>
+
+      <div class="sidebar-foot">
+        <div class="user-block">
+          <span class="avatar" id="user-avatar">TS</span>
+          <span class="user-meta">
+            <span class="user-name" id="user-name">—</span>
+            <span class="user-role" id="user-role">—</span>
+          </span>
+          <button type="button" class="icon-btn" id="logout-btn" title="Выйти" aria-label="Выйти">
+            <span data-icon="logout"></span>
+          </button>
+        </div>
       </div>
     </aside>
 
-    <main class="main-area">
+    <div class="workspace">
       <header class="topbar">
-        <div>
-          <h2 id="page-title">Сводный контур владельца (Executive Overview)</h2>
-          <div id="page-subtitle" class="muted">Светофор 5 изолированных зон, золотые сигналы SRE, чек-лист запуска и подтверждение решений HITL</div>
+        <button type="button" class="icon-btn only-mobile" id="sidebar-toggle" aria-label="Открыть меню">
+          <span data-icon="menu"></span>
+        </button>
+
+        <div class="topbar-title">
+          <div class="crumbs" id="crumbs"></div>
+          <h1 id="page-title">Обзор</h1>
         </div>
+
         <div class="topbar-actions">
-          <span id="maint-pill" class="status-pill status-ok">Серверы открыты</span>
-          <button id="refresh-current-btn" type="button" class="btn btn-secondary btn-sm">↻ Обновить</button>
+          <button type="button" class="search-trigger" id="search-trigger" aria-label="Поиск (Ctrl+K)">
+            <span data-icon="search"></span>
+            <span class="search-trigger-text">Поиск по CRM…</span>
+            <kbd>⌘K</kbd>
+          </button>
+
+          <span class="live-chip" id="live-chip" title="Поток событий">
+            <span class="live-dot"></span><span class="live-label">live</span>
+          </span>
+
+          <button type="button" class="icon-btn" id="refresh-btn" title="Обновить (R)" aria-label="Обновить">
+            <span data-icon="refresh"></span>
+          </button>
+
+          <div class="notif-wrap">
+            <button type="button" class="icon-btn" id="notif-btn" aria-label="Уведомления" aria-expanded="false">
+              <span data-icon="bell"></span>
+              <span class="badge-count hidden" id="notif-count">0</span>
+            </button>
+            <div class="popover notif-popover hidden" id="notif-popover" role="dialog" aria-label="Уведомления">
+              <div class="popover-head">
+                <strong>Уведомления</strong>
+                <button type="button" class="link-btn" id="notif-read-all">Прочитать все</button>
+              </div>
+              <div class="popover-body" id="notif-list"></div>
+            </div>
+          </div>
+
+          <button type="button" class="icon-btn" id="theme-btn" title="Тема" aria-label="Переключить тему">
+            <span data-icon="theme"></span>
+          </button>
         </div>
       </header>
 
-      <div id="toast-bar" class="toast-bar hidden"></div>
-      <div id="tab-container" class="tab-container"></div>
-    </main>
-  </div>
-
-  <!-- Modal for Runbooks / JSON Schemas / Player Export -->
-  <div id="modal-backdrop" class="modal-backdrop hidden">
-    <div class="modal-card">
-      <div class="modal-header">
-        <h3 id="modal-title">Детали</h3>
-        <button id="modal-close-btn" type="button" class="btn btn-ghost btn-sm">✕ Закрыть</button>
-      </div>
-      <pre id="modal-body" class="modal-pre"></pre>
+      <main class="outlet" id="main-outlet" tabindex="-1" aria-live="polite">
+        <div id="view" class="view"></div>
+      </main>
     </div>
   </div>
+
+  <!-- ===================== Overlays ===================== -->
+  <div class="overlay hidden" id="palette-overlay" role="dialog" aria-modal="true" aria-label="Командная палитра">
+    <div class="palette">
+      <div class="palette-input">
+        <span data-icon="search"></span>
+        <input id="palette-input" type="text" placeholder="Раздел, игрок, тикет, инцидент…" autocomplete="off" />
+        <kbd>Esc</kbd>
+      </div>
+      <div class="palette-body" id="palette-body"></div>
+      <div class="palette-foot">
+        <span><kbd>↑</kbd><kbd>↓</kbd> навигация</span>
+        <span><kbd>↵</kbd> открыть</span>
+        <span><kbd>Esc</kbd> закрыть</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="overlay hidden" id="modal-overlay" role="dialog" aria-modal="true" aria-labelledby="modal-title">
+    <div class="modal" id="modal-card">
+      <div class="modal-head">
+        <h2 id="modal-title">Подтверждение</h2>
+        <button type="button" class="icon-btn" id="modal-close" aria-label="Закрыть"><span data-icon="close"></span></button>
+      </div>
+      <div class="modal-body" id="modal-body"></div>
+      <div class="modal-foot" id="modal-foot"></div>
+    </div>
+  </div>
+
+  <div class="overlay hidden" id="drawer-overlay" role="dialog" aria-modal="true" aria-labelledby="drawer-title">
+    <div class="drawer" id="drawer">
+      <div class="drawer-head">
+        <div>
+          <div class="drawer-eyebrow" id="drawer-eyebrow"></div>
+          <h2 id="drawer-title">Детали</h2>
+        </div>
+        <button type="button" class="icon-btn" id="drawer-close" aria-label="Закрыть"><span data-icon="close"></span></button>
+      </div>
+      <div class="drawer-body" id="drawer-body"></div>
+      <div class="drawer-foot" id="drawer-foot"></div>
+    </div>
+  </div>
+
+  <div class="toast-stack" id="toast-stack" aria-live="polite" aria-atomic="false"></div>
 
   <script src="/assets/app.js"></script>
 </body>

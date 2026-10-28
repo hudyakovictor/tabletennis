@@ -36,6 +36,8 @@ function checkRateLimit(key, maxPerMinute = 120) {
     allowed: bucket.count <= maxPerMinute,
     remaining: Math.max(0, maxPerMinute - bucket.count),
     resetAt: bucket.resetAt,
+    retryAfterSec: Math.max(1, Math.ceil((bucket.resetAt - now) / 1000)),
+    limit: maxPerMinute,
   };
 }
 
@@ -189,6 +191,34 @@ function verifyTelegramInitData(initDataRaw, botToken = CONFIG.telegramGameBotTo
  * 5. Fresh swipe presence (`has_fresh_swipe === false` cannot be `accepted: true`)
  * 6. `MATCH_RULES` reject code consistency (`accepted === true` cannot carry a `reject_code`)
  */
+const CLIENT_EVENT_KEY_MAP = Object.freeze({
+  clientEventId: 'client_event_id',
+  eventId: 'event_id',
+  pointerType: 'pointer_type',
+  isServe: 'is_serve',
+  tableZone: 'table_zone',
+  hasFreshSwipe: 'has_fresh_swipe',
+  swipeStraightness: 'swipe_straightness',
+  rejectCode: 'reject_code',
+  strokeType: 'stroke_type',
+  ballSpeed: 'ball_speed',
+  reactionMs: 'reaction_ms',
+  sweetSpotDist: 'sweet_spot_dist',
+  rulesVersion: 'rules_version',
+  abVariant: 'ab_variant',
+  isGrace: 'is_grace',
+});
+
+function normalizeClientEventKeys(raw) {
+  let out = raw;
+  for (const [camel, snake] of Object.entries(CLIENT_EVENT_KEY_MAP)) {
+    if (raw[camel] === undefined) continue;
+    if (out === raw) out = { ...raw };
+    if (out[snake] === undefined) out[snake] = raw[camel];
+  }
+  return out;
+}
+
 function validateInputTelemetryBatch(events) {
   if (!Array.isArray(events)) {
     return {
@@ -216,11 +246,14 @@ function validateInputTelemetryBatch(events) {
   const recentSecondWindow = [];
 
   for (let i = 0; i < events.length; i++) {
-    const ev = events[i];
-    if (!ev || typeof ev !== 'object') {
+    const raw = events[i];
+    if (!raw || typeof raw !== 'object') {
       rejectedEvents.push({ index: i, reason: 'NON_OBJECT' });
       continue;
     }
+    // A JavaScript client naturally emits camelCase. Normalise both dialects once
+    // here so a typo-free client never loses exactly-once identity or a reject code.
+    const ev = normalizeClientEventKeys(raw);
 
     const along = Number(ev.along);
     const across = Number(ev.across);
@@ -333,7 +366,16 @@ function validateInputTelemetryBatch(events) {
         ? Math.max(0, Math.min(1, +Number(ev.swipe_straightness).toFixed(4)))
         : 0.88;
 
+    // Client-side event identity (optional) — enables exactly-once ingestion on retry.
+    const clientEventId =
+      ev.client_event_id !== undefined && ev.client_event_id !== null
+        ? String(ev.client_event_id).slice(0, 64)
+        : ev.event_id !== undefined && ev.event_id !== null
+        ? String(ev.event_id).slice(0, 64)
+        : null;
+
     validEvents.push({
+      client_event_id: clientEventId && /^[A-Za-z0-9_.:-]+$/.test(clientEventId) ? clientEventId : null,
       ts: tsDate.toISOString(),
       pointer_type: pointerType,
       grip,

@@ -74,6 +74,7 @@ function openDatabase(customPath) {
     'utf8'
   );
   db.exec(schemaSql);
+  db.__migrations = applySchemaMigrations(db);
 
   const archiveDb = openArchiveDbFor(targetPath);
   db.__archiveDb = archiveDb;
@@ -131,6 +132,63 @@ function closeDb() {
     sharedDb.close();
     sharedDb = null;
   }
+}
+
+/**
+ * Forward-only, idempotent schema migrations for databases created by earlier
+ * builds. `CREATE TABLE IF NOT EXISTS` never adds a column to an existing table,
+ * so every additive column is applied here explicitly. Cheap to run (PRAGMA scan)
+ * and safe on a hot database.
+ */
+const COLUMN_MIGRATIONS = Object.freeze([
+  ['input_events', 'client_event_id', 'TEXT'],
+  ['support_tickets', 'first_response_at', 'TEXT'],
+  ['support_tickets', 'first_response_minutes', 'INTEGER'],
+  ['support_tickets', 'sla_due_at', 'TEXT'],
+  ['audit_logs', 'prev_hash', 'TEXT'],
+  ['audit_logs', 'entry_hash', 'TEXT'],
+  ['admin_sessions', 'csrf_hash', "TEXT NOT NULL DEFAULT ''"],
+  ['sessions', 'ws_ticket_id', 'TEXT'],
+]);
+
+function tableColumns(db, table) {
+  try {
+    return new Set(db.prepare(`PRAGMA table_info(${table})`).all().map((r) => r.name));
+  } catch {
+    return new Set();
+  }
+}
+
+function applySchemaMigrations(db) {
+  const applied = [];
+  for (const [table, column, ddl] of COLUMN_MIGRATIONS) {
+    const cols = tableColumns(db, table);
+    if (cols.size === 0) continue;
+    if (cols.has(column)) continue;
+    try {
+      db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${ddl}`);
+      applied.push(`${table}.${column}`);
+    } catch (err) {
+      // A concurrent process may have added it between the check and the ALTER.
+      if (!String(err.message).includes('duplicate column')) throw err;
+    }
+  }
+
+  // Legacy audit rows (pre-v3) predate the hash chain: seal them retroactively so
+  // tamper detection covers the full history instead of silently skipping it.
+  const legacy = db
+    .prepare('SELECT COUNT(*) AS c FROM audit_logs WHERE entry_hash IS NULL OR entry_hash = \'\'')
+    .get();
+  if (Number(legacy?.c || 0) > 0) {
+    try {
+      const { backfillAuditChain } = require('../security/audit');
+      backfillAuditChain(db);
+    } catch {
+      // Audit backfill is best-effort; chain verification reports the gap explicitly.
+    }
+    applied.push('audit_logs.hash_chain.backfill');
+  }
+  return applied;
 }
 
 /**
@@ -263,4 +321,5 @@ module.exports = {
   moveExpiredDirectorChatToArchiveDb,
   runRetentionCleanup,
   createHotBackup,
+  applySchemaMigrations,
 };

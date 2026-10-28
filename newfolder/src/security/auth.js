@@ -8,6 +8,7 @@
 const crypto = require('node:crypto');
 const { CONFIG, ROLES } = require('../config');
 const { hashIdentifier } = require('./audit');
+const { hasPermission: hasGranularPermission, ROLE_PERMISSIONS: GRANULAR_ROLES } = require('./permissions');
 
 const ROLE_PERMISSIONS = Object.freeze({
   [ROLES.PLAYER]: ['client:play', 'client:telemetry', 'client:support', 'client:privacy'],
@@ -91,8 +92,8 @@ function verifyHmacJwt(token) {
   }
 }
 
-function signToken({ sub, username, role, displayName }) {
-  return signHmacJwt({ sub, username, role, displayName, typ: 'admin' }, 12 * 3600);
+function signToken({ sub, username, role, displayName, sid = null }) {
+  return signHmacJwt({ sub, username, role, displayName, sid, typ: 'admin' }, 12 * 3600);
 }
 
 function signPlayerToken({ playerId, region }) {
@@ -121,17 +122,41 @@ function parseCookies(cookieHeader) {
   return out;
 }
 
-function authenticateAdminRequest(req) {
+/**
+ * Resolves the admin principal.
+ *
+ * When a `db` is supplied the server-side session registry is authoritative:
+ * a revoked or expired session is rejected even if its JWT signature is still valid.
+ * Legacy JWTs without `sid` are accepted only outside production, so an upgrade never
+ * locks the owner out while a leaked production token cannot outlive its session.
+ */
+function authenticateAdminRequest(req, db = null, { allowLegacy = CONFIG.env !== 'production' } = {}) {
   const auth = req.headers['authorization'];
   let raw = null;
+  let source = 'cookie';
   if (auth && auth.startsWith('Bearer ')) {
     raw = auth.slice(7).trim();
+    source = 'bearer';
   } else {
     const cookies = parseCookies(req.headers['cookie']);
     raw = cookies['topspin_crm_token'] || null;
   }
   if (!raw) return null;
-  return verifyHmacJwt(raw);
+  const payload = verifyHmacJwt(raw);
+  if (!payload || payload.typ !== 'admin') return null;
+
+  if (db) {
+    if (payload.sid) {
+      const session = getActiveSession(db, payload.sid);
+      if (!session) return null;
+      if (Date.now() - new Date(session.last_seen_at).getTime() > 60_000) {
+        touchAdminSession(db, payload.sid);
+      }
+      return { ...payload, authSource: source, sessionExpiresAt: session.expires_at };
+    }
+    if (!allowLegacy) return null;
+  }
+  return { ...payload, authSource: source, legacy: !payload.sid };
 }
 
 function authenticatePlayerRequest(req) {
@@ -142,13 +167,15 @@ function authenticatePlayerRequest(req) {
   return p;
 }
 
+const SESSION_TTL_SEC = 12 * 3600;
+
 function buildSessionCookie(token, isSecure = false) {
   const parts = [
     `topspin_crm_token=${encodeURIComponent(token)}`,
     'Path=/',
     'HttpOnly',
     'SameSite=Lax',
-    `Max-Age=${12 * 3600}`,
+    `Max-Age=${SESSION_TTL_SEC}`,
   ];
   if (isSecure) parts.push('Secure');
   return parts.join('; ');
@@ -156,6 +183,115 @@ function buildSessionCookie(token, isSecure = false) {
 
 function clearSessionCookie() {
   return 'topspin_crm_token=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0';
+}
+
+/**
+ * CSRF double-submit token. The cookie is deliberately readable by the SPA
+ * (HttpOnly=false) while the server keeps only its SHA-256 hash inside the session
+ * row, so a stolen cookie alone cannot authorize a mutation.
+ */
+function buildCsrfCookie(csrfToken, isSecure = false) {
+  const parts = [
+    `topspin_csrf=${encodeURIComponent(csrfToken)}`,
+    'Path=/',
+    'SameSite=Lax',
+    `Max-Age=${SESSION_TTL_SEC}`,
+  ];
+  if (isSecure) parts.push('Secure');
+  return parts.join('; ');
+}
+
+function clearCsrfCookie() {
+  return 'topspin_csrf=; Path=/; SameSite=Lax; Max-Age=0';
+}
+
+function sha256(value) {
+  return crypto.createHash('sha256').update(String(value)).digest('hex');
+}
+
+function createAdminSession(db, { actor, ipHash = null, userAgent = null }) {
+  const sid = crypto.randomUUID();
+  const csrfToken = crypto.randomBytes(24).toString('base64url');
+  const now = new Date();
+  const expiresAt = new Date(now.getTime() + SESSION_TTL_SEC * 1000).toISOString();
+  db.prepare(
+    `INSERT INTO admin_sessions
+     (id, actor_id, username, role, ip_hash, ua_hash, csrf_hash, created_at, last_seen_at, expires_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+  ).run(
+    sid,
+    actor.id,
+    actor.username,
+    actor.role,
+    ipHash,
+    userAgent ? hashIdentifier(userAgent) : null,
+    sha256(csrfToken),
+    now.toISOString(),
+    now.toISOString(),
+    expiresAt
+  );
+  return { sid, csrfToken, expiresAt };
+}
+
+function getActiveSession(db, sid) {
+  if (!db || !sid) return null;
+  const row = db
+    .prepare('SELECT * FROM admin_sessions WHERE id = ? AND revoked_at IS NULL AND expires_at > ?')
+    .get(sid, new Date().toISOString());
+  return row || null;
+}
+
+function touchAdminSession(db, sid) {
+  if (!db || !sid) return;
+  try {
+    db.prepare('UPDATE admin_sessions SET last_seen_at = ? WHERE id = ?').run(
+      new Date().toISOString(),
+      sid
+    );
+  } catch {
+    /* session touching must never break a request */
+  }
+}
+
+function revokeAdminSession(db, sid, actorId = null) {
+  if (!db || !sid) return false;
+  const sql = actorId
+    ? 'UPDATE admin_sessions SET revoked_at = ? WHERE id = ? AND actor_id = ? AND revoked_at IS NULL'
+    : 'UPDATE admin_sessions SET revoked_at = ? WHERE id = ? AND revoked_at IS NULL';
+  const params = actorId
+    ? [new Date().toISOString(), sid, actorId]
+    : [new Date().toISOString(), sid];
+  const res = db.prepare(sql).run(...params);
+  return Number(res.changes || 0) > 0;
+}
+
+function listAdminSessions(db, actorId) {
+  return db
+    .prepare(
+      `SELECT id, actor_id, username, role, ip_hash, created_at, last_seen_at, expires_at, revoked_at
+       FROM admin_sessions WHERE actor_id = ? ORDER BY last_seen_at DESC LIMIT 25`
+    )
+    .all(actorId);
+}
+
+function cleanupAdminSessions(db) {
+  const cutoff = new Date(Date.now() - 2 * 86400 * 1000).toISOString();
+  const res = db
+    .prepare('DELETE FROM admin_sessions WHERE expires_at < ? OR (revoked_at IS NOT NULL AND revoked_at < ?)')
+    .run(cutoff, cutoff);
+  return Number(res.changes || 0);
+}
+
+function verifyCsrf(db, req, principal, cookies) {
+  // Bearer-authenticated API clients are not exposed to ambient-credential CSRF.
+  const viaBearer = String(req.headers['authorization'] || '').startsWith('Bearer ');
+  if (viaBearer) return true;
+  const header = String(req.headers['x-csrf-token'] || '');
+  const cookie = cookies['topspin_csrf'] || '';
+  if (!header || !cookie || header !== cookie) return false;
+  const session = getActiveSession(db, principal.sid);
+  if (!session) return false;
+  return session.csrf_hash === sha256(header);
 }
 
 // 5 failed attempts per 5 minutes brute-force guard (04-security.md)
@@ -206,8 +342,9 @@ function ensureBootstrapAdmin(db) {
 }
 
 module.exports = {
-  ROLE_PERMISSIONS,
-  hasPermission,
+  ROLE_PERMISSIONS: GRANULAR_ROLES,
+  hasPermission: hasGranularPermission,
+  legacyHasPermission: hasGranularPermission,
   hashPassword,
   verifyPassword,
   signToken,
@@ -219,6 +356,17 @@ module.exports = {
   authenticateAdminRequest,
   buildSessionCookie,
   clearSessionCookie,
+  buildCsrfCookie,
+  clearCsrfCookie,
+  SESSION_TTL_SEC,
+  createAdminSession,
+  getActiveSession,
+  touchAdminSession,
+  revokeAdminSession,
+  listAdminSessions,
+  cleanupAdminSessions,
+  verifyCsrf,
+  parseCookies,
   checkLoginAttemptLimit,
   recordFailedLoginAttempt,
   clearLoginAttempts,
