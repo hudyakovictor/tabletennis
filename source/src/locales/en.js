@@ -82,7 +82,7 @@ I18n.add('en', {
   'result.win': 'Victory', 'result.lose': 'Defeat', 'result.rating': 'Rating',
   'result.xp': 'XP · level {n}', 'result.maxSpeed': 'Max speed', 'result.accuracy': 'Accuracy',
   'result.questDone': 'Daily quest complete', 'result.questReward': 'Reward waits on the home screen',
-  'result.reward': 'Reward', 'result.chestSent': 'Sent to a free slot', 'result.rematch': 'Rematch',
+  'result.reward': 'Reward', 'result.rewardCoins': 'Coins for the win', 'result.chestSent': 'Sent to a free slot', 'result.rematch': 'Rematch',
   'result.analysis': 'Match analysis',
   'analysis.mapTitle': 'Strike-zone heatmap',
   'analysis.tipsTitle': 'Coaching tips',

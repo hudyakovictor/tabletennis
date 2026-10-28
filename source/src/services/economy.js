@@ -6,11 +6,21 @@
    ===================================================================== */
 const Wallet = {
   add(kind, amount, fromPt, { count } = {}) {
-    const target = $(`.screen.current [data-cur="${kind}"]`) || $(`[data-cur="${kind}"]`);
     const startVal = S[kind]; S[kind] += amount; save();
     /* Мгновенный звуковой отклик: раньше первый «дзынь» звучал только когда
      * долетала первая монета (~1 с после касания) — ощущалось как лаг. */
     if (kind === 'gems') Sfx.gem(0); else Sfx.coin(0);
+    return this._fly(kind, amount, fromPt, startVal, count);
+  },
+  /* Начисление уже записано, а показать надо позже (награда за матч пишется
+   * сразу — иначе ранний выход с экрана терял её, — а дорожка монет идёт по
+   * таймлайну). Баланс не трогаем: иначе анимация начислила бы второй раз. */
+  show(kind, amount, fromPt, { count } = {}) {
+    if (kind === 'gems') Sfx.gem(0); else Sfx.coin(0);
+    return this._fly(kind, amount, fromPt, S[kind] - amount, count);
+  },
+  _fly(kind, amount, fromPt, startVal, count) {
+    const target = $(`.screen.current [data-cur="${kind}"]`) || $(`[data-cur="${kind}"]`);
     if (!target) return Promise.resolve();
     const v = target.querySelector('.v'), ic = target.querySelector('.ci');
     const to = FX.pt(ic || target);

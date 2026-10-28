@@ -81,7 +81,7 @@ I18n.add('ru', {
   'result.win': 'Победа', 'result.lose': 'Поражение', 'result.rating': 'Рейтинг',
   'result.xp': 'Опыт · уровень {n}', 'result.maxSpeed': 'Макс. скорость', 'result.accuracy': 'Точность',
   'result.questDone': 'Задание дня выполнено', 'result.questReward': 'Награда ждёт на главной',
-  'result.reward': 'Награда', 'result.chestSent': 'Отправлен в свободный слот', 'result.rematch': 'Реванш',
+  'result.reward': 'Награда', 'result.rewardCoins': 'Монеты за победу', 'result.chestSent': 'Отправлен в свободный слот', 'result.rematch': 'Реванш',
   'result.analysis': 'Разбор матча',
   'analysis.mapTitle': 'Тепловая карта зоны удара',
   'analysis.tipsTitle': 'Советы по игре',
