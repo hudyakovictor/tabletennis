@@ -46,11 +46,21 @@ let currentRoute = { tab: 'overview', query: {} };
 let pendingProposals = 0;
 
 /* ============================ Boot ============================ */
-document.addEventListener('DOMContentLoaded', () => {
+// app.js loads this module with a dynamic `import()`, and a dynamic import never
+// blocks DOMContentLoaded. By the time the graph of 15 modules has arrived the
+// event has already fired, so a bare listener here never runs and the CRM stays
+// on the static login screen. Start now when the document is already parsed.
+function start() {
   bindGlobalChrome();
   hydrateIcons();
   boot();
-});
+}
+
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', start, { once: true });
+} else {
+  start();
+}
 
 async function boot() {
   try {
