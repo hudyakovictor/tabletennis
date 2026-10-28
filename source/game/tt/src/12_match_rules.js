@@ -99,6 +99,7 @@ const CONTACT_CORRIDOR_RULES = Object.freeze({
   compactFlickMinPx: 14,
   compactFlickMaxPx: 42,
   compactFlickMaxSec: 0.38,
+  tapContactRadiusPx: 36,       // immediate tap; the larger oval still admits swipe backswings
   strokeAnchorWindowSec: 0.34,
   strokeReleaseWindowSec: 0.85,
   serveEarlyAlignTouchPx: 96,

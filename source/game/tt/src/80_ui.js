@@ -1201,7 +1201,7 @@ class UI {
     /* The host's «Размер подсказки» calibration slider was posted to the
      * engine and then ignored: the ring is the one lesson every drill points
      * at, so its size has to obey the player. 0.72× .. 1.32× around neutral. */
-    const calK = (g._cal && Number.isFinite(g._cal.hintRadius)) ? lerp(0.72, 1.32, clamp(g._cal.hintRadius, 0, 1)) : 1;
+    const calK = (g._cal && Number.isFinite(g._cal.hintRadius)) ? lerp(0.25, 1.50, clamp(g._cal.hintRadius, 0, 1)) : 1;
     if (serve) return 30 * d * calK;
     const q = g.project({ x: p.x + MATCH_RULES.captureRadius, y: p.y, z: p.z }, {});
     const r = q && q.ok ? Math.abs(q.x * W - x) : 40 * d;

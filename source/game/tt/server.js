@@ -86,6 +86,7 @@ function createRelay() {
           if (room && room.host === ws) send(room.guest, msg);
           break;
         case 'input':
+        case 'guestHit':
           if (room && room.guest === ws) send(room.host, msg);
           break;
         case 'ping': send(ws, { type: 'pong', t: msg.t }); break;

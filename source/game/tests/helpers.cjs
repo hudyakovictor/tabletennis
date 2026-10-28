@@ -61,7 +61,7 @@ function enginePage() {
   const fresh = fs.existsSync(ENGINE_BUILD) && fs.statSync(ENGINE_BUILD).mtimeMs >= newestSourceTime(srcDir);
   if (!fresh) {
     execFileSync('python3', [path.join(root, 'tt', 'build.py'), ENGINE_BUILD],
-      { env: { ...process.env, TT_NO_LOGO: '1' }, stdio: 'inherit' });
+      { stdio: 'inherit' });
   }
   return (engineBuilt = ENGINE_BUILD);
 }

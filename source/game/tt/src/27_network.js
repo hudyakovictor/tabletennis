@@ -92,6 +92,7 @@ class NetworkManager {
     };
     this._opponentScore = 0;
     this._lastServerBall = null;
+    this._lastGuestHitShot = -1;   // shotId последнего guestHit; не дублировать
     this._callbacks = {};
   }
 
@@ -156,6 +157,7 @@ class NetworkManager {
     this.room = null; this.side = 0; this.peerId = null; this.isHost = false;
     this._interpBuf.length = 0;
     this._lastServerBall = null;
+    this._lastGuestHitShot = -1;
     this._lastStateT = this._lastInputT = 0;
   }
 
@@ -208,6 +210,21 @@ class NetworkManager {
         this.state = 'LOBBY';
         this._emit('peerLeft', {});
         break;
+      case 'guestHit': {
+        /* Гость ударил мяч. Хост применяет скорость к своему мячу.
+         * Координаты гостя зеркальные — разворачиваем обратно. */
+        if (!this.isHost || this.state !== 'IN_MATCH') return;
+        const b = this.game.ball;
+        if (!b.live) break;
+        const mv = Array.isArray(msg.v) ? netFlipZ(msg.v) : null;
+        const mw = Array.isArray(msg.w) ? netFlipAxial(msg.w) : null;
+        if (mv) V3.set(b.v, mv[0], mv[1], mv[2]);
+        if (mw) V3.set(b.w, mw[0], mw[1], mw[2]);
+        b.lastHitBy = -1;            // теперь мяч летит к игроку
+        if (Number.isFinite(msg.rally)) this.game.rally = msg.rally;
+        this._lastGuestHitShot = -1; // сброс для следующего удара гостя
+        break;
+      }
       case 'pong':
         this.latency = Date.now() - this._pingT;
         break;
@@ -269,6 +286,7 @@ class NetworkManager {
       server: g.server,
       rally: g.rally,
       shotId: g.shotId,
+      state: g.state,   // синхронизация состояния игры для гостя
     });
   }
 
@@ -285,6 +303,19 @@ class NetworkManager {
       n: [pad.normal.x, pad.normal.y, pad.normal.z],
       sw: pad.swing,
     });
+    /* Когда гость ударил мяч (shotId изменился, lastHitBy = 1), сообщаем
+     * об этом хосту — гостевые удары не проходят через tryAiHit на хосте. */
+    const g = this.game;
+    if (g.ball.live && g.ball.lastHitBy === 1 && g.shotId !== this._lastGuestHitShot) {
+      this._lastGuestHitShot = g.shotId;
+      const b = g.ball;
+      this._send({
+        type: 'guestHit',
+        v: [b.v.x, b.v.y, b.v.z],
+        w: [b.w.x, b.w.y, b.w.z],
+        rally: g.rally,
+      });
+    }
   }
 
   /* ---- guest: apply host state (interpolated) ---- */
@@ -321,6 +352,13 @@ class NetworkManager {
     }
     // sync score
     if (msg.score) this.game.score = msg.score.slice();
+    /* Синхронизация состояния игры: гость должен войти в RALLY, когда
+     * в RALLY вошёл хост; иначе его tryPlayerHit не сработает. */
+    if (msg.state && ['SERVE_READY', 'SERVE_TOSS', 'RALLY', 'POINT'].includes(msg.state) &&
+        msg.state !== this.game.state) {
+      this.game.state = msg.state;
+      this.game.stateT = 0;
+    }
   }
 
   /* ---- host: apply guest input ---- */
