@@ -14,6 +14,7 @@
     "seed:reset": "node --no-warnings src/db/seed-cli.js --force",
     "retention": "node --no-warnings src/db/retention-cli.js",
     "test": "node --no-warnings --test tests/*.test.js",
+    "test:contract": "node --no-warnings --test tests/contract.test.js",
     "test:ui": "node --no-warnings tools/ui-smoke.mjs",
     "test:all": "npm test && npm run test:ui"
   },

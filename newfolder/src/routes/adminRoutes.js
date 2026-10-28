@@ -1806,6 +1806,7 @@ async function dispatchAdmin(db, { req, res, pathname, urlObj, body, clientIp, p
       bannerRu: body.bannerRu,
       bannerEn: body.bannerEn,
       etaIso: body.etaIso,
+      graceSec: body.allowActiveMatchesFinishGraceSec,
       actorUsername: principal.username,
     });
     publish('maintenance', state);

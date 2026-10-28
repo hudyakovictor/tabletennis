@@ -27,7 +27,7 @@ function getMaintenanceState(db) {
   return { ...JSON.parse(row.value_json), updatedAt: row.updated_at };
 }
 
-function setMaintenanceState(db, { enabled, bannerRu, bannerEn, etaIso, actorUsername }) {
+function setMaintenanceState(db, { enabled, bannerRu, bannerEn, etaIso, graceSec, actorUsername }) {
   const nowIso = new Date().toISOString();
   const prev = getMaintenanceState(db);
   const next = {
@@ -41,7 +41,9 @@ function setMaintenanceState(db, { enabled, bannerRu, bannerEn, etaIso, actorUse
       bannerEn ||
       (enabled ? 'Scheduled maintenance is in progress. Active matches can finish; new matchmaking is paused.' : ''),
     etaIso: etaIso || null,
-    allowActiveMatchesFinishGraceSec: 180,
+    allowActiveMatchesFinishGraceSec: Number.isFinite(Number(graceSec))
+      ? Math.max(0, Math.min(1800, Number(graceSec)))
+      : prev.allowActiveMatchesFinishGraceSec || 180,
     blockNewMatchesHttp503: Boolean(enabled),
   };
 
