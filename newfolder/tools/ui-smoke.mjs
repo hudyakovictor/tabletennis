@@ -23,6 +23,7 @@ const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'topspin-ui-'));
 
 const nativeFetch = globalThis.fetch;
 const errors = [];
+const apiFailures = [];
 const warnings = [];
 
 function fail(where, err) {
@@ -114,6 +115,11 @@ window.fetch = async (input, init = {}) => {
   if (cookieJar) headers.cookie = cookieJar;
   const res = await nativeFetch(url, { ...init, headers, redirect: 'manual' });
   setCookieHeader(res.headers.getSetCookie?.() || []);
+  // `/auth/me` answering 401 before login is the probe itself, not a failure.
+  const expectedProbe = res.status === 401 && url.endsWith('/api/admin/auth/me');
+  if (url.includes('/api/') && res.status >= 400 && !expectedProbe) {
+    apiFailures.push(`${String(init.method || 'GET').padEnd(6)} ${res.status} ${url.replace(BASE, '')}`);
+  }
   return res;
 };
 window.EventSource = class {
@@ -247,8 +253,10 @@ async function main() {
     await sleep(900);
     const outlet = document.getElementById('view') || document.getElementById('main-outlet');
     const text = (outlet?.textContent || '').trim();
-    const ok = errors.length === before && text.length > 120;
-    results.push([tab, ok, `${text.length} chars${errors.length > before ? `, ${errors.length - before} errors` : ''}`]);
+    const hasCard = Boolean(outlet?.querySelector('.card, .kpi, .empty'));
+    const hasErrorPanel = Boolean(outlet?.querySelector('.error-panel'));
+    const ok = errors.length === before && text.length > 120 && hasCard && !hasErrorPanel;
+    results.push([tab, ok, `${text.length} chars${hasCard ? '' : ', no card'}${hasErrorPanel ? ', ERROR PANEL' : ''}${errors.length > before ? `, ${errors.length - before} errors` : ''}`]);
     if (process.env.UI_SMOKE_DUMP) {
       fs.mkdirSync(process.env.UI_SMOKE_DUMP, { recursive: true });
       fs.writeFileSync(path.join(process.env.UI_SMOKE_DUMP, `${tab}.txt`), (outlet?.innerHTML || ''));
@@ -274,6 +282,76 @@ async function main() {
     results.push([label, errors.length === before && text.length > 100]);
   }
 
+  /* ------------------------------ interactions ------------------------------ */
+  const overlayOpen = (id) => !document.getElementById(id).classList.contains('hidden');
+  const closeWithEscape = async (id) => {
+    document.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    await sleep(150);
+    return !overlayOpen(id);
+  };
+
+  // Player 360 drawer: a real click on a table row must fetch and render the profile.
+  window.location.hash = '#/players';
+  await sleep(900);
+  const playerRow = document.querySelector('#view tbody tr[data-key]');
+  if (playerRow) {
+    playerRow.dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
+    await waitFor(() => overlayOpen('drawer-overlay') && (document.getElementById('drawer-body').textContent || '').length > 200,
+      { label: 'player drawer', timeout: 6000 });
+    const drawerText = document.getElementById('drawer-body').textContent;
+    results.push(['player drawer renders 360 profile',
+      /Согласи/.test(drawerText) && /Сессии|Платежи|Тикеты/.test(drawerText), `${drawerText.length} chars`]);
+    results.push(['drawer closes on Escape', await closeWithEscape('drawer-overlay')]);
+  } else {
+    results.push(['player drawer renders 360 profile', false, 'no table rows']);
+  }
+
+  // Governance → roles: the permission matrix drawer must open for a role.
+  window.location.hash = '#/governance?tab=roles';
+  await sleep(900);
+  const roleBtn = document.querySelector('#view [data-role]');
+  if (roleBtn) {
+    roleBtn.dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
+    await waitFor(() => overlayOpen('drawer-overlay'), { label: 'role drawer', timeout: 4000 });
+    const roleText = document.getElementById('drawer-body').textContent || '';
+    results.push(['role permission drawer lists capabilities', roleText.includes(':') && roleText.length > 80, `${roleText.length} chars`]);
+    await closeWithEscape('drawer-overlay');
+  } else {
+    results.push(['role permission drawer lists capabilities', false, 'no role buttons']);
+  }
+
+  // LiveOps → maintenance dialog must render the 503 contract before anything is applied.
+  window.location.hash = '#/liveops';
+  await sleep(900);
+  const maintBtn = document.getElementById('toggle-maint');
+  if (maintBtn) {
+    maintBtn.dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
+    await waitFor(() => overlayOpen('drawer-overlay'), { label: 'maintenance drawer', timeout: 4000 });
+    const form = document.getElementById('maint-form');
+    results.push(['maintenance dialog renders 503 contract',
+      Boolean(form) && Boolean(form.querySelector('[name="bannerRu"]')) && Boolean(form.querySelector('[name="grace"]'))]);
+    await closeWithEscape('drawer-overlay');
+  } else {
+    results.push(['maintenance dialog renders 503 contract', false, 'no toggle button']);
+  }
+
+  // Theme toggle flips the document attribute and survives a re-render.
+  const themeBtn = document.getElementById('theme-btn');
+  const themeBefore = document.documentElement.dataset.theme;
+  themeBtn?.dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
+  await sleep(120);
+  results.push(['theme toggle switches the document theme', document.documentElement.dataset.theme !== themeBefore]);
+  themeBtn?.dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
+  await sleep(120);
+
+  // Notification centre opens and lists something (or an explicit empty state).
+  document.getElementById('notif-btn')?.dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
+  await sleep(400);
+  const notifPopover = document.getElementById('notif-popover');
+  results.push(['notification popover opens', Boolean(notifPopover) && !notifPopover.classList.contains('hidden')]);
+  document.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+  await sleep(150);
+
   // Palette + notification popover wiring.
   document.getElementById('search-trigger')?.dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
   await sleep(120);
@@ -287,6 +365,7 @@ async function main() {
     document.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
   }
 
+  results.push(['no failed API calls', apiFailures.length === 0]);
   results.push(['no runtime errors', errors.length === 0]);
 }
 
@@ -299,6 +378,11 @@ try {
 } finally {
   for (const [label, ok, extra] of results) {
     console.log(`${ok ? 'PASS' : 'FAIL'}  ${label}${extra ? `  (${extra})` : ''}`);
+  }
+  if (apiFailures.length) {
+    console.log('\n--- API failures ---');
+    for (const f of [...new Set(apiFailures)].slice(0, 30)) console.log(f);
+    exitCode = 1;
   }
   if (errors.length) {
     console.log('\n--- errors ---');

@@ -234,7 +234,7 @@ function silencesTab(silences) {
       <div class="card-body flush">
         ${silences.length ? silences.map((s) => `<div class="list-row">
             <span class="status-dot info"></span>
-            <div class="list-main"><span class="list-title">${esc(s.metric)}</span><span class="list-sub">${esc(s.reason)} · до ${esc(dateTime(s.expires_at))}</span></div>
+            <div class="list-main"><span class="list-title">${esc(s.fingerprint)}</span><span class="list-sub">${esc(s.reason)} · до ${esc(dateTime(s.expires_at))} · ${esc(s.created_by || 'система')}</span></div>
             <button class="btn btn-sm btn-ghost" data-unsilence="${esc(s.id)}">Снять</button>
           </div>`).join('') : emptyState({ title: 'Активных silences нет' })}
       </div>
@@ -256,7 +256,7 @@ function bindTabActions(container, ctx, data) {
   });
 
   run(container, '[data-silence]', async (node) => {
-    if (!can('alerts:silence')) { toast('Недостаточно прав', { type: 'error' }); return; }
+    if (!can('observability:manage')) { toast('Недостаточно прав', { type: 'error' }); return; }
     const reason = await promptDialog({
       title: 'Приглушить алерт',
       label: `Причина для ${node.dataset.silence}`,
@@ -266,7 +266,11 @@ function bindTabActions(container, ctx, data) {
     });
     if (!reason) return;
     try {
-      await api.post('/api/admin/observability/silence', { metric: node.dataset.silence, reason }, { idempotencyKey: `sil-${node.dataset.silence}-${Date.now()}` });
+      await api.post(
+        '/api/admin/observability/silence',
+        { fingerprint: node.dataset.silence, reason, minutes: 120 },
+        { idempotencyKey: `sil-${node.dataset.silence}-${Date.now()}` }
+      );
       toast('Silence создан', { type: 'success' });
       ctx.refresh();
     } catch (err) { toastError(err); }
