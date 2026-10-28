@@ -29,7 +29,7 @@ npm start              # http://0.0.0.0:4100
 ## Проверки качества
 
 ```bash
-npm test        # 31/31: 8 сценарных тестов ТЗ + 18 платформенных (сессии, CSRF, RBAC, SLA, SSE, ключи зон, разборы) + 5 контрактных
+npm test        # 32/32: 8 сценарных тестов ТЗ + 18 платформенных (сессии, CSRF, RBAC, SLA, SSE, ключи зон, разборы) + 6 контрактных
 npm run test:ui # 33/33: jsdom исполняет настоящие ES-модули против живого сервера — 12 вкладок, deep-links, drawers, a11y-аудит DOM
 npm run test:all
 ```
@@ -48,7 +48,7 @@ npm run test:all
 | `src/routes/platformRoutes.js` | governance, settings, diagnostics, операторы CRM, silences, SLO |
 | `src/routes/clientRoutes.js` | публичный контракт `/api/client/v1/*` (17 эндпоинтов) |
 | `src/routes/query.js` | единая пагинация, whitelisted сортировка, CSV с защитой от формул |
-| `tests/contract.test.js` | статический контракт UI ↔ API: права, маршруты, `data-*`, DOM-id, состав вкладок |
+| `tests/contract.test.js` | статический контракт UI ↔ API ↔ документация: права, маршруты, `data-*`, DOM-id, вкладки, клиентские эндпоинты из док. 19 |
 | `src/security/` | scrypt + JWT, реестр сессий, CSRF double-submit, 52 гранулярных права, 6-точечный валидатор физики, hash-chain аудит, AES-256-GCM хранилище ключей провайдеров |
 | `src/db/` | SQLite (WAL, 45 таблиц), forward-only миграции, архивация чата, seed, retention 90/180/365 |
 | `src/ai/` | 5 изолированных зон + директор, бюджеты токенов, кэш промптов, batch −50 %, JSON Schema и карантин |
