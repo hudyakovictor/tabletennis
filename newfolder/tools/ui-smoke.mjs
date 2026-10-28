@@ -214,6 +214,30 @@ async function waitFor(predicate, { timeout = 6000, label = 'condition' } = {}) 
   throw new Error(`timeout waiting for ${label}`);
 }
 
+/* ------------------------------ a11y checks ------------------------------ */
+// A button whose only content is an SVG icon has no accessible name; the same is
+// true for an input with neither a wrapping <label> nor aria-label/aria-labelledby.
+// Both are invisible in a screenshot and painful for screen-reader users, so they
+// are treated as failures rather than warnings.
+const a11yIssues = [];
+
+function auditA11y(scopeLabel, explicitRoot = null) {
+  const root = explicitRoot || document.getElementById('view') || document.body;
+  for (const btn of root.querySelectorAll('button')) {
+    const name = (btn.textContent || '').trim() || btn.getAttribute('aria-label') || btn.getAttribute('title');
+    if (!name) a11yIssues.push(`${scopeLabel}: button without an accessible name (${btn.className || 'no class'})`);
+  }
+  for (const input of root.querySelectorAll('input, select, textarea')) {
+    if (input.type === 'hidden' || input.type === 'checkbox' || input.type === 'radio') continue;
+    const wrapped = input.closest('label');
+    const labelled = input.getAttribute('aria-label') || input.getAttribute('aria-labelledby') || input.id && document.querySelector(`label[for="${input.id}"]`);
+    if (!wrapped && !labelled) a11yIssues.push(`${scopeLabel}: form field without a label (${input.name || input.id || input.tagName})`);
+  }
+  for (const img of root.querySelectorAll('img')) {
+    if (!img.hasAttribute('alt')) a11yIssues.push(`${scopeLabel}: image without alt`);
+  }
+}
+
 /* --------------------------------- run ----------------------------------- */
 const results = [];
 
@@ -257,6 +281,7 @@ async function main() {
     const hasErrorPanel = Boolean(outlet?.querySelector('.error-panel'));
     const ok = errors.length === before && text.length > 120 && hasCard && !hasErrorPanel;
     results.push([tab, ok, `${text.length} chars${hasCard ? '' : ', no card'}${hasErrorPanel ? ', ERROR PANEL' : ''}${errors.length > before ? `, ${errors.length - before} errors` : ''}`]);
+    auditA11y(tab);
     if (process.env.UI_SMOKE_DUMP) {
       fs.mkdirSync(process.env.UI_SMOKE_DUMP, { recursive: true });
       fs.writeFileSync(path.join(process.env.UI_SMOKE_DUMP, `${tab}.txt`), (outlet?.innerHTML || ''));
@@ -300,6 +325,7 @@ async function main() {
     await waitFor(() => overlayOpen('drawer-overlay') && (document.getElementById('drawer-body').textContent || '').length > 200,
       { label: 'player drawer', timeout: 6000 });
     const drawerText = document.getElementById('drawer-body').textContent;
+    auditA11y('player drawer', document.getElementById('drawer-overlay'));
     results.push(['player drawer renders 360 profile',
       /Согласи/.test(drawerText) && /Сессии|Платежи|Тикеты/.test(drawerText), `${drawerText.length} chars`]);
     results.push(['drawer closes on Escape', await closeWithEscape('drawer-overlay')]);
@@ -315,6 +341,7 @@ async function main() {
     roleBtn.dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
     await waitFor(() => overlayOpen('drawer-overlay'), { label: 'role drawer', timeout: 4000 });
     const roleText = document.getElementById('drawer-body').textContent || '';
+    auditA11y('role drawer', document.getElementById('drawer-overlay'));
     results.push(['role permission drawer lists capabilities', roleText.includes(':') && roleText.length > 80, `${roleText.length} chars`]);
     await closeWithEscape('drawer-overlay');
   } else {
@@ -329,6 +356,7 @@ async function main() {
     maintBtn.dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
     await waitFor(() => overlayOpen('drawer-overlay'), { label: 'maintenance drawer', timeout: 4000 });
     const form = document.getElementById('maint-form');
+    auditA11y('maintenance drawer', document.getElementById('drawer-overlay'));
     results.push(['maintenance dialog renders 503 contract',
       Boolean(form) && Boolean(form.querySelector('[name="bannerRu"]')) && Boolean(form.querySelector('[name="grace"]'))]);
     await closeWithEscape('drawer-overlay');
@@ -366,6 +394,7 @@ async function main() {
     document.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
   }
 
+  results.push(['no accessibility gaps in rendered views', a11yIssues.length === 0]);
   results.push(['no failed API calls', apiFailures.length === 0]);
   results.push(['no runtime errors', errors.length === 0]);
 }
@@ -379,6 +408,11 @@ try {
 } finally {
   for (const [label, ok, extra] of results) {
     console.log(`${ok ? 'PASS' : 'FAIL'}  ${label}${extra ? `  (${extra})` : ''}`);
+  }
+  if (a11yIssues.length) {
+    console.log('\n--- a11y issues ---');
+    for (const issue of [...new Set(a11yIssues)].slice(0, 30)) console.log(`  ${issue}`);
+    exitCode = 1;
   }
   if (apiFailures.length) {
     console.log('\n--- API failures ---');

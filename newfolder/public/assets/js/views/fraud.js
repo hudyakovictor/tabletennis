@@ -56,7 +56,7 @@ export async function render(container, ctx) {
                 .map(([v, l]) => `<button type="button" data-status="${v}" class="${status === v ? 'active' : ''}">${l}${statusCounts[v] ? ` · ${statusCounts[v]}` : ''}</button>`)
                 .join('')}
             </div>
-            <input class="input-inline grow" id="case-search" type="search" placeholder="Поиск по игроку, типу, ID…" value="${esc(q)}" />
+            <input class="input-inline grow" id="case-search" type="search" aria-label="Поиск фрод-кейсов" placeholder="Поиск по игроку, типу, ID…" value="${esc(q)}" />
           </div>
           ${table({
             rows: items,

@@ -46,7 +46,7 @@ export async function render(container, ctx) {
           </div>
           <div class="suggestions" id="suggestions">${suggestions(messages)}</div>
           <form class="chat-compose" id="ask-form">
-            <textarea name="question" id="ask-input" placeholder="Спросите директора: «какие зоны требуют внимания?»" rows="1"></textarea>
+            <textarea name="question" id="ask-input" aria-label="Вопрос директору" placeholder="Спросите директора: «какие зоны требуют внимания?»" rows="1"></textarea>
             <button type="submit" class="btn btn-primary" id="ask-submit">${icon('chevronRight')} Отправить</button>
           </form>
         </div>

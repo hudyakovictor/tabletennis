@@ -30,7 +30,7 @@ npm start              # http://0.0.0.0:4100
 
 ```bash
 npm test        # 31/31: 8 сценарных тестов ТЗ + 18 платформенных (сессии, CSRF, RBAC, SLA, SSE, ключи зон, разборы) + 5 контрактных
-npm run test:ui # 32/32: jsdom исполняет настоящие ES-модули против живого сервера — 12 вкладок, 8 deep-link’ов, drawers
+npm run test:ui # 33/33: jsdom исполняет настоящие ES-модули против живого сервера — 12 вкладок, deep-links, drawers, a11y-аудит DOM
 npm run test:all
 ```
 
