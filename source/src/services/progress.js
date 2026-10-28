@@ -80,17 +80,55 @@ const Progress = {
     if (!Api.enabled || this.ready) return;
     this.ready = true;
     const s = await Api.login();
-    /* SDK Telegram грузится async: если initData ещё нет, следующий вызов
-     * (load, возврат в фокус) попробует снова, а игра в это время локальна. */
-    if (!s) { this.ready = false; return; }
+    /* SDK Telegram грузится async: если его тег пришёл позже нашего `load`, в
+     * момент первого boot() initData ещё нет. Пара отложенных попыток закрывает
+     * этот зазор; дальше — обычный возврат в фокус (visibilitychange). */
+    if (!s) {
+      this.ready = false;
+      if ((this.retries = (this.retries || 0) + 1) <= 3) setTimeout(() => this.boot(), 800 * this.retries);
+      return;
+    }
+    this.retries = 0;
     this.playerId = s.playerId; this.online = true;
     await this.pull();
     await this.flush();
+    /* Доска нужна экрану рейтинга, а не старту: тянем в фоне, экран сам
+     * перерисуется, когда данные придут. */
+    this.leaderboard().catch(() => {});
     /* TMA часто живёт в фоне: досылаем очередь при возврате на экран. */
     document.addEventListener('visibilitychange', () => {
       if (document.visibilityState !== 'visible') return;
-      if (!this.online) this.boot(); else this.flush();
+      if (!this.online) this.boot(); else { this.flush(); this.leaderboard().catch(() => {}); }
     });
+  },
+
+  /* Реальная доска сервера. Пока её нет — экран показывает локальный список,
+   * поэтому запрос никогда не блокирует рендер. Кэш на минуту: ходить между
+   * экранами не должно значить ходить в сеть.
+   * Ответ зависит от того, кто спрашивает: со своим токеном сервер добавляет
+   * строку «me». Поэтому кэш привязан к состоянию входа — иначе доска, которую
+   * успел запросить холодный экран до логина, до минуты оставалась бы без
+   * своей строки. Ответ, пришедший позже более свежего запроса, отбрасывается. */
+  board: null, boardAt: 0, boardAuth: false, boardSeq: 0, boardSubs: [],
+  onBoard(fn) {
+    this.boardSubs.push(fn);
+    return () => { this.boardSubs = this.boardSubs.filter((f) => f !== fn); };
+  },
+  async leaderboard(limit = 20) {
+    if (!Api.enabled) return null;
+    const authed = !!Api.session();
+    if (this.board && this.boardAuth === authed && Date.now() - this.boardAt < 60000) return this.board;
+    const seq = ++this.boardSeq;
+    const r = await Api.request(`/api/client/v1/leaderboard?limit=${limit}`);
+    if (seq !== this.boardSeq) return this.board;
+    if (!r.ok || !r.json) return this.board;
+    this.online = true;
+    this.boardAuth = authed;
+    this.board = { entries: r.json.entries || [], me: r.json.me || null, at: Date.now() };
+    this.boardAt = Date.now();
+    /* Экран мог нарисоваться раньше ответа — подписчики перерисуют себя сами. */
+    this.boardSubs.slice().forEach((fn) => { try { fn(this.board); } catch (e) {} });
+    return this.board;
   },
 
   /** Отправка очереди. Останавливается на обрыве сети, а не теряет записи. */
