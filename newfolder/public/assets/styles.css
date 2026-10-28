@@ -1216,6 +1216,9 @@ select {
 }
 
 /* ---------- 2x. Component additions used by v3 views ---------- */
+.list-plain { margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 6px; color: var(--text-2); font-size: 13px; }
+.list-plain li::marker { color: var(--brand); }
+
 .kv-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 14px 28px; }
 
 .avatar-sm {
