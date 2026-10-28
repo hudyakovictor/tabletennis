@@ -62,17 +62,17 @@ export async function render(container, ctx) {
             ${STATUSES.map(([v, l]) => `<button type="button" data-status="${v}" class="${status === v ? 'active' : ''}">${l}${v !== 'all' && counts[v] ? ` · ${counts[v]}` : ''}</button>`).join('')}
           </div>
           <div class="row">
-            <select class="input-inline" id="region-select">
+            <select class="input-inline" id="region-select" aria-label="Фильтр по региону">
               <option value="">все регионы</option>
               ${['RU', 'EU', 'TR', 'IN', 'SG', 'US', 'BR', 'CN'].map((r) => `<option value="${r}" ${region === r ? 'selected' : ''}>${r}</option>`).join('')}
             </select>
-            <select class="input-inline" id="sort-select">
+            <select class="input-inline" id="sort-select" aria-label="Сортировка игроков">
               <option value="created_at" ${sort === 'created_at' ? 'selected' : ''}>по регистрации</option>
               <option value="last_seen_at" ${sort === 'last_seen_at' ? 'selected' : ''}>по активности</option>
               <option value="status" ${sort === 'status' ? 'selected' : ''}>по статусу</option>
               <option value="region" ${sort === 'region' ? 'selected' : ''}>по региону</option>
             </select>
-            <input class="input-inline" id="player-search" type="search" placeholder="Ник, ID, кампания…" value="${esc(q)}" />
+            <input class="input-inline" id="player-search" type="search" aria-label="Поиск игроков" placeholder="Ник, ID, кампания…" value="${esc(q)}" />
           </div>
         </div>
         <div class="card-body flush">
