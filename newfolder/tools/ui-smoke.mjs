@@ -271,6 +271,7 @@ async function main() {
     ['#/settings?tab=scheduler', 'settings scheduler tab'],
     ['#/settings?tab=sessions', 'settings sessions tab'],
     ['#/observability?tab=slo', 'observability slo tab'],
+    ['#/observability?tab=postmortems', 'observability postmortems tab'],
     ['#/liveops?tab=news', 'liveops news tab'],
     ['#/liveops?tab=maintenance', 'liveops maintenance tab'],
   ];

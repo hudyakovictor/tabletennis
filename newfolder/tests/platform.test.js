@@ -416,6 +416,46 @@ describe('Platform & governance (v3)', () => {
     assert.equal(afterRow.api_key_encrypted, null);
   });
 
+  it('post-mortems: an incident is required, validation happens before the insert', async () => {
+    const missing = await adminCall('POST', '/api/admin/postmortems', { summary: 'Разбор без инцидента' });
+    assert.equal(missing.status, 400);
+    assert.equal(missing.json.error, 'INCIDENT_REQUIRED');
+
+    const unknown = await adminCall('POST', '/api/admin/postmortems', { incidentId: 'inc_missing', summary: 'Разбор' });
+    assert.equal(unknown.status, 404);
+    assert.equal(unknown.json.error, 'INCIDENT_NOT_FOUND');
+
+    const incident = await adminCall('POST', '/api/admin/incidents', {
+      severity: 'warning',
+      zone: 'ops',
+      title: `Post-mortem probe ${Date.now()}`,
+      description: 'Проверка контракта постмортема',
+    });
+    assert.equal(incident.status, 201);
+    const incidentId = incident.json.incident?.id || incident.json.id;
+
+    const noSummary = await adminCall('POST', '/api/admin/postmortems', { incidentId, summary: '   ' });
+    assert.equal(noSummary.status, 422);
+    assert.equal(noSummary.json.error, 'SUMMARY_REQUIRED');
+
+    const created = await adminCall('POST', '/api/admin/postmortems', {
+      incidentId,
+      summary: 'Дедупликация телеметрии не покрывала повторный вход в сессию.',
+      rootCause: 'Ключ дедупликации строился без session_id.',
+      impact: 'Двойной учёт событий в зоне Ops.',
+      fixApplied: 'Составной ключ (session_id, client_event_id).',
+      actionItems: ['Добавить регрессионный тест', 'Проверить метрику contact_rate'],
+    });
+    assert.equal(created.status, 201);
+    assert.equal(created.json.postmortem.incident_id, incidentId);
+
+    const feed = await adminCall('GET', '/api/admin/observability');
+    const found = feed.json.postmortems.find((p) => p.incident_id === incidentId);
+    assert.ok(found, 'the new post-mortem must be listed');
+    assert.equal(found.action_items.length, 2);
+    assert.ok(found.incident_title, 'list query joins the incident title for the UI');
+  });
+
   it('CSV export neutralizes formula injection and serves a stable header', async () => {
     const marker = `=cmd|' /C calc'!A0-${Date.now()}`;
     db.prepare(

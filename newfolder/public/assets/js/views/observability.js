@@ -40,7 +40,7 @@ export async function render(container, ctx) {
     </div>
 
     <div class="tabs mb-16" id="tabs">
-      ${[['signals', 'Сигналы'], ['slo', 'SLO и бюджет'], ['incidents', `Инциденты${incidents.length ? ` · ${incidents.length}` : ''}`], ['errors', 'Ошибки API'], ['runbooks', 'Runbooks'], ['silences', 'Silences']]
+      ${[['signals', 'Сигналы'], ['slo', 'SLO и бюджет'], ['incidents', `Инциденты${incidents.length ? ` · ${incidents.length}` : ''}`], ['postmortems', `Разборы${(data.postmortems || []).length ? ` · ${data.postmortems.length}` : ''}`], ['errors', 'Ошибки API'], ['runbooks', 'Runbooks'], ['silences', 'Silences']]
         .map(([v, l]) => `<button type="button" class="tab ${tab === v ? 'active' : ''}" data-tab="${v}">${l}</button>`).join('')}
     </div>
 
@@ -91,6 +91,7 @@ export async function render(container, ctx) {
 function renderTab(tab, bag) {
   if (tab === 'slo') return sloTab(bag.s);
   if (tab === 'incidents') return incidentsTab(bag.incidents);
+  if (tab === 'postmortems') return postmortemsTab(bag.data);
   if (tab === 'errors') return errorsTab(bag.apiErrors, bag.data);
   if (tab === 'runbooks') return runbooksTab(bag.data.runbooks || []);
   if (tab === 'silences') return silencesTab(bag.data.silences || []);
@@ -241,7 +242,131 @@ function silencesTab(silences) {
     </section>`;
 }
 
+function postmortemsTab(data) {
+  const items = data.postmortems || [];
+  const openIncidents = (data.incidents || []).filter((i) => i.status !== 'resolved');
+  const canCreate = can('postmortems:create');
+  return `<div class="grid grid-12">
+      <section class="card col-8">
+        <div class="card-head">
+          <div><h3>Blameless-разборы</h3><div class="dim">Разбор отделён от наказания: фиксируются причина, влияние и действия</div></div>
+          ${canCreate && openIncidents.length ? `<button class="btn btn-sm btn-primary" id="new-postmortem">${icon('plus')} Разбор</button>` : ''}
+        </div>
+        <div class="card-body flush">
+          ${items.length
+            ? items.map((p) => `<div class="list-row">
+                <span class="status-dot ${p.incident_severity === 'critical' ? 'critical' : 'ok'}"></span>
+                <div class="list-main">
+                  <span class="list-title">${esc(p.incident_title || p.incident_id)}</span>
+                  <span class="list-sub">${esc(p.blameless_summary)}</span>
+                  <span class="list-sub dim">${esc(dateTime(p.created_at))} · ${esc(p.created_by)} · действий: ${num((p.action_items || []).length)}</span>
+                </div>
+                <button class="btn btn-sm btn-outline" data-postmortem="${esc(p.id)}">Открыть</button>
+              </div>`).join('')
+            : emptyState({ iconName: 'check', title: 'Разборов пока нет', text: 'Оформите разбор после закрытия инцидента — он попадёт в аудит.' })}
+        </div>
+      </section>
+      <section class="card col-4">
+        <div class="card-head"><h3>Без обвинений</h3></div>
+        <div class="card-body stack" style="font-size:12.5px;color:var(--text-2)">
+          <p class="muted">Разбор отвечает на вопрос «что в системе позволило ошибке случиться», а не «кто виноват».</p>
+          <div class="row-between"><span class="muted">Привязка</span><strong>к инциденту</strong></div>
+          <div class="row-between"><span class="muted">Обязательное поле</span><strong>резюме</strong></div>
+          <div class="row-between"><span class="muted">Открытых инцидентов</span><strong>${num(openIncidents.length)}</strong></div>
+          <div class="row-between"><span class="muted">Разборов</span><strong>${num(items.length)}</strong></div>
+        </div>
+      </section>
+    </div>`;
+}
+
+function openPostmortemDialog(incidents, ctx) {
+  const options = incidents
+    .map((i) => `<option value="${esc(i.id)}">${esc(i.title)} · ${esc(i.severity)}</option>`)
+    .join('');
+  openDrawer({
+    title: 'Новый разбор инцидента',
+    eyebrow: 'blameless post-mortem',
+    body: `<form class="stack" id="pm-form">
+        <label class="field"><span class="field-label">Инцидент</span>
+          <select name="incidentId" required>${options}</select></label>
+        <label class="field"><span class="field-label">Резюме без обвинений</span>
+          <textarea name="summary" required placeholder="Что произошло и почему система это допустила"></textarea></label>
+        <label class="field"><span class="field-label">Корневая причина</span>
+          <textarea name="rootCause" placeholder="Технические и процессные причины"></textarea></label>
+        <label class="field"><span class="field-label">Влияние</span>
+          <textarea name="impact" placeholder="Игроки, матчи, деньги, длительность"></textarea></label>
+        <label class="field"><span class="field-label">Что исправлено</span>
+          <textarea name="fixApplied" placeholder="Немедленные меры"></textarea></label>
+        <label class="field"><span class="field-label">Действия (по одному в строке)</span>
+          <textarea name="actionItems" placeholder="Добавить алерт на 5xx
+Покрыть тестом дедупликацию"></textarea></label>
+      </form>`,
+    actions: [
+      { label: 'Отмена', variant: 'btn-ghost' },
+      {
+        label: 'Сохранить',
+        variant: 'btn-primary',
+        close: false,
+        onClick: async ({ close }) => {
+          const fd = new FormData(qs('#pm-form'));
+          const summary = String(fd.get('summary') || '').trim();
+          if (!fd.get('incidentId') || !summary) { toast('Выберите инцидент и заполните резюме', { type: 'warn' }); return; }
+          try {
+            await api.post(
+              '/api/admin/postmortems',
+              {
+                incidentId: fd.get('incidentId'),
+                summary,
+                rootCause: fd.get('rootCause'),
+                impact: fd.get('impact'),
+                fixApplied: fd.get('fixApplied'),
+                actionItems: String(fd.get('actionItems') || '')
+                  .split('\n')
+                  .map((line) => line.trim())
+                  .filter(Boolean),
+              },
+              { idempotencyKey: `pm-${Date.now()}` }
+            );
+            toast('Разбор сохранён', { type: 'success' });
+            close();
+            ctx.refresh();
+          } catch (err) { toastError(err); }
+        },
+      },
+    ],
+  });
+}
+
 function bindTabActions(container, ctx, data) {
+  qs('#new-postmortem', container)?.addEventListener('click', () => {
+    openPostmortemDialog((data.incidents || []).filter((i) => i.status !== 'resolved'), ctx);
+  });
+
+  run(container, '[data-postmortem]', (node) => {
+    const pm = (data.postmortems || []).find((p) => p.id === node.dataset.postmortem);
+    if (!pm) return;
+    const items = pm.action_items || [];
+    openDrawer({
+      title: pm.incident_title || pm.incident_id,
+      eyebrow: `post-mortem · ${dateTime(pm.created_at)}`,
+      wide: true,
+      body: `<div class="stack">
+          <div class="field-label">Резюме</div><p>${esc(pm.blameless_summary)}</p>
+          <div class="split-even">
+            <div><div class="field-label mb-8">Корневая причина</div><p class="muted">${esc(pm.root_cause || '—')}</p></div>
+            <div><div class="field-label mb-8">Влияние</div><p class="muted">${esc(pm.impact || '—')}</p></div>
+          </div>
+          <div class="field-label">Что исправлено</div><p class="muted">${esc(pm.fix_applied || '—')}</p>
+          <div class="field-label">Действия</div>
+          ${items.length
+            ? `<ul class="list-plain">${items.map((i) => `<li>${esc(typeof i === 'string' ? i : JSON.stringify(i))}</li>`).join('')}</ul>`
+            : '<p class="dim">Действия не зафиксированы</p>'}
+          <div class="dim">Автор: ${esc(pm.created_by)}</div>
+        </div>`,
+      actions: [{ label: 'Закрыть', variant: 'btn-ghost' }],
+    });
+  });
+
   run(container, '[data-runbook]', async (node) => {
     try {
       const rb = await api.get(`/api/admin/runbooks/${encodeURIComponent(node.dataset.runbook)}`);

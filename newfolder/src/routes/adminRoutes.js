@@ -1740,6 +1740,18 @@ async function dispatchAdmin(db, { req, res, pathname, urlObj, body, clientIp, p
   if (req.method === 'POST' && pathname === '/api/admin/postmortems') {
     const denied = guard(P.POSTMORTEMS_CREATE);
     if (denied) return denied;
+    // A post-mortem is always attached to an incident: validate before inserting so a
+    // missing id surfaces as a clear 400/404 instead of a NOT NULL constraint 500.
+    const incidentId = String(body.incidentId || '').trim();
+    if (!incidentId) {
+      return { status: 400, json: { error: 'INCIDENT_REQUIRED', message: 'Укажите инцидент для постмортема' } };
+    }
+    if (!db.prepare('SELECT id FROM incidents WHERE id = ?').get(incidentId)) {
+      return { status: 404, json: { error: 'INCIDENT_NOT_FOUND', message: 'Инцидент не найден' } };
+    }
+    if (!String(body.summary || '').trim()) {
+      return { status: 422, json: { error: 'SUMMARY_REQUIRED', message: 'Blameless-резюме обязательно' } };
+    }
     const pm = createPostmortem(db, {
       incidentId: body.incidentId,
       summary: body.summary,

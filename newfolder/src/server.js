@@ -454,8 +454,32 @@ function createCrmApp(customDb = null) {
       });
       res.end(content);
     } catch (err) {
-      const code = err.statusCode || 500;
-      sendResponse(code, { error: err.message || 'Internal Server Error' });
+      // Error boundary. A 4xx raised intentionally by a handler keeps its message
+      // (it is written for the operator); an unexpected 5xx must never leak SQLite
+      // text, stack traces or file paths — the client gets a correlation id and the
+      // detail goes to the log and to the error metric instead.
+      const status = Number(err.statusCode) || 500;
+      if (status >= 500) {
+        const requestId = crypto.randomUUID();
+        console.error(`[crm] ${requestId} ${req.method} ${pathname} → ${err.stack || err.message}`);
+        try {
+          recordHttpRequestMetric({
+            method: req.method,
+            pathname,
+            statusCode: status,
+            durationMs: 0,
+          });
+        } catch {
+          /* metrics must never mask the original failure */
+        }
+        sendResponse(status, {
+          error: err.code || 'INTERNAL_ERROR',
+          message: 'Внутренняя ошибка сервера. Сообщите идентификатор запроса поддержке.',
+          requestId,
+        });
+        return;
+      }
+      sendResponse(status, { error: err.code || 'REQUEST_FAILED', message: err.message || 'Bad Request' });
     }
   });
 
