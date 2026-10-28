@@ -1,0 +1,16 @@
+services:
+  crm:
+    build: .
+    restart: unless-stopped
+    ports:
+      - "4173:4173"
+    env_file:
+      - .env
+    environment:
+      CRM_DB_PATH: /data/crm.sqlite
+      HOST: 0.0.0.0
+      PORT: 4173
+    volumes:
+      - crm-data:/data
+volumes:
+  crm-data:
