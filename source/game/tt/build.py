@@ -40,10 +40,9 @@ for f in JS_ORDER:
     js_parts.append(f"/* ====== {f} ====== */\n"+s)
 js="\n\n".join(js_parts)
 
-# Arena photo texture (the stands). Sponsor boards are gone from the scene,
-# so their JPEGs are no longer inlined: ~170 KB off the bundle.
-# Scene falls back to a procedural texture when the file is absent.
-ARENA_ASSETS = {'stands': 'stands.jpg'}
+# Street court panorama and the original stands for the no-image fallback.
+# All stay in the offline build; TT_NO_ARENA keeps the procedural fallback.
+ARENA_ASSETS = {'panorama': 'street-court.jpg', 'asphalt': 'asphalt-tile.jpg', 'stands': 'stands.jpg'}
 arena = {}
 if not os.environ.get('TT_NO_ARENA'):
     for key, fn in ARENA_ASSETS.items():
