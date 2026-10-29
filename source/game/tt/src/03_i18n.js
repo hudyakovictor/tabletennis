@@ -10,6 +10,7 @@ const ET = (() => {
   let lang = 'ru';
   const D = {
     ru: {
+      'hud.you': 'Ты', 'hud.opponent': 'Соперник', 'hud.serve': 'Подача', 'hud.score': 'Счёт матча',
       'boot.webglTitle': 'WebGL недоступен',
       'boot.webglBody': 'Этой демке нужен WebGL. Включите аппаратное ускорение в браузере и перезагрузите страницу.',
       'drill.serve.title': 'ПОДАЧА', 'drill.serve.goal': 'Подай: центр → лево → право',
@@ -43,6 +44,7 @@ const ET = (() => {
       'ui.tapContinue': 'Коснись экрана — продолжить', 'ui.tapBallTouch': 'Коснись экрана — мяч подлетит', 'ui.tapBallMouse': 'Клик ЛКМ — мяч подлетит'
     },
     en: {
+      'hud.you': 'You', 'hud.opponent': 'Opponent', 'hud.serve': 'Serve', 'hud.score': 'Match score',
       'boot.webglTitle': 'WebGL unavailable',
       'boot.webglBody': 'This game needs WebGL. Enable hardware acceleration in your browser and reload the page.',
       'drill.serve.title': 'SERVE', 'drill.serve.goal': 'Serve: center → left → right',

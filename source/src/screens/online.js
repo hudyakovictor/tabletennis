@@ -49,13 +49,16 @@ Router.def('online', {
     if (Net.code) { Net.st = 'connecting'; this.paint(); GameHost.send('net', { cmd: 'join', code: Net.code }); }
   },
   onNet(m) {
-    if (!this.alive) return;
+    // Status polls can arrive after matchEnd; keep the result visible until
+    // the player explicitly chooses a new room or exits.
+    if (!this.alive || Net.over) return;
     if (m.msg) Net.err = String(m.msg);
     const room = netCode(m.room);
     if (room) { Net.room = room; Net.code = room; }
     if (Number.isFinite(m.latency)) Net.ping = m.latency;
     if (m.side === 1 || m.side === -1) Net.side = m.side;
     if (m.st) Net.st = m.st;
+    this.el.classList.toggle('net-playing', Net.st === 'match');
     if (Net.st === 'match') { GameHost.show(true); TGX.guard(true); }
     else GameHost.show(false);
     this.paint();
@@ -63,8 +66,8 @@ Router.def('online', {
   onOver(m) {
     Net.over = { won: !!m.won, score: netEsc((m.score || []).join(':')) };
     Net.st = 'over';
-    GameHost.send('outro');
-    this.paint();
+    GameHost.send('outro'); GameHost.show(false); TGX.guard(false);
+    this.el.classList.remove('net-playing'); this.paint();
   },
   quitMatch() {
     GameHost.send('net', { cmd: 'leave' });
@@ -88,11 +91,10 @@ Router.def('online', {
     const head = (chip) => `<div class="pg-head rise" style="--d:0"><div class="h1">${t('net.title')}</div>${chip}</div>`;
 
     if (Net.st === 'match') {
-      body.innerHTML = `<div class="net-live safe-top">
-        <span class="chip">${t('net.roomCap')} <b class="num">${Net.code}</b></span>
-        <span class="chip ${Net.side === 1 ? 'gold' : ''}">${t(Net.side === 1 ? 'net.host' : 'net.guest')}</span>
-        <span class="chip num">${Net.ping || '—'} ${t('net.ms')}</span>
-        <button class="net-exit pe" data-act="exit" aria-label="${t('common.exit')}">✕</button></div>`;
+      body.innerHTML = `<div class="net-live">
+        <span class="net-meta">${t('net.roomCap')} ${Net.code} · ${t(Net.side === 1 ? 'net.host' : 'net.guest')}</span>
+        <span class="net-ping num">${Net.ping || '—'} ${t('net.ms')}</span>
+        <button class="net-exit pe" data-act="exit" aria-label="${t('common.exit')}" title="${t('common.exit')}">${Art.icon('x', { c: 'currentColor', fill: 'none', sw: 2.2 })}</button></div>`;
       return;
     }
     if (Net.over) {

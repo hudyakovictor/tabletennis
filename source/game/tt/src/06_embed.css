@@ -60,8 +60,25 @@ html.tt-embed #shot #shotMeta { font: 600 11.5px/1.25 var(--ui); }
 
 /* ============================ ОНЛАЙН =============================
  * В онлайн-матче очки приходят с хоста и ведёт их движок, а не оболочка:
- * класс tt-online (его включает мост при matchStart) возвращает табло.
- * Оболочка в этом рисует только код комнаты и пинг. */
-html.tt-embed.tt-online #score { display: flex !important; }
+ * класс tt-online (его включает мост при matchStart) возвращает компактное
+ * табло слева. Оболочка показывает статус и выход справа. */
+html.tt-embed.tt-online #score {
+  display:flex !important; flex-direction:column; align-items:stretch;
+  width:min(48vw,204px); padding:6px 9px; border-radius:14px;
+  background:rgba(7,14,25,.78); border-color:rgba(207,231,245,.14);
+  box-shadow:0 6px 20px rgba(0,0,0,.25);
+}
+html.tt-embed.tt-online #score .sb-side { min-width:0; height:25px; padding:0; gap:5px; flex-direction:row; }
+html.tt-embed.tt-online #score .sb-side + .sb-side { border-top:1px solid rgba(213,232,244,.10); }
+html.tt-embed.tt-online #score .sb-nm { order:0; flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+  font:800 11px/1 var(--ui); color:#fff; letter-spacing:0; text-transform:none; }
+html.tt-embed.tt-online #score .sb-pts { order:2; min-width:16px; text-align:right; font-size:16px; color:#c0edff; }
+html.tt-embed.tt-online #score #scoreSideA .sb-pts { color:#ffd2bf; }
+html.tt-embed.tt-online #score .sb-mid { display:none; }
+html.tt-embed.tt-online #score .serve-dot { order:1; display:flex; align-items:center; gap:4px; width:auto; height:auto;
+  background:none; box-shadow:none; visibility:hidden; color:#f6cd75; font:800 8px/1 var(--ui); }
+html.tt-embed.tt-online #score .serve-dot.on { visibility:visible; background:none; box-shadow:none; }
+html.tt-embed.tt-online #score .serve-dot::before { content:''; width:5px; height:5px; border-radius:50%; background:currentColor; }
+html.tt-embed.tt-online #score .serve-dot::after { content:attr(data-label); }
 html.tt-embed.tt-online #rally.on,
 html.tt-embed.tt-online #mpInd.on { display: flex !important; }

@@ -57,8 +57,10 @@ function newestSourceTime(dir) {
 let engineBuilt = null;
 function enginePage() {
   if (engineBuilt) return engineBuilt;
-  const srcDir = path.join(root, 'tt', 'src');
-  const fresh = fs.existsSync(ENGINE_BUILD) && fs.statSync(ENGINE_BUILD).mtimeMs >= newestSourceTime(srcDir);
+  const ttDir = path.join(root, 'tt');
+  const newest = Math.max(newestSourceTime(path.join(ttDir, 'src')),
+    newestSourceTime(path.join(ttDir, 'assets')), fs.statSync(path.join(ttDir, 'build.py')).mtimeMs);
+  const fresh = fs.existsSync(ENGINE_BUILD) && fs.statSync(ENGINE_BUILD).mtimeMs >= newest;
   if (!fresh) {
     execFileSync('python3', [path.join(root, 'tt', 'build.py'), ENGINE_BUILD],
       { stdio: 'inherit' });
