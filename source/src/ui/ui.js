@@ -3,24 +3,68 @@
    «держи, чтобы купить», сегмент-табы со скользящей плашкой.
    ===================================================================== */
 const UI = {
+  /* Это локальная лента доступных игровых наград, а не обещание системных
+     push-уведомлений: автономная игра не имеет сервера push-подписки. */
+  notices() {
+    const items = [];
+    if (Date.now() >= (S.freeAt || 0)) items.push({ icon: 'gift', title: t('hub.dailyGift'), detail: t('hub.giftReady'), action: 'gifts' });
+    const chests = (Array.isArray(S.chests) ? S.chests : []).filter((c) => c && c.state === 'ready').length;
+    if (chests) items.push({ icon: 'lock', title: t('notices.chests'), detail: t('notices.chestsDetail', { n: chests }), action: 'gifts' });
+    const quests = Daily.ready();
+    if (quests) items.push({ icon: 'quest', title: t('hub.questsTitle'), detail: t('notices.questsDetail', { n: quests }), action: 'quests' });
+    return items;
+  },
+  notificationButton(cls = '') {
+    const count = this.notices().length;
+    return `<button class="notice-button ${cls}" data-act="notifications" aria-label="${t('notices.title')}" title="${t('notices.title')}">
+      ${Art.icon('bell', { c: 'currentColor', fill: 'none', sw: 1.9 })}<span class="notice-count num" aria-hidden="true" ${count ? '' : 'hidden'}>${count || ''}</span>
+    </button>`;
+  },
+  refreshNotifications() {
+    const count = this.notices().length;
+    $$('.notice-button .notice-count').forEach((badge) => { badge.hidden = !count; badge.textContent = count || ''; });
+  },
+  openNotifications({ readOnly = false } = {}) {
+    const items = this.notices();
+    const rows = items.map((item) => {
+      const tag = readOnly ? 'div' : 'button';
+      return `<${tag} class="notice-row" ${readOnly ? '' : `data-notice="${item.action}"`}>
+        <span class="notice-icon">${Art.icon(item.icon, { c: 'currentColor', fill: 'none' })}</span>
+        <span class="notice-copy"><b>${item.title}</b><small>${item.detail}</small></span>
+        ${readOnly ? '' : '<span class="notice-arrow" aria-hidden="true">›</span>'}</${tag}>`;
+    }).join('');
+    const w = Sheet.open(`<div class="notice-head"><div><span class="notice-kicker">${t('notices.kicker')}</span><div class="h1">${t('notices.title')}</div></div>
+        <button class="notice-close" data-notice-close aria-label="${t('notices.close')}">${Art.icon('x', { c: 'currentColor', fill: 'none' })}</button></div>
+      <div class="notice-list">${rows || `<div class="notice-empty">${Art.icon('bell', { c: 'currentColor', fill: 'none' })}<p>${t('notices.empty')}</p></div>`}</div>`, {
+      onOpen: (wrap) => wrap.addEventListener('click', async (e) => {
+        if (e.target.closest('[data-notice-close]')) { Sheet.close(); return; }
+        const row = e.target.closest('[data-notice]'); if (!row) return;
+        const action = row.dataset.notice;
+        Sheet.close(true);
+        if (Router.cur !== 'hub') await Router.go('hub');
+        if (Router.cur !== 'hub') return;
+        const hub = Router.screens.hub;
+        if (action === 'gifts') hub.giftsSheet();
+        else if (action === 'quests') hub.questSheet();
+      })
+    });
+    const dialog = w.querySelector('.sheet');
+    dialog.setAttribute('role', 'dialog'); dialog.setAttribute('aria-modal', 'true'); dialog.setAttribute('aria-label', t('notices.title'));
+    this.refreshNotifications();
+  },
   hud({ back = false, title = '' } = {}) {
-    const L = leagueOf(S.rating); const p = S.xp / S.xpMax; const C = 2 * Math.PI * 21;
+    const L = leagueOf(S.rating);
     const left = back
-      ? `<button class="ib" data-act="back" aria-label="${t('common.back')}">${Art.icon('back', { c: '#fff' })}</button><div class="h2" style="flex:1;margin-left:4px">${title}</div>`
-      : `<div class="hud-me" data-act="profile">
-          <div class="lvl-ring">
-            <svg class="ring" viewBox="0 0 48 48"><circle cx="24" cy="24" r="21" fill="none" stroke="rgba(0,0,0,.55)" stroke-width="4.5"/>
-            <circle cx="24" cy="24" r="21" fill="none" stroke="url(#xpg)" stroke-width="4.5" stroke-linecap="round" stroke-dasharray="${C}" stroke-dashoffset="${C * (1 - p)}"/>
-            <defs><linearGradient id="xpg"><stop offset="0" stop-color="#7DF3FF"/><stop offset="1" stop-color="#2E8BFF"/></linearGradient></defs></svg>
-            <div class="av">${Art.avatar('me', 38)}</div><div class="lv">${S.level}</div>
-          </div>
-          <div class="hud-name"><b>${S.name.split(' ')[0]}</b><span>${Art.badge(L, 14)}${leagueName(L)}</span></div>
-        </div>`;
-    /* Кнопки «+» убраны: они перегружали верхнюю плашку и перехватывали
-     * случайные тапы в момент подачи/удара. Покупка — только из магазина. */
+      ? `<button class="ib" data-act="back" aria-label="${t('common.back')}">${Art.icon('back', { c: '#fff' })}</button><div class="h2 hud-title">${title}</div>`
+      : `<button class="hud-me" data-act="profile" aria-label="${t('hud.profile')}">
+          <span class="hud-name"><b>${S.name.split(' ')[0]}</b><span>${t('hud.level', { n: S.level })} · ${leagueName(L)}</span></span>
+        </button>`;
+    /* Покупка валюты остаётся в магазине, а колокольчик показывает только
+       реальные доступные награды, без выдуманных сообщений. */
     return `<div class="hud">${left}
       <div class="cur" data-cur="coins"><span class="ci">${Art.coin(36)}</span><span class="v num">${fmt(S.coins)}</span></div>
       <div class="cur" data-cur="gems"><span class="ci">${Art.gem(34)}</span><span class="v num">${fmt(S.gems)}</span></div>
+      ${this.notificationButton()}
     </div>`;
   },
   bindHud(el) {
@@ -29,6 +73,7 @@ const UI = {
       const k = a.dataset.act;
       if (k === 'back') Router.back();
       if (k === 'profile') Router.go('profile');
+      if (k === 'notifications') this.openNotifications();
       if (k === 'buy-coins' || k === 'buy-gems') { Router.go('shop'); setTimeout(() => { const g = $('.screen.current #gemPacks'); g && g.scrollIntoView({ behavior: 'smooth', block: 'center' }); }, 520); }
     });
   },
@@ -62,8 +107,9 @@ const UI = {
   seg(el, onChange) {
     const pill = el.querySelector('.pill'); const btns = $$('button', el);
     const place = (b) => { pill.style.left = b.offsetLeft + 'px'; pill.style.width = b.offsetWidth + 'px'; };
+    btns.forEach((b) => b.setAttribute('aria-pressed', String(b.classList.contains('on'))));
     requestAnimationFrame(() => place(el.querySelector('button.on') || btns[0]));
-    el.addEventListener('click', (e) => { const b = e.target.closest('button'); if (!b || b.classList.contains('on')) return; btns.forEach((x) => x.classList.toggle('on', x === b)); place(b); Sfx.tab(); haptic('select'); onChange && onChange(b.dataset.v); });
+    el.addEventListener('click', (e) => { const b = e.target.closest('button'); if (!b || b.classList.contains('on')) return; btns.forEach((x) => { x.classList.toggle('on', x === b); x.setAttribute('aria-pressed', String(x === b)); }); place(b); Sfx.tab(); haptic('select'); onChange && onChange(b.dataset.v); });
   },
 
   /* сплит-текст для побуквенной анимации */

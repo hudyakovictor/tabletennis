@@ -68,9 +68,12 @@ function openSettings() {
     return `${head}<div class="calrow"><div class="cal-t"><b>${t(c.tk)}</b><small>${t(c.dk)}</small></div><div class="cal-c"><input type="range" min="${c.min}" max="${c.max}" value="${v}" data-cal="${c.k}" aria-label="${t(c.tk)}"><span class="cal-v num" data-calv="${c.k}">${v}</span></div></div>`;
   }).join('');
   Sheet.open(`<div class="h1" style="margin:4px 4px 14px">${t('set.title')}</div>
+    <div class="settings-diff">
+      <div class="settings-diff-head"><b>${t('set.diff')}</b><small>${t('set.diffHint')}</small></div>
+      <div class="seg" id="dseg" role="group" aria-label="${t('set.diff')}"><span class="pill"></span>${DIFFS.map((d) => `<button data-v="${d.id}" class="${S.diff === d.id ? 'on' : ''}">${t(d.tk)}</button>`).join('')}</div>
+      <div class="settings-diff-info" id="diffDescription">${t(diffOf(S.diff).sk)}</div>
+    </div>
     <div class="pnl sgroup">${row('sfx', t('set.sfx'), 'sound', t('set.sfxD'))}${row('vibro', t('set.vibro'), 'vibe', t('set.vibroD'))}${row('hint', t('set.hint'), 'target', t('set.hintD'))}${row('rm', t('set.rm'), 'motion', t('set.rmD'))}</div>
-    <div class="cap" style="margin:18px 4px 8px">${t('set.diff')} <small class="dim" style="text-transform:none;font-weight:400;font-size:11px">${t('set.diffHint')}</small></div>
-    <div class="seg" id="dseg"><span class="pill"></span>${DIFFS.map((d) => `<button data-v="${d.id}" class="${S.diff === d.id ? 'on' : ''}">${t(d.tk)}</button>`).join('')}</div>
     <div class="cap" style="margin:18px 4px 8px">${t('set.quality')}</div>
     <div class="seg" id="qseg"><span class="pill"></span>${['high', 'mid', 'low'].map((q) => `<button data-v="${q}" class="${S.quality === q ? 'on' : ''}">${{ high: t('quality.high'), mid: t('quality.mid'), low: t('quality.low') }[q]}</button>`).join('')}</div>
     <div class="cap" style="margin:18px 4px 8px">${t('set.language')}</div>
@@ -156,11 +159,12 @@ function openSettings() {
         GameHost.ready && GameHost.send('cal', { k: r.dataset.cal, v: +r.value });
       });
       UI.seg($('#qseg', w), (v) => setQuality(v));
-      /* Уровень бота — тот же выбор, что и в хабе: профиль (S.diff), звук,
-       * тост. WTF отдельно предупреждает и вспыхивает. */
+      /* Единственный выбор уровня бота: сохраняется в профиле и применяется
+       * к следующему матчу. WTF отдельно предупреждает и вспыхивает. */
       UI.seg($('#dseg', w), (v) => {
         S.diff = clamp(+v, 0, DIFFS.length - 1); save();
         const D = diffOf(S.diff);
+        w.querySelector('#diffDescription').textContent = t(D.sk);
         if (D.id === 3) { flash('#FF69D8', .3, 240); toast(t('diff.wtfWarn'), 'target'); }
         else toast(t('diff.changed', { name: t(D.tk) }), 'target');
       });

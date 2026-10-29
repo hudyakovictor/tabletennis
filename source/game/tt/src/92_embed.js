@@ -497,6 +497,7 @@ const showTip = (text) => { if (text) tip = { text, until: g.time + 4.6 }; };
         g.settings.targetScore = 11; g.freePlay = false;
         resetAssist(); g.hintContact = false;
         g.startMatch(2);
+        if (g.ui) g.ui.syncScore(); // names, zero score and the first server immediately
         onlineHud(true);
         netSay('match', { side: net.side });
       });
