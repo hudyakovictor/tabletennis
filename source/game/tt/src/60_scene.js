@@ -1,5 +1,5 @@
 /* =====================================================================
- *  SCENE — all geometry and every texture is generated at runtime.
+ *  SCENE — procedural table and effects, with an embedded street panorama.
  *  Dimensions follow ITTF: table 2.74 x 1.525 x 0.76 m, net 15.25 cm.
  * ===================================================================== */
 'use strict';
@@ -133,6 +133,38 @@ function texShadow() {
   return c;
 }
 
+/* Stable, soft-edged footprint of the actual table on the floor. The broad
+ * tabletop shade follows the overhead key light; four darker contact patches
+ * and short leg shadows keep the feet grounded from every orbit angle. */
+const TABLE_GROUND_SHADOW = Object.freeze({ width: 3.4, depth: 4.7, offsetX: -0.34, offsetZ: -0.24 });
+function tableGroundShadowAlpha(x, z, T = PH) {
+  const s = TABLE_GROUND_SHADOW;
+  const dx = Math.max(0, Math.abs(x - s.offsetX) - T.T_HALF_WID);
+  const dz = Math.max(0, Math.abs(z - s.offsetZ) - T.T_HALF_LEN);
+  let a = 0.69 * Math.exp(-(dx * dx + dz * dz) / (2 * 0.22 * 0.22));
+  const lx = s.offsetX * 0.85, lz = s.offsetZ * 0.85;
+  for (let sx = -1; sx <= 1; sx += 2) for (let sz = -1; sz <= 1; sz += 2) {
+    const fx = sx * (T.T_HALF_WID - 0.14), fz = sz * (T.T_HALF_LEN - 0.22);
+    const t = clamp(((x - fx) * lx + (z - fz) * lz) / (lx * lx + lz * lz), 0, 1);
+    const ex = x - fx - lx * t, ez = z - fz - lz * t;
+    const leg = 0.40 * Math.exp(-(ex * ex + ez * ez) / (2 * 0.065 * 0.065));
+    const contact = 0.48 * Math.exp(-((x - fx) ** 2 + (z - fz) ** 2) / (2 * 0.095 * 0.095));
+    a = 1 - (1 - a) * (1 - leg) * (1 - contact);
+  }
+  return clamp(a, 0, 0.92);
+}
+function texTableGroundShadow() {
+  const S = 256, c = cv(S, S), g = c.getContext('2d');
+  const image = g.createImageData(S, S), d = image.data, s = TABLE_GROUND_SHADOW;
+  for (let j = 0; j < S; j++) for (let i = 0; i < S; i++) {
+    const x = ((i + 0.5) / S - 0.5) * s.width;
+    const z = ((j + 0.5) / S - 0.5) * s.depth;
+    d[(j * S + i) * 4 + 3] = Math.round(255 * tableGroundShadowAlpha(x, z));
+  }
+  g.putImageData(image, 0, 0);
+  return c;
+}
+
 function texGlow() {
   const S = 128, c = cv(S, S), g = c.getContext('2d');
   const rg = g.createRadialGradient(S / 2, S / 2, 0, S / 2, S / 2, S / 2);
@@ -194,12 +226,20 @@ class Scene {
       glow: R.texFromCanvas(texGlow(), { wrap: 'clamp', mips: false }),
       ring: R.texFromCanvas(texRing(), { wrap: 'clamp', mips: false }),
       shadow: R.texFromCanvas(texShadow(), { wrap: 'clamp', mips: false }),
+      tableGroundShadow: R.texFromCanvas(texTableGroundShadow(), { wrap: 'clamp', mips: false }),
     };
 
-    /* Фото-текстура трибуны из сборки (tt/build.py → window.__TT_ARENA):
-     * свап по готовности. Баннерные текстуры больше не грузим. */
+    /* The image is embedded in the offline build. Keep the procedural hall
+     * until it has decoded (also used when TT_NO_ARENA or an image fails). */
+    this.hasPanorama = false;
     const A = (typeof window !== 'undefined' && window.__TT_ARENA) || {};
     if (A.stands) arenaImageTex(R, A.stands, 2048, 256, (tx) => { this.tex.stands = tx; if (this.mat.stands) this.mat.stands.tex = tx; });
+    if (A.panorama) arenaImageTex(R, A.panorama, 2048, 1024, (tx) => {
+      this.tex.panorama = tx; this.mat.panorama.tex = tx; this.mat.courtGround.tex = tx; this.hasPanorama = true;
+    });
+    if (A.asphalt) arenaImageTex(R, A.asphalt, 512, 512, (tx) => {
+      this.tex.asphalt = tx; this.mat.courtGround.asphalt = tx;
+    });
 
     /* ---- meshes ---- */
     this.mesh = {
@@ -214,6 +254,9 @@ class Scene {
       rubber: R.mesh(makePaddleBlade(0.072, 0.077, 0.003, 44)),
       handle: R.mesh(makeBox(0.030, 0.100, 0.022)),
       floor: R.mesh(makePlane(34, 30, 17)),
+      courtFloor: R.mesh(makeStreetCourtFloor()),
+      courtShell: R.mesh(makeStreetCourtShell()),
+      courtMarking: R.mesh(makeStreetCourtMarking()),
       quad: R.mesh(makeQuad(1, 1)),
       wall: R.mesh(makeQuadUV(1, 1, 1, 1)),
       sphere: R.mesh(makeSphere(1, 16, 12)),
@@ -237,6 +280,9 @@ class Scene {
       handle: { color: [0.26, 0.17, 0.12], rough: 0.62, emissive: [0.022, 0.015, 0.011] },
       floor: { color: [0.52, 0.54, 0.60], tex: this.tex.floor, rough: 0.80 },
       stands: { color: [0.82, 0.82, 0.88], tex: this.tex.stands, rough: 1.0 },
+      panorama: { color: [1, 1, 1], unlitTexture: true, doubleSided: true, rough: 1 },
+      courtGround: { color: [1, 1, 1], unlitTexture: true, doubleSided: true, rough: 1 },
+      courtMarking: { color: [0, 0, 0], unlit: true, emissive: [0.07, 0.28, 0.34], blend: true, opacity: 0.78, doubleSided: true },
       trail: { color: [1, 1, 1], rough: 1, blend: 'add', emissive: [1, 1, 1], doubleSided: true },
       mark: { color: [1, 1, 1], rough: 1, blend: true, doubleSided: true, emissive: [0.4, 0.4, 0.4] },
       glow: { color: [1, 1, 1], tex: this.tex.glow, blend: 'add', emissive: [1, 1, 1], doubleSided: true, rough: 1 },
@@ -319,16 +365,16 @@ class Scene {
     M4.compose(this.floorPool, V3.set(pos, 0, 0.004, 0),
       Q.setAxisAngle(rot, 1, 0, 0, -Math.PI / 2), V3.set(scl, 9.0, 7.2, 1));
 
-    // one big soft pool of shade under the table: cleaner than any shadow
-    // map and it never flickers
+    // A stable, table-shaped shadow is drawn on the same ground as the feet.
     this.tableShade = M4.create();
     M4.compose(this.tableShade, V3.set(pos, 0, 0.012, 0),
-      Q.setAxisAngle(rot, 1, 0, 0, -Math.PI / 2), V3.set(scl, T.T_WID * 2.15, T.T_LEN * 1.5, 1));
+      Q.setAxisAngle(rot, 1, 0, 0, -Math.PI / 2),
+      V3.set(scl, TABLE_GROUND_SHADOW.width, TABLE_GROUND_SHADOW.depth, 1));
 
     this._tmp = { pos: V3.new(), rot: Q.new(), scl: V3.new(1, 1, 1), m: M4.create(), m2: M4.create() };
     this._sm = M4.create(); this._sp = V3.new(); this._sq = Q.new(); this._ss = V3.new();
     this._shadowMat = { color: [0, 0, 0], tex: this.tex.shadow, unlit: true, emissive: [0, 0, 0], blend: true, doubleSided: true, rough: 1, opacity: 1 };
-    this._shadowMat0 = { color: [0, 0, 0], tex: this.tex.shadow, unlit: true, emissive: [0, 0, 0], blend: true, doubleSided: true, rough: 1, opacity: 0.55 };
+    this._shadowMat0 = { color: [0, 0, 0], tex: this.tex.tableGroundShadow, unlit: true, emissive: [0, 0, 0], blend: true, doubleSided: true, rough: 1, opacity: 1 };
   }
 
   /**
@@ -402,20 +448,27 @@ class Scene {
       ? (mesh, mat4, mat) => R.drawShadow(mesh, mat4, mat && mat.alphaTest ? mat.tex : null, mat && mat.alphaTest)
       : (mesh, mat4, mat) => R.draw(mesh, mat4, mat);
     const M = this.M, me = this.mesh, ma = this.mat;
+    if (!shadowPass) {
+      if (this.hasPanorama) {
+        // One stationary environment and one projection for both the image
+        // and the model: translation during the orbit produces real parallax.
+        d(me.courtShell, M.floor, ma.panorama);
+        d(me.courtFloor, M.floor, ma.courtGround);
+        if (ma.courtGround.asphalt) R.draw(me.courtMarking, M.floor, ma.courtMarking);
+      } else {
+        d(me.floor, M.floor, ma.floor);
+        R.draw(me.quad, this.floorPool, ma.pool);
+        for (const w of this.walls) d(me.wall, w, ma.stands);
+        d(me.quad, this.ceiling, ma.ceiling);
+      }
+      R.draw(me.quad, this.tableShade, this._shadowMat0);
+    }
     d(me.tableTop, M.tableTop, ma.table);
     d(me.box, M.apronN, ma.apron); d(me.box, M.apronS, ma.apron);
     d(me.box, M.apronW, ma.apron); d(me.box, M.apronE, ma.apron);
     for (const l of this.legs) d(me.leg, l, ma.frame);
     for (const l of this.legBars) d(me.box, l, ma.frame);
     for (const p of this.netPosts) d(me.netPost, p, ma.post);
-    if (!shadowPass) {
-      d(me.floor, M.floor, ma.floor);
-      R.draw(me.quad, this.floorPool, ma.pool);
-      R.draw(me.quad, this.tableShade, this._shadowMat0);
-      for (const w of this.walls) d(me.wall, w, ma.stands);
-      d(me.quad, this.ceiling, ma.ceiling);
-    } else {
-      d(me.net, M.net, ma.net);
-    }
+    if (shadowPass) d(me.net, M.net, ma.net);
   }
 }

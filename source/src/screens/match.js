@@ -2,25 +2,25 @@ Router.def('match', {
   full: true, mood: 'battle', game: true,
   render() {
     const o = PEOPLE[BATTLE.opp]; const T = TARGET[MODE.id] || 11;
-    /* Свободная игра: табло не считает очки — вместо цифр бесконечность,
-       матч не заканчивается, результат и рейтинг не пишутся. */
+    /* Свободная игра: счёт не ведётся, матч не заканчивается, результат и
+       рейтинг не пишутся. Прочерк в каждой строке не притворяется счётом. */
     const free = MODE.id === 'free';
     const D = diffOf(S.diff);
     return `<div class="mx cine">
       <div class="mx-bars"><i></i><i></i></div>
       <div class="m-vig"></div>
-      <div class="sb safe-top">
-        <div class="sb-in">
-          <div class="sbp me">${Art.avatar('me', 38)}<span class="sbn"><b>${S.name.split(' ')[0]}</b><i class="srv" data-srv="1">${t('match.serve')}</i></span></div>
-          ${free ? `<div class="sbs free"><span class="d">∞</span></div>`
-            : `<div class="sbs"><span class="d me num" id="scP">0</span><span class="colon">:</span><span class="d op num" id="scO">0</span></div>`}
-          <div class="sbp op"><span class="sbn r"><b>${o.s.split(' ').pop()}</b><i class="srv" data-srv="-1">${t('match.serve')}</i></span>${Art.avatar('p' + BATTLE.opp, 38)}</div>
+      <div class="sb">
+        <div class="sb-in" role="group" aria-label="${free ? t('match.freeNoScore') : t('match.score')}">
+          <div class="sb-row me"><span class="sb-name">${S.name.split(' ')[0]}</span><i class="srv" data-srv="1" aria-hidden="true">${t('match.serve')}</i>${free ? '<b class="sb-score">—</b>' : '<b class="sb-score num" id="scP">0</b>'}</div>
+          <div class="sb-row op"><span class="sb-name">${o.s.split(' ').pop()}</span><i class="srv" data-srv="-1" aria-hidden="true">${t('match.serve')}</i>${free ? '<b class="sb-score">—</b>' : '<b class="sb-score num" id="scO">0</b>'}</div>
         </div>
-        <div class="sb-sub"><span class="cap">${t(MODE.tk)} · ${free ? t('match.freeNoScore') : t('match.to', { n: T })}</span>
-          <span class="ai-lvl" data-l="${D.id}" title="${t('diff.botLevel')}">${D.name}</span></div>
+        <span class="ai-lvl" data-l="${D.id}" title="${t('diff.botLevel')}">${D.name}</span>
       </div>
-      <button class="ib m-pause pe" data-act="pause" aria-label="${t('match.pause')}">${Art.icon('pause', { c: '#fff', sw: 2.6 })}</button>
-      <button class="ib m-slowmo pe" data-act="slowmo" aria-label="${t('match.slowmo')}" aria-pressed="false">${Art.icon('clock', { c: '#fff', sw: 2.4 })}<span>${t('match.slowmo')}</span></button>
+      <div class="match-actions pe">
+        ${UI.notificationButton('m-notifications')}
+        <button class="ib m-slowmo" data-act="slowmo" aria-label="${t('match.slowmo')}" title="${t('match.slowmo')}" aria-pressed="false">${Art.icon('clock', { c: 'currentColor', fill: 'none', sw: 2 })}<span>${t('match.slowmo')}</span></button>
+        <button class="ib m-pause" data-act="pause" aria-label="${t('match.pause')}" title="${t('match.pause')}">${Art.icon('pause', { c: 'currentColor', fill: 'none', sw: 2.6 })}</button>
+      </div>
       <button class="ib m-diag-shot pe" data-act="diag-mark" ${GameHost.debug ? '' : 'hidden'} aria-label="${t('debug.mark')}"><span aria-hidden="true">●</span> ${t('debug.mark')}</button>
       ${devBtn()}
       <div class="m-rally"><span>${t('match.rally')}</span><b class="num">×0</b></div>
@@ -28,9 +28,9 @@ Router.def('match', {
       <div class="mx-srv"></div>
       <div class="m-serve">${Art.icon('paddle', { c: '#FFB3A6' })}<span>${t('match.serveHint')}</span></div>
       <div class="mx-intro">
-        <div class="lt op" style="--c1:${o.c[0]};--c2:${o.c[1]}">${Art.avatar('p' + BATTLE.opp, 56)}<span><small>${o.club} · ${fmt(o.r)}</small><b>${o.n}</b></span></div>
+        <div class="lt op" style="--c1:${o.c[0]};--c2:${o.c[1]}"><span><small>${o.club} · ${fmt(o.r)}</small><b>${o.n}</b></span></div>
         <div class="mx-chip"><span>${t(MODE.tk)}</span><b>${free ? t('match.freeNoScore') : t('match.matchTo', { n: T })}</b></div>
-        <div class="lt me" style="--c1:#FF7A4D;--c2:#B4161E"><span><small>${S.club} · ${fmt(S.rating)}</small><b>${S.name}</b></span>${Art.avatar('me', 56)}</div>
+        <div class="lt me" style="--c1:#FF7A4D;--c2:#B4161E"><span><small>${S.club} · ${fmt(S.rating)}</small><b>${S.name}</b></span></div>
       </div>
       <div class="vs-count mx-count"></div>
     </div>`;
@@ -44,6 +44,10 @@ Router.def('match', {
     GameHost.ensure(); GameHost.show(true); GameHost.send('quiet', { on: true }); GameHost.send('mute', { on: !S.sfx });
     this.off = GameHost.on((m) => this.onMsg(m));
     el.querySelector('[data-act=pause]').addEventListener('click', () => this.pause());
+    el.querySelector('[data-act=notifications]').addEventListener('click', () => {
+      if (!this.st.live || this.st.over || Sheet.cur) return;
+      GameHost.send('pause'); UI.openNotifications({ readOnly: true }); this.watchSheets();
+    });
     el.querySelector('[data-act=diag-mark]').addEventListener('click', diagnosticMarkFrame);
     /* Слоу-мо «разобрать траекторию»: свободный тумблер в движок; состояние
        кнопки живёт здесь, движок лишь замедляет время розыгрыша. */
@@ -98,7 +102,7 @@ Router.def('match', {
         void c.offsetWidth; c.classList.add('on');
       }
       st.server = m.server;
-      $$('.srv', el).forEach((s) => s.classList.toggle('on', +s.dataset.srv === m.server));
+      $$('.srv', el).forEach((s) => { const on = +s.dataset.srv === m.server; s.classList.toggle('on', on); s.setAttribute('aria-hidden', String(!on)); });
       if (m.server > 0) st.myServes++;
       // подсказка подачи — ТОЛЬКО когда подаёт игрок; при подаче бота всегда прячем
       if (m.server > 0 && st.myServes <= 3) serveEl.classList.add('on'); else serveEl.classList.remove('on');

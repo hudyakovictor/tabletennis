@@ -152,6 +152,17 @@ test('host serve flag is copied to the guest only between rallies', () => {
   net._handle({ type:'state', ball:null, server:1 });
   assert.equal(game.server,-1);                      // подача хоста для гостя = подаёт соперник
 });
+test('guest refreshes its visible score and server when host data changes', () => {
+  const {net, game} = fixture(); game.server = 1;
+  const shown = [];
+  game.ui = { syncScore() { shown.push({ score: [...game.score], server: game.server }); } };
+  net._applyRemoteState({ball: null, score: [2, 3], server: -1});
+  assert.deepEqual(shown, [{score: [2, 3], server: -1}]);
+  net._applyRemoteState({ball: null, score: [2, 3], server: -1});
+  assert.equal(shown.length, 1, 'unchanged network frames do not replay score animations');
+  net._applyRemotePoint({score: [2, 4], server: 1});
+  assert.deepEqual(shown[1], {score: [2, 4], server: 1});
+});
 test('guest takes the score from the host point packet, not from its own physics', () => {
   const { net, game } = fixture(); net.isHost=false; net.state='IN_MATCH';
   game.score=[0,0]; game.server=1; game.rally=0;

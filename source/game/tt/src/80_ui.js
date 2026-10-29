@@ -861,11 +861,22 @@ class UI {
     }
     $('#servA').classList.toggle('on', g.server === 1);
     $('#servB').classList.toggle('on', g.server === -1);
-    /* Имя соперника в HUD = УРОВЕНЬ СЛОЖНОСТИ (ЛЁГКИЙ/СРЕДНИЙ/СЛОЖНЫЙ/WTF),
-     * а не безымянный «ПРО». Уровень WTF дополнительно красит букву —
-     * data-ai-lvl читает CSS (§ боссовый вид). */
-    const L = g.ai.L;
-    $('#oppName').textContent = L.ru || L.name;
+    /* В игре с ботом показываем его уровень, в онлайн-матче — участников,
+     * а не название уровня ИИ, который не является соперником. */
+    const L = g.ai.L, online = !!(g.network && g.network.isInMatch);
+    $('#scoreSideA .sb-nm').textContent = online ? ET('hud.you') : 'ВЫ';
+    $('#oppName').textContent = online ? ET('hud.opponent') : (L.ru || L.name);
+    if (online) {
+      $('#score').setAttribute('aria-label', ET('hud.score'));
+      [['#servA', 1], ['#servB', -1]].forEach(([selector, side]) => {
+        const marker = $(selector);
+        marker.setAttribute('data-label', ET('hud.serve'));
+        marker.setAttribute('role', 'img'); marker.setAttribute('aria-label', ET('hud.serve'));
+        marker.setAttribute('aria-hidden', String(g.server !== side));
+      });
+    } else {
+      $('#servA').setAttribute('aria-hidden', 'true'); $('#servB').setAttribute('aria-hidden', 'true');
+    }
     const lvl = String(g.ai.levelIndex);
     if (document.body.dataset.aiLvl !== lvl) document.body.dataset.aiLvl = lvl;
   }

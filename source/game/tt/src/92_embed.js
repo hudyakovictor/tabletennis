@@ -499,6 +499,7 @@ const showTip = (text) => { if (text) tip = { text, until: g.time + 4.6 }; };
         resetAssist(); g.hintContact = false;
         g.startMatch(2);
         if (net.isHost) g.server = 1;        // хост всегда первый подаёт
+        if (g.ui) g.ui.syncScore(); // names, zero score and the first server immediately
         onlineHud(true);
         netSay('match', { side: net.side });
       });

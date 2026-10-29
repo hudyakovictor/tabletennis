@@ -199,6 +199,10 @@ const Art = (() => {
 
   /* duotone-иконки: обводка + мягкая заливка, читаются на любом фоне */
   const P = {
+    home: '<path d="M3.5 10.5L12 3.8l8.5 6.7V20H15v-5.5H9V20H3.5z"/>',
+    cup: '<path d="M7 4h10v4.5a5 5 0 0 1-10 0z"/><path d="M7 6H4.3v1.5A4.2 4.2 0 0 0 7.5 12M17 6h2.7v1.5a4.2 4.2 0 0 1-3.2 4.5M12 13.5V19M8.5 20h7"/>',
+    market: '<path d="M4.5 10.3V20h15v-9.7M3.2 7.5l1.6-3.2h14.4l1.6 3.2v1.2a2.5 2.5 0 0 1-4.4 1.6 2.7 2.7 0 0 1-4.4 0 2.7 2.7 0 0 1-4.4 0A2.5 2.5 0 0 1 3.2 8.7zM9.2 20v-5.3h5.6V20"/>',
+    bell: '<path d="M18.5 10a6.5 6.5 0 0 0-13 0c0 4.7-1.8 5.5-1.8 7h16.6c0-1.5-1.8-2.3-1.8-7zM9.6 20a2.6 2.6 0 0 0 4.8 0"/>',
     star: '<path d="M12 3.5l2.6 5.3 5.8.8-4.2 4.1 1 5.8-5.2-2.7-5.2 2.7 1-5.8-4.2-4.1 5.8-.8z"/>',
     bolt: '<path d="M13.5 2.5L5 13.5h6l-1 8 8.5-11h-6z"/>',
     fire: '<path d="M12 2.5s5.5 4.2 5.5 10a5.5 5.5 0 0 1-11 0c0-2.3 1.2-4 2.3-5 .3 2 1.3 3 2.4 3 1.4 0 1.8-1.6.8-8z"/>',
@@ -249,40 +253,5 @@ const Art = (() => {
     return `<span style="display:inline-block;width:${size}px;height:${size}px">${icon('pads', { c, sw: 1.7, fill: c })}</span>`;
   }
 
-  /* иконки вкладок — «объёмные» цветные */
-  function navIcon(k) {
-    const g = id('ng');
-    const grad = (a, b) => `<defs><linearGradient id="${g}" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${a}"/><stop offset="1" stop-color="${b}"/></linearGradient></defs>`;
-    if (k === 'navShop') return `<svg viewBox="0 0 40 40" width="100%" height="100%">${grad('#7DFFB0', '#10B45A')}
-      <path d="M8 15h24l-2 18a3 3 0 0 1-3 2.6H13A3 3 0 0 1 10 33z" fill="#07603A" transform="translate(0 2)"/>
-      <path d="M8 15h24l-2 18a3 3 0 0 1-3 2.6H13A3 3 0 0 1 10 33z" fill="url(#${g})" stroke="#fff" stroke-opacity=".5" stroke-width="1.2"/>
-      <path d="M14 15v-3a6 6 0 0 1 12 0v3" fill="none" stroke="#fff" stroke-width="2.6" stroke-linecap="round"/>
-      <circle cx="20" cy="25" r="4.5" fill="#FFD54A" stroke="#A85300" stroke-width="1.2"/></svg>`;
-    if (k === 'navPass') return `<svg viewBox="0 0 40 40" width="100%" height="100%">${grad('#D3B5FF', '#7337F0')}
-      <path d="M6 12a3 3 0 0 1 3-3h22a3 3 0 0 1 3 3v3a3 3 0 0 0 0 6v3a3 3 0 0 1-3 3H9a3 3 0 0 1-3-3v-3a3 3 0 0 0 0-6z" fill="#3B158C" transform="translate(0 2.5)"/>
-      <path d="M6 12a3 3 0 0 1 3-3h22a3 3 0 0 1 3 3v3a3 3 0 0 0 0 6v3a3 3 0 0 1-3 3H9a3 3 0 0 1-3-3v-3a3 3 0 0 0 0-6z" fill="url(#${g})" stroke="#fff" stroke-opacity=".5" stroke-width="1.2"/>
-      <path d="M20 12.5l2 4 4.4.6-3.2 3 .8 4.4-4-2.1-4 2.1.8-4.4-3.2-3 4.4-.6z" fill="#FFD54A" stroke="#A85300" stroke-width="1"/></svg>`;
-    if (k === 'navArena') return `<svg viewBox="0 0 40 40" width="100%" height="100%">${grad('#FF9A6B', '#E01E36')}
-      <g transform="translate(0 2)" fill="#7E0A1A"><ellipse cx="14" cy="15" rx="8" ry="8.5" transform="rotate(-30 14 15)"/><ellipse cx="26" cy="15" rx="8" ry="8.5" transform="rotate(30 26 15)"/></g>
-      <rect x="18.5" y="20" width="4" height="12" rx="2" fill="#C98A4B" transform="rotate(35 20 26)"/><rect x="17.5" y="20" width="4" height="12" rx="2" fill="#C98A4B" transform="rotate(-35 20 26)"/>
-      <ellipse cx="14" cy="15" rx="8" ry="8.5" transform="rotate(-30 14 15)" fill="url(#${g})" stroke="#fff" stroke-opacity=".55" stroke-width="1.2"/>
-      <ellipse cx="26" cy="15" rx="8" ry="8.5" transform="rotate(30 26 15)" fill="#2EC9FF" stroke="#fff" stroke-opacity=".55" stroke-width="1.2"/>
-      <circle cx="20" cy="7" r="3.6" fill="#fff" stroke="#C9D2F5" stroke-width="1"/></svg>`;
-    if (k === 'navRank') return `<svg viewBox="0 0 40 40" width="100%" height="100%">${grad('#FFF0A0', '#FF9500')}
-      <path d="M12 7h16v8a8 8 0 0 1-16 0z" fill="#A85300" transform="translate(0 2)"/>
-      <path d="M12 7h16v8a8 8 0 0 1-16 0z" fill="url(#${g})" stroke="#fff" stroke-opacity=".6" stroke-width="1.2"/>
-      <path d="M12 9H7v2.5a5.5 5.5 0 0 0 5.5 5.5M28 9h5v2.5a5.5 5.5 0 0 1-5.5 5.5" fill="none" stroke="#FFC93A" stroke-width="2.4"/>
-      <rect x="17.5" y="22" width="5" height="6" fill="#E0A000"/><rect x="12" y="28" width="16" height="6" rx="2" fill="url(#${g})" stroke="#A85300" stroke-width="1"/></svg>`;
-    if (k === 'navGear') return `<svg viewBox="0 0 40 40" width="100%" height="100%">${grad('#BFD3FF', '#4A6BD8')}
-      <g transform="translate(0 1.5)" fill="#24356E"><path d="M20 5.5l2.6 3.6 4.4-1 1 4.4 3.6 2.6-1.9 4.1 1.9 4.1-3.6 2.6-1 4.4-4.4-1L20 34.9l-2.6-3.6-4.4 1-1-4.4-3.6-2.6 1.9-4.1L8.4 17l3.6-2.6 1-4.4 4.4 1z"/><circle cx="20" cy="20" r="8"/></g>
-      <path d="M20 5.5l2.6 3.6 4.4-1 1 4.4 3.6 2.6-1.9 4.1 1.9 4.1-3.6 2.6-1 4.4-4.4-1L20 34.9l-2.6-3.6-4.4 1-1-4.4-3.6-2.6 1.9-4.1 1.9-4.1-3.6-2.6 1-4.4 4.4 1z" fill="url(#${g})" stroke="#fff" stroke-opacity=".5" stroke-width="1.2" stroke-linejoin="round"/>
-      <circle cx="20" cy="20" r="5" fill="#0E1638" stroke="#fff" stroke-opacity=".7" stroke-width="1.6"/></svg>`;
-    return `<svg viewBox="0 0 40 40" width="100%" height="100%">${grad('#9BF6FF', '#1A86F0')}
-      <circle cx="20" cy="15" r="7" fill="#0A3F8A" transform="translate(0 2)"/><path d="M7 34a13 13 0 0 1 26 0z" fill="#0A3F8A" transform="translate(0 2)"/>
-      <circle cx="20" cy="15" r="7" fill="url(#${g})" stroke="#fff" stroke-opacity=".55" stroke-width="1.2"/>
-      <path d="M7 34a13 13 0 0 1 26 0z" fill="url(#${g})" stroke="#fff" stroke-opacity=".55" stroke-width="1.2"/>
-      <path d="M16 12a4 4 0 0 1 4-2" stroke="#fff" stroke-width="2" stroke-linecap="round"/></svg>`;
-  }
-
-  return { coin, gem, star, trophy, badge, chest, chestName: (kind) => t((CHEST[kind] || CHEST.gold).nk), CHEST, paddle, paddlePair, rubber, blade, avatar, icon, navIcon };
+  return { coin, gem, star, trophy, badge, chest, chestName: (kind) => t((CHEST[kind] || CHEST.gold).nk), CHEST, paddle, paddlePair, rubber, blade, avatar, icon };
 })();

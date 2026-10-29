@@ -4157,7 +4157,7 @@ class Game {
       this.drawDynamic(true);
     }
     R.beginScene([0.018, 0.022, 0.032]);
-    this.scene.drawStatic(R, false);   // opaque hall + table
+    this.scene.drawStatic(R, false);   // court, grounded table and shadows
     this.drawReflections();            // glossy smear in the table top
     this.drawContactShadows();         // soft grounding shade, ON TOP of the gloss so it reads
     this.drawDynamic(false);           // ball + bats (opaque)

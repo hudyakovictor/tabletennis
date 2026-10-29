@@ -242,7 +242,7 @@ uniform vec3 uAlbedo;
 uniform float uRough, uMetal, uSpecTint;
 uniform vec3 uEmissive;
 uniform float uUseTex, uAlphaTest, uOpacity, uUnlit;
-uniform sampler2D uTex;
+uniform sampler2D uTex, uAsphalt;
 uniform sampler2D uShadow;
 uniform float uShadowOn, uShadowTexel;
 uniform vec3 uLightDir, uLightCol;
@@ -277,6 +277,31 @@ void main(){
   vec4 texc = vec4(1.0);
   if(uUseTex > 0.5){ texc = texture(uTex, vUv); if(texc.a < uAlphaTest) discard; }
   vec3 albedo = uAlbedo * texc.rgb;
+  // Photographic panoramas already contain their lighting. Decode the ACES
+  // curve used by the final composite so the image is not brightened a
+  // second time, and skip all per-pixel lights/fog for the background.
+  if(uUnlit > 1.5){
+    if(uUnlit > 2.5){
+      // A real tiled asphalt surface close to the table eliminates the
+      // panorama's stretched near-ground pixels. Preserve the photograph's
+      // distant perimeter and its neon reflections with a soft transition.
+      float r = length(vWorld.xz);
+      float nearGround = 1.0 - smoothstep(5.0, 8.5, r);
+      float lamp = exp(-r*r*0.035);
+      vec3 asphalt = texture(uAsphalt, vWorld.xz * 0.38).rgb;
+      // Cooler, lower evening light: keep the granular surface and some of
+      // the photograph's reflections, but avoid the previous warm grey cast.
+      vec3 litGround = asphalt * vec3(0.50,0.56,0.66) * (0.78 + 0.22*lamp);
+      litGround += vec3(0.004,0.009,0.016)*lamp;
+      litGround = mix(litGround, albedo * vec3(0.82,0.91,1.0), 0.12);
+      albedo = mix(albedo, litGround, nearGround);
+    }
+    vec3 y = clamp(albedo, vec3(0.0), vec3(0.92));
+    vec3 a = 2.51 - 2.43*y, b = 0.03 - 0.59*y;
+    vec3 radiance = (-b + sqrt(b*b + 0.56*a*y)) / (2.0*a);
+    oColor = vec4(radiance, uOpacity * texc.a); return;
+  }
+  if(uUnlit > 0.5) { oColor = vec4(uEmissive, uOpacity * texc.a); return; }
   vec3 N = normalize(vNrm);
   vec3 V = normalize(uCam - vWorld);
   if(!gl_FrontFacing) N = -N;
@@ -317,7 +342,6 @@ void main(){
   }
   // hemisphere ambient
   float hemi = N.y*0.5+0.5;
-  if (uUnlit > 0.5) { oColor = vec4(uEmissive, uOpacity * texc.a); return; }
   vec3 amb = mix(uGroundCol, uSkyCol, hemi) * albedo * (1.0 - uMetal*0.6);
   // crude specular occlusion from ambient
   float NdV = max(dot(N,V),0.0);
@@ -789,7 +813,8 @@ class Renderer {
     const em = mat.emissive || [0, 0, 0];
     gl.uniform3f(u.uEmissive, em[0], em[1], em[2]);
     gl.uniform1f(u.uOpacity, mat.opacity !== undefined ? mat.opacity : 1);
-    gl.uniform1f(u.uUnlit, mat.unlit ? 1 : 0);
+    gl.uniform1f(u.uUnlit, mat.asphalt ? 3 : mat.unlitTexture ? 2 : mat.unlit ? 1 : 0);
+    if (mat.asphalt) { gl.activeTexture(gl.TEXTURE2); gl.bindTexture(gl.TEXTURE_2D, mat.asphalt); gl.uniform1i(u.uAsphalt, 2); }
     gl.uniform1f(u.uRimPower, mat.rimPower || 3);
     gl.uniform1f(u.uRimStrength, mat.rim || 0);
     const rc = mat.rimCol || [0.5, 0.7, 1];
