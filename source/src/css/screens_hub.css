@@ -3,17 +3,15 @@
    ===================================================================== */
 
 /* ---------- HUB ---------- */
-.screen[data-id=hub]{padding-bottom:calc(var(--sab) + 84px)}
-.road{display:flex;align-items:center;gap:6px;margin:4px 14px 0;padding:6px 8px;border-radius:18px;background:rgba(0,0,0,.28);box-shadow:inset 0 1px 0 rgba(255,255,255,.05)}
+.screen[data-id=hub]{padding-bottom:0}
+.hub-content{min-height:0;display:flex;flex-direction:column;padding-bottom:calc(var(--sab) + var(--tgb) + 86px)}
+.road{flex:none;display:flex;align-items:center;gap:6px;margin:4px 14px 0;padding:6px 8px;border-radius:18px;background:rgba(0,0,0,.28);box-shadow:inset 0 1px 0 rgba(255,255,255,.05)}
 .road .bar{flex:1;height:18px}
 .road .rb{width:34px;height:34px;flex:none;filter:drop-shadow(0 4px 6px rgba(0,0,0,.5))}
 .road .rb.next{opacity:.55;filter:grayscale(.6) drop-shadow(0 4px 6px rgba(0,0,0,.5))}
-.hero{position:relative;flex:1;min-height:250px}
-.arena-title{position:absolute;top:6px;left:0;right:0;text-align:center;z-index:2;pointer-events:none}
-.arena-title small{display:block;font:800 10px/1 var(--display);letter-spacing:.5em;text-transform:uppercase;color:rgba(155,232,255,.75);margin-left:.5em}
-.arena-title b{display:block;font-size:clamp(22px,7.4vw,32px);margin-top:3px;letter-spacing:.03em;background:linear-gradient(180deg,#fff 28%,#7DB8FF 70%,#3E79E8);-webkit-background-clip:text;background-clip:text;color:transparent;filter:drop-shadow(0 3px 0 rgba(8,16,50,.8)) drop-shadow(0 0 26px rgba(46,180,255,.45))}
-.hero canvas.demo{position:absolute;inset:40px 0 0;width:100%;height:calc(100% - 40px)}
-.side{position:absolute;top:78px;display:flex;flex-direction:column;gap:26px;z-index:3}
+.hero{position:relative;flex:1 0 200px;min-height:200px}
+.hero canvas.demo{position:absolute;inset:0;width:100%;height:100%}
+.side{position:absolute;top:42px;display:flex;flex-direction:column;gap:26px;z-index:3}
 .side.l .fab em{left:-4px;transform:none}.side.r .fab em{left:auto;right:-4px;transform:none}
 .side.l{left:10px}.side.r{right:10px}
 .fab{position:relative;width:50px;height:50px;border-radius:18px;display:grid;place-items:center;padding:12px;
@@ -26,23 +24,6 @@
 .fab .fchest{animation:bob 2.2s ease-in-out infinite}
 @keyframes bob{0%,100%{transform:translateY(0) rotate(-3deg)}50%{transform:translateY(-4px) rotate(3deg)}}
 .playzone{display:flex;flex-direction:column;align-items:center;gap:12px;padding:0 20px;margin-top:-6px;position:relative;z-index:3}
-/* Панель сложности бота: подпись сверху, четыре ступеньки снизу.
-   Выбор хранится в S.diff и уезжает в движок вместе с матчем.
-   Две строки, а не одна: подпись уровня длинная («атакует первым · держит
-   давление»), в одну строку с четырьмя чипами она обрезалась на телефоне. */
-.diffbar{display:grid;grid-template-columns:1fr;gap:8px;margin:2px 16px 10px;padding:9px 10px 10px;border-radius:16px;
-  background:rgba(5,7,22,.62);box-shadow:inset 0 0 0 1px rgba(155,232,255,.16),0 8px 18px rgba(0,0,0,.32);position:relative;z-index:3}
-.diffbar .db-l{display:grid;grid-template-columns:18px 1fr;grid-template-rows:auto auto;column-gap:7px;align-items:center;min-width:0}
-.diffbar .db-l svg{grid-row:1/3;width:18px;height:18px}
-.diffbar .db-l b{font:900 11px/1.1 var(--display);text-transform:uppercase;letter-spacing:.1em;color:rgba(255,255,255,.86)}
-.diffbar .db-l small{font:700 10.5px/1.2 var(--display);color:var(--ink3);text-transform:none;letter-spacing:.02em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.diffbar .db-chips{display:flex;gap:5px}
-.dchip{flex:1 1 0;appearance:none;border:0;cursor:pointer;padding:9px 4px;border-radius:11px;background:rgba(255,255,255,.06);
-  color:rgba(255,255,255,.62);font:900 11px/1 var(--display);letter-spacing:.04em;transition:transform .14s var(--spring),background .16s,color .16s,box-shadow .16s}
-.dchip.pressed{transform:scale(.94)}
-.dchip.on{background:var(--c,#9BE8FF);color:#06122A;box-shadow:0 0 0 1px rgba(255,255,255,.35) inset,0 6px 16px rgba(0,0,0,.45)}
-.dchip.wtf{background:rgba(255,75,216,.14);color:#FFB4EE}
-.dchip.wtf.on{background:linear-gradient(180deg,#FF69D8,#FF4B3E);color:#12000C;box-shadow:0 0 0 1px rgba(255,255,255,.45) inset,0 0 22px rgba(255,75,216,.55)}
 .mode-chip{display:flex;align-items:center;gap:10px;height:46px;padding:0 14px 0 6px;border-radius:16px;background:rgba(5,7,22,.72);box-shadow:inset 0 0 0 1px rgba(255,201,58,.28),0 8px 18px rgba(0,0,0,.4);text-align:left;transition:transform .2s var(--spring)}
 .mode-chip.pressed{transform:scale(.96)}
 .mode-chip .mi{width:34px;height:34px;padding:6px;border-radius:12px;background:linear-gradient(180deg,rgba(255,201,58,.3),rgba(255,140,0,.15))}
@@ -54,19 +35,24 @@
 .b3.play.pressed{animation:none}
 @keyframes breathe{0%,100%{transform:scale(1)}50%{transform:scale(1.035)}}
 .screen:not(.live) .b3.play{animation:none}
-/* четыре кнопки режимов вместо одной «В бой» */
-.play-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;padding:0 16px}
-.modebtn{--h:auto;height:auto;min-height:0;flex-direction:column;align-items:center;justify-content:center;gap:10px;padding:16px 10px 14px;text-align:center}
-.modebtn .mb-i{width:120px;height:120px;flex:none;display:grid;place-items:center}
+/* Компактные режимы: иконка слева, название и описание справа. */
+.play-grid{display:grid;flex:none;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;padding:0 14px;margin-top:0}
+.modebtn{--h:84px;height:84px;min-height:0;flex-direction:row;align-items:center;justify-content:flex-start;gap:8px;padding:8px;text-align:left;border-radius:16px}
+.modebtn .mb-i{width:50px;height:50px;flex:none;display:grid;place-items:center}
 .modebtn .mb-i svg,.modebtn .mb-i img{width:100%;height:100%;display:block;border-radius:8px}
-.modebtn .mb-t{flex:none;min-width:0;text-align:center}
-/* текст «наверх»: сначала метка-роль, под ней название режима */
-.modebtn small{display:block;font:800 11px/1 var(--display);color:rgba(255,255,255,.6);text-transform:uppercase;letter-spacing:.12em;margin-bottom:3px}
-.modebtn.dark small{color:rgba(255,255,255,.45)}
-.modebtn b{display:block;font:900 15px/1.1 var(--display);text-transform:uppercase}
+.modebtn .mb-t{flex:1;min-width:0;text-align:left}
+.modebtn b{display:block;font:800 12.5px/1.12 var(--body);text-transform:none;letter-spacing:0}
+.modebtn small{display:block;margin-top:4px;font:600 10px/1.22 var(--body);letter-spacing:0;text-transform:none;color:rgba(58,26,0,.76)}
+.modebtn.dark small{color:rgba(228,235,255,.72)}
 .modebtn.gold{--c1:#FFE066;--c2:#FFB01F;--c3:#FF8A00}
 .modebtn.dark b{color:#fff}
-.friends{margin:12px 14px 0}
+@media(max-width:355px){.modebtn{gap:6px}.modebtn .mb-i{width:42px;height:42px}.modebtn b{font-size:11.5px}.modebtn small{font-size:9.5px}}
+@media(max-height:500px) and (min-width:600px){
+  .hero{min-height:120px;flex-basis:120px}
+  .side{top:14px;flex-direction:row;gap:16px}
+  .play-grid{grid-template-columns:repeat(4,minmax(0,1fr))}
+}
+.friends{flex:none;margin:12px 14px 0}
 /* лента друзей одной «пилюлей»-панелью: вся кликабельна → рефералка */
 .fr-band{display:flex;align-items:center;gap:12px;width:100%;padding:10px 12px;border-radius:20px;background:linear-gradient(180deg,rgba(30,38,88,.85),rgba(12,16,44,.9));box-shadow:inset 0 1px 0 rgba(255,255,255,.1),0 4px 0 #080A22;text-align:left}
 .fr-band.pressed{transform:translateY(2px)}

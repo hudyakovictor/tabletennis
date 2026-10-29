@@ -69,36 +69,33 @@
 .m-vig{--vc:rgba(255,40,40,.4);position:absolute;inset:0;pointer-events:none;opacity:0;box-shadow:inset 0 0 120px 30px var(--vc)}
 .m-vig.mp{opacity:1;--vc:rgba(255,60,40,.35);animation:mpv 1s ease-in-out infinite}
 @keyframes mpv{50%{opacity:.4}}
-.sb{position:absolute;left:0;right:0;top:0;padding-left:10px;padding-right:10px;pointer-events:none;z-index:3}
-.sb-in{display:flex;align-items:center;justify-content:space-between;gap:6px;height:58px;padding:0 8px;border-radius:20px;background:linear-gradient(180deg,rgba(26,31,74,.92),rgba(12,15,40,.92));box-shadow:inset 0 1px 0 rgba(255,255,255,.14),0 10px 26px rgba(0,0,0,.5)}
-.sbp{display:flex;align-items:center;gap:8px;flex:1;min-width:0}
-.sbp.op{justify-content:flex-end}
-.sbp .avatar{flex:none}
-.sbp.me .avatar{box-shadow:0 0 0 2px #FF7A4D}.sbp.op .avatar{box-shadow:0 0 0 2px #2EC9FF}
-.sbn{min-width:0}.sbn.r{text-align:right}
-.sbn b{display:block;font:900 12px/1.1 var(--display);text-transform:uppercase;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.srv{display:inline-block;font:900 10px/1 var(--display);font-style:normal;letter-spacing:.04em;padding:3px 6px;border-radius:5px;margin-top:3px;background:#FFC93A;color:#3A1A00;opacity:0;transform:scale(.5);transition:all .35s var(--spring)}
-.srv.on{opacity:1;transform:none}
-.sbs{display:flex;align-items:center;gap:4px;font:900 34px/1 var(--display);padding:0 4px}
-.sbs .d{min-width:30px;text-align:center}
-.sbs .me{color:#FF8A6B;text-shadow:0 0 18px rgba(255,90,60,.6)}.sbs .op{color:#7DE6FF;text-shadow:0 0 18px rgba(46,201,255,.6)}
-.sbs .colon{opacity:.4;font-size:24px}
-.sbs .d.flip{animation:flipd .6s var(--spring)}
-/* Свободная игра: вместо счёта — бесконечность. Фолбэк-шрифт, потому что в
-   дисплейной гарнитуре глифа ∞ может не быть. */
-.sbs.free .d{min-width:0;padding:0 6px;font-family:system-ui,-apple-system,"Segoe UI",sans-serif;font-weight:800;font-size:30px;color:rgba(255,255,255,.72)}
+/* The scoreboard is a compact island, never a full-width backdrop. */
+.sb{position:absolute;left:12px;top:calc(var(--sat) + var(--tgt) + 10px);width:min(48vw,204px);pointer-events:none;z-index:3}
+.sb-in{display:grid;gap:1px;padding:6px 9px;border-radius:14px;background:rgba(7,14,25,.78);
+  box-shadow:inset 0 0 0 1px rgba(207,231,245,.14),0 6px 20px rgba(0,0,0,.25)}
+.sb-row{display:flex;align-items:center;gap:5px;min-width:0;height:25px}
+.sb-row+.sb-row{border-top:1px solid rgba(213,232,244,.10)}
+.sb-name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font:800 11px/1 var(--body)}
+.sb-score{min-width:16px;text-align:right;font:900 16px/1 var(--display);color:#fff}
+.sb-row.me .sb-score{color:#ffd2bf}.sb-row.op .sb-score{color:#c0edff}
+.sb-score.flip{animation:flipd .6s var(--spring)}
+.srv{flex:none;font:800 8px/1 var(--body);font-style:normal;color:#f6cd75;visibility:hidden;opacity:0;transition:opacity .2s}
+.srv::before{content:"";display:inline-block;width:5px;height:5px;margin-right:4px;vertical-align:1px;border-radius:50%;background:currentColor}
+.srv.on{visibility:visible;opacity:1}
 @keyframes flipd{0%{transform:rotateX(90deg) scale(1.6)}100%{transform:none}}
-.sb-sub{text-align:center;margin-top:6px;display:flex;align-items:center;justify-content:center;gap:8px;flex-wrap:wrap}
-/* Бейдж сложности в HUD: игрок всегда видит, с каким ботом играет. */
-.ai-lvl{padding:3px 8px;border-radius:8px;background:rgba(5,7,22,.66);box-shadow:inset 0 0 0 1px rgba(155,232,255,.45);
-  font:900 9.5px/1 var(--display);letter-spacing:.1em;color:#9BE8FF}
-.ai-lvl[data-l="0"]{color:#9CFFD0;box-shadow:inset 0 0 0 1px rgba(156,255,208,.45)}
-.ai-lvl[data-l="2"]{color:#FFC93A;box-shadow:inset 0 0 0 1px rgba(255,201,58,.5)}
-.ai-lvl[data-l="3"]{color:#FF69D8;box-shadow:inset 0 0 0 1px #FF69D8,0 0 16px rgba(255,75,216,.5)}
+.ai-lvl{display:inline-block;margin:5px 0 0 4px;padding:4px 7px;border-radius:7px;background:rgba(7,14,25,.68);
+  font:900 8px/1 var(--display);letter-spacing:.07em;color:#9be8ff}
+.ai-lvl[data-l="0"]{color:#9cffd0}.ai-lvl[data-l="2"]{color:#ffc93a}.ai-lvl[data-l="3"]{color:#ff83df}
+/* Training uses the original bottom-left exit button; only match moves it. */
 .m-pause{position:absolute;left:12px;bottom:calc(var(--sab) + 16px);z-index:4;opacity:.85}
-.m-slowmo{position:absolute;right:12px;bottom:calc(var(--sab) + 16px);z-index:4;width:auto;padding:0 13px;display:flex;align-items:center;gap:7px;font:900 11px/1 var(--display);letter-spacing:.05em;text-transform:uppercase;color:#fff;opacity:.85}
-.m-slowmo svg{width:19px;height:19px}
-.m-slowmo.on{opacity:1;color:#7DD3FC;border-color:rgba(125,211,252,.6);box-shadow:0 0 18px rgba(56,150,220,.45),0 3px 0 #0A0D26}
+.match-actions{position:absolute;right:12px;top:calc(var(--sat) + var(--tgt) + 10px);z-index:4;display:flex;align-items:flex-start;gap:6px}
+.match-actions .notice-button,.match-actions .ib{width:42px;height:42px;border-radius:13px;color:#e1f1fa;background:rgba(7,14,25,.78);
+  box-shadow:inset 0 0 0 1px rgba(207,231,245,.16),0 6px 20px rgba(0,0,0,.25)}
+.match-actions .m-pause{position:relative;left:auto;bottom:auto;opacity:1}
+.m-slowmo{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1px;padding:2px}
+.m-slowmo svg{width:18px;height:18px}
+.m-slowmo span{font:800 8px/1 var(--body);white-space:nowrap;letter-spacing:0}
+.m-slowmo.on{color:#9be8ff;box-shadow:inset 0 0 0 1px #7dd3fc,0 0 14px rgba(56,150,220,.4)}
 .m-rally{position:absolute;right:14px;top:calc(var(--sat) + var(--tgt) + 104px);z-index:3;text-align:right;opacity:0;transform:translateX(30px);transition:all .4s var(--spring);pointer-events:none}
 .m-rally.on{opacity:1;transform:none}
 .m-rally span{display:block;font:900 10px/1 var(--display);letter-spacing:.12em;text-transform:uppercase;color:var(--ink3)}
@@ -272,10 +269,14 @@
 .net-relay{display:flex;gap:8px;align-items:flex-start;margin:0 14px;font-size:11px;line-height:1.45;color:var(--ink3)}
 .net-relay span:first-child{width:16px;height:16px;flex:0 0 16px}
 .net-relay b{color:var(--ink2);overflow-wrap:anywhere}
-/* идём матч: оболочка не мешает — только тонкая строка статуса поверх игры */
-.net-live{position:absolute;left:50%;transform:translateX(-50%);top:calc(var(--sat) + var(--tgt) + 8px);
-  display:flex;gap:6px;align-items:center;padding:6px 8px;border-radius:999px;background:rgba(4,6,16,.62);
-  backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);z-index:6;max-width:calc(100vw - 24px)}
-.net-live .chip{font-size:10.5px;white-space:nowrap}
-.net-exit{flex:0 0 30px;width:30px;height:30px;border-radius:50%;border:1px solid rgba(255,255,255,.22);
-  background:rgba(255,255,255,.08);color:#fff;font-size:14px;line-height:1;display:grid;place-items:center}
+/* In a network match the engine owns the left-side score; room status and
+   exit stay in a separate, compact island on the right. */
+.screen[data-id=online].net-playing .hud{display:none}
+.net-live{position:absolute;right:12px;top:calc(var(--sat) + var(--tgt) + 10px);z-index:6;display:flex;align-items:center;gap:6px;pointer-events:auto}
+.net-live *{pointer-events:auto}
+.net-meta{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
+.net-ping{height:42px;min-width:44px;padding:0 7px;display:grid;place-items:center;border-radius:13px;background:rgba(7,14,25,.78);
+  box-shadow:inset 0 0 0 1px rgba(207,231,245,.16);font:800 10px/1 var(--body);white-space:nowrap;color:#d3e9f1}
+.net-exit{width:42px;height:42px;border-radius:13px;background:rgba(7,14,25,.78);color:#e1f1fa;display:grid;place-items:center;
+  box-shadow:inset 0 0 0 1px rgba(207,231,245,.16),0 6px 20px rgba(0,0,0,.25)}
+.net-exit svg{width:20px;height:20px}

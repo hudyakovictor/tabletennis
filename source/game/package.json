@@ -16,7 +16,9 @@
     "noise": "node tt/tools/noise_zone_sim.cjs",
     "ai:serves": "node tt/tools/ai_serve_map.cjs",
     "analyze:log": "node tt/tools/analyze_input_log.cjs",
-    "bench:log": "node tt/tools/benchmark_input_log.cjs"
+    "bench:log": "node tt/tools/benchmark_input_log.cjs",
+    "test:panorama": "node tests/panorama-browser.cjs",
+    "test:interface": "node tests/interface-browser.cjs"
   },
   "dependencies": {
     "ws": "^8.22.0"

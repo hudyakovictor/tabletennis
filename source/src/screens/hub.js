@@ -1,6 +1,6 @@
 /* =====================================================================
-   HUB — «Арена»: живой стол с розыгрышем ИИ vs ИИ, дорога лиги,
-   огромная кнопка «В бой», слоты сундуков, боковые ярлыки.
+   HUB — «Арена»: живой стол с облётом камеры, дорога лиги,
+   компактный выбор режимов, друзья и боковые ярлыки.
    ===================================================================== */
 const MODES = [
   { id: 'ranked', tk: 'mode.ranked', sk: 'mode.rankedSub', i: 'crown', c: 'gold', diff: .62, tag: '±24' },
@@ -27,6 +27,7 @@ Router.def('hub', {
     const freeLeft = (S.freeAt || 0) - Date.now();
     /* Название зала убрано: «Твой зал · Лига / Арена» перегружало шапку */
     return `${UI.hud()}
+    <div class="hub-content scroll">
     <div class="road rise" style="--d:0" data-act="ranks">
       <span class="rb">${Art.badge(L, 34)}</span>
       <div class="bar gold"><i style="--p:0" data-p="${p}"></i><span class="lbl num">${fmt(S.rating)} / ${N ? fmt(N.min) : '∞'}</span></div>
@@ -34,7 +35,6 @@ Router.def('hub', {
     </div>
     <div class="hero">
       <canvas class="demo"></canvas>
-      <div class="arena-title"><small>${t('hub.gameName')}</small><b>TABLE TENNIS</b><b class="alt">ULTIMATE</b></div>
       <div class="side l">
         <button class="fab pop" style="--d:2" data-act="quests" data-press><span class="fic"><img src="${ILL['ic-quest']}" alt="" width="34" height="34"></span>${qr ? `<span class="dot">${qr}</span>` : ''}<em>${t('hub.quests')}</em></button>
         <button class="fab pop" style="--d:3" data-act="events" data-press><span class="fic"><img src="${ILL['ic-trophy']}" alt="" width="34" height="34"></span><em>${t('hub.events')}</em></button>
@@ -43,22 +43,13 @@ Router.def('hub', {
         <button class="fab pop ${freeLeft <= 0 ? 'free' : ''}" style="--d:2" data-act="gifts" data-press><span class="fchest">${Art.icon('gift', { c: '#FFE9B0' })}</span><em class="num" id="freeT" data-gift="1">${freeLeft > 0 ? fmtLeft(freeLeft) : t('hub.gift')}</em></button>
       </div>
     </div>
-    ${this.diffBar()}
     <div class="playzone play-grid">
-      <button class="b3 modebtn rise" style="--d:2" data-modebtn="free" data-press><span class="mb-i"><img src="${ILL['ic-swirl']}" alt="" width="120" height="120"></span><span class="mb-t"><b>${t('mode.free')}</b></span></button>
-      <button class="b3 modebtn gold rise" style="--d:3" data-modebtn="ranked" data-press><span class="mb-i"><img src="${ILL['ic-cross']}" alt="" width="120" height="120"></span><span class="mb-t"><b>${t('hub.online')}</b></span></button>
-      <button class="b3 modebtn dark rise" style="--d:4" data-modebtn="practice" data-press><span class="mb-i"><img src="${ILL['ic-basket']}" alt="" width="120" height="120"></span><span class="mb-t"><b>${t('mode.practice')}</b></span></button>
-      <button class="b3 modebtn dark rise" style="--d:5" data-modebtn="career" data-press><span class="mb-i"><img src="${ILL['ic-medalp']}" alt="" width="120" height="120"></span><span class="mb-t"><b>${t('hub.career')}</b></span></button>
+      <button class="b3 modebtn rise" style="--d:2" data-modebtn="free" data-press><span class="mb-i"><img src="${ILL['ic-swirl']}" alt="" width="120" height="120"></span><span class="mb-t"><b>${t('mode.free')}</b><small>${t('hub.freeSub')}</small></span></button>
+      <button class="b3 modebtn gold rise" style="--d:3" data-modebtn="ranked" data-press><span class="mb-i"><img src="${ILL['ic-cross']}" alt="" width="120" height="120"></span><span class="mb-t"><b>${t('hub.online')}</b><small>${t('hub.onlineSub')}</small></span></button>
+      <button class="b3 modebtn dark rise" style="--d:4" data-modebtn="practice" data-press><span class="mb-i"><img src="${ILL['ic-basket']}" alt="" width="120" height="120"></span><span class="mb-t"><b>${t('mode.practice')}</b><small>${t('hub.practiceSub')}</small></span></button>
+      <button class="b3 modebtn dark rise" style="--d:5" data-modebtn="career" data-press><span class="mb-i"><img src="${ILL['ic-medalp']}" alt="" width="120" height="120"></span><span class="mb-t"><b>${t('hub.career')}</b><small>${t('hub.careerSub')}</small></span></button>
     </div>
-    ${this.friendsBar()}`;
-  },
-  /* Панель сложности ПЕРЕД матчем: четыре уровня движка, выбор — один тап,
-   * хранится в профиле (S.diff) и уезжает в бота вместе с матчем. */
-  diffBar() {
-    const D = diffOf(S.diff);
-    return `<div class="diffbar rise" style="--d:1">
-      <span class="db-l">${Art.icon('target', { c: D.c, sw: 2.4 })}<b>${t('diff.botLevel')}</b><small>${t(D.sk)}</small></span>
-      <span class="db-chips">${DIFFS.map((d) => `<button class="dchip${d.id === D.id ? ' on' : ''}${d.id === 3 ? ' wtf' : ''}" data-diff="${d.id}" data-press aria-pressed="${d.id === D.id}" style="--c:${d.c}"><b>${d.name}</b></button>`).join('')}</span>
+    ${this.friendsBar()}
     </div>`;
   },
   /* Друзья-лента (3 друга + «+» к рефералке):
@@ -103,7 +94,7 @@ Router.def('hub', {
         w.addEventListener('click', (e) => {
           const g = e.target.closest('[data-gift]');
           if (g && Date.now() >= (S.freeAt || 0)) {
-            S.freeAt = Date.now() + FREE_MS; save();
+            S.freeAt = Date.now() + FREE_MS; save(); UI.refreshNotifications();
             const p = FX.pt(g); Wallet.add('coins', 40, p); FX.twinkles(p.x, p.y, 30, 8); haptic('success');
             toast(t('hub.giftToast', { n: 40 }), 'gift');
             Sheet.close(); return;
@@ -152,20 +143,22 @@ Router.def('hub', {
         gft.textContent = left > 0 ? fmtLeft(left) : t('hub.gift');
         const fab = gft.closest('.fab'); fab && fab.classList.toggle('free', left <= 0);
       }
+      UI.refreshNotifications();
     }, 1000);
     el.addEventListener('click', (e) => {
       /* Router.go при busy молча возвращается: тап по плитке во время перехода
        * splash → hub терялся без всякого ответа. Ждём освобождения и повторяем. */
       const goRoute = (id, opt) => {
-        Router.go(id, opt);
-        if (!Router.busy || !Router.screens[id]) return;
+        if (!Router.screens[id]) return;
+        if (!Router.busy) { Router.go(id, opt); return; }
         let tries = 0;
-        const tick = () => { if (!Router.busy) Router.go(id, opt); else if (++tries < 40) setTimeout(tick, 50); };
+        const tick = () => {
+          if (!Router.busy) { if (Router.cur !== id) Router.go(id, opt); }
+          else if (++tries < 40) setTimeout(tick, 50);
+        };
         setTimeout(tick, 50);
       };
-      const a = e.target.closest('[data-act],[data-modebtn],[data-chest],[data-f],[data-diff]'); if (!a) return;
-      /* Сложность бота: один тап по ступеньке — и она в профиле. */
-      if (a.dataset.diff !== undefined) return this.setDiff(+a.dataset.diff, a);
+      const a = e.target.closest('[data-act],[data-modebtn],[data-chest],[data-f]'); if (!a) return;
       const mb = a.dataset.modebtn;
       if (mb) {
         const p = FX.pt(a); FX.burst(p.x, p.y, { count: 24, speed: 9 }); haptic('heavy');
@@ -210,22 +203,6 @@ Router.def('hub', {
     cv.addEventListener('pointerdown', (e) => { const p = FX.pt({ getBoundingClientRect: () => ({ left: e.clientX, top: e.clientY, width: 0, height: 0 }) }); FX.burst(p.x, p.y, { c: ['#2EE6FF', '#fff'], count: 12, speed: 6, size: .7 }); Sfx.paddle(1.2); });
   },
   leave() { this.game && this.game.destroy(); this.game = null; this.el = null; clearInterval(this.timer); if (this.lobby) { GameHost.show(false); GameHost.send('attract'); } },
-  /* Смена уровня — с звуком, толчком и тостом: игрок должен видеть, что
-   * бот стал другим, а не узнавать об этом по проигранному матчу. */
-  setDiff(id, btn) {
-    S.diff = clamp(Math.round(id), 0, DIFFS.length - 1); save();
-    const D = diffOf(S.diff);
-    $$('[data-diff]', this.el || document).forEach((b) => {
-      const on = +b.dataset.diff === D.id;
-      b.classList.toggle('on', on); b.setAttribute('aria-pressed', String(on));
-    });
-    const lbl = this.el && this.el.querySelector('.diffbar .db-l small');
-    if (lbl) lbl.textContent = t(D.sk);
-    if (btn) { const p = FX.pt(btn); FX.ring(p.x, p.y, D.c, 90, 5); bump(btn); }
-    haptic('select'); Sfx.tab();
-    if (D.id === 3) { flash('#FF69D8', .28, 220); Sfx.impact(); toast(t('diff.wtfWarn'), 'target'); }
-    else toast(t('diff.changed', { name: t(D.tk) }), 'target');
-  },
   chestTap(i, btn) {
     const c = S.chests[i]; if (!c) return;
     if (c.state === 'ready') { Router.go('chest', { data: { kind: c.kind, slot: i } }); return; }
@@ -277,7 +254,7 @@ Router.def('hub', {
         const b = e.target.closest('[data-q]'); if (!b) return;
         const q = Daily.claim(b.dataset.q); if (!q) return;
         const p = FX.pt(b); FX.burst(p.x, p.y, { count: 20 }); Wallet.add(b.dataset.k, +b.dataset.r, p);
-        b.outerHTML = `<span class="chip green">${Art.icon('check', { c: '#9CFFD0' })}</span>`; haptic('success');
+        b.outerHTML = `<span class="chip green">${Art.icon('check', { c: '#9CFFD0' })}</span>`; UI.refreshNotifications(); haptic('success');
       })
     });
   },
