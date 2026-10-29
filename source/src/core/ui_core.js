@@ -139,18 +139,18 @@ const Nav = {
    * «Настройки» — кнопка-ярлык, не маршрут: она открывает лист настроек
    * поверх текущего экрана и не снимает подсветку с активной вкладки. */
   items: [
-    { id: 'hub', k: 'nav.hub', i: 'navArena' },
-    { id: 'pass', k: 'nav.pass', i: 'navPass' },
-    { id: 'shop', k: 'nav.shop', i: 'navShop' },
-    { id: 'settings', k: 'nav.settings', i: 'navGear', sheet: true }
+    { id: 'hub', k: 'nav.hub', i: 'home' },
+    { id: 'pass', k: 'nav.pass', i: 'cup' },
+    { id: 'shop', k: 'nav.shop', i: 'market' },
+    { id: 'settings', k: 'nav.settings', i: 'gear', sheet: true }
   ],
   build() {
     const n = $('#nav'); if (!n) return;
     n.innerHTML = '<div class="navbg"></div>' + this.items.map((tb) => `
-      <button class="tab" data-tab="${tb.id}" aria-label="${t(tb.k)}" data-silent>
-        <span class="glow"></span><span class="ti">${Art.navIcon(tb.i)}</span><span class="tl">${t(tb.k)}</span>
+      <button class="tab" data-tab="${tb.id}" aria-label="${t(tb.k)}" title="${t(tb.k)}" data-silent>
+        <span class="glow"></span><span class="ti" aria-hidden="true">${Art.icon(tb.i, { c: 'currentColor', fill: 'none', sw: 1.9 })}</span>
       </button>`).join('');
-    n.addEventListener('click', (e) => {
+    if (!this.bound) n.addEventListener('click', (e) => {
       const b = e.target.closest('.tab'); if (!b) return;
       haptic('select');
       /* «Настройки» — лист поверх текущего экрана: маршрут не меняем,
@@ -159,6 +159,8 @@ const Nav = {
       if (b.dataset.tab === Router.cur) { const sc = $('.screen.current .scroll'); sc && sc.scrollTo({ top: 0, behavior: 'smooth' }); return; }
       Router.go(b.dataset.tab);
     });
+    this.bound = true;
+    this.set(this.items.some((tb) => tb.id === Router.cur && !tb.sheet) ? Router.cur : null);
     this.dots();
   },
   /* бадж «Пропуска» = число реально доступных наград (не зашитая константа):
@@ -175,6 +177,6 @@ const Nav = {
     if (n > 0) { if (!d) { d = document.createElement('span'); d.className = 'dot'; t.appendChild(d); } d.textContent = String(n); }
     else if (d) d.remove();
   },
-  set(id) { $$('#nav .tab').forEach((t) => t.classList.toggle('on', t.dataset.tab === id)); },
+  set(id) { $$('#nav .tab').forEach((el) => { const on = el.dataset.tab === id; el.classList.toggle('on', on); if (on) el.setAttribute('aria-current', 'page'); else el.removeAttribute('aria-current'); }); },
   show(on) { $('#nav').classList.toggle('hide', !on); }
 };

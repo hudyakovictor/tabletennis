@@ -247,6 +247,7 @@ class NetworkManager {
     }
     if (msg.server === 1 || msg.server === -1) g.server = msg.server;
     if (Number.isFinite(msg.rally)) g.rally = msg.rally;
+    if (g.ui && typeof g.ui.syncScore === 'function') g.ui.syncScore();
   }
 
   /* ---- host: send game state to server ---- */
@@ -290,6 +291,7 @@ class NetworkManager {
   /* ---- guest: apply host state (interpolated) ---- */
   _applyRemoteState(msg) {
     if (!this._validState(msg)) return;
+    const g = this.game, beforeServer = g.server, beforeA = g.score[0], beforeB = g.score[1];
     this._interpBuf.push({ ...msg, receivedAt: Date.now() });
     if (this._interpBuf.length > 30) this._interpBuf.shift();
     // apply ball immediately (prediction handles smoothing)
@@ -319,8 +321,11 @@ class NetworkManager {
       V3.set(op.normal, rn[0], rn[1], rn[2]);
       op.anim.swing = msg.racket.sw || 0;
     }
-    // sync score
+    // The guest's authoritative score/server arrive here, not via its own
+    // awardPoint(). Refresh the visible HUD only when one of them changes.
     if (msg.score) this.game.score = msg.score.slice();
+    if ((g.server !== beforeServer || g.score[0] !== beforeA || g.score[1] !== beforeB) &&
+        g.ui && typeof g.ui.syncScore === 'function') g.ui.syncScore();
   }
 
   /* ---- host: apply guest input ---- */

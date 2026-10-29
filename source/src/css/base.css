@@ -146,14 +146,18 @@ body.in-tg{--sat:0px;--sab:0px} /* внутри Telegram env() дублируе�
 
 /* ---------------- top HUD ---------------- */
 .hud{position:relative;z-index:5;display:flex;align-items:center;gap:8px;padding:calc(var(--sat) + var(--tgt) + 10px) 12px 6px}
-.hud-me{display:flex;align-items:center;gap:9px;flex:1;min-width:0}
-.lvl-ring{position:relative;width:48px;height:48px;flex:none}
-.lvl-ring svg.ring{position:absolute;inset:0;transform:rotate(-90deg)}
-.lvl-ring .av{position:absolute;inset:5px;border-radius:50%;overflow:hidden}
-.lvl-ring .lv{position:absolute;right:-5px;bottom:-4px;min-width:22px;height:22px;padding:0 5px;border-radius:8px;display:grid;place-items:center;font:900 11px/1 var(--display);color:#3A1A00;background:linear-gradient(180deg,#FFF0A0,#FFB01F);box-shadow:0 2px 0 #A85300,0 0 0 2px var(--bg1)}
+.hud-me{display:flex;align-items:center;flex:1;min-width:0;min-height:40px;text-align:left}
+.hud-title{flex:1;min-width:0;margin-left:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .hud-name{min-width:0}
 .hud-name b{display:block;font:900 13px/1.1 var(--display);letter-spacing:-.01em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.hud-name span{display:flex;white-space:nowrap;align-items:center;gap:4px;font-size:11px;color:var(--ink2);margin-top:3px}
+.hud-name span{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:10px;color:var(--ink2);margin-top:5px}
+.notice-button{position:relative;display:grid;place-items:center;flex:none;width:40px;height:40px;border-radius:13px;color:#e1f1fa;
+  background:rgba(10,17,30,.76);box-shadow:inset 0 0 0 1px rgba(192,227,245,.16),0 5px 16px rgba(0,0,0,.25)}
+.notice-button svg{width:21px;height:21px}
+.notice-count{position:absolute;top:-4px;right:-3px;min-width:16px;height:16px;padding:0 3px;border-radius:9px;background:#e8b75c;color:#172130;
+  font:900 9px/16px var(--display);text-align:center;box-shadow:0 0 0 2px #0b1420}
+.notice-count[hidden]{display:none}
+@media(max-width:360px){.hud{gap:5px;padding-left:8px;padding-right:8px}.hud-name b{font-size:11px}.hud-name span{font-size:9px}.hud .cur{font-size:11px}}
 .cur{position:relative;display:flex;align-items:center;height:32px;padding:0 6px 0 30px;border-radius:12px;background:rgba(3,5,18,.7);box-shadow:inset 0 2px 4px rgba(0,0,0,.7),0 1px 0 rgba(255,255,255,.08);font:900 13px/1 var(--display);letter-spacing:-.01em}
 .cur .ci{position:absolute;left:-8px;top:50%;width:36px;height:36px;transform:translateY(-50%);filter:drop-shadow(0 3px 4px rgba(0,0,0,.5))}
 .cur .plus{position:relative;width:20px;height:20px;margin-left:7px;border-radius:7px;display:grid;place-items:center;background:linear-gradient(180deg,#5BF79A,#18B85F);box-shadow:0 2px 0 #07603A,inset 0 1px 0 rgba(255,255,255,.6);color:#fff;font:900 15px/1 var(--display)}
@@ -163,21 +167,35 @@ body.in-tg{--sat:0px;--sab:0px} /* внутри Telegram env() дублируе�
 .bump-ic{animation:bumpic .5s var(--spring)}
 @keyframes bumpic{0%{transform:translateY(-50%) scale(1) rotate(0)}30%{transform:translateY(-50%) scale(1.4) rotate(-14deg)}100%{transform:translateY(-50%) scale(1) rotate(0)}}
 
-/* ---------------- bottom nav (CR-style expanding) ---------------- */
-#nav{position:absolute;left:0;right:0;bottom:0;padding:0 8px calc(var(--sab) + var(--tgb) + 8px);display:flex;gap:4px;align-items:flex-end;
-  background:linear-gradient(180deg,transparent,rgba(4,5,13,.85) 38%,rgba(4,5,13,.98));transition:transform .45s var(--out)}
+/* ---------------- bottom nav: four single-colour icons ---------------- */
+#nav{position:absolute;left:0;right:0;bottom:0;padding:0 10px calc(var(--sab) + var(--tgb) + 10px);display:flex;align-items:flex-end;
+  background:linear-gradient(180deg,transparent,rgba(4,8,16,.82) 48%,rgba(4,8,16,.96));transition:transform .45s var(--out)}
 #nav.hide{transform:translateY(130%)}
-#nav .navbg{position:absolute;left:8px;right:8px;bottom:calc(var(--sab) + var(--tgb) + 8px);height:66px;border-radius:24px;background:linear-gradient(180deg,#1E2457,#121638);box-shadow:inset 0 1.5px 0 rgba(255,255,255,.12),0 -10px 30px rgba(0,0,0,.4),0 6px 0 #070920}
-#nav .tab{position:relative;z-index:1;flex:1;height:66px;display:flex;flex-direction:column;align-items:center;justify-content:center;transition:flex .45s var(--spring)}
-#nav .tab.on{flex:1.65}
-#nav .tab .glow{position:absolute;inset:6px 2px;border-radius:18px;background:linear-gradient(180deg,#FFD54A,#FF9A1A);box-shadow:inset 0 2px 0 rgba(255,255,255,.6),0 4px 0 #A85300,0 0 24px rgba(255,180,30,.45);opacity:0;transform:scale(.6);transition:opacity .25s,transform .45s var(--spring)}
-#nav .tab.on .glow{opacity:1;transform:scale(1)}
-#nav .tab .ti{position:relative;width:34px;height:34px;transition:transform .45s var(--spring);filter:drop-shadow(0 3px 2px rgba(0,0,0,.45))}
-#nav .tab.on .ti{transform:translateY(-16px) scale(1.42)}
-#nav .tab .tl{position:absolute;bottom:9px;font:900 10.5px/1 var(--display);text-transform:uppercase;letter-spacing:.02em;color:#3A1A00;opacity:0;transform:translateY(8px);transition:opacity .2s,transform .35s var(--spring)}
-#nav .tab.on .tl{opacity:1;transform:none;transition-delay:.06s}
-#nav .tab:not(.on) .ti{opacity:.62;filter:grayscale(.35) drop-shadow(0 3px 2px rgba(0,0,0,.45))}
-#nav .tab .dot{top:6px;right:calc(50% - 26px)}
+#nav .navbg{position:absolute;left:10px;right:10px;bottom:calc(var(--sab) + var(--tgb) + 10px);height:60px;border-radius:19px;
+  background:rgba(13,23,36,.96);box-shadow:inset 0 0 0 1px rgba(196,220,235,.13),0 10px 28px rgba(0,0,0,.42)}
+#nav .tab{position:relative;z-index:1;flex:1;height:60px;display:grid;place-items:center;color:#94a7b4;transition:color .2s}
+#nav .tab.on{color:#d9f6ff}
+#nav .tab .glow{position:absolute;inset:7px 10%;border-radius:13px;background:rgba(127,206,224,.13);opacity:0;transition:opacity .2s}
+#nav .tab.on .glow{opacity:1}
+#nav .tab .ti{position:relative;width:25px;height:25px}
+#nav .tab .dot{top:4px;right:calc(50% - 26px)}
+#nav .tab:focus-visible,.notice-button:focus-visible,.hud-me:focus-visible{outline:2px solid #9be8ff;outline-offset:2px}
+
+/* The bell lists only currently available in-game rewards. */
+.notice-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin:2px 2px 18px}
+.notice-head .h1{font-size:21px;margin-top:5px}
+.notice-kicker{font:800 10px/1 var(--body);letter-spacing:.13em;text-transform:uppercase;color:#87b2c7}
+.notice-close{display:grid;place-items:center;flex:none;width:38px;height:38px;border-radius:12px;color:#c8dce5;background:rgba(255,255,255,.07)}
+.notice-close svg{width:19px;height:19px}
+.notice-list{display:grid;gap:9px}
+.notice-row{width:100%;display:flex;align-items:center;gap:12px;text-align:left;padding:12px;border-radius:16px;
+  background:rgba(113,158,183,.10);box-shadow:inset 0 0 0 1px rgba(178,222,236,.10)}
+.notice-icon{display:grid;place-items:center;flex:none;width:40px;height:40px;border-radius:12px;color:#a8e1f1;background:rgba(111,194,220,.12)}
+.notice-icon svg{width:21px;height:21px}
+.notice-copy{flex:1;min-width:0}.notice-copy b{display:block;font-size:13px}.notice-copy small{display:block;margin-top:3px;font-size:11px;line-height:1.35;color:var(--ink2)}
+.notice-arrow{font-size:24px;line-height:1;color:#91afbe}
+.notice-empty{display:grid;justify-items:center;gap:8px;padding:30px 16px 35px;text-align:center;color:var(--ink2)}
+.notice-empty svg{width:30px;height:30px;color:#91afbe}.notice-empty p{margin:0;font-size:13px}
 
 /* ---------------- toasts ---------------- */
 .toast{display:flex;align-items:center;gap:10px;padding:10px 16px 10px 10px;border-radius:16px;background:linear-gradient(180deg,#2A3170,#171B44);box-shadow:inset 0 1px 0 rgba(255,255,255,.15),0 12px 28px rgba(0,0,0,.6);font-size:13px;font-weight:800;
@@ -245,6 +263,15 @@ body.in-tg{--sat:0px;--sab:0px} /* внутри Telegram env() дублируе�
 .seg button{position:relative;z-index:1;flex:1;height:40px;border-radius:12px;font:900 12px/1 var(--display);text-transform:uppercase;color:var(--ink3);transition:color .3s}
 .seg button.on{color:#fff}
 .seg .pill{position:absolute;top:4px;bottom:4px;border-radius:12px;background:linear-gradient(180deg,#3A4390,#262D66);box-shadow:inset 0 1.5px 0 rgba(255,255,255,.2),0 3px 0 #0B0E26;transition:left .45s var(--spring),width .45s var(--spring)}
+
+/* Four bot levels must stay readable even on narrow phones. */
+.settings-diff{margin:0 0 16px}
+.settings-diff-head{display:flex;flex-direction:column;gap:4px;margin:0 4px 8px}
+.settings-diff-head b{font:900 11px/1.2 var(--display);text-transform:uppercase;color:#e1eafb}
+.settings-diff-head small,.settings-diff-info{font:600 11px/1.35 var(--body);color:rgba(196,210,235,.72)}
+.settings-diff-info{min-height:15px;margin:7px 4px 0}
+#dseg button{min-width:0;padding:0 2px;font:800 11px/1 var(--body);letter-spacing:0;color:#aab9d3}
+#dseg button.on{color:#fff}
 
 /* ---------------- reduced motion ---------------- */
 body.rm *{animation-duration:.001ms!important;animation-iteration-count:1!important;transition-duration:.001ms!important}
