@@ -189,16 +189,6 @@ class PhysicsWatchdog {
     this._armedOppMeta = null;
   }
 
-  /** Новый розыгрыш: контекст уровня бота тоже сбрасываем. */
-  resetMatch() {
-    this.reset();
-    this.aiShots = [];
-    this._oppFloorSec = 0;
-    this._playerFloorSec = 0;
-    this._offScreenSec = 0;
-    this._offScreen = false;
-  }
-
   /** Состояние гейта на текущий кадр: бьёт ли игрок прямо сейчас. */
   arm(armed, meta) {
     this._armed = !!armed;
