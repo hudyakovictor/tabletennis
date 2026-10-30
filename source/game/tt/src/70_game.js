@@ -211,6 +211,28 @@ class Game {
 
     this.shotJournal = new ShotJournal();
     this.inputLog = typeof InputTelemetryLog !== 'undefined' ? new InputTelemetryLog() : null;
+    /* Сторож физики: пять классов геймплейных багов детектируются сами,
+     * без записи кадров и без участия человека. Тикеты живут в памяти
+     * (кольцо на 64) и попадают в отчёт; при включённой записи — ещё и в
+     * журнал событий как 'watchdog'. Ничего наружу не уходит. */
+    this.watchdog = typeof PhysicsWatchdog !== 'undefined' ? new PhysicsWatchdog() : null;
+    if (this.watchdog) {
+      this.watchdog.onTicket = (row) => {
+        if (this.debugRecording && typeof this.logInput === 'function') this.logInput('watchdog', { outcome: row });
+      };
+    }
+    this._hitSeq = 0;
+    /* Сторож: поза клинка бота на прошлом кадре (клинок за кадр проходит
+     * путь, и «сквозь» надо считать по нему, а не по точке) + точка контакта
+     * до применения импульса — без неё не посчитать, во сколько раз удар
+     * разогнал мяч. */
+    if (this.watchdog) {
+      this._watchOppPrev = { x: 0, y: 0, z: 0 };
+      this._watchOppPad = { pos: { x: 0, y: 0, z: 0 }, normal: { x: 0, y: 0, z: 1 } };
+      this._watchOpp = { pad: this._watchOppPad, padPrev: this._watchOppPrev, hitRadius: 0.152 };
+      this._watchProject = (q) => this.project(q, this._watchProjOut || (this._watchProjOut = {}));
+    }
+    this._preHit = null;
 
     // Momentum tracking
     this.momentum = {
@@ -709,6 +731,7 @@ class Game {
     this.moments.reset();
     if (this.inputLog && typeof this.inputLog.resetClock === 'function') this.inputLog.resetClock(this.time);
     this.shotJournal && this.shotJournal.reset();
+    this.watchdog && this.watchdog.reset();
     this.lastMoment = null;
     this._acc = 0;
     this.followThrough.active = false;
@@ -811,6 +834,7 @@ class Game {
     this.stopTraining();
     this.endReplay(false);
     this.shotJournal && this.shotJournal.reset();
+    this.watchdog && this.watchdog.reset();
     this.career.stop();
     this.network.disconnect();
     this.demoMode = false;
@@ -1046,6 +1070,7 @@ class Game {
 
   /* ---------------------------- scoring ---------------------------- */
   awardPoint(who, reason) {
+    if (this.watchdog) this.watchdog.point();
     /* Гость в онлайне не ведёт счёт: хост единственный источник очков. Собственная
      * физика гостя может определить финал розыгрыша иначе и счёт разойдётся.
      * Гостю достаточно остановить мяч — следующий point-пакет синхронизирует счёт. */
@@ -1163,6 +1188,9 @@ class Game {
     if (this.debugRecording) this.logInput('bounce', { outcome: { side, speed, lastHitBy: lh,
       edge: info && Number.isFinite(info.edge) ? info.edge : null } });
     this.recorder.addBounce(side, this.ball.p.x, this.ball.p.z, lh);
+    if (this.watchdog) this.watchdog.tableContact({ time: this.time, side,
+      edge: info && Number.isFinite(info.edge) ? info.edge : 0,
+      edgeAxis: info && info.edgeAxis ? info.edgeAxis : null, speed });
     if (this.training) this.training.onBounce(side, lh);
 
     if (this.isServeBall) {
@@ -1297,6 +1325,7 @@ class Game {
     if (side < 0 && this.shotJournal) this.shotJournal.returned(this.time);
     const b = this.ball;
     b.lastHitBy = side;
+    this._hitSeq = (this._hitSeq || 0) + 1;   // сторож: в этом подшаге контакт был
     this.shotId++;                       // the opponent reacts once per shot
     this.rallyBounces.length = 0;
     this.netTouched = false;
@@ -1325,6 +1354,10 @@ class Game {
     // here invalidated its legal serves after they had already been solved.
 
     const speed = V3.len(b.v), spin = V3.len(b.w);
+    /* Здесь уже применены экипировка, бонус за точный контакт, штраф за
+     * промах, смягчение темпа и карьерные бусты — то есть проверять потолки
+     * имеет смысл только отсюда. */
+    this.watchdogStroke(side, racket, contactP, quality, speed, spin);
     const name = racket.stroke ? racket.stroke.id : 'DRIVE';
     if (side > 0) {
       this.stats.shots++;
@@ -1848,6 +1881,8 @@ class Game {
     /* --- paddles (CCD) --- */
     if (this.time - this.player.lastHitT > 0.09) this.tryPlayerHit(p0);
     else this.debugRecording && this.diagnosticPhysicsGate('hit_cooldown', { elapsedReal: this.time - this.player.lastHitT, requiredReal: .09 });
+
+    this.watchdogSubstep(p0);
   }
 
   /** net touch on a service: no point, the serve is simply taken again. */
@@ -1994,6 +2029,9 @@ class Game {
       diagnosticInternalError: this._diagnosticInternalError || null,
       /* Последние 20 матчей с телеметрией бота: по ним видно, ошибается ли
        * WTF, жива ли сетка/длинная ошибка и какова сила ответа по уровням. */
+      /* Сторож физики: тикеты по пяти классам геймплейных багов, счётчики
+       * и гейты самопроверки. Читается без разбора 20 МБ событий. */
+      watchdog: this.watchdog ? this.watchdog.report() : null,
       aiLog: (this.profile && this.profile.data && this.profile.data.aiLog) || [],
       /* Цена кадра по подсистемам и текущий авто-масштаб: по этому блоку
        * видно, тормозит ли телефон из-за рендера, физики или оболочки. */
@@ -2276,6 +2314,7 @@ class Game {
     V3.addScaled(b.p, b.p, n, PH.R * 0.6);          // отлепить от грани для CCD следующего шага
     b.lastHitBy = 1;
     this.shotId++;
+    this._hitSeq = (this._hitSeq || 0) + 1;   // «стенка» — тоже контакт для сторожа
     this.rallyBounces.length = 0;
     this.netTouched = false;
     if (!this.isServeBall) {
@@ -2469,6 +2508,103 @@ class Game {
     s.pos.z = lerp(p.prevPos.z, p.pos.z, a1);
     V3.copy(s.normal, p.normal);
     return s;
+  }
+
+  /* ------------------------------------------------------------------
+   * Сторож физики: см. tt/src/46_physics_watchdog.js.
+   *
+   * arm() считается раз в кадр (жест уже разрешён гейтом), substep() — на
+   * каждом подшаге, но читает только числа и делает 3-4 сравнения: 600 Гц
+   * не должны стоить кадра. Контакт и отскок приходят отдельными вызовами,
+   * потому что там уже известны нормаль, точка и тип кромки.
+   * ------------------------------------------------------------------ */
+  watchdogArmFrame() {
+    const w = this.watchdog;
+    if (!w) return;
+    const b = this.ball, pad = this.player, sw = this.swipe;
+    const serving = this.state === GS.SERVE_TOSS && this.server === 1 && b.lastHitBy === 0;
+    const zone = sw && sw.pressZone;
+    const m = sw && sw.active ? sw.m : sw.lastReleased;
+    const ownBounce = Array.isArray(this.rallyBounces) && this.rallyBounces.includes(1);
+    /* Условия те же, что в tryPlayerHit: если гейт отказал бы нажатию
+     * (свой отскок, повторный контакт, кулдаун, направление), пролёт мимо
+     * клинка — не баг физики, а честный вердикт ввода. */
+    const armed = !!(b.live && !this.paused && !(this.recenterT > 0) &&
+      zone && zone.accepted && zone.directionOk !== false &&
+      zone.shotId === this.shotId && this.time - pad.lastHitT > .09 &&
+      !this.pressConsumed() &&
+      (serving || (this.state === GS.RALLY && b.lastHitBy === -1 && ownBounce)) &&
+      typeof isRealStroke === 'function' && isRealStroke(m, serving));
+    w.arm(armed, { shotId: this.shotId, serving, gestureId: sw && sw.gestureId });
+
+    /* Клинок бота взводится его собственной фазой удара: план есть,
+     * commit сделан, мяч летит к нему и уже отскочил на его половине.
+     * Всё остальное — честный отказ (не долетел, не отскочил, не бьёт). */
+    const ai = this.ai;
+    const oppBounce = Array.isArray(this.rallyBounces) && this.rallyBounces.some(s => s < 0);
+    const oppArmed = !!(b.live && !this.paused && ai && ai.commit && this.state === GS.RALLY &&
+      b.lastHitBy === 1 && oppBounce && b.p.z > ai.pos.z - 0.02);
+    w.armOpponent(oppArmed, {
+      shotId: this.shotId, stroke: ai && ai.commit ? (ai.commit.archId || null) : null,
+      aiLevel: ai ? ai.levelIndex : null,
+    });
+    /* Позы клинков для кадра: у бота берём прошлый кадр как prevPos, иначе
+     * его собственное движение по кадру считалось бы нулевым. */
+    if (this.aiPaddle && this.aiPaddle.pos && this._watchOppPad && this._watchOppPrev) {
+      V3.copy(this._watchOppPrev, this._watchOppPad.pos);
+      V3.copy(this._watchOppPad.pos, this.aiPaddle.pos);
+      if (this.aiPaddle.normal) V3.copy(this._watchOppPad.normal, this.aiPaddle.normal);
+    }
+  }
+
+  watchdogSubstep(p0) {
+    const w = this.watchdog;
+    if (!w) return;
+    const pad = this._subPad || this.player;
+    w.substep({
+      dt: PHYS_DT, time: this.time, p0, p1: this.ball.p, ball: this.ball,
+      pad, padPrev: pad.prevPos || this.player.prevPos, hitRadius: this.player.hitRadius,
+      opp: this._watchOpp || null,
+      hitSeq: this._hitSeq || 0,
+    });
+  }
+
+  /** Кадр: позы обеих ракеток (под столом видно и без удара) и «мяч ушёл
+   *  за кадр». Зовётся раз в кадр, уже после физики и удара бота. */
+  watchdogFrame(dtReal) {
+    const w = this.watchdog;
+    if (!w) return;
+    const ai = this.ai;
+    w.frame({
+      time: this.time, dt: Number.isFinite(dtReal) ? dtReal : 0,
+      side: this.ball.lastHitBy === 1 ? -1 : 1,
+      aiLevel: ai ? ai.levelIndex : null,
+      player: this.player, opponent: this.aiPaddle, ball: this.ball,
+      project: this._watchProject || (this._watchProject = (q) => this.project(q, {})),
+      viewport: { w: this.vw, h: this.vh },
+    });
+  }
+
+  /** Удар состоялся: потолки темпа и вращения после ВСЕХ множителей. */
+  watchdogStroke(side, racket, contactP, quality, speed, spin) {
+    const w = this.watchdog;
+    if (!w || !racket) return;
+    const pre = this._preHit;
+    this._preHit = null;
+    w.stroke({
+      time: this.time, side,
+      aiLevel: side === -1 && this.ai ? this.ai.levelIndex : null,
+      tactic: side === -1 && this.ai ? this.ai.tactic : null,
+      strokeId: (racket.stroke && racket.stroke.id) || null,
+      vmag: Number.isFinite(racket.vmag) ? racket.vmag : null,
+      vR: racket.vR || null, quality, contact: contactP,
+      /* Поза клинка в момент удара: к этому месту игра уже поставила её в
+       * точку контакта, и журнал aiShots должен видеть именно её. */
+      racket: { pos: side === -1 ? this.aiPaddle.pos : this.player.pos,
+        normal: racket.normal || null },
+      ball: { v: this.ball.v, w: this.ball.w }, ballBefore: pre,
+      ballSpeed: speed, ballSpin: spin,
+    });
   }
 
   diagnosticPhysicsGate(stage, detail = {}) {
@@ -2785,6 +2921,7 @@ class Game {
     racket.contactInput = { pressZone: this.swipe.pressZone && { ...this.swipe.pressZone }, capture: captureSample && { ...captureSample, route: hit.captureKind || 'ccd' }, p: shotVec(contact), v: shotVec(b.v), w: shotVec(b.w), gesture: { ...m },
       context: { grip: this.settings.grip, hand: this.settings.hand, forehand, isServe: isServeStroke,
         equip: { ...sideParams }, vmagK: this.equip.vmagK, moveYaw: this.padYaw || 0, movePitch: this.padPitch || 0 } };
+    this._preHit = { v: V3.clone(b.v), w: V3.clone(b.w) };
     const info = impactRacket(b.v, b.w, racket.normal, racket.vR, quality, racket.rubber || {});
     /* A separating face returns null and leaves the ball untouched. Consuming
      * the gesture (and the 90 ms hit cooldown, and the paddle's position) on a
@@ -2815,6 +2952,13 @@ class Game {
       if (this.shotJournal && typeof this.shotJournal.noteOutcome === 'function')
         this.shotJournal.noteOutcome(hit.captureKind === 'serve_edge' ? 'SERVE_EDGE' : 'EDGE', { q: quality });
     }
+    /* Сторож видит позу клинка ДО «прилипания» к мячу: именно эта дистанция
+     * и есть ответ на «подача не от ракетки»/«контакт не на ракетке». */
+    /* Поза, которой удар РЕШЁН (курсор/тап), а не анимированная копия:
+     * раньше тикет «ракетка под столом» считался по другой ракетке, чем та,
+     * что коснулась мяча. */
+    if (this.watchdog) this.watchdog.contact({ time: this.time, side: 1, serve: isServeStroke,
+      contact, pad: { pos: strokePos }, padBefore: pad.pos, racket });
     /* The blade is where the contact is. The old code left the bat up to one
      * full capture radius away and launched the ball from a point it visibly
      * never reached; the AI already snaps its paddle to the contact. prevPos is
@@ -2915,8 +3059,11 @@ class Game {
     const racket = ai.swing(this);
     if (!racket) { return; }
     const contact = V3.clone(b.p);
+    this._preHit = { v: V3.clone(b.v), w: V3.clone(b.w) };
     const info = impactRacket(b.v, b.w, racket.normal, racket.vR, racket.quality, racket.rubber || {});
     if (!info) return;
+    if (this.watchdog) this.watchdog.contact({ time: this.time, side: -1, serve: false,
+      contact, pad, padBefore: pad.pos, racket, aiLevel: this.ai ? this.ai.levelIndex : null });
     V3.copy(pad.normal, racket.normal);
     V3.copy(pad.pos, b.p);
     /* Same separation as the player's contact: the flight the solver fitted
@@ -3822,6 +3969,7 @@ class Game {
             racket = refineRacket(this.ball.p, this.ball.v, this.ball.w, racket, 1, racket.quality);
           }
           const contact = V3.clone(this.ball.p);
+          this._preHit = { v: V3.clone(this.ball.v), w: V3.clone(this.ball.w) };
           const info = impactRacket(this.ball.v, this.ball.w, racket.normal, racket.vR, racket.quality, racket.rubber || {});
           if (!info) break;
           /* Tame the serve bounce at the levels where the player cannot yet
@@ -3833,6 +3981,9 @@ class Game {
             this.ball.w.x *= kk;   // top/back kick grown by the bounce
             this.ball.w.y *= kk;   // side-skip off the bounce
           }
+          if (this.watchdog) this.watchdog.contact({ time: this.time, side: -1, serve: true,
+            contact, pad: this.aiPaddle, padBefore: this.aiPaddle.pos, racket,
+            aiLevel: this.ai ? this.ai.levelIndex : null });
           V3.copy(this.aiPaddle.pos, this.ball.p);
           V3.copy(this.aiPaddle.normal, racket.normal);
           V3.addScaled(this.ball.p, this.ball.p, racket.normal, PH.R * STROKE_CONFIG.racket.launchSeparation);
@@ -3873,6 +4024,7 @@ class Game {
      * substeps), so a bat that had visibly arrived was still a frame behind
      * for the contact — 0.1-0.2 m at a normal swipe speed. */
     this.updatePlayerPaddle(dtReal);
+    this.watchdogArmFrame();
 
     // physics substeps
     if (this.ball.live) {
@@ -3912,6 +4064,7 @@ class Game {
     }
     else this.ai.think(this, dt);
     this.tryAiHit();
+    this.watchdogFrame(dtReal);
     this.particles.update(dt);
     for (const m of this.marks) m.t += dtReal;
     while (this.marks.length && this.marks[0].t > this.marks[0].life) this.marks.shift();

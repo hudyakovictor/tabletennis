@@ -16,6 +16,7 @@
     "calibrate": "node tt/tools/calibrate.cjs",
     "noise": "node tt/tools/noise_zone_sim.cjs",
     "ai:serves": "node tt/tools/ai_serve_map.cjs",
+    "watchdog:rally": "node tt/tools/headless-rally.cjs --strokes=200",
     "analyze:log": "node tt/tools/analyze_input_log.cjs",
     "bench:log": "node tt/tools/benchmark_input_log.cjs",
     "test:panorama": "node tests/panorama-browser.cjs",

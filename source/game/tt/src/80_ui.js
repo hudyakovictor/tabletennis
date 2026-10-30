@@ -1003,7 +1003,35 @@ class UI {
       : archive && archive.status === 'opening' ? 'подключаем локальное хранилище' : 'восстановление после перезагрузки недоступно';
     const frameStatus = this._diagnosticBookmark ? ' · ' + (archive && archive.frameStatus === 'saved' ? 'кадр в локальном резерве'
       : archive && archive.frameStatus === 'pending' ? 'сохраняем кадр' : 'кадр только в памяти') : '';
-    status.textContent = `${g.debugRecording ? 'Запись включена' : 'Запись выключена'} · в памяти ${Math.round(stats.retainedWallSeconds)} с / ${stats.inWindow} событий · ${storage}${frameStatus}`;
+    /* Сторож физики: сколько тикетов и живы ли его детекторы. Гейты
+     * пересчитываются только когда меняется число тикетов — самопроверка
+     * детерминированная, но панель открывается на паузе, а не в бою. */
+    let watchdogStatus = '';
+    if (g.watchdog) {
+      const counts = g.watchdog.counts || {};
+      const total = Object.values(counts).reduce((a, b) => a + b, 0);
+      if (this._watchdogGatesKey !== total || !this._watchdogGates) {
+        this._watchdogGatesKey = total;
+        this._watchdogGates = g.watchdog.selfTest();
+      }
+      const gates = this._watchdogGates;
+      /* Доминирующий код: «сторож: 0» на пустом прогоне и «сторож: 7 ·
+       * BALL_THROUGH_RACKET» — разные диагнозы, и второй не должен требовать
+       * открывать отчёт. BALL_OFF_FRAME с cause='input' — законный исход
+       * удара, поэтому в счёт аномалий не идёт (см. gateCounts). */
+      const gateCounts = g.watchdog.gateCounts || counts;
+      const engine = Object.values(gateCounts).reduce((a, b) => a + Math.max(0, b), 0);
+      const explained = (g.watchdog.causes && g.watchdog.causes.input) || 0;
+      let top = '';
+      if (engine > 0) {
+        const [code, n] = Object.entries(gateCounts).filter(([, v]) => v > 0).sort((a, b) => b[1] - a[1])[0] || [];
+        if (code) top = ` · ${code}${n > 1 ? ' ×' + n : ''}`;
+      }
+      watchdogStatus = ` · сторож: ${engine}${top}` +
+        (explained ? ` · улетело по удару: ${explained}` : '') +
+        (gates ? (gates.status === 'green' ? ' · гейты зелёные' : ' · гейты КРАСНЫЕ') : '');
+    }
+    status.textContent = `${g.debugRecording ? 'Запись включена' : 'Запись выключена'} · в памяти ${Math.round(stats.retainedWallSeconds)} с / ${stats.inWindow} событий · ${storage}${frameStatus}${watchdogStatus}`;
     if (!this._diagnosticBookmark && !this._diagnosticRestoreTried && g.debugArchive) {
       this._diagnosticRestoreTried = true;
       g.debugArchive.readFrame().then(saved => {
