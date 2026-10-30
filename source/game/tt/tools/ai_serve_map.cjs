@@ -34,14 +34,14 @@ const random = mulberry32(seed);
 const seededMath = Object.create(Math);
 seededMath.random = random;
 
-const files = ['10_math.js', '12_match_rules.js', '30_physics.js', '38_paddle_motion.js', '40_swipe.js', '55_ai.js'];
+const files = ['05_stroke_config.js', '10_math.js', '12_match_rules.js', '30_physics.js', '38_paddle_motion.js', '40_swipe.js', '55_ai.js'];
 const source = files.map(f => fs.readFileSync(path.join(root, 'tt/src', f), 'utf8')).join('\n');
 const api = vm.runInNewContext(source +
-  '\n;({ OpponentAI, V3, PH, impactRacket, predict, MATCH_RULES })', { console, Math: seededMath });
+  '\n;({ OpponentAI, V3, PH, impactRacket, predict, MATCH_RULES, STROKE_CONFIG })', { console, Math: seededMath });
 const { OpponentAI, V3, PH, impactRacket, predict } = api;
 
 const ai = new OpponentAI(level);
-const AI_SERVE_CONTACT_Y = 0.36; // 70_game.js contacts the AI toss here
+const AI_SERVE_CONTACT_Y = api.STROKE_CONFIG.serve.toss.aiContactHeight;
 const rows = [];
 for (let i = 0; i < count; i++) {
   const ball = {

@@ -5,7 +5,7 @@ const { load } = require('./helpers.cjs');
  * AI_LEVELS to clamp the index, so the fixture must load the AI module too. */
 const lib = load(['10_math.js', '12_match_rules.js', '25_career.js', '30_physics.js', '38_paddle_motion.js',
   '40_swipe.js', '55_ai.js', '56_rig.js', '57_camera.js', '70_game.js', '80_ui.js'],
-  ['MATCH_RULES', 'pressHitZone', 'ballCaptureTarget', 'measureCaptureAllowance', 'installUnifiedControls', 'playerCaptureLimits', 'playerInCaptureRange', 'strikeCueModel',
+  ['MATCH_RULES', 'pressHitZone', 'ballCaptureTarget', 'measureCaptureAllowance', 'installUnifiedControls', 'playerCaptureLimits', 'playerInCaptureRange', 'strikeCueModel', 'strikeGreenTint',
     'Game', 'UI', 'GS', 'V3', 'Career', 'PERKS', 'MEET_ASSIST', 'AI_LEVELS']);
 const { MATCH_RULES: rules, V3, GS } = lib;
 function fixture() {
@@ -321,4 +321,89 @@ test('setDifficulty drives the bot, persists to the profile and ignores garbage'
   assert.equal(g.setDifficulty('wtf'), 0, 'мусор не пишет NaN в профиль');
   assert.equal(lib.AI_LEVELS.length, 4, 'кламп считается по реальному числу уровней');
   assert.equal(seen.join(','), '3,0,3,0,0', 'каждый вызов дошёл до бота');
+});
+
+/* ---------------- сигнал «бей сейчас» = только зелёный мяч ---------------- */
+/* Замер живого матча: честное окно захвата (мяч внутри бокса ракетки) —
+ * 1 кадр, 17–33 мс. таким сигналом воспользоваться нельзя, поэтому тон
+ * считается по времени до контакта. Всё остальное вокруг мяча в матче
+ * (эллипс бокса, пунктир grace, точка, шевроны, цветная крошка) убрано. */
+const LEAD = 0.30, FULL = 0.15;
+
+test('green ball ramps by time-to-contact instead of burning one frame', () => {
+  const tint = lib.strikeGreenTint;
+  assert.equal(tint(null, LEAD, FULL), 0, 'без окна — белый');
+  assert.equal(tint({ on: false, contactable: false, t: 0 }, LEAD, FULL), 0);
+  assert.equal(tint({ on: true, contactable: false, t: Infinity }, LEAD, FULL), 0, 'NaN/Infinity не красят мяч');
+  assert.equal(tint({ on: true, contactable: false, t: 0.36 }, LEAD, FULL), 0, 'далеко ещё белый');
+  assert.ok(Math.abs(tint({ on: true, contactable: false, t: 0.225 }, LEAD, FULL) - 0.5) < 1e-9, 'середина разбега — полтона');
+  assert.equal(tint({ on: true, contactable: false, t: 0.15 }, LEAD, FULL), 1, 'на плато — уже целиком зелёный');
+  assert.equal(tint({ on: true, contactable: false, t: 0.05 }, LEAD, FULL), 1, 'и ближе к контакту');
+  assert.equal(tint({ on: true, contactable: true, t: 0 }, LEAD, FULL), 1, 'в окне захвата — всегда полный');
+  let prev = -1;
+  for (let t = LEAD + 0.05; t >= 0; t -= 0.01) {
+    const k = tint({ on: true, contactable: false, t }, LEAD, FULL);
+    assert.ok(k >= prev && k <= 1, `разбег монотонный: t=${t} k=${k}`);
+    prev = k;
+  }
+  assert.ok(prev >= 0.99, 'к контакту тон насыщается');
+  // помощь заевшемуся (g.hintContact): запас длиннее — на 0.36 с уже зелёный
+  assert.ok(tint({ on: true, contactable: false, t: 0.36 }, 0.45, FULL) > 0.2);
+});
+
+test('the green plateau in the shipped constants is long enough to catch', () => {
+  const fs = require('node:fs'), path = require('node:path');
+  const src = fs.readFileSync(path.join(__dirname, '..', 'tt/src/70_game.js'), 'utf8');
+  const full = /const STRIKE_FULL = ([\d.]+)/.exec(src);
+  const lead = /const STRIKE_LEAD = this\.hintContact \? ([\d.]+) : ([\d.]+)/.exec(src);
+  assert.ok(full && lead, 'константы зелёного мяча на месте');
+  /* Плато не меньше 120 мс: окно приёма открывается на eta ~0.09–0.18 с,
+     и именно плато решает, увидит ли игрок зелёный или один кадр. */
+  assert.ok(+full[1] >= 0.12 && +full[1] <= 0.25, `плато ${full[1]} с — вне разумных`);
+  assert.ok(+lead[2] >= +full[1] && +lead[2] <= 0.4, `разбег ${lead[2]} с`);
+  assert.ok(+lead[1] > +lead[2], 'подсказка хоста удлиняет разбег, а не укорачивает');
+});
+
+test('match overlay draws no capture ellipse, no grace dash, no contact dot', () => {
+  const { g, u } = canvasFixture();
+  g.hintContact = true; g.state = GS.RALLY;
+  g.ball.lastHitBy = -1; g.ball.v = V3.new(0, 0, 6);
+  g.contactPrediction = () => ({ p: V3.new(0, 1, 1.5), t: 0.12 });
+  assert.equal(u.coachCueNow(), null, 'матчевой метки встречи больше нет');
+  assert.equal(u.drawCoach({ save() {}, restore() {} }, 800, 600, 2), false, 'рисовать нечего');
+  // тренировка остаётся учебной: там подсказка нужна
+  g.training = { coachCue: () => ({ kind: 'contact', p: V3.new(0, 1, 1.5) }) };
+  assert.ok(u.coachCueNow(), 'тренерский сигнал из тренировки не отрезан');
+});
+
+test('spin chevrons and spin crumbs stay out of matches', () => {
+  const spinFx = (freePlay) => {
+    const { g, u, c, ops } = canvasFixture();
+    g.training = null; g.freePlay = freePlay;
+    g.settings.showSpinIndicator = true;
+    g.spinIndicator = { color: [1, 0.52, 0.12] };
+    g.R = { camPos: V3.new(0, 1.4, 2.4) }; g.camPos = g.R.camPos;
+    g.ball.w = V3.new(0, 0, 120); g._cal = {};
+    u.dpr = 2; u.reducedMotion = false;
+    g.project = (p, out) => {
+      const o = out || {};
+      o.x = 0.5 + p.x * 0.5; o.y = 0.5 - p.y * 0.5; o.ok = true; return o;
+    };
+    u.drawSpinMark(c, 800, 600, 2, 1 / 60);
+    return ops.length;
+  };
+  assert.equal(spinFx(false), 0, 'в матче шевронов поверх мяча нет');
+  assert.ok(spinFx(true) > 0, 'в свободном полёте закрутка по-прежнему видна');
+
+  const crumbs = (freePlay) => {
+    const g = canvasFixture().g;
+    g.training = null; g.freePlay = freePlay; g.reducedMotion = false;
+    let spawned = 0;
+    g.particles = { spawn() { spawned++; } };
+    g.time = 1;
+    g._trailCrumb({ p: V3.new(0, 1, 1), w: V3.new(0, 0, 120), speed: 12 });
+    return spawned;
+  };
+  assert.equal(crumbs(false), 0, 'цветная крошка в матче не сыпется');
+  assert.equal(crumbs(true), 1, 'в свободном полёте дуга закрутки остаётся');
 });

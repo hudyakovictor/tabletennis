@@ -999,11 +999,11 @@ R(SRCG, 'player-visible RU strings are pure Cyrillic+spaced (no accidental latin
   return m.filter((t) => /\u0410-\u044F/.test(t) && /[a-zA-Z]/.test(t)).length === 0;
 })(), '', 2);
 
-R(SRCG, 'SERVE_BACK arch comment preserved (arc tuning history)', /SERVE_BACK: \{ elev: -34, contact: 64/.test(src('40_swipe.js')), '', 2);
+R(SRCG, 'SERVE_BACK tuning exists in the shared config', /SERVE_BACK: \{ elev: -34, contact: 64/.test(src('05_stroke_config.js')), '', 2);
 
-R(SRCG, 'RACKET_VMAX constant exists and is 19.5', /RACKET_VMAX = 19\.5/.test(src('40_swipe.js')), '', 3);
+R(SRCG, 'RACKET_VMAX aliases the shared config', /RACKET_VMAX = STROKE_CONFIG\.racket\.vmax/.test(src('40_swipe.js')), '', 3);
 
-R(SRCG, 'SERVE_VMAX ceiling is 12.5 (pro serve speed)', /SERVE_VMAX = 12\.5/.test(src('40_swipe.js')), '', 3);
+R(SRCG, 'SERVE_VMAX aliases the shared config', /SERVE_VMAX = STROKE_CONFIG\.serve\.vmax/.test(src('40_swipe.js')), '', 3);
 
 R(SRCG, 'serve solver keeps legal backstop check: "own" half bounce', /why = 'own'/.test(src('40_swipe.js')), '', 2);
 
@@ -1055,4 +1055,3 @@ console.log('groups:', JSON.stringify(groups));
 const fails = out.filter((r) => !r.ok);
 console.log(`DEEP AUDIT: ${out.length} checks, ${out.length - fails.length} pass, ${fails.length} fail`);
 module.exports = { out };
-

@@ -6,6 +6,7 @@
 const DEVMODE = /[?&]dev=1/.test(location.search);
 const GameHost = {
   frame: null, ready: false, q: [], subs: new Set(), rules: null,
+  trainingCatalog: null, trainSnapshot: null, trainRequestId: 0, trainSessionId: null,
   debug: (() => { try { return sessionStorage.getItem('ttu-debug-recording') === '1'; } catch (e) { return false; } })(),
   setDebug(on) {
     this.debug = !!on;
@@ -47,7 +48,11 @@ const GameHost = {
   mode: null, sticky: {}, paused: false, losses: [],
   send(type, data) {
     const m = Object.assign({ __tt: 1, type }, data || {});
-    if (['attract', 'lobby', 'match', 'train'].includes(type)) { this.mode = { type, data: data || {} }; this.paused = false; }
+    if (type === 'train') {
+      m.requestId = ++this.trainRequestId; m.progress = repairTrainingState(S.training);
+      this.trainSessionId = null; this.trainSnapshot = null;
+    }
+    if (['attract', 'lobby', 'match', 'train'].includes(type)) { this.mode = { type, data: { ...m } }; this.paused = false; }
     if (['quiet', 'mute', 'hint', 'quality', 'rm', 'debug'].includes(type)) this.sticky[type] = data || {};
     if (type === 'pause') this.paused = true; if (type === 'resume' || type === 'quit') this.paused = false;
     if (type === 'quit') this.mode = { type: 'attract', data: {} };
@@ -66,7 +71,11 @@ const GameHost = {
     Object.entries(sticky).forEach(([t, d]) => this.send(t, d));
     if (mode) {
       if (mode.type === 'match' && m.inMatch) this.send('match', Object.assign({}, mode.data, { resume: { score: m.score, server: m.server } }));
-      else if (mode.type === 'train') this.send('train', { step: Number.isFinite(m.training) ? m.training : (mode.data.step || 0) });
+      else if (mode.type === 'train') {
+        const snapshot = this._trainRecovery;
+        this.send('train', { ...mode.data, lessonId: snapshot && snapshot.id || mode.data.lessonId,
+          resume: snapshot ? { stage: snapshot.stage, practicePassed: snapshot.practicePassed, quizPassed: snapshot.quizPassed } : null });
+      }
       else if (mode.type !== 'match') this.send(mode.type, mode.data);
       else this.send('attract');
     }
@@ -86,10 +95,11 @@ const GameHost = {
   }
 };
 window.addEventListener('message', (e) => {
-  const m = e.data; if (!m || m.__tt !== 1 || !GameHost.frame || e.source !== GameHost.frame.contentWindow) return;
+  let m = e.data; if (!m || m.__tt !== 1 || !GameHost.frame || e.source !== GameHost.frame.contentWindow) return;
   if (GameHost.debug && typeof HostDiagnostics !== 'undefined' && ['glLost', 'ready', 'paused', 'matchEnd'].includes(m.type))
     HostDiagnostics.record('engine_message', { messageType: m.type, paused: m.type === 'paused' ? !!m.v : null });
   if (m.type === 'glLost') {
+    GameHost._trainRecovery = GameHost.trainSnapshot;
     if (GameHost._glRecoveryPending) return;
     let flush = null;
     try {
@@ -107,6 +117,7 @@ window.addEventListener('message', (e) => {
   }
   if (m.type === 'ready') {
     GameHost.ready = true; GameHost.rules = m.rules;
+    if (m.trainingCatalog && m.trainingCatalog.version === 1) GameHost.trainingCatalog = m.trainingCatalog;
     if (GameHost._recovering) { GameHost._recovering = false; setTimeout(() => { const ov = $('#glRecover'); ov && ov.classList.remove('on'); }, 350); }
     if (GameHost.debug) GameHost.send('debug', { on: true });
     GameHost.send('quality', { q: S.quality });
@@ -121,6 +132,23 @@ window.addEventListener('message', (e) => {
     if (S.cal) for (const k in S.cal) GameHost.send('cal', { k, v: S.cal[k] });
     GameHost.send('missShots', { on: S.missShots !== false, half: S.missShotHalf });
     const q = GameHost.q; GameHost.q = []; q.forEach((x) => GameHost.frame.contentWindow.postMessage(x, '*'));
+  }
+  if (m.type === 'trainingCatalog' && m.catalog && m.catalog.version === 1) GameHost.trainingCatalog = m.catalog;
+  if (['train', 'trainingProgress', 'trainDone'].includes(m.type)) {
+    if (m.requestId !== GameHost.trainRequestId || !GameHost.mode || GameHost.mode.type !== 'train') return;
+    if (m.type === 'train') {
+      if (GameHost.trainSessionId && GameHost.trainSessionId !== m.sessionId) return;
+      GameHost.trainSessionId = m.sessionId; GameHost.trainSnapshot = m;
+      if (m.mode === 'course' && S.training.lastLesson !== m.id && GameHost.trainingCatalog &&
+          GameHost.trainingCatalog.lessons.some(s => s.id === m.id)) { S.training.lastLesson = m.id; save(); }
+    } else if (m.sessionId !== GameHost.trainSessionId) return;
+    if (m.type === 'trainingProgress' && applyTrainingProgress(S, m, GameHost.trainingCatalog)) saveNow();
+    if (m.type === 'trainDone') {
+      const result = trainingMastery(S, GameHost.trainingCatalog);
+      const rewarded = m.mode === 'course' && m.courseComplete === true && result.courseComplete && awardTrainingCompletion(S, GameHost.trainingCatalog);
+      m = { ...m, ...result, courseComplete: m.mode === 'course' && result.courseComplete, rewarded: !!rewarded };
+      if (rewarded || result.courseComplete) saveNow();
+    }
   }
   if (m.type === 'haptic') haptic(m.kind);
   if (m.type === 'attempt') ZoneStats.add(m);

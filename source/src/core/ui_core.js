@@ -122,10 +122,13 @@ const Router = {
     const sc = el.querySelector('.scroll'); const top = sc ? sc.scrollTop : 0;
     /* Без входной хореографии: игрок уже на экране, контент не должен
      * выезжать заново — меняются только числа. */
-    el.classList.add('repaint');
-    el.innerHTML = d.render();
-    try { d.mount && d.mount(el); } catch (e) { console.error(e); }
-    const sc2 = el.querySelector('.scroll'); if (sc2) sc2.scrollTop = top;
+    // Replace the section so remounting cannot accumulate delegated handlers.
+    const fresh = el.cloneNode(false);
+    fresh.classList.add('repaint');
+    fresh.innerHTML = d.render();
+    el.replaceWith(fresh);
+    try { d.mount && d.mount(fresh); } catch (e) { console.error(e); }
+    const sc2 = fresh.querySelector('.scroll'); if (sc2) sc2.scrollTop = top;
     return true;
   },
   back() {
@@ -182,9 +185,10 @@ const Nav = {
   /* бадж «Пропуска» = число реально доступных наград (не зашитая константа):
      при открытии приложения и после каждого клейма пересчитывается */
   dots() {
-    if (typeof PASS === 'undefined') return;
+    const season = globalThis.TTSeason;
+    if (!season) return;
     let n = 0;
-    for (const r of PASS) {
+    for (const r of season.seasonOver() || S.passSeason !== season.seasonNumber() ? [] : season.currentPass()) {
       if (r.l <= S.passLvl && !S.claimed.f.includes(r.l)) n++;
       if (S.premium && r.l <= S.passLvl && !S.claimed.p.includes(r.l)) n++;
     }

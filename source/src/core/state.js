@@ -11,17 +11,16 @@
    уровень 1. Всё остальное зарабатывается матчами (см. сложность формы в
    screens/match.js). */
 const SAVE_KEY = 'ttu-v2';
-const SAVE_VERSION = 5;
+const SAVE_VERSION = 7;
 const DEFAULT_STATE = {
   v: SAVE_VERSION, lang: null,
   name: 'Anton Spin', nick: '@anton_tt', club: 'Spin Lab',
   coins: 1840, gems: 46, level: 1, xp: 0, xpMax: 1800,
   rating: 1000, wins: 0, losses: 0, streak: 0, bestRally: 0,
   form: [],
-  /* История рейтинга для графика в профиле: [{t, r}], 30 дней. Раньше график
-     был синусоидой с подписью «+231» — красиво и неправда. */
+  /* История рейтинга для графика в профиле: [{t, r}], 30 дней. */
   hist: [],
-  passLvl: 7, passXp: 60, premium: false, claimed: { f: [1, 2, 3, 4, 5], p: [] },
+  passLvl: 0, passXp: 0, passSeason: 4, premium: false, claimed: { f: [], p: [] },
   chests: [
     { id: 'c1', kind: 'silver', state: 'ready' },
     { id: 'c2', kind: 'gold', state: 'unlocking', endsAt: Date.now() + (2 * 3600 + 14 * 60) * 1000 },
@@ -30,6 +29,7 @@ const DEFAULT_STATE = {
   ],
   owned: ['r-teal', 'b-ink', 't-coral'], equipped: { rubber: 'r-teal', blade: 'b-ink', trail: 't-coral' },
   sfx: true, music: true, vibro: true, rm: false, quality: 'high', assist: true, tutorial: true, hint: true, tutorialDone: false,
+  training: { version: 1, lessons: {}, lastLesson: null },
   /* Уровень бота: выбор игрока (0 EASY … 3 WTF), а не лига. Живёт в
      профиле и переживает перезапуск. Ступенька по умолчанию — СРЕДНИЙ. */
   diff: 1,
@@ -56,8 +56,65 @@ const MIGRATIONS = {
   3: (s) => { if (!Number.isFinite(s.diff)) s.diff = 1; },
   /* v4 → v5: история рейтинга. Старые сейвы получают пустую — график честно
      покажет, что истории нет, а не нарисует выдуманную кривую. */
-  4: (s) => { if (!Array.isArray(s.hist)) s.hist = []; }
+  4: (s) => { if (!Array.isArray(s.hist)) s.hist = []; },
+  /* v5 → v6: сезон привязан к номеру. Старые сейвы получают Сезон 4 — тот же,
+     что был хардкодом, поэтому их прогресс пропуска не сбрасывается до ролловера. */
+  5: (s) => { if (!Number.isFinite(s.passSeason)) s.passSeason = 4; },
+  // A legacy tutorial flag is not proof of mastering the new curriculum.
+  6: (s) => { s.training = repairTrainingState(s.training); },
 };
+function repairTrainingState(raw) {
+  const out = { version: 1, lessons: {}, lastLesson: null };
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return out;
+  if (typeof raw.lastLesson === 'string' && /^[A-Z][A-Z0-9_]{0,47}$/.test(raw.lastLesson)) out.lastLesson = raw.lastLesson;
+  if (raw.lessons && typeof raw.lessons === 'object' && !Array.isArray(raw.lessons)) {
+    for (const id of Object.keys(raw.lessons).slice(0, 100)) {
+      const row = raw.lessons[id];
+      if (!/^[A-Z][A-Z0-9_]{0,47}$/.test(id) || !row || typeof row !== 'object' || Array.isArray(row)) continue;
+      const number = value => Number.isFinite(value) ? Math.max(0, Math.min(100000, Math.floor(value))) : 0;
+      const attempts = number(row.attempts);
+      out.lessons[id] = { mastered: row.mastered === true, practiced: row.practiced === true,
+        attempts, correct: Math.min(attempts, number(row.correct)) };
+    }
+  }
+  return out;
+}
+function applyTrainingProgress(state, message, catalog) {
+  if (!message || message.mode !== 'course' || !catalog || catalog.version !== 1 || !Array.isArray(catalog.lessons)) return false;
+  const lesson = catalog.lessons.find(s => s.id === message.id);
+  if (!lesson || !Number.isInteger(message.attempts) || !Number.isInteger(message.correct) ||
+      message.attempts < message.correct || message.correct < 3 || message.attempts > 100000) return false;
+  const mastery = message.stage === 'check' && message.attempts === 4 && message.validated === true &&
+    message.practicePassed === true && message.quizPassed === true;
+  const practice = message.stage === 'practice' && message.practicePassed === true;
+  if (!mastery && !practice) return false;
+  const progress = repairTrainingState(state.training), old = progress.lessons[message.id] || {};
+  const incoming = repairTrainingState(message.profile).lessons[message.id] || {};
+  progress.lessons[message.id] = { practiced: old.practiced === true || practice || mastery,
+    mastered: old.mastered === true || mastery, attempts: Math.max(old.attempts || 0, incoming.attempts || message.attempts),
+    correct: Math.max(old.correct || 0, incoming.correct || message.correct) };
+  progress.lastLesson = message.id; state.training = progress;
+  return true;
+}
+function trainingMastery(state, catalog) {
+  const lessons = catalog && Array.isArray(catalog.lessons) ? catalog.lessons : [];
+  const skills = new Set(); let mastered = 0;
+  for (const lesson of lessons) if (state.training && state.training.lessons &&
+      Object.prototype.hasOwnProperty.call(state.training.lessons, lesson.id) && state.training.lessons[lesson.id] && state.training.lessons[lesson.id].mastered === true) {
+    mastered++; (lesson.skills || []).forEach(id => skills.add(id));
+  }
+  const totalSkills = catalog && Array.isArray(catalog.skills) ? catalog.skills : [];
+  return { mastered, total: lessons.length, coverage: totalSkills.length ? Math.round(totalSkills.filter(s => skills.has(s.id)).length / totalSkills.length * 100) : 0,
+    courseComplete: lessons.length > 0 && mastered === lessons.length };
+}
+function awardTrainingCompletion(state, catalog) {
+  if (!trainingMastery(state, catalog).courseComplete) return false;
+  state.tutorialDone = true;
+  if (state.tutorialRewarded) return false;
+  // Credit and the one-time flag share the same save, before any animation.
+  state.coins += 200; state.gems += 5; state.tutorialRewarded = true;
+  return true;
+}
 const Store = {
   ok: (() => { try { const k = '__t'; localStorage.setItem(k, '1'); localStorage.removeItem(k); return true; } catch (e) { return false; } })(),
   read(key) { if (!this.ok) return null; try { return JSON.parse(localStorage.getItem(key) || 'null'); } catch (e) { return null; } },
@@ -81,6 +138,7 @@ const Store = {
     if (!Array.isArray(draft.owned)) draft.owned = DEFAULT_STATE.owned.slice();
     if (!draft.equipped || typeof draft.equipped !== 'object') draft.equipped = Object.assign({}, DEFAULT_STATE.equipped);
     if (!Array.isArray(draft.chests)) draft.chests = structuredClone(DEFAULT_STATE.chests);
+    draft.training = repairTrainingState(draft.training);
     return draft;
   },
   save(s) { this.write(SAVE_KEY, s); }

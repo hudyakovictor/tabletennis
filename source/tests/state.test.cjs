@@ -15,7 +15,7 @@ function loadState(raw) {
 
 test('v2 gallery crop upgrades once without clearing images or other settings', () => {
   const { S, SAVE_VERSION, entries } = loadState({ v: 2, missShotHalf: 20, missShots: false, rating: 1105 });
-  assert.equal(SAVE_VERSION, 5); assert.equal(S.v, 5); assert.equal(S.missShotHalf, 350);
+  assert.equal(SAVE_VERSION, 7); assert.equal(S.v, 7); assert.equal(S.missShotHalf, 350);
   assert.equal(S.missShots, false); assert.equal(S.rating, 1105);
   assert.equal(JSON.parse(entries.get('ttu-v2.bak')).missShotHalf, 20);
   assert.equal(JSON.parse(entries.get('ttu-miss-shots'))[0].img, 'T0xE');
@@ -38,4 +38,23 @@ test('a v4 save gets an empty rating history, a real one survives', () => {
   const hist = [{ t: Date.now() - 864e5, r: 1164 }, { t: Date.now(), r: 1180 }];
   const kept = loadState({ v: 4, hist }).S;
   assert.equal(kept.hist.length, 2, 'своя история не затирается миграцией');
+});
+
+/* v5 → v6: сезон привязан к номеру. Старый сейв получает passSeason = 4 —
+ * тот же сезон, что был хардкодом, поэтому ролловера до смены нет. */
+test('a v5 save gets passSeason = 4 and survives a real one', () => {
+  const { S } = loadState({ v: 5, passLvl: 7, passXp: 60 });
+  assert.equal(S.passSeason, 4, 'запускаем сезон 4 на легаси-сейве');
+  assert.equal(S.passLvl, 7); assert.equal(S.passXp, 60);
+  const kept = loadState({ v: 5, passSeason: 5 }).S;
+  assert.equal(kept.passSeason, 5, 'уже сменённый сезон не откатывается');
+});
+
+test('new saves have no invented pass progress and legacy claims survive migration', () => {
+  const fresh = loadState(null).S;
+  assert.equal(fresh.passLvl, 0); assert.equal(fresh.passXp, 0);
+  assert.deepEqual(Array.from(fresh.claimed.f), []); assert.deepEqual(Array.from(fresh.claimed.p), []);
+  const legacy = loadState({ v: 5, passLvl: 7, passXp: 60, premium: true, claimed: { f: [1, 2], p: [1] } }).S;
+  assert.equal(legacy.passLvl, 7); assert.equal(legacy.passXp, 60); assert.equal(legacy.premium, true);
+  assert.deepEqual(Array.from(legacy.claimed.f), [1, 2]); assert.deepEqual(Array.from(legacy.claimed.p), [1]);
 });

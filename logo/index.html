@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#11110f">
+  <title>Table Tennis WTF | Лаборатория заставок</title>
+  <link rel="stylesheet" href="lab.css">
+  <script src="lab.js" defer></script>
+</head>
+<body>
+  <header class="masthead">
+    <a class="wordmark" href="./index.html" aria-label="Table Tennis WTF, лаборатория заставок">
+      <span>TABLE TENNIS</span><strong>WTF<span class="wordmark-dot">!</span></strong>
+    </a>
+    <div class="masthead-note"><span class="edition">MOTION LAB / 001</span><span>Сначала загрузка. Потом WTF.</span></div>
+    <span class="prototype-tag">НЕ ИГРА. ПОЛИГОН.</span>
+  </header>
+
+  <main>
+    <div class="workspace">
+      <section class="preview-column" aria-label="Интерактивная заставка">
+        <div class="preview-heading"><span class="eyebrow">Проверка на попадание</span><span id="phase-label" class="phase-label" role="status">Готовим ассеты</span></div>
+        <div class="screen-shell">
+          <div id="stage" class="stage" data-variant="smash" data-phase="loading">
+            <div class="arena-floor" aria-hidden="true"></div>
+            <canvas id="ink" aria-hidden="true"></canvas>
+            <div id="load-accessible" class="sr-only" role="progressbar" aria-label="Загрузка игры, демонстрация" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"></div>
+            <div id="world" class="world" aria-hidden="true">
+              <div id="comic-panels" class="comic-panels"><i></i><i></i><i></i></div>
+              <img id="streak" class="layer streak" src="assets/streak.png" alt="">
+              <img id="paddle" class="layer paddle" src="assets/paddle-red.png" alt="">
+              <div id="net-left" class="layer net-piece left"><img src="assets/net.png" alt=""></div>
+              <div id="net-right" class="layer net-piece right"><img src="assets/net.png" alt=""></div>
+              <div id="ring" class="layer ring">
+                <svg viewBox="0 0 160 160"><circle class="ring-track" cx="80" cy="80" r="68"></circle><circle id="ring-progress" class="ring-progress" cx="80" cy="80" r="68"></circle></svg>
+                <span class="ring-tick"></span>
+              </div>
+              <div id="ball" class="layer ball"><span id="white-core" class="white-core"></span><img id="face" src="assets/ball-panic.png" alt=""></div>
+              <img id="impact" class="layer impact" src="assets/impact.png" alt="">
+              <img id="crown" class="layer crown" src="assets/crown.png" alt="">
+              <img id="scream" class="layer scream" src="assets/cry-aaa.png" alt="">
+              <div id="comic-word" class="layer comic-word">WTF?!</div>
+              <div id="loader-copy" class="loader-copy"><span id="percentage">0%</span><span id="loading-caption">ЗАРЯЖАЕМ РАКЕТКУ</span></div>
+              <img id="scene-logo" class="layer scene-logo" src="assets/logo-brush.png" alt="">
+              <span class="scene-subtitle">WILD TRICK FACTORY</span>
+            </div>
+            <section id="mock-menu" class="mock-menu" aria-label="Макет главного меню" hidden>
+              <span class="menu-kicker">ГЛАВНОЕ МЕНЮ / МАКЕТ</span>
+              <img id="menu-logo" src="assets/logo-brush.png" alt="Table Tennis WTF">
+              <div class="menu-copy"><h2>Не паникуй.<br>Просто отбей.</h2><p>Загрузка закончилась. Хаос начинается.</p></div>
+              <button id="mock-play" class="menu-play" type="button">ИГРАТЬ <span aria-hidden="true">↗</span></button>
+              <button id="menu-replay" class="menu-replay" type="button">Ещё один удар</button>
+              <span class="menu-footnote">Это пример перехода, игра не подключена.</span>
+            </section>
+            <div id="flash" class="flash" aria-hidden="true"></div>
+            <div id="asset-error" class="asset-error" role="alert" hidden></div>
+            <div id="stage-toast" class="stage-toast" role="status" hidden></div>
+          </div>
+          <div class="film-strip"><span id="frame-name">01 / В ЭКРАН</span><button id="fullscreen" type="button" aria-label="Развернуть анимацию на весь экран">НА ВЕСЬ ЭКРАН <span aria-hidden="true">↗</span></button></div>
+        </div>
+
+        <div class="transport">
+          <button id="play-all" class="button primary" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m8 5 11 7-11 7z"></path></svg>Вся заставка</button>
+          <button id="play-hit" class="button" type="button">Только удар</button>
+          <button id="pause" class="button icon-button" type="button" aria-label="Пауза" aria-pressed="false"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5v14M16 5v14"></path></svg></button>
+        </div>
+        <div class="timeline-row"><label for="timeline">ФИНАЛ ПО КАДРАМ</label><output id="time-output" for="timeline">0.0 / 1.6 с</output></div>
+        <input id="timeline" class="timeline" type="range" min="0" max="1000" value="0" aria-label="Положение финальной анимации">
+        <div class="timeline-notes"><span>Белый мяч</span><span>Контакт</span><span>В камеру</span><span>Меню</span></div>
+        <details class="loading-test"><summary>Проверить загрузку по процентам</summary><label for="load-slider">Загрузка <output id="load-output" for="load-slider">0%</output></label><input id="load-slider" type="range" min="0" max="100" value="0"></details>
+        <p class="preview-note">Загрузка здесь имитируется. Финал запускается только после 100%. Можно сразу повторить удар или остановить любой кадр.</p>
+      </section>
+
+      <aside class="workbench" aria-label="Выбор идеи и настройки">
+        <div class="section-heading"><span class="eyebrow">Шесть способов сказать</span><h1>WHAT THE<br><span>FOREHAND.</span></h1><p>Один мяч. Разный уровень безумия.<br>Выбери сюжет, а потом смешай слои.</p></div>
+        <div id="ideas" class="ideas" role="group" aria-label="Варианты анимации"></div>
+        <div class="idea-description"><span id="idea-number" class="idea-number">01</span><div><h2 id="idea-title">В экран</h2><p id="idea-description"></p></div></div>
+
+        <section class="settings" aria-labelledby="settings-title">
+          <h2 id="settings-title" class="eyebrow">Собери свой удар</h2>
+          <div class="select-grid">
+            <label>Мяч / первый кадр<select id="ball-choice"><option value="ball-panic">01 · Паника</option><option value="ball-wobble">02 · Косой взгляд</option><option value="ball-scream">03 · Большой крик</option><option value="ball-shock">04 · Полный шок</option></select></label>
+            <label>Ракетка<select id="paddle-choice"><option value="paddle-red">Красная / чистый силуэт</option><option value="paddle-comic">Комикс / брызги</option></select></label>
+            <label class="wide">Логотип<select id="logo-choice"><option value="logo-brush">Table Tennis WTF / кисть</option><option value="logo-stamp">Table Tennis WTF / эмблема</option></select></label>
+          </div>
+          <div class="duration-heading"><label for="duration">ДЛИТЕЛЬНОСТЬ ФИНАЛА</label><output id="duration-output" for="duration">1.6 с</output></div>
+          <input id="duration" type="range" min="1000" max="2000" step="100" value="1600">
+          <div class="check-grid">
+            <label><input id="mimic" type="checkbox" checked><span>Мимика / 3 кадра</span></label>
+            <label><input id="particles" type="checkbox" checked><span>Брызги и линии скорости</span></label>
+            <label><input id="flash-choice" type="checkbox" checked><span>Одна белая вспышка</span></label>
+            <label><input id="shake" type="checkbox" checked><span>Тряска при ударе</span></label>
+            <label><input id="sound" type="checkbox"><span>Синтезированный звук</span></label>
+            <label><input id="slow" type="checkbox"><span>Замедление ×0.35</span></label>
+            <label class="wide"><input id="reduced" type="checkbox"><span>Без резкого движения и вспышки</span></label>
+          </div>
+        </section>
+        <p class="workbench-note">Настройки относятся только к этому полигону. Текущая заставка и меню игры не изменены.</p>
+      </aside>
+    </div>
+
+    <section class="asset-section" aria-labelledby="assets-title">
+      <div class="asset-heading"><div><span class="eyebrow">Не картинки целиком. Отдельные слои.</span><h2 id="assets-title">Из коллажа в движение.</h2></div><p>Нажми на ассет, чтобы рассмотреть прозрачность.<br>Все слои вырезаны из твоих изображений.</p></div>
+      <div id="asset-grid" class="asset-grid"></div>
+    </section>
+  </main>
+
+  <footer class="footer"><span>TABLE TENNIS WTF / WILD TRICK FACTORY</span><div><a href="Комикс-граффити мудборд «Настольный теннис WTF».png" target="_blank" rel="noopener">Коллаж 01</a><a href="Концепт-арт игры «Настольный теннис WTF».png" target="_blank" rel="noopener">Коллаж 02</a><a href="Экстремальный теннис_ концепт-арт игры.png" target="_blank" rel="noopener">Коллаж 03</a></div><span>Пробел: пауза · R: повтор</span></footer>
+
+  <dialog id="asset-dialog" class="asset-dialog" aria-labelledby="asset-dialog-title">
+    <form method="dialog"><h2 id="asset-dialog-title">Ассет</h2><button class="button" aria-label="Закрыть просмотр" value="close" type="submit">Закрыть</button></form>
+    <div class="asset-large"><img id="asset-large-image" alt=""></div>
+    <a id="asset-download" class="button primary" download>Скачать PNG</a>
+  </dialog>
+  <noscript><div class="noscript">Для проигрывания анимаций нужен JavaScript. Исходные коллажи доступны по ссылкам внизу.</div></noscript>
+</body>
+</html>

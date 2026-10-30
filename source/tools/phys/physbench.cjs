@@ -6,7 +6,7 @@ const path = require('path'), fs = require('fs'), vm = require('vm');
 const SRC = path.resolve(__dirname, '../../game/tt/src');
 function load(model) {
   const ctx = vm.createContext({ console, Math });
-  const src = ['10_math.js', '30_physics.js'].map((f) => fs.readFileSync(path.join(SRC, f), 'utf8')).join('\n');
+  const src = ['05_stroke_config.js', '10_math.js', '30_physics.js'].map((f) => fs.readFileSync(path.join(SRC, f), 'utf8')).join('\n');
   vm.runInContext(src + `\n;globalThis.api = { PH, V3, predict, aeroAccel, bounceTable, integrateBall };`, ctx);
   if (model && ctx.api.PH.AERO_MODEL !== undefined) ctx.api.PH.AERO_MODEL = model;
   return ctx.api;

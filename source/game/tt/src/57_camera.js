@@ -705,7 +705,20 @@ function cameraRigFor(mode, ball, aspect, out, adjust) {
    * uses, so the player's own half of the screen stays anchored. Four
    * projected points — cheaper than one frame of paddle maths. */
   o.shiftY = 0;
-  const b = tabletopBounds(rigViewProj(o, aspect, _adjFitBuf));
+  let vp = rigViewProj(o, aspect, _adjFitBuf);
+  let b = tabletopBounds(vp);
+  const frame = tableScreenBounds(vp), opp = opponentScreenTop(vp);
+  // A stored trim may enlarge the table while cutting off the opponent.
+  // Widen only the lens; all screen spans scale together before nearY is grounded.
+  const widen = Math.max(1,
+    (b.bottom - b.top) / (P.nearY - P.topMin + 1e-4),
+    (b.bottom - opp) / (P.nearY - CAMERA_HEADROOM + 0.003),
+    (0.5 - frame.left) / 0.48, (frame.right - 0.5) / 0.48);
+  if (widen > 1) {
+    o.fov = Math.min(84, 2 * Math.atan(Math.tan(o.fov * DEG / 2) * widen) / DEG);
+    vp = rigViewProj(o, aspect, _adjFitBuf);
+    b = tabletopBounds(vp);
+  }
   o.shiftY = P.nearY - b.bottom;
   return o;
 }

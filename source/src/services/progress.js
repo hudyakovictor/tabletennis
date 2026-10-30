@@ -96,6 +96,66 @@ const Progress = {
     this.merge(r.json.progress, !this.pending);
   },
 
+  seasonRequest: null, seasonWatching: false, seasonTimer: 0, seasonStamp: null,
+
+  reconcileSeason() {
+    const season = globalThis.TTSeason;
+    if (season.rolloverNeeded(S.passSeason)) {
+      S.passSeason = season.seasonNumber();
+      S.passLvl = 0;
+      S.passXp = 0;
+      S.premium = false;
+      S.claimed = { f: [], p: [] };
+      saveNow();
+    }
+    const current = season.currentSeason();
+    const stamp = JSON.stringify([current, season.seasonOver(), season.seasonLeftText(), S.passSeason]);
+    if (stamp !== this.seasonStamp) {
+      this.seasonStamp = stamp;
+      Nav.dots();
+      if (Router.cur === 'pass') Router.repaint();
+      if (Router.cur === 'ranks') {
+        const chip = document.querySelector('.screen.current [data-season-left]');
+        if (chip) chip.textContent = t('ranks.seasonChip', { left: season.seasonLeftShort() });
+      }
+    }
+    if (this.seasonWatching) {
+      clearTimeout(this.seasonTimer);
+      const delay = Math.max(25, Math.min(60000, season.nextSeasonBoundary() - Date.now()));
+      this.seasonTimer = setTimeout(() => {
+        // Reconcile cached boundaries immediately, without waiting for the network.
+        this.reconcileSeason();
+        this.applySeasonRollover().catch(() => {});
+      }, delay);
+    }
+  },
+
+  /** Public calendar loading is independent of Telegram authentication. */
+  async applySeasonRollover() {
+    if (this.seasonRequest) return this.seasonRequest;
+    this.seasonRequest = (async () => {
+      try {
+        if (Api.enabled) globalThis.TTSeason.setServerSeason(await Api.liveops());
+      } finally {
+        this.reconcileSeason();
+      }
+    })();
+    try { await this.seasonRequest; } finally { this.seasonRequest = null; }
+  },
+
+  watchSeason() {
+    if (this.seasonWatching) return;
+    this.seasonWatching = true;
+    const refresh = () => {
+      this.reconcileSeason();
+      this.applySeasonRollover().catch(() => {});
+    };
+    document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') refresh(); });
+    window.addEventListener('pageshow', refresh);
+    window.addEventListener('online', refresh);
+    refresh();
+  },
+
   async boot() {
     if (!Api.enabled || this.ready) return;
     this.ready = true;

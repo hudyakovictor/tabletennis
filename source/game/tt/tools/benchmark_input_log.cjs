@@ -18,7 +18,7 @@ const option = (name, fallback) => {
   return i >= 0 && args[i + 1] ? args[i + 1] : fallback;
 };
 const iterations = Math.max(1, Math.floor(Number(option('--iterations', '20000')) || 20000));
-const files = ['10_math.js', '12_match_rules.js', '25_career.js', '30_physics.js',
+const files = ['05_stroke_config.js', '10_math.js', '12_match_rules.js', '25_career.js', '30_physics.js',
   '38_paddle_motion.js', '40_swipe.js', '42_shot_diagnostics.js', '43_input_telemetry.js',
   '55_ai.js', '56_rig.js', '57_camera.js', '59_replay.js', '70_game.js', '80_ui.js'];
 const saved = new Map();

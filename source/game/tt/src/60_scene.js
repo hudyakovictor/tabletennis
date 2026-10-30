@@ -290,7 +290,6 @@ class Scene {
       ceiling: { color: [0.07, 0.10, 0.16], emissive: [0.016, 0.026, 0.048], rough: 0.95 },
       shadow: { color: [0, 0, 0], tex: this.tex.shadow, unlit: true, emissive: [0, 0, 0], blend: true, doubleSided: true, rough: 1 },
       pool: { color: [1, 1, 1], tex: this.tex.glow, blend: 'add', emissive: [0.050, 0.058, 0.080], doubleSided: true, rough: 1 },
-      gloss: { color: [1, 1, 1], tex: this.tex.glow, blend: 'add', emissive: [1, 1, 1], doubleSided: true, rough: 1, unlit: true },
     };
 
     /* ---- static transform cache ---- */
@@ -395,48 +394,9 @@ class Scene {
     R.draw(this.mesh.quad, this._sm, this._shadowMat);
   }
 
-  /** Glossy smear on the table top — the cheap, stable stand-in for a planar
-   *  reflection. A polished table does not mirror sharply: micro-roughness
-   *  stretches every highlight along the view direction and fades it with
-   *  height. Two quads do it: a tight bright core right under the object and
-   *  a long dim tail towards the viewer. Costs nothing, can never spill off
-   *  the table and never fights the depth buffer. */
-  gloss(R, x, y, z, camX, camZ, radius, strength, col) {
-    const TY = PH.T_H, HW = PH.T_HALF_WID, HL = PH.T_HALF_LEN;
-    const h = y - TY;
-    if (h < -0.03 || h > 1.05) return;
-    if (Math.abs(x) > HW + 0.10 || Math.abs(z) > HL + 0.16) return;
-    const hh = Math.max(0, h);
-    let a = strength * Math.exp(-hh * 1.5);
-    a *= clamp((HW + 0.03 - Math.abs(x)) / 0.13, 0, 1);     // soft rim cut
-    a *= clamp((HL + 0.05 - Math.abs(z)) / 0.16, 0, 1);
-    if (a < 0.012) return;
-
-    // The mirror image slides towards the viewer along the horizontal view
-    // direction, so the smear has to follow the camera azimuth — otherwise
-    // it points the wrong way the moment the player orbits the hall.
-    const vx = camX - x, vz = camZ - z;
-    const vl = Math.hypot(vx, vz) || 1e-4;
-    const ux = vx / vl, uz = vz / vl;
-    const yaw = Math.atan2(ux, uz);
-    const g = this.mat.gloss;
-    const qx = this._sq, qy = this._sq2 || (this._sq2 = Q.new()), qr = this._sq3 || (this._sq3 = Q.new());
-    Q.setAxisAngle(qy, 0, 1, 0, yaw);
-    Q.setAxisAngle(qx, 1, 0, 0, -Math.PI / 2);
-    Q.mul(qr, qy, qx);
-
-    const put = (d, rx, rz, amt) => {
-      const cx = x + ux * d, cz = z + uz * d;
-      if (Math.abs(cx) > HW + rx || Math.abs(cz) > HL + rz) return;
-      M4.compose(this._sm, V3.set(this._sp, cx, TY + 0.0022, cz), qr,
-        V3.set(this._ss, rx, rz, 1));
-      g.emissive[0] = col[0] * amt; g.emissive[1] = col[1] * amt; g.emissive[2] = col[2] * amt;
-      R.draw(this.mesh.quad, this._sm, g);
-    };
-    const len = radius * (1 + hh * 9.0);
-    put(0, radius * (1 + hh * 0.5), radius * (1 + hh * 0.8), a);     // core
-    put(len * 0.85, radius * 0.9, len * 1.15, a * 0.40);             // tail
-  }
+  /* Глянцевое размазывание блика по столу (бывший gloss) удалено: светлое
+   * пятно под мячем спорило с контактной тенью и врало о высоте. Единственный
+   * индикатор высоты теперь — тень в drawContactShadows. */
 
   /* --------------------------- drawing ---------------------------- */
   /** the net is alpha-blended, so it must be drawn after every opaque

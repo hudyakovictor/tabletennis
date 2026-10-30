@@ -28,6 +28,9 @@ test('fresh source build is self-contained (no template placeholders left)', () 
 test('standalone bundle parses as a browser script (no duplicate declarations or broken class methods)', () => {
   const vm = require('node:vm');
   const html = freshBuild();
+  const firstModule = html.indexOf('/* ====== ');
+  assert.ok(firstModule > 0);
+  assert.equal(html.indexOf('/* ====== 05_stroke_config.js ====== */'), firstModule);
   const scripts = [...html.matchAll(/<script\b[^>]*>([\s\S]*?)<\/script>/g)];
   assert.ok(scripts.length > 0);
   for (const [, source] of scripts) assert.doesNotThrow(() => new vm.Script(source, { filename: 'game.html' }));

@@ -41,11 +41,35 @@ function mulberry32(seed) {
   };
 }
 
+function ensureSeasonCalendar(db) {
+  const present = new Set(db.prepare("SELECT config_json FROM liveops_events WHERE event_type = 'season'").all().map((row) => {
+    try { return JSON.parse(row.config_json).season?.n; } catch { return null; }
+  }));
+  const insert = db.prepare(`INSERT OR IGNORE INTO liveops_events
+    (id, title, event_type, starts_at, ends_at, config_json, status, created_at)
+    VALUES (?, ?, 'season', ?, ?, ?, 'scheduled', ?)`);
+  for (const [n, title, start, end] of [
+    [4, 'Сезон 4: Неоновая лига', '2026-10-15T00:00:00.000Z', '2026-11-10T00:00:00.000Z'],
+    [5, 'Сезон 5: Зимний спринт', '2026-11-11T00:00:00.000Z', '2026-12-07T00:00:00.000Z'],
+  ]) {
+    if (present.has(n)) continue;
+    const pass = Array.from({ length: 20 }, (_, i) => {
+      const l = i + 1;
+      const f = l % 5 === 0 ? { k: 'chest', kind: 'silver', n: 1 } : l % 2 ? { k: 'coins', n: 50 + l * 10 } : { k: 'gems', n: 2 + (l >> 1) };
+      const p = l % 5 === 0 ? { k: 'chest', kind: l % 10 === 0 ? 'epic' : 'gold', n: 1 } : l % 3 === 0 ? { k: 'card', n: 1, col: ['#FF4B3E', '#9F6BFF', '#2EC9FF'][l % 3] } : { k: 'gems', n: 5 + l };
+      return { s: n, l, f, p };
+    });
+    // Upgrade populated databases too, without replacing operator-published dates or rewards.
+    insert.run(`season_${n}`, title, start, end, JSON.stringify({ season: { n }, pass }), new Date().toISOString());
+  }
+}
+
 async function seedDatabaseIfEmpty(db, force = false) {
   ensureBootstrapAdmin(db);
 
   const existingPlayers = Number(db.prepare('SELECT COUNT(*) AS cnt FROM players').get()?.cnt || 0);
   if (existingPlayers > 0 && !force) {
+    ensureSeasonCalendar(db);
     return { seeded: false, players: existingPlayers };
   }
 
@@ -827,6 +851,8 @@ async function seedDatabaseIfEmpty(db, force = false) {
   for (const ev of roadmap) {
     insCal.run(crypto.randomUUID(), ev[0], ev[1], ev[2], ev[3], JSON.stringify(ev[4]), ev[5], isoAgo(72));
   }
+
+  ensureSeasonCalendar(db);
 
   // 14. Seed Director Persistent State + >72h Old Messages (moved into separate `director-archive.sqlite`!) + Fresh Active Chat
   db.prepare(

@@ -5,7 +5,7 @@
 'use strict';
 
 /* Where the opponent's bat meets its own toss, metres above the table. */
-const AI_SERVE_CONTACT_Y = 0.36;
+const AI_SERVE_CONTACT_Y = STROKE_CONFIG.serve.toss.aiContactHeight;
 
 const GS = {
   MENU: 'MENU', SERVE_READY: 'SERVE_READY', SERVE_TOSS: 'SERVE_TOSS',
@@ -34,6 +34,39 @@ const MEET_ASSIST_HORIZON = 0.60;  // seconds to the meeting point
  * 32 точки — это ≈0.17 с полёта: направление видно, «облако» не рисуется. */
 const TRAIL_WIDTH = 0.011;   // metres — half-width of the ribbon
 const TRAIL_POINTS = 32;
+
+/* Ориентация мяча — ТОЛЬКО визуал: по ней ничего не считается (b.q нужен
+ * только M4.compose в отрисовке). Честные 300 рад/с — это ~48 об/с, а мяч на
+ * экране 6–10 px: шов превращается в стробоскоп и направление крутки не
+ * читается вообще. Для маски мяча скорость сжимается до читаемого предела,
+ * ОСЬ и ЗНАК сохраняются — куда мяч крутится, туда и бежит рисунок. */
+const SPIN_VISUAL_CAP = 34;  // rad/s ≈ 5.4 об/с — самый быстрый читаемый бег шва
+function spinVisualRate(w, out) {
+  const l = V3.len(w);
+  if (!(l > SPIN_VISUAL_CAP)) return V3.copy(out, w);
+  return V3.mul(out, w, SPIN_VISUAL_CAP / l);
+}
+
+function parkServeBall(out, pad, hand) {
+  const toss = STROKE_CONFIG.serve.toss;
+  // The free hand holds the real ball beside the blade, not behind its handle.
+  return V3.set(out, pad.pos.x + (hand === 'left' ? 1 : -1) * toss.lateralOffset,
+    PH.TABLE_Y + toss.height,
+    clamp(pad.pos.z - toss.paddleZOffset, PH.T_HALF_LEN + toss.endLineMargin, toss.farZ));
+}
+
+/* Насколько мяч зелёный в этом кадре: 0 — белый, 1 — «бей сейчас».
+ * Единственный носитель тайминга в матче. Тон считается по ВРЕМЕНИ до
+ * контакта, а не по факту пересечения бокса захвата: по замерам живого
+ * матча честное окно захвата — 1 кадр (17–33 мс), глаз его не ловит.
+ * lead — с какого запаса цвет начинается, full — с какого он уже полный. */
+function strikeGreenTint(w, lead, full) {
+  if (!w || !w.on) return 0;
+  if (w.contactable) return 1;
+  const t = Number.isFinite(w.t) ? w.t : Infinity;
+  return clamp((lead - t) / (lead - full), 0, 1);
+}
+
 class Game {
   constructor(canvas, ui) {
     this.canvas = canvas;
@@ -459,6 +492,9 @@ class Game {
       this.swipe.pressZone.pressContactable = !!(this._strike && this._strike.on && this._strike.contactable);
       this.swipe.pressZone.shotId = this.shotId;
       this.swipe.pressZone.serving = serveReadyPress || servePress;
+      const ballAtPress = this.project(this.ball.p, {});
+      this.swipe.pressZone.tapAtPress = this.swipe.pressZone.accepted === true && ballAtPress.ok &&
+        Math.hypot((n.x - ballAtPress.x) * rect.width, (n.y - ballAtPress.y) * rect.height) <= CONTACT_CORRIDOR_RULES.tapContactRadiusPx;
       if (this.training && typeof this.training.onPress === 'function') this.training.onPress(this.swipe.pressZone);
       if (typeof this.onPressZone === 'function') this.onPressZone(this.swipe.pressZone, cpGate, servePress);
       if (this.shotJournal) {
@@ -478,7 +514,6 @@ class Game {
       if (this.debugRecording) this._debugLastPress = { shotId: this.shotId, gestureId: this.swipe.gestureId,
         green: !!this.swipe.pressZone.pressContactable, accepted: !!this.swipe.pressZone.accepted, time: tEv };
       if (serveReadyPress) this.startToss();
-      else this.tryInputHit(tapStrokeMetrics(this.swipe.m, n.x, n.y, servePress));
     };
 
     const track = (e) => {
@@ -682,6 +717,11 @@ class Game {
     this._demoGesture = null;
     this.matchTasks = { topspin: 0, smash: 0, serves: 0, moments: 0 };
     this.training = null;
+    /* Тренировка поднимает CAPTURE_FORGIVE до 1.55 и снимает его только в
+     * complete()/quit(). Здесь учебник сбрасывается мимо них: без этой
+     * строки свободная игра могла остаться с учебным захватом (×1.55 ко
+     * всем осям) — мяч бьётся «дальше кольца» до самого конца сессии. */
+    if (typeof setCaptureForgiveness === 'function') setCaptureForgiveness(1);
     this.matchWinner = 0;
     this._idleStill = false;           // витрина «ракетки на столе» — только в меню/лобби
     this.messages.length = 0;
@@ -763,7 +803,12 @@ class Game {
   }
 
   /* --------------------------- training ---------------------------- */
-  startTraining() {
+  get playerPaddleVisible() {
+    return this.settings.showPlayerPaddle !== false &&
+      (this.state === GS.MENU || (this.ui ? this.ui.inputMode !== 'touch' : this.pointerFine !== false));
+  }
+  startTraining(options = {}) {
+    this.stopTraining();
     this.endReplay(false);
     this.shotJournal && this.shotJournal.reset();
     this.career.stop();
@@ -777,7 +822,7 @@ class Game {
     this.matchWinner = 0;
     this.messages.length = 0;
     this.audio.init(); this.audio.resume();
-    this.training = new Trainer(this);
+    this.training = new Trainer(this, options);
     this.training.begin();
     this.ui && this.ui.trainShow(this.training);
     if (typeof document !== 'undefined' && document.body) document.body.classList.add('is-playing');
@@ -820,10 +865,11 @@ class Game {
 
   /* --------------------------- serving ----------------------------- */
   prepServe() {
+    const toss = STROKE_CONFIG.serve.toss;
     const s = this.server;
     const b = this.ball;
-    const x = s > 0 ? 0 : rndSym(0.26);
-    V3.set(b.p, x, PH.TABLE_Y + 0.17, s * (PH.T_HALF_LEN + 0.20));
+    const x = s > 0 ? 0 : rndSym(toss.readyXJitter);
+    V3.set(b.p, x, PH.TABLE_Y + toss.readyHeight, s * (PH.T_HALF_LEN + toss.readyEndMargin));
     V3.zero(b.v); V3.zero(b.w); Q.identity(b.q);
     b.live = false; b.hist.length = 0; b.lastHitBy = 0; this.netTouched = false;
     b.trailGrade = null; b.golden = null;
@@ -840,16 +886,17 @@ class Game {
     /* Every point begins from the same known state: bat back in the centre,
      * cursor binding re-anchored, no stale intercept from the last rally. */
     this.resetPaddle();
+    if (s > 0) parkServeBall(b.p, this.player, this.settings.hand);
     this.setState(GS.SERVE_READY);
     this.audio.resetRally();
     this.recorder.begin(this.time, s);
     this.moments.beginRally(this.time, this.score);
     this.ai.setPressure(this.score[1], this.score[0], this.settings.targetScore);
     if (s < 0) {
-      this.aiServeTimer = rnd(0.7, 1.3);
+      this.aiServeTimer = rnd(...toss.aiReadyDelay);
       /* точка подачи выбирается один раз на подачу — умеренно у края или
        * по центру, НИКОГДА с последней позиции розыгрыша */
-      this.aiServeX = rndSym(0.34);
+      this.aiServeX = rndSym(toss.aiServeXJitter);
     }
   }
   startToss() {
@@ -863,13 +910,13 @@ class Game {
     this.tossQueued = false;
     const b = this.ball;
     const pad = this.player;
+    const toss = STROKE_CONFIG.serve.toss;
     // ITTF requires a near-vertical toss of at least 16 cm; we throw ~30 cm
-    V3.set(b.p, pad.pos.x,
-      PH.TABLE_Y + 0.14, clamp(pad.pos.z - 0.04, PH.T_HALF_LEN + 0.04, 2.0));
+    parkServeBall(b.p, pad, this.settings && this.settings.hand);
     /* Высота подброса из калибровки: 2.10..2.85 м/с throw (нейтраль 0.45 →
      * прежние ~2.45). Выше — больше времени на замах, ниже — быстрее темп. */
-    const tossK = (this._cal && Number.isFinite(this._cal.tossHeight)) ? clamp(this._cal.tossHeight, 0, 1) : 0.45;
-    V3.set(b.v, rndSym(0.03), 2.10 + tossK * 0.75 + rnd(0, 0.2), rndSym(0.03));
+    const tossK = (this._cal && Number.isFinite(this._cal.tossHeight)) ? clamp(this._cal.tossHeight, 0, 1) : toss.calibrationDefault;
+    V3.set(b.v, rndSym(toss.lateralJitter), toss.speed + tossK * toss.speedSpan + rnd(0, toss.speedJitter), rndSym(toss.lateralJitter));
     this.tossStartY = b.p.y;
     this.tossApex = b.p.y;
     V3.zero(b.w);
@@ -1339,7 +1386,7 @@ class Game {
       this.recorder.addShot(1, Object.assign({
         x: contactP.x, y: contactP.y, z: contactP.z, quality,
       }, this.lastShotInfo));
-      if (this.training) this.training.onPlayerHit(this.lastShotInfo);
+      if (this.training) this.training.onPlayerHit(this.lastShotInfo, racket, contactP);
       this.moments.addContact(this.time, {
         by: 1, stroke: (racket.stroke && racket.stroke.id) || '?',
         speed: speed * 3.6, spin: spin / TAU, quality,
@@ -1690,7 +1737,7 @@ class Game {
     const p0 = V3.clone(b.p);
 
     integrateBall(b.p, b.v, b.w, dt);
-    Q.integrate(b.q, b.q, b.w, dt);
+    Q.integrate(b.q, b.q, spinVisualRate(b.w, this._spinVis || (this._spinVis = V3.new())), dt);
     b.speed = V3.len(b.v);
 
     /* --- table --- */
@@ -1805,6 +1852,7 @@ class Game {
 
   /** net touch on a service: no point, the serve is simply taken again. */
   letServe() {
+    if (this.training) { this.training.onLet(); return; }
     this.msg('ПЕРЕИГРОВКА (LET)', 1.4, '#9fd0ff');
     this.audio.ui();
     this.ball.live = false;
@@ -2124,24 +2172,25 @@ class Game {
     const rubber = sideParams || {};
     const strokeRef = { id: 'BLOCK', family: 'BLOCK' };
     if (isServe) {
+      const serve = STROKE_CONFIG.serve, glance = serve.glance;
       /* Таблица добора: первые же легальные пары обычно в центре диапазона,
        * так что средняя царапня-подача — это недорезанный мяч едва через
        * сетку, а не пуля и не фол. */
-      for (let li = 0; li <= 5; li++) for (let si = 0; si <= 5; si++) {
-        const lift = lerp(R.serveLiftMs[0], R.serveLiftMs[1], li / 5);
-        const spd = lerp(R.serveSpeedMs[0], R.serveSpeedMs[1], si / 5);
+      for (let li = 0; li <= glance.steps; li++) for (let si = 0; si <= glance.steps; si++) {
+        const lift = lerp(...glance.liftMs, li / glance.steps);
+        const spd = lerp(...glance.speedMs, si / glance.steps);
         /* тосс сбоку тянем обратно к столу, иначе боковая царапня уходит
          * в белую линию или вылетает за боковушку */
-        const vR = V3.new(clamp(-contact.x * R.serveCounterAim + lat * 0.35, -.7, .7), lift, -spd);
+        const vR = V3.new(clamp(-contact.x * glance.counterAim + lat * 0.35, -.7, .7), lift, -spd);
         const n = mkNormal();
         const v = V3.clone(b.v), w = V3.clone(b.w);
         if (!impactRacket(v, w, n, vR, R.quality, rubber)) continue;
-        const p0 = V3.addScaled(V3.clone(contact), contact, n, PH.R * 1.05);
-        const o = predict(p0, v, w, { dt: 1 / 120, maxT: 2.2, stopAfterBounces: 2, out: {} });
+        const p0 = V3.addScaled(V3.clone(contact), contact, n, PH.R * STROKE_CONFIG.racket.launchSeparation);
+        const o = predict(p0, v, w, { dt: glance.coarseDt, maxT: serve.solver.maxT, stopAfterBounces: 2, out: {} });
         if (o.landed && !o.hitNet && !o.diverged &&
-            o.landed.z > 0 && Math.abs(o.landed.x) <= PH.T_HALF_WID + 0.01 &&
-            o.b2 && o.b2.z < 0 && o.b2.z >= -PH.T_HALF_LEN - 0.01 &&
-            Math.abs(o.b2.x) <= PH.T_HALF_WID + 0.01) {
+            o.landed.z > 0 && Math.abs(o.landed.x) <= PH.T_HALF_WID + glance.courtMargin &&
+            o.b2 && o.b2.z < 0 && o.b2.z >= -PH.T_HALF_LEN - glance.courtMargin &&
+            Math.abs(o.b2.x) <= PH.T_HALF_WID + glance.courtMargin) {
           return { normal: n, vR, vmag: V3.len(vR), quality: R.quality, valid: true,
             stroke: strokeRef, rubber: { ...rubber }, sweet: 0, timing: .5, glance: true,
             azSwing: lat * .3, azFace: lat * .3, elev: 25, faceElev: 25 };
@@ -2173,8 +2222,15 @@ class Game {
    * малой скорости — ничего: обычный обмен остаётся чистым. */
   _trailCrumb(b) {
     if (this.reducedMotion || !this.particles || typeof this.particles.spawn !== 'function') return;
+    /* Цветная крошка — второй носитель закрутки (первый — шевроны). В матче
+     * оба выключены: на скорости это бусины поверх траектории, которые
+     * спорят с главным сигналом — зелёным мячом. Тип закрутки в матче
+     * читается в строке удара. Крошка остаётся в тренировке и свободном
+     * полёте, где дугу разбирают намеренно. */
+    if (!this.training && !this.freePlay) return;
     if (this.time - (this._crumbT || -1) < 0.029) return;
-    const spinTopBack = b.w.x, spinSide = b.w.y;
+    const measured = measureShotSpin(b.w, b.v);
+    const spinTopBack = -measured.topRps * TAU, spinSide = measured.sideRps * TAU;
     const spinMag = Math.hypot(spinTopBack, spinSide);
     const spd = b.speed || 0;
     let r, g, bl;
@@ -2245,6 +2301,12 @@ class Game {
     }
     if (this.shotJournal && typeof this.shotJournal.noteOutcome === 'function')
       this.shotJournal.noteOutcome('BLOCK');
+    if (this.training) {
+      const racket = { stroke: STROKES.BLOCK, arch: ARCH.BLOCK, normal: n, vR, quality: .30,
+        rubber, contactInput: { p: V3.clone(pad.pos), v: v0, w: w0, gesture: { ...this.swipe.m } } };
+      if (this.shotJournal) this.shotJournal.capture(this.swipe.gestureId, this.time, racket, b, { shotId: this.shotId });
+      this.training.onPlayerHit({ stroke: STROKES.BLOCK, quality: .30, power: 0 }, racket, b.p);
+    }
     this.logInput('contact', { outcome: { contact: true, route: 'passive_block',
       distanceM: V3.dist(b.p, pad.pos) } });
     return true;
@@ -2261,8 +2323,10 @@ class Game {
     const b = this.ball;
     const v = V3.clone(b.v), w = V3.clone(b.w);
     if (!impactRacket(v, w, racket.normal, racket.vR, racket.quality ?? .5, racket.rubber || {})) return false;
-    const p = V3.addScaled(V3.clone(contact), contact, racket.normal, PH.R * 1.05);
-    const o = predict(p, v, w, { dt: 1 / 160, maxT: 2.2, stopAfterBounces: 2, out: this._q || (this._q = {}) });
+    const p = V3.addScaled(V3.clone(contact), contact, racket.normal, PH.R * STROKE_CONFIG.racket.launchSeparation);
+    const validation = isServe ? STROKE_CONFIG.serve.solver : STROKE_CONFIG.racket.validation;
+    const o = predict(p, v, w, { dt: validation.coarseDt,
+      maxT: validation.maxT, stopAfterBounces: 2, out: this._q || (this._q = {}) });
     if (o.diverged || o.hitNet || !o.landed) return false;
     if (isServe) {
       return o.landed.z > 0 && Math.abs(o.landed.x) <= PH.T_HALF_WID + 0.01 &&
@@ -2432,17 +2496,25 @@ class Game {
         zone.shotId !== this.shotId ||
         this.time - pad.lastHitT <= .09 || !isRealStroke(m, serving) ||
         !(serving || (this.state === GS.RALLY && b.lastHitBy === -1))) return;
+    let pointer = this.pointer;
     if (m.tap === true) {
       const p = this.project(b.p, {}), rect = this.canvas.getBoundingClientRect();
-      if (!p.ok || Math.hypot((this.pointer.x - p.x) * rect.width, (this.pointer.y - p.y) * rect.height)
-          > CONTACT_CORRIDOR_RULES.tapContactRadiusPx) return;
+      if (!p.ok || (!zone.tapAtPress && Math.hypot((pointer.x - p.x) * rect.width, (pointer.y - p.y) * rect.height)
+          > CONTACT_CORRIDOR_RULES.tapContactRadiusPx)) return;
+      // A confirmed stationary click follows its own moving ball, never rewinds it.
+      if (zone.tapAtPress && !m.compactFlick) pointer = p;
     }
     const calSpeed = this._cal && Number.isFinite(this._cal.padSpeed)
       ? lerp(.84, 1.20, clamp(this._cal.padSpeed, 0, 1)) : 1;
     const sens = clamp(MATCH_RULES.sensitivity * calSpeed, .55, 2);
     const target = pointerBladeSolve(this._liveRig, this.R.aspect(),
-      clamp(.5 + (this.pointer.x - .5) * sens, 0, 1),
-      clamp(.5 + (this.pointer.y - .5) * sens, 0, 1),
+      clamp(.5 + (pointer.x - .5) * sens, 0, 1),
+      clamp(.5 + (pointer.y - .5) * sens, 0, 1),
+      /* Глубина фантома = плоскость мяча: курсор в 2D глубину выразить не
+       * может. Клик подтверждается отпусканием, свайп — свежим движением,
+       * без ожидания кадра анимации. Строгость здесь несут другие гейты —
+       * press-зона, tapContactRadiusPx, обязательный отскок на своей
+       * половину, лимиты подачи REACH_SHELL и ползунок «Зона приёма». */
       { forceZ: quantizeDepth(b.p.z) });
     if (this.camVPReady) clampPaddleToFrustum(this.camVP, target, .012);
     const lim = paddleLimitsFor(target.tz);
@@ -2527,7 +2599,7 @@ class Game {
       if (b.v.y < 0 && this.tossRiseNow() >= MATCH_RULES.serveTossMinRise - 1e-6 && (serveIn || serveEdge)) {
         hit = { t: 1, x: b.p.x, y: b.p.y, z: b.p.z,
           captureKind: serveIn ? 'serve' : 'serve_edge',
-          rad: serveIn ? rad * 0.40 : serveReach, px: spad.pos.x, py: spad.pos.y, pz: spad.pos.z,
+          rad: serveIn ? rad * STROKE_CONFIG.serve.qualityRadiusK : serveReach, px: spad.pos.x, py: spad.pos.y, pz: spad.pos.z,
           edge: !serveIn };
       }
     } else if (ownBounce) {
@@ -2542,6 +2614,10 @@ class Game {
       if (this.debugRecording) gateDetail = { inside, grazing, still, closing, atClosest, tap: m.tap === true,
         capture: captureSample, previousBall: inputLogVec(p0),
         paddleStart: inputLogVec(spad.prevPos), paddleEnd: inputLogVec(spad.pos) };
+      /* v4.2: курсорный путь (inputPad) остаётся в гейте — мгновенный ввод
+       * зафиксирован тестами, и фантом стоит в плоскости мяча, поэтому
+       * atClosest для него вырожден (сближение ≈ 0). Тяжесть блока держат
+       * магнит ракетки (ослаблен), grace-полоса и «Зона приёма». */
       if ((inside || grazing) && (inputPad || (m.tap === true && inside) || atClosest || still)) {
         const cx = swept.point ? swept.point.x : b.p.x;
         const cy = swept.point ? swept.point.y : b.p.y;
@@ -2589,15 +2665,16 @@ class Game {
       quality = GRACE_RULES.quality;
       racket.quality = quality;
     } else if (m) {
-      const timing = clamp(m.speed / Math.max(m.peakSpeed, 1e-3), 0.35, 1);
-      const tband = timing >= 0.93 ? 'ТОЧНО' : timing >= 0.80 ? 'ХОРОШО'
-        : timing >= 0.62 ? 'РАНОВАТО' : 'ПОЗДНО';
-      const tq = timing >= 0.93 ? 1.08 : timing >= 0.80 ? 1.0 : timing >= 0.62 ? 0.90 : 0.74;
+      const contactCfg = STROKE_CONFIG.racket.contact, thresholds = contactCfg.timingThresholds;
+      const timing = clamp(m.speed / Math.max(m.peakSpeed, 1e-3), contactCfg.timingMin, 1);
+      const timingIndex = timing >= thresholds[0] ? 0 : timing >= thresholds[1] ? 1 : timing >= thresholds[2] ? 2 : 3;
+      const tband = ['ТОЧНО', 'ХОРОШО', 'РАНОВАТО', 'ПОЗДНО'][timingIndex];
+      const tq = contactCfg.timingQuality[timingIndex];
       this.lastTiming = tband;
       const ctx = {
         side: 1, grip: this.settings.grip, forehand, isServe: isServeStroke,
         ball: { y: contact.y, z: contact.z },
-        ballSpin: b.w, ballSpeed: V3.len(b.v),
+        ballSpin: b.w, ballSpeed: V3.len(b.v), ballVelocity: b.v,
         powerScale: 1,
         moveYaw: this.padYaw || 0, movePitch: this.padPitch || 0,
         equip: sideParams,
@@ -2609,14 +2686,25 @@ class Game {
       /* Precision pays twice: a swipe peaking exactly at the contact gets a
        * pace bonus on top of the tq quality bonus — this is what makes the
        * exact hit a winner, not just a neat one. */
-      if (timing >= 0.93) racket.vmag *= 1.05;
+      if (timing >= thresholds[0]) racket.vmag *= contactCfg.speedBonus;
       if (!isServeStroke) {
         const miss = (1 - sweet) * offMag;
-        racket.vmag *= 1 - 0.18 * miss;
-        racket.azSwing = clamp(racket.azSwing + offLat * 0.23 * (1 - sweet), -1.35, 1.35);
-        racket.elev = clamp(racket.elev - offVer * 8.0 * (1 - sweet), -70, 78);
+        racket.vmag *= 1 - contactCfg.missSpeedK * miss;
+        racket.azSwing = clamp(racket.azSwing + offLat * contactCfg.missAzimuthK * (1 - sweet), ...STROKE_CONFIG.racket.azSwingRange);
+        racket.elev = clamp(racket.elev - offVer * contactCfg.missElevationK * (1 - sweet), ...contactCfg.missElevationRange);
       }
-      quality = clamp(racket.quality * (0.60 + 0.40 * sweet) * (0.70 + 0.30 * timing) * tq, 0.25, 1);
+      /* Потолок темпа чистого бокового удара. deriveStroke ограничивает vmag
+       * ДО того, как здесь поработают множители (экипировка, бонус за точный
+       * контакт, штраф за промах), и быстрый свайп снова улетал за потолок:
+       * на мобильном вьюпорте 31 пиксель свайпа давали 11.6 м/с замаха,
+       * 86 км/ч и 36 об/с бока — мяч уводило за боковую линию, и ни одна
+       * ступень лестницы ассиста не возвращала его в игру (e2e
+       * mouse/1/rally). Потолок про физику удара, а не про щедрость формулы,
+       * поэтому применяется ПОСЛЕ множителей. */
+      if (!isServeStroke && racket.stroke && racket.stroke.id === 'SIDE')
+        racket.vmag = Math.min(racket.vmag, STROKE_CONFIG.spin.sideVmax);
+      quality = clamp(racket.quality * (contactCfg.sweetWeights[0] + contactCfg.sweetWeights[1] * sweet)
+        * (contactCfg.timingWeights[0] + contactCfg.timingWeights[1] * timing) * tq, ...contactCfg.qualityRange);
       racket.quality = quality;
       // One authored trajectory assist level, shared by every player.
       const assistLvl = MATCH_RULES.trajectoryAssist;
@@ -2633,23 +2721,26 @@ class Game {
          * находит легал почти всегда. */
         racket = refineRacket(contact, b.v, b.w, racket, 1, quality);
       }
-      if (racket && racket.valid !== false && clamp(assistLvl, 0, 1) < 0.999 &&
+      if (racket && clamp(assistLvl, 0, 1) < 0.999 &&
           !this._playerFlightLegal(contact, racket, isServeStroke)) {
         /* Пост-верификация: решатель «без повторной проверки» формально
          * valid, но мяч уходит в свою половину/в сетку — для игрока это
          * неотличимо от «удар не в ту сторону». Карабкаемся по лестнице:
          * (1) пере(решаем) полным ассистом; (2) если и тот нелегален —
          * честно приглушаем темп (смягченный удар виден и объясним), а не
-         * отсылаем абсурдную пулю в стол. */
-        const safer = refineRacket(contact, b.v, b.w, racket, 1, Math.min(quality, .85));
+         * отсылаем абсурдную пулю в стол. Нелегальный СОВСЕМ (valid:false)
+         * тоже идёт сюда: быстрый боковой свайп давал 24 об/с бока и 89 км/ч
+         * с места в 1.5 м за своей линией — решатель такой мяч не удерживает,
+         * и без этой ветки игрок получал пулю за стол. */
+        const safer = refineRacket(contact, b.v, b.w, racket, 1, Math.min(quality, contactCfg.fallbackQualityMax));
         if (this._playerFlightLegal(contact, safer, isServeStroke)) racket = safer;
         else {
           /* (2) дикий боковой завиток подачи приглушаем до игрового — это та
            * самая «подача-рыба в сетку» из жалоб: жест честный, цель живая,
            * но curl=0.9 физически непопадаем; ассист усмиряет его ДО удара. */
           let dampedOk = false;
-          if (isServeStroke && m && Math.abs(m.curl || 0) > 0.55) {
-            const damped = deriveStroke({ ...m, curl: (m.curl || 0) * 0.3 }, ctx);
+          if (isServeStroke && m && Math.abs(m.curl || 0) > STROKE_CONFIG.serve.curlRecoveryThreshold) {
+            const damped = deriveStroke({ ...m, curl: (m.curl || 0) * STROKE_CONFIG.serve.curlRecoveryK }, ctx);
             strokeFrame(damped, 0, 0, 1, damped.vR, damped.normal);
             damped.vmag *= this.equip.vmagK;
             const d2 = refineRacket(contact, b.v, b.w, damped, 1, quality);
@@ -2658,11 +2749,32 @@ class Game {
           if (!dampedOk) {
             /* (3) ничего легального не нашлось даже полным ассистом — честно
              * приглушаем темп: смягчённый удар виден и объясним, вместо
-             * абсурдной пули в стол молча. */
-            racket.vmag = Math.min(racket.vmag, 4.0);
-            if (racket.vR) V3.mul(racket.vR, racket.vR, Math.min(1, 4.0 / Math.max(V3.len(racket.vR), 1e-6)));
-            racket.softened = true;
-            if (this.shotJournal) this.shotJournal.reason = 'SOFTENED';
+             * абсурдной пули в стол молча. Но один только темп убивает удар
+             * в другом месте: медленный мяч с прежней закрытой гранью (−15°)
+             * идёт в сетку (замер temp/side-browser-probe.cjs: 4 м/с → «в
+             * сетку»). Поэтому перебираем несколько честных пар «подъём
+             * грани × темп» и берём первую законную; если ни одна не
+             * подошла — гасим ТОЛЬКО темп, не трогая грань. Поднятая грань без
+             * законного полёта опасна: разворачивая лицо от мяча, она
+             * превращает удар в «нет контакта» (impactRacket отвергает
+             * расходящуюся грань), и на мобильном вьюпорте свежий жест просто
+             * переставал быть ударом. */
+            const sw = V3.new(), nm = V3.new();
+            let gentle = null;
+            for (const [lift, target] of contactCfg.softening) {
+              const scale = Math.min(1, target * (this.equip.vmagK || 1) / Math.max(racket.vmag, 1e-6));
+              strokeFrame(racket, (racket.dElev || 0) + lift, racket.dAz || 0, scale, sw, nm);
+              const cand = { ...racket, valid: true, softened: true, vmag: racket.vmag * scale,
+                vR: V3.clone(sw), normal: V3.clone(nm) };
+              if (this._playerFlightLegal(contact, cand, isServeStroke)) { gentle = cand; break; }
+            }
+            if (gentle) racket = gentle;
+            else {
+              const floor = contactCfg.softening[0][1] * (this.equip.vmagK || 1);
+              racket.vmag = Math.min(racket.vmag, floor);
+              if (racket.vR) V3.mul(racket.vR, racket.vR, Math.min(1, floor / Math.max(V3.len(racket.vR), 1e-6)));
+              racket.softened = true;
+            }
           }
         }
       }
@@ -2712,7 +2824,7 @@ class Game {
     V3.copy(pad.prevPos, pad.pos);
     V3.copy(pad.prev, pad.pos);
     V3.copy(b.p, contact);
-    V3.addScaled(b.p, b.p, racket.normal, PH.R * 1.05);
+    V3.addScaled(b.p, b.p, racket.normal, PH.R * STROKE_CONFIG.racket.launchSeparation);
     V3.copy(pad.normal, racket.normal); // show the assisted contact face too
     if (isServeStroke && !hit.edge && racket.stroke && /^SERVE_/.test(racket.stroke.id) && typeof STROKES !== 'undefined') {
       /* Стиль подачи ВЫРАСТАЕТ из жеста (тот же свайп, четыре направления):
@@ -2734,7 +2846,7 @@ class Game {
       const ft = this.followThrough;
       ft.active = true;
       ft.t = 0;
-      ft.duration = .025 + motion.profile.followTime + motion.profile.recoverTime * .5;
+      ft.duration = motion.profile.hold + motion.profile.followTime + motion.profile.recoverTime * .5;
       ft.amplitude = (motion.profile.family === 'BLOCK' ? .025 : motion.profile.family === 'PUSH' ? .055 : .14)
         * (this.settings.grip === 'penhold' ? .85 : 1);
       const spd = V3.len(racket.vR) || 1;
@@ -2769,7 +2881,7 @@ class Game {
   }
 
   tryAiHit() {
-    if (this.training) return;           // the feeder never returns the ball
+    if (this.training && !this.training.allowAi) { if (this.training.tryReply) this.training.tryReply(); return; }
     /* В онлайн-матче удары соперника приходят как 'guestHit'-сообщения,
      * а не через ботовы план; здесь ловить нечего. */
     if (this.network.isInMatch) return;
@@ -2809,7 +2921,7 @@ class Game {
     V3.copy(pad.pos, b.p);
     /* Same separation as the player's contact: the flight the solver fitted
      * starts one radius off the face, so the live ball must too. */
-    V3.addScaled(b.p, b.p, racket.normal, PH.R * 1.05);
+    V3.addScaled(b.p, b.p, racket.normal, PH.R * STROKE_CONFIG.racket.launchSeparation);
     this.applyHit(-1, racket, contact, racket.quality, info);
   }
 
@@ -2870,6 +2982,7 @@ class Game {
   }
 
   updatePlayerPaddle(dt) {
+    const cfg = STROKE_CONFIG.racket;
     const pad = this.player;
     V3.copy(pad.prev, pad.pos);
     pad.prevPos = pad.prevPos || V3.clone(pad.pos);
@@ -2889,7 +3002,7 @@ class Game {
          * honoured if it is FRESH — the timeout is what keeps the original
          * bug fixed (a toss that fires seconds after the player has moved on
          * drops a ball nobody asked for). */
-        const fresh = this.time - (this.tossQueuedAt === undefined ? -9 : this.tossQueuedAt) < 0.60;
+        const fresh = this.time - (this.tossQueuedAt === undefined ? -9 : this.tossQueuedAt) < STROKE_CONFIG.serve.toss.queuedWindow;
         this.tossQueued = false;
         if (this.state === GS.SERVE_READY && this.server === 1 && (this.pointerDown || fresh)) this.startToss();
       }
@@ -3047,11 +3160,12 @@ class Game {
     const serveSlide = this.state === GS.SERVE_TOSS && this.server === 1 &&
       this.ball.lastHitBy === 0 && this.recenterT <= 0;
     if (serveSlide) {
-      const k = 0.55 + 0.45 * A;
+      const tracking = STROKE_CONFIG.serve.tracking;
+      const k = tracking.weights[0] + tracking.weights[1] * A;
       tx = lerp(tx, this.ball.p.x, k);
-      tz = lerp(tz, this.ball.p.z + 0.02, k);
-      const under = this.ball.p.y - 0.04;
-      ty = lerp(ty, under, this.ball.v.y < 0 ? k : 0.45 * A);
+      tz = lerp(tz, this.ball.p.z + tracking.zOffset, k);
+      const under = this.ball.p.y - tracking.underBall;
+      ty = lerp(ty, under, k);
     }
 
     /* Rally stroke contact anchor: once an admitted gesture is actively
@@ -3085,10 +3199,16 @@ class Game {
         }
         this._lockDbg = { ownBounced, mx, my, mz, intent: !!rallyIntent, active: rallyStrokeActive };
         if (Number.isFinite(mx) && Number.isFinite(my) && Number.isFinite(mz)) {
-          const kLock = ownBounced ? 0.90 : 0.72;
-          tx = lerp(tx, mx, kLock);
-          ty = lerp(ty, my, kLock);
-          tz = lerp(tz, mz, kLock);
+          /* Помощь, а не автопилот (v4.1). 0.90/0.72 тянули цель клика на
+           * точку перехвата КАЖДЫЙ кадр: клинок доезжал до мяча за 2–3 кадра
+           * из любой точки, поэтому блок был бесплатным и контакт случался
+           * там, где нарисованная ракетка ещё не была. Теперь пропорция
+           * меньше и дополнительно ограничена в метрах за кадр — до мяча всё
+           * ещё надо привести ракетку, игра лишь доводит пару сантиметров. */
+          const help = ownBounced ? cfg.snapAssist[0] : cfg.snapAssist[1], capMetres = cfg.snapDistance;
+          tx += clamp((mx - tx) * help, -capMetres, capMetres);
+          ty += clamp((my - ty) * help, -capMetres, capMetres);
+          tz += clamp((mz - tz) * help, -capMetres, capMetres);
         }
       }
     }
@@ -3105,14 +3225,26 @@ class Game {
       PH.TABLE_Y + lim.yLo, PH.TABLE_Y + lim.yHi);
     tz = clamp(tz, PADDLE_LIMITS.zStepIn, PADDLE_LIMITS.zFar);
 
+    /* Ползунок калибровки «Зона приёма»: читается каждый кадр, применяется на
+     * лету — как padSpeed/padSmooth. 0 → жёсткий приём (0.85×), 50 → честный
+     * контракт (1.00×), 100 → учебный (1.30×). Скрытый дев-множитель
+     * CAPTURE_FORGIVE, на котором жила тренировка, теперь только про учебника
+     * и сет-корд; вкус игрока живёт здесь. */
+    const capV = (this._cal && Number.isFinite(this._cal.captureK)) ? clamp(this._cal.captureK, 0, 1) : 0.5;
+    const capK = capV < 0.5 ? lerp(0.85, 1, capV * 2) : lerp(1, 1.30, (capV - 0.5) * 2);
+    if (capK !== this._capCalK) {
+      this._capCalK = capK;
+      if (typeof setCaptureCalibration === 'function') setCaptureCalibration(capK);
+    }
+
     const calRate = (this._cal && Number.isFinite(this._cal.padSmooth))
-      ? lerp(68, 36, clamp(this._cal.padSmooth, 0, 1)) : 55;
-    const rate = this.recenterT > 0 ? 32 : calRate;
+      ? lerp(1 / cfg.trackingLagRange[0], 1 / cfg.trackingLagRange[1], clamp(this._cal.padSmooth, 0, 1)) : 1 / cfg.trackingLag;
+    const rate = this.recenterT > 0 ? 1 / cfg.resetTrackingLag : calRate;
     const zDrive = pointerDepth || this._reachFwd > 1e-4;
     this._padTarget = { tx, ty, tz, rate, lock: rallyStrokeActive && !!(this.swipe && this.swipe.realGestureId === this.swipe.gestureId), footZ: this._footZ };
     pad.pos.x = expSmooth(pad.pos.x, tx, rate, dt);
     pad.pos.y = expSmooth(pad.pos.y, ty, rate, dt);
-    pad.pos.z = expSmooth(pad.pos.z, tz, rate * (zDrive ? 1 : 0.7), dt);
+    pad.pos.z = expSmooth(pad.pos.z, tz, rate * (zDrive ? 1 : cfg.depthTrackingK), dt);
     V3.sub(pad.vel, pad.pos, pad.prevPos);
     V3.mul(pad.vel, pad.vel, 1 / Math.max(dt, 1e-4));
 
@@ -3143,7 +3275,7 @@ class Game {
       ball: { y: pad.pos.y, z: pad.pos.z }, isServe: servingNow,
       incomingTop: this.ball.w.x, ballSpeed: V3.len(this.ball.v),
       arcSens: this.settings.arcSens ?? 1,
-    }, clamp(Math.max(intent.releaseSpeed, intent.peakSpeed * .78) / 4.2, 0, 1.45)).id : null;
+    }, clamp(Math.max(intent.releaseSpeed, intent.peakSpeed * cfg.speed.peakK) / cfg.speed.inputScale, 0, cfg.speed.powerMax)).id : null;
     if (intent && this.followThrough) this.followThrough.active = false;
     const wrist = playerWristPose(pad.pos, pad.vel, this.settings.hand, {
       grip: this.settings.grip,
@@ -3193,12 +3325,12 @@ class Game {
     if (m) {
       const ctx = {
         side: 1, grip: this.settings.grip, forehand: pad.forehand, isServe: servingNow, ball: { y: pad.pos.y, z: pad.pos.z },
-        ballSpin: this.ball.w, ballSpeed: V3.len(this.ball.v), moveYaw: this.padYaw, movePitch: this.padPitch,
+        ballSpin: this.ball.w, ballSpeed: V3.len(this.ball.v), ballVelocity: this.ball.v, moveYaw: this.padYaw, movePitch: this.padPitch,
       };
       const st = deriveStroke(m, ctx);
       /* First ~45 ms keep the ready face so the bat does not pop onto
          the archetype the frame a finger twitches. */
-      const k = smoothstep(0, 0.045, m.dur || 0);
+      const k = smoothstep(0, cfg.contact.readyBlendTime, m.dur || 0);
       want.x = lerp(rest.x, st.normal.x, k);
       want.y = lerp(rest.y, st.normal.y, k);
       want.z = lerp(rest.z, st.normal.z, k);
@@ -3638,33 +3770,35 @@ class Game {
            * ракетки там, куда бот дотянулся в прошлом розыгрыше (край стола,
            * под самой сеткой) — и подача летела из того же угла */
           {
-            const tx = clamp(this.aiServeX || 0, -0.42, 0.42);
-            const tz = -(PH.T_HALF_LEN + 0.16);
-            const k = 1 - Math.exp(-6 * dtReal);
+            const toss = STROKE_CONFIG.serve.toss;
+            const tx = clamp(this.aiServeX || 0, -toss.aiReadyXMax, toss.aiReadyXMax);
+            const tz = -(PH.T_HALF_LEN + toss.aiEndMargin);
+            const k = 1 - Math.exp(-toss.aiApproachRate * dtReal);
             this.ai.pos.x += (tx - this.ai.pos.x) * k;
             this.ai.pos.z += (tz - this.ai.pos.z) * k;
-            this.ai.pos.x = clamp(this.ai.pos.x, -0.60, 0.60);
-            if (this.ai.pos.z > -1.02) this.ai.pos.z = -1.02;   // никогда под сеткой
-            this.ai.pos.y = PH.TABLE_Y + 0.25;
+            this.ai.pos.x = clamp(this.ai.pos.x, -toss.aiPositionXMax, toss.aiPositionXMax);
+            if (this.ai.pos.z > -toss.aiZMin) this.ai.pos.z = -toss.aiZMin;
+            this.ai.pos.y = PH.TABLE_Y + toss.aiPaddleHeight;
           }
           /* park the ball in front of the AI's OWN bat every frame — a serve
            * tossed 25 cm away from the paddle reads as ball and racket living
            * in different worlds */
           V3.set(this.ball.p, this.ai.pos.x,
-            PH.TABLE_Y + 0.14, clamp(this.ai.pos.z + 0.05, -(PH.T_HALF_LEN + 0.30), -1.05));
+            PH.TABLE_Y + STROKE_CONFIG.serve.toss.height,
+            clamp(this.ai.pos.z + STROKE_CONFIG.serve.toss.aiPaddleZOffset,
+              -(PH.T_HALF_LEN + STROKE_CONFIG.serve.toss.aiFarMargin), -STROKE_CONFIG.serve.toss.aiNearZ));
           this.aiServeTimer -= dtReal;
           if (this.aiServeTimer <= 0) {
-            V3.set(this.ball.v, rndSym(0.05), 3.1, rndSym(0.05));
+            const toss = STROKE_CONFIG.serve.toss;
+            V3.set(this.ball.v, rndSym(toss.aiLateralJitter), toss.aiSpeed, rndSym(toss.aiLateralJitter));
             this.ball.live = true;
             this.isServeBall = true;
             this.setState(GS.SERVE_TOSS);
-            this.aiSwingAt = this.time + 0.42;
+            this.aiSwingAt = this.time + toss.aiSwingDelay;
           }
         } else {
           this.serveHint = clamp(this.serveHint + dtReal, 0, 3);
-          // the ball rests in front of the bat, aligned with the player
-          V3.set(this.ball.p, this.player.pos.x,
-            PH.TABLE_Y + 0.14, clamp(this.player.pos.z - 0.04, PH.T_HALF_LEN + 0.04, 2.0));
+          parkServeBall(this.ball.p, this.player, this.settings.hand);
         }
         break;
       case GS.SERVE_TOSS:
@@ -3677,9 +3811,9 @@ class Game {
          * server's own half, so the solver used to halve it (measured: the
          * fast serve left the bat at 24 km/h at swing scale 0.50). At 0.36 m
          * on the way down it is a real serve. */
-        if (this.server === -1 && this.ball.lastHitBy === 0 && this.stateT > 0.10 &&
-          ((this.ball.v.y < 0 && this.ball.p.y <= PH.TABLE_Y + AI_SERVE_CONTACT_Y) ||
-            this.time > this.aiSwingAt + 0.6)) {
+        if (this.server === -1 && this.ball.lastHitBy === 0 && this.stateT > STROKE_CONFIG.serve.toss.aiContactDelay &&
+          ((this.ball.v.y < 0 && this.ball.p.y <= PH.TABLE_Y + STROKE_CONFIG.serve.toss.aiContactHeight) ||
+            this.time > this.aiSwingAt + STROKE_CONFIG.serve.toss.aiTimeout)) {
           let racket = this.ai.serve(this);
           // the opponent does not get to donate points either — but a level
           // whose skill is already 1.0 has been solved at full assist, and
@@ -3701,14 +3835,14 @@ class Game {
           }
           V3.copy(this.aiPaddle.pos, this.ball.p);
           V3.copy(this.aiPaddle.normal, racket.normal);
-          V3.addScaled(this.ball.p, this.ball.p, racket.normal, PH.R * 1.05);
+          V3.addScaled(this.ball.p, this.ball.p, racket.normal, PH.R * STROKE_CONFIG.racket.launchSeparation);
           this.serveBounces = 0; this.rallyBounces.length = 0;
           this.applyHit(-1, racket, contact, racket.quality, info);
           this.setState(GS.RALLY);
         }
         if (this.server === 1 && this.ball.lastHitBy === 0) {
           this.tossApex = Math.max(this.tossApex || 0, this.ball.p.y);
-          if (this.stateT > 3.4) this.awardPoint(-1, 'ПОДАЧА НЕ ВЫПОЛНЕНА');
+          if (this.stateT > STROKE_CONFIG.serve.toss.timeout) this.awardPoint(-1, 'ПОДАЧА НЕ ВЫПОЛНЕНА');
         }
         break;
       case GS.POINT:
@@ -3766,7 +3900,10 @@ class Game {
     this.updateStrikeWindow(dtReal);
     this.logInput('frame', { dt: dtReal });
     if (this.state === GS.RALLY || this.state === GS.SERVE_TOSS) this.moments.push(this.time, this);
-    if (this.training) this.training.update(dtReal);
+    if (this.training) {
+      this.training.update(dtReal);
+      if (this.training.allowAi) this.ai.think(this, dt);
+    }
     else if (this.network.isInMatch) {
       // online: the far paddle belongs to the peer, not to the AI
       const op = this.network.opponentRacket;
@@ -3853,17 +3990,13 @@ class Game {
     this.keepPaddleOnScreen();
     this.clampPaddleVolume();
 
-    // post-processing reacts to the action
+    // post-processing: оставлен только тонмап/виньетка. Радиальное «мыло»
+    // и хроматический аберрационный сдвиг убраны совсем: они размывали и
+    // расщепляли на цветные копии именно мяч в точке удара.
     const P = this.R.post;
-    const sp = clamp(V3.len(this.ball.v) / 30, 0, 1);
-    if (this.reducedMotion) {
-      P.radial = 0; P.flash = 0;
-    } else {
-      P.radial = expSmooth(P.radial, this.ball.live ? sp * sp * 0.85 : 0, 5, dtReal);
-      P.flash = expSmooth(P.flash, this.hitFlash * 0.05, 10, dtReal);
-    }
+    P.radial = 0; P.ca = 0;
+    P.flash = this.reducedMotion ? 0 : expSmooth(P.flash, this.hitFlash * 0.03, 10, dtReal);
     P.sat = expSmooth(P.sat, 1.05 + (1 - this.timeScale) * 0.25, 4, dtReal);
-    P.ca = expSmooth(P.ca, 0.55 + sp * 0.75, 4, dtReal);
     this.audio.setCrowd(clamp(this.rally / 18, 0, 1) * 0.6 + (this.state === GS.POINT ? 0.4 : 0));
 
     // network: sync state (host) or input (guest)
@@ -3955,17 +4088,40 @@ class Game {
       ? (mesh, mat4, mat) => R.drawShadow(mesh, mat4, null, 0)
       : (mesh, mat4, mat) => R.draw(mesh, mat4, mat);
 
-    /* ball: зелёная подсветка ровно в окне удара — «сейчас можно бить».
-     * Раньше/позже окна мяч остаётся белым, тайминг читается без слов. */
+    /* ball: зелёный мяч — единственный носитель «бей сейчас».
+     * Прежняя логика («зелёный = мяч внутри бокса захвата») по замерам в
+     * живом матче давала 1 кадр, 17–33 мс: сигнал загорался в тот же миг,
+     * когда удар уже случается, и глазами не ловился.
+     * Трасса приёма покадрово: окно вообще открывается лишь после отскока
+     * на своей стороне и live 2–4 кадра (eta на момент открытия 0.09–0.18 с)
+     * — это физический предел честного «бей сейчас». Поэтому тон считается
+     * по ВРЕМЕНИ до контакта: с 0.30 с мяч трогается зелёным, с 0.15 с он
+     * уже целиком зелёный и держит цвет до удара — то есть зелёный ВСЁ
+     * подлетное окно, а не последний кадр.
+     * Тонировка идёт по альбедо (сам мяч зелёный), а не по rim-блику:
+     * «ёмит+обводка» читались как едва заметный зелёный зайчик.
+     * Спекуляр приглушён — белый блик на стеклянном шаре съедал цвет. */
+    const STRIKE_FULL = 0.15;
+    // помощь хосту (g.hintContact): заевшемуся игроку мяч зеленеет заранее
+    const STRIKE_LEAD = this.hintContact ? 0.45 : 0.30;
     if (this.ball.live || this.state === GS.SERVE_READY || this._idleStill) {
       const BS = (this._cal && this._cal.ballSize !== undefined) ? (0.8 + this._cal.ballSize * 0.5) : 1;
       M4.compose(tmp.m, this.ball.p, this.ball.q, V3.set(tmp.scl, BS, BS, BS));
-      const w = this._strike;
-      const green = !shadowPass && w && w.on && w.contactable;
-      if (green) {
-        const gm = this._ballGreen || (this._ballGreen = Object.assign({}, ma.ball));
-        gm.emissive = [0.05, 0.55, 0.22];
-        gm.rim = 0.9; gm.rimCol = [0.3, 1.0, 0.45]; gm.rimPower = 1.6;
+      const gk = shadowPass ? 0 : strikeGreenTint(this._strike, STRIKE_LEAD, STRIKE_FULL);
+      if (gk > 0.02) {
+        let gm = this._ballGreen;
+        if (!gm) {
+          gm = this._ballGreen = Object.assign({}, ma.ball);
+          // Object.assign делит массивы с базовым материалом — own copies
+          gm.color = ma.ball.color.slice();
+          gm.emissive = ma.ball.emissive.slice();
+        }
+        const bc = ma.ball.color, be = ma.ball.emissive, c = gm.color, e = gm.emissive;
+        c[0] = lerp(bc[0], 0.26, gk); c[1] = lerp(bc[1], 1.0, gk); c[2] = lerp(bc[2], 0.42, gk);
+        e[0] = lerp(be[0], 0.03, gk); e[1] = lerp(be[1], 0.42, gk); e[2] = lerp(be[2], 0.13, gk);
+        gm.specTint = lerp(ma.ball.specTint, 0.35, gk);
+        gm.rim = lerp(ma.ball.rim, 0.12, gk);
+        gm.rimCol = [0.3, 1.0, 0.45]; gm.rimPower = 2.8;
         d(me.ball, tmp.m, gm);
       } else {
         d(me.ball, tmp.m, ma.ball);
@@ -3974,7 +4130,7 @@ class Game {
 
     /* Paddle-only rendering. Physics and visuals share the same face normal;
        rendering must not mutate the simulation's orientation. */
-    if (this.settings.showPlayerPaddle !== false) {
+    if (this.playerPaddleVisible) {
       const pp = this.player;
       /* The telegraph lives here and only here: the simulation keeps the
        * blade on the ball, the drawing pulls it back for the wind-up. */
@@ -4049,18 +4205,6 @@ class Game {
     if (navigator.vibrate) { try { navigator.vibrate(ms); } catch (e) { /* ignore */ } }
   }
 
-  /** Reflections of the bright movers in the table top. Only things that
-   *  actually add light get one: the ball, the red rubber, the net tape.
-   *  Ракетки блик больше не получают: два аддитивных пятна поверх тени
-   *  превращали зону под ракеткой в светлую кашу. */
-  drawReflections() {
-    const R = this.R, S = this.scene, b = this.ball;
-    const cx = this.camPos.x, cz = this.camPos.z;
-    if (b.live || this.state === GS.SERVE_READY) {
-      S.gloss(R, b.p.x, b.p.y, b.p.z, cx, cz, 0.055, 1.70, [1.0, 0.96, 0.86]);
-    }
-  }
-
   drawFX() {
     const R = this.R, S = this.scene, me = S.mesh;
     const tmp = S._tmp;
@@ -4090,7 +4234,7 @@ class Game {
       }
       R.draw(me.trail, M4.identity(tmp.m), {
         color: [1, 1, 1], rough: 1, blend: 'add', doubleSided: true,
-        emissive: [col[0] * k, col[1] * k, col[2] * k], opacity: grade ? 0.55 : 0.20,
+        emissive: [col[0] * k, col[1] * k, col[2] * k], opacity: grade ? 0.42 : 0.12,
       });
     }
 
@@ -4106,12 +4250,12 @@ class Game {
       });
     }
 
-    /* predicted landing spot */
+    /* predicted landing spot: без пульсации — мигающая метка на столе
+     * только шумела, место приземления читается и статичной */
     if (this.settings.showPredict && this.ball.live && this.predictOut.landed && this.ball.lastHitBy === 1) {
       const L = this.predictOut.landed;
-      const pulse = this.reducedMotion ? 0.055 : 0.055 + Math.sin(this.time * 9) * 0.008;
       M4.compose(tmp.m, V3.new(L.x, PH.TABLE_Y + 0.004, L.z),
-        Q.setAxisAngle(Q.new(), 1, 0, 0, -Math.PI / 2), V3.new(pulse, pulse, pulse));
+        Q.setAxisAngle(Q.new(), 1, 0, 0, -Math.PI / 2), V3.new(0.055, 0.055, 0.055));
       R.draw(me.quad, tmp.m, {
         color: [1, 1, 1], tex: this.scene.tex.ring, blend: 'add', doubleSided: true,
         emissive: [0.15, 0.95, 0.55], rough: 1,
@@ -4131,17 +4275,9 @@ class Game {
       });
     }
 
-    /* ball glow so it reads against the dark hall */
-    if (this.ball.live) {
-      const g = clamp(0.03 + V3.len(this.ball.v) * 0.0022, 0.03, 0.09);
-      this.billboard(tmp.m, this.ball.p, g, 0);
-      R.draw(me.quad, tmp.m, {
-        color: [1, 1, 1], tex: this.scene.tex.glow, blend: 'add', doubleSided: true,
-        emissive: [0.42, 0.44, 0.40], rough: 1,
-      });
-    }
-
-
+    /* Свечение вокруг мяча убрано: аддитивный ореол поверх и без того
+     * светлого мяча размывал его силуэт именно там, где надо бить.
+     * Мяч держится в кадре за счёт emissive в материале и тёмной арены. */
   }
 
   /** The opponent is deliberately NOT a character model: a floating bat
@@ -4158,8 +4294,7 @@ class Game {
     }
     R.beginScene([0.018, 0.022, 0.032]);
     this.scene.drawStatic(R, false);   // court, grounded table and shadows
-    this.drawReflections();            // glossy smear in the table top
-    this.drawContactShadows();         // soft grounding shade, ON TOP of the gloss so it reads
+    this.drawContactShadows();         // soft grounding shade — единственная «подложка» мяча
     this.drawDynamic(false);           // ball + bats (opaque)
     this.scene.drawNet(R);             // alpha-blended net on top of them
     this.drawFX();                     // additive trail / particles / decals

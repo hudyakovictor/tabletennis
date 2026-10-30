@@ -11,7 +11,7 @@ const lib = load(['10_math.js', '12_match_rules.js', '30_physics.js', '38_paddle
 
 function inputGame(pointerType = 'touch', scale = 1) {
   const { V3, PH, GS } = lib, handlers = new Map();
-  const g = Object.create(lib.Game.prototype), width = 390, height = 844;
+  const g = Object.create(lib.Game.prototype), width = pointerType === 'mouse' ? 1280 : 390, height = pointerType === 'mouse' ? 760 : 844;
   g.canvas = { style: {}, clientWidth: width, clientHeight: height, setPointerCapture() {},
     addEventListener: (type, fn) => handlers.set(type, fn),
     getBoundingClientRect: () => ({ left: 0, top: 0, width, height }) };
@@ -90,11 +90,14 @@ test('a neutral rally tap is not a serve unless explicitly stamped for a contact
   assert.equal(tap.dx, 0); assert.equal(tap.dy, 0); assert.equal(tap.curl, 0);
 });
 
-test('mouse and touch return the current ball on pointerdown, before release or any animation frame', () => {
+test('mouse and touch confirm a click on release without waiting for any animation frame', () => {
   for (const type of ['mouse', 'touch']) for (const scale of [1, .3]) {
     const { g, send } = inputGame(type, scale), contact = lib.V3.clone(g.ball.p), time = g.time;
     send('pointerdown');
-    assert.equal(g.ball.lastHitBy, 1, `${type}/${scale}: pointerdown did not strike`);
+    assert.equal(g.ball.lastHitBy, -1, `${type}/${scale}: down must leave room for a swipe`);
+    assert.equal(g.stats.shots, 0);
+    send('pointerup');
+    assert.equal(g.ball.lastHitBy, 1, `${type}/${scale}: release did not confirm the tap`);
     assert.ok(g.ball.v.z < 0);
     assert.equal(g.time, time, 'input must not advance the game clock');
     assert.equal(g.stats.shots, 1);
@@ -127,24 +130,29 @@ test('instant input keeps bounce, reach, pause and cancellation gates', () => {
   volley.send('pointerdown'); volley.send('pointerup');
   assert.equal(volley.g.ball.lastHitBy, -1, 'a tap cannot volley');
   const far = inputGame(); far.g.ball.p.z = 2.9;
-  far.send('pointerdown');
+  far.send('pointerdown'); far.send('pointerup');
   assert.equal(far.g.ball.lastHitBy, -1, 'a tap cannot reach beyond the physical limits');
   const paused = inputGame(); paused.g.paused = true;
-  paused.send('pointerdown');
+  paused.send('pointerdown'); paused.send('pointerup');
   assert.equal(paused.g.ball.lastHitBy, -1);
   const cancelled = inputGame(), p = cancelled.g.project(cancelled.g.ball.p, {});
   cancelled.send('pointerdown', { x: p.x, y: p.y + .09 });
   cancelled.send('pointercancel'); cancelled.send('pointerup', p);
   assert.equal(cancelled.g.ball.lastHitBy, -1, 'cancelling before contact cannot produce a release shot');
+  const cancelledTap = inputGame();
+  cancelledTap.send('pointerdown'); cancelledTap.send('pointercancel'); cancelledTap.send('pointerup');
+  assert.equal(cancelledTap.g.ball.lastHitBy, -1, 'a cancelled pending click cannot hit');
 });
 
-test('a legal falling toss can be served by pressing the ball; a rising toss cannot', () => {
+test('a legal falling toss can be served by a confirmed click; a rising toss cannot', () => {
   for (const vy of [1, -1]) {
     const { g, send } = inputGame();
     g.state = lib.GS.SERVE_TOSS; g.isServeBall = true; g.ball.lastHitBy = 0;
     g.tossStartY = lib.PH.TABLE_Y + .14; g.tossApex = lib.PH.TABLE_Y + .40;
     lib.V3.set(g.ball.p, 0, lib.PH.TABLE_Y + .30, 1.6); lib.V3.set(g.ball.v, 0, vy, -.02);
     send('pointerdown');
+    assert.equal(g.ball.lastHitBy, 0, 'down cannot choose tap over the intended swipe');
+    send('pointerup');
     assert.equal(g.ball.lastHitBy, vy < 0 ? 1 : 0);
     if (vy < 0) {
       assert.equal(g.state, lib.GS.RALLY);
@@ -153,6 +161,59 @@ test('a legal falling toss can be served by pressing the ball; a rising toss can
         { dt: lib.PH.SIM_DT, maxT: 2.2, stopAfterBounces: 2, out: {} });
       assert.ok(flight.landed && flight.landed.z > 0 && flight.b2 && flight.b2.z < 0 && !flight.hitNet,
         'the tap serve must bounce on both halves and clear the net');
+    }
+  }
+});
+
+test('a confirmed short click follows the same moving ball without rewinding the contact', () => {
+  for (const type of ['mouse', 'touch']) for (const scale of [1, .3]) {
+    const { g, send } = inputGame(type, scale), start = g.project(g.ball.p, {});
+    send('pointerdown', start, 1000);
+    const simDt = .06 * scale;
+    for (let t = 0; t < simDt; t += lib.PH.SIM_DT) lib.integrateBall(g.ball.p, g.ball.v, g.ball.w, Math.min(lib.PH.SIM_DT, simDt - t));
+    g.time += .06; g.strokeTime += simDt;
+    const contact = lib.V3.clone(g.ball.p);
+    send('pointerup', start, 1060);
+    assert.equal(g.ball.lastHitBy, 1, `${type}/${scale}: the original short click lost its moving ball`);
+    assert.ok(lib.V3.dist(g.player.pos, contact) < 1e-9, 'contact must use the current ball, not the down snapshot');
+    assert.equal(g.stats.shots, 1);
+  }
+});
+
+test('on-ball horizontal mouse and touch drags create signed sidespin in rally and serve', () => {
+  for (const type of ['mouse', 'touch']) for (const scale of [1, .3]) {
+    for (const serving of [false, true]) for (const direction of [-1, 1]) {
+      for (const incomingTop of serving ? [0] : [0, 120, -120]) {
+        const { g, send } = inputGame(type, scale);
+        if (serving) {
+          g.state = lib.GS.SERVE_TOSS; g.isServeBall = true; g.ball.lastHitBy = 0;
+          g.tossStartY = lib.PH.TABLE_Y + .14; g.tossApex = lib.PH.TABLE_Y + .40;
+          lib.V3.set(g.ball.p, 0, lib.PH.TABLE_Y + .30, 1.6); lib.V3.set(g.ball.v, 0, -1, -.02);
+        }
+        lib.V3.set(g.ball.w, incomingTop, 0, 0);
+        const start = g.project(g.ball.p, {}), before = g.ball.lastHitBy;
+        const end = { x: start.x + direction * .08, y: start.y };
+        send('pointerdown', start, 1000);
+        assert.equal(g.ball.lastHitBy, before, 'pressing the ball must not consume the horizontal gesture');
+        send('pointermove', end, 1040);
+        const label = `${type}/${scale}/${serving ? 'serve' : 'rally'}/${direction}/${incomingTop}`;
+        assert.equal(g.ball.lastHitBy, 1, `${label}: real movement did not strike`);
+        assert.equal(g.lastShotInfo.stroke.id, serving ? 'SERVE_SIDE' : 'SIDE', label);
+        const gesture = g.shotJournal.latest.contact.incoming.gesture;
+        assert.notEqual(gesture.tap, true, `${label}: swipe became a tap`);
+        assert.ok(Math.abs(gesture.curl) < 1e-6, `${label}: sidespin cannot require a C-shaped gesture`);
+        assert.ok(Math.abs(g.ball.w.y) > Math.abs(g.ball.w.x), `${label}: vertical spin dominates ${JSON.stringify(g.ball.w)}`);
+        assert.ok(direction * g.ball.w.y > 0, `${label}: sideways brush sign does not follow its direction`);
+        const flight = lib.predict(lib.V3.clone(g.ball.p), lib.V3.clone(g.ball.v), lib.V3.clone(g.ball.w),
+          { dt: lib.PH.SIM_DT, maxT: 2.6, stopAfterBounces: serving ? 2 : 1, stopOnFirstBounce: !serving, out: {} });
+        assert.equal(flight.hitNet, false, `${label}: sidespin struck the net`);
+        assert.equal(Math.sign(flight.landed?.z), serving ? 1 : -1, `${label}: sidespin missed the playable court ${JSON.stringify({
+          v:g.ball.v,w:g.ball.w,kind:flight.kind,plane:flight.planeCross,elev:g.lastShotInfo.elev,contact:g.lastShotInfo.contact
+        })}`);
+        if (serving) assert.equal(Math.sign(flight.b2?.z), -1, `${label}: sidespin serve missed the receiver's court`);
+        send('pointerup', end, 1080);
+        assert.equal(g.stats.shots, 1, `${label}: release duplicated the contact`);
+      }
     }
   }
 });

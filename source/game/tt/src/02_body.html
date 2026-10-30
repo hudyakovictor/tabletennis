@@ -41,12 +41,20 @@
 
     <!-- Крупное объявление нового урока: название удара, цель и жест.
          Висит всю фазу интро — прочитать успевает каждый. -->
-    <div id="tIntro" role="status" aria-live="polite">
+    <div id="tIntro" role="dialog" aria-modal="true" aria-label="Учебный урок">
       <span id="tINo"></span>
       <b id="tITitle"></b>
       <span id="tIGoal"></span>
       <i id="tITip"></i>
-      <em id="tIWait">Коснись экрана — продолжить</em>
+      <div id="tIInfo"></div>
+      <div id="tIDiagram"></div>
+      <div id="tIQuiz"></div>
+      <div class="tI-actions">
+        <button id="tIStart" class="tbt pe">Начать практику</button>
+        <button id="tIRetry" class="tbt pe" hidden>Повторить проверку</button>
+        <button id="tINext" class="tbt pe" hidden>Далее</button>
+      </div>
+      <em id="tIWait"></em>
     </div>
 
     <div id="dbg"></div>
@@ -86,6 +94,11 @@
         <button id="inputLogPause" class="tbt">СОХРАНИТЬ ПОСЛЕДНИЕ 30 С</button>
         <div id="trainingActions" hidden>
           <p id="trainPauseTip"></p>
+          <button class="tbt" id="trReference">РАЗБОР И СХЕМА</button>
+          <button class="tbt" id="trRepeat">ПОВТОРИТЬ УРОК</button>
+          <label class="train-select"><select id="trainLesson"></select><button class="tbt" id="trLesson">ВЫБРАННЫЙ УРОК</button></label>
+          <label class="train-select"><select id="trainStroke"></select><button class="tbt" id="trPractice">ОТРАБОТКА УДАРА</button></label>
+          <label class="train-select"><select id="trainAccuracy"></select><button class="tbt" id="trAccuracy">ПОПАДАНИЕ В ЗОНЫ</button></label>
           <button class="tbt" id="trSkip">ПРОПУСТИТЬ УПРАЖНЕНИЕ</button>
           <button class="tbt" id="trExit">ЗАКОНЧИТЬ ОБУЧЕНИЕ</button>
         </div>
@@ -184,7 +197,7 @@
       <div class="logo" style="font-size:24px">НАСТРОЙКИ</div>
       <div class="sub">Личные предпочтения · единые правила игры</div>
 
-      <p class="note">Допуски попадания и помощь одинаковы для всех. Мышь или палец управляют ракеткой. Короткий клик или тап во время приёма — простой удар; свайп задаёт направление и вращение. На подаче клик подбрасывает мяч, затем нужен свайп. Скобки у мяча подсказывают время: пунктир — приближение, сплошные — окно удара. Сам по себе маркер мяч не отбивает.</p>
+      <p class="note">Допуски попадания и помощь одинаковы для всех. Мышь или палец управляют ракеткой. Короткий клик или тап во время приёма — простой удар; свайп задаёт направление и вращение. На подаче первое нажатие подбрасывает мяч, а новый клик или тап по падающему мячу выполняет простой удар. Для вращения начни свайп заранее и проведи через падающий мяч. Скобки у мяча подсказывают время: пунктир — приближение, сплошные — окно удара. Сам по себе маркер мяч не отбивает.</p>
 
       <h3 class="sec">ХВАТ И ВЕДУЩАЯ РУКА</h3>
       <div class="row" role="group" aria-label="Хват ракетки">
@@ -277,16 +290,8 @@
   <!-- ====================== TRAINING COMPLETE ===================== -->
   <div class="screen" id="tdone" role="dialog" aria-modal="true" aria-label="Обучение пройдено">
     <div class="card">
-      <div class="logo" style="font-size:30px;">ОБУЧЕНИЕ ПРОЙДЕНО</div>
-      <div class="sub">Шесть ударов в руках. Дальше — матч</div>
-      <div class="recap">
-        <div class="rc"><i style="background:#4ee39a"></i><b>Вверх</b><small>топспин: мяч ныряет в стол</small></div>
-        <div class="rc"><i style="background:#39c6ff"></i><b>Вниз</b><small>подрезка: низко и медленно</small></div>
-        <div class="rc"><i style="background:#ffd34d"></i><b>Дугой вбок</b><small>боковое: мяч уходит вбок</small></div>
-        <div class="rc"><i style="background:#9aa7b8"></i><b>Коротко</b><small>блок: гасит чужую скорость</small></div>
-        <div class="rc"><i style="background:#ff7a2f"></i><b>Быстро и плоско</b><small>смеш по высокому мячу</small></div>
-        <div class="rc"><i style="background:#ff5d6e"></i><b>Момент</b><small>бей, когда кольцо сомкнулось</small></div>
-      </div>
+      <div class="logo" id="tdTitle" style="font-size:30px;"></div>
+      <div class="sub" id="tdSummary"></div>
       <button class="btn" id="tdPlay">НАЧАТЬ МАТЧ</button>
       <button class="btn ghost" id="tdAgain">ПРОЙТИ ЕЩЁ РАЗ</button>
     </div>

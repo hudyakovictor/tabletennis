@@ -79,7 +79,7 @@ Router.def('ranks', {
      * общую плашку — визуально группа, а не разрозненные элементы. */
     return `${UI.hud()}<div class="scroll">
       <div class="seg rise" style="--d:0;margin:8px 14px 4px" id="rkSeg"><span class="pill"></span><button class="on" data-v="world">${t('ranks.world')}</button><button data-v="friends">${t('common.friends')}</button><button data-v="club">${t('ranks.club')}</button></div>
-      <div class="pg-head rise" style="--d:1;margin:4px 14px 6px"><div class="h1">${t('ranks.title')}</div><span class="chip gold">${Art.icon('clock', { c: '#FFE28A' })} ${t('ranks.seasonChip', { left: seasonLeftShort() })}</span></div>
+      <div class="pg-head rise" style="--d:1;margin:4px 14px 6px"><div class="h1">${t('ranks.title')}</div><span class="chip gold">${Art.icon('clock', { c: '#FFE28A' })} <span data-season-left>${t('ranks.seasonChip', { left: globalThis.TTSeason.seasonLeftShort() })}</span></span></div>
       <div class="pnl rk-plate rise" style="--d:2"><div id="rkBody" class="rk-body">${this.body('world')}</div></div></div>`;
   },
   mount(el) {

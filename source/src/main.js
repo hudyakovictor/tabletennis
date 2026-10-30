@@ -50,6 +50,7 @@ Router.def('splash', {
 function boot() {
   TGX.init();
   I18n.init();            // язык: S.lang → Telegram language_code → браузер → ru
+  Progress.watchSeason();
   const mob = () => document.body.classList.toggle('mobile', TGX.inTG || matchMedia('(max-width:760px), (pointer:coarse) and (max-width:1100px)').matches);
   mob(); window.addEventListener('resize', mob);
   document.body.classList.toggle('rm', !!S.rm || matchMedia('(prefers-reduced-motion: reduce)').matches);
