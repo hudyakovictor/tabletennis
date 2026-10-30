@@ -14,12 +14,22 @@ const run = (strokes) => JSON.parse(execFileSync(process.execPath,
 
 test('headless rally: no false anomalies on the bot blade, in frame, or at the ceiling', () => {
   const out = run(40);
-  assert.equal(out.pass, true, JSON.stringify(out.total));
+  assert.equal(out.pass, true, JSON.stringify(out.gate));
+  assert.equal(out.gate.total, 0, `engine anomalies: ${JSON.stringify(out.gate.byCode)}`);
   assert.equal(out.total.BALL_THROUGH_RACKET, 0);
   assert.equal(out.total.RACKET_UNDER_TABLE, 0);
   assert.equal(out.total.SPEED_CEILING, 0);
-  assert.equal(out.other, 0, 'no other code may fire either');
+  assert.equal(out.total.RACKET_OFFSCREEN, 0);
+  assert.equal(out.total.other, 0, 'no other code may fire either');
   for (const lv of out.perLevel) assert.equal(lv.gates, 'green', `level ${lv.name}`);
+  /* Мяч за кадром — законный исход: он объясняется ударом и в гейт не идёт,
+   * но не должен и теряться (иначе «тихо» = «не смотрели»). */
+  assert.equal(out.causes.engine, 0, `engine-caused off-frame tickets: ${out.causes.engine}`);
+  /* Клинок бота обязан двигаться: замороженная поза не проверяет ничего. */
+  for (const lv of out.perLevel) {
+    assert.ok(lv.stats.uniquePoses > 50, `level ${lv.name}: only ${lv.stats.uniquePoses} unique poses`);
+  }
+  assert.ok(out.minPoses > 50, `min unique poses ${out.minPoses}`);
   /* Зелёный прогон обязан быть НЕ пустым: детекторы должны были реально
    * смотреть на клинок и на кадр, иначе «ноль тикетов» ничего не значит. */
   assert.ok(out.probe.armedSteps > 1000, `armed substeps: ${out.probe.armedSteps}`);

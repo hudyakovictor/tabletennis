@@ -36,7 +36,8 @@ const lib = load([
 ], [
   'PH', 'V3', 'predict', 'integrateBall', 'impactRacket', 'bounceTable', 'netContactKind',
   'OpponentAI', 'AI_LEVELS', 'PhysicsWatchdog', 'cameraRigFor', 'rigViewProj', 'projectPoint',
-  'STROKE_CONFIG', 'MATCH_RULES', 'clipTape',
+  'STROKE_CONFIG', 'MATCH_RULES', 'clipTape', 'keepPaddleAboveTable', 'paddleLimitsFor',
+  'PADDLE_STANCE_Z',
 ]);
 
 const { PH, V3, OpponentAI, AI_LEVELS, PhysicsWatchdog } = lib;
@@ -98,6 +99,33 @@ function makeStub(aiPos) {
 /* Один удар бота целиком: подлёт → замах → контакт → полёт отскока.
  * Каждый подшаг идёт через тот же интегратор, что в игре, отскоки — через
  * bounceTable/clipTape, а сторож кормится ровно как в 70_game.js. */
+/* Клинок бота двигается как в игре: по горизонтали — к прогнозу точки
+ * встречи на его плоскости, по вертикали — по высоте мяча, с лимитами
+ * depth-зависимые (paddleLimitsFor) и скоростью уровня (AI_LEVELS.move).
+ * Сглаживание экспоненциальное, как ai._moveSmooth: ровно поэтому позы
+ * разные от кадра к кадру, а не один замороженный вектор. */
+const _q = {};
+const REACH_X = 1.12;
+function moveBlade(stub, ball, dt, level) {
+  const ai = stub.ai.pos;
+  const stopZ = Math.max(-2.05, Math.min(-1.05, ai.z));
+  lib.predict(V3.clone(ball.p), V3.clone(ball.v), V3.clone(ball.w),
+    { dt: 1 / 240, maxT: 2.4, stopZ, stopDir: -1, stopAtPlane: true, out: _q });
+  const aim = _q.end && Number.isFinite(_q.end.x) ? _q.end : ball.p;
+  const lim = lib.paddleLimitsFor(stopZ);
+  let tx = Math.max(-Math.min(REACH_X, lim.x), Math.min(REACH_X, lim.x, aim.x));
+  let ty = Math.max(PH.TABLE_Y + Math.max(0.18, lim.yLo),
+    Math.min(PH.TABLE_Y + Math.min(0.96, lim.yHi), aim.y));
+  let tz = stopZ;
+  const rate = Math.max(2, Math.min(12, level.move * 2.5));
+  const k = 1 - Math.exp(-rate * dt);
+  ai.x += (tx - ai.x) * k;
+  ai.y += (ty - ai.y) * k;
+  ai.z += (tz - ai.z) * k * 0.9;
+  lib.keepPaddleAboveTable(ai, { x: 0, y: -0.1, z: 1 }, 0, PH.TABLE_Y, PH.T_HALF_WID, PH.T_HALF_LEN);
+  return { x: ai.x, y: ai.y, z: ai.z };
+}
+
 function strokeOnce(w, ball, stub, levelIndex, ai, stats) {
   const oppPad = { pos: { x: 0, y: 0, z: 0 }, normal: { x: 0, y: 0, z: 1 } };
   let prevOpp = { x: ai.pos.x, y: ai.pos.y, z: ai.pos.z };
@@ -152,6 +180,8 @@ function strokeOnce(w, ball, stub, levelIndex, ai, stats) {
       accFrame -= frameDt;
       stub.time += frameDt; stub.strokeTime += frameDt;
       ai.think(stub, frameDt);
+      moveBlade(stub, ball, frameDt, lib.AI_LEVELS[levelIndex] || { move: 3 });
+      stats.poses.add(`${stub.ai.pos.x.toFixed(3)},${stub.ai.pos.y.toFixed(3)},${stub.ai.pos.z.toFixed(3)}`);
       /* ровно условия 70_game.watchdogArmFrame: план есть, мяч летит к боту,
        * уже отскочил на его половине и ещё перед ним */
       w.armOpponent(!!(ai.commit && ball.live && ball.lastHitBy === 1 && botBounce &&
@@ -206,7 +236,7 @@ function runLevel(levelIndex, strokes) {
   w.onTicket = null;
   const ai = new OpponentAI(levelIndex);
   const stub = makeStub();
-  const stats = { strokes: 0, swings: 0, declines: 0, bounces: 0, nets: 0, hitSeq: 0,
+  const stats = { strokes: 0, swings: 0, declines: 0, bounces: 0, nets: 0, hitSeq: 0, poses: new Set(),
     maxVmagRatio: 0, maxVmag: 0, maxVmagVsLevel: 0, maxX: 0, maxZ: 0, maxBallSpeed: 0, maxBallY: 0, codes: {} };
 
   for (let n = 0; n < strokes; n++) {
@@ -227,9 +257,20 @@ function runLevel(levelIndex, strokes) {
     strokeOnce(w, ball, stub, levelIndex, ai, stats);
   }
   for (const code of Object.keys(w.counts)) if (w.counts[code]) stats.codes[code] = w.counts[code];
+  stats.uniquePoses = stats.poses.size;
+  delete stats.poses;
   stats.probe = { ...w.probe };
+  stats.causes = w.report().causes;
+  /* В гейт идут только аномалии движка: BALL_OFF_FRAME с cause='input' —
+   * это «так ударили», а не «движок сломался». */
+  stats.engineTickets = w.tickets.filter(t => !(t.code === 'BALL_OFF_FRAME' &&
+    t.detail && t.detail.cause === 'input'));
+  stats.inputTickets = w.tickets.filter(t => t.code === 'BALL_OFF_FRAME' &&
+    t.detail && t.detail.cause === 'input');
   return { level: levelIndex, name: AI_LEVELS[levelIndex] && AI_LEVELS[levelIndex].name,
-    gates: w.report().gates.status, stats, tickets: w.tickets.map(t => ({ code: t.code, time: t.time, side: t.side, aiLevel: t.aiLevel, detail: t.detail })) };
+    gates: w.report().gates.status, stats,
+    engine: stats.engineTickets.map(t => ({ code: t.code, time: t.time, side: t.side, aiLevel: t.aiLevel, detail: t.detail })),
+    offFrameInput: stats.inputTickets.map(t => ({ code: t.code, time: t.time, side: t.side, aiLevel: t.aiLevel, detail: t.detail })) };
 }
 
 const results = [];
@@ -280,24 +321,41 @@ function bench() {
 const benchOut = bench();
 const msPerFrame = benchOut.sub;
 
-const total = { BALL_THROUGH_RACKET: 0, RACKET_UNDER_TABLE: 0, SPEED_CEILING: 0, other: 0 };
+/* В гейт идут только аномалии движка. BALL_OFF_FRAME с cause='input' —
+ * законный исход удара: он печатается и считается отдельно. */
+const gate = { total: 0, byCode: {} };
+const causes = { input: 0, engine: 0 };
+const total = { BALL_THROUGH_RACKET: 0, RACKET_UNDER_TABLE: 0, SPEED_CEILING: 0, RACKET_OFFSCREEN: 0, other: 0 };
+let minPoses = Infinity;
 for (const r of results) {
-  for (const [code, n] of Object.entries(r.stats.codes)) {
-    if (code in total) total[code] += n; else total.other += n;
+  minPoses = Math.min(minPoses, r.stats.uniquePoses);
+  causes.input += r.stats.causes.input;
+  causes.engine += r.stats.causes.engine;
+  for (const t of r.stats.engineTickets) {
+    gate.total++;
+    gate.byCode[t.code] = (gate.byCode[t.code] || 0) + 1;
+    if (t.code in total) total[t.code]++; else total.other++;
   }
 }
 const probeTotals = results.reduce((a, r) => {
   for (const [k, v] of Object.entries(r.stats.probe || {})) a[k] = (a[k] || 0) + v;
   return a;
 }, {});
-const failed = total.BALL_THROUGH_RACKET + total.RACKET_UNDER_TABLE + total.SPEED_CEILING;
 const covered = probeTotals.planeCrossings > 0 && probeTotals.armedSteps > 0 &&
   probeTotals.poses > 0 && probeTotals.strokes > 0;
-const out = { strokes: STROKES, levels: LEVELS, perLevel: results, total, other: total.other, probe: probeTotals,
-  msPerFrame, msFrameOnly: benchOut.frame, msSubstepsOnly: benchOut.substeps, pass: failed === 0 && covered && results.every(r => r.gates === 'green') };
+/* Позы бота обязаны быть РАЗНЫМИ: если клинок стоит на месте, кадровая
+ * проверка «ракетка под столом / за кадром» ничего не проверяет. */
+const posesOk = results.every(r => r.stats.uniquePoses > 50);
+const out = { strokes: STROKES, levels: LEVELS, perLevel: results, total, gate, causes, probe: probeTotals,
+  uniquePoses: results.map(r => r.stats.uniquePoses), minPoses, posesOk,
+  msPerFrame, msFrameOnly: benchOut.frame, msSubstepsOnly: benchOut.substeps,
+  pass: gate.total === 0 && covered && posesOk && results.every(r => r.gates === 'green') };
 
 if (argv.includes('--dump')) {
-  for (const r of results) for (const t of r.tickets) console.log(JSON.stringify(t));
+  for (const r of results) {
+    for (const t of r.engine) console.log('ENGINE', JSON.stringify(t));
+    for (const t of r.offFrameInput) console.log('INPUT', JSON.stringify(t));
+  }
 }
 if (json) { console.log(JSON.stringify(out, null, 2)); process.exit(out.pass ? 0 : 1); }
 
@@ -305,16 +363,20 @@ console.log(`Headless rally: ${LEVELS} × ${STROKES} ударов бота\n`);
 for (const r of results) {
   const s = r.stats;
   console.log(`${String(r.name).padEnd(6)} ударов ${String(s.strokes).padStart(3)} · замах ${String(s.swings).padStart(3)}` +
-    ` · отказ ${String(s.declines).padStart(3)} · vmag ${s.maxVmag.toFixed(2)} (${(s.maxVmagRatio * 100).toFixed(0)}% потолка)` +
-    ` · мяч ${(s.maxBallSpeed * 3.6).toFixed(0)} км/ч · apex ${s.maxBallY.toFixed(2)} м · |x| ${s.maxX.toFixed(2)} |z| ${s.maxZ.toFixed(2)}` +
-    ` · vmag/vmagMax ${(s.maxVmagVsLevel * 100).toFixed(0)}%` +
-    ` · клинок: ${s.probe.armedSteps} взведённых подшагов, ${s.probe.planeCrossings} пересеч. плоскости` +
-    ` · гейты ${r.gates}` + (Object.keys(s.codes).length ? ` · ТИКЕТЫ ${JSON.stringify(s.codes)}` : ''));
+    ` · отказ ${String(s.declines).padStart(3)} · vmag ${s.maxVmag.toFixed(2)} (${(s.maxVmagRatio * 100).toFixed(0)}% потолка, ${(s.maxVmagVsLevel * 100).toFixed(0)}% уровня)` +
+    ` · поз ${s.uniquePoses} · мяч ${(s.maxBallSpeed * 3.6).toFixed(0)} км/ч · apex ${s.maxBallY.toFixed(2)} м` +
+    ` · вне кадра: input ${s.causes.input} / engine ${s.causes.engine}` +
+    ` · клинок: ${s.probe.armedSteps} взведённых, ${s.probe.planeCrossings} пересеч.` +
+    ` · гейты ${r.gates}` + (r.engine.length ? ` · ТИКЕТЫ ${JSON.stringify(gate.byCode)}` : ''));
 }
-console.log(`\nBALL_THROUGH_RACKET ${total.BALL_THROUGH_RACKET} · RACKET_UNDER_TABLE ${total.RACKET_UNDER_TABLE}` +
-  ` · SPEED_CEILING ${total.SPEED_CEILING} · прочие ${total.other}`);
+console.log(`\nГейт (аномалии движка): ${gate.total}${gate.total ? ' ' + JSON.stringify(gate.byCode) : ''}` +
+  ` · BALL_THROUGH_RACKET ${total.BALL_THROUGH_RACKET} · RACKET_UNDER_TABLE ${total.RACKET_UNDER_TABLE}` +
+  ` · SPEED_CEILING ${total.SPEED_CEILING} · RACKET_OFFSCREEN ${total.RACKET_OFFSCREEN} · прочие ${total.other}`);
+console.log(`Объяснено законным ударом (не в гейте): BALL_OFF_FRAME cause=input ${causes.input}` +
+  ` · cause=engine ${causes.engine}`);
 console.log(`Покрытие детекторов: ${probeTotals.substeps} подшагов (${probeTotals.armedSteps} взведённых) · ${probeTotals.planeCrossings} пересечений плоскости клинка` +
-  ` · ${probeTotals.poses} поз ракеток в кадре · ${probeTotals.screens} кадров вне экрана · ${probeTotals.strokes} ударов`);
+  ` · ${probeTotals.poses} поз ракеток в кадре · ${probeTotals.screens} кадров мяча вне экрана · ${probeTotals.strokes} ударов`);
+console.log(`Позы клинка бота: мин ${minPoses} на уровень (требуется > 50) — ${posesOk ? 'ок' : 'ПРОВАЛ'}`);
 console.log(`Сторож: ${msPerFrame.toFixed(4)} мс на кадр целиком (10 подшагов 600 Гц + кадр);` +
   ` подшаги ${benchOut.substeps.toFixed(4)} · кадр ${benchOut.frame.toFixed(4)} — бюджет 0.05`);
 console.log(out.pass ? '\nГЕЙТЫ ЗЕЛЁНЫЕ' : '\nПРОВАЛ');

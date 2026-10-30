@@ -1017,13 +1017,19 @@ class UI {
       const gates = this._watchdogGates;
       /* Доминирующий код: «сторож: 0» на пустом прогоне и «сторож: 7 ·
        * BALL_THROUGH_RACKET» — разные диагнозы, и второй не должен требовать
-       * открывать отчёт. */
+       * открывать отчёт. BALL_OFF_FRAME с cause='input' — законный исход
+       * удара, поэтому в счёт аномалий не идёт (см. gateCounts). */
+      const gateCounts = g.watchdog.gateCounts || counts;
+      const engine = Object.values(gateCounts).reduce((a, b) => a + Math.max(0, b), 0);
+      const explained = (g.watchdog.causes && g.watchdog.causes.input) || 0;
       let top = '';
-      if (total > 0) {
-        const [code, n] = Object.entries(counts).sort((a, b) => b[1] - a[1])[0] || [];
+      if (engine > 0) {
+        const [code, n] = Object.entries(gateCounts).filter(([, v]) => v > 0).sort((a, b) => b[1] - a[1])[0] || [];
         if (code) top = ` · ${code}${n > 1 ? ' ×' + n : ''}`;
       }
-      watchdogStatus = ` · сторож: ${total}${top}${gates ? (gates.status === 'green' ? ' · гейты зелёные' : ' · гейты КРАСНЫЕ') : ''}`;
+      watchdogStatus = ` · сторож: ${engine}${top}` +
+        (explained ? ` · улетело по удару: ${explained}` : '') +
+        (gates ? (gates.status === 'green' ? ' · гейты зелёные' : ' · гейты КРАСНЫЕ') : '');
     }
     status.textContent = `${g.debugRecording ? 'Запись включена' : 'Запись выключена'} · в памяти ${Math.round(stats.retainedWallSeconds)} с / ${stats.inWindow} событий · ${storage}${frameStatus}${watchdogStatus}`;
     if (!this._diagnosticBookmark && !this._diagnosticRestoreTried && g.debugArchive) {
