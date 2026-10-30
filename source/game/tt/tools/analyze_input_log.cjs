@@ -123,12 +123,19 @@ const summary = {
 
   watchdog: {
     events: countBy(events.filter(e => e.type === 'watchdog'), e => e.outcome && e.outcome.code),
+    /* Почему мяч улетел: input — так ударили, engine — баг движка. */
+    causes: countBy(events.filter(e => e.type === 'watchdog' && e.outcome && e.outcome.cause),
+      e => e.outcome.cause),
     bySide: countBy(events.filter(e => e.type === 'watchdog'),
       e => String(e.outcome && e.outcome.side)),
     byLevel: countBy(events.filter(e => e.type === 'watchdog'),
       e => e.outcome && Number.isFinite(e.outcome.aiLevel) ? 'lv' + e.outcome.aiLevel : 'lv-'),
     report: report && report.watchdog ? {
       total: report.watchdog.counts || null, classes: report.watchdog.classes || null,
+      /* gateCounts: счёт без BALL_OFF_FRAME cause='input' — это законные
+       * исходы ударов, а не аномалии. causes показывает разбивку. */
+      gateTotal: report.watchdog.gateCounts || null,
+      causes: report.watchdog.causes || null,
       gates: report.watchdog.gates ? report.watchdog.gates.status : null,
       failed: report.watchdog.gates ? report.watchdog.gates.failed : null,
       /* Журнал бота: сколько ударов записано и насколько близко к потолку

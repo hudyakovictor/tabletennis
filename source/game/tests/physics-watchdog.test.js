@@ -31,10 +31,11 @@ test('watchdog self-test gates are green and cover every code', () => {
   const names = gates.checks.map(c => c.name).join(' ');
   for (const need of ['clean run', 'BALL_INTO_TABLE', 'BALL_OFF_ARENA', 'CORNER_REPEAT_CONTACT',
     'CORNER_STUCK', 'RACKET_UNDER_TABLE', 'BALL_THROUGH_RACKET', 'SERVE_NOT_FROM_RACKET',
-    'SPEED_CEILING', 'SPIN_CEILING', 'bot blade'])
+    'SPEED_CEILING', 'SPIN_CEILING', 'bot blade', 'BALL_OFF_FRAME', 'RACKET_OFFSCREEN'])
     assert.match(names, new RegExp(need));
-  assert.deepEqual(Object.keys(WATCHDOG_CLASSES).sort(), ['corner', 'racket', 'serve', 'strong_shot']);
-  assert.equal(WATCHDOG_CODES.length, 9);
+  assert.deepEqual(Object.keys(WATCHDOG_CLASSES).sort(),
+    ['corner', 'racket', 'serve', 'shot_outcome', 'strong_shot']);
+  assert.equal(WATCHDOG_CODES.length, 11);
 });
 
 test('clean legal flight, honest table bounce and contact produce zero tickets', () => {
@@ -472,39 +473,98 @@ test('the aiShots ring records the bot stroke: pose, contact, ball before/after,
 
 const offProject = () => ({ ok: true, x: 0.5, y: -0.9, d: 4 });
 
-test('BALL_OFF_ARENA gets the screen variant when the ball is gone from the frame', () => {
+test('ball out of frame is BALL_OFF_FRAME, not an arena anomaly', () => {
   const w = new PhysicsWatchdog();
   const ball = { live: true, p: { x: 0, y: 4.2, z: -3.3 }, v: { x: 0, y: 4, z: -7 } };
   for (let i = 0; i < 30; i++)
     w.frame({ time: i / 60, dt: 1 / 60, ball, project: offProject, viewport: { w: 1280, h: 760 } });
-  assert.equal(w.counts.BALL_OFF_ARENA, 1);
-  assert.equal(w.tickets[0].detail.variant, 'screen');
-  assert.ok(w.tickets[0].detail.outPx > 24);
+  assert.equal(w.counts.BALL_OFF_FRAME, 1);
+  assert.equal(w.counts.BALL_OFF_ARENA, 0, 'экран — не метры: арена не должна срабатывать');
+  const row = w.tickets.find(t => t.code === 'BALL_OFF_FRAME');
+  assert.ok(row.detail.outPx > 24);
+  /* Доказательств бага движка нет — значит не engine: гейт не валит. */
+  assert.equal(row.detail.cause, 'input');
+  assert.equal(w.report().gateCounts.BALL_OFF_FRAME, 0);
 });
 
-test('a legal lob that the fixed camera crops is not a bug', () => {
+test('a legal hard shot off the frame is cause=input and does not fail the gate', () => {
   const w = new PhysicsWatchdog();
-  const ball = { live: true, p: { x: 0.1, y: 2.3, z: -0.4 }, v: { x: 0, y: 0.8, z: 0 } };
-  for (let i = 0; i < 60; i++)
-    w.frame({ time: i / 60, dt: 1 / 60, ball, project: offProject, viewport: { w: 1280, h: 760 } });
-  assert.equal(w.counts.BALL_OFF_ARENA, 0);
+  w.stroke({ time: 1, side: 1, strokeId: 'DRIVE', vmag: 6, quality: 0.9,
+    ball: { v: { x: 0, y: 2, z: 9 }, w: { x: -50, y: 0, z: 0 } } });
+  const ball = { live: true, p: { x: 0.2, y: 1.6, z: -0.3 }, v: { x: 0, y: 3, z: -8 } };
+  for (let i = 0; i < 30; i++)
+    w.frame({ time: 1 + i / 60, dt: 1 / 60, ball, project: offProject, viewport: { w: 1280, h: 760 } });
+  const row = w.tickets.find(t => t.code === 'BALL_OFF_FRAME');
+  assert.equal(row.detail.cause, 'input');
+  assert.equal(row.detail.who, 'player');
+  assert.equal(row.detail.strokeId, 'DRIVE');
+  assert.ok(row.detail.vmag > 0 && row.detail.limit > row.detail.vmag);
+  assert.equal(w.report().gateCounts.BALL_OFF_FRAME, 0, 'законный удар не валит гейт');
+  assert.equal(w.report().causes.input, 1);
 });
 
-test('a ball in frame is never a screen ticket, even outside the play volume', () => {
+test('the same off-frame ball after an over-ceiling stroke is cause=engine and fails the gate', () => {
   const w = new PhysicsWatchdog();
-  const ball = { live: true, p: { x: 4.5, y: 2, z: -5 }, v: { x: 1, y: 0, z: -2 } };
-  for (let i = 0; i < 60; i++)
-    w.frame({ time: i / 60, dt: 1 / 60, ball, project: () => ({ ok: true, x: 0.5, y: 0.5, d: 4 }),
-      viewport: { w: 1280, h: 760 } });
-  assert.equal(w.counts.BALL_OFF_ARENA, 0);
+  const limit = w.speedLimit({ side: -1, strokeId: 'SMASH', aiLevel: 1 });
+  w.stroke({ time: 2, side: -1, aiLevel: 1, strokeId: 'SMASH', vmag: limit * 2.5,
+    ball: { v: { x: 0, y: 2, z: 9 }, w: { x: 0, y: 0, z: 0 } } });
+  const ball = { live: true, p: { x: 0.2, y: 1.6, z: -0.3 }, v: { x: 0, y: 3, z: -8 } };
+  for (let i = 0; i < 30; i++)
+    w.frame({ time: 2 + i / 60, dt: 1 / 60, ball, project: offProject, viewport: { w: 1280, h: 760 } });
+  const row = w.tickets.find(t => t.code === 'BALL_OFF_FRAME');
+  assert.equal(row.detail.cause, 'engine');
+  assert.equal(row.detail.causeKind, 'SPEED_CEILING');
+  assert.equal(row.side, -1);
+  assert.equal(row.aiLevel, 1);
+  assert.equal(w.report().gateCounts.BALL_OFF_FRAME, 1, 'аномалия движка валит гейт');
+  assert.equal(w.report().gateCounts.SPEED_CEILING, 1);
 });
 
-test('a dead ball is not measured for screen visibility', () => {
+test('a speed jump inside one substep marks the shot as engine-caused', () => {
   const w = new PhysicsWatchdog();
-  const ball = { live: false, p: { x: 0, y: 3.4, z: -2.6 }, v: { x: 0, y: 0, z: 0 } };
-  for (let i = 0; i < 60; i++)
-    w.frame({ time: i / 60, dt: 1 / 60, ball, project: offProject, viewport: { w: 1280, h: 760 } });
-  assert.equal(w.counts.BALL_OFF_ARENA, 0);
+  w.stroke({ time: 3, side: 1, strokeId: 'DRIVE', vmag: 6,
+    ball: { v: { x: 0, y: 0, z: 6 }, w: { x: 0, y: 0, z: 0 } } });
+  const mk = (speed) => ({ live: true, p: { x: 0, y: 1.2, z: 0.3 }, v: { x: 0, y: 0, z: speed }, speed });
+  w.substep({ dt: 1 / 600, time: 3.001, p0: { x: 0, y: 1.2, z: 0.3 }, p1: { x: 0, y: 1.2, z: 0.302 },
+    ball: mk(6), hitSeq: 4 });
+  w.substep({ dt: 1 / 600, time: 3.003, p0: { x: 0, y: 1.2, z: 0.302 }, p1: { x: 0, y: 1.2, z: 0.5 },
+    ball: mk(48), hitSeq: 4 });
+  const ball = { live: true, p: { x: 0, y: 1.2, z: -0.4 }, v: { x: 0, y: 0, z: -40 } };
+  for (let i = 0; i < 30; i++)
+    w.frame({ time: 3.1 + i / 60, dt: 1 / 60, ball, project: offProject, viewport: { w: 1280, h: 760 } });
+  const row = w.tickets.find(t => t.code === 'BALL_OFF_FRAME');
+  assert.equal(row.detail.cause, 'engine');
+  assert.equal(row.detail.causeKind, 'speed_jump');
+});
+
+test('a blade off screen while the ball is alive is a ticket, a blade in frame is not', () => {
+  const outProj = (p) => (p.y > 1.5 ? { ok: true, x: 0.5, y: 1.6, d: 3 } : { ok: true, x: 0.5, y: 0.5, d: 3 });
+  const w = new PhysicsWatchdog();
+  const ball = { live: true, p: { x: 0, y: 1.1, z: 1.2 }, v: { x: 0, y: 0, z: 4 } };
+  for (let i = 0; i < 12; i++)
+    w.frame({ time: i / 60, dt: 1 / 60, ball, project: outProj, viewport: { w: 1280, h: 760 },
+      player: { pos: { x: 0, y: 1.1, z: 1.7 } }, opponent: { pos: { x: 0, y: 2.0, z: -1.5 } } });
+  assert.equal(w.counts.RACKET_OFFSCREEN, 1);
+  const row = w.tickets.find(t => t.code === 'RACKET_OFFSCREEN');
+  assert.equal(row.detail.who, 'opponent');
+  assert.equal(row.side, -1);
+  assert.ok(row.detail.outPx > 24);
+
+  const inside = new PhysicsWatchdog();
+  for (let i = 0; i < 12; i++)
+    inside.frame({ time: i / 60, dt: 1 / 60, ball, project: () => ({ ok: true, x: 0.5, y: 0.5, d: 3 }),
+      viewport: { w: 1280, h: 760 },
+      player: { pos: { x: 0, y: 1.1, z: 1.7 } }, opponent: { pos: { x: 0, y: 1.0, z: -1.5 } } });
+  assert.equal(inside.counts.RACKET_OFFSCREEN, 0);
+});
+
+test('a dead ball does not make an off-screen blade a ticket', () => {
+  const w = new PhysicsWatchdog();
+  const ball = { live: false, p: { x: 0, y: 1.1, z: 1.2 }, v: { x: 0, y: 0, z: 0 } };
+  for (let i = 0; i < 20; i++)
+    w.frame({ time: i / 60, dt: 1 / 60, ball, project: () => ({ ok: true, x: 0.5, y: 1.6, d: 3 }),
+      viewport: { w: 1280, h: 760 }, player: { pos: { x: 0, y: 2, z: 1.7 } }, opponent: { pos: { x: 0, y: 2, z: -1.5 } } });
+  assert.equal(w.counts.RACKET_OFFSCREEN, 0);
 });
 
 test('every ticket carries side and aiLevel', () => {

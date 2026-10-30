@@ -29,12 +29,34 @@ const WATCHDOG_VERSION = 1;
 const WATCHDOG_CLASSES = Object.freeze({
   strong_shot: Object.freeze(['BALL_INTO_TABLE', 'BALL_OFF_ARENA', 'SPEED_CEILING', 'SPIN_CEILING']),
   corner: Object.freeze(['CORNER_REPEAT_CONTACT', 'CORNER_STUCK']),
-  racket: Object.freeze(['RACKET_UNDER_TABLE', 'BALL_THROUGH_RACKET']),
+  racket: Object.freeze(['RACKET_UNDER_TABLE', 'RACKET_OFFSCREEN', 'BALL_THROUGH_RACKET']),
   serve: Object.freeze(['SERVE_NOT_FROM_RACKET']),
+  /* Исход удара, а не баг движка: кривой или слишком сильный удар законно
+   * уводит мяч за кадр. Пишется всегда, в гейт идёт только cause='engine'. */
+  shot_outcome: Object.freeze(['BALL_OFF_FRAME']),
 });
 
-const WATCHDOG_CODES = Object.freeze(WATCHDOG_CLASSES.strong_shot
-  .concat(WATCHDOG_CLASSES.corner, WATCHDOG_CLASSES.racket, WATCHDOG_CLASSES.serve));
+/* Тикеты, которые сами по себе доказывают баг движка: если такой случился в
+ * этом розыгрыше, уход мяча за кадр тоже получает cause='engine'. */
+const WATCHDOG_ENGINE_CODES = Object.freeze([
+  'BALL_INTO_TABLE', 'SPEED_CEILING', 'SPIN_CEILING', 'BALL_THROUGH_RACKET',
+  'RACKET_UNDER_TABLE', 'RACKET_OFFSCREEN',
+]);
+
+/** Коды, которые валят гейт. `BALL_OFF_FRAME` с cause='input' — объяснение,
+ *  почему удар не получился, а не аномалия. */
+function wdCountsForGate(tickets, counts) {
+  const out = { ...counts };
+  for (const row of tickets || []) {
+    if (row.code === 'BALL_OFF_FRAME' && row.detail && row.detail.cause === 'input') {
+      out.BALL_OFF_FRAME = (out.BALL_OFF_FRAME || 0) - 1;
+    }
+  }
+  return out;
+}
+
+const WATCHDOG_CODES = Object.freeze(Object.keys(WATCHDOG_CLASSES)
+  .reduce((all, name) => all.concat(WATCHDOG_CLASSES[name]), []));
 
 /* Пороги. Каждый — физическая величина с запасом, а не подгонка под UI.
  *
@@ -99,15 +121,19 @@ const WATCHDOG_RULES = Object.freeze({
   /* Экран. Тикет только когда мяч И не в кадре, И вне играбельного объёма:
    * камера (57_camera.js) не следует за мячом, поэтому честный лоб над
    * столом штатно уходит за верхний край кадра — это не баг. */
+  /* Скачок скорости внутри одного подшага без удара и без отскока — это
+   * телепорт, а не физика: гравитация добавляет 0.016 м/с за 1/600 с. */
+  teleportSpeedJump: 12.0,
+  /* Клинок за кадром: игрок видит не то, что бьёт. Порог в пикселях и
+   * выдержка — те же, что у мяча, чтобы одиночный кадр не давал тикет. */
+  racketOffscreenMarginPx: 24,
+  racketOffscreenDwellSec: 0.10,
   screenMarginPx: 24,
   screenDwellSec: 0.25,
   /* Границы «мяч ушёл» в метрах. Замер headless-прогона (все уровни × 200
    * ударов): легальный мяч доходит до apex 2.30 м, |x| 1.71 м, |z| 2.28 м —
    * всё это камера штатно режет по краю, и тикета быть не должно. Пороги
    * стоят выше измеренного максимума на полкорпуса-корпус. */
-  screenGuardY: 3.0,                  // м над столом: 3.76 м по абсолютной высоте
-  screenGuardX: 2.26,                 // T_HALF_WID + 1.5
-  screenGuardZ: 2.87,                 // T_HALF_LEN + 1.5
   maxAiShots: 100,                    // кольцо журнала ударов бота
   /* 0.44 = 80 % от serveCaptureRadius (0.55): внутри сферы захвата подача
    * разрешена контрактом, внешние 20 % — уже видимый телепорт клинка. */
@@ -166,6 +192,11 @@ class PhysicsWatchdog {
     this._playerFloorSec = 0;
     this._offScreenSec = 0;
     this._offScreen = false;
+    this._offscreen = { player: 0, opponent: 0 };
+    this._cause = null;
+    this._prevSpeed = null;
+    this._lastTableContactT = null;
+    this._lastStroke = null;
   }
 
   /** Новый удар: сбрасываем одноразовые флаги, счётчики и таймеры. */
@@ -187,6 +218,20 @@ class PhysicsWatchdog {
     this._armedMeta = null;
     this._armedOpp = false;
     this._armedOppMeta = null;
+    /* Причина «почему мяч улетел»: сначала честный удар, потом — если
+     * найдётся баг движка — отметка engine. */
+    this._cause = null;
+    this._prevSpeed = null;
+    this._lastTableContactT = null;
+    this._offscreen = { player: 0, opponent: 0 };
+  }
+
+  /** Отметить причину на этот розыгрыш: 'engine' сильнее 'input'. */
+  _markCause(cause, kind, detail) {
+    if (cause === 'engine' || !this._cause) {
+      this._cause = { cause, kind: kind || null, detail: detail || null,
+        time: detail && Number.isFinite(detail.time) ? detail.time : null };
+    }
   }
 
   /** Состояние гейта на текущий кадр: бьёт ли игрок прямо сейчас. */
@@ -214,11 +259,16 @@ class PhysicsWatchdog {
     if (now !== null && Number.isFinite(last) && now - last < this.rules.ticketCooldownSec) return null;
     if (now !== null) this._lastAt[code] = now;
     this.counts[code] = (this.counts[code] || 0) + 1;
+    if (WATCHDOG_ENGINE_CODES.includes(code)) this._markCause('engine', code);
     const side = Number.isFinite(detail.side) ? detail.side : this._ctxSide;
     const aiLevel = Number.isFinite(detail.aiLevel) ? detail.aiLevel : this._ctxLevel;
     const row = {
       code, time: now, seq: ++this._seq, side, aiLevel,
       class: Object.keys(WATCHDOG_CLASSES).find(k => WATCHDOG_CLASSES[k].includes(code)) || null,
+      /* Причина и виновник — на верхнем уровне: по логу видно, объясняется
+       * ли уход мяча ударом, не разбирая detail. */
+      ...(detail.cause ? { cause: detail.cause } : {}),
+      ...(detail.who ? { who: detail.who } : {}),
       detail,
     };
     this.tickets.push(row);
@@ -237,6 +287,25 @@ class PhysicsWatchdog {
     const PHc = WD_PH(), R = this.rules;
     const p1 = s.p1, p0 = s.p0 || p1;
     const dt = Number.isFinite(s.dt) ? s.dt : 0;
+
+    /* --- 0. телепорт и NaN: причина 'engine' для ухода мяча ---------- */
+    const nanBall = !Number.isFinite(p1.y) || !Number.isFinite(p1.z) ||
+      (s.ball && s.ball.v && (!Number.isFinite(s.ball.v.x) || !Number.isFinite(s.ball.v.y) ||
+        !Number.isFinite(s.ball.v.z)));
+    if (nanBall) {
+      this._markCause('engine', 'nan', { time: s.time, ball: [p1.x, p1.y, p1.z] });
+    } else if (s.ball && Number.isFinite(s.ball.speed)) {
+      const prev = this._prevSpeed;
+      const bounced = this._lastTableContactT !== null && Number.isFinite(s.time) &&
+        Math.abs(s.time - this._lastTableContactT) < 0.004;
+      const hit = s.hitSeq !== undefined && this._hitSeqSeen !== null && s.hitSeq !== this._hitSeqSeen;
+      if (prev !== null && Math.abs(s.ball.speed - prev) > R.teleportSpeedJump && !hit && !bounced) {
+        this._markCause('engine', 'speed_jump', {
+          time: s.time, before: +prev.toFixed(2), after: +s.ball.speed.toFixed(2),
+        });
+      }
+      this._prevSpeed = s.ball.speed;
+    }
 
     /* --- 1. сильный удар в стол: мяч внутри плиты -------------------- */
     const inFootprint = Math.abs(p1.x) <= PHc.T_HALF_WID && Math.abs(p1.z) <= PHc.T_HALF_LEN;
@@ -258,9 +327,12 @@ class PhysicsWatchdog {
     if (!this._offArena && (Math.abs(p1.x) > R.arena.x || Math.abs(p1.z) > R.arena.z ||
         p1.y > R.arena.y)) {
       this._offArena = true;
+      const cause = this._cause ? this._cause.cause : 'input';
       this.ticket('BALL_OFF_ARENA', {
         time: s.time, x: +p1.x.toFixed(3), y: +p1.y.toFixed(3), z: +p1.z.toFixed(3),
         speed: s.ball && Number.isFinite(s.ball.speed) ? +s.ball.speed.toFixed(2) : null,
+        ...this.strokeContext(), cause,
+        causeKind: this._cause ? this._cause.kind : null,
       });
     }
 
@@ -398,6 +470,7 @@ class PhysicsWatchdog {
     const R = this.rules, PHc = WD_PH();
     this._racketPose('player', f.player, dt, PHc.TABLE_Y + R.racketFloorOverTable, 1, f.time);
     this._racketPose('opponent', f.opponent, dt, PHc.TABLE_Y + R.opponentFloorOverTable, -1, f.time);
+    this._racketOffscreen(f, dt);
     this._screen(f, dt);
   }
 
@@ -424,9 +497,44 @@ class PhysicsWatchdog {
     } else this[key] = 0;
   }
 
-  /** 4. мяч ушёл за границы кадра и при этом вне играбельного объёма. */
+  /** 3б. Клинок за кадром, пока мяч жив: игрок видит не то, что бьёт. */
+  _racketOffscreen(f, dt) {
+    const R = this.rules, b = f.ball;
+    const live = !!(b && b.live);
+    const vw = f.viewport && f.viewport.w, vh = f.viewport && f.viewport.h;
+    const measurable = live && typeof f.project === 'function' &&
+      Number.isFinite(vw) && Number.isFinite(vh) && vw > 0 && vh > 0;
+    for (const [who, side] of [['player', 1], ['opponent', -1]]) {
+      const pad = who === 'player' ? f.player : f.opponent;
+      const pos = pad && (pad.pos || pad);
+      if (!pos || !Number.isFinite(pos.x) || !measurable) { this._offscreen[who] = 0; continue; }
+      const pr = f.project(pos);
+      let outPx = Infinity;
+      if (pr && pr.ok === true && Number.isFinite(pr.x) && Number.isFinite(pr.y)) {
+        const px = pr.x * vw, py = pr.y * vh;
+        outPx = Math.max(-px, px - vw, -py, py - vh);
+      }
+      if (outPx > R.racketOffscreenMarginPx) {
+        this._offscreen[who] += dt;
+        if (this._offscreen[who] >= R.racketOffscreenDwellSec) {
+          this.context(side, null);
+          this.ticket('RACKET_OFFSCREEN', {
+            time: wdNum(f.time), who, side,
+            racket: [ +pos.x.toFixed(3), +pos.y.toFixed(3), +pos.z.toFixed(3) ],
+            outPx: Number.isFinite(outPx) ? Math.round(outPx) : null,
+            seconds: +this._offscreen[who].toFixed(3),
+            viewport: { w: vw, h: vh },
+          });
+        }
+      } else this._offscreen[who] = 0;
+    }
+  }
+
+  /** Мяч ушёл за кадр. Это ИСХОД удара, а не всегда баг: кривой или слишком
+   *  сильный удар законно уводит мяч за кадр. Тикет пишется всегда, но в
+   *  гейт идёт только cause='engine'. */
   _screen(f, dt) {
-    const R = this.rules, PHc = WD_PH(), b = f.ball;
+    const R = this.rules, b = f.ball;
     if (!b || !b.live || !b.p || !Number.isFinite(b.p.x) || typeof f.project !== 'function') {
       this._offScreenSec = 0; return;
     }
@@ -439,19 +547,21 @@ class PhysicsWatchdog {
       outPx = Math.max(-px, px - vw, -py, py - vh);
       projected = true;
     } else outPx = Infinity;              // за камерой — тоже «не видно»
-    const outside = Math.abs(b.p.x) > R.screenGuardX || Math.abs(b.p.z) > R.screenGuardZ ||
-      b.p.y > PHc.TABLE_Y + R.screenGuardY;
     if (outPx > R.screenMarginPx && this.probe) this.probe.screens++;
-    if (outPx > R.screenMarginPx && outside) {
+    if (outPx > R.screenMarginPx) {
       this._offScreenSec += dt;
-      if (this._offScreenSec >= R.screenDwellSec) {
+      if (this._offScreenSec >= R.screenDwellSec && !this._offScreen) {
         this._offScreen = true;
-        this.ticket('BALL_OFF_ARENA', {
-          time: f.time, variant: 'screen', projected,
+        const ctx = this.strokeContext();
+        const cause = this._cause ? this._cause.cause : 'input';
+        this.ticket('BALL_OFF_FRAME', {
+          time: f.time, projected, cause,
+          causeKind: this._cause ? this._cause.kind : null,
           outPx: Number.isFinite(outPx) ? Math.round(outPx) : null,
           seconds: +this._offScreenSec.toFixed(3),
           x: +b.p.x.toFixed(3), y: +b.p.y.toFixed(3), z: +b.p.z.toFixed(3),
           speed: b.v ? +Math.hypot(b.v.x, b.v.y, b.v.z).toFixed(2) : null,
+          ...ctx,
         });
       }
     } else this._offScreenSec = 0;
@@ -511,7 +621,32 @@ class PhysicsWatchdog {
         w: [ +w.x.toFixed(1), +w.y.toFixed(1), +w.z.toFixed(1) ],
       });
     }
+    /* Контекст последнего удара: нужен тикетам «мяч улетел», чтобы по логу
+     * было видно, чем именно били и сколько оставалось до потолка. */
+    this._lastStroke = {
+      side: st.side === -1 ? -1 : 1,
+      aiLevel: Number.isFinite(st.aiLevel) ? st.aiLevel : null,
+      strokeId: st.strokeId || null,
+      vmag: vmag === null ? null : +vmag.toFixed(3),
+      limit: limit === null ? null : +limit.toFixed(3),
+      ratio: vmag !== null && limit ? +(vmag / limit).toFixed(3) : null,
+      quality: wdNum(st.quality),
+      time: wdNum(st.time),
+    };
+    if (vmag !== null && limit && vmag <= limit) this._markCause('input', 'legal_stroke');
     if (st.side === -1) this._pushAiShot(st, vmag, limit);
+  }
+
+  /** Поля последнего удара для тикетов об улетевшем мяче. */
+  strokeContext() {
+    const s = this._lastStroke;
+    if (!s) return { who: null, vmag: null, limit: null, limitRatio: null };
+    return {
+      who: s.side === -1 ? 'opponent' : 'player',
+      aiLevel: s.aiLevel,
+      strokeId: s.strokeId,
+      vmag: s.vmag, limit: s.limit, limitRatio: s.ratio,
+    };
   }
 
   _pushAiShot(st, vmag, limit) {
@@ -539,6 +674,7 @@ class PhysicsWatchdog {
   tableContact(t) {
     if (!t) return;
     const R = this.rules;
+    if (Number.isFinite(t.time)) this._lastTableContactT = t.time;
     const edge = Number.isFinite(t.edge) ? t.edge : 0;
     if (edge <= 0.25) return;
     const now = Number.isFinite(t.time) ? t.time : null;
@@ -620,6 +756,17 @@ class PhysicsWatchdog {
   /** Очко закончилось: следующий розыгрыш считается с чистого листа. */
   point() { this.resetShot(); }
 
+  /** Сколько тикетов объяснено законным ударом, а сколько — багом движка. */
+  _causeCounts() {
+    const out = { input: 0, engine: 0 };
+    for (const row of this.tickets) {
+      const c = row.detail && row.detail.cause;
+      if (c === 'input') out.input++;
+      else if (c === 'engine') out.engine++;
+    }
+    return out;
+  }
+
   report() {
     const classes = {};
     for (const [name, codes] of Object.entries(WATCHDOG_CLASSES)) {
@@ -629,6 +776,10 @@ class PhysicsWatchdog {
     return {
       version: this.version, rules: this.rules, classes, codes: WATCHDOG_CLASSES,
       counts: { ...this.counts }, total: this.tickets.length, tickets: this.tickets.slice(),
+      /* cause='input' — законный исход удара: в счёт аномалий не идёт. */
+      gateCounts: wdCountsForGate(this.tickets, this.counts),
+      causes: this._causeCounts(),
+      lastStroke: this._lastStroke,
       lastContact: this.lastContact,
       limits: { speed: { vmax: (wdStrokeConfig() && wdStrokeConfig().racket || {}).vmax || 19.5 },
         spin: { cap: this.spinLimit() } },
@@ -645,6 +796,7 @@ class PhysicsWatchdog {
     const run = () => {
       const checks = [];
       const fresh = () => new PhysicsWatchdog(this.rules);
+      const firstOf = (w, code) => w.tickets.find(t => t.code === code) || null;
       const add = (name, expected, got, extra) => checks.push({ name, expected, got, pass: expected === got, ...(extra || {}) });
       /* Отложенный вердикт «сквозь клинок» ставится только после окна
        * throughGraceSec: здесь это окно проматывается пустым подшагом. */
@@ -808,24 +960,69 @@ class PhysicsWatchdog {
           ball: { v: { x: 0, y: 0, z: 8 }, w: { x: w.spinLimit() * 0.8, y: 0, z: 0 } } });
         add('legal spin under the cap: allowed', 0, w.counts.SPIN_CEILING);
       }
-      /* --- 4д. мяч ушёл за кадр И вне играбельного объёма ---------------- */
+      /* --- 4д. законный удар увёл мяч за кадр: тикет есть, гейт чист ---- */
       {
         const w = fresh();
+        w.stroke({ time: 0.5, side: 1, strokeId: 'DRIVE', vmag: 6,
+          ball: { v: { x: 0, y: 0, z: 9 }, w: { x: 0, y: 0, z: 0 } } });
         const project = p => ({ ok: true, x: 0.5, y: -0.6, d: 3 });
         for (let i = 0; i < 20; i++) w.frame({ time: i / 60, dt: 1 / 60,
-          ball: { live: true, p: { x: 0, y: 3.6, z: -3.0 }, v: { x: 0, y: 5, z: -6 } },
+          ball: { live: true, p: { x: 0, y: 1.2, z: -0.4 }, v: { x: 0, y: 3, z: -6 } },
           project, viewport: { w: 1280, h: 760 } });
-        add('BALL_OFF_ARENA (screen)', 1, w.counts.BALL_OFF_ARENA);
-        add('screen ticket variant', 'screen', w.tickets.length ? w.tickets[0].detail.variant : 'none');
+        add('BALL_OFF_FRAME (legal shot)', 1, w.counts.BALL_OFF_FRAME);
+        add('off-frame cause=input', 'input', (firstOf(w, 'BALL_OFF_FRAME') || {}).detail?.cause || 'none');
+        add('off-frame input does not fail the gate', 0,
+          wdCountsForGate(w.tickets, w.counts).BALL_OFF_FRAME);
       }
-      /* --- 4е. честный лоб над столом уходит за кадр — не баг ----------- */
+      /* --- 4д2. мяч улетел после бага движка: cause=engine, гейт красный -- */
       {
         const w = fresh();
+        const lim = w.speedLimit({ side: -1, strokeId: 'DRIVE', aiLevel: 0 });
+        w.stroke({ time: 0.5, side: -1, aiLevel: 0, strokeId: 'DRIVE', vmag: lim * 1.8,
+          ball: { v: { x: 0, y: 0, z: 9 }, w: { x: 0, y: 0, z: 0 } } });
+        const project = p => ({ ok: true, x: 0.5, y: -0.6, d: 3 });
+        for (let i = 0; i < 20; i++) w.frame({ time: i / 60, dt: 1 / 60,
+          ball: { live: true, p: { x: 0, y: 1.2, z: -0.4 }, v: { x: 0, y: 3, z: -6 } },
+          project, viewport: { w: 1280, h: 760 } });
+        add('off-frame cause=engine', 'engine', (firstOf(w, 'BALL_OFF_FRAME') || {}).detail?.cause || 'none');
+        add('off-frame engine fails the gate', 1,
+          wdCountsForGate(w.tickets, w.counts).BALL_OFF_FRAME);
+        const off = firstOf(w, 'BALL_OFF_FRAME');
+        add('off-frame carries vmag/limit', 'yes',
+          off && Number.isFinite(off.detail.limitRatio) && Number.isFinite(off.detail.vmag) ? 'yes' : 'none');
+      }
+      /* --- 4е. лоб: камера его режет, но это законный удар ---------------- */
+      {
+        const w = fresh();
+        w.stroke({ time: 0.2, side: 1, strokeId: 'LOB', vmag: 5,
+          ball: { v: { x: 0, y: 6, z: -3 }, w: { x: 0, y: 0, z: 0 } } });
         const project = p => ({ ok: true, x: 0.5, y: -0.4, d: 3 });
         for (let i = 0; i < 40; i++) w.frame({ time: i / 60, dt: 1 / 60,
           ball: { live: true, p: { x: 0.1, y: 2.4, z: -0.4 }, v: { x: 0, y: 1, z: 0 } },
           project, viewport: { w: 1280, h: 760 } });
-        add('legal lob above the frame: allowed', 0, w.counts.BALL_OFF_ARENA);
+        add('legal lob off the frame is not an anomaly', 0,
+          wdCountsForGate(w.tickets, w.counts).BALL_OFF_FRAME);
+      }
+      /* --- 3д. клинок за кадром, пока мяч жив -------------------------- */
+      {
+        const w = fresh();
+        const outProj = p => (p.y > 1.5 ? { ok: true, x: 0.5, y: 2.2, d: 3 } : { ok: true, x: 0.5, y: 0.5, d: 3 });
+        for (let i = 0; i < 12; i++) w.frame({ time: i / 60, dt: 1 / 60,
+          ball: { live: true, p: { x: 0, y: 1.1, z: 1.2 }, v: { x: 0, y: 0, z: 4 } },
+          player: { pos: { x: 0, y: 1.1, z: 1.7 } },
+          opponent: { pos: { x: 0, y: 2.0, z: -1.5 } },
+          project: outProj, viewport: { w: 1280, h: 760 } });
+        add('RACKET_OFFSCREEN', 1, w.counts.RACKET_OFFSCREEN);
+        add('offscreen ticket names the blade', 'opponent', (firstOf(w, 'RACKET_OFFSCREEN') || {}).detail?.who || 'none');
+      }
+      {
+        const w = fresh();
+        const inProj = () => ({ ok: true, x: 0.5, y: 0.5, d: 3 });
+        for (let i = 0; i < 12; i++) w.frame({ time: i / 60, dt: 1 / 60,
+          ball: { live: true, p: { x: 0, y: 1.1, z: 1.2 }, v: { x: 0, y: 0, z: 4 } },
+          player: { pos: { x: 0, y: 1.1, z: 1.7 } }, opponent: { pos: { x: 0, y: 1.0, z: -1.5 } },
+          project: inProj, viewport: { w: 1280, h: 760 } });
+        add('blades in frame: allowed', 0, w.counts.RACKET_OFFSCREEN);
       }
       /* --- 5б. честная подача: ракетка у мяча, мяч стартует с клинка --- */
       {
