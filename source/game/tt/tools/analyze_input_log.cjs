@@ -100,6 +100,16 @@ const summary = {
   retention: report && report.recording || null,
   physicsGates: countBy(events.filter(e => e.type === 'physics_gate'), e => e.outcome && e.outcome.stage),
   anomalies: countBy(events.filter(e => e.type === 'anomaly'), e => e.outcome && e.outcome.reason),
+  /* Автоматические тикеты сторожа физики: пять классов геймплейных багов.
+   * Из подробного отчёта берём и накопленные счётчики, и состояние гейтов. */
+  watchdog: {
+    events: countBy(events.filter(e => e.type === 'watchdog'), e => e.outcome && e.outcome.code),
+    report: report && report.watchdog ? {
+      total: report.watchdog.counts || null, classes: report.watchdog.classes || null,
+      gates: report.watchdog.gates ? report.watchdog.gates.status : null,
+      failed: report.watchdog.gates ? report.watchdog.gates.failed : null,
+    } : null,
+  },
   cancellations: countBy(events.filter(e => e.type === 'input_cancel'), e => e.outcome && e.outcome.reason),
   releases: countBy(events.filter(e => e.type === 'pointerup'), e => e.outcome && e.outcome.recognized),
   runtimeErrors: countBy(events.filter(e => e.type === 'runtime_error'), e => e.outcome && e.outcome.kind),
