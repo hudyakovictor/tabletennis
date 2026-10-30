@@ -95,11 +95,55 @@ const countBy = (rows, pick) => {
   for (const row of rows) { const key = pick(row) || 'unknown'; result[key] = (result[key] || 0) + 1; }
   return result;
 };
+/* Сводка кольца aiShots: по уровню — сколько ударов, максимум замаха и его
+ * отношение к потолку уровня. */
+function aiShotSummary(aiShots) {
+  if (!aiShots || !Array.isArray(aiShots.ring)) return null;
+  const byLevel = {};
+  for (const row of aiShots.ring) {
+    const key = Number.isFinite(row.level) ? 'lv' + row.level : 'lv-';
+    const acc = byLevel[key] || (byLevel[key] = { shots: 0, maxVmag: 0, maxRatio: 0, strokes: {} });
+    acc.shots++;
+    if (Number.isFinite(row.vmag)) acc.maxVmag = Math.max(acc.maxVmag, row.vmag);
+    if (Number.isFinite(row.vmag) && Number.isFinite(row.limit) && row.limit > 0)
+      acc.maxRatio = Math.max(acc.maxRatio, +(row.vmag / row.limit).toFixed(3));
+    if (row.strokeId) acc.strokes[row.strokeId] = (acc.strokes[row.strokeId] || 0) + 1;
+  }
+  for (const acc of Object.values(byLevel)) acc.maxVmag = +acc.maxVmag.toFixed(2);
+  return { total: aiShots.total, byLevel };
+}
+
 const summary = {
   file: input, inputFormat, events: events.length, malformed,
   retention: report && report.recording || null,
   physicsGates: countBy(events.filter(e => e.type === 'physics_gate'), e => e.outcome && e.outcome.stage),
   anomalies: countBy(events.filter(e => e.type === 'anomaly'), e => e.outcome && e.outcome.reason),
+  /* Автоматические тикеты сторожа физики: пять классов геймплейных багов.
+   * Из подробного отчёта берём и накопленные счётчики, и состояние гейтов. */
+
+  watchdog: {
+    events: countBy(events.filter(e => e.type === 'watchdog'), e => e.outcome && e.outcome.code),
+    /* Почему мяч улетел: input — так ударили, engine — баг движка. */
+    causes: countBy(events.filter(e => e.type === 'watchdog' && e.outcome && e.outcome.cause),
+      e => e.outcome.cause),
+    bySide: countBy(events.filter(e => e.type === 'watchdog'),
+      e => String(e.outcome && e.outcome.side)),
+    byLevel: countBy(events.filter(e => e.type === 'watchdog'),
+      e => e.outcome && Number.isFinite(e.outcome.aiLevel) ? 'lv' + e.outcome.aiLevel : 'lv-'),
+    report: report && report.watchdog ? {
+      total: report.watchdog.counts || null, classes: report.watchdog.classes || null,
+      /* gateCounts: счёт без BALL_OFF_FRAME cause='input' — это законные
+       * исходы ударов, а не аномалии. causes показывает разбивку. */
+      gateTotal: report.watchdog.gateCounts || null,
+      causes: report.watchdog.causes || null,
+      gates: report.watchdog.gates ? report.watchdog.gates.status : null,
+      failed: report.watchdog.gates ? report.watchdog.gates.failed : null,
+      /* Журнал бота: сколько ударов записано и насколько близко к потолку
+       * бил последний удар каждого уровня — без разбора 20 МБ событий. */
+      aiShots: aiShotSummary(report.watchdog.aiShots),
+      probe: report.watchdog.probe || null,
+    } : null,
+  },
   cancellations: countBy(events.filter(e => e.type === 'input_cancel'), e => e.outcome && e.outcome.reason),
   releases: countBy(events.filter(e => e.type === 'pointerup'), e => e.outcome && e.outcome.recognized),
   runtimeErrors: countBy(events.filter(e => e.type === 'runtime_error'), e => e.outcome && e.outcome.kind),
