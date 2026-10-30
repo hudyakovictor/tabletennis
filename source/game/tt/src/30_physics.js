@@ -270,7 +270,7 @@ function impactSphere(v, w, nIn, vSurf, e, mu, et) {
   const nLen = Math.hypot(nIn.x, nIn.y, nIn.z);
   _nUnit.x = nIn.x / nLen; _nUnit.y = nIn.y / nLen; _nUnit.z = nIn.z / nLen;
   const n = _nUnit;
-  sanitizeV(v); sanitizeV(w, SPIN_CAP * 2);
+  sanitizeV(v); sanitizeV(w, STROKE_CONFIG.spin.cap * 2);
   if (vSurf) sanitizeV(vSurf); else vSurf = ZERO3;
   // relative velocity of the ball centre wrt the surface
   V3.sub(_u, v, vSurf);
@@ -287,7 +287,7 @@ function impactSphere(v, w, nIn, vSurf, e, mu, et) {
   const vcLen = V3.len(_vc);
 
   // ---- normal impulse (per unit mass) ----
-  const eEff = Math.max(0.05, e);
+  const eEff = Math.max(STROKE_CONFIG.racket.impact.minRestitution, e);
   const dvn = -(1 + eEff) * un;                  // >0
   const Jn = PH.M * dvn;
 
@@ -368,21 +368,22 @@ function bounceTable(p, v, w) {
  *  with unit normal n (facing the incoming ball) and velocity vR.
  *  `quality` in [0..1] scales the effective COR (off-centre hits).
  * ---------------------------------------------------------------- */
-const SPIN_CAP = 1080;   // rad/s  (~172 rev/s, above the measured world best)
+const SPIN_CAP = STROKE_CONFIG.spin.cap;
 function impactRacket(v, w, n, vR, quality = 1, rubber = {}) {
   if (!saneN(n)) return null;
   sanitizeV(vR);
+  const cfg = STROKE_CONFIG.racket, base = cfg.rubber || {}, impact = cfg.impact;
   const q = Number.isFinite(quality) ? clamp(quality, 0, 1) : 1;
   quality = q;
-  const e0 = (rubber.e ?? PH.E_RACKET) * (0.55 + 0.45 * quality);
-  const mu = (rubber.mu ?? PH.MU_RACKET) * (0.6 + 0.4 * quality);
-  const et = (rubber.et ?? PH.ET_RACKET) * (0.5 + 0.5 * quality);
+  const e0 = (rubber.e ?? base.e ?? PH.E_RACKET) * (impact.restitutionQuality[0] + impact.restitutionQuality[1] * quality);
+  const mu = (rubber.mu ?? base.mu ?? PH.MU_RACKET) * (impact.frictionQuality[0] + impact.frictionQuality[1] * quality);
+  const et = (rubber.et ?? base.et ?? PH.ET_RACKET) * (impact.tangentialQuality[0] + impact.tangentialQuality[1] * quality);
   V3.sub(_u, v, vR);
   const closing = -V3.dot(_u, n);
-  const e = clamp((e0 - PH.E_RACKET_SPEED * Math.max(0, closing)) * (rubber.damp ?? 1), 0.18, 0.92);
+  const e = clamp((e0 - (base.eSpeed ?? PH.E_RACKET_SPEED) * Math.max(0, closing)) * (rubber.damp ?? base.damp ?? 1), ...impact.restitutionRange);
   const info = impactSphere(v, w, n, vR, e, mu, et);
   const wl = V3.len(w);
-  if (wl > SPIN_CAP) V3.mul(w, w, SPIN_CAP / wl);
+  if (wl > STROKE_CONFIG.spin.cap) V3.mul(w, w, STROKE_CONFIG.spin.cap / wl);
   return info;
 }
 
@@ -494,7 +495,7 @@ function predict(p0, v0, w0, opts = {}) {
   const stopZ = opts.stopZ;              // stop when z crosses this plane (towards the player)
   const stopDir = opts.stopDir || 1;
   V3.copy(_pp, p0); V3.copy(_pv, v0); V3.copy(_pw, w0);
-  sanitizeV(_pp, 40); sanitizeV(_pv); sanitizeV(_pw, SPIN_CAP * 2);
+  sanitizeV(_pp, 40); sanitizeV(_pv); sanitizeV(_pw, STROKE_CONFIG.spin.cap * 2);
   const out = opts.out || {};
   out.bounces = 0; out.hitNet = false; out.landed = null; out.b2 = null; out.b3 = null; out.apex = -1; out.cross = null;
   out.planeCross = null; out.netCross = null; out.floor = null;
@@ -616,7 +617,7 @@ function solveLaunch(from, target, spin, opts = {}) {
   const finitePt = (p) => !!p && Number.isFinite(p.x) && Number.isFinite(p.z) &&
     (p.y === undefined || Number.isFinite(p.y));
   if (!finitePt(from) || !finitePt(target)) return null;
-  if (spin) sanitizeV(spin, SPIN_CAP * 2);
+  if (spin) sanitizeV(spin, STROKE_CONFIG.spin.cap * 2);
   const dirX = target.x - from.x, dirZ = target.z - from.z;
   const horiz = Math.hypot(dirX, dirZ) || 1e-6;
   let ux = dirX / horiz, uz = dirZ / horiz;

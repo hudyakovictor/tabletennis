@@ -18,6 +18,9 @@ function load(files, names, extra = {}) {
   if (!process.env.TT_TEST_REF && files.some(f => ['65_train.js', '70_game.js', '80_ui.js', '90_boot.js', '92_embed.js'].includes(f)) && !files.includes('03_i18n.js')) {
     files = ['03_i18n.js', ...files];
   }
+  if (!process.env.TT_TEST_REF && files.includes('65_train.js') && !files.includes('64_training_data.js')) {
+    files = [...files]; files.splice(files.indexOf('65_train.js'), 0, '64_training_data.js');
+  }
   if (!process.env.TT_TEST_REF && files.some(f => ['70_game.js', '80_ui.js'].includes(f)) && !files.includes('12_match_rules.js')) {
     files = [...files]; files.splice(Math.max(0, files.indexOf('10_math.js') + 1), 0, '12_match_rules.js');
   }
@@ -28,6 +31,9 @@ function load(files, names, extra = {}) {
   if (!process.env.TT_TEST_REF && files.some(f => ['70_game.js', '80_ui.js'].includes(f)) && !files.includes('43_input_telemetry.js')) {
     files = [...files]; const index = files.findIndex(f => ['70_game.js', '80_ui.js'].includes(f));
     files.splice(index, 0, '43_input_telemetry.js');
+  }
+  if (!process.env.TT_TEST_REF && files.some(f => ['12_match_rules.js', '30_physics.js', '38_paddle_motion.js', '40_swipe.js', '70_game.js'].includes(f))) {
+    files = ['05_stroke_config.js', ...files.filter(f => f !== '05_stroke_config.js')];
   }
   const saved = new Map();
   const context = vm.createContext({ console, setInterval, clearInterval, URLSearchParams,

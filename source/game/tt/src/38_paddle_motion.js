@@ -9,7 +9,11 @@ const PADDLE_PROFILES = Object.freeze({
   PUSH: Object.freeze({ keys: Object.freeze([15, -10, -25, -30]), range: Object.freeze([15, 40]), roll: -.10, follow: .10, recover: .17 }),
   FLICK: Object.freeze({ keys: Object.freeze([15, 0, 20, 28]), range: Object.freeze([-30, -5]), roll: .20, follow: .09, recover: .16 }),
   BLOCK: Object.freeze({ keys: Object.freeze([15, 8, 8, 10]), range: Object.freeze([-15, 0]), roll: .03, follow: .06, recover: .13 }),
-  SERVE: Object.freeze({ keys: Object.freeze([15, -20, 0, 25]), range: Object.freeze([-45, 45]), roll: .20, follow: .12, recover: .20 }),
+  get SERVE() {
+    const p = STROKE_CONFIG.motion.SERVE;
+    return Object.freeze({ keys: Object.freeze([p.ready, p.prepare, p.contact, p.follow]), range: Object.freeze([...p.range]),
+      roll: p.roll, follow: p.followTime, recover: p.recoverTime, hold: p.hold });
+  },
 });
 function paddleStrokeFamily(stroke) {
   if (typeof stroke !== 'string') return 'DRIVE';
@@ -27,7 +31,7 @@ function paddleGripProfile(grip, stroke, forehand = true) {
     follow: loop ? contact + (forehand ? 7 : 12) : k[3],
     // Reverse-penhold backhand needs more wrist travel than the forehand.
     roll: base.roll * (pen ? (forehand ? 1.15 : 1.45) : 1),
-    followTime: base.follow, recoverTime: base.recover,
+    followTime: base.follow, recoverTime: base.recover, hold: base.hold ?? STROKE_CONFIG.racket.snapFrames / 60,
     range: loop ? (forehand ? [-30, -10] : [-40, -15]) : base.range };
 }
 // A narrow dead band prevents tiny touch noise flipping the FH/BH grip.
@@ -118,7 +122,7 @@ class PaddleStrokeMotion {
     if (!this.active) return null;
     if (this.fresh) this.fresh = false;
     else if (Number.isFinite(dt) && dt > 0) this.elapsed += dt;
-    const p = this.profile, hold = .025;
+    const p = this.profile, hold = p.hold;
     const follow = this.followEnabled ? p.followTime : 0;
     const end = hold + follow + p.recoverTime;
     if (this.elapsed >= end) { this.reset(); return null; }

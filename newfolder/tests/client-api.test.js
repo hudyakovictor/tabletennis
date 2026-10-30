@@ -410,5 +410,105 @@ describe('Game client API — CORS, auth and progress', () => {
       assert.equal(res.json.rewards.coinsPerLevel, 150);
       assert.equal(res.json.contractVersion, 1);
     });
+
+    it('serves liveops events with the current season and its dates', async (t) => {
+      t.mock.method(Date, 'now', () => Date.parse('2026-10-28T12:00:00Z'));
+      /* liveops/events — публичная информация о сезоне: даты и сетка наград.
+       * Клиент сверяет их с текущим временем, а не с зашитыми строками. */
+      const res = await clientCall('GET', '/api/client/v1/liveops/events');
+      assert.equal(res.status, 200, res.text);
+      assert.equal(res.json.ok, true);
+      assert.ok(Array.isArray(res.json.events));
+      assert.ok(res.json.serverTimeUtc);
+
+      const season4 = res.json.events.find((e) => e.type === 'season' && e.title.includes('Сезон 4'));
+      assert.ok(season4, 'сезон 4 должен быть в календаре');
+      assert.equal(season4.status, 'active', 'сезон 4 активен 28.10.2026');
+      assert.equal(season4.startsAt, '2026-10-15T00:00:00.000Z');
+      assert.equal(season4.endsAt, '2026-11-10T00:00:00.000Z');
+      assert.ok(season4.config.pass && season4.config.pass.length === 20, 'сетка наград — 20 уровней');
+
+      const season5 = res.json.events.find((e) => e.type === 'season' && e.title.includes('Сезон 5'));
+      assert.ok(season5, 'сезон 5 запланирован после финиша 4');
+      assert.equal(season5.status, 'scheduled');
+      assert.equal(season5.startsAt, '2026-11-11T00:00:00.000Z');
+
+      const active = res.json.active;
+      assert.ok(active, 'должен быть активный сезон');
+      assert.equal(active.id, season4.id);
+    });
+
+    it('returns liveops events without auth (public calendar)', async () => {
+      const res = await rawRequest(baseUrl, 'GET', '/api/client/v1/liveops/events');
+      assert.equal(res.status, 200, res.text);
+      assert.equal(res.json.ok, true);
+      assert.ok(res.json.events.length > 0);
+    });
+
+    it('uses exclusive season boundaries and retains the finished season during gaps', async (t) => {
+      let now;
+      t.mock.method(Date, 'now', () => now);
+      for (const [time, active, current, upcoming] of [
+        ['2026-10-15T00:00:00Z', 4, 4, 5],
+        ['2026-11-09T23:59:59Z', 4, 4, 5],
+        ['2026-11-10T00:00:00Z', null, 4, 5],
+        ['2026-11-11T00:00:00Z', 5, 5, null],
+        ['2026-12-07T00:00:00Z', null, 5, null],
+      ]) {
+        now = Date.parse(time);
+        const res = await rawRequest(baseUrl, 'GET', '/api/client/v1/liveops/events');
+        assert.equal(res.status, 200, res.text);
+        assert.equal(res.json.active?.config.season.n ?? null, active, time);
+        assert.equal(res.json.season?.config.season.n ?? null, current, time);
+        assert.equal(res.json.upcoming?.config.season.n ?? null, upcoming, time);
+        assert.equal(res.json.serverTimeUtc, new Date(now).toISOString());
+      }
+    });
+
+    it('does not expose private config, invalid dates or cancelled calendar entries', async (t) => {
+      t.mock.method(Date, 'now', () => Date.parse('2026-10-28T12:00:00Z'));
+      const insert = db.prepare(`INSERT INTO liveops_events
+        (id, title, event_type, starts_at, ends_at, config_json, status, created_at)
+        VALUES (?, 'Public event', ?, ?, ?, ?, ?, '2026-10-01T00:00:00Z')`);
+      const ids = ['public_holiday', 'cancelled_season', 'draft_season', 'invalid_date'];
+      t.after(() => { for (const id of ids) db.prepare('DELETE FROM liveops_events WHERE id = ?').run(id); });
+      insert.run(ids[0], 'holiday', '2026-10-01T00:00:00Z', '2026-12-01T00:00:00Z', JSON.stringify({ providerKey: 'PRIVATE_CONFIG_SENTINEL', prompt: 'PRIVATE_PROMPT' }), 'active');
+      insert.run(ids[1], 'season', '2026-10-01T00:00:00Z', '2026-12-01T00:00:00Z', '{}', 'cancelled');
+      insert.run(ids[2], 'season', '2026-10-01T00:00:00Z', '2026-12-01T00:00:00Z', '{}', 'draft');
+      insert.run(ids[3], 'season', 'not-a-date', '2026-12-01T00:00:00Z', '{}', 'active');
+      const row = db.prepare("SELECT * FROM liveops_events WHERE id = 'season_4'").get();
+      t.after(() => db.prepare('UPDATE liveops_events SET config_json = ? WHERE id = ?').run(row.config_json, row.id));
+      const config = JSON.parse(row.config_json); config.secret = 'PRIVATE_CONFIG_SENTINEL'; config.pass[0].f.prompt = 'PRIVATE_PROMPT';
+      db.prepare('UPDATE liveops_events SET config_json = ? WHERE id = ?').run(JSON.stringify(config), row.id);
+      const res = await rawRequest(baseUrl, 'GET', '/api/client/v1/liveops/events');
+      assert.equal(res.status, 200);
+      assert.equal(res.json.active.config.season.n, 4, 'active holiday and roadmap season are not the pass');
+      assert.equal(res.json.upcoming.config.season.n, 5, 'upcoming tournament is not the next season');
+      assert.ok(res.json.events.some((e) => e.id === ids[0]));
+      for (const id of ids.slice(1)) assert.ok(!res.json.events.some((e) => e.id === id), id);
+      assert.ok(!res.text.includes('PRIVATE_CONFIG_SENTINEL'));
+      assert.ok(!res.text.includes('PRIVATE_PROMPT'));
+    });
+
+    it('upgrades populated calendars without reseeding players or replacing published seasons', async () => {
+      const oldDb = openDatabase(':memory:');
+      try {
+        await seedDatabaseIfEmpty(oldDb);
+        oldDb.prepare("DELETE FROM liveops_events WHERE id = 'season_4'").run();
+        const row = oldDb.prepare("SELECT * FROM liveops_events WHERE id = 'season_5'").get();
+        const config = JSON.parse(row.config_json); config.pass[0].f.n = 777;
+        oldDb.prepare('UPDATE liveops_events SET id = ?, ends_at = ?, config_json = ? WHERE id = ?')
+          .run('published_custom_s5', '2026-12-09T00:00:00.000Z', JSON.stringify(config), row.id);
+        const players = oldDb.prepare('SELECT COUNT(*) AS n FROM players').get().n;
+        const first = await seedDatabaseIfEmpty(oldDb);
+        const second = await seedDatabaseIfEmpty(oldDb);
+        assert.equal(first.seeded, false); assert.equal(second.seeded, false);
+        assert.equal(oldDb.prepare('SELECT COUNT(*) AS n FROM players').get().n, players);
+        assert.ok(oldDb.prepare("SELECT id FROM liveops_events WHERE id = 'season_4'").get());
+        assert.equal(oldDb.prepare("SELECT ends_at FROM liveops_events WHERE id = 'published_custom_s5'").get().ends_at, '2026-12-09T00:00:00.000Z');
+        assert.equal(oldDb.prepare("SELECT id FROM liveops_events WHERE id = 'season_5'").get(), undefined, 'no duplicate for an existing season number');
+        assert.equal(oldDb.prepare("SELECT config_json FROM liveops_events WHERE id = 'published_custom_s5'").get().config_json, JSON.stringify(config));
+      } finally { oldDb.close(); }
+    });
   });
 });

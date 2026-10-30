@@ -24,7 +24,18 @@ let CAPTURE_FORGIVE = 1;
 function setCaptureForgiveness(k) { CAPTURE_FORGIVE = (Number.isFinite(k) && k > 0) ? k : 1; }
 function getCaptureForgiveness() { return CAPTURE_FORGIVE; }
 
-const MATCH_RULES = Object.freeze(Object.assign({
+/* v4.1: то же самое, но как НАСТРОЙКА игрока, а не скрытый дев-ключ.
+ * Ползунок калибровки «Зона приёма» (g._cal.captureK) приходит сюда через
+ * setCaptureCalibration() и множит боковой и глубинный допуск ПРИЁМА В РОЗЫГРЫШЕ.
+ * Подачу не трогаем: там 0.55 м и без того щедро, и её размер — регламент,
+ * а не вкус. getCaptureEnvelope() читает визуал, чтобы кольцо никогда
+ * не осталось меньше, чем реальная граница отбивания. */
+let CAPTURE_CAL = 1;
+function setCaptureCalibration(k) { CAPTURE_CAL = (Number.isFinite(k) && k > 0) ? k : 1; }
+function getCaptureCalibration() { return CAPTURE_CAL; }
+function getCaptureEnvelope() { return CAPTURE_FORGIVE * CAPTURE_CAL; }
+
+const MATCH_RULES = Object.freeze(Object.defineProperties(Object.assign({
   version: 4,
   zoneShape: 'oval',           // 'circle' keeps pressHitZone for A/B comparison
   pressRadiusPx: 96,           // legacy circle admission for real pointer-down events
@@ -37,13 +48,11 @@ const MATCH_RULES = Object.freeze(Object.assign({
   ovalMinSpeedPx: 8,           // circle below this screen speed
   ovalFullSpeedPx: 120,        // full oval at/above this screen speed; smoothstep between
   ovalSampleDtSec: .05,        // projection interval for screen velocity
-  serveTossMinRise: .16,       // ITTF minimum toss rise, metres above release
   trajectoryAssist: .85,
   positionAssist: .85,
   sensitivity: 1,
   captureRadius: .22,          // v3: blade + finger forgiveness
   depthTolerance: .22,         // v3: auto-footwork puts the blade at the ball's depth
-  serveCaptureRadius: .55,     // falling toss capture radius
   sweetRadius: .15225,         // contact-quality reference, NOT capture radius
   timingMinPx: 8,
   timingMaxPx: 20,
@@ -65,12 +74,19 @@ const MATCH_RULES = Object.freeze(Object.assign({
   magnetHorizon: .45,
   autoFootwork: true,          // bat DEPTH follows the ball's best post-bounce hitting point
   footworkHeight: .40,         // m above table: ideal descending contact height
-}, (typeof globalThis !== 'undefined' && globalThis.__TT_RULES) || {}));
+}, (typeof globalThis !== 'undefined' && globalThis.__TT_RULES) || {}), {
+  serveTossMinRise: { enumerable: true, get() { return globalThis.__TT_RULES?.serveTossMinRise ?? STROKE_CONFIG.serve.tossMinRise; } },
+  serveCaptureRadius: { enumerable: true, get() { return globalThis.__TT_RULES?.serveCaptureRadius ?? STROKE_CONFIG.serve.captureRadius; } },
+}));
 
 const GRACE_RULES = Object.freeze({
-  bandMul: 1.34,
-  serveBandMul: 1.36,
-  depthMul: 1.75,
+  /* v4.1 «баланс»: край был слишком щедрым — 1.34× вбок и 1.75× в глубину
+   * означали, что мяч отбивается заметно дальше кольца (на LOW-камере это
+   * ~87 и ~92 px против ~65 px кольца). Полоса осталась (крайние мячи должны
+   * спасаться), но влезла обратно в обозримое качество: край бьёт заметно слабее. */
+  bandMul: 1.28,
+  get serveBandMul() { return STROKE_CONFIG.serve.glance.bandMul; },
+  depthMul: 1.45,
   padVelK: 0.42,
   minCarryMs: 2.6,
   maxCarryMs: 6.2,
@@ -80,11 +96,11 @@ const GRACE_RULES = Object.freeze({
   scatterPitchRad: 0.06,
   scatterSpin: 85,
   quality: 0.30,
-  serveLiftMs: [1.55, 2.6],
-  serveSpeedMs: [1.3, 3.0],
-  serveCounterAim: 0.9,
-  serveSideK: 1.30,
-  serveFwdK: 1.15,
+  get serveLiftMs() { return STROKE_CONFIG.serve.glance.liftMs; },
+  get serveSpeedMs() { return STROKE_CONFIG.serve.glance.speedMs; },
+  get serveCounterAim() { return STROKE_CONFIG.serve.glance.counterAim; },
+  get serveSideK() { return STROKE_CONFIG.serve.glance.sideK; },
+  get serveFwdK() { return STROKE_CONFIG.serve.glance.fwdK; },
 });
 
 const CONTACT_CORRIDOR_RULES = Object.freeze({
@@ -129,8 +145,9 @@ function installUnifiedControls(settings) {
 
 function playerCaptureLimits(isServe) {
   return {
-    radius: (isServe ? MATCH_RULES.serveCaptureRadius : MATCH_RULES.captureRadius) * CAPTURE_FORGIVE,
-    depth: MATCH_RULES.depthTolerance * CAPTURE_FORGIVE,
+    radius: (isServe ? MATCH_RULES.serveCaptureRadius * CAPTURE_FORGIVE
+                     : MATCH_RULES.captureRadius * CAPTURE_FORGIVE * CAPTURE_CAL),
+    depth: MATCH_RULES.depthTolerance * CAPTURE_FORGIVE * CAPTURE_CAL,
     sweet: MATCH_RULES.sweetRadius,
   };
 }
@@ -140,8 +157,8 @@ function playerInCaptureRange(ball, paddle, isServe = false) {
   const dx = ball.x - paddle.x, dy = ball.y - paddle.y, dz = ball.z - paddle.z;
   return isServe
     ? Math.hypot(dx, dy, dz) <= MATCH_RULES.serveCaptureRadius * CAPTURE_FORGIVE
-    : Math.hypot(dx, dy) <= MATCH_RULES.captureRadius * CAPTURE_FORGIVE
-      && Math.abs(dz) <= MATCH_RULES.depthTolerance * CAPTURE_FORGIVE;
+      : Math.hypot(dx, dy) <= MATCH_RULES.captureRadius * CAPTURE_FORGIVE * CAPTURE_CAL
+        && Math.abs(dz) <= MATCH_RULES.depthTolerance * CAPTURE_FORGIVE * CAPTURE_CAL;
 }
 
 function playerGraceRange(ball, paddle, isServe = false) {
@@ -150,8 +167,8 @@ function playerGraceRange(ball, paddle, isServe = false) {
   const dx = ball.x - paddle.x, dy = ball.y - paddle.y, dz = ball.z - paddle.z;
   return isServe
     ? Math.hypot(dx, dy, dz) <= MATCH_RULES.serveCaptureRadius * CAPTURE_FORGIVE * GRACE_RULES.serveBandMul
-    : Math.hypot(dx, dy) <= MATCH_RULES.captureRadius * CAPTURE_FORGIVE * GRACE_RULES.bandMul
-      && Math.abs(dz) <= MATCH_RULES.depthTolerance * CAPTURE_FORGIVE * GRACE_RULES.depthMul;
+    : Math.hypot(dx, dy) <= MATCH_RULES.captureRadius * CAPTURE_FORGIVE * CAPTURE_CAL * GRACE_RULES.bandMul
+      && Math.abs(dz) <= MATCH_RULES.depthTolerance * CAPTURE_FORGIVE * CAPTURE_CAL * GRACE_RULES.depthMul;
 }
 
 /**

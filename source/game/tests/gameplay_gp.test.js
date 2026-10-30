@@ -332,10 +332,16 @@ test('serve styles keep physical spin signatures (same swipe, four directions)',
   assert.equal(fast.id, 'SERVE_FAST');
   /* «стремительная» после решателя может уступить резаной по м/с (нижнее
    * несёт вверх, легальный потолок выше) — её сигнатура ДРУГАЯ: минимум
-   * вращения на единицу скорости, т.е. самая плоская подача */
-  const rpmPerMs = (s) => V3.len(s.w) / Math.max(s.spd, 1e-6);
-  assert.ok(rpmPerMs(fast) < rpmPerMs(top) && rpmPerMs(fast) < rpmPerMs(back) && rpmPerMs(fast) < rpmPerMs(side),
-    `fast serve must be the flattest (spin/velocity ${rpmPerMs(fast).toFixed(1)})`);
+   * ВЕРТИКАЛЬНОГО вращения на единицу скорости, т.е. самая плоская по дропу.
+   * Боковая подача из этого сравнения выведена: у неё 132 рад/с вокруг
+   * вертикальной оси при 6.3 м/с (|w|/v = 21 против 29 у стремительной) — это и
+   * есть смысл канала, который чинили: бок стал сильнее, чем у плоского удара,
+   * но он почти не тормозит мяч, а уводит его в сторону. */
+  const vertPerMs = (s) => Math.hypot(s.w.x, s.w.z) / Math.max(s.spd, 1e-6);
+  assert.ok(vertPerMs(fast) < vertPerMs(top) && vertPerMs(fast) < vertPerMs(back),
+    `fast serve must be the flattest (vertical spin/velocity ${vertPerMs(fast).toFixed(1)})`);
+  assert.ok(Math.abs(side.w.y) > Math.hypot(side.w.x, side.w.z),
+    `sidespin serve must spin about the vertical axis (wy ${side.w.y.toFixed(0)}, wx/wz ${side.w.x.toFixed(0)}/${side.w.z.toFixed(0)})`);
 });
 
 test('net cord: short slowmo + widened capture window, then restored', () => {

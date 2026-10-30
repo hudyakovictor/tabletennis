@@ -12,7 +12,7 @@ const path = require('node:path');
 const vm = require('node:vm');
 
 const root = path.resolve(__dirname, '../..');
-const source = ['10_math.js', '12_match_rules.js']
+const source = ['05_stroke_config.js', '10_math.js', '12_match_rules.js']
   .map(f => fs.readFileSync(path.join(root, 'tt/src', f), 'utf8')).join('\n');
 const { MATCH_RULES, PRESS_REJECTION_REASONS } = vm.runInNewContext(
   source + '\n;({ MATCH_RULES, PRESS_REJECTION_REASONS })', { console });

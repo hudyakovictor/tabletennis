@@ -157,7 +157,8 @@ class ShotJournal {
       incoming: input, outgoing, normal: shotVec(racket.normal), racketVelocity: shotVec(racket.vR),
       raw: racket.unassisted || null, assist: { elevation: racket.dElev || 0, azimuth: racket.dAz || 0, wrist: racket.dWrist || 0,
         scale: racket.scale === undefined ? 1 : racket.scale, damp: racket.damp === undefined ? 1 : racket.damp,
-        valid: racket.valid === undefined ? null : !!racket.valid, solved: racket.solved || null },
+        valid: racket.valid === undefined ? null : !!racket.valid, solved: racket.solved || null,
+        softened: !!racket.softened },
       grip: extra.grip || 'shakehand', hand: extra.hand || 'right', shotId: extra.shotId };
     if (input && input.w) {
       entry.contact.spinChangeRps = Math.hypot(ball.w.x - input.w.x, ball.w.y - input.w.y, ball.w.z - input.w.z) / TAU;

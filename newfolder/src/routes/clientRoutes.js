@@ -34,6 +34,7 @@ const {
   createSupportTicket,
   getSupportTicketById,
   listSupportTickets,
+  listLiveopsCalendar,
 } = require('../services/liveops');
 const { publish } = require('../services/eventBus');
 const { notify } = require('../services/notifications');
@@ -1044,6 +1045,63 @@ async function handleClientRoute(db, req, pathname, urlObj, body, clientIp) {
     };
     idemSave(db, idemKey, auth.sub, 'POST', pathname, body, 200, json);
     return { status: 200, json };
+  }
+
+  // LiveOps calendar — источник текущего сезона и его дат для клиента
+  // (15-liveops-content-plan.md, 19-client-integration-guide.md §3.12).
+  // Публичная информация: без обязательного токена, с токеном — та же выборка.
+  if (req.method === 'GET' && pathname === '/api/client/v1/liveops/events') {
+    const now = Date.now();
+    const reward = (r) => {
+      if (!r || !Number.isSafeInteger(r.n) || r.n <= 0) return null;
+      if (r.k === 'coins' || r.k === 'gems') return { k: r.k, n: r.n };
+      if (r.k === 'chest' && r.n === 1 && ['silver', 'gold', 'epic'].includes(r.kind)) return { k: r.k, kind: r.kind, n: 1 };
+      if (r.k === 'card' && r.n === 1 && /^#[0-9a-f]{6}$/i.test(r.col)) return { k: r.k, n: 1, col: r.col };
+      return null;
+    };
+    const events = listLiveopsCalendar(db).flatMap((e) => {
+      if (!['active', 'scheduled', 'finished'].includes(e.status)) return [];
+      const start = Date.parse(e.starts_at), end = Date.parse(e.ends_at);
+      if (!Number.isFinite(start) || !Number.isFinite(end) || start >= end) return [];
+      let raw = {};
+      try { raw = JSON.parse(e.config_json || '{}') || {}; } catch { /* Invalid admin config is not public. */ }
+      const config = {};
+      const n = raw.season?.n;
+      if (e.event_type === 'season' && Number.isSafeInteger(n) && n > 0 && Array.isArray(raw.pass) && raw.pass.length > 0 && raw.pass.length <= 100) {
+        const pass = raw.pass.map((tier, i) => tier && tier.l === i + 1 && tier.s === n
+          ? { s: n, l: i + 1, f: reward(tier.f), p: reward(tier.p) } : null);
+        if (pass.every((tier) => tier && tier.f && tier.p)) {
+          config.season = { n, days: (end - start) / 864e5 };
+          config.pass = pass;
+        }
+      }
+      return {
+        id: e.id,
+        type: e.event_type,
+        title: e.title,
+        startsAt: new Date(start).toISOString(),
+        endsAt: new Date(end).toISOString(),
+        status: e.status === 'finished' ? 'finished' : now < start ? 'scheduled' : now >= end ? 'finished' : 'active',
+        config,
+      };
+    }).sort((a, b) => Date.parse(a.startsAt) - Date.parse(b.startsAt)
+      || (a.config.season?.n || 0) - (b.config.season?.n || 0) || a.id.localeCompare(b.id));
+    // Roadmap placeholders and other event types never become the battle-pass season.
+    const seasons = events.filter((e) => e.type === 'season' && e.config.season);
+    const active = seasons.filter((e) => e.status === 'active').at(-1) || null;
+    const upcoming = seasons.find((e) => e.status === 'scheduled') || null;
+    const season = active || seasons.filter((e) => e.status === 'finished' && Date.parse(e.startsAt) <= now).at(-1) || null;
+    return {
+      status: 200,
+      json: {
+        ok: true,
+        events,
+        active,
+        upcoming,
+        season,
+        serverTimeUtc: new Date(now).toISOString(),
+      },
+    };
   }
 
   // Leaderboard (`GET /api/client/v1/leaderboard`)

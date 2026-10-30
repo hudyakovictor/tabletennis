@@ -5,7 +5,8 @@
  *    attract                    slow orbit over an idle table (menus, VS)
  *    prematch {dur}             fly from the orbit into the playing camera
  *    match {diff,target,hint,free}   start a scored match (free — no score, endless)
- *    train {step}               start the tutorial (optionally at a drill)
+ *    train {mode,lessonId,stroke,target,progress} voluntary academy/practice
+ *    trainAction {action,answer} start/retry/restart/answer/continue
  *    pause / resume / quit
  *    outro                      victory orbit after the last point
  *    replay / skipReplay        best rally of the match
@@ -203,21 +204,23 @@
           ai: g.ai && g.ai.telemetry ? g.ai.telemetry() : null,
           hasReplay: !!(g.moments && g.moments.best) });
       };
-      const lastTrain = { key: '' };
+    const lastTrain = { key: '' };
       wrap(ui, 'trainSync', function (orig, t) {
         const r = orig(t);
-        const S = t.S, key = [t.step, t.done, t.phase, t.frozen, t.nudge > 0, t.coachText].join('|');
+        const key = [t.sessionId, t.revision, ET.lang(), ui.inputMode, t.coachText, t.nudge > 0].join('|');
         if (key !== lastTrain.key) {
           lastTrain.key = key;
-          post('train', { step: t.step, total: TRAIN_STEPS.length, id: S.id, title: ET(S.title), goal: ET(S.goal),
-            /* в интро вся информация живёт в большой внутриигровой карточке —
-             * шапка хоста её НЕ дублирует */
-            text: t.phase === 'intro' ? '' : t.coachText, tip: trainingTip(S, ui.inputMode || 'touch'), done: t.done, need: S.need,
-            phase: t.phase, msg: t.msg, frozen: !!t.frozen, nudge: t.nudge > 0, guide: t.guide });
+          post('train', Object.assign(t.snapshot(), { requestId: t.options.requestId }));
         }
         return r;
       });
-      wrap(ui, 'trainDone', function (orig, t) { const r = orig(t); post('trainDone', {}); return r; });
+      ui.trainProgress = t => post('trainingProgress', { requestId: t.options.requestId, sessionId: t.sessionId,
+        mode: t.mode, id: t.S.id, profile: t.profile, stage: t.stage,
+        attempts: t.attempts, correct: t.done, practicePassed: t.practicePassed, quizPassed: t.quizPassed,
+        validated: t.checkPassed === true });
+      wrap(ui, 'trainDone', function (orig, t) {
+        const r = orig(t); post('trainDone', Object.assign(t.summary(), { requestId: t.options.requestId })); return r;
+      });
       wrap(ui, 'trainHide', function (orig) { return orig(); });
     }
     // the coach sentence changes with the game state (toss, ball held…): resync each frame cheaply
@@ -514,7 +517,7 @@ const showTip = (text) => { if (text) tip = { text, until: g.time + 4.6 }; };
       if (!m || m.__tt !== 1) return;
       // only commands that need a visible, running arena wake it; 'attract'/'quit' just set the scene
       // behind a hidden layer (menus, matchmaking) and must not restart full-rate rendering there
-      if (!['sleep', 'mute', 'haptics', 'equip', 'quality', 'rm', 'debug', 'hint', 'attract', 'quit', 'quiet', 'pause', 'resume', 'locale', 'missShots'].includes(m.type)) wake();
+      if (!['sleep', 'mute', 'haptics', 'equip', 'quality', 'rm', 'debug', 'hint', 'inputMode', 'attract', 'quit', 'quiet', 'pause', 'resume', 'locale', 'missShots'].includes(m.type)) wake();
       switch (m.type) {
         case 'net': netCommand(m); break;
         case 'sleep': sleeping = true; break;      // frozen in place: update is skipped, so nothing advances
@@ -558,10 +561,16 @@ const showTip = (text) => { if (text) tip = { text, until: g.time + 4.6 }; };
         case 'train':
           lobby = false;
           g.audio.init(); g.audio.resume();
-          g.startTraining();
-          if (Number.isFinite(m.step) && m.step > 0) g.training.goStep(m.step);
+          g.startTraining(m);
           if (cine.mode === 'attract') setCine('prematch', 1.2);
           break;
+        case 'trainAction':
+          if (g.training) {
+            g.training.action(m.action, m.answer);
+            if (['start', 'retry', 'restart', 'continue'].includes(m.action) || m.action === 'answer' && g.training.quizPassed) hostPause(false);
+          }
+          break;
+        case 'inputMode': if (ui && ui.setInputMode) ui.setInputMode(m.pointerType); break;
         case 'pause': hostPause(true); break;
         case 'resume': hostPause(false); break;
         case 'quit': lobby = false; g.inspectSlowmo = false; g.returnToMenu(); setCine('attract'); break;
@@ -588,7 +597,10 @@ const showTip = (text) => { if (text) tip = { text, until: g.time + 4.6 }; };
           g.settings.quality = q; g.R.quality = q; g.resize(); break;
         }
         case 'quiet': document.documentElement.classList.toggle('tt-quiet', !!m.on); break;
-        case 'locale': if (typeof ET !== 'undefined') { ET.set(m.lang); applyStaticTexts(); } break;   // язык от хоста
+        case 'locale': if (typeof ET !== 'undefined') {
+          ET.set(m.lang); applyStaticTexts(); post('trainingCatalog', { catalog: trainingCatalog() });
+          if (g.training) { g.training.diagram = null; g.training.sync(); }
+        } break;
         /* Калибровка из настроек оболочки: 10 личных параметров 0..100.
          * Применяются мгновенно, хранятся у хоста. Не трогают честные
          * правила боя — только комфорт, камеру и визуал. */
@@ -599,7 +611,9 @@ const showTip = (text) => { if (text) tip = { text, until: g.time + 4.6 }; };
           /* Камера: угол (высота) и зум мапятся на существующие setter'ы
            * игрового движка — они уже зажаты в честные пределы CAM_ADJUST. */
           if (K === 'camHeight' && g.setCamPitch) g.setCamPitch(CAM_ADJUST.pitchMin + V * (CAM_ADJUST.pitchMax - CAM_ADJUST.pitchMin));
-          if (K === 'camZoom' && g.setCamZoom) g.setCamZoom(CAM_ADJUST.zoomMin + V * (CAM_ADJUST.zoomMax - CAM_ADJUST.zoomMin));
+          if (K === 'camZoom' && g.setCamZoom) g.setCamZoom(V <= 0.5
+            ? lerp(CAM_ADJUST.zoomMin, 1, V * 2)
+            : lerp(1, CAM_ADJUST.zoomMax, (V - 0.5) * 2));
           if (K === 'camSway') g._swayCal = V;
           /* Закрутка из калибровки оболочки: те же поля настроек, что у
            * ползунков самого движка. Ползунок 0..100 -> множитель физический:
@@ -621,7 +635,8 @@ const showTip = (text) => { if (text) tip = { text, until: g.time + 4.6 }; };
         }
       }
     });
-    post('ready', { rules: Object.assign({}, MATCH_RULES), steps: TRAIN_STEPS.map((s) => ({ id: s.id, title: ET(s.title) })) });
+    post('ready', { rules: Object.assign({}, MATCH_RULES), trainingCatalog: trainingCatalog(),
+      steps: TRAIN_STEPS.map((s) => ({ id: s.id, title: ET(s.title) })) });
   };
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start);

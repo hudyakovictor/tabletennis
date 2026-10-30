@@ -543,7 +543,10 @@ class Renderer {
       fogDensity: 0.0026,
       fogCol: V3.new(0.020, 0.024, 0.034),
     };
-    this.post = { bloom: 0.52, exposure: 1.02, vignette: 0.86, grain: 0.014, ca: 1.0, radial: 0, sat: 1.05, flash: 0, focus: [0.5, 0.52], threshold: 1.14, soft: 0.55 };
+    /* Пост-обработка урезана до минимума: блум 0.52 превращал каждый яркий
+     * пиксель мяча в ореол, зерно и хроматика шумили на весь кадр. Оставлен
+     * лёгкий сдвиг светлых источников, тонмап и виньетка. */
+    this.post = { bloom: 0.16, exposure: 1.02, vignette: 0.86, grain: 0, ca: 0, radial: 0, sat: 1.05, flash: 0, focus: [0.5, 0.52], threshold: 1.30, soft: 0.55 };
     this.drawCalls = 0; this.tris = 0;
   }
 

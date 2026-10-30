@@ -133,6 +133,21 @@ test('zoom is clamped to its band, never trusted', () => {
   }
 });
 
+test('retained zoom and pitch cannot crop the table or opponent on desktop or mobile', () => {
+  for (const [w, h] of VIEWPORTS) for (const mode of lib.CAMERA_ORDER) {
+    for (const adjust of [{ zoom: 1.2, pitch: 8 }, { zoom: 1.8, pitch: 16 }, { zoom: 1.8, pitch: -16 }, { zoom: 1, pitch: 16 }]) {
+      const a = w / h, P = lib.CAMERA_PRESETS[mode];
+      const rig = lib.cameraRigFor(mode, null, a, undefined, adjust);
+      const vp = lib.rigViewProj(rig, a), table = lib.tabletopBounds(vp), frame = lib.tableScreenBounds(vp);
+      const context = `${mode} ${w}x${h} ${JSON.stringify(adjust)}`;
+      assert.ok(Math.abs(table.bottom - P.nearY) < .004, context);
+      assert.ok(table.top >= P.topMin - .004, `${context}: far end cropped`);
+      assert.ok(lib.opponentScreenTop(vp) >= lib.CAMERA_HEADROOM - .004, `${context}: opponent cropped`);
+      assert.ok(frame.left >= 0 && frame.right <= 1, `${context}: sides cropped`);
+    }
+  }
+});
+
 test('pitch trim rotates the eye around the look point inside an absolute band', () => {
   const a = 1280 / 760;
   const dist = (r) => Math.hypot(r.eye.x - r.look.x, r.eye.y - r.look.y, r.eye.z - r.look.z);

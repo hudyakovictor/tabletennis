@@ -17,6 +17,7 @@ const CAL = [
   { g: 'ball', k: 'flytime', tk: 'cal.flytime', dk: 'cal.flytimeD', min: 0, max: 100, def: 50 },
   { g: 'ball', k: 'tableGlow', tk: 'cal.tableGlow', dk: 'cal.tableGlowD', min: 0, max: 100, def: 50 },
   { g: 'help', k: 'hintRadius', tk: 'cal.hintRadius', dk: 'cal.hintRadiusD', min: 0, max: 100, def: 60 },
+  { g: 'help', k: 'captureK', tk: 'cal.captureK', dk: 'cal.captureKD', min: 0, max: 100, def: 50 },
   { g: 'help', k: 'hintGlow', tk: 'cal.hintGlow', dk: 'cal.hintGlowD', min: 0, max: 100, def: 65 },
   { g: 'help', k: 'slowmoDepth', tk: 'cal.slowmoDepth', dk: 'cal.slowmoDepthD', min: 0, max: 100, def: 60 }
 ];

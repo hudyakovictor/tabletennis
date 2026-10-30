@@ -68,5 +68,15 @@ const Api = {
     if (!r.ok || !r.json || !r.json.playerToken) return null;
     this.remember({ token: r.json.playerToken, playerId: r.json.playerId });
     return r.json;
+  },
+
+  /** LiveOps-календарь: текущий сезон, его даты и сетка наград. Публичная
+   *  информация — токен не обязателен. Без сети возвращает null и клиент
+   *  сохраняет последний календарь либо использует офлайн-сезон 4. */
+  async liveops() {
+    if (!this.enabled) return null;
+    const r = await this.request('/api/client/v1/liveops/events', { auth: false });
+    if (r.offline || !r.ok || !r.json) return null;
+    return r.json;
   }
 };

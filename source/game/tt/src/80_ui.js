@@ -329,6 +329,19 @@ class UI {
     $('#tdAgain').addEventListener('click', startTrain);
     $('#trSkip').addEventListener('click', () => { const t = this.game.training; if (t && this.game.paused) { t.skip(); this.game.setPaused(false); this.game.audio.ui('click'); } });
     $('#trExit').addEventListener('click', () => { if (this.game.paused) this.showMainMenu(); });
+    $('#trReference').addEventListener('click', () => { if (this.game.training && this.game.paused) { this.trainingReference = true; this.trainSync(this.game.training); } });
+    $('#trRepeat').addEventListener('click', () => { if (this.game.training) { this.game.training.action('restart'); this.game.setPaused(false); } });
+    $('#trLesson').addEventListener('click', () => this.game.startTraining({ mode: 'course', lessonId: $('#trainLesson').value }));
+    $('#trPractice').addEventListener('click', () => this.game.startTraining({ mode: 'stroke', stroke: $('#trainStroke').value }));
+    $('#trAccuracy').addEventListener('click', () => this.game.startTraining({ mode: 'accuracy', target: $('#trainAccuracy').value }));
+    $('#tIStart').addEventListener('click', () => {
+      const t = this.game.training; if (!t) return;
+      if (this.trainingReference) { this.trainingReference = false; this.trainSync(t); }
+      else t.action('start');
+      this.game.setPaused(false);
+    });
+    $('#tIRetry').addEventListener('click', () => { if (this.game.training) { this.game.training.action('retry'); this.game.setPaused(false); } });
+    $('#tINext').addEventListener('click', () => { if (this.game.training) { this.game.training.action('continue'); this.game.setPaused(false); } });
     /* --- workshop / shop / daily --- */
     const wsOpen = (tab) => {
       this.game.audio.ui('click');
@@ -1079,46 +1092,84 @@ class UI {
   hideNote() { this.noteTimer = 0; const el = $('#note'); el && el.classList.remove('on'); }
 
   /* --------------------------- coach panel ------------------------ */
-  trainShow() { $('#train').classList.add('on'); $('#score').style.opacity = '0'; $('#trainingActions').hidden = false; }
-  trainHide() { $('#trainingActions').hidden = true; $('#train').classList.remove('on'); $('#score').style.opacity = ''; $('#tdone').classList.remove('on'); const ti = $('#tIntro'); if (ti) ti.classList.remove('on'); }
+  trainShow() { this.trainingReference = false; $('#train').classList.add('on'); $('#score').style.opacity = '0'; $('#trainingActions').hidden = false; }
+  trainHide() { this.trainingReference = false; this._tIntroKey = ''; $('#trainingActions').hidden = true; $('#train').classList.remove('on'); $('#score').style.opacity = ''; $('#tdone').classList.remove('on'); const ti = $('#tIntro'); if (ti) ti.classList.remove('on'); }
+  trainProgress(t) { try { localStorage.setItem('tt-academy-v1', JSON.stringify(t.profile)); } catch (e) {} }
   trainSync(t) {
     const S = t.S, feedback = t.phase === 'ok' || t.phase === 'fail';
     $('#trStep').textContent = `${t.step + 1}/${TRAIN_STEPS.length}`;
     $('#trTitle').textContent = ET(S.title);
-    $('#trProgress').textContent = `${t.done}/${S.need}`;
-    /* во время интро строку шапка НЕ дублирует — вся информация живёт
-       в большой карточке урока */
-    $('#trTip').textContent = t.phase === 'intro' ? ''
-      : t.phase === 'fail'
-      ? ET('ui.tapRetry')
-      : feedback ? '' : (t.coachText || ET(S.goal));
+    $('#trProgress').textContent = `${t.done}/${t.stage === 'check' ? 4 : S.need}`;
+    $('#trTip').textContent = ['intro', 'question', 'review'].includes(t.phase) ? ''
+      : t.phase === 'fail' ? ET('ui.tapRetry') : feedback ? '' : t.coachText;
     $('#trainPauseTip').textContent = trainingTip(S, this.inputMode);
     $('#trMsg').textContent = feedback ? t.msg : '';
     $('#trMsg').style.color = t.msgCol || 'var(--good)';
-    /* большое объявление урока: каждый новый удар представлен КРУПНО,
-       с целью и жестом — до этого о смене удара сообщал только мелкий текст */
-    const ti = $('#tIntro');
-    /* во время объявления урока мелкая шапка прячется: карточка — единственный
-     * источник текста, дублей больше нет нигде */
-    $('#train').classList.toggle('ti-hide', t.phase === 'intro');
-    if (ti) {
-      const show = t.phase === 'intro';
-      ti.classList.toggle('on', show);
-      if (show && this._tIntroStep !== t.step) {
-        this._tIntroStep = t.step;
-        /* «НОВЫЙ УДАР» — только для действительно новых ударов; базовое
-         * отбитие и направление — просто очередной урок */
-        const isNewStroke = S.id === 'TOPSPIN' || S.id === 'PUSH';
-        $('#tINo').textContent = t.step === 0 ? ET('ui.lessonFirst', { total: TRAIN_STEPS.length })
-          : isNewStroke ? ET('ui.lessonNew', { n: t.step + 1, total: TRAIN_STEPS.length })
-          : ET('ui.lesson', { n: t.step + 1, total: TRAIN_STEPS.length });
-        $('#tITitle').textContent = ET(S.title);
-        $('#tIGoal').textContent = ET(S.goal);
-        $('#tITip').textContent = trainingTip(S, this.inputMode);
+    if (this._trainingSelectLang !== ET.lang()) {
+      this._trainingSelectLang = ET.lang();
+      for (const [id, rows] of [['trainLesson', TRAIN_STEPS], ['trainStroke', Object.values(TRAIN_GUIDES)], ['trainAccuracy', TRAIN_TARGETS]]) {
+        const select = $('#' + id), value = select.value; select.replaceChildren();
+        for (const row of rows) { const option = document.createElement('option'); option.value = row.id; option.textContent = ET(row.title); select.appendChild(option); }
+        if (value) select.value = value;
+      }
+      for (const [id, key] of [['trReference', 'reference'], ['trRepeat', 'repeat'], ['trLesson', 'lessonSelect'], ['trPractice', 'strokeSelect'], ['trAccuracy', 'targetSelect']]) $('#' + id).textContent = ET('academy.' + key);
+    }
+    const correction = t.phase === 'fail' && t.stage !== 'check';
+    const modal = ['intro', 'question', 'review'].includes(t.phase) || correction || this.trainingReference;
+    $('#train').classList.toggle('ti-hide', modal); $('#tIntro').classList.toggle('on', modal);
+    if (!modal || typeof window !== 'undefined' && window.__TT_EMBED) return;
+    const key = [t.sessionId, t.step, t.phase, t.stage, this.trainingReference, this.inputMode, ET.lang(), t.msg].join('|');
+    if (this._tIntroKey === key) return;
+    this._tIntroKey = key;
+    const view = trainingLessonView(S), info = $('#tIInfo'), feedbackView = correction || this.trainingReference ? t.feedback : null; info.replaceChildren();
+    $('#tINo').textContent = ET('ui.lesson', { n: t.step + 1, total: TRAIN_STEPS.length });
+    $('#tITitle').textContent = feedbackView ? feedbackView.title : view.title; $('#tIGoal').textContent = view.goal;
+    $('#tITip').textContent = trainingTip(S, this.inputMode); $('#tIWait').textContent = feedbackView ? feedbackView.correction : t.msg || '';
+    if (t.phase === 'intro' || this.trainingReference) {
+      const details = document.createElement('details'), summary = document.createElement('summary');
+      summary.textContent = ET('academy.motion.details'); details.appendChild(summary); info.appendChild(details);
+      for (const [field, value] of [['how', view.controls[this.inputMode]], ['feature', view.feature], ['advantage', view.advantage], ['when', view.when], ['risk', view.risk], ['counter', view.counter]]) {
+        const line = document.createElement('div'), label = document.createElement('b'), p = document.createElement('p');
+        label.textContent = ET('academy.' + field); p.textContent = value; line.append(label, p); details.appendChild(line);
       }
     }
+    $('#tIQuiz').replaceChildren();
+    if (t.phase === 'question' && !this.trainingReference) {
+      const question = document.createElement('p'); question.textContent = view.quiz.prompt; $('#tIQuiz').appendChild(question);
+      for (const option of view.quiz.options) {
+        const button = document.createElement('button'); button.className = 'tbt pe'; button.textContent = option.text;
+        button.addEventListener('click', () => t.action('answer', option.id)); $('#tIQuiz').appendChild(button);
+      }
+    }
+    const el = $('#tIDiagram'); el.replaceChildren();
+    if (t.phase === 'intro' || this.trainingReference || correction) {
+      const gesture = feedbackView ? feedbackView.expected.gesture : view.gesture, actual = feedbackView && feedbackView.actual.gesture;
+      const ps = gesture.points, played = actual && actual.points || [], ratio = actual && actual.viewport[0] > 0 ? actual.viewport[1] / actual.viewport[0] : 1;
+      const all = [...ps, ...played], scale = Math.min(400, 125 / Math.max(.18, ...all.map(p => Math.abs(p[0]))), 66 / Math.max(.16, ...all.map(p => Math.abs(p[1]) * ratio)));
+      const project = p => [150 + p[0] * scale, 88 + p[1] * ratio * scale];
+      const path = points => points.map((p, i) => (i ? 'L' : 'M') + project(p).join(' ')).join(' ');
+      const start = project(ps[0]), end = project(ps[ps.length - 1]);
+      let svg = '<svg viewBox="0 0 300 176" role="img"><rect x="1" y="1" width="298" height="174" rx="12" fill="#080f21" stroke="#34466b"/>';
+      svg += `<path d="${path(ps)}" stroke="#9cffd0" stroke-width="4" fill="none"/>`;
+      if (played.length) svg += `<path d="${path(played)}" stroke="#ffb3a6" stroke-width="3" stroke-dasharray="5 4" fill="none"/>`;
+      svg += '<circle cx="150" cy="88" r="6" fill="#fff"/>';
+      if (gesture.kind !== 'tap') svg += `<circle cx="${start[0]}" cy="${start[1]}" r="11" fill="#9cffd0"/><text x="${start[0]}" y="${start[1] + 4}" text-anchor="middle" fill="#080f21">1</text><text x="${end[0]}" y="${end[1] < 88 ? end[1] - 10 : end[1] + 17}" text-anchor="middle">2</text>`;
+      else svg += '<circle cx="150" cy="88" r="18" stroke="#9cffd0" stroke-width="3" fill="none"/>';
+      svg += '</svg>'; el.innerHTML = svg;
+      const caption = document.createElement('p'); caption.textContent = ET('academy.motion.example') + (played.length ? '. ' + ET('academy.motion.actual') : ''); el.appendChild(caption);
+    }
+    $('#tIStart').hidden = t.phase !== 'intro' && !this.trainingReference;
+    $('#tIStart').textContent = ET('academy.' + (this.trainingReference ? 'back' : t.stage === 'check' ? 'check' : 'start'));
+    $('#tIRetry').hidden = !correction && (t.phase !== 'review' || t.checkPassed) || this.trainingReference;
+    $('#tIRetry').textContent = ET(correction ? 'academy.motion.retry' : 'academy.retry');
+    $('#tINext').hidden = t.phase !== 'review' || this.trainingReference;
+    $('#tINext').textContent = ET('academy.' + (t.checkPassed ? 'continue' : 'start'));
   }
-  trainDone() { $('#train').classList.remove('on'); $('#trainingActions').hidden = true; $('#tdone').classList.add('on'); }
+  trainDone(t) {
+    $('#train').classList.remove('on'); $('#tIntro').classList.remove('on'); $('#trainingActions').hidden = true; $('#tdone').classList.add('on');
+    const summary = t.summary(); $('#tdTitle').textContent = ET(summary.courseComplete ? 'academy.complete' : 'academy.partial');
+    $('#tdSummary').textContent = ET('academy.summary', { n: summary.mastered, total: summary.total, coverage: summary.coverage });
+  }
 
   showMatchEnd(won) {
     const g = this.game, s = g.stats;
@@ -1174,36 +1225,13 @@ class UI {
     const g = this.game;
     if (!g || g.paused || (g.replayer && g.replayer.on)) return null;
     if (g.training) return typeof g.training.coachCue === 'function' ? g.training.coachCue() : null;
-    if (g.hintContact && g.state === GS.RALLY && typeof g.contactPrediction === 'function') {
-      /* ONE mark, pinned to the world point it appeared at — it never roams
-       * across the screen (that travelling ring was the whole complaint).
-       * Opens ~300 ms before contact, heats up, carries the ideal-contact dot,
-       * vanishes on the swing — and its lifecycle is airtight so no stale
-       * mark survives on screen:
-       *  - it only lives while the opponent's ball ACTUALLY travels at the
-       *    player (toward-guard on v.z; after a whiff the ball sails on as
-       *    'missed' and a fossil mark would otherwise keep rendering);
-       *  - the pin is gated on THIS flight's geometry (the ball is already
-       *    on the player's side of the net), never on a bounce counter
-       *    accumulated over the whole rally — that stale gate kept the old
-       *    mark alive between shots and made it 'jump' between contacts;
-       *  - a mark whose ball flew past the pinned plane un-hit dies at once. */
-      if (g.ball.lastHitBy === 1) { this._mark = null; return null; }
-      const toward = g.ball.v && g.ball.v.z > 0.05;
-      if (!toward) { this._mark = null; return null; }
-      const cp = g.contactPrediction();
-      if (!this._mark || this._mark.shot !== g.shotId) {
-        this._mark = null;
-        if (cp && cp.t < 0.30 && g.ball.p.z > -0.04)
-          this._mark = { shot: g.shotId, p: { x: cp.p.x, y: cp.p.y, z: cp.p.z } };
-        else return null;
-      }
-      /* мяч пролетел мимо укреплённой плоскости — метка умирает сразу,
-       * не дожидаясь конца очка */
-      if (this._mark && g.ball.p.z > this._mark.p.z + 0.10) { this._mark = null; return null; }
-      return { kind: 'mark', p: this._mark.p, t: cp ? cp.t : .15, subtle: true };
-    }
-    this._mark = null;
+    /* Матчевая метка встречи (эллипс бокса захвата + пунктир grace-края +
+     * точка) убрана совсем. Замеры в живом матче: окно реального захвата —
+     * 1 кадр (17–33 мс), весь подлёт ~83 мс: кольцо появляется там и тогда,
+     * куда игрок уже не успевает попасть, и только шумит поверх мяча.
+     * Единственный носитель тайминга — зелёный мяч (70_game.js: drawDynamic),
+     * а флаг g.hintContact теперь работает иначе: он удлиняет запас,
+     * с которого мяч начинает зеленеть (помощь заевшимся). */
     return null;
   }
 
@@ -1216,16 +1244,95 @@ class UI {
     if (serve) return 30 * d * calK;
     const q = g.project({ x: p.x + MATCH_RULES.captureRadius, y: p.y, z: p.z }, {});
     const r = q && q.ok ? Math.abs(q.x * W - x) : 40 * d;
-    return clamp(r, 22 * d, 64 * d) * calK;
+    /* v4.1: потолок 64·dpr срезал честный размер (на LOW-камере 1200×864
+     * 0.22 м — это ~65 px): кольцо рисовалось МЕНЬШЕ захвата, и «мяч отбит
+     * дальше кольца» выглядел багом. Теперь потолок — доля экрана. */
+    return clamp(r, 22 * d, W * 0.16) * calK;
   }
 
-  drawAimTarget(c, W, H, d, side, now) {
+  /* Полуоси бокса захвата и пунктир grace-края были нужны только матчевой
+   * метке встречи; метку убрали — вместе с ней ушли и эти два метода.
+   * Границы захвата по-прежнему честные, просто живут в физике
+   * (playerInCaptureRange / playerGraceRange), а не на экране. */
+
+  /* ------------------------- закрутка читается ------------------------ */
+  /* Куда крутится мяч — по «конвейеру» шевронов через центр мяча. Берётся
+   * скорость точки поверхности, БЛИЖАЙШЕЙ к камере: v = ω × r (r — из центра
+   * мяча на камеру). Такая точка всегда лежит в плоскости экрана, поэтому
+   * направление не схлопывается в точку при любом пресете камеры.
+   * Топспин => шевроны бегут вверх, подрезка => вниз, боковая => вправо/
+   * влево, смешанная => по диагонали. Всё считается из физики — шаблона,
+   * который мог бы соврать, здесь нет. Цвет тот же, что у spinIndicator. */
+  drawSpinMark(c, W, H, d, dt) {
+    const g = this.game, b = g.ball;
+    if (!b || !b.live || !g.settings.showSpinIndicator) return;
+    /* Шевроны — урок, а не шум: в матче они рисовались прямо поверх мяча и
+     * спорили с главным сигналом (зелёным мячом), а тип закрутки в матче и
+     * так читается в строке удара («БОКОВАЯ · 35 об/с»). Оставляем их там,
+     * где закрутку разбирают: тренировка и свободный полёт. */
+    if (!g.training && !g.freePlay) return;
+    const wmag = V3.len(b.w);
+    if (!(wmag > 50)) return;                       // меньше 8 об/с — мяч почти плоский
+    const t = this._spinScr || (this._spinScr = { r: V3.new(), s: V3.new(), p: V3.new(), q0: {}, q1: {}, q2: {} });
+    const cam = (g.R && g.R.camPos) || g.camPos;
+    if (!cam) return;
+    V3.sub(t.r, cam, b.p);
+    V3.cross(t.s, b.w, t.r);
+    const sl = V3.len(t.s);
+    if (!(V3.len(t.r) > 1e-4) || !(sl > 1e-6)) return;
+    const q0 = g.project(b.p, t.q0);
+    if (!q0.ok) return;
+    const eps = 0.05;
+    V3.set(t.p, b.p.x + t.s.x * eps / sl, b.p.y + t.s.y * eps / sl, b.p.z + t.s.z * eps / sl);
+    const q1 = g.project(t.p, t.q1);
+    if (!q1.ok) return;
+    let ux = (q1.x - q0.x) * W, uy = (q1.y - q0.y) * H;
+    const ul = Math.hypot(ux, uy);
+    if (!(ul > 1)) return;
+    ux /= ul; uy /= ul;
+    const mx = q0.x * W, my = q0.y * H;
+    /* размер мяча на экране — тот же пересчёт, что у 3D-сферы, плюс
+     * визуальный масштаб ползунка «Размер мяча» */
+    const q2 = g.project(V3.set(t.p, b.p.x + PH.R, b.p.y, b.p.z), t.q2);
+    const BS = (g._cal && Number.isFinite(g._cal.ballSize)) ? 0.8 + g._cal.ballSize * 0.5 : 1;
+    const rPx = Math.max((q2.ok ? Math.hypot((q2.x - q0.x) * W, (q2.y - q0.y) * H) : 3) * BS, 3 * d);
+    const col = g.spinIndicator.color || [1, 1, 1];
+    const rgba = (a) => `rgba(${Math.round(col[0] * 255)},${Math.round(col[1] * 255)},${Math.round(col[2] * 255)},${a})`;
+    const heavy = clamp((wmag - 50) / 220, 0, 1);   // сила закрутки -> яркость
+    const reach = Math.max(rPx * 2.7, 17 * d);
+    const chev = Math.max(rPx * 0.8, 5.5 * d);
+    /* темп бега делим на 7: честные 48 об/с на этом масштабе — каша */
+    const fps = clamp((wmag / TAU) / 7, 0.9, 3.4);
+    if (!this.reducedMotion) this._spinPhase = ((this._spinPhase || 0) + fps * dt) % 1;
+    const ph = this.reducedMotion ? 0.34 : (this._spinPhase || 0);
+    c.save();
+    c.lineCap = 'round'; c.lineJoin = 'round';
+    /* «рельса» через весь мяч убрана: это лишняя линия поверх мяча,
+     * направление и без того читается по трём шевронам */
+    const nx = -uy, ny = ux;
+    for (let i = 0; i < 3; i++) {
+      const s = -reach + ((ph + i / 3) % 1) * 2 * reach;
+      const fade = 1 - Math.pow(Math.abs(s) / reach, 3);
+      const px = mx + ux * s, py = my + uy * s;
+      c.globalAlpha = (0.35 + 0.6 * heavy) * fade;
+      c.strokeStyle = rgba(1); c.lineWidth = 2.1 * d;
+      c.beginPath();
+      c.moveTo(px - ux * chev + nx * chev * 0.62, py - uy * chev + ny * chev * 0.62);
+      c.lineTo(px, py);
+      c.lineTo(px - ux * chev - nx * chev * 0.62, py - uy * chev - ny * chev * 0.62);
+      c.stroke();
+    }
+    c.restore();
+  }
+
+  drawAimTarget(c, W, H, d, side, now, zone) {
     const g = this.game, y = PH.TABLE_Y + 0.002;
-    const xs = side === 0 ? [-0.28, 0.28] : side > 0 ? [0.04, PH.T_HALF_WID] : [-PH.T_HALF_WID, -0.04];
-    const pts = [[xs[0], -PH.T_HALF_LEN], [xs[1], -PH.T_HALF_LEN], [xs[1], -0.06], [xs[0], -0.06]]
+    const xs = zone ? [zone.x0, zone.x1] : side === 0 ? [-0.28, 0.28] : side > 0 ? [0.04, PH.T_HALF_WID] : [-PH.T_HALF_WID, -0.04];
+    const zs = zone ? [zone.z0, zone.z1] : [-PH.T_HALF_LEN, -.06];
+    const pts = [[xs[0], zs[0]], [xs[1], zs[0]], [xs[1], zs[1]], [xs[0], zs[1]]]
       .map(([x, z]) => g.project({ x, y, z }, {}));
     if (pts.some((q) => !q || !q.ok)) return;
-    const a = 0.20 + 0.10 * Math.sin(now * 5);
+    const a = this.reducedMotion ? .25 : 0.20 + 0.10 * Math.sin(now * 5);
     c.save();
     c.beginPath(); pts.forEach((q, i) => (i ? c.lineTo(q.x * W, q.y * H) : c.moveTo(q.x * W, q.y * H))); c.closePath();
     c.fillStyle = `rgba(53,198,244,${a})`; c.fill();
@@ -1273,37 +1380,17 @@ class UI {
      * громче — легче поймать окно. Размер живёт в hintRadius. */
     const glowK = (g._cal && Number.isFinite(g._cal.hintGlow))
       ? lerp(0.30, 1.15, clamp(g._cal.hintGlow, 0, 1)) : 1;
+    /* Единственный носитель цвета «бей сейчас» — сам мяч. Кольцо-подсказка
+     * не имеет права обещать зелёный заранее: точка красится в зелёный ровно
+     * тогда, когда открыто окно захвата, иначе это ложный сигнал. */
+    const greenNow = !!(g._strike && g._strike.on && g._strike.contactable);
     let cue = this.coachCueNow();
     /* Никакого «досвета» последнего кадра и никакого сглаживания между
      * позициями: точки сигналов теперь ПРИКОЛОЧЕНЫ при появлении (матч —
      * coachCueNow, тренировка — training.coachCue), а кольцо должно просто
      * появляться и исчезать в нужном месте, а не плыть за прогнозом. */
     if (!cue) return false;
-    if (cue.kind === 'aim') { this.drawAimTarget(c, W, H, d, cue.side || 0, now); return true; }
-    if (cue.kind === 'mark') {
-      /* static strike mark: one ring + the ideal-contact dot, pinned in the
-       * world, white → butter-yellow as the window closes. Nothing chases the
-       * ball, nothing slides, no chevrons, no approach circles. */
-      const q = g.project(cue.p, {});
-      if (!q || !q.ok || !Number.isFinite(q.x)) return false;
-      const mx0 = q.x * W, my0 = q.y * H;
-      const rr = this.coachRadius(cue.p, mx0, W, false);
-      const padE = rr + ((MATCH_RULES.contactEdgePx || 20) + 6) * d;
-      const mx = clamp(mx0, padE, W - padE), my = clamp(my0, 90 * d, H - 70 * d);
-      const heat = clamp(1 - (cue.t || .3) / .30, 0, 1);
-      c.save();
-      c.globalAlpha = Math.min(1, (0.8 + 0.2 * heat) * glowK);
-      c.shadowColor = heat > .66 ? '#FFE699' : '#35C6F4'; c.shadowBlur = (8 + heat * 6) * d;
-      c.strokeStyle = heat > .66 ? '#FFE699' : 'rgba(255,255,255,.92)';
-      c.lineWidth = (2 + heat * 1.6) * d;
-      c.beginPath(); c.arc(mx, my, rr, 0, TAU); c.stroke();
-      c.shadowBlur = 0;
-      c.beginPath(); c.arc(mx, my, (3 + heat * 4.4) * d, 0, TAU);
-      c.fillStyle = heat > .85 ? '#8CFF9E' : '#FFD54A'; c.fill();
-      c.lineWidth = 1.5 * d; c.strokeStyle = 'rgba(255,255,255,.9)'; c.stroke();
-      c.restore();
-      return true;
-    }
+    if (cue.kind === 'aim') { this.drawAimTarget(c, W, H, d, cue.side || 0, now, cue.zone); return true; }
     const p = g.project(cue.p, {});
     if (!p || !p.ok || !Number.isFinite(p.x)) return false;
     let x = p.x * W, y = p.y * H;
@@ -1316,7 +1403,7 @@ class UI {
       const mx = ((MATCH_RULES.contactEdgePx || 20) + 24) * d, my = 96 * d;
       x = clamp(x, mx, W - mx); y = clamp(y, my, H - my);
     }
-    if (cue.aim !== undefined) this.drawAimTarget(c, W, H, d, cue.aim, now);
+    if (cue.zone) this.drawAimTarget(c, W, H, d, cue.aim || 0, now, cue.zone);
     if (cue.nudge > 0) x += Math.sin(now * 70) * 7 * d * Math.min(1, cue.nudge * 2);
     c.save();
     if (cue.frozen) {
@@ -1333,16 +1420,8 @@ class UI {
       (cue._holdAge !== undefined ? Math.max(.25, 1 - cue._holdAge / .24) : 1) * glowK);
     c.globalAlpha = alpha;
     if (cue.kind === 'tap') {
-      const ph = (now % 1.2) / 1.2;
       c.strokeStyle = 'rgba(255,255,255,.9)'; c.lineWidth = 2.5 * d;
       c.beginPath(); c.arc(x, y, r, 0, TAU); c.stroke();
-      c.globalAlpha = (1 - ph) * alpha; c.lineWidth = 3 * d;
-      c.beginPath(); c.arc(x, y, r * (1 + ph * 1.8), 0, TAU); c.stroke();
-      c.globalAlpha = alpha;
-      /* Рука стоит ПРЯМО В цели: палец опускается из-под кружка в его
-       * центр, куда и надо тапнуть. Раньше иконка рисовалась далеко под
-       * кружком — и было непонятно, жать в круг или «куда показывает палец» */
-      this.drawGhostFinger(c, d, x, y + r * 0.6, x, y - r * 0.04, ph);
       c.restore(); return true;
     }
     // approach circle: closes on the ring exactly when the ball arrives
@@ -1352,12 +1431,12 @@ class UI {
       c.lineWidth = (cue.subtle ? 1.5 : 2.5) * d;
       c.beginPath(); c.arc(x, y, r * (1 + 2.4 * k), 0, TAU); c.stroke();
     }
-    const pulse = cue.frozen ? 1 + 0.07 * Math.sin(now * 7) : 1;
+    const pulse = cue.frozen && !this.reducedMotion ? 1 + 0.07 * Math.sin(now * 7) : 1;
     /* heat: white = "it will be HERE", a butter-yellow ring + glowing dot =
      * "lift NOW". Blends over the last 350 ms instead of a 90 ms pop. */
     const heat = cue.frozen ? 0 : clamp(1 - (cue.t !== undefined ? cue.t : 1) / .35, 0, 1);
     c.shadowColor = cue.frozen ? '#FFD54A' : heat > .6 ? '#FFE699' : '#35C6F4';
-    c.shadowBlur = (cue.subtle ? 6 : 16) * d * (0.7 + heat * .6);
+    c.shadowBlur = (cue.subtle ? 4 : 10) * d * (0.7 + heat * .6);
     c.strokeStyle = heat > .75 ? '#FFE699' : heat > .4 ? '#F3EDD8' : 'rgba(255,255,255,.95)';
     c.lineWidth = ((cue.subtle ? 2 : 3) + heat * 1.6) * d;
     c.beginPath(); c.arc(x, y, r * pulse, 0, TAU); c.stroke();
@@ -1365,44 +1444,32 @@ class UI {
     // the exact ideal contact spot — a dot players can aim the finger at
     const dotR = (3.2 + heat * 3.4) * d;
     c.beginPath(); c.arc(x, y, dotR, 0, TAU);
-    c.fillStyle = heat > .8 ? 'rgba(140,255,158,.95)' : 'rgba(255,213,74,.95)';
-    if (!cue.frozen) { c.shadowColor = '#FFE699'; c.shadowBlur = 8 * d; }
+    c.fillStyle = greenNow ? 'rgba(140,255,158,.95)' : 'rgba(255,213,74,.95)';
     c.fill(); c.shadowBlur = 0;
     c.lineWidth = 1.6 * d; c.strokeStyle = 'rgba(255,255,255,.85)'; c.stroke();
-    if (cue.frozen) {
-      /* Одна история, три элемента, один путь:
-       *   маленький пунктирный кружок = «палец ОТСЮДА»,
-       *   пунктирная линия = путь жеста СКВОЗЬ кольцо (и жёлтую точку),
-       *   рука = зацикленная анимация этого пути.
-       * Большого овала-зоны больше нет — он читался как четвёртая,
-       * непонятная отдельная область.
-       * ВАЖНО: модель прицеливания (deriveStroke) читает ТОЧКУ СТАРТА жеста
-       * так же, как его направление — поэтому стартовый кружок стоит на
-       * СТОРОНЕ ЦЕЛИ, а не напротив неё: раньше при цели «влево» кружок был
-       * справа от кольца и честно повторённый жест прицеливался ВПРАВО —
-       * «не в ту зону». Горизонтальный сдвиг старта зажат в допуск гейта
-       * (≤34 CSS px — внутри contactSide* минимумов для мыши и пальца);
-       * вертикальные расстояния — в долях экрана, чтобы пропорции жеста не
-       * зависели от радиуса кольца/матрицы dpr. */
-      const ph = (now % 1.4) / 1.4, aimSgn = cue.aim || 0;
-      const mSide = Math.min(W, H);
-      const sx = x + clamp(aimSgn * W * 0.10, -34 * d, 34 * d);
-      const sy = y + mSide * 0.12;                  // старт: ниже кольца, на стороне цели
-      const ex = x + aimSgn * W * 0.22;             // финиш: выше кольца, дальше в сторону цели
-      const ey = y - mSide * 0.10;
-      // путь жеста
-      c.save();
-      c.setLineDash([3 * d, 5 * d]); c.lineWidth = 1.4 * d; c.lineCap = 'round';
-      c.strokeStyle = 'rgba(255,255,255,.45)';
-      c.beginPath(); c.moveTo(sx, sy); c.lineTo(ex, ey); c.stroke();
-      // стартовый кружок «палец отсюда»
-      c.setLineDash([4 * d, 4 * d]); c.lineWidth = 2 * d;
-      c.strokeStyle = 'rgba(125,243,255,.95)'; c.shadowColor = 'rgba(46,230,255,.6)'; c.shadowBlur = 9 * d;
-      c.beginPath(); c.arc(sx, sy, 10 * d, 0, TAU); c.stroke();
-      c.setLineDash([]); c.shadowBlur = 0; c.restore();
-      this.drawGhostFinger(c, d, sx, sy, ex, ey, ph);
-    }
     c.restore();
+    if (cue.frozen && cue.gesture && cue.gesture.kind !== 'tap') {
+      const points = cue.gesture.points, pad = 24 * d;
+      let scale = 1;
+      for (const point of points) {
+        if (point[0] < 0) scale = Math.min(scale, (x - pad) / (-point[0] * W));
+        if (point[0] > 0) scale = Math.min(scale, (W - x - pad) / (point[0] * W));
+        if (point[1] < 0) scale = Math.min(scale, (y - 96 * d) / (-point[1] * H));
+        if (point[1] > 0) scale = Math.min(scale, (H - y - pad) / (point[1] * H));
+      }
+      if (scale > .25) {
+        const ps = points.map(p => [x + p[0] * W * scale, y + p[1] * H * scale]), start = ps[0], end = ps[ps.length - 1], before = ps[ps.length - 2];
+        const angle = Math.atan2(end[1] - before[1], end[0] - before[0]);
+        c.save(); c.lineCap = 'round'; c.lineWidth = 3 * d; c.strokeStyle = '#9cffd0'; c.fillStyle = '#9cffd0';
+        c.beginPath(); ps.forEach((p, i) => i ? c.lineTo(p[0], p[1]) : c.moveTo(p[0], p[1])); c.stroke();
+        c.beginPath(); c.moveTo(end[0], end[1]);
+        c.lineTo(end[0] - Math.cos(angle - .5) * 12 * d, end[1] - Math.sin(angle - .5) * 12 * d);
+        c.lineTo(end[0] - Math.cos(angle + .5) * 12 * d, end[1] - Math.sin(angle + .5) * 12 * d); c.closePath(); c.fill();
+        c.beginPath(); c.arc(start[0], start[1], 12 * d, 0, TAU); c.fill();
+        c.font = `800 ${12 * d}px ${CSSFONT}`; c.textAlign = 'center'; c.fillStyle = '#080f21'; c.fillText('1', start[0], start[1] + 4 * d);
+        c.restore();
+      }
+    }
     return true;
   }
 
@@ -1493,8 +1560,12 @@ class UI {
     c.clearRect(0, 0, W, H);
     if (!g) return;
 
-    // bracket strike ring: only inside training — matches show the pinned mark
-    if (!this.captureDebug && !this.drawCoach(c, W, H, d) && this.game && this.game.training) this.drawStrikeRing(c, W, H, d);
+    // «скобка»-кольцо — только в тренировке; в матче подсказок нет вовсе,
+    // единственный сигнал — зелёный мяч (70_game.js: drawDynamic)
+    if (!this.captureDebug && !this.drawCoach(c, W, H, d) && this.game && this.game.training && this.game.training.guide !== 'none') this.drawStrikeRing(c, W, H, d);
+    /* направление закрутки рисуется поверх кольца: мяч маленький, ему нужен
+     * свой слой, а не попытка разглядеть шов в 8 пикселях */
+    if (!this.captureDebug) this.drawSpinMark(c, W, H, d, dt);
     this.drawCaptureDebug(c, W, H, d);
     this.syncNativeCursor();
 

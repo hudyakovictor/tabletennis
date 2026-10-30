@@ -9,6 +9,82 @@ const { pathToFileURL } = require('node:url');
 const puppeteer = require('puppeteer-core');
 const chromium = require('@sparticuz/chromium');
 const { root, enginePage } = require('./helpers.cjs');
+
+async function horizontalInputs(page, target, offset, pointerTypes) {
+  let checks = 0;
+  const cdp = pointerTypes.includes('touch') ? await page.createCDPSession() : null;
+  await target.evaluate(() => { const g=window.__game;g._sideTestUpdate=g.update;g.update=()=>{}; });
+  try {
+    for (const pointerType of pointerTypes) for (const scale of [1,.3]) {
+      for (const serving of [false,true]) for (const direction of [-1,1]) {
+        const point=await target.evaluate(({scale,serving})=>{
+          const g=window.__game;g.cancelInput();g.setPaused(false);g.frame++;g.shotId++;
+          g.setState(serving?GS.SERVE_TOSS:GS.RALLY);g.server=serving?1:-1;
+          g.isServeBall=serving;g.recenterT=0;g.rallyBounces=serving?[]:[1];
+          g.setInspectSlowmo(scale<1);g.timeScale=scale;g.targetTimeScale=scale;
+          V3.set(g.player.pos,0,PH.TABLE_Y+.28,1.78);V3.copy(g.player.prevPos,g.player.pos);
+          V3.set(g.player.normal,0,0,-1);V3.zero(g.player.vel);g.padYaw=0;g.padPitch=0;
+          V3.set(g.ball.p,0,PH.TABLE_Y+.30,serving?1.6:1.5);
+          V3.set(g.ball.v,0,serving?-1:-.1,serving?-.02:6);V3.set(g.ball.w,serving?0:120,0,0);
+          g.ball.live=true;g.ball.lastHitBy=serving?0:-1;g.player.lastHitT=g.time-1;
+          g.tossStartY=PH.TABLE_Y+.14;g.tossApex=PH.TABLE_Y+.40;g.shotJournal.reset();g.stats.shots=0;
+          g.camReset();g.updateCamera(4);g.updateCamera(0);
+          const p=g.project(g.ball.p,{}),r=g.canvas.getBoundingClientRect();
+          return {x:r.left+p.x*r.width,y:r.top+p.y*r.height,width:r.width};
+        },{scale,serving});
+        const x=offset.x+point.x,y=offset.y+point.y;
+        const label=`${pointerType}/${scale}/${serving?'serve':'rally'}/${direction}`;
+        if(pointerType==='touch') await cdp.send('Input.dispatchTouchEvent',{type:'touchStart',touchPoints:[{x,y,id:1}]});
+        else {await page.mouse.move(x,y);await page.mouse.down();}
+        assert.equal(await target.evaluate(()=>window.__game.stats.shots),0,`${label}: down stole the swipe`);
+        if(pointerType==='touch') {
+          for(let i=1;i<=4;i++) await cdp.send('Input.dispatchTouchEvent',{type:'touchMove',touchPoints:[{x:x+direction*point.width*.08*i/4,y,id:1}]});
+        } else await page.mouse.move(x+direction*point.width*.08,y,{steps:4});
+        const result=await target.evaluate(serving=>{
+          const g=window.__game,gesture=g.shotJournal.latest?.contact?.incoming?.gesture;
+          const flight=predict(V3.clone(g.ball.p),V3.clone(g.ball.v),V3.clone(g.ball.w),
+            {dt:PH.SIM_DT,maxT:2.6,stopAfterBounces:serving?2:1,stopOnFirstBounce:!serving,out:{}});
+          return {hit:g.ball.lastHitBy,stroke:g.lastShotInfo?.stroke?.id,tap:gesture?.tap===true,curl:gesture?.curl,
+            wx:g.ball.w.x,wy:g.ball.w.y,shots:g.stats.shots,
+            flight:{net:!!flight.hitNet,land:flight.landed?+flight.landed.z.toFixed(2):null,
+              x:flight.landed?+flight.landed.x.toFixed(2):null,
+              cross:flight.planeCross?[+flight.planeCross.z.toFixed(2),+flight.planeCross.x.toFixed(2)]:null,
+              assist:g.shotJournal.latest?.contact?.assist?.valid},
+            kmh:+(V3.len(g.ball.v)*3.6).toFixed(0),
+            solve:g.shotJournal.latest?.contact?.assist&&{el:+g.shotJournal.latest.contact.assist.elevation.toFixed(2),
+              az:+g.shotJournal.latest.contact.assist.azimuth.toFixed(2),sc:+g.shotJournal.latest.contact.assist.scale.toFixed(2),
+              solved:g.shotJournal.latest.contact.assist.solved},
+            raw:g.shotJournal.latest?.contact?.raw&&{bat:+g.shotJournal.latest.contact.raw.speed.toFixed(1),
+              /* «откуда взялся замах» без этих полей не восстановить: маршрут
+               * захвата (ccd/endpoint/edge), множитель экипировки и признак
+               * царапины — трое из них обходят потолок бокового удара. */
+              route:g.shotJournal.latest.contact.incoming?.capture?.route,
+              vmagK:g.shotJournal.latest.contact.incoming?.context?.vmagK,
+              glance:!!g.lastShotInfo?.glance,
+              spin:+(g.settings.spinGain ?? 1).toFixed(2)},
+            q:g.shotJournal.latest?.contact?.quality,soft:!!g.lastShotInfo?.softened,
+            legal:!flight.hitNet&&!!flight.landed&&Math.sign(flight.landed.z)===(serving?1:-1)&&
+              (!serving||(!!flight.b2&&flight.b2.z<0))};
+        },serving);
+        assert.equal(result.hit,1,`${label}: movement did not strike ${JSON.stringify(result)}`);
+        assert.equal(result.stroke,serving?'SERVE_SIDE':'SIDE',label);
+        assert.equal(result.tap,false,`${label}: horizontal movement became a tap`);
+        assert.ok(Math.abs(result.curl)<.05,`${label}: sidespin must not require curl`);
+        assert.ok(Math.abs(result.wy)>Math.abs(result.wx)&&direction*result.wy>0,`${label}: wrong spin ${JSON.stringify(result)}`);
+        assert.equal(result.legal, true, `${label}: the side stroke did not produce a playable flight ${JSON.stringify(result)}`);
+        if(pointerType==='touch') await cdp.send('Input.dispatchTouchEvent',{type:'touchEnd',touchPoints:[]});
+        else await page.mouse.up();
+        assert.equal(await target.evaluate(()=>window.__game.stats.shots),1,`${label}: release duplicated the hit`);
+        checks++;
+      }
+    }
+    return checks;
+  } finally {
+    await target.evaluate(()=>{const g=window.__game;g.cancelInput();g.setInspectSlowmo(false);g.update=g._sideTestUpdate;delete g._sideTestUpdate;});
+    if(cdp) await cdp.detach();
+  }
+}
+
 (async () => {
   // Minimal Linux images may lack NSS. The Chromium npm package ships it.
   const libs = path.join(os.tmpdir(), 'topspin-browser-libs');
@@ -254,7 +330,7 @@ const { root, enginePage } = require('./helpers.cjs');
         check('input instructions use pointer capabilities, not viewport width', () => {
           return g.ui.inputMode===(navigator.maxTouchPoints>0 ? 'touch' : 'mouse');
         });
-        check('all six training tips are brief and specific to the active input', () => {
+        check('all academy tips and lesson controls follow the active input', () => {
           g.startTraining();
           for(let step=0;step<TRAIN_STEPS.length;step++) {
             g.training.goStep(step);g.ui.setInputMode('touch');
@@ -265,9 +341,11 @@ const { root, enginePage } = require('./helpers.cjs');
           }
           g.returnToMenu();return true;
         });
-        check('training keeps the swipe area empty; controls exist only inside pause', () => {
+        check('academy intro is explicit; live swipe area remains unobstructed', () => {
           document.querySelectorAll('.screen.on').forEach(el=>el.classList.remove('on'));
           g.startTraining();g.setPaused(false);g.ui.tick(0);
+          if(g.training.phase!=='intro' || g.ball.live || !document.getElementById('tIStart'))return false;
+          document.getElementById('tIStart').click();
           const header=document.querySelector('#train'),controls=document.querySelector('#topright');
           const rect=header.getBoundingClientRect(),top=controls.getBoundingClientRect();
           const clear=!header.querySelector('button') && getComputedStyle(header).pointerEvents==='none' &&
@@ -352,12 +430,12 @@ const { root, enginePage } = require('./helpers.cjs');
           const send=(type,x,y,pointerType) => {
             const rect=g.canvas.getBoundingClientRect();
             g.canvas.dispatchEvent(new PointerEvent(type,{pointerId:pointerType==='mouse'?31:41,pointerType,
-              button:0,buttons:type==='pointerup'?0:1,clientX:rect.left+x,clientY:rect.top+y,bubbles:true,cancelable:true}));
+               button:0,buttons:type==='pointerup'?0:1,isPrimary:true,clientX:rect.left+x,clientY:rect.top+y,bubbles:true,cancelable:true}));
           };
           try {
             for(const scale of [1,.3]) for(const pointerType of ['mouse','touch']) for(const kind of ['click','swipe']) {
               g.startMatch(0);g.paused=false;g.setState(GS.RALLY);g.server=-1;g.isServeBall=false;
-              g.recenterT=0;g.swipe.cancel();g.ball.live=false;g.pointer={x:.5,y:.59};g.pointerFine=pointerType==='mouse';
+              g.recenterT=0;g.cancelInput();g.ball.live=false;g.pointer={x:.5,y:.59};g.pointerFine=pointerType==='mouse';
               for(let i=0;i<30;i++)g.updatePlayerPaddle(1/60);
               const pad=g.player.pos;
               V3.set(g.ball.p,pad.x,pad.y,pad.z-(kind==='click'?.12:.84));
@@ -366,18 +444,23 @@ const { root, enginePage } = require('./helpers.cjs');
               g.setInspectSlowmo(scale<1);g.timeScale=scale;g.targetTimeScale=scale;g.updateCamera(0);
               const cp=g.contactPrediction(), rect=g.canvas.getBoundingClientRect();
               if(kind==='swipe' && !cp)throw Error('missing predicted contact');
-              const p=g.project(kind==='click'?g.player.pos:cp.p,{}),x=p.x*rect.width,y=p.y*rect.height;
-              send('pointerdown',x,kind==='swipe'?y+50:y,pointerType);
+              // A tap targets the ball, not a smoothed paddle 0.12m behind it;
+              // perspective can separate those projections by more than36px.
+              const p=g.project(kind==='click'?g.ball.p:cp.p,{}),x=p.x*rect.width,y=p.y*rect.height;
+              const startY=Math.min(rect.height-2,y+Math.max(50,rect.height*.08));
+              const endY=Math.max(2,y-Math.max(40,rect.height*.06));
+              send('pointerdown',x,kind==='swipe'?startY:y,pointerType);
               const press=g.swipe.pressZone || (g.shotJournal.latest && g.shotJournal.latest.pressZone);
               if(!press || !press.accepted)throw Error(`${scale}/${pointerType}/${kind}: press rejected`);
               if(kind==='swipe') {
-                g.update(.025);send('pointermove',x,y+25,pointerType);
-                g.update(.025);send('pointermove',x,y,pointerType);g.update(.025);
+                g.update(.025);send('pointermove',x,(startY+endY)/2,pointerType);
+                g.update(.025);send('pointermove',x,endY,pointerType);g.update(.025);
               } else {
-                if(g.ball.lastHitBy!==1 || g.anticipation.active)
-                  throw Error(`${scale}/${pointerType}: the click waited for release or animation`);
+                if(g.ball.lastHitBy!==-1)
+                  throw Error(`${scale}/${pointerType}: down consumed the gesture before click confirmation`);
               }
-              send('pointerup',x,y,pointerType);
+               send('pointerup',x,kind==='swipe'?endY:y,pointerType);
+               if(kind==='click'&&(g.ball.lastHitBy!==1||g.anticipation.active))throw Error(`${scale}/${pointerType}: a confirmed click waited for animation`);
               if(g.ball.lastHitBy!==1 && !g.playerStrokeIntent(false))throw Error(`${scale}/${pointerType}/${kind}: no input intent`);
               let frames=0;
               while(g.ball.lastHitBy===-1 && g.ball.live && frames++<100)g.update(1/60);
@@ -564,12 +647,12 @@ const { root, enginePage } = require('./helpers.cjs');
           const b=tableScreenBounds(g.camVP);
           return band.top>b.bottom*window.innerHeight && document.getElementById('train').parentElement.id==='hud';
         });
-        check('ball trail uses 20 percent opacity', () => {
+        check('neutral ball trail is dialed down to 12 percent opacity', () => {
           const oldDraw=g.R.draw, oldHist=g.ball.hist; let opacity;
           g.ball.hist=[0,1,0, .05,1,.1, .1,1,.2, .15,1,.3];
           g.R.draw=function(mesh,matrix,mat){if(mesh===g.scene.mesh.trail)opacity=mat.opacity;};
           try {g.drawFX();} finally {g.R.draw=oldDraw;g.ball.hist=oldHist;}
-          return opacity===.2;
+          return opacity===.12;
         });
         check('pause control pauses first, then exits to MENU without further scoring', () => {
           g.startMatch(2); g.server = -1; g.prepServe();
@@ -850,11 +933,7 @@ const { root, enginePage } = require('./helpers.cjs');
         g.tryPlayerHit(V3.clone(g.ball.p));return g.ball.lastHitBy===-1 && g.shotJournal.latest.outcome==='outside';
       }),true,'outside real pointer-down must not be rescued by moving into the zone or by CCD');
       await page.mouse.move(aimPoint.x,aimPoint.y);await page.mouse.down();
-      assert.equal(await page.evaluate(()=>{
-        const g=window.__game,shot=g.shotJournal.latest;
-        return g.ball.lastHitBy===1 && g.ball.v.z<0 && g.stats.shots===1 &&
-          !!shot.contact && shot.contact.incoming.gesture.tap && !g.anticipation.active;
-      }),true,'real mouse press must return the ball before release or a game update');
+      assert.equal(await page.evaluate(()=>window.__game.ball.lastHitBy),-1,'real mouse down must allow a drag before choosing a tap');
       await page.evaluate(()=>window.__game.time+=.1);await page.mouse.up();
       assert.equal(await page.evaluate(()=>{
         const g=window.__game,shot=g.shotJournal.latest;
@@ -862,17 +941,70 @@ const { root, enginePage } = require('./helpers.cjs');
         // The same click cannot return another ball without a fresh press.
         g.ball.lastHitBy=-1;g.rallyBounces=[1];V3.copy(g.ball.p,g.player.pos);V3.set(g.ball.v,0,0,6);
         g.tryPlayerHit(V3.clone(g.ball.p));
-        return !!hit && g.ball.lastHitBy===-1;
+        return !!hit && g.ball.lastHitBy===-1 && !g.anticipation.active;
       }),true,'inside a legal capture window a quick click returns the ball exactly once');
+      /* g.update заморожен, значит игровое время стоит и между шагами мыши:
+       * весь проход свайпа через мяч попадает в 90-мс кулдаун предыдущего
+       * контакта и отбрасывается ДО расчёта удара (замер: sinceHit 0.05 на
+       * всех in-range сэмплах, последний шаг уже 0.30 м от мяча при радиусе
+       * захвата 0.22). Следующий входящий — это новый розыгрыш, поэтому его
+       * изолируем как вживую: время последнего контакта уходит в прошлое, а
+       * чужой ω от предыдущей атаки сбрасывается. Саму 90-мс защиту движка
+       * проверяем отдельным сценарием ниже, а не таймингом этого теста. */
+      await page.evaluate(()=>{const g=window.__game;g.player.lastHitT=g.time-1;V3.zero(g.ball.w);});
       await page.mouse.move(aimPoint.x,aimPoint.y+80);await page.mouse.down();
       await page.evaluate(()=>window.__game.time+=.05);await page.mouse.move(aimPoint.x,aimPoint.y-70,{steps:4});
       await page.evaluate(()=>window.__game.time+=.05);await page.mouse.up();
-      assert.equal(await page.evaluate(()=>{
+      const freshMiss = await page.evaluate(()=>{
         const g=window.__game,shot=g.shotJournal.latest;
         const hit=g.ball.lastHitBy===1 && shot.contact && !shot.contact.incoming.gesture.tap;
-        g.update=g._testUpdate;delete g._testUpdate;return hit;
-      }),true,'inside real pointer-down plus fresh motion can make a physical hit');
+        /* Сообщение об отказе должно говорить ЧЕМ: без этого «свежий жест не
+         * стал ударом» приходится воспроизводить весь прогон. При отсутствии
+         * контакта в shot.contact брать нечего, поэтому просим метрики самого
+         * жеста, ближайший сэмпл захвата, причину которую движок выдал бы сам
+         * (missReason) и состояние кулдауна — ранние выходы из tryInputHit
+         * иначе приходится восстанавливать по всему прогону. */
+        const info=hit?null:{hitBy:g.ball.lastHitBy,shots:g.stats.shots,outcome:shot&&shot.outcome,
+          reason:(shot&&shot.reason)||(shot&&g.shotJournal.missReason(shot)),stroke:shot&&shot.strokeId,
+          contact:!!(shot&&shot.contact),sinceHit:+(g.time-g.player.lastHitT).toFixed(3),
+          tap:shot&&shot.contact&&shot.contact.incoming.gesture.tap,
+          zone:shot&&shot.pressZone&&{accepted:shot.pressZone.accepted,reason:shot.pressZone.reason},
+          gesture:shot&&shot.gestureMetrics&&{dx:+shot.gestureMetrics.dx.toFixed(3),
+            dy:+shot.gestureMetrics.dy.toFixed(3),samples:shot.gestureMetrics.samples},
+          closest:shot&&shot.closest&&{lateral:+shot.closest.lateral.toFixed(3),radius:+shot.closest.radius.toFixed(3),
+            depthGap:shot.closest.depthGap&&+shot.closest.depthGap.toFixed(3),
+            depthLimit:shot.closest.depthLimit&&+shot.closest.depthLimit.toFixed(3)},
+          assist:shot&&shot.contact&&shot.contact.assist&&{valid:shot.contact.assist.valid,soft:shot.contact.assist.softened}};
+        g.update=g._testUpdate;delete g._testUpdate;return info;
+      });
+      assert.equal(freshMiss,null,'inside real pointer-down plus fresh motion can make a physical hit '+JSON.stringify(freshMiss));
       count++;console.log(`PASS ${width}x${height}: real clicks and swipes hit once inside the capture window; outside starts stay rejected`);
+
+      /* Отдельный сценарий про 90-мс блокировку повторного удара. Выше по
+       * тексту она сознательно обходится таймингом фикстуры (иначе замороженное
+       * время съедало весь проход мыши через мяч), значит именно здесь она и
+       * есть предмет проверки: свежее нажатие внутри блокировки не бьёт, тот же
+       * жест после её истечения бьёт. */
+      const cool=await page.evaluate(()=>{
+        const g=window.__game;g._coolUpdate=g.update;g.update=()=>{};g.cancelInput();
+        g.setState(GS.RALLY);g.server=-1;g.isServeBall=false;g.recenterT=0;g.rallyBounces=[1];
+        V3.set(g.player.pos,0,1.05,1.5);V3.copy(g.player.prevPos,g.player.pos);V3.set(g.player.normal,0,0,-1);
+        V3.copy(g.ball.p,g.player.pos);V3.set(g.ball.v,0,0,6);V3.zero(g.ball.w);g.ball.live=true;g.ball.lastHitBy=-1;
+        g.player.lastHitT=g.time;g.shotJournal.reset();g.stats.shots=0;
+        const p=g.project(g.ball.p),r=g.canvas.getBoundingClientRect();return {x:r.x+p.x*r.width,y:r.y+p.y*r.height};
+      });
+      await page.mouse.move(cool.x,cool.y+40);await page.mouse.down();
+      await page.evaluate(()=>window.__game.time+=.02);await page.mouse.move(cool.x,cool.y-40,{steps:3});
+      assert.equal(await page.evaluate(()=>window.__game.ball.lastHitBy),-1,'a fresh press inside the 90 ms re-hit lock must not strike');
+      await page.mouse.up();
+      await page.evaluate(()=>{const g=window.__game;g.ball.lastHitBy=-1;g.rallyBounces=[1];V3.copy(g.ball.p,g.player.pos);V3.set(g.ball.v,0,0,6);V3.zero(g.ball.w);g.time+=.1;});
+      await page.mouse.move(cool.x,cool.y+40);await page.mouse.down();
+      await page.evaluate(()=>window.__game.time+=.02);await page.mouse.move(cool.x,cool.y-40,{steps:3});
+      const expiredHit=await page.evaluate(()=>{const g=window.__game;const r=g.ball.lastHitBy===1&&g.shotJournal.latest&&!!g.shotJournal.latest.contact;
+        g.update=g._coolUpdate;delete g._coolUpdate;return !!r;});
+      await page.mouse.up();
+      assert.equal(expiredHit,true,'the same gesture must strike once the 90 ms re-hit lock has expired');
+      count++;console.log(`PASS ${width}x${height}: the re-hit lock blocks a fresh press only while it is active`);
 
       if (width < 600) {
         const touchPoint=await page.evaluate(()=>{
@@ -884,22 +1016,29 @@ const { root, enginePage } = require('./helpers.cjs');
           const p=g.project(g.ball.p),r=g.canvas.getBoundingClientRect();return {x:r.left+p.x*r.width,y:r.top+p.y*r.height};
         });
         const touch=await page.touchscreen.touchStart(touchPoint.x,touchPoint.y);
-        assert.equal(await page.evaluate(()=>{
-          const g=window.__game,shot=g.shotJournal.latest;
-          return g.ball.lastHitBy===1 && g.ball.v.z<0 && g.stats.shots===1 &&
-            !!shot.contact && shot.contact.incoming.gesture.tap && !g.anticipation.active;
-        }),true,'actual touch must return the ball while the finger is still down');
+        assert.equal(await page.evaluate(()=>window.__game.ball.lastHitBy),-1,'actual touch down must allow a swipe before choosing a tap');
         await touch.end();
         assert.equal(await page.evaluate(()=>{
           const g=window.__game,shot=g.shotJournal.latest;
-          const ok=!!shot.contact && shot.contact.incoming.gesture.tap && g.ball.lastHitBy===1 && g.ball.v.z<0 && g.stats.shots===1;
+          const ok=!!shot.contact && shot.contact.incoming.gesture.tap && g.ball.lastHitBy===1 && g.ball.v.z<0 && g.stats.shots===1 && !g.anticipation.active;
           g.update=g._testUpdate;delete g._testUpdate;return ok;
         }),true,'an actual touch tap returns a legal incoming ball toward the opponent');
         count++;console.log(`PASS ${width}x${height}: actual touchscreen tap returns the ball`);
       }
 
+      count+=await horizontalInputs(page,page,{x:0,y:0},width<600?['mouse','touch']:['mouse']);
+      console.log(`PASS ${width}x${height}: native horizontal drags create signed sidespin in rally and serve at both speeds`);
+
       await page.evaluate(() => {
         const g=window.__game; g.server=1; g.prepServe(); g.camReset(); g.updateCamera(0);
+        /* Камера подводится к мячу в самом рендер-цикле (updateCamera зовётся из
+         * rAF), поэтому заморозка g.update её не останавливает: за пару
+         * сотен миллисекунд живого цикла camPos уходит на 0.5 мм, camShiftY на
+         * 0.6 мм — и тест ловит собственную сходимость камеры вместо реакции на
+         * колесо. Гасим именно updateCamera: тогда любое изменение camPos/fov/
+         * shift значит, что обработчик ввода написал их напрямую. */
+        g._camUpdate=g.update;g._camStep=g.updateCamera;
+        g.update=()=>{};g.updateCamera=()=>{};
       });
       const camBefore=await page.evaluate(()=>({y:window.__game.camPos.y,z:window.__game.camPos.z,
         fov:window.__game.fov,shift:window.__game.camShiftY}));
@@ -910,12 +1049,20 @@ const { root, enginePage } = require('./helpers.cjs');
       await page.mouse.move(width*.5,height*.45-35,{steps:4});
       await page.mouse.move(width*.5+35,height*.45-35,{steps:4});
       await page.mouse.up({button:'right'});
-      assert.equal(await page.evaluate(before=>{
-        const g=window.__game;g.updateCamera(0);
-        return !g.swipe.active && !g.pointerDown && !('cameraControls' in g) &&
+      const cameraInput = await page.evaluate(before=>{
+        const g=window.__game;
+        /* fov подводится экспоненциальным сглаживанием и никогда не
+         * совпадает побитово: допуск 0.1° отсеивает шум подводки, но
+         * колесо/правый драг дают градусы — их он не спрячет. */
+        const unchanged = !g.swipe.active && !g.pointerDown && !('cameraControls' in g) &&
           Math.abs(g.camPos.y-before.y)<1e-9 && Math.abs(g.camPos.z-before.z)<1e-9 &&
-          g.fov===before.fov && g.camShiftY===before.shift;
-      },camBefore),true,'wheel or right-drag moved the camera');
+          Math.abs(g.fov-before.fov)<0.1 && g.camShiftY===before.shift;
+        g.update=g._camUpdate;delete g._camUpdate;
+        g.updateCamera=g._camStep;delete g._camStep;
+        return { unchanged, swipe: g.swipe.active, pointerDown: g.pointerDown, dy: g.camPos.y-before.y,
+          dz: g.camPos.z-before.z, fov: g.fov, expectedFov: before.fov, shift: g.camShiftY, expectedShift: before.shift };
+      },camBefore);
+      assert.equal(cameraInput.unchanged,true,'wheel or right-drag moved the camera: '+JSON.stringify(cameraInput));
       count++; console.log(`PASS ${width}x${height}: wheel and right-drag cannot zoom, tilt or stroke`);
       await page.evaluate(()=>{window.__game.setCameraPreset('DYNAMIC');window.__game.updateCamera(0);});
       await page.keyboard.press('c');
@@ -1030,6 +1177,19 @@ const { root, enginePage } = require('./helpers.cjs');
       const frame=await (await page.$('#gamelayer iframe')).contentFrame();
       await frame.waitForFunction('window.__game && window.__game.R.drawCalls > 0',{timeout:30000});
       await page.waitForSelector('.mx.live',{timeout:30000});
+      await page.evaluate(()=>GameHost.send('cal',{k:'camZoom',v:50}));
+      await frame.waitForFunction('window.__game._cal.camZoom === .5 && window.__game.settings.camZoom === 1',{timeout:10000});
+      count++;console.log(`PASS ${width}x${height}: standard shell calibration has neutral camera zoom`);
+      await page.evaluate(()=>{GameHost.send('cal',{k:'camZoom',v:100});GameHost.send('cal',{k:'camHeight',v:100});});
+      await frame.waitForFunction('window.__game.settings.camZoom === 1.8 && window.__game.settings.camPitch === 16',{timeout:10000});
+      assert.equal(await frame.evaluate(()=>{
+        const g=window.__game;g.updateCamera(4);g.updateCamera(0);
+        const vp=rigViewProj(g.camRig,g.R.aspect()),table=tabletopBounds(vp),P=CAMERA_PRESETS[g.settings.camera];
+        return table.top >= P.topMin-.004 && opponentScreenTop(vp)>=CAMERA_HEADROOM-.004;
+      }),true,`shipped shell ${width}x${height}: retained calibration must not hide the opponent`);
+      count++;console.log(`PASS ${width}x${height}: retained shell camera calibration keeps the table and opponent visible`);
+      await page.evaluate(()=>{GameHost.send('cal',{k:'camZoom',v:50});GameHost.send('cal',{k:'camHeight',v:50});});
+      await frame.waitForFunction('window.__game.settings.camZoom === 1 && window.__game.settings.camPitch === 0',{timeout:10000});
       await page.click('[data-act=slowmo]');
       await frame.waitForFunction('window.__game.inspectSlowmo === true',{timeout:10000});
       const bounds=await page.evaluate(()=>{const r=document.querySelector('#gamelayer iframe').getBoundingClientRect();return {x:r.left,y:r.top};});
@@ -1046,13 +1206,16 @@ const { root, enginePage } = require('./helpers.cjs');
       let touch;
       if(width<600)touch=await page.touchscreen.touchStart(bounds.x+point.x,bounds.y+point.y);
       else {await page.mouse.move(bounds.x+point.x,bounds.y+point.y);await page.mouse.down();}
+      assert.equal(await frame.evaluate(()=>window.__game.stats.shots),0,'shipped shell down must not steal a swipe');
+      if(touch)await touch.end();else await page.mouse.up();
       assert.equal(await frame.evaluate(()=>{
         const g=window.__game,shot=g.shotJournal.latest;
         return !!shot.contact && shot.contact.incoming.gesture.tap && shot.pressZone.accepted &&
           g.ball.lastHitBy===1 && g.ball.v.z<0 && g.ball.trailGrade==='yellow' && g.stats.shots===1;
-      }),true,`shipped shell ${width}x${height}: the press returns the ball before release, with slowmo enabled`);
-      if(touch)await touch.end();else await page.mouse.up();
+      }),true,`shipped shell ${width}x${height}: a confirmed click/tap returns the ball with slowmo enabled`);
       assert.equal(await frame.evaluate(()=>window.__game.stats.shots),1,'release must not repeat the shell contact');
+      count+=await horizontalInputs(page,frame,bounds,width<600?['mouse','touch']:['mouse']);
+      console.log(`PASS ${width}x${height}: shipped iframe horizontal input creates signed sidespin for mouse and touch`);
       assert.deepEqual(errors,[],`shipped shell ${width}x${height}: uncaught exceptions`);
       count++;console.log(`PASS ${width}x${height}: shipped shell, slowmo control and actual click/tap through iframe`);
       await page.close();

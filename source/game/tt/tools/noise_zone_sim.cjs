@@ -38,7 +38,7 @@ const option = (name, fallback) => {
 const seed = Number(option('--seed', '20261019')) >>> 0;
 const outDir = path.resolve(root, option('--out', 'test-results'));
 
-const files = ['10_math.js', '12_match_rules.js', '30_physics.js', '38_paddle_motion.js', '40_swipe.js', '42_shot_diagnostics.js'];
+const files = ['05_stroke_config.js', '10_math.js', '12_match_rules.js', '30_physics.js', '38_paddle_motion.js', '40_swipe.js', '42_shot_diagnostics.js'];
 const source = files.map(f => fs.readFileSync(path.join(root, 'tt/src', f), 'utf8')).join('\n');
 const api = vm.runInNewContext(source +
   '\n;({ MATCH_RULES, pressHitZone, pressHitZoneOval, shotCalibrationCases, PH })', { console });

@@ -12,7 +12,8 @@ const vm = require('node:vm');
 const { writePng, heatColor } = require('./png.cjs');
 
 const root = path.resolve(__dirname, '../..');
-const rulesSource = fs.readFileSync(path.join(root, 'tt/src/12_match_rules.js'), 'utf8');
+const rulesSource = ['05_stroke_config.js', '12_match_rules.js']
+  .map(f => fs.readFileSync(path.join(root, 'tt/src', f), 'utf8')).join('\n');
 const { MATCH_RULES, PRESS_REJECTION_REASONS } = vm.runInNewContext(
   rulesSource + '\n;({ MATCH_RULES, PRESS_REJECTION_REASONS })', { console });
 
