@@ -1003,7 +1003,21 @@ class UI {
       : archive && archive.status === 'opening' ? 'подключаем локальное хранилище' : 'восстановление после перезагрузки недоступно';
     const frameStatus = this._diagnosticBookmark ? ' · ' + (archive && archive.frameStatus === 'saved' ? 'кадр в локальном резерве'
       : archive && archive.frameStatus === 'pending' ? 'сохраняем кадр' : 'кадр только в памяти') : '';
-    status.textContent = `${g.debugRecording ? 'Запись включена' : 'Запись выключена'} · в памяти ${Math.round(stats.retainedWallSeconds)} с / ${stats.inWindow} событий · ${storage}${frameStatus}`;
+    /* Сторож физики: сколько тикетов и живы ли его детекторы. Гейты
+     * пересчитываются только когда меняется число тикетов — самопроверка
+     * детерминированная, но панель открывается на паузе, а не в бою. */
+    let watchdogStatus = '';
+    if (g.watchdog) {
+      const counts = g.watchdog.counts || {};
+      const total = Object.values(counts).reduce((a, b) => a + b, 0);
+      if (this._watchdogGatesKey !== total || !this._watchdogGates) {
+        this._watchdogGatesKey = total;
+        this._watchdogGates = g.watchdog.selfTest();
+      }
+      const gates = this._watchdogGates;
+      watchdogStatus = ` · сторож: ${total}${gates ? (gates.status === 'green' ? ' · гейты зелёные' : ' · гейты КРАСНЫЕ') : ''}`;
+    }
+    status.textContent = `${g.debugRecording ? 'Запись включена' : 'Запись выключена'} · в памяти ${Math.round(stats.retainedWallSeconds)} с / ${stats.inWindow} событий · ${storage}${frameStatus}${watchdogStatus}`;
     if (!this._diagnosticBookmark && !this._diagnosticRestoreTried && g.debugArchive) {
       this._diagnosticRestoreTried = true;
       g.debugArchive.readFrame().then(saved => {
