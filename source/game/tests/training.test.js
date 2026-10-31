@@ -7,7 +7,7 @@ const lib = load(['10_math.js', '12_match_rules.js', '30_physics.js', '40_swipe.
   ['Trainer', 'ET', 'TRAINING_VERSION', 'TRAIN_SKILLS', 'TRAIN_MODULES', 'TRAIN_STEPS', 'TRAIN_GUIDES', 'TRAIN_GUIDE_FIELDS', 'TRAIN_FEEDS', 'TRAIN_TARGETS',
     'trainingCatalog', 'trainingCoverage', 'trainingGuideView', 'trainingLessonView', 'trainingTarget', 'trainingInTarget', 'trainingTip',
     'detectInputMode', 'trainingFeedBall', 'STROKES', 'ARCH', 'V3', 'Q', 'PH', 'TAU', 'predict', 'bounceTable', 'impactRacket',
-    'makeRacket', 'refineRacket', 'measureShotSpin', 'classifyStroke', 'getCaptureForgiveness', 'SwipeTracker', 'isRealStroke'],
+    'makeRacket', 'refineRacket', 'measureShotSpin', 'classifyStroke', 'getCaptureForgiveness', 'SwipeTracker', 'isRealStroke', 'tapStrokeMetrics'],
   { GS, PHYS_DT: 1 / 600, window: { __TT_EMBED: true } });
 const { Trainer, TRAIN_SKILLS, TRAIN_MODULES, TRAIN_STEPS, TRAIN_GUIDES, STROKES, V3, Q, PH, TAU } = lib;
 const plain = value => JSON.parse(JSON.stringify(value));
@@ -24,7 +24,7 @@ function trainerFixture(options = {}) {
       trainProgress(t) { progress.push({ stage: t.stage, id: t.S.id, practiced: t.practicePassed, mastered: t.checkPassed }); }, trainHide() {} },
     ai: { levelIndex: 3, pos: V3.new(), anim: {}, setLevel(n) { this.levelIndex = n; }, reset() {}, setHandicap() {}, setTrend() {} },
     aiPaddle: { pos: V3.new(), normal: V3.new(0, 0, 1) },
-    cancelInput() { this.cancelled = (this.cancelled || 0) + 1; }, resetPaddle() {},
+    cancelInput() { this.cancelled = (this.cancelled || 0) + 1; if (this.swipe) this.swipe.cancel(); }, resetPaddle() {},
     setSlowmoAllowed(on) { this.slowmoAllowed = on; }, contactPrediction() { return { p: V3.new(0, 1, .92), t: .1 }; },
     prepServe() { this.state = GS.SERVE_READY; this.isServeBall = true; this.ball.lastHitBy = 0; this.ball.live = false; }
   };
@@ -35,8 +35,9 @@ function trainerFixture(options = {}) {
 function startAttempt(t) {
   if (t.phase === 'intro') assert.equal(t.action('start'), true);
   else if (t.phase === 'ok') t.update(1.01);
-  else if (t.phase === 'fail') t.onPress({ accepted: false });
-  assert.equal(t.phase, 'wait'); t.update(.66); assert.equal(t.phase, 'live', `feed for ${t.S.id}`);
+  else if (t.phase === 'fail') t.update(1.51);
+  if (t.phase === 'wait') t.update(.66);
+  assert.equal(t.phase, 'live', `feed for ${t.S.id}`);
 }
 
 // Controller fixtures use an actual racket collision and the shared flight
@@ -89,8 +90,8 @@ function finishPractice(t) {
 }
 function enterCheck(t) { finishPractice(t); assert.equal(t.action('answer', t.S.quiz.answer), true); assert.equal(t.stage, 'check'); }
 
-test('the independent skill registry covers the 39 lessons, eight modules and all actual strokes', () => {
-  assert.equal(TRAIN_STEPS.length, 39); assert.equal(TRAIN_MODULES.length, 8);
+test('the independent skill registry covers 44 lessons, eight modules and 20 physical strokes', () => {
+  assert.equal(TRAIN_STEPS.length, 44); assert.equal(TRAIN_MODULES.length, 8); assert.equal(TRAIN_SKILLS.length, 54);
   assert.ok(TRAIN_SKILLS.length > TRAIN_STEPS.length, 'skills are not one convenient entry per lesson');
   const skills = new Set(TRAIN_SKILLS.map(s => s.id)), modules = new Set(TRAIN_MODULES.map(m => m.id));
   const covered = new Set(TRAIN_STEPS.flatMap(s => s.skills));
@@ -103,9 +104,16 @@ test('the independent skill registry covers the 39 lessons, eight modules and al
     assert.ok(step.skills.length); for (const id of step.skills) assert.ok(skills.has(id), `${step.id}: unknown skill ${id}`);
   }
   for (const id of modules) assert.ok(TRAIN_STEPS.some(step => step.module === id), `nonempty module ${id}`);
-  assert.equal(Object.keys(STROKES).filter(id => !id.startsWith('SERVE_')).length, 13);
-  assert.equal(Object.keys(STROKES).filter(id => id.startsWith('SERVE_')).length, 4);
-  assert.deepEqual(Object.keys(TRAIN_GUIDES).sort(), Object.keys(STROKES).sort());
+  assert.equal(Object.keys(STROKES).filter(id => !id.startsWith('SERVE_')).length, 15);
+  assert.equal(Object.keys(STROKES).filter(id => id.startsWith('SERVE_')).length, 5);
+  assert.equal(Object.keys(TRAIN_GUIDES).length, 22);
+  assert.deepEqual(Object.keys(TRAIN_GUIDES).filter(id => TRAIN_GUIDES[id].stroke === id).sort(), Object.keys(STROKES).sort());
+  assert.deepEqual(plain(lib.trainingCatalog().strokes.map(s => s.id).sort()), Object.keys(STROKES).sort());
+  for (const id of ['SERVE_SIDE_TOP', 'SERVE_SIDE_BACK']) {
+    const lesson = TRAIN_STEPS.find(s => s.id === id);
+    assert.equal(STROKES[id], undefined); assert.equal(lesson.stroke, 'SERVE_SIDE'); assert.equal(lesson.technique, id);
+    assert.equal(lib.trainingLessonView(lesson).technique, id);
+  }
   for (const id of Object.keys(STROKES)) { assert.ok(skills.has(id)); assert.ok(covered.has(id)); }
   const ratio = [...skills].filter(id => covered.has(id)).length / skills.size;
   assert.ok(ratio >= .95, `real registry coverage: ${ratio}`);
@@ -134,24 +142,26 @@ test('all numbered motion examples produce the advertised stroke through the act
       time += Math.hypot(points[i][0] - points[i - 1][0], points[i][1] - points[i - 1][1]) / length * row.gesture.duration / 1000;
       sw.move(.5 + points[i][0], .5 + points[i][1], time);
     }
-    const metrics = sw.m, serving = row.id.startsWith('SERVE_');
-    if (row.id === 'BLOCK') Object.assign(metrics, { dist: 0, releaseSpeed: .8, peakSpeed: .8, up: 1 });
-    else assert.equal(lib.isRealStroke(metrics, serving), true, row.id);
+    const serving = row.id.startsWith('SERVE_');
+    const metrics = row.gesture.kind === 'tap' ? lib.tapStrokeMetrics(sw.m, .5, .5, serving) : sw.m;
+    assert.equal(lib.isRealStroke(metrics, serving), true, row.id);
     const power = Math.max(metrics.releaseSpeed, .78 * metrics.peakSpeed) / 4.2;
-    const ctx = { isServe: serving, ball: { y: row.id === 'SMASH' ? 1.4 : .95, z: .92 },
-      incomingTop: row.id === 'COUNTER' ? 285 : 35, ballSpeed: row.id === 'BLOCK' ? 9 : 4 };
+    const ctx = { isServe: serving, forehand: row.id !== 'BANANA', ball: { x: row.id === 'BANANA' ? -.35 : 0, y: row.id === 'SMASH' ? 1.4 : .95, z: .92 },
+      incomingTop: ['COUNTER', 'CHOP_BLOCK'].includes(row.id) ? 285 : 35, ballSpeed: ['BLOCK', 'CHOP_BLOCK'].includes(row.id) ? 9 : 4 };
     assert.equal(lib.classifyStroke(metrics, ctx, power).id, row.id, row.id);
   }
 });
 
-test('practice keeps the correction visible until an explicit retry without resetting earlier successes', () => {
+test('practice auto-feeds after a brief correction without resetting successes or losing manual feedback', () => {
   const { t } = trainerFixture(); startAttempt(t); playerContact(t); landContact(t);
   startAttempt(t); t.onFault(-1, 'miss');
   const counts = [t.done, t.attempts, t.stats.attempts], feedback = plain(t.snapshot().feedback);
-  t.update(20); assert.equal(t.phase, 'fail'); assert.deepEqual(plain(t.snapshot().feedback), feedback);
-  assert.equal(t.g.ball.live, false); assert.equal(t.action('retry'), true); assert.equal(t.phase, 'wait');
+  const ballNo = t.ballNo;
+  t.update(1.49); assert.equal(t.phase, 'fail'); assert.deepEqual(plain(t.snapshot().feedback), feedback);
+  assert.equal(t.g.ball.live, false); assert.equal(t.ballNo, ballNo);
+  t.update(.02); assert.equal(t.phase, 'live'); assert.equal(t.ballNo, ballNo + 1);
   assert.deepEqual([t.done, t.attempts, t.stats.attempts], counts);
-  t.update(.66); assert.equal(t.phase, 'live'); assert.equal(t.feedback, null);
+  assert.equal(t.feedback, null); assert.deepEqual(plain(t.snapshot().latestFeedback), feedback);
 });
 
 test('actual hand traces are copied before the tracker is cancelled, with screen aspect and the real contact origin', () => {
@@ -227,7 +237,7 @@ test('missing the next rally ball cannot display a contact or hand trace from th
   assert.equal(t.feedback.actual.gesture, null);
 });
 
-test('all lessons and 17 guides have bilingual context, how-to, effects, advantages, use, risk and counterplay', () => {
+test('all lessons and 22 guides have bilingual context, controls, effects, advantages, use, risk and counterplay', () => {
   const ET = lib.ET;
   const ru = Object.keys(ET.dicts.ru).sort(), en = Object.keys(ET.dicts.en).sort(); assert.deepEqual(ru, en);
   const text = (value, label) => { assert.equal(typeof value, 'string', label); assert.ok(value.trim().length > 0, label); assert.doesNotMatch(value, /\b(?:academy|drill|train|hud|ui)\.[A-Za-z_]/, label); };
@@ -338,19 +348,21 @@ test('spin success uses travel-relative post-impact vectors, not a forged HUD sp
   for (const [lessonId, physicalStroke, label] of [['TOPSPIN', 'PUSH', 'LOOP'], ['PUSH', 'LOOP', 'PUSH'], ['HOOK', 'DRIVE', 'HOOK']]) {
     const { t } = trainerFixture({ lessonId }); startAttempt(t);
     playerContact(t, { physicalStroke, label, info: { topspin: 999, sidespin: 999 } }); landContact(t);
-    assert.equal(t.done, 0, lessonId); assert.equal(t.result.reason, 'spin', lessonId); assert.equal(t.result.contact, true); assert.equal(t.result.legal, true);
+    assert.equal(t.done, 0, lessonId); assert.equal(t.lastShot.stroke, physicalStroke, 'executed racket, not the HUD label');
+    assert.equal(t.result.reason, 'stroke', lessonId); assert.equal(t.result.contact, true); assert.equal(t.result.legal, true);
+    assert.equal(t.criterion({ ...t.lastShot, stroke: label }), 'spin', 'the forged name cannot replace measured spin');
     startAttempt(t); playerContact(t); const measured = lib.measureShotSpin(t.g.ball.w, t.g.ball.v); near(t.lastShot.spinMeasured.topRps, measured.topRps, lessonId);
     landContact(t); assert.equal(t.done, 1, lessonId);
   }
 });
 
 test('spin measurements rotate with travel and remain detached from later table-bounce changes', () => {
-  const { g, t } = trainerFixture({ lessonId: 'TOPSPIN' }); startAttempt(t); playerContact(t);
+  const { g, t } = trainerFixture({ lessonId: 'TOPSPIN' }); startAttempt(t); const { racket, contactP } = playerContact(t);
   const spin = t.lastShot.spinMeasured.topRps; const outgoing = plain(t.lastShot.outgoing);
   assert.ok(spin >= 3); landContact(t); near(t.result.topspin, spin, 'captured spin'); assert.deepEqual(plain(t.lastShot.outgoing), outgoing);
   for (const [v, w] of [[V3.new(0, 0, -5), V3.new(-10 * TAU, 0, 0)], [V3.new(3, 0, -4), V3.new(-8 * TAU, 0, -6 * TAU)], [V3.new(5, 0, 0), V3.new(0, 0, -10 * TAU)]]) {
     V3.copy(g.ball.v, v); V3.copy(g.ball.w, w); t.phase = 'live'; g.shotId++;
-    t.onPlayerHit({ stroke: STROKES.LOOP, quality: .9, topspin: -999 }); near(t.lastShot.spinMeasured.topRps, 10, 'travel-relative topspin');
+    t.onPlayerHit({ stroke: STROKES.LOOP, quality: .9, topspin: -999 }, racket, contactP); near(t.lastShot.spinMeasured.topRps, 10, 'travel-relative topspin');
   }
 });
 
@@ -359,7 +371,8 @@ test('speed and lob height objectives are measured from the real flight, never f
     const { t } = trainerFixture({ lessonId }); startAttempt(t);
     playerContact(t, { physicalStroke, label: t.S.stroke, vmag, info: { speed: 999, apex: 999 } });
     assert.ok(t.lastShot.speed < 999); assert.ok(t.lastShot.apex < 999); landContact(t);
-    assert.equal(t.done, 0, lessonId); assert.equal(t.result.reason, reason, lessonId);
+    assert.equal(t.done, 0, lessonId); assert.equal(t.result.reason, 'stroke', lessonId);
+    assert.equal(t.criterion({ ...t.lastShot, stroke: t.S.stroke }), reason, 'measurements still reject a forged name');
   }
   const { t } = trainerFixture({ lessonId: 'SMASH' }); startAttempt(t); playerContact(t); landContact(t);
   assert.equal(t.done, 1); assert.ok(t.result.speed >= 25);
@@ -387,8 +400,9 @@ test('left/right and short targets require the actual opponent landing rather th
     assert.equal(Math.sign(landing.x), i % 2 ? -1 : 1);
   }
   const drop = trainerFixture({ lessonId: 'DROP' }).t; startAttempt(drop);
-  playerContact(drop, { physicalStroke: 'DRIVE', label: 'DROP', aim: { x: 0, z: -1.1 } }); landContact(drop);
-  assert.equal(drop.done, 0); assert.equal(drop.result.reason, 'outside');
+  playerContact(drop, { physicalStroke: 'DRIVE', label: 'DROP', aim: { x: 0, z: -1.1 } }); const longLanding = landContact(drop);
+  assert.equal(drop.done, 0); assert.equal(drop.result.reason, 'stroke');
+  assert.equal(lib.trainingInTarget(longLanding, drop.currentTarget), false, 'a forged drop label cannot make a deep landing short');
 });
 
 test('duplicate contact/bounce callbacks cannot advance a continuous rally', () => {

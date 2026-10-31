@@ -70,7 +70,7 @@ const AI_LEVELS = [
 /* Удары, которые считаются АТАКОЙ для серии агрессии. Бот не может лупить
  * ими подряд бесконечно: со третьего атакующего мяча к шансу ошибки
  * добавляется 1.5 %, и так до +4 %. Подставка/подрезка/свеча серию рвут. */
-const AI_ATTACK_STROKES = new Set(['SMASH', 'COUNTER', 'LOOP', 'DRIVE', 'FLICK']);
+const AI_ATTACK_STROKES = new Set(['SMASH', 'COUNTER', 'LOOP', 'DRIVE', 'FLICK', 'BANANA']);
 
 /* ---------------------------------------------------------------------
  *  TACTICS
@@ -83,16 +83,22 @@ const AI_TACTICS = {
   DEFEND: { id: 'DEFEND', pace: 0.62, risk: 0.22, depth: 0.72, wide: 0.30 },
 };
 
-/* Serve honesty table, per level: how hard the serve may leave the bat,
- * how far off-centre it may pitch, and how much bounce kick survives the
- * tame clamp. The complaint was real: a mail-slot serve + topspin kick is a
- * fair weapon only against someone who covers the table width by design. */
+/* Serve pace and placement limits apply to the racket BEFORE the verified
+ * launch. Spin is never changed after impact to disguise a different flight. */
 const AI_SERVE_CAPS = [
-  { vmag: 4.4, orbit: PH.T_HALF_WID * 0.44, kick: 0.40 },  // EASY
-  { vmag: 6.0, orbit: PH.T_HALF_WID * 0.55, kick: 0.55 },  // MEDIUM
-  { vmag: 9.6, orbit: PH.T_HALF_WID * 0.70, kick: 0.85 },  // HARD
-  { vmag: 11.0, orbit: PH.T_HALF_WID * 0.80, kick: 0.95 }, // WTF
+  { vmag: 4.4, orbit: PH.T_HALF_WID * 0.44 },  // EASY
+  { vmag: 6.0, orbit: PH.T_HALF_WID * 0.55 },  // MEDIUM
+  { vmag: 9.6, orbit: PH.T_HALF_WID * 0.70 },  // HARD
+  { vmag: 11.0, orbit: PH.T_HALF_WID * 0.80 }, // WTF
 ];
+
+/* Минимальный запас от сетки для первого отскока подачи, метры.
+ * Отскок вплотную к ленте не оставляет второй дуге места: мяч цепляет сетку
+ * и падает обратно за своей половиной — «ОШИБКА ПОДАЧИ». */
+const AI_SERVE_NET_ROOM = 0.16;
+const AI_SERVE_APEX = 0.85;
+const AI_SERVE_SOLVES = 2;
+const AI_SERVE_FRAME_TRIES = 8;
 
 const AI_BACKSWING = {
   LOOP:    { back: 0.30, lift: -0.16, side: 0.10, face: -0.30, name: 'накат' },
@@ -100,8 +106,11 @@ const AI_BACKSWING = {
   DRIVE:   { back: 0.22, lift: -0.04, side: 0.08, face: -0.14, name: 'накат' },
   SMASH:   { back: 0.34, lift: 0.22, side: 0.08, face: -0.22, name: 'смеш' },
   FLICK:   { back: 0.10, lift: 0.04, side: 0.06, face: -0.10, name: 'флик' },
+  SIDE:    { back: 0.12, lift: 0.00, side: 0.18, face: -0.06, name: 'side' },
+  BANANA:  { back: 0.08, lift: -0.04, side: 0.16, face: -0.12, name: 'banana' },
   PUSH:    { back: 0.06, lift: 0.08, side: 0.04, face: 0.18, name: 'подст' },
   CHOP:    { back: 0.20, lift: 0.14, side: 0.08, face: 0.24, name: 'чоп' },
+  CHOP_BLOCK: { back: 0.04, lift: 0.06, side: 0.02, face: 0.16, name: 'chop block' },
   BLOCK:   { back: 0.04, lift: 0.00, side: 0.02, face: 0.00, name: 'блок' },
   LOB:     { back: 0.26, lift: 0.18, side: 0.06, face: -0.12, name: 'свеча' },
   HOOK:    { back: 0.18, lift: -0.04, side: 0.28, face: -0.14, name: 'хук' },
@@ -110,11 +119,10 @@ const AI_BACKSWING = {
 };
 
 function shotHitsNet(ball, racket) {
-  const tv = V3.clone(ball.v), tw = V3.clone(ball.w), sv = V3.new(), sn = V3.new();
-  strokeFrame(racket, 0, 0, 1, sv, sn);
-  impactRacket(tv, tw, sn, sv, racket.quality, racket.rubber || {});
+  const launch = resolveRacketLaunch(ball, racket);
+  if (!launch) return false;
   const chk = {};
-  predict(V3.clone(ball.p), tv, tw, { dt: PH.SIM_DT, maxT: 1.2, stopOnFirstBounce: true, out: chk });
+  predict(launch.p, launch.v, launch.w, { dt: PH.SIM_DT, maxT: 1.2, stopOnFirstBounce: true, out: chk });
   return !!chk.hitNet;
 }
 
@@ -141,7 +149,12 @@ function makeRacket(side, archId, o) {
 class OpponentAI {
   constructor(levelIndex = 2) {
     this.side = -1;
-    this.faceNormal = V3.new(0, 0, 1);
+    this.hand = 'right';
+    this.grip = 'shakehand';
+    this.forehand = true;
+    this.roll = 0.28;
+    this.faceNormal = V3.new(0, -Math.sin(15 * DEG), Math.cos(15 * DEG));
+    this.lastStrokeId = null;
     this.levelIndex = clamp(levelIndex, 0, AI_LEVELS.length - 1);
     this.L = AI_LEVELS[this.levelIndex];
     this.maxSpeed = this.L.move;
@@ -165,10 +178,10 @@ class OpponentAI {
     this.stats = OpponentAI._blankStats();
 
     // Home position
-    this.home = V3.new(0, PH.TABLE_Y + 0.25, -1.45);
-    this.target = V3.new(0, PH.TABLE_Y + 0.25, -1.45);
+    this.home = V3.new(0, PH.TABLE_Y + 0.20, -(PH.T_HALF_LEN + 0.25));
+    this.target = V3.clone(this.home);
     this.pos = V3.clone(this.home);
-    this.lastPos = V3.new(0, PH.TABLE_Y + 0.25, -1.45);
+    this.lastPos = V3.clone(this.home);
     this.vel = V3.new();
 
     // Swing state
@@ -185,6 +198,7 @@ class OpponentAI {
     // Prediction cache
     this._pred = {};
     this._q = {};
+    this._servePath = [];
     /* Чтение траектории и решение разведены: _percept — прогноз, по которому
      * бот двигается, _reactUntil — дедлайн реакции уровня. */
     this._percept = null;
@@ -271,7 +285,10 @@ class OpponentAI {
     this.stats = OpponentAI._blankStats();
     V3.copy(this.target, this.home);
     V3.copy(this.pos, this.home);
-    V3.set(this.faceNormal, 0, 0, 1);
+    V3.set(this.faceNormal, 0, -Math.sin(15 * DEG), -this.side * Math.cos(15 * DEG));
+    this.roll = (this.hand === 'left' ? -1 : 1) * (this.grip === 'penhold' ? Math.PI - 0.052 : 0.28);
+    this.forehand = true;
+    this.lastStrokeId = null;
     V3.copy(this.lastPos, this.home);
     V3.zero(this.vel);
     V3.copy(this._moveSmooth, this.home);
@@ -303,6 +320,29 @@ class OpponentAI {
    *  deep rescues must survive the clamp, or the director is a dead letter. */
   setHandicap(h) { this.handicap = clamp(h, 0.68, 1.08); }
 
+  _strokeContext(game) {
+    const b = game.ball;
+    this.forehand = paddleForehand(b.p.x * this.side, this.hand, this.forehand);
+    return {
+      side: this.side, ball: b.p, ballSpin: b.w, ballVelocity: b.v,
+      ballSpeed: V3.len(b.v), incomingTop: this.side * b.w.x,
+      hand: this.hand, grip: this.grip, forehand: this.forehand,
+      equip: (game.aiEquip || game.equip) && typeof (game.aiEquip || game.equip).forSide === 'function'
+        ? (game.aiEquip || game.equip).forSide(this.forehand ? 1 : -1) : undefined,
+      powerScale: 1, spinBias: 'norm',
+    };
+  }
+
+  _scaleRacket(racket, cap) {
+    if (!racket || !racket.vR) return racket;
+    const cut = this.handicap < 1 ? 1 - (1 - this.handicap) * 0.45 : 1;
+    const scale = Math.min(1, cap / Math.max(racket.vmag, 0.5)) * cut;
+    if (scale >= 1) return racket;
+    const swing = V3.new(), normal = V3.new();
+    strokeFrame(racket, 0, 0, scale, swing, normal);
+    return resolvedRacketFrame(racket, normal, swing);
+  }
+
   /* Pitch the racket face down/up around the world X axis without touching
    * its azimuth — the execution-error injection lives in this one degree of
    * freedom (and in racket speed). */
@@ -314,7 +354,8 @@ class OpponentAI {
   /**
    * Execution error — the reason even a prepared swing sometimes goes into
    * the net or sails long. `errBase`/`errPress` are the level's honest knobs
-   * and this is THE reader of them: a serve rolls a third of the rate,
+   * and this is THE reader of them for rallies only. Technical serves do
+   * not donate points or consume this random stream. In a rally,
    * scoreboard pressure adds errPress on top, and a director handicap below
    * 1 widens everything. The bot does not "decide" the outcome it wants —
    * it perturbs the solved racket: face closed + slower arm (into the net)
@@ -323,74 +364,36 @@ class OpponentAI {
    * still lands in is not an error, so after five escalations the solved
    * racket is returned untouched.
    */
-  /* Доворот готового кадра подачи вокруг вертикальной оси так, чтобы
-   * замеренное predict приземление (второй отскок) ушло из кромочной зоны
-   * к центру. Кадр поворачивается целиком (normal и vR), поэтому удар
-   * сохраняет свой характер; принимается только вариант, который уже по
-   * быстрому rep легален (своя половина -> второй отскок на столе, без
-   * сетки) и подтверждён _flightLegal. Null, если лучше не стало. */
-  _yawServeToWidth(ball, racket, probe, cap, bx0) {
-    const rotY = (v, ang) => {
-      const c = Math.cos(ang), sn = Math.sin(ang);
-      return V3.new(v.x * c + v.z * sn, v.y, -v.x * sn + v.z * c);
-    };
-    let best = null, bestAbs = Math.abs(bx0);
-    for (const a of [0.10, 0.22, 0.38, 0.55]) {
-      for (const dir of [-Math.sign(bx0), Math.sign(bx0)]) {
-        const cand = { ...racket, normal: rotY(racket.normal, dir * a), vR: rotY(racket.vR, dir * a) };
-        const rep = probe(cand);
-        const bx = rep && rep.b2 ? rep.b2.x : null;
-        if (bx === null || Math.abs(bx) >= bestAbs) continue;
-        if (rep.hitNet || !rep.landed || Math.sign(rep.landed.z) !== Math.sign(ball.p.z)) continue;
-        best = cand; bestAbs = Math.abs(bx);
-        if (bestAbs <= cap) break;
-      }
-      if (best && bestAbs <= cap) break;
-    }
-    return best && this._flightLegal(ball, best, true) ? best : null;
-  }
-
   applyExecutionError(game, racket, isServe) {
-    if (!racket || racket.valid === false || !game || !game.ball) return racket;
+    if (isServe || !racket || racket.valid === false || !game || !game.ball) return racket;
     const L = this.L;
-    const pressure = isServe ? 0 : clamp(this.pressure, 0, 1);
+    const pressure = clamp(this.pressure, 0, 1);
     /* Базовый процент уровня — не единственная причина ошибки. К нему
      * добавляются те же условия, что и у человека: очень быстрый мяч (+3–5 %),
      * короткий мяч у сетки (+2 %) и собственная серия атаки (+1.5–4 %).
      * У WTF errPress — АБСОЛЮТНЫЙ процент под давлением (1.7 % → 1.9 %),
      * иначе шкала уехала бы в 3.6 % и «почти идеальный» перестал бы им быть. */
-    const inSpeed = isServe ? 0 : V3.len(game.ball.v);
-    const fastAdd = isServe ? 0 : clamp((inSpeed - 14) / 6, 0, 1) * 0.05;
-    const shortAdd = isServe || !this._lastShort ? 0 : 0.02;
-    const streakAdd = isServe ? 0 : clamp((this.aggrStreak - 2) * 0.015, 0, 0.04);
-    const base = isServe ? L.errBase / 3
-      : (L.errPressAbs ? lerp(L.errBase, L.errPress, pressure) : L.errBase + L.errPress * pressure);
+    const inSpeed = V3.len(game.ball.v);
+    const fastAdd = clamp((inSpeed - 14) / 6, 0, 1) * 0.05;
+    const shortAdd = this._lastShort ? 0.02 : 0;
+    const streakAdd = clamp((this.aggrStreak - 2) * 0.015, 0, 0.04);
+    const base = L.errPressAbs ? lerp(L.errBase, L.errPress, pressure) : L.errBase + L.errPress * pressure;
     const rate = clamp((base + fastAdd + shortAdd + streakAdd) / Math.max(this.handicap, 0.70), 0, 0.85);
     if (this._rand() >= rate) return racket;
     const b = game.ball;
     const isFault = (rk) => {
-      /* The same sequence tryAiHit/serveAiHit applies: contact starts one
-       * ball radius off the face, impactRacket mutates throwaway copies of
-       * the ball, and the production predict() judges the flight. */
-      const v = V3.clone(b.v), w = V3.clone(b.w);
-      if (!impactRacket(v, w, rk.normal, rk.vR, rk.quality, rk.rubber || {})) return false;
-      const p = V3.addScaled(V3.clone(b.p), b.p, rk.normal, PH.R * 1.05);
-      const o = predict(p, v, w, { dt: 1 / 240, maxT: 2.4, stopAfterBounces: 2, out: this._q });
+      const launch = resolveRacketLaunch(b, rk);
+      if (!launch) return false;
+      const o = predict(launch.p, launch.v, launch.w,
+        { dt: PH.SIM_DT, maxT: 2.4, stopOnFirstBounce: true, out: this._q });
       if (o.diverged) return true;
-      if (isServe) {
-        /* Legal serve: own side first, then the player's court. */
-        return o.hitNet || !o.landed || o.landed.z >= 0 ||
-          !o.b2 || o.b2.z < 0 || o.b2.z > PH.T_HALF_LEN + 0.005 ||
-          Math.abs(o.b2.x) > PH.T_HALF_WID + 0.005;
-      }
-      /* Legal rally return: one bounce inside the player's court. */
-      return o.hitNet || !o.landed || o.landed.z < 0 ||
-        o.landed.z > PH.T_HALF_LEN + 0.005 || Math.abs(o.landed.x) > PH.T_HALF_WID + 0.005;
+      return o.hitNet || !o.landed || o.landed.z * rk.side > 0 ||
+        Math.abs(o.landed.z) > PH.T_HALF_LEN + 0.005 || Math.abs(o.landed.x) > PH.T_HALF_WID + 0.005;
     };
     /* Честная монетка: половина ошибок — в сетку, половина — длинные. */
     const kind = this._rand() < 0.50 ? 'net' : 'long';
     for (let step = 1; step <= 5; step++) {
-      const bad = Object.assign({}, racket);
+      let bad = Object.assign({}, racket);
       if (kind === 'net') {
         bad.normal = OpponentAI._pitchFace(racket.normal, 3.2 * step + 1.5);
         bad.vR = V3.mul(V3.clone(racket.vR), racket.vR, 1 - 0.055 * step);
@@ -398,6 +401,7 @@ class OpponentAI {
         bad.normal = OpponentAI._pitchFace(racket.normal, -(2.6 * step + 1.5));
         bad.vR = V3.mul(V3.clone(racket.vR), racket.vR, 1 + 0.060 * step);
       }
+      if (racket.arch) bad = resolvedRacketFrame(bad, bad.normal, bad.vR);
       if (isFault(bad)) {
         this.stats.errors++;
         if (kind === 'net') this.stats.net++; else this.stats.long++;
@@ -424,78 +428,80 @@ class OpponentAI {
    * told us the face envelope had no answer. */
   _flightLegal(b, racket, isServe) {
     if (!racket || racket.valid === false) return false;
-    const v = V3.clone(b.v), w = V3.clone(b.w);
-    if (!impactRacket(v, w, racket.normal, racket.vR, racket.quality, racket.rubber || {})) return false;
-    const p = V3.addScaled(V3.clone(b.p), b.p, racket.normal, PH.R * 1.05);
-    const o = predict(p, v, w, { dt: 1 / 240, maxT: 2.6, stopAfterBounces: 2, out: this._q });
+    if (isServe) return this._serveVerdict(b, racket).reason === 'ok';
+    const launch = resolveRacketLaunch(b, racket);
+    if (!launch || !strokeIdentityMatches(racket, launch)) return false;
+    const o = predict(launch.p, launch.v, launch.w,
+      { dt: PH.SIM_DT, maxT: 2.6, stopOnFirstBounce: true, out: this._q });
     if (o.diverged || !o.landed) return false;
-    if (isServe) {
-      return o.landed.z < 0 && o.landed.z > -PH.T_HALF_LEN - 0.005 &&
-        Math.abs(o.landed.x) <= PH.T_HALF_WID + 0.005 &&
-        !!o.b2 && o.b2.z > 0 && o.b2.z <= PH.T_HALF_LEN + 0.005 &&
-        Math.abs(o.b2.x) <= PH.T_HALF_WID + 0.005;
-    }
-    return o.landed.z >= 0 && o.landed.z <= PH.T_HALF_LEN + 0.005 &&
+    return o.landed.z * racket.side <= 0 && Math.abs(o.landed.z) <= PH.T_HALF_LEN + 0.005 &&
       Math.abs(o.landed.x) <= PH.T_HALF_WID + 0.005;
   }
 
-  /* The solver occasionally comes back with mark `valid === false` — most
-   * often at the extremes, where the level's vmag is huge and the face
-   * pitch the launch needs slips outside the racket cone (a ROOKIE block
-   * sailing three metres long, a LEGEND counter dying in its own net).
-   * Shipping that puts out-balls in play without even the honesty of an
-   * aiError tag. So when the solved stroke would not play a legal ball,
-   * climb down the archetype ladder — a soft block/push carries an open
-   * face and a modest tempo, and can find a legal face for anything that
-   * is in reach at all. The aim is pulled toward the middle and the pace
-   * to a rally tempo; legality beats tactics. The same pace cut the
-   * handicap applies elsewhere is applied BEFORE the check, so what is
-   * verified is what ships. Only when the whole ladder fails — a ball that
-   * is simply unreturnable — is the original shipped, tagged as the miss
-   * it is. */
-  _ensureLegal(game, racket, plan, archId, isServe) {
+  _serveVerdict(ball, racket) {
+    const diagnostic = { reason: 'solver', dt: PH.SIM_DT,
+      firstBounce: null, secondBounce: null, postBounceApex: null };
+    if (!racket) return diagnostic;
+    // A budget-limited solve is only a proposal; this exact flight is the verdict.
+    const launch = resolveRacketLaunch(ball, racket);
+    if (!launch) { diagnostic.reason = 'separating'; return diagnostic; }
+    diagnostic.launch = launch;
+    if (!strokeIdentityMatches(racket, launch)) { diagnostic.reason = 'stroke_identity'; return diagnostic; }
+    const cap = AI_SERVE_CAPS[this.levelIndex];
+    if (racket.vmag > cap.vmag + 1e-6 || V3.len(launch.v) > STROKE_CONFIG.serve.ballMax + 1e-6) {
+      diagnostic.reason = 'speed_cap'; return diagnostic;
+    }
+    const maxT = STROKE_CONFIG.serve.solver.maxT;
+    const path = this._servePath;
+    const o = predict(launch.p, launch.v, launch.w, { dt: PH.SIM_DT, maxT,
+      stopAfterBounces: 2, path, maxPath: 3 * (Math.ceil(maxT / PH.SIM_DT) + 1), out: {} });
+    diagnostic.firstBounce = o.landed;
+    diagnostic.secondBounce = o.b2;
+    if (o.landed) {
+      let apex = PH.TABLE_Y + PH.R;
+      // predict stores one point per production step BEFORE resolving contact.
+      const firstAfterBounce = Math.round(o.landed.t / PH.SIM_DT) * 3 + 1;
+      for (let i = firstAfterBounce; i < path.length; i += 3) apex = Math.max(apex, path[i]);
+      diagnostic.postBounceApex = apex - PH.TABLE_Y;
+    }
+    const side = racket.side;
+    if (o.diverged) diagnostic.reason = 'diverged';
+    else if (o.hitNet) diagnostic.reason = 'net';
+    else if (!o.landed) diagnostic.reason = 'first_bounce_missing';
+    else if (o.landed.z * side <= AI_SERVE_NET_ROOM) diagnostic.reason = 'first_bounce_net_room';
+    else if (Math.abs(o.landed.z) > PH.T_HALF_LEN + 0.005 || Math.abs(o.landed.x) > PH.T_HALF_WID + 0.005)
+      diagnostic.reason = 'first_bounce_out';
+    else if (!o.b2) diagnostic.reason = 'second_bounce_missing';
+    else if (o.b2.z * side >= 0) diagnostic.reason = 'second_bounce_side';
+    else if (Math.abs(o.b2.z) > PH.T_HALF_LEN + 0.005 || Math.abs(o.b2.x) > PH.T_HALF_WID + 0.005)
+      diagnostic.reason = 'second_bounce_out';
+    else if (diagnostic.postBounceApex > AI_SERVE_APEX) diagnostic.reason = 'post_bounce_apex';
+    else if ((cap.vmag <= 6 || racket.stroke.id === 'SERVE_SIDE') &&
+      Math.abs(o.b2.x) > PH.T_HALF_WID * (cap.vmag <= 6 ? 0.60 : 0.66)) diagnostic.reason = 'width_cap';
+    else diagnostic.reason = 'ok';
+    return diagnostic;
+  }
+
+  // Only rallies may switch to a defensive family; serves preserve their intent.
+  _ensureLegal(game, racket, plan) {
     const ball = game.ball;
-    if (this._flightLegal(ball, racket, isServe)) return racket;
+    if (this._flightLegal(ball, racket, false)) return racket;
     const L = this.L;
-    const cut = this.handicap < 1 ? 1 - (1 - this.handicap) * 0.45 : 1;
-    const aim = isServe
-      ? { x: 0, z: PH.T_HALF_LEN * 0.60 }
-      : { x: clamp(((plan.aim && plan.aim.x) || 0) * 0.5, -0.42, 0.42), z: PH.T_HALF_LEN * 0.62 };
-    const ladder = isServe
-      ? ['SERVE_TOP', 'SERVE_TOP', 'SERVE_BACK']
-      : ['BLOCK', 'PUSH', 'LOOP'];
-    for (let t = 0; t < ladder.length; t++) {
-      const A2 = ARCH[ladder[t]];
-      if (!A2) continue;
-      const cand = makeRacket(-1, ladder[t], {
-        elev: A2.elev, contact: A2.contact,
-        azSwing: 0, azFace: 0,
-        vmag: isServe
-          ? clamp(AI_SERVE_CAPS[this.levelIndex].vmag * (0.85 - 0.11 * t), 3.6, AI_SERVE_CAPS[this.levelIndex].vmag)
-          : clamp(plan.speed * 0.55, 2.2, Math.min(4.6, Math.max(3.0, L.vmagMin + 1.2))),
+    const aim = { x: clamp(((plan.aim && plan.aim.x) || 0) * 0.5, -0.42, 0.42),
+      z: -this.side * PH.T_HALF_LEN * 0.62 };
+    const ctx = this._strokeContext(game);
+    for (const id of ['BLOCK', 'PUSH', 'LOOP']) {
+      const cand = racketForStroke(id, ctx, {
+        vmag: clamp(plan.speed * 0.55, 2.2, Math.min(4.6, Math.max(3.0, L.vmagMin + 1.2))),
         aim, quality: 0.8 + 0.1 * L.skill,
-        isServe, netClear: isServe ? 0.06 : 0.12,
       });
-      strokeFrame(cand, 0, 0, 1, cand.vR, cand.normal);
-      const solved = refineRacket(ball.p, ball.v, ball.w, cand,
-        Math.max(L.skill, 0.85), cand.quality);
-      if (solved && solved.vR && cut < 1) V3.mul(solved.vR, solved.vR, cut);
-      if (this._flightLegal(ball, solved, isServe)) return solved;
+      cand.netClear = 0.12;
+      const solved = this._scaleRacket(refineRacket(ball.p, ball.v, ball.w, cand,
+        Math.max(L.skill, 0.85), cand.quality), L.vmagMax);
+      if (this._flightLegal(ball, solved, false)) return solved;
     }
-    /* Nothing on the ladder solves legally — the incoming ball is truly
-     * unreturnable from here. Ship the best-effort stroke tagged as the
-     * miss it honestly is, so stats and effects see it for what it is. */
-    if (!racket.aiError) {
-      const v = V3.clone(ball.v), w = V3.clone(ball.w);
-      let dir = 'long';
-      if (impactRacket(v, w, racket.normal, racket.vR, racket.quality, racket.rubber || {})) {
-        const o = predict(V3.clone(ball.p), v, w, { dt: 1 / 240, maxT: 2.6, out: this._q });
-        const wantZ = isServe ? 0 : 0;
-        dir = (o.hitNet || !o.landed || (isServe ? o.landed.z <= wantZ : o.landed.z < wantZ)) ? 'net' : 'long';
-      }
-      racket.aiError = dir;
-      this.stats.errors++;
-    }
+    racket.valid = false;
+    racket.invalidReason = 'unreturnable';
     return racket;
   }
 
@@ -584,11 +590,15 @@ class OpponentAI {
     const blur = L.posErr * (0.35 + lead * 1.15) / this.handicap;
     const ex = Number.isFinite(plan.errUnitX) ? plan.errUnitX : 0;
     const ey = Number.isFinite(plan.errUnitY) ? plan.errUnitY : 0;
-    return {
+    const target = {
       x: clamp(plan.x + ex * blur, -1.12, 1.12),
       y: clamp(plan.y + ey * blur * 0.42, PH.TABLE_Y - 0.05, PH.TABLE_Y + 0.96),
       z: clamp(plan.z - 0.055, -2.5, -1.05),
     };
+    const pose = game.aiPaddle;
+    keepPaddleAboveTable(target, pose ? pose.normal : this.faceNormal, pose ? pose.roll : this.roll,
+      PH.TABLE_Y, PH.T_HALF_WID, PH.T_HALF_LEN);
+    return target;
   }
 
   /* ==================================================================
@@ -605,9 +615,16 @@ class OpponentAI {
     const heavyTop = topspin > 230;
     const inSpeed = plan.speed;
     const deepMe = plan.z < -PH.T_HALF_LEN - 0.52;
+    const overTable = Math.abs(plan.z) < PH.T_HALF_LEN - 0.02 && Math.abs(plan.x || 0) < PH.T_HALF_WID - 0.03;
+    const backhand = !paddleForehand((plan.x || 0) * this.side, this.hand, this.forehand);
     const aggro = clamp((L.aggro * 0.7 + T.risk * 0.5) * (0.85 + this.pace * 0.3)
       + this.mood * 0.08 - this.pressure * 0.07 + this._trendAmp() * 0.8, 0, 1.1);
     const r = this._rand();
+
+    if (this.levelIndex >= 2 && plan.short && overTable && backhand && hTable >= 0.04 && hTable <= 0.28 &&
+      inSpeed < 12 && r < 0.12 + (this.levelIndex - 2) * 0.10) return 'BANANA';
+    if (heavyTop && inSpeed > 8 && overTable && hTable >= 0.04 && hTable < 0.26 &&
+      r < 0.10 * L.spinRead) return 'CHOP_BLOCK';
 
     if (hNet > 0.17 && inSpeed < 13.5) {
       if (r < L.smashRate * (0.55 + aggro * 0.6)) return 'SMASH';
@@ -635,7 +652,10 @@ class OpponentAI {
     if (heavyTop && r < L.counterRate + aggro * 0.2) return 'COUNTER';
 
     if (L.style === 'PUSHER' && r < 0.55 - aggro * 0.3) return 'PUSH';
-    if (r < 0.07 * L.variety * T.wide) return this._rand() < 0.5 ? 'HOOK' : 'FADE';
+    if (r < 0.07 * L.variety * T.wide) {
+      const lateral = this._rand();
+      return lateral < 1 / 3 ? 'SIDE' : lateral < 2 / 3 ? 'HOOK' : 'FADE';
+    }
     if (r < 0.07 * L.variety * T.wide + 0.08 * (1 - aggro)) return 'PUSH';
 
     if (r < 0.34 + aggro * 0.46) return 'LOOP';
@@ -700,68 +720,46 @@ class OpponentAI {
     const L = this.L;
     const plan = this.commit;
 
-    // Determine stroke archetype
-    const archId = this.commit.archId || 'DRIVE';
-    const A = ARCH[archId] || ARCH.DRIVE;
-
-    // Compute racket state
-    let racket = makeRacket(-1, archId, {
-      elev: A.elev,
-      contact: A.contact,
-      azSwing: 0,
-      azFace: 0,
+    const archId = plan.archId || 'DRIVE';
+    let racket = racketForStroke(archId, this._strokeContext(game), {
       vmag: clamp(plan.speed * (0.7 + 0.3 * this.pace), L.vmagMin, L.vmagMax),
       aim: plan.aim,
       quality: 0.75 + 0.20 * L.skill,
-      isServe: false,
     });
 
     // Solve on copies. The game applies the returned impact exactly once.
-    strokeFrame(racket, 0, 0, 1, racket.vR, racket.normal);
-    racket = refineRacket(ball.p, ball.v, ball.w, racket, L.skill, racket.quality);
-    /* The rescue also bites into PACE, not only into error chance: at the
-     * deepest dig the bot's ball is ~14% slower, which is exactly what
-     * "больше мячей должно отбиваться" asks for. Applied BEFORE the
-     * legality check below: what is verified is what ships. */
-    if (this.handicap < 1 && racket && racket.vR)
-      V3.mul(racket.vR, racket.vR, 1 - (1 - this.handicap) * 0.45);
-    /* A solve that would sail long or dive into the net is not a stroke —
-     * verify against the real flight and climb down to a safer archetype
-     * if the first answer was hot garbage (solver extremes, mostly). */
-    racket = this._ensureLegal(game, racket, plan, archId, false);
-    /* Серия агрессии: атака копит счётчик, защита его рвёт. Именно его
-     * applyExecutionError читает как растущий штраф к ошибке — бот не может
-     * лупить смашами подряд без права на промах. */
-    this.noteStroke(archId);
-    /* Perfect on paper is not perfect on the table: the solved stroke can
-     * still be misexecuted (net cord of the wrong kind, long sail). */
+    racket = this._scaleRacket(refineRacket(ball.p, ball.v, ball.w, racket, L.skill, racket.quality), L.vmagMax);
+    racket = this._ensureLegal(game, racket, plan);
+    // Error pressure includes this attack, but only the executed family counts.
+    if (racket.valid !== false) this.noteStroke(racket.stroke.id);
     racket = this.applyExecutionError(game, racket, false);
     V3.copy(this.faceNormal, racket.normal);
-    this.lastStrokeId = archId;
-    this.phase = 'SWING';
-    this.anim.swing = 1;
+    this.phase = racket.valid === false ? 'RECOVER' : 'SWING';
+    this.anim.swing = racket.valid === false ? 0 : 1;
     this.plan = null;
     this.commit = null;
 
-    // Record for stats
-    this.stats.shots++;
-    this.stats.sumSpeed += V3.len(ball.v);
-    if (V3.len(ball.v) > this.stats.maxSpeed) this.stats.maxSpeed = V3.len(ball.v);
-    this.stats.byStroke[archId] = (this.stats.byStroke[archId] || 0) + 1;
-    /* Скорость ОТВЕТА и её отношение к прилётевшему мячу — телеметрия
-     * «бот не бьёт вдвое сильнее без ограничений»: меряем тем же импульсом,
-     * который применит игра. */
-    const vv = V3.clone(ball.v), ww = V3.clone(ball.w), inc = V3.len(ball.v);
-    if (impactRacket(vv, ww, racket.normal, racket.vR, racket.quality, racket.rubber || {})) {
-      const out = V3.len(vv);
-      this.stats.sumOut += out; this.stats.outN++;
-      if (out > this.stats.maxOut) this.stats.maxOut = out;
-      if (inc > 0.5) { this.stats.sumRatio += out / inc; this.stats.ratioN++; }
-    }
-    this.strokeHistory.push({ archId, time: now, quality: racket.quality });
-    if (this.strokeHistory.length > 50) this.strokeHistory.shift();
-
     return racket;
+  }
+
+  /** Called after the game has actually applied the contact, for both serves
+   * and rallies. Solving or retrying a serve is not an executed shot. */
+  recordHit(ball, racket, launch, now) {
+    if (!racket || racket.valid === false || !launch || !launch.info) return false;
+    const id = racket.stroke.id;
+    this.lastStrokeId = id;
+    V3.copy(this.faceNormal, racket.normal);
+    this.stats.shots++;
+    const inc = V3.len(ball.v), out = V3.len(launch.v);
+    this.stats.sumSpeed += inc;
+    this.stats.maxSpeed = Math.max(this.stats.maxSpeed, inc);
+    this.stats.byStroke[id] = (this.stats.byStroke[id] || 0) + 1;
+    this.stats.sumOut += out; this.stats.outN++;
+    this.stats.maxOut = Math.max(this.stats.maxOut, out);
+    if (inc > 0.5) { this.stats.sumRatio += out / inc; this.stats.ratioN++; }
+    this.strokeHistory.push({ archId: id, time: now, quality: racket.quality });
+    if (this.strokeHistory.length > 50) this.strokeHistory.shift();
+    return true;
   }
 
   /** Serve — solved against both required bounces */
@@ -769,176 +767,54 @@ class OpponentAI {
     const ball = game.ball;
     const L = this.L;
 
-    // Pick serve type based on context
     const r = this._rand();
-    let serveType;
-    if (r < 0.35) serveType = 'SERVE_TOP';
-    else if (r < 0.60) serveType = 'SERVE_BACK';
-    else if (r < 0.80) serveType = 'SERVE_SIDE';
-    else serveType = 'SERVE_FAST';
-
-    const A = ARCH[serveType] || ARCH.SERVE_TOP;
-    const st = STROKES[serveType] || STROKES.SERVE_TOP;
-
-    const CAP = AI_SERVE_CAPS[this.levelIndex] || AI_SERVE_CAPS[0];
-
-    // Aim — inside the orbit, biased middle; no more mail-slot corners on rookie
+    const serveType = r < 0.30 ? 'SERVE_TOP' : r < 0.55 ? 'SERVE_BACK' : r < 0.75 ? 'SERVE_SIDE'
+      : r < 0.90 ? 'SERVE_FAST' : 'SERVE_NO_SPIN';
+    const CAP = AI_SERVE_CAPS[this.levelIndex];
     let aimX = clamp(this._sym(0.50), -CAP.orbit, CAP.orbit);
-    /* КРАЙ СТОЛА — НЕ ЦЕЛЬ. Слабая подача (НОВИЧОК/ЛЮБИТЕЛЬ, vmag <= 6) и
-     * любая сильная боковая прицеливаются не шире половины полуширины:
-     * слабый мяч с кромки уходит в аут от малейшей ошибки исполнения, а
-     * SERVE_SIDE после отскока добирает боковой увод (Магнус + трение о
-     * стол) и «убегает» за боковую линию даже при честном прицеле. Сильной
-     * прямой подаче старших уровней широкий прицел оставлен. */
-    if (CAP.vmag <= 6.0 || serveType === 'SERVE_SIDE') {
-      /* Слабым — ещё уже: у новичка пост-решательная ошибка исполнения и
-       * урезание темпа разносят приземление на ±0.3 м шире прицела
-       * (замер картой подач), поэтому запас до кромки нужен больше. */
-      const safeX = PH.T_HALF_WID * (CAP.vmag <= 6.0 ? 0.44 : 0.48);
-      aimX = clamp(aimX, -safeX, safeX);
-    }
-    const aimZ = PH.T_HALF_LEN * (0.55 + 0.35 * this._rand());
-
-    const racket = makeRacket(-1, serveType, {
-      elev: A.elev,
-      contact: A.contact,
-      azSwing: 0,
-      azFace: 0,
-      vmag: Math.min(lerp(6, 11, L.skill), CAP.vmag) * (0.85 + 0.15 * this.pace),
-      aim: { x: aimX, z: aimZ },
-      quality: 0.80 + 0.15 * L.skill,
-      isServe: true,
-      netClear: 0.055,
-    });
-
-    this.lastStrokeId = serveType;
-
-    // Solve the serve (use existing serve solver from game)
-    const side = -1;
-    const serveCtx = {
-      side,
-      isServe: true,
-      ball: { y: ball.p.y, z: ball.p.z },
-      ballSpin: ball.w, ballSpeed: V3.len(ball.v),
-      powerScale: 1,
-      moveYaw: 0,
-      /* The racket falls back to the base rubber when the game has no
-         equipment layer (a test harness, a bench, a failed shop init). An AI
-         serve must never be the thing that throws. */
-      equip: game && game.equip && typeof game.equip.forSide === 'function'
-        ? game.equip.forSide(-1) : undefined,
-      spinBias: 'norm',
-    };
-
-    const m = {
-      right: aimX * 0.5,
-      up: (A.elev / 66),
-      dist: 0.2,
-      curl: serveType === 'SERVE_SIDE' ? 0.34 : 0,
-      speed: 1.5,
-      peakSpeed: 1.5,
-      releaseSpeed: 1.5,
-      smooth: 0.9,
-      straightness: 0.9,
-      samples: 10,
-      jerk: 0.1,
-    };
-
-    const racketFromStroke = deriveStroke(m, serveCtx);
-    /* deriveStroke invents its own aim from the synthetic gesture metrics
-     * (m.x is unset, so it sanitises to the centre): without this line the
-     * placement rolled above never reaches the solver and every serve is
-     * aimed within ~8 cm of the centre line at one fixed depth. */
-    racketFromStroke.aim = { x: aimX, z: aimZ };
-    racketFromStroke.vmag = racket.vmag;
-    racketFromStroke.normal = racket.normal;
-    racketFromStroke.vR = racket.vR;
-    racketFromStroke.rubber = racket.rubber;
-    racketFromStroke.quality = racket.quality;
-    racketFromStroke.stroke = st;
-    racketFromStroke.arch = A;
-    racketFromStroke.isServe = true;
-
-    // Use refineRacket for legal serve
-    let finalRacket = refineRacket(ball.p, ball.v, ball.w, racketFromStroke,
-      this.handicap, racket.quality);
-
-    if (!finalRacket.valid && this.handicap < 0.999) {
-      finalRacket = refineRacket(ball.p, ball.v, ball.w, racketFromStroke,
-        1, racket.quality);
-    }
-    /* Pace cut first, verify after: what is checked is what ships. */
-    if (this.handicap < 1 && finalRacket && finalRacket.vR)
-      V3.mul(finalRacket.vR, finalRacket.vR, 1 - (1 - this.handicap) * 0.45);
-    /* A solve can still produce an illegal serve (the rare one that
-     * bounces at its own back line and dies short of the far court) —
-     * verify against the real flight and retry softer toward the middle
-     * before shipping anything. */
-    finalRacket = this._ensureLegal(game, finalRacket, null, serveType, true);
-
-    /* ПОСТ-ПРОВЕРКА ШИРИНЫ — тем же predict, что судит легальность, и ПОСЛЕ
-     * всех мутаций (урезание темпа гандикапом выше уже применено). Замер
-     * картой подач показал: на слабых уровнях решатель систематически
-     * недооценивает боковой увод медленной кручёной подачи (длинный полёт,
-     * Магнус и отскок с вращением), и мяч с прицелом 0.06 м приземлялся на
-     * 0.71 м — у самой кромки. Зажатого прицела мало: проверяем само
-     * ПРИЗЕМЛЕНИЕ и, если оно шире безопасной зоны, пере(решаем) с прицелом
-     * заметно ближе к центру. Только для слабых уровней и боковых подач —
-     * сильная прямая подача мастера в угол остаётся законным оружием. */
-    if (CAP.vmag <= 6.0 || serveType === 'SERVE_SIDE') {
-      const probe = (rk) => {
-        if (!rk || !rk.normal || !rk.vR) return null;
-        const v = V3.clone(ball.v), w = V3.clone(ball.w);
-        if (!impactRacket(v, w, rk.normal, rk.vR, rk.quality, rk.rubber || {})) return null;
-        const pp = V3.addScaled(V3.clone(ball.p), ball.p, rk.normal, PH.R * 1.05);
-        const rep = {};
-        predict(pp, v, w, { dt: 1 / 240, maxT: 2.4, stopAfterBounces: 2, out: rep });
-        return rep;
-      };
-      const landX = (rep) => (rep && rep.b2 ? rep.b2.x : null);
-      const widthCap = PH.T_HALF_WID * (CAP.vmag <= 6.0 ? 0.60 : 0.66);
-      let bx = landX(probe(finalRacket));
-      if (bx !== null && Math.abs(bx) > widthCap) {
-        /* Ступень 1 — прямой доворот кадра вокруг вертикали (дёшево: один
-         * predict на кандидата). Решатель подач — эвристический спуск и
-         * упирается в локальный оптимум (замер: приземление -0.59 при
-         * прицеле -0.15 не чинилось пере-решениями). Доворот normal+vR
-         * единым кадром сохраняет характер удара; легальность принятого
-         * кадра подтверждает _flightLegal. */
-        const yawed = this._yawServeToWidth(ball, finalRacket, probe, widthCap, bx);
-        if (yawed) { finalRacket = yawed; bx = landX(probe(finalRacket)); }
-      }
-      if (bx !== null && Math.abs(bx) > widthCap) {
-        /* Ступень 2 — пере-решение из приглушённого жеста. Не «тот же удар
-         * с другим прицелом»: решатель ищет вокруг АВТОРСКОГО кадра жеста,
-         * и сдвиг одного aim находит тот же широкий оптимум (замер: прицел
-         * 0.34->0.01, а приземление -0.737 неизменно три итерации подряд).
-         * Как в приглушении дикой подачи игрока, гасится сам жест (curl и
-         * боковой замах) — меняется центр поиска, а не только цель. */
-        const k = 0.45;
-        const pulled = deriveStroke({ ...m, curl: (m.curl || 0) * k, right: aimX * k * 0.5 }, serveCtx);
-        pulled.aim = { x: aimX * k, z: aimZ };
-        pulled.vmag = racket.vmag; pulled.normal = racket.normal; pulled.vR = racket.vR;
-        pulled.rubber = racket.rubber; pulled.quality = racket.quality;
-        pulled.stroke = st; pulled.arch = A; pulled.isServe = true;
-        let re = refineRacket(ball.p, ball.v, ball.w, pulled, 1, racket.quality);
-        if (re && re.valid !== false) {
-          if (this.handicap < 1 && re.vR) V3.mul(re.vR, re.vR, 1 - (1 - this.handicap) * 0.45);
-          re = this._ensureLegal(game, re, null, serveType, true);
-          if (re && re.valid !== false) {
-            const bxRe = landX(probe(re));
-            const yawed2 = bxRe !== null && Math.abs(bxRe) > widthCap
-              ? this._yawServeToWidth(ball, re, probe, widthCap, bxRe) : null;
-            finalRacket = yawed2 || re;
-          }
+    if (CAP.vmag <= 6 || serveType === 'SERVE_SIDE')
+      aimX = clamp(aimX, -PH.T_HALF_WID * 0.44, PH.T_HALF_WID * 0.44);
+    const aimZ = -this.side * PH.T_HALF_LEN * (0.55 + 0.35 * this._rand());
+    const direction = this._rand() < 0.5 ? -1 : 1;
+    const mixed = serveType === 'SERVE_SIDE' ? this._rand() : 0.5;
+    const verticalBrush = mixed < 1 / 3 ? -0.40 : mixed > 2 / 3 ? 0.40 : 0;
+    const vmag = Math.min(lerp(6, 11, L.skill), CAP.vmag) * (0.85 + 0.15 * this.pace);
+    const ctx = this._strokeContext(game);
+    let finalRacket, diagnostic, frameTries = 0;
+    for (let attempt = 0; attempt < AI_SERVE_SOLVES; attempt++) {
+      const prototype = racketForStroke(serveType, ctx, { direction, verticalBrush,
+        vmag: vmag * (attempt ? 0.78 : 1), quality: 0.80 + 0.15 * L.skill,
+        aim: attempt ? { x: aimX * 0.35, z: -this.side * PH.T_HALF_LEN * 0.72 } : { x: aimX, z: aimZ } });
+      prototype.vmagCap = CAP.vmag;
+      finalRacket = this._scaleRacket(refineRacket(ball.p, ball.v, ball.w, prototype, 1, prototype.quality), CAP.vmag);
+      diagnostic = this._serveVerdict(ball, finalRacket);
+      if (diagnostic.reason !== 'ok') {
+        const lateral = diagnostic.secondBounce ? Math.sign(diagnostic.secondBounce.x) : direction;
+        const yaw = diagnostic.secondBounce ? clamp(Math.atan2(-diagnostic.secondBounce.x,
+          Math.abs(diagnostic.secondBounce.z - ball.p.z)), -0.40, 0.40) : 0;
+        const tweaks = diagnostic.reason === 'width_cap'
+          ? [[0, -lateral * 0.12, 1], [0, lateral * 0.12, 1], [0, -lateral * 0.26, 1], [0, lateral * 0.26, 1]]
+          : diagnostic.reason === 'post_bounce_apex'
+            ? [[0.20, yaw, 0.85], [0.20, yaw, 0.75], [0.50, yaw, serveType === 'SERVE_NO_SPIN' ? 0.80 : 0.55], [0.60, yaw, 0.50]]
+          : [[-0.08, 0, 0.88], [0.08, 0, 0.88], [-0.16, 0, 0.72], [0.16, 0, 0.72]];
+        for (const [e, az, scale] of tweaks) {
+          if (frameTries >= AI_SERVE_FRAME_TRIES) break;
+          frameTries++;
+          const swing = V3.new(), normal = V3.new();
+          strokeFrame(finalRacket, e, az, scale, swing, normal);
+          const candidate = resolvedRacketFrame(finalRacket, normal, swing, { valid: true });
+          const verdict = this._serveVerdict(ball, candidate);
+          if (verdict.reason === 'ok') { finalRacket = candidate; diagnostic = verdict; break; }
         }
       }
+      diagnostic.attempts = attempt + 1;
+      diagnostic.frameTries = frameTries;
+      if (diagnostic.reason === 'ok') break;
     }
-
-    // A serve can be faulted too — at a third of the rally error rate.
-    finalRacket = this.applyExecutionError(game, finalRacket, true);
-
-    return finalRacket;
+    finalRacket.aiServeDiagnostic = diagnostic;
+    finalRacket.valid = diagnostic.reason === 'ok';
+    if (!finalRacket.valid) finalRacket.invalidReason = diagnostic.reason;
+    return this.applyExecutionError(game, finalRacket, true);
   }
 
   /** Check if AI is ready to strike (timing) */
@@ -1034,17 +910,18 @@ class OpponentAI {
       this._moveSmooth.y = expSmooth(this._moveSmooth.y, this.target.y, moveRate, dt);
       this._moveSmooth.z = expSmooth(this._moveSmooth.z, this.target.z, moveRate * 0.9, dt);
 
-      // Store position for rendering
-      game.ai.pos = V3.new(
-        this._moveSmooth.x,
-        this._moveSmooth.y,
-        this._moveSmooth.z
-      );
+      // The same constrained center is used for contact, drawing and diagnostics.
+      V3.copy(this.pos, this._moveSmooth);
+      const pose = game.aiPaddle;
+      keepPaddleAboveTable(this.pos, pose ? pose.normal : this.faceNormal, pose ? pose.roll : this.roll,
+        PH.TABLE_Y, PH.T_HALF_WID, PH.T_HALF_LEN);
+      V3.copy(this._moveSmooth, this.pos);
+      if (game.ai !== this) V3.copy(game.ai.pos, this.pos);
 
       // Compute velocity for visual purposes
-      V3.sub(this.vel, game.ai.pos, this.lastPos);
+      V3.sub(this.vel, this.pos, this.lastPos);
       V3.mul(this.vel, this.vel, 1 / Math.max(dt, 1e-4));
-      V3.copy(this.lastPos, game.ai.pos);
+      V3.copy(this.lastPos, this.pos);
     }
 
     // Swing timing

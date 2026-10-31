@@ -569,6 +569,7 @@ function predict(p0, v0, w0, opts = {}) {
   out.clear = (out.netCross ? out.netCross.y : 99) - PH.NET_TOP - PH.R;
   out.end = { x: _pp.x, y: _pp.y, z: _pp.z };
   out.endV = { x: _pv.x, y: _pv.y, z: _pv.z };
+  out.endW = { x: _pw.x, y: _pw.y, z: _pw.z };
   return out;
 }
 

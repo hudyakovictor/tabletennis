@@ -4,10 +4,35 @@ const { load } = require('./helpers.cjs');
 const lib = load(['10_math.js', '30_physics.js', '38_paddle_motion.js', '40_swipe.js', '56_rig.js'],
   ['PaddleStrokeMotion', 'PaddleReadClock', 'PaddleRig', 'paddleGripProfile', 'paddleContactRange',
     'paddleForehand', 'stepPaddleAngle', 'paddleAngleDelta', 'paddleBottomExtent', 'keepPaddleAboveTable',
+    'paddleTableClearance', 'paddleContactPose',
     'faceFromWrist', 'paddleFaceAngles', 'playerWristPose', 'deriveStroke', 'refineRacket', 'classifyStroke',
     'strokeFrame', 'resolvedRacketFrame', 'SwipeTracker', 'impactRacket', 'predict', 'PH', 'V3', 'Q', 'M4', 'DEG']);
 const { V3, DEG, faceFromWrist, PaddleStrokeMotion } = lib;
 const near = (a, b, eps = 1e-9) => assert.ok(Math.abs(a - b) < eps, `${a} != ${b}`);
+
+test('real material below the tabletop is rejected even when its center is four cm above it', () => {
+  const normal = V3.new(0, 0, -1), inside = V3.new(0, lib.PH.TABLE_Y + .04, .9);
+  assert.ok(lib.paddleTableClearance(inside, normal, .28) < -.10);
+  assert.ok(lib.keepPaddleAboveTable(inside, normal, .28, lib.PH.TABLE_Y, lib.PH.T_HALF_WID, lib.PH.T_HALF_LEN) > .10);
+  assert.ok(lib.paddleTableClearance(inside, normal, .28) >= .0059);
+  const behind = V3.new(0, lib.PH.TABLE_Y - .04, lib.PH.T_HALF_LEN + .18);
+  assert.equal(lib.paddleTableClearance(behind, normal, .28), Infinity);
+  assert.equal(lib.keepPaddleAboveTable(behind, normal, .28, lib.PH.TABLE_Y, lib.PH.T_HALF_WID, lib.PH.T_HALF_LEN), 0);
+});
+
+test('a low contact anchors one actual rubber surface for both grips, hands and active faces', () => {
+  for (const grip of ['shakehand', 'penhold']) for (const hand of ['right', 'left']) for (const forehand of [true, false]) {
+    const ball = V3.new(hand === 'right' ? .3 : -.3, lib.PH.TABLE_Y + .08, .85);
+    const normal = V3.norm(V3.new(), V3.new(.1, -.2, -1));
+    const pose = lib.paddleContactPose(ball, { normal }, { grip, hand, forehand });
+    assert.ok(pose); assert.ok(pose.clearance >= -.0011);
+    assert.equal(pose.activeFace, forehand ? 1 : -1);
+    const m = lib.M4.compose(lib.M4.create(), pose.pos, pose.q, V3.new(1, 1, 1)), p = pose.localPoint;
+    const surface = V3.new(m[0] * p.x + m[4] * p.y + m[8] * p.z + m[12],
+      m[1] * p.x + m[5] * p.y + m[9] * p.z + m[13], m[2] * p.x + m[6] * p.y + m[10] * p.z + m[14]);
+    near(V3.dist(surface, ball), lib.PH.R, 1e-6); near(V3.dist(surface, pose.point), 0, 1e-6);
+  }
+});
 
 for (const grip of ['shakehand', 'penhold']) for (const hand of ['right', 'left']) {
   test(`${grip}/${hand}: exact physical contact, correct stroke-specific follow, complete recovery`, () => {
@@ -138,10 +163,14 @@ test('analytical table clearance agrees with the actual blade, rubbers and handl
       const normal = faceFromWrist(V3.new(), .3, pitch, 1), calls = [];
       rig.draw({ draw(mesh, matrix) { calls.push({ mesh, matrix: Array.from(matrix) }); } }, S,
         { pos: V3.new(), normal, roll: pose.roll, absoluteRoll: true, hand });
-      let bottom = Infinity;
+      let bottom = Infinity; const vertices = [];
       for (const c of calls) {
         const m = c.matrix;
-        const y = (px, py, pz) => m[1] * px + m[5] * py + m[9] * pz + m[13];
+        const y = (px, py, pz) => {
+          const v = [m[0] * px + m[4] * py + m[8] * pz + m[12],
+            m[1] * px + m[5] * py + m[9] * pz + m[13], m[2] * px + m[6] * py + m[10] * pz + m[14]];
+          vertices.push(v); return v[1];
+        };
         if (c.mesh === 'handle') {
           for (const a of [-.015, .015]) for (const b of [-.05, .05]) for (const z of [-.011, .011]) bottom = Math.min(bottom, y(a, b, z));
         } else {
@@ -152,7 +181,11 @@ test('analytical table clearance agrees with the actual blade, rubbers and handl
       near(lib.paddleBottomExtent(normal, pose.roll), -bottom, 4e-6);
       const pos = V3.new(x, .6, .9);
       lib.keepPaddleAboveTable(pos, normal, pose.roll, .76, .7625, 1.37);
-      assert.ok(pos.y + bottom >= .7659);
+      if (x === 0) assert.ok(pos.y + bottom >= .7659);
+      // Only material inside the tabletop footprint must clear its surface.
+      for (const v of vertices) if (Math.abs(x + v[0]) <= .7625 && Math.abs(.9 + v[2]) <= 1.37)
+        assert.ok(pos.y + v[1] >= .7657, 'rendered material inside the table remains clear');
+      assert.ok(lib.paddleTableClearance(pos, normal, pose.roll, .76, .7625, 1.37) >= .0059);
     }
   }
   const outside = V3.new(1.5, .6, 2);

@@ -578,17 +578,56 @@ async function horizontalInputs(page, target, offset, pointerTypes) {
           }
         });
         check('complete AI serves cannot be returned by an idle player or pointer hovering', () => {
-          g.startMatch(2);g.server=-1;g.prepServe();
-          let playerHits=0,incoming=false;const apply=g.applyHit;
-          g.applyHit=function(side,...args){if(side===1)playerHits++;return apply.call(this,side,...args);};
-          try {
-            for(let i=0;i<60*30;i++) {
-              g.pointer={x:.5+Math.sin(i*.1)*.3,y:.55}; // cursor motion, no stroke
-              g.update(1/60);
-              incoming ||= g.ball.lastHitBy===-1 && g.ball.p.z>.5;
+          /* Бот имеет право честно ошибиться на подаче (errBase/3 на уровень).
+           * После двух фолтов подача переходит к игроку, а он тут ничего не
+           * нажимает — попытка умирает не потому, что подача отбиваема. Поэтому
+           * сценарий повторяется, пока бот не отдаст ЧИСТУЮ подачу; проверяется
+           * именно она: пришла на половину игрока, игрок не бил, очко боту. */
+          const apply=g.applyHit,award=g.awardPoint;
+          let playerHits=0,incoming=false,aiHits=0,minZ=9;const points=[],serves=[],log=[];
+          g.awardPoint=function(side,reason,...rest){points.push([side,String(reason),
+            +this.ball.p.x.toFixed(2),+this.ball.p.y.toFixed(2),+this.ball.p.z.toFixed(2)]);
+            return award.call(this,side,reason,...rest);};
+          g.applyHit=function(side,racket,...args){
+            if(side===1)playerHits++;else aiHits++;
+            if(side<0&&g.isServeBall){
+              /* Что именно бот отдал: стиль, честную ошибку исполнения и
+               * предсказанный полёт — без этого двойная ошибка неотличима
+               * от «игрок не отбил». */
+              const b=g.ball;const flight={};
+              predict(V3.clone(b.p),V3.clone(b.v),V3.clone(b.w),
+                {dt:PH.SIM_DT,maxT:2.6,stopAfterBounces:2,out:flight});
+              serves.push({stroke:racket.stroke&&racket.stroke.id,err:racket.aiError||null,
+                level:g.ai&&g.ai.levelIndex,
+                from:[+b.p.x.toFixed(2),+b.p.y.toFixed(2),+b.p.z.toFixed(2)],
+                kmh:+(V3.len(b.v)*3.6).toFixed(0),
+                land:flight.landed?[+flight.landed.x.toFixed(2),+flight.landed.z.toFixed(2)]:null,
+                b2:flight.b2?[+flight.b2.x.toFixed(2),+flight.b2.z.toFixed(2)]:null,
+                net:!!flight.hitNet});
             }
-            if(!(incoming && playerHits===0 && g.score[1]>=1))throw Error(JSON.stringify({incoming,playerHits,score:g.score,state:g.state,time:g.time})); return true;
-          } finally {g.applyHit=apply;}
+            return apply.call(this,side,racket,...args);
+          };
+          try {
+            for(let attempt=0;attempt<8;attempt++) {
+              g.startMatch(2);g.server=-1;g.prepServe();
+              playerHits=0;incoming=false;
+              for(let i=0;i<60*15;i++) {
+                g.pointer={x:.5+Math.sin(i*.1)*.3,y:.55}; // cursor motion, no stroke
+                g.update(1/60);
+                if(g.ball.lastHitBy===-1)minZ=Math.min(minZ,g.ball.p.z);
+                incoming ||= g.ball.lastHitBy===-1 && g.ball.p.z>.5;
+                if(incoming && g.score[1]>=1)break;
+                /* Подачи больше не будет: бот отдал обе фолтом. */
+                if(g.state===GS.SERVE_READY && g.server===1)break;
+              }
+              log.push({attempt,incoming,playerHits,score:g.score.slice(),state:g.state,
+                serves:serves.slice(-2)});
+              if(incoming) break;
+            }
+            const ok=incoming && playerHits===0 && g.score[1]>=1;
+            if(!ok)throw Error(JSON.stringify({incoming,playerHits,aiHits,minZ,points,serves,log,
+              score:g.score,state:g.state,time:g.time})); return true;
+          } finally {g.applyHit=apply;g.awardPoint=award;}
         });
         check('one real return followed by no input never produces a second return', () => {
           incomingBall();let playerHits=0;const apply=g.applyHit;
@@ -773,33 +812,43 @@ async function horizontalInputs(page, target, offset, pointerTypes) {
           return !document.querySelector('#debugMissesModal,#debugReplayHud,#pauseDebugMisses,#btnDebugMisses') &&
             ['watchMiss','recordMissedPoint','playAllMissesSequential'].every(k=>typeof g[k]==='undefined') && !('missedRallies' in g);
         });
-        check('recognized swipe without contact reports no contact, not a successful topspin', () => {
+        check('recognized swipe without contact stays in the journal and never creates a hit label', () => {
           g.startMatch(2);g.setState(GS.RALLY);g.ball.live=false;
           g.swipe.down(.5,.7,g.time-.1);g.swipe.move(.52,.5,g.time-.05);g.swipe.up(.54,.3,g.time);g.swipeReleasedAt=g.time;
           g.updateShotDiagnostics();
           if(!g.shotJournal.latest.valid || g.shotJournal.latest.contact)return false;
-          g.time+=.4;g.updateShotDiagnostics();g.ui.syncShotFeedback();
-          const ok=g.shotJournal.latest.outcome==='no_contact' && document.querySelector('#shotStatus').textContent==='Нет контакта' && !document.querySelector('#shotMeta').textContent;
+          g.time+=.4;g.strokeTime+=.4;g.updateShotDiagnostics();g.ui.syncShotFeedback();
+          const view=shotFeedbackView(g.shotJournal.latest);
+          const ok=g.shotJournal.latest.outcome==='no_contact' && view.status==='Нет контакта' && !view.metrics &&
+            g.ui.hitLabels.length===0 && getComputedStyle(document.querySelector('#shot')).display==='none';
           g.returnToMenu();return ok;
         });
-        check('contact feedback waits for actual bounce and survives opponent return', () => {
-          g.startMatch(2);g.career.stop();g.setState(GS.RALLY);g.isServeBall=false;g.ball.live=false;
+        check('only player contact creates a measured canvas label; bounce and return update only the journal', () => {
+          g.startMatch(2);g.career.stop();g.setState(GS.RALLY);g.setPaused(false);g.isServeBall=false;g.ball.live=false;
           const sw=new SwipeTracker();sw.down(.5,.7,0);sw.move(.52,.5,.05);sw.up(.54,.3,.1);
           g.swipe.down(.5,.7,g.time);
           const r=deriveStroke(sw.lastReleased,{side:1,grip:'shakehand',forehand:true,ball:{y:1,z:1.5},ballSpin:V3.new(),ballSpeed:6,movePitch:-.15});
           V3.set(g.ball.v,0,1,-6);V3.set(g.ball.w,-TAU*12,TAU*3,0);
-          g.applyHit(1,r,V3.clone(g.ball.p),.85,null);
+          const contact=V3.new(.14,1.09,1.45);
+          g.applyHit(1,r,contact,.85,null);
           const entry=g.shotJournal.latest;
           if(!entry.contact || entry.outcome!=='pending' || !near(entry.contact.spin.topRps,12))return false;
+          const label=g.ui.hitLabels[0];
+          if(g.ui.hitLabels.length!==1 || label.rps!==Math.round(entry.contact.spin.totalRps) ||
+            label.color!==STROKES[r.stroke.id].col || label.point===contact || !near(label.point.z,contact.z))return false;
+          const paint=[],ctx=g.ui.fxg,fill=ctx.fillText;
+          ctx.fillText=function(text,x,y){paint.push({text,x,y,font:this.font,color:this.fillStyle});return fill.call(this,text,x,y);};
+          try {g.ui.drawShotLabels(ctx,g.ui.fx.width,g.ui.fx.height,g.ui.dpr,label.at+.2);}
+          finally {ctx.fillText=fill;}
+          if(paint.length!==1 || !paint[0].text.startsWith(r.stroke.id+' '+label.rps+' ') ||
+            paint[0].x<0 || paint[0].y<0 || paint[0].y>g.ui.fx.height || parseFloat(paint[0].font.split(' ')[1])/g.ui.dpr<20)return false;
           g.netTouched=true;g.shotJournal.net();
           if(entry.outcome!=='pending')return false;
           g.onBounce(-1,2,null);g.ui.syncShotFeedback();
-          if(entry.outcome!=='table' || document.querySelector('#shotStatus').textContent!=='На стол')return false;
-          const badge=document.querySelector('#shot'),rect=badge.getBoundingClientRect(),band=document.querySelector('#playband').getBoundingClientRect();
-          if(parseFloat(getComputedStyle(document.querySelector('#shotStatus')).fontSize)<20 || parseFloat(getComputedStyle(document.querySelector('#shotMeta')).fontSize)<18)return false;
-          if(getComputedStyle(badge).display==='none' || rect.height<30 || rect.bottom>band.bottom+1 || rect.top<band.top-1)return false;
+          if(entry.outcome!=='table' || shotFeedbackView(entry).status!=='На стол' || g.ui.hitLabels[0]!==label)return false;
           g.applyHit(-1,r,V3.clone(g.ball.p),.85,null);
-          const ok=entry.outcome==='table' && g.shotJournal.records.length===1;
+          const ok=entry.outcome==='table' && g.shotJournal.records.length===1 && g.ui.hitLabels.length===1 &&
+            !g.ui.showShot(g.lastShotInfo) && getComputedStyle(document.querySelector('#shot')).display==='none';
           g.returnToMenu();return ok;
         });
         check('shot lab is an accessible paused numeric report, closes without resuming paused play', () => {

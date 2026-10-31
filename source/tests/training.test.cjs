@@ -39,11 +39,11 @@ function masterAll(api, targetCatalog = catalog) {
   }
 }
 
-test('save version seven migrates legacy flags without inventing academy mastery or changing earned state', () => {
+test('the current save migrates legacy flags without inventing academy mastery or changing earned state', () => {
   const legacy = { v: 6, tutorialDone: true, tutorialRewarded: true, coins: 713, gems: 9, rating: 1420, wins: 11, losses: 5,
     level: 4, xp: 251, diff: 3, cal: { captureK: 1.12, spinGain: .93 }, hist: [{ t: 10, r: 1400 }],
     passSeason: 5, passLvl: 7, passXp: 60, premium: true, claimed: { f: [1, 2], p: [1] }, equipped: { rubber: 'r-owned', blade: 'b-owned' } };
-  const api = loadState(legacy); assert.equal(api.SAVE_VERSION, 7); assert.equal(api.S.v, 7);
+  const api = loadState(legacy); assert.ok(api.SAVE_VERSION >= 8); assert.equal(api.S.v, api.SAVE_VERSION);
   for (const key of Object.keys(legacy).filter(key => key !== 'v')) assert.deepEqual(plain(api.S[key]), legacy[key], key);
   assert.deepEqual(plain(api.S.training), { version: 1, lessons: {}, lastLesson: null });
   assert.deepEqual(plain(api.trainingMastery(api.S, catalog)), { mastered: 0, total: 3, coverage: 0, courseComplete: false });
@@ -201,7 +201,7 @@ test('saveNow flushes progress and reward atomically, cancels debounced saves an
   const api = loadState(legacy); masterAll(api); api.save(); api.save();
   assert.equal(api.timers.size, 1); assert.equal([...api.timers.values()][0].delay, 250);
   assert.equal(api.awardTrainingCompletion(api.S, catalog), true); api.saveNow(); assert.equal(api.timers.size, 0);
-  const saved = JSON.parse(api.entries.get('ttu-v2')); assert.equal(saved.v, 7); assert.equal(saved.coins, 913); assert.equal(saved.gems, 14);
+  const saved = JSON.parse(api.entries.get('ttu-v2')); assert.equal(saved.v, api.SAVE_VERSION); assert.equal(saved.coins, 913); assert.equal(saved.gems, 14);
   assert.equal(saved.tutorialRewarded, true); assert.equal(saved.tutorialDone, true); assert.deepEqual(saved.training, plain(api.S.training));
   assert.equal(api.writes.filter(w => w.key === 'ttu-v2').length, 1); assert.deepEqual(JSON.parse(api.entries.get('ttu-v2.bak')), legacy);
   const reload = loadState(saved, { backup: api.entries.get('ttu-v2.bak') }); assert.equal(reload.trainingMastery(reload.S, catalog).courseComplete, true);

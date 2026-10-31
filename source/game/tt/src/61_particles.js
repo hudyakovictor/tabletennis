@@ -13,14 +13,16 @@ class Particles {
     this.life = new Float32Array(max); this.maxLife = new Float32Array(max);
     this.size = new Float32Array(max); this.col = new Float32Array(max * 3);
     this.grav = new Float32Array(max);
+    this.trail = new Uint8Array(max);
   }
-  spawn(x, y, z, vx, vy, vz, life, size, r, g, b, grav) {
+  spawn(x, y, z, vx, vy, vz, life, size, r, g, b, grav, trail = false) {
     const i = this.n < this.max ? this.n++ : (Math.random() * this.max) | 0;
     this.p[i * 3] = x; this.p[i * 3 + 1] = y; this.p[i * 3 + 2] = z;
     this.v[i * 3] = vx; this.v[i * 3 + 1] = vy; this.v[i * 3 + 2] = vz;
     this.life[i] = life; this.maxLife[i] = life; this.size[i] = size;
     this.col[i * 3] = r; this.col[i * 3 + 1] = g; this.col[i * 3 + 2] = b;
     this.grav[i] = grav === undefined ? 4 : grav;
+    this.trail[i] = trail ? 1 : 0;
   }
   burst(x, y, z, n, speed, life, size, r, g, b, dir) {
     for (let i = 0; i < n; i++) {
@@ -32,10 +34,10 @@ class Particles {
       this.spawn(x, y, z, vx * s, vy * s, vz * s, life * rnd(0.6, 1.2), size * rnd(0.6, 1.3), r, g, b);
     }
   }
-  update(dt) {
+  update(dt, dtReal = dt) {
     for (let i = 0; i < this.n; i++) {
       if (this.life[i] <= 0) continue;
-      this.life[i] -= dt;
+      this.life[i] -= this.trail[i] ? dtReal : dt;
       this.v[i * 3 + 1] -= this.grav[i] * dt;
       this.v[i * 3] *= 1 - 2.2 * dt; this.v[i * 3 + 2] *= 1 - 2.2 * dt;
       this.p[i * 3] += this.v[i * 3] * dt;

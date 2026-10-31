@@ -30,10 +30,8 @@ const MEET_ASSIST = [0.85, 0.60, 0.30, 0.10];
 const MEET_ASSIST_RADIUS = 0.62;   // metres — outside this the bat is the pointer's
 const MEET_ASSIST_HORIZON = 0.60;  // seconds to the meeting point
 
-/* Шлейф мяча: одна ширина на всю ленту и короткий хвост в точках истории.
- * 32 точки — это ≈0.17 с полёта: направление видно, «облако» не рисуется. */
+/* Fixed-width ribbon; timestamps, not frame count, determine its duration. */
 const TRAIL_WIDTH = 0.011;   // metres — half-width of the ribbon
-const TRAIL_POINTS = 32;
 
 /* Ориентация мяча — ТОЛЬКО визуал: по ней ничего не считается (b.q нужен
  * только M4.compose в отрисовке). Честные 300 рад/с — это ~48 об/с, а мяч на
@@ -71,7 +69,7 @@ class Game {
   constructor(canvas, ui) {
     this.canvas = canvas;
     this.ui = ui;
-    this.R = new Renderer(canvas, { quality: 'high' });
+    this.R = new Renderer(canvas, { quality: 'medium' });
     this.scene = new Scene(this.R, 'arena');
     this.audio = new AudioEngine();
     this.ai = new OpponentAI(0);
@@ -104,10 +102,10 @@ class Game {
     this.replayer = new MomentPlayer();
 
     this.settings = {
-      difficulty: 0,
-      quality: 'high',
+      difficulty: 1,
+      quality: 'medium',
       sound: true,
-      volume: 0.9,
+      volume: 0.8,
       camera: 'BROADCAST',
       camZoom: 1,                    // legacy-подстройка из старых сейвов; новый ввод её не трогает
       camPitch: 0,                   // to же, в градусах поверх пресета
@@ -127,7 +125,7 @@ class Game {
       spinGain: 1,        // калибровка: сила закрутки мяча (0.5..1.6)
       arcSens: 1,         // калибровка: чувствительность дуги «С» (0.6..1.8)
       // NEW: Enhanced gameplay settings
-      showSpinIndicator: true,
+      showSpinIndicator: false,
       followThrough: true,
       anticipationHint: true,
       shotFeedback: true,
@@ -142,6 +140,26 @@ class Game {
      * null then), which is why it survived to here. Found by the headless
      * smoke suite: 2 of 3 matches failed to boot once localStorage was warm. */
     installUnifiedControls(this.settings);
+    const saved = this.profile.data.settings || {}, rawCal = saved.cal && typeof saved.cal === 'object' && !Array.isArray(saved.cal) ? saved.cal : {};
+    this.savedCalibrationPreferences = {};
+    const normalizedCal = normalizeCalibrations(rawCal);
+    for (const entry of CALIBRATION_REGISTRY) {
+      if (Object.prototype.hasOwnProperty.call(rawCal, entry.key) && Number.isFinite(calibrationNumber(rawCal[entry.key], NaN)))
+        this.savedCalibrationPreferences[entry.key] = normalizedCal[entry.key] === entry.default / 100 ? entry.default : normalizedCal[entry.key] * 100;
+    }
+    // Import shipped scalar preferences only when no raw calibration was saved.
+    const legacyCal = {
+      spinGain: Number.isFinite(saved.spinGain) ? (saved.spinGain - .5) / 1.1 * 100 : NaN,
+      arcSens: Number.isFinite(saved.arcSens) ? (saved.arcSens - .6) / 1.2 * 100 : NaN,
+      camZoom: Number.isFinite(saved.camZoom) ? saved.camZoom <= 1
+        ? (saved.camZoom - CAM_ADJUST.zoomMin) / (1 - CAM_ADJUST.zoomMin) * 50
+        : 50 + (saved.camZoom - 1) / (CAM_ADJUST.zoomMax - 1) * 50 : NaN,
+      camHeight: Number.isFinite(saved.camPitch) ? saved.camPitch <= 0
+        ? 50 - saved.camPitch / CAM_ADJUST.pitchMin * 50 : 50 + saved.camPitch / CAM_ADJUST.pitchMax * 50 : NaN,
+    };
+    for (const [key, value] of Object.entries(legacyCal))
+      if (!Object.prototype.hasOwnProperty.call(this.savedCalibrationPreferences, key) && Number.isFinite(value))
+        this.savedCalibrationPreferences[key] = clamp(value, 0, 100);
     this.loadSettings();
     this.ai.setLevel(this.settings.difficulty);
 
@@ -174,7 +192,8 @@ class Game {
     this.state = GS.MENU;
     this.paused = false;
     this.training = null;
-    this.time = 0; this.frame = 0; this.stateT = 0;
+    this.time = 0; this.frame = 0; this.stateT = 0; this.stateSimT = 0;
+    this.sessionKind = 'free';
     /* Внутренний масштаб рендера: 1 — как выбрал игрок в quality, ниже —
      * движок сам экономит пиксели на слабом телефоне (решает PerfMonitor). */
     this.renderScale = 1;
@@ -251,10 +270,11 @@ class Game {
 
     this.motionQuery = typeof window !== 'undefined' && window.matchMedia
       ? window.matchMedia('(prefers-reduced-motion: reduce)') : null;
-    this.reducedMotion = !!(this.motionQuery && this.motionQuery.matches);
+    this.reducedMotion = !!(this.motionQuery && this.motionQuery.matches) || !!this.motionOff;
     if (this.motionQuery) {
       const onMotionPreference = (event) => {
-        this.reducedMotion = !!event.matches;
+        this.reducedMotion = !!event.matches || !!this.motionOff;
+        if (this.ui) this.ui.reducedMotion = this.reducedMotion;
         if (this.reducedMotion) {
           this.shake = 0; this.hitFlash = 0;
           this.marks.length = 0; this.particles.n = 0;
@@ -306,6 +326,8 @@ class Game {
 
     // Online multiplayer over the relay (experimental)
     this.network = new NetworkManager(this);
+    this.preview = typeof TrainingPreview === 'function' ? new TrainingPreview(this) : null;
+    applyGameCalibrations(this, this.savedCalibrationPreferences);
 
     this.resize();
     this.updateCamera(0);
@@ -382,11 +404,13 @@ class Game {
     };
 
     this.cancelInput = (reason = 'unspecified', event = null) => {
+      if (this.preview?.active) return;
       if (this.debugRecording) this.logInput('input_cancel', { dom: event ? domEvent(event) : null,
         outcome: { reason, active: !!this.swipe.active, pointerDown: !!this.pointerDown, pointers: ptrs.size } });
       ptrs.clear(); dropStroke();
     };
     const down = (e) => {
+      if (this.preview?.active) return;
       if (this.paused || this.state === GS.MENU || this.state === GS.MATCH_END) {
         if (this.debugRecording) this.logInput('pointer_ignored', { dom: domEvent(e), outcome: { reason: this.paused ? 'PAUSED' : 'NON_PLAY_STATE' } });
         return;
@@ -517,11 +541,13 @@ class Game {
       const ballAtPress = this.project(this.ball.p, {});
       this.swipe.pressZone.tapAtPress = this.swipe.pressZone.accepted === true && ballAtPress.ok &&
         Math.hypot((n.x - ballAtPress.x) * rect.width, (n.y - ballAtPress.y) * rect.height) <= CONTACT_CORRIDOR_RULES.tapContactRadiusPx;
-      if (this.training && typeof this.training.onPress === 'function') this.training.onPress(this.swipe.pressZone);
-      if (typeof this.onPressZone === 'function') this.onPressZone(this.swipe.pressZone, cpGate, servePress);
+      const press = { ...this.swipe.pressZone }, gestureId = this.swipe.gestureId;
+      if (this.training && typeof this.training.onPress === 'function') this.training.onPress(press);
+      if (!this.swipe.active || this.swipe.gestureId !== gestureId) return;
+      if (typeof this.onPressZone === 'function') this.onPressZone(press, cpGate, servePress);
       if (this.shotJournal) {
-        const attempt = this.shotJournal.create(this.swipe.gestureId, tEv);
-        attempt.pressZone = { ...this.swipe.pressZone };
+        const attempt = this.shotJournal.create(gestureId, tEv);
+        attempt.pressZone = press;
         const win = attempt.pressZone.serving ? 1.15 : .25;
         attempt.deadline = tEv + win;
         attempt.deadlineSim = simEv + win;
@@ -530,11 +556,11 @@ class Game {
       this.pointerDown = true;
       this.logInput('pointerdown', { pointer: { x: n.x, y: n.y }, pointerId: e.pointerId, buttons: e.buttons, inputType: pointerType,
         dom: this.debugRecording ? domEvent(e) : null,
-        outcome: { greenAtPress: !!this.swipe.pressZone.pressContactable,
+        outcome: { greenAtPress: !!press.pressContactable,
           gateAnchor: corridor && corridor.valid ? 'strike_corridor' : (cpGate ? 'predicted_contact' : 'current_ball'),
           predictedEta: cpGate ? cpGate.t : null } });
       if (this.debugRecording) this._debugLastPress = { shotId: this.shotId, gestureId: this.swipe.gestureId,
-        green: !!this.swipe.pressZone.pressContactable, accepted: !!this.swipe.pressZone.accepted, time: tEv };
+        green: !!press.pressContactable, accepted: !!press.accepted, time: tEv };
       if (serveReadyPress) this.startToss();
     };
 
@@ -553,6 +579,7 @@ class Game {
     };
 
     const move = (e) => {
+      if (this.preview?.active) return;
       const p = ptrs.get(e.pointerId);
       if (p) { p.x = e.clientX; p.y = e.clientY; }
       if (this.swipe.active && activeStrokePointerId !== null && e.pointerId !== activeStrokePointerId) {
@@ -569,7 +596,11 @@ class Game {
         this.promotePendingServeZone();
         this.promotePendingRallyBackswing(n);
         const sp = this.swipe.m.speed;
-        if (sp > 1.6) this.audio.whoosh(clamp(sp / 4, 0, 1.4));
+        if (sp > 1.6 && this._swingSoundId !== this.swipe.gestureId && this.swipe.consumedId !== this.swipe.gestureId &&
+            isRealStroke(this.swipe.m, !!z?.serving)) {
+          this._swingSoundId = this.swipe.gestureId;
+          this.audio.whoosh(clamp(sp / 4, 0, 1.4), 'player/' + this.swipe.gestureId);
+        }
         this.logInput('pointermove', { pointer: { x: n.x, y: n.y }, pointerId: e.pointerId, buttons: e.buttons,
           inputType: e.pointerType || (this.pointerFine === false ? 'touch' : 'mouse'),
           dom: this.debugRecording ? domEvent(e) : null });
@@ -579,6 +610,7 @@ class Game {
     };
 
     const up = (e) => {
+      if (this.preview?.active) return;
       ptrs.delete(e.pointerId);
       if (e.button === 2 || e.button === 1) {
         e.preventDefault();
@@ -651,7 +683,7 @@ class Game {
     c.addEventListener('lostpointercapture', (e) => { if (ptrs.has(e.pointerId)) this.cancelInput('lostpointercapture', e); });
     c.addEventListener('contextmenu', (e) => e.preventDefault());
     // Hover movement follows the bat. A held right button is not a camera command.
-    window.addEventListener('pointermove', (e) => { if (!ptrs.size && !this.swipe.active) track(e); }, { passive: true });
+    window.addEventListener('pointermove', (e) => { if (!this.preview?.active && !ptrs.size && !this.swipe.active) track(e); }, { passive: true });
     window.addEventListener('blur', () => { this.cancelInput('window_blur'); this.setPaused(true); });
     document.addEventListener('visibilitychange', () => {
       if (this.debugRecording) this.logInput('visibility', { outcome: { state: document.visibilityState } });
@@ -676,6 +708,7 @@ class Game {
       }
     } catch (e) { console.debug('Telegram swipe behavior unavailable', e); }
     document.addEventListener('touchmove', (e) => {
+      if (this.preview?.active) return;
       // The pause actions are a real scroll area on small phones. Do not
       // swallow its touch scroll while preventing rubber-banding during play.
       const scroll = e.target && e.target.closest && e.target.closest('.pause-actions');
@@ -687,6 +720,7 @@ class Game {
     document.documentElement.style.overscrollBehavior = 'none';
 
     window.addEventListener('keydown', (e) => {
+      if (this.preview?.active) return;
       if (document.getElementById('settings').classList.contains('on') || document.getElementById('shotLab').classList.contains('on')) return;
       if (e.repeat || e.ctrlKey || e.metaKey || e.altKey ||
           (e.target && (e.target.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName)))) return;
@@ -711,7 +745,7 @@ class Game {
     /* Refit in the same tick: the pointer map inverts the camera that is
      * actually on screen, so a resize must never leave a stale projection
      * behind for even one frame of aiming. */
-    if (this.camRig && this.settings) this.updateCamera(0);
+    if (this.camRig && this.settings && !this.preview?.active) this.updateCamera(0);
   }
 
   /** Авто-масштаб рендера (0.6…1) от PerfMonitor: качество (quality) остаётся
@@ -727,16 +761,19 @@ class Game {
 
   /* --------------------------- match flow -------------------------- */
   startMatch(diff) {
+    this.setSessionKind(this.network.isInMatch ? 'online' : this.career.active ? 'career' : this.freePlay ? 'free' : this.sessionKind === 'practice' ? 'practice' : 'ranked');
     this.endReplay(false); // cancel old callbacks; never complete an old match here
     this.moments.reset();
     if (this.inputLog && typeof this.inputLog.resetClock === 'function') this.inputLog.resetClock(this.time);
     this.shotJournal && this.shotJournal.reset();
+    this.ui?.clearShotFeedback?.();
     this.watchdog && this.watchdog.reset();
     this.lastMoment = null;
     this._acc = 0;
     this.followThrough.active = false;
     this.anticipation.active = false;
     this.audio.stopAudience();
+    this.audio.stopEffects?.(); this._swingSoundId = null; this._aiSwingSoundShot = null;
     this._demoGesture = null;
     this.matchTasks = { topspin: 0, smash: 0, serves: 0, moments: 0 };
     this.training = null;
@@ -831,9 +868,11 @@ class Game {
       (this.state === GS.MENU || (this.ui ? this.ui.inputMode !== 'touch' : this.pointerFine !== false));
   }
   startTraining(options = {}) {
+    this.setSessionKind('practice');
     this.stopTraining();
     this.endReplay(false);
     this.shotJournal && this.shotJournal.reset();
+    this.ui?.clearShotFeedback?.();
     this.watchdog && this.watchdog.reset();
     this.career.stop();
     this.network.disconnect();
@@ -858,7 +897,8 @@ class Game {
 
   setState(s) {
     const previous = this.state;
-    this.state = s; this.stateT = 0; if (this.paused) this.setPaused(false);
+    this.state = s; this.stateT = 0; this.stateSimT = 0; if (this.paused) this.setPaused(false);
+    this.syncAudioQuiet();
     if (this.debugRecording && previous !== s) this.logInput('state_change', { outcome: { from: previous, to: s } });
     if (typeof document !== 'undefined' && document.body) {
       document.body.classList.toggle('is-playing', s !== GS.MENU && s !== GS.MATCH_END);
@@ -867,7 +907,23 @@ class Game {
 
   /* Pause only makes sense during a live rally or serve prep; leaving the play
      state (restart, match end) always clears it so the overlay can't stick. */
+  syncAudioQuiet() {
+    this.audio?.setQuiet?.(!!(this.paused || this.preview?.active || this._ttSleeping || this._audioQuietRequested || this.state === GS.MENU));
+  }
+
+  openTrainingPreview(options = {}) {
+    if (!this.preview || this.network.isInMatch || this.career.active ||
+        this.state !== GS.MENU && gameplayCalibrationLocked(this)) return false;
+    this.setPaused(true);
+    this.cancelInput?.('preview_open');
+    this.cancelPendingCapture?.();
+    this.swipe.lastReleased = null; this.swipeReleasedAt = this.lastSwipeT = -Infinity;
+    this._pendingTap = null; this.mouseTrail = []; this.ui?.clearShotFeedback?.();
+    return this.preview.open(options);
+  }
+
   setPaused(v) {
+    if (this.preview?.active) return this.paused;
     const play = this.state === GS.RALLY || this.state === GS.SERVE_READY ||
                  this.state === GS.SERVE_TOSS || this.state === GS.POINT;
     const wasPaused = !!this.paused, next = !!v && play;
@@ -876,7 +932,8 @@ class Game {
       catch (e) { this.diagnosticIssue('screenshot', e && e.message || e, e && e.stack); }
     }
     this.paused = next;
-    if (this.paused && this.cancelInput) this.cancelInput('pause');
+    this.syncAudioQuiet();
+    if (this.paused && !wasPaused && this.cancelInput) this.cancelInput('pause');
     if (this.debugRecording && wasPaused !== this.paused) this.logInput('pause', { outcome: { paused: this.paused, requested: !!v } });
     if (typeof document !== 'undefined' && document.body)
       document.body.classList.toggle('is-paused', this.paused);
@@ -1052,6 +1109,27 @@ class Game {
     if (this._cpFrame === this.frame && this._cpTime === this.time) return this._cp;
     this._cpFrame = this.frame; this._cpTime = this.time;
     const o = this._cpOut || (this._cpOut = {});
+    const expected = this.training?.S?.check?.context;
+    if (expected) {
+      const sc = this.strikeCorridor();
+      const sample = sc?.valid && sc.samples.find(p => p.z >= PADDLE_LIMITS.zStepIn && p.z <= PADDLE_LIMITS.zFar &&
+        (!expected.overTable || Math.abs(p.z) < PH.T_HALF_LEN - .02 && Math.abs(p.x) < PH.T_HALF_WID) &&
+        (!Number.isFinite(expected.maxHeight) || p.y - PH.TABLE_Y < expected.maxHeight) &&
+        (expected.forehand !== false || paddleForehand(p.x, this.settings.hand) === false));
+      this._cp = null;
+      if (!sample) return null;
+      let p = b.p, v = b.v, w = b.w, t = 0;
+      if (sample.t > 0) {
+        predict(b.p, b.v, b.w, { dt: PHYS_DT, maxT: sample.t + PHYS_DT * 2,
+          stopZ: sample.z, stopDir: 1, stopAtPlane: true, out: o });
+        if (!o.reach || o.hitNet || o.diverged) return null;
+        p = o.reach; v = o.endV; w = o.endW; t = o.reachT;
+      }
+      if (!trainingContactEligible({ ...p, speed: V3.len(v), spin: measureShotSpin(w, v),
+        forehand: paddleForehand(p.x, this.settings.hand) }, expected)) return null;
+      this._cp = { p: V3.clone(p), v: V3.clone(v), w: V3.clone(w), t };
+      return this._cp;
+    }
     o.reach = null;
     const stopPlane = Number.isFinite(this._footZ) ? clamp(this._footZ, PADDLE_LIMITS.zStepIn, PADDLE_LIMITS.zFar) : pad.pos.z;
     predict(V3.clone(b.p), V3.clone(b.v), V3.clone(b.w),
@@ -1367,11 +1445,13 @@ class Game {
       this.stats.byStroke[name] = (this.stats.byStroke[name] || 0) + 1;
     } else {
       this.stats.aiShots = (this.stats.aiShots || 0) + 1;
+      if (this.ai && typeof this.ai.recordHit === 'function')
+        this.ai.recordHit({ v: this._preHit?.v || b.v }, racket, { p: b.p, v: b.v, w: b.w, info }, this.strokeTime ?? this.time);
     }
 
     /* an off-centre contact sounds like wood, not like rubber */
     const softHit = !!(racket.arch && racket.arch.soft) || (side > 0 && this.lastSweet !== undefined && this.lastSweet < 0.38);
-    this.audio.hitRacket(speed, info ? info.contactSlip : 0, softHit);
+    this.audio.hitRacket(speed, info ? info.contactSlip : 0, softHit, side + '/' + this.shotId);
     if (side > 0 && this.lastSweet !== undefined && this.lastSweet < 0.30) this.buzz(16);
     if (this.feedback) {
       this.feedback.execute({
@@ -1406,9 +1486,10 @@ class Game {
       this.hitFlash = Math.min(this.hitFlash + 0.55, 1);   // периферия, не точка контакта
       this.lastShotInfo = {
         stroke: racket.stroke, speed: speed * 3.6, spin: spin / TAU,
+        side, shotId: this.shotId, v: shotVec(b.v), w: shotVec(b.w),
         topspin: -b.w.x * side, sidespin: b.w.y, quality,
         power: racket.power, t: this.time,
-        contact: racket.contact, elev: racket.elev,
+        contact: racket.contact, elev: racket.elev, contactPoint: shotVec(contactP),
         timing: side > 0 ? (this.lastTiming || '') : '',
         sweet: side > 0 ? (this.lastSweet !== undefined ? this.lastSweet : 1) : 1,
         rim: side > 0 && this.lastSweet !== undefined && this.lastSweet < 0.42,
@@ -1427,7 +1508,7 @@ class Game {
       const sid = racket.stroke && racket.stroke.id;
       if (sid === 'LOOP' || sid === 'COUNTER') this.matchTasks.topspin++;
       else if (sid === 'SMASH') this.matchTasks.smash++;
-      else if (sid === 'SERVE_TOP' || sid === 'SERVE_SIDE' || sid === 'SERVE_FAST' || sid === 'SERVE_BACK') this.matchTasks.serves++;
+      if (racket.isServe) this.matchTasks.serves++;
       this.buzz(Math.round(lerp(8, 26, clamp(speed / 90, 0, 1))));
       this.shakeIt(clamp(speed / 55, 0.03, 0.38) * 0.45, V3.new(rndSym(0.4), 0.5, 1));
       if (this.settings.slowmoOnBigShots && speed * 3.6 > 92) this.punchSlowmo(0.42, 0.26);
@@ -1454,6 +1535,7 @@ class Game {
   }
 
   punchSlowmo(scale, dur) {
+    if (typeof gameplayCalibrationLocked === 'function' && gameplayCalibrationLocked(this)) return;
     this.targetTimeScale = scale;
     this.slowmoUntil = this.time + dur;
   }
@@ -1479,6 +1561,9 @@ class Game {
 
   updateSlowmo(dtReal) {
     const S = this.slowmo;
+    if (typeof gameplayCalibrationLocked === 'function' && gameplayCalibrationLocked(this)) {
+      S.on = S.active = false; this.inspectSlowmo = false; this.slowmoUntil = 0; this.targetTimeScale = 1; return;
+    }
     const want = S.on && this.slowmoAvailable() && S.energy > 0.015;
     if (want) {
       S.energy = Math.max(0, S.energy - dtReal * 0.40);     // ~2.5 s from full
@@ -1489,10 +1574,7 @@ class Game {
     }
     if (this.inspectSlowmo &&
       (this.state === GS.RALLY || this.state === GS.SERVE_TOSS || this.state === GS.SERVE_READY)) {
-      /* Глубина разбора из калибровки: 0.55 (мягко) .. 0.12 (почти стоп-кадр),
-       * нейтраль 0.60 → прежние 0.30. Боевое слоу-мо не трогаем. */
-      const depth = (this._cal && Number.isFinite(this._cal.slowmoDepth))
-        ? lerp(0.55, 0.12, clamp(this._cal.slowmoDepth, 0, 1)) : 0.30;
+      const depth = this._calValues.slowmoDepth;
       S.active = true; this.targetTimeScale = depth; return;
     }
     S.active = want;
@@ -1506,14 +1588,28 @@ class Game {
    * обычная. Честность та же, что у боевого режима: allowed=false
    * (карьерные турниры, онлайн) закрывает и этот переключатель. */
   setInspectSlowmo(on) {
-    const ok = this.slowmo && this.slowmo.allowed && !(this.network && this.network.isInMatch);
+    this.inspectSlowmoRequested = !!on;
+    const ok = this.slowmo && this.slowmo.allowed &&
+      !(typeof gameplayCalibrationLocked === 'function' && gameplayCalibrationLocked(this)) && !(this.network && this.network.isInMatch);
     this.inspectSlowmo = !!on && ok;
     if (this.debugRecording) this.logInput('slowmo', { outcome: { requested: !!on, enabled: this.inspectSlowmo, allowed: !!ok } });
     return this.inspectSlowmo;
   }
 
   /** Career tournaments and online matches call this with false. */
-  setSlowmoAllowed(v) { this.slowmo.allowed = !!v; if (!v) { this.setSlowmoHold(false); this.inspectSlowmo = false; } }
+  setSlowmoAllowed(v) {
+    this.slowmo.allowed = !!v && !(typeof gameplayCalibrationLocked === 'function' && gameplayCalibrationLocked(this));
+    if (!this.slowmo.allowed) { this.setSlowmoHold(false); this.inspectSlowmo = false; }
+  }
+
+  setSessionKind(kind) {
+    if (!['free', 'practice', 'ranked', 'career', 'check', 'online'].includes(kind)) return false;
+    if (this.preview && this.preview.active) this.preview.close(false);
+    if (kind !== this.sessionKind) { this.inspectSlowmoRequested = false; this.inspectSlowmo = false; }
+    this.sessionKind = kind;
+    if (typeof refreshGameCalibrationPolicy === 'function') refreshGameCalibrationPolicy(this);
+    return true;
+  }
 
   /* --------------------------- settings ---------------------------- */
 
@@ -1543,6 +1639,8 @@ class Game {
       showTele: s.showTele, haptics: s.haptics, coach: s.coach, adaptive: s.adaptive,
       targetScore: s.targetScore,
       spinBias: s.spinBias, spinGain: s.spinGain, arcSens: s.arcSens,
+      cal: typeof calibrationState === 'function' ? calibrationState(this).raw : undefined,
+      audioLevels: this.audio.levels ? { ...this.audio.levels } : undefined,
     };
     if (this.career && this.career.active && this.career._baseSettings)
       this.profile.data.settings.difficulty = this.career._baseSettings.difficulty;
@@ -1994,6 +2092,30 @@ class Game {
     return this.debugArchive || null;
   }
 
+  /** Подачи: сколько нажатий ДОШЛО до контакта и сколько отбито зоной
+   *  нажатия, плюс сколько бокового реально получилось. За сессию 828 с
+   *  было 56 нажатий, 14 контактов и 41 отказ зоны — без этой сводки
+   *  «боковой не получается» и «подача не летит» не различить. */
+  diagnosticServeSummary() {
+    const recs = this.shotJournal ? this.shotJournal.exportData().records : [];
+    const serves = (recs || []).filter(r => r && r.isServe);
+    const contacts = serves.filter(r => r.contact);
+    const side = contacts.map(r => r.contact.spin && r.contact.spin.sideRps).filter(Number.isFinite);
+    const bucket = k => side.filter(v => Math.abs(v) >= k).length;
+    const outcomes = {}, styles = {};
+    for (const r of serves) {
+      outcomes[r.outcome] = (outcomes[r.outcome] || 0) + 1;
+      styles[r.strokeId || 'none'] = (styles[r.strokeId || 'none'] || 0) + 1;
+    }
+    return {
+      attempts: serves.length, contacts: contacts.length,
+      pressRejected: serves.filter(r => r.pressZone && r.pressZone.accepted === false).length,
+      outcomes, styles,
+      sidespin: { n: side.length, over5rps: bucket(5), over10rps: bucket(10), over20rps: bucket(20),
+        maxAbsRps: side.length ? +Math.max(...side.map(Math.abs)).toFixed(1) : null },
+    };
+  }
+
   async diagnosticReport() {
     if (this.debugRecording) this.logInput('report_requested', { outcome: { paused: !!this.paused } });
     this.diagnosticRecoveryArchive();
@@ -2006,10 +2128,10 @@ class Game {
     const safeSettings = {};
     for (const key of ['difficulty', 'quality', 'camera', 'camZoom', 'camPitch', 'hand', 'grip',
       'spinGain', 'arcSens', 'showTrail', 'showPredict', 'targetScore', 'adaptive']) safeSettings[key] = this.settings[key];
-    const calibration = {};
+    const calibration = typeof calibrationState === 'function' ? calibrationState(this) : {};
     for (const key of ['camHeight', 'camZoom', 'camSway', 'padSpeed', 'padSmooth', 'ballSize', 'trailLen',
       'tableGlow', 'flytime', 'hintRadius', 'spinGain', 'arcSens'])
-      if (this._cal && Number.isFinite(this._cal[key])) calibration[key] = this._cal[key];
+      if (typeof calibrationState !== 'function' && this._cal && Number.isFinite(this._cal[key])) calibration[key] = this._cal[key];
     return { format: 'topspin-diagnostics', version: DIAGNOSTIC_VERSION, createdAt: new Date().toISOString(),
       sessionId: archive ? archive.sessionId : null,
       privacy: 'Local only. No automatic transmission. Review before sharing; contains device details, input coordinates and game state.',
@@ -2032,6 +2154,7 @@ class Game {
       /* Сторож физики: тикеты по пяти классам геймплейных багов, счётчики
        * и гейты самопроверки. Читается без разбора 20 МБ событий. */
       watchdog: this.watchdog ? this.watchdog.report() : null,
+      serves: this.diagnosticServeSummary(),
       aiLog: (this.profile && this.profile.data && this.profile.data.aiLog) || [],
       /* Цена кадра по подсистемам и текущий авто-масштаб: по этому блоку
        * видно, тормозит ли телефон из-за рендера, физики или оболочки. */
@@ -2259,7 +2382,8 @@ class Game {
    * зелёное; плоская пуля быстрее 8.5 м/с — седой шлейф. Без вращения и на
    * малой скорости — ничего: обычный обмен остаётся чистым. */
   _trailCrumb(b) {
-    if (this.reducedMotion || !this.particles || typeof this.particles.spawn !== 'function') return;
+    const cal = this._calEffective || this._cal;
+    if (this.reducedMotion || this.settings.showTrail === false || cal?.trailLen === 0 || !this.particles || typeof this.particles.spawn !== 'function') return;
     /* Цветная крошка — второй носитель закрутки (первый — шевроны). В матче
      * оба выключены: на скорости это бусины поверх траектории, которые
      * спорят с главным сигналом — зелёным мячом. Тип закрутки в матче
@@ -2278,7 +2402,8 @@ class Game {
     else if (spd > 8.5) { r = .62; g = .66; bl = .75; }
     else return;
     this._crumbT = this.time;
-    this.particles.spawn(b.p.x, b.p.y, b.p.z, 0, 0, 0, 0.5, 0.011 + spd * 0.0004, r, g, bl, 0);
+    const duration = (this._calValues || calibrationState(this).values.effective).trailLen / 1000;
+    this.particles.spawn(b.p.x, b.p.y, b.p.z, 0, 0, 0, duration, 0.011 + spd * 0.0004, r, g, bl, 0, true);
   }
 
   /* ==== Пассивный блок «стенка» ==========================================
@@ -2808,8 +2933,8 @@ class Game {
       const tq = contactCfg.timingQuality[timingIndex];
       this.lastTiming = tband;
       const ctx = {
-        side: 1, grip: this.settings.grip, forehand, isServe: isServeStroke,
-        ball: { y: contact.y, z: contact.z },
+        side: 1, grip: this.settings.grip, hand: this.settings.hand, forehand, isServe: isServeStroke,
+        ball: { x: contact.x, y: contact.y, z: contact.z },
         ballSpin: b.w, ballSpeed: V3.len(b.v), ballVelocity: b.v,
         powerScale: 1,
         moveYaw: this.padYaw || 0, movePitch: this.padPitch || 0,
@@ -2918,6 +3043,9 @@ class Game {
       racket.unassisted = rawShotFrame;
     }
 
+    const contactPose = paddleContactPose(contact, racket, { grip: this.settings.grip,
+      hand: this.settings.hand, forehand, roll: pad.roll });
+    if (!contactPose && !hit.edge) { this.logPressRejection('RACKET_TABLE_COLLISION'); return; }
     racket.contactInput = { pressZone: this.swipe.pressZone && { ...this.swipe.pressZone }, capture: captureSample && { ...captureSample, route: hit.captureKind || 'ccd' }, p: shotVec(contact), v: shotVec(b.v), w: shotVec(b.w), gesture: { ...m },
       context: { grip: this.settings.grip, hand: this.settings.hand, forehand, isServe: isServeStroke,
         equip: { ...sideParams }, vmagK: this.equip.vmagK, moveYaw: this.padYaw || 0, movePitch: this.padPitch || 0 } };
@@ -2958,12 +3086,16 @@ class Game {
      * раньше тикет «ракетка под столом» считался по другой ракетке, чем та,
      * что коснулась мяча. */
     if (this.watchdog) this.watchdog.contact({ time: this.time, side: 1, serve: isServeStroke,
-      contact, pad: { pos: strokePos }, padBefore: pad.pos, racket });
+      contact, pad: contactPose || { pos: strokePos }, padBefore: pad.pos, racket });
     /* The blade is where the contact is. The old code left the bat up to one
      * full capture radius away and launched the ball from a point it visibly
      * never reached; the AI already snaps its paddle to the contact. prevPos is
      * moved too, so the next frame does not read the snap as 20 m/s of bat. */
-    V3.copy(pad.pos, contact);
+    V3.copy(pad.pos, contactPose ? contactPose.pos : contact);
+    if (contactPose) {
+      pad.q = Q.copy(pad.q || Q.new(), contactPose.q); pad.roll = contactPose.roll;
+      pad.activeFace = contactPose.activeFace; pad.contactPose = contactPose; pad.poseReady = true;
+    }
     pad.forehand = forehand;
     V3.copy(pad.prevPos, pad.pos);
     V3.copy(pad.prev, pad.pos);
@@ -2983,7 +3115,8 @@ class Game {
     pad.swing = 1;
     const motion = this.paddleMotion || (this.paddleMotion = new PaddleStrokeMotion());
     motion.contact(racket.normal, pad.roll, racket.stroke.id, this.settings.grip,
-      this.settings.hand, forehand, this.settings.followThrough !== false);
+      this.settings.hand, forehand, this.settings.followThrough !== false,
+      contactPose ? { pose: contactPose, racket, side: 1 } : undefined);
     const impactAngles = paddleFaceAngles(racket.normal);
     pad.pitch = impactAngles.pitch; pad.yaw = impactAngles.yaw; pad.motionStage = 'contact';
     if (this.settings.followThrough && racket.vR) {
@@ -3059,16 +3192,22 @@ class Game {
     const racket = ai.swing(this);
     if (!racket) { return; }
     const contact = V3.clone(b.p);
+    const contactPose = paddleContactPose(contact, racket, { hand: 'right', grip: 'shakehand', forehand: racket.forehand, roll: pad.roll });
+    const launch = resolveRacketLaunch(b, racket);
+    if (!contactPose || !launch || !strokeIdentityMatches(racket, launch)) return;
     this._preHit = { v: V3.clone(b.v), w: V3.clone(b.w) };
-    const info = impactRacket(b.v, b.w, racket.normal, racket.vR, racket.quality, racket.rubber || {});
-    if (!info) return;
+    const info = launch.info;
     if (this.watchdog) this.watchdog.contact({ time: this.time, side: -1, serve: false,
-      contact, pad, padBefore: pad.pos, racket, aiLevel: this.ai ? this.ai.levelIndex : null });
+      contact, pad: contactPose, padBefore: pad.pos, racket, aiLevel: this.ai ? this.ai.levelIndex : null });
     V3.copy(pad.normal, racket.normal);
-    V3.copy(pad.pos, b.p);
+    V3.copy(pad.pos, contactPose.pos); V3.copy(ai.pos, contactPose.pos);
+    pad.q = Q.copy(pad.q || Q.new(), contactPose.q); pad.roll = contactPose.roll; pad.contactPose = contactPose; pad.poseReady = true;
+    this.aiPaddleMotion = this.aiPaddleMotion || new PaddleStrokeMotion();
+    this.aiPaddleMotion.contact(racket.normal, contactPose.roll, racket.stroke.id, 'shakehand', 'right',
+      racket.forehand !== false, true, { pose: contactPose, racket, side: -1 });
     /* Same separation as the player's contact: the flight the solver fitted
      * starts one radius off the face, so the live ball must too. */
-    V3.addScaled(b.p, b.p, racket.normal, PH.R * STROKE_CONFIG.racket.launchSeparation);
+    V3.copy(b.p, launch.p); V3.copy(b.v, launch.v); V3.copy(b.w, launch.w);
     this.applyHit(-1, racket, contact, racket.quality, info);
   }
 
@@ -3244,8 +3383,9 @@ class Game {
         wantFootZ = clamp(pz.worldTarget.z, PADDLE_LIMITS.zStepIn, PADDLE_LIMITS.zFar);
       } else {
         const sc = this.strikeCorridor();
-        if (sc && sc.valid && Number.isFinite(sc.footZ)) {
-          wantFootZ = clamp(sc.footZ, PADDLE_LIMITS.zStepIn, PADDLE_LIMITS.zFar);
+        const contactZ = this.training?.S?.check?.context ? this.contactPrediction()?.p.z : sc?.footZ;
+        if (Number.isFinite(contactZ)) {
+          wantFootZ = clamp(contactZ, PADDLE_LIMITS.zStepIn, PADDLE_LIMITS.zFar);
         }
       }
     }
@@ -3377,8 +3517,7 @@ class Game {
      * контракт (1.00×), 100 → учебный (1.30×). Скрытый дев-множитель
      * CAPTURE_FORGIVE, на котором жила тренировка, теперь только про учебника
      * и сет-корд; вкус игрока живёт здесь. */
-    const capV = (this._cal && Number.isFinite(this._cal.captureK)) ? clamp(this._cal.captureK, 0, 1) : 0.5;
-    const capK = capV < 0.5 ? lerp(0.85, 1, capV * 2) : lerp(1, 1.30, (capV - 0.5) * 2);
+    const capK = this._calValues.captureK;
     if (capK !== this._capCalK) {
       this._capCalK = capK;
       if (typeof setCaptureCalibration === 'function') setCaptureCalibration(capK);
@@ -3419,7 +3558,8 @@ class Game {
     pad.forehand = paddleForehand(pad.pos.x, this.settings.hand, pad.forehand);
     // Recognize the CURRENT gesture, never last frame's liveStroke.
     const intentType = intent ? classifyStroke(intent, {
-      ball: { y: pad.pos.y, z: pad.pos.z }, isServe: servingNow,
+      ball: { x: pad.pos.x, y: pad.pos.y, z: pad.pos.z }, isServe: servingNow,
+      side: 1, forehand: pad.forehand, hand: this.settings.hand,
       incomingTop: this.ball.w.x, ballSpeed: V3.len(this.ball.v),
       arcSens: this.settings.arcSens ?? 1,
     }, clamp(Math.max(intent.releaseSpeed, intent.peakSpeed * cfg.speed.peakK) / cfg.speed.inputScale, 0, cfg.speed.powerMax)).id : null;
@@ -3471,7 +3611,8 @@ class Game {
     faceFromWrist(rest, this.padYaw, this.padPitch, 1);
     if (m) {
       const ctx = {
-        side: 1, grip: this.settings.grip, forehand: pad.forehand, isServe: servingNow, ball: { y: pad.pos.y, z: pad.pos.z },
+        side: 1, grip: this.settings.grip, hand: this.settings.hand, forehand: pad.forehand, isServe: servingNow,
+        ball: { x: pad.pos.x, y: pad.pos.y, z: pad.pos.z },
         ballSpin: this.ball.w, ballSpeed: V3.len(this.ball.v), ballVelocity: this.ball.v, moveYaw: this.padYaw, movePitch: this.padPitch,
       };
       const st = deriveStroke(m, ctx);
@@ -3500,15 +3641,27 @@ class Game {
     const motion = this.paddleMotion || (this.paddleMotion = new PaddleStrokeMotion());
     const strokePose = motion.sample(dt, { yaw: this.padYaw, pitch: this.padPitch, roll: this.padRoll }, !!intent);
     if (strokePose) {
-      faceFromWrist(pad.normal, strokePose.yaw, strokePose.pitch, 1);
+      if (strokePose.q) {
+        V3.copy(pad.pos, strokePose.p); V3.copy(pad.normal, strokePose.normal);
+        Q.copy(pad.q, strokePose.q); pad.activeFace = strokePose.activeFace;
+      } else faceFromWrist(pad.normal, strokePose.yaw, strokePose.pitch, 1);
       pad.roll = paddleAngleDelta(0, strokePose.roll);
       this.padRoll = pad.roll;
     }
     const face = paddleFaceAngles(pad.normal);
     pad.pitch = face.pitch; pad.yaw = face.yaw;
     pad.motionStage = strokePose ? strokePose.stage : intent ? 'swing' : this._prep > .02 ? 'prepare' : 'ready';
-    const lifted = keepPaddleAboveTable(pad.pos, pad.normal, pad.roll, PH.TABLE_Y, PH.T_HALF_WID, PH.T_HALF_LEN);
+    if (!strokePose?.q) {
+      pad.activeFace = pad.forehand === false ? -1 : 1;
+      paddlePoseQuaternion(V3.mul(this._bladeFace || (this._bladeFace = V3.new()), pad.normal, pad.activeFace),
+        pad.roll, pad.q || (pad.q = Q.new()));
+    }
+    const clearance = paddleTableClearance(pad.pos, pad.normal, pad.roll, PH.TABLE_Y, PH.T_HALF_WID, PH.T_HALF_LEN, pad.q);
+    const lifted = clearance < .006 ? .006 - clearance : 0;
+    if (lifted) pad.pos.y += lifted;
     if (lifted) pad.vel.y = (pad.pos.y - pad.prevPos.y) / Math.max(dt, 1e-4);
+    if (strokePose?.q) V3.mul(pad.vel, V3.sub(pad.vel, pad.pos, pad.prevPos), 1 / Math.max(dt, 1e-4));
+    pad.poseReady = true;
     pad.swing = Math.max(0, pad.swing - dt * 4.5);
     pad.hitRadius = MATCH_RULES.sweetRadius;
   }
@@ -3596,8 +3749,8 @@ class Game {
   }
   /** Reset the view: the authored preset AND a clean trim. */
   camReset() {
-    this.settings.camZoom = 1;
-    this.settings.camPitch = 0;
+    applyGameCalibration(this, 'camZoom', 50);
+    applyGameCalibration(this, 'camHeight', 50);
     this.setCameraPreset(CAMERA_ORDER[0]);
   }
 
@@ -3638,6 +3791,37 @@ class Game {
     const lim = paddleLimitsFor(clamp(pad.pos.z, PADDLE_LIMITS.zStepIn, PADDLE_STANCE_Z));
     pad.pos.x = clamp(pad.pos.x, -lim.x, lim.x);
     pad.pos.y = clamp(pad.pos.y, PH.TABLE_Y + lim.yLo, PH.TABLE_Y + lim.yHi);
+  }
+
+  updateOpponentPose(dt) {
+    const ai = this.ai, pad = this.aiPaddle;
+    if (!ai || !pad || this._idleStill) return;
+    const old = V3.copy(pad.prevPos || (pad.prevPos = V3.new()), pad.pos);
+    const pose = this.aiPaddleMotion && this.aiPaddleMotion.sample(dt, { yaw: 0, pitch: -15 * DEG, roll: .28 });
+    if (pose?.q) {
+      V3.copy(pad.pos, pose.p); V3.copy(pad.normal, pose.normal);
+      Q.copy(pad.q, pose.q); pad.roll = pose.roll; pad.activeFace = pose.activeFace;
+    } else {
+      V3.copy(pad.pos, ai.pos);
+      const fn = ai.faceNormal, an = ai.anim || {}, windup = an.windup || 0, swing = an.swing || 0;
+      const normal = this._aiNorm || (this._aiNorm = V3.new());
+      V3.set(normal, fn.x + windup * .14 - swing * .10,
+        fn.y - windup * .25 + swing * .16, fn.z);
+      V3.norm(pad.normal, normal);
+      pad.roll = (ai.roll ?? .28) + windup * .24 - swing * .12;
+      pad.activeFace = ai.forehand === false ? -1 : 1;
+      paddlePoseQuaternion(V3.mul(normal, pad.normal, pad.activeFace), pad.roll, pad.q);
+      if (windup > .05 && ai.plan && this._aiSwingSoundShot !== this.shotId) {
+        this._aiSwingSoundShot = this.shotId;
+        this.audio.whoosh?.(.65, 'ai/' + this.shotId);
+      }
+    }
+    const clearance = paddleTableClearance(pad.pos, pad.normal, pad.roll, PH.TABLE_Y, PH.T_HALF_WID, PH.T_HALF_LEN, pad.q);
+    if (clearance < .006) pad.pos.y += .006 - clearance;
+    V3.copy(ai.pos, pad.pos);
+    const velocity = pad.vel || (pad.vel = V3.new());
+    V3.mul(velocity, V3.sub(velocity, pad.pos, old), 1 / Math.max(dt, 1e-4));
+    pad.poseReady = true;
   }
 
   updateCamera(dt) {
@@ -3864,6 +4048,7 @@ class Game {
 
   /* ------------------------------ update --------------------------- */
   update(dtReal) {
+    if (this.preview?.active) return;
     if (!Number.isFinite(dtReal) || dtReal <= 0) return;
     dtReal = Math.min(dtReal, 0.1);
     if (this.state === GS.MENU) {
@@ -3889,19 +4074,28 @@ class Game {
       this.updateCameraReplay(dtReal);
       return;
     }
-    const ts = this.timeScale;
-    const dt = Math.min(dtReal, 0.05) * ts;
     this.time += dtReal;
-    this.strokeTime += dt;
     this.stateT += dtReal;
-
+    const policyKey = [this.sessionKind, this.training?.stage, this.career?.active, this.network.isInMatch].join('|');
+    if (policyKey !== this._calPolicyKey && typeof refreshGameCalibrationPolicy === 'function') {
+      this._calPolicyKey = policyKey; refreshGameCalibrationPolicy(this);
+    }
     if (this.slowmoUntil && this.time > this.slowmoUntil) { this.targetTimeScale = 1; this.slowmoUntil = 0; }
     this.updateSlowmo(dtReal);
     /* Калибровка «Скорость мяча» (flytime 0..1): общий темп матча,
      * тренировочная насадка. Регламентную физику не трогает — это
      * честное замедление времени как у существующего slow-mo. */
-    const ft = (this._cal && this._cal.flytime !== undefined) ? (0.78 + this._cal.flytime * 0.4) : 1;
-    this.timeScale = expSmooth(this.timeScale, this.targetTimeScale * ft, 9, dtReal);
+    const cal = this._calEffective || this._cal;
+    const value = cal && Number.isFinite(cal.flytime) ? cal.flytime : .5;
+    const ft = typeof calibrationPace === 'function' ? calibrationPace(value)
+      : value <= .5 ? lerp(.35, 1, value * 2) : lerp(1, 1.25, (value - .5) * 2);
+    const inspectorActive = this.inspectSlowmo && this.slowmo.allowed;
+    const targetScale = inspectorActive || this.slowmo.active || this.slowmoUntil ? this.targetTimeScale : ft;
+    this.timeScale = typeof gameplayCalibrationLocked === 'function' && gameplayCalibrationLocked(this)
+      ? 1 : expSmooth(this.timeScale, targetScale, 9, dtReal);
+    const dt = Math.min(dtReal, 0.05) * this.timeScale;
+    this.strokeTime += dt;
+    this.stateSimT = (this.stateSimT || 0) + dt;
 
     if (this.demoMode && !this.paused) {
       this.updateDemoPlayer(dtReal);
@@ -3920,7 +4114,7 @@ class Game {
             const toss = STROKE_CONFIG.serve.toss;
             const tx = clamp(this.aiServeX || 0, -toss.aiReadyXMax, toss.aiReadyXMax);
             const tz = -(PH.T_HALF_LEN + toss.aiEndMargin);
-            const k = 1 - Math.exp(-toss.aiApproachRate * dtReal);
+            const k = 1 - Math.exp(-toss.aiApproachRate * dt);
             this.ai.pos.x += (tx - this.ai.pos.x) * k;
             this.ai.pos.z += (tz - this.ai.pos.z) * k;
             this.ai.pos.x = clamp(this.ai.pos.x, -toss.aiPositionXMax, toss.aiPositionXMax);
@@ -3934,14 +4128,14 @@ class Game {
             PH.TABLE_Y + STROKE_CONFIG.serve.toss.height,
             clamp(this.ai.pos.z + STROKE_CONFIG.serve.toss.aiPaddleZOffset,
               -(PH.T_HALF_LEN + STROKE_CONFIG.serve.toss.aiFarMargin), -STROKE_CONFIG.serve.toss.aiNearZ));
-          this.aiServeTimer -= dtReal;
+          this.aiServeTimer -= dt;
           if (this.aiServeTimer <= 0) {
             const toss = STROKE_CONFIG.serve.toss;
             V3.set(this.ball.v, rndSym(toss.aiLateralJitter), toss.aiSpeed, rndSym(toss.aiLateralJitter));
             this.ball.live = true;
             this.isServeBall = true;
             this.setState(GS.SERVE_TOSS);
-            this.aiSwingAt = this.time + toss.aiSwingDelay;
+            this.aiSwingAt = this.strokeTime + toss.aiSwingDelay;
           }
         } else {
           this.serveHint = clamp(this.serveHint + dtReal, 0, 3);
@@ -3958,42 +4152,39 @@ class Game {
          * server's own half, so the solver used to halve it (measured: the
          * fast serve left the bat at 24 km/h at swing scale 0.50). At 0.36 m
          * on the way down it is a real serve. */
-        if (this.server === -1 && this.ball.lastHitBy === 0 && this.stateT > STROKE_CONFIG.serve.toss.aiContactDelay &&
+        if (this.server === -1 && this.ball.lastHitBy === 0 && this.stateSimT > STROKE_CONFIG.serve.toss.aiContactDelay &&
           ((this.ball.v.y < 0 && this.ball.p.y <= PH.TABLE_Y + STROKE_CONFIG.serve.toss.aiContactHeight) ||
-            this.time > this.aiSwingAt + STROKE_CONFIG.serve.toss.aiTimeout)) {
-          let racket = this.ai.serve(this);
-          // the opponent does not get to donate points either — but a level
-          // whose skill is already 1.0 has been solved at full assist, and
-          // re-solving the same problem is pure frame time
-          if (racket.valid === false && clamp(this.ai.L.skill, 0, 1) < 0.999) {
-            racket = refineRacket(this.ball.p, this.ball.v, this.ball.w, racket, 1, racket.quality);
-          }
+            this.strokeTime > this.aiSwingAt + STROKE_CONFIG.serve.toss.aiTimeout)) {
+          const racket = this.ai.serve(this);
           const contact = V3.clone(this.ball.p);
-          this._preHit = { v: V3.clone(this.ball.v), w: V3.clone(this.ball.w) };
-          const info = impactRacket(this.ball.v, this.ball.w, racket.normal, racket.vR, racket.quality, racket.rubber || {});
-          if (!info) break;
-          /* Tame the serve bounce at the levels where the player cannot yet
-           * cover the width: the spin component that makes the ball hop up
-           * (and the side-skip off SERVE_SIDE) is scaled toward the level's
-           * kick cap. Rookie serves land and run dead flat. */
-          if (this.ai.levelIndex < AI_SERVE_CAPS.length - 1) {
-            const kk = AI_SERVE_CAPS[this.ai.levelIndex].kick;
-            this.ball.w.x *= kk;   // top/back kick grown by the bounce
-            this.ball.w.y *= kk;   // side-skip off the bounce
+          const contactPose = racket && paddleContactPose(contact, racket, { hand: 'right', grip: 'shakehand', forehand: racket.forehand, roll: this.aiPaddle.roll });
+          const launch = racket && resolveRacketLaunch(this.ball, racket);
+          if (!racket || racket.valid === false || !contactPose || !launch || !strokeIdentityMatches(racket, launch)) {
+            this.logInput('decision', { outcome: { reason: 'BOT_SERVE_RETRY',
+              detail: racket?.invalidReason || (!contactPose ? 'geometry' : !launch ? 'separating' : 'spin') } });
+            this.ball.live = false; this.aiServeTimer = .25; this.setState(GS.SERVE_READY);
+            break;
           }
+          this._preHit = { v: V3.clone(this.ball.v), w: V3.clone(this.ball.w) };
+          const info = launch.info;
           if (this.watchdog) this.watchdog.contact({ time: this.time, side: -1, serve: true,
-            contact, pad: this.aiPaddle, padBefore: this.aiPaddle.pos, racket,
+            contact, pad: contactPose, padBefore: this.aiPaddle.pos, racket,
             aiLevel: this.ai ? this.ai.levelIndex : null });
-          V3.copy(this.aiPaddle.pos, this.ball.p);
+          V3.copy(this.aiPaddle.pos, contactPose.pos); V3.copy(this.ai.pos, contactPose.pos);
           V3.copy(this.aiPaddle.normal, racket.normal);
-          V3.addScaled(this.ball.p, this.ball.p, racket.normal, PH.R * STROKE_CONFIG.racket.launchSeparation);
+          this.aiPaddle.q = Q.copy(this.aiPaddle.q || Q.new(), contactPose.q);
+          this.aiPaddle.roll = contactPose.roll; this.aiPaddle.contactPose = contactPose; this.aiPaddle.poseReady = true;
+          this.aiPaddleMotion = this.aiPaddleMotion || new PaddleStrokeMotion();
+          this.aiPaddleMotion.contact(racket.normal, contactPose.roll, racket.stroke.id, 'shakehand', 'right',
+            racket.forehand !== false, true, { pose: contactPose, racket, side: -1 });
+          V3.copy(this.ball.p, launch.p); V3.copy(this.ball.v, launch.v); V3.copy(this.ball.w, launch.w);
           this.serveBounces = 0; this.rallyBounces.length = 0;
           this.applyHit(-1, racket, contact, racket.quality, info);
           this.setState(GS.RALLY);
         }
         if (this.server === 1 && this.ball.lastHitBy === 0) {
           this.tossApex = Math.max(this.tossApex || 0, this.ball.p.y);
-          if (this.stateT > STROKE_CONFIG.serve.toss.timeout) this.awardPoint(-1, 'ПОДАЧА НЕ ВЫПОЛНЕНА');
+          if (this.stateSimT > STROKE_CONFIG.serve.toss.timeout) this.awardPoint(-1, 'ПОДАЧА НЕ ВЫПОЛНЕНА');
         }
         break;
       case GS.POINT:
@@ -4041,19 +4232,14 @@ class Game {
         if (!this.ball.live) break;
       }
       this._subPad = null;
-      // trail history
-      const h = this.ball.hist;
-      h.push(this.ball.p.x, this.ball.p.y, this.ball.p.z);
-      /* Короткий хвост (24 кадра вместо 32) — и вдвое реже точек в буфере. */
-      const tcap = Math.round((this._cal && this._cal.trailLen !== undefined ? this._cal.trailLen : 0.33) * TRAIL_POINTS);
-      if (!tcap) h.length = 0; else if (h.length > tcap * 3) h.splice(0, 3);
+      this.recordBallTrail();
     } else this._acc = 0;
 
     this.updateStrikeWindow(dtReal);
     this.logInput('frame', { dt: dtReal });
     if (this.state === GS.RALLY || this.state === GS.SERVE_TOSS) this.moments.push(this.time, this);
     if (this.training) {
-      this.training.update(dtReal);
+      this.training.update(dtReal, dt);
       if (this.training.allowAi) this.ai.think(this, dt);
     }
     else if (this.network.isInMatch) {
@@ -4063,9 +4249,10 @@ class Game {
       V3.copy(this.aiPaddle.normal, op.normal);
     }
     else this.ai.think(this, dt);
+    this.updateOpponentPose(dt);
     this.tryAiHit();
     this.watchdogFrame(dtReal);
-    this.particles.update(dt);
+    this.particles.update(dt, dtReal);
     for (const m of this.marks) m.t += dtReal;
     while (this.marks.length && this.marks[0].t > this.marks[0].life) this.marks.shift();
     for (const m of this.messages) m.t += dtReal;
@@ -4188,6 +4375,21 @@ class Game {
   }
 
   /* ------------------------------ render --------------------------- */
+  recordBallTrail() {
+    const b = this.ball, h = b.hist, times = b.histTimes || (b.histTimes = []);
+    if (!h.length) { times.length = 0; b.trailSampleAt = -Infinity; }
+    if (!this.settings.showTrail || this.reducedMotion || this._calValues.trailLen <= 0) {
+      trimBallTrail(this, 0); return;
+    }
+    if (times.length && this.time - b.trailSampleAt + 1e-9 < 1 / 120) {
+      h[h.length - 3] = b.p.x; h[h.length - 2] = b.p.y; h[h.length - 1] = b.p.z;
+      times[times.length - 1] = this.time;
+    } else {
+      h.push(b.p.x, b.p.y, b.p.z); times.push(this.time); b.trailSampleAt = this.time;
+    }
+    trimBallTrail(this, this._calValues.trailLen);
+  }
+
   /* Шлейф мяча — тонкая лента постоянной ширины. Раньше ширина росла от
    * скорости и затухала кубом к хвосту, а сама история держалась в 96 точек:
    * получалось почти круглое пятно-облако из десятков аддитивных треугольников.
@@ -4260,7 +4462,8 @@ class Game {
     if (this.ball.live || this.state === GS.SERVE_READY || this._idleStill) {
       const BS = (this._cal && this._cal.ballSize !== undefined) ? (0.8 + this._cal.ballSize * 0.5) : 1;
       M4.compose(tmp.m, this.ball.p, this.ball.q, V3.set(tmp.scl, BS, BS, BS));
-      const gk = shadowPass ? 0 : strikeGreenTint(this._strike, STRIKE_LEAD, STRIKE_FULL);
+      const hints = this.hintContact !== false && !(typeof gameplayCalibrationLocked === 'function' && gameplayCalibrationLocked(this));
+      const gk = shadowPass || !hints ? 0 : strikeGreenTint(this._strike, STRIKE_LEAD, STRIKE_FULL);
       if (gk > 0.02) {
         let gm = this._ballGreen;
         if (!gm) {
@@ -4285,14 +4488,8 @@ class Game {
        rendering must not mutate the simulation's orientation. */
     if (this.playerPaddleVisible) {
       const pp = this.player;
-      /* The telegraph lives here and only here: the simulation keeps the
-       * blade on the ball, the drawing pulls it back for the wind-up. */
-      const ao = this.anticipation.active ? this.anticipation.visualOffset : null;
-      const dpos = this._drawPadPos || (this._drawPadPos = V3.new());
-      if (ao && (ao.x || ao.y || ao.z)) V3.set(dpos, pp.pos.x + ao.x, pp.pos.y + ao.y, pp.pos.z + ao.z);
-      else V3.copy(dpos, pp.pos);
       this.rig.draw(R, S, {
-        pos: dpos, normal: pp.normal, hand: this.settings.hand, shadowPass,
+        pos: pp.pos, normal: pp.normal, q: pp.poseReady && !this._idleStill ? pp.q : undefined, hand: this.settings.hand, shadowPass,
         swing: pp.swing, roll: pp.roll || 0, absoluteRoll: true,
         mats: this.paddleMats(S, this.equip),
       });
@@ -4310,21 +4507,9 @@ class Game {
       });
       return;
     }
-    const an = V3.norm(V3.new(), V3.sub(V3.new(), this.ball.p, this.ai.pos));
-    an.z = Math.abs(an.z) * 1 || 1;
-    // Blend "look at the ball" with the stroke's own face angle, so the
-    // backswing visibly opens for a chop and closes for a loop.
-    const fn = this.ai.faceNormal, wd = clamp(this.ai.anim.windup, 0, 1);
-    const aiNorm = V3.norm(V3.new(), V3.new(
-      an.x * 0.4 * (1 - wd * 0.5),
-      lerp(-0.1 + an.y * 0.3, fn.y * 1.5, wd),
-      1));
-    V3.copy(ap.normal, aiNorm);
-    V3.copy(ap.pos, this.ai.pos);
-
     this.rig.draw(R, S, {
-      pos: ap.pos, normal: aiNorm, hand: this.settings.hand === 'right' ? 'left' : 'right',
-      swing: -this.ai.anim.swing, roll: (this.ai.anim.lean || 0) * 0.22,
+      pos: ap.pos, normal: ap.normal, q: ap.poseReady ? ap.q : undefined, hand: this.ai.hand || 'right',
+      swing: 0, roll: ap.roll ?? this.ai.roll ?? .28, absoluteRoll: true,
       mats: this.paddleMats(S, this.aiEquip), shadowPass,
     });
 
@@ -4419,6 +4604,7 @@ class Game {
     const P = this.particles;
     for (let i = 0; i < P.n; i++) {
       if (P.life[i] <= 0) continue;
+      if (P.trail?.[i] && (!this.settings.showTrail || this.reducedMotion || this._calValues.trailLen <= 0)) continue;
       const a = P.life[i] / P.maxLife[i];
       const sz = P.size[i] * (0.4 + a * 1.4);
       this.billboard(tmp.m, V3.new(P.p[i * 3], P.p[i * 3 + 1], P.p[i * 3 + 2]), sz, 0);
@@ -4440,6 +4626,7 @@ class Game {
 
 
   render() {
+    if (this.preview?.active) { if (!this._ttSleeping) this.preview.render(); return; }
     const R = this.R;
     if (R.beginShadow()) {
       this.scene.drawStatic(R, true);

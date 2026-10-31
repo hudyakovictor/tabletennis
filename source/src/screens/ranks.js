@@ -34,7 +34,7 @@ const serverMe = () => {
 };
 
 Router.def('ranks', {
-  mood: 'gold',
+  mood: 'gold', live: true,
   data(tab) {
     const meRow = { n: S.name, s: t('ranks.you'), r: S.rating, key: 'me', me: true, club: S.club };
     if (tab === 'world') {
@@ -75,34 +75,44 @@ Router.def('ranks', {
       ${tab === 'world' && me && (me.pos > 3 || !real) ? `<div class="lrow me sticky"><span class="lp num">${fmt(me.pos)}</span>${Art.avatar('me', 40)}<span class="ln"><b>${t('ranks.you')}</b><small>${real ? t('ranks.place', { pos: fmt(me.pos) }) : t('ranks.localPlace', { pos: fmt(me.pos) })}</small></span><span class="lr num">${Art.badge(leagueOf(me.r), 18)}${fmt(me.r)}</span></div>` : ''}`;
   },
   render() {
+    const tab = this.tab || 'world';
     /* Фильтр стоит ПЕРВЫМ (важнее заголовка), плитки ниже собраны в одну
      * общую плашку — визуально группа, а не разрозненные элементы. */
     return `${UI.hud()}<div class="scroll">
-      <div class="seg rise" style="--d:0;margin:8px 14px 4px" id="rkSeg"><span class="pill"></span><button class="on" data-v="world">${t('ranks.world')}</button><button data-v="friends">${t('common.friends')}</button><button data-v="club">${t('ranks.club')}</button></div>
-      <div class="pg-head rise" style="--d:1;margin:4px 14px 6px"><div class="h1">${t('ranks.title')}</div><span class="chip gold">${Art.icon('clock', { c: '#FFE28A' })} <span data-season-left>${t('ranks.seasonChip', { left: globalThis.TTSeason.seasonLeftShort() })}</span></span></div>
-      <div class="pnl rk-plate rise" style="--d:2"><div id="rkBody" class="rk-body">${this.body('world')}</div></div></div>`;
+      <div class="seg rise" style="--d:0;margin:8px 14px 4px" id="rkSeg"><span class="pill"></span><button class="${tab === 'world' ? 'on' : ''}" data-v="world" data-l10n="ranks.world">${t('ranks.world')}</button><button class="${tab === 'friends' ? 'on' : ''}" data-v="friends" data-l10n="common.friends">${t('common.friends')}</button><button class="${tab === 'club' ? 'on' : ''}" data-v="club" data-l10n="ranks.club">${t('ranks.club')}</button></div>
+      <div class="pg-head rise" style="--d:1;margin:4px 14px 6px"><div class="h1" data-l10n="ranks.title">${t('ranks.title')}</div><span class="chip gold">${Art.icon('clock', { c: '#FFE28A' })} <span data-season-left>${t('ranks.seasonChip', { left: globalThis.TTSeason.seasonLeftShort() })}</span></span></div>
+      <div class="pnl rk-plate rise" style="--d:2"><div id="rkBody" class="rk-body">${this.body(tab)}</div></div></div>`;
   },
   mount(el) {
-    UI.bindHud(el); this.anim(el);
-    let cur = 'world';
-    const paint = () => {
+    UI.bindHud(el); let cancelAnim = this.anim(el), alive = true;
+    this.tab = this.tab || 'world';
+    const paint = (animate = true) => {
+      if (!alive) return;
       const b = el.querySelector('#rkBody'); if (!b) return;
-      b.classList.remove('go'); b.innerHTML = this.body(cur); void b.offsetWidth; this.anim(el);
+      cancelAnim(); b.classList.remove('go'); b.innerHTML = this.body(this.tab);
+      if (animate) { void b.offsetWidth; cancelAnim = this.anim(el); } else b.classList.add('go');
     };
-    UI.seg(el.querySelector('#rkSeg'), (v) => { cur = v; paint(); });
+    this.paint = paint;
+    UI.seg(el.querySelector('#rkSeg'), (v) => { this.tab = v; paint(); });
     /* Доска тянется в фоне: пока её нет, показываем локальный список. Ответ
      * может прийти и после отрисовки — тогда перерисовываемся сами, не уходя
-     * с экрана. Подписка снимает себя, когда экран уже выброшен. */
-    let stop = null;
-    stop = Progress.onBoard(() => {
-      if (!el.isConnected) { if (stop) stop(); return; }
-      if (cur === 'world') paint();
+      * с экрана. Mount owns the subscription even when no offline event arrives. */
+    const stop = Progress.onBoard(() => {
+      if (alive && el.isConnected && this.tab === 'world') paint();
     });
     if (!Progress.board && Api.enabled) Progress.leaderboard().catch(() => {});
+    return () => { alive = false; stop(); cancelAnim(); if (this.paint === paint) this.paint = null; };
+  },
+  refreshLocale(el) {
+    UI.refreshHud(el); UI.localize(el); if (this.paint) this.paint(false);
+    const button = el.querySelector('#rkSeg button.on'), pill = el.querySelector('#rkSeg .pill');
+    pill.style.left = button.offsetLeft + 'px'; pill.style.width = button.offsetWidth + 'px';
+    el.querySelector('[data-season-left]').textContent = t('ranks.seasonChip', { left: globalThis.TTSeason.seasonLeftShort() });
   },
   anim(el) {
-    const b = el.querySelector('#rkBody'); requestAnimationFrame(() => b.classList.add('go'));
-    setTimeout(() => { const p1 = el.querySelector('.pod.p1 .pd-av'); if (!p1) return; const p = FX.pt(p1); FX.twinkles(p.x, p.y, 50, 10); FX.burst(p.x, p.y - 30, { c: ['#FFC93A', '#fff'], count: 14, speed: 6, size: .7, ring: false }); Sfx.impact(); }, 900);
+    const b = el.querySelector('#rkBody'), raf = requestAnimationFrame(() => b.classList.add('go'));
+    const timer = (typeof effectiveReducedMotion === 'function' ? effectiveReducedMotion() : S.rm) ? 0 : setTimeout(() => { const p1 = el.querySelector('.pod.p1 .pd-av'); if (!p1) return; const p = FX.pt(p1); FX.twinkles(p.x, p.y, 50, 10); FX.burst(p.x, p.y - 30, { c: ['#FFC93A', '#fff'], count: 14, speed: 6, size: .7, ring: false }); Sfx.impact(); }, 900);
+    return () => { cancelAnimationFrame(raf); clearTimeout(timer); };
   }
 });
 

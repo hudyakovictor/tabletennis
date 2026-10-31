@@ -130,7 +130,7 @@ function createMissShotCapture(opts = {}) {
     } catch (e) { return fail(e); }
   }
 
-  return { request, capture, fail, hasPending: () => !!pending,
+  return { request, capture, fail, cancel: () => { pending = null; }, hasPending: () => !!pending,
     setEnabled: (v) => { enabled = !!v; if (!enabled) pending = null; }, isEnabled: () => enabled,
     setHalf: (v) => { half = MISS_SHOT_SIZES.includes(+v) ? +v : MISS_SHOT_HALF; },
     getHalf: () => half };

@@ -140,7 +140,13 @@ const WATCHDOG_RULES = Object.freeze({
   serveBladeDistance: 0.44,           // м: ракетка должна быть у мяча на подаче
   serveOffsetTol: 0.06,               // м: мяч ушёл не с ракетки после контакта
   ticketCooldownSec: 0.5,             // с: не сыпать одинаковыми тикетами
-  maxTickets: 64,                     // кольцо; старые вытесняются
+  /* 256, а не 64: за одну сессию (828 с) набегало 104 тикета, и отчёт
+   * показывал только хвост — «44 из 64» вместо полной картины. */
+  maxTickets: 256,                    // кольцо; старые вытесняются
+  /* Журнал апексов: сколько мяч поднимался над столом после каждого удара
+   * и после каждого отскока. Это то, что видно глазом («подпрыгнул выше
+   * кадра»), и то, что раньше не мерилось вообще. */
+  maxApexRows: 400,
 });
 
 const WD_PH = () => (typeof PH !== 'undefined' ? PH : {
@@ -186,6 +192,7 @@ class PhysicsWatchdog {
      * ничего не доказывает, если пролётов сквозь клинок не было вообще. */
     this.probe = { substeps: 0, armedSteps: 0, planeCrossings: 0, crossings: 0, approaches: 0,
       frames: 0, poses: 0, screens: 0, strokes: 0 };
+    this.apexLog = this.apexLog || [];
     this._ctxSide = null;
     this._ctxLevel = null;
     this._oppFloorSec = 0;
@@ -224,6 +231,15 @@ class PhysicsWatchdog {
     this._prevSpeed = null;
     this._lastTableContactT = null;
     this._offscreen = { player: 0, opponent: 0 };
+    /* Апекс мяча: сколько он поднялся над столом после удара и после
+     * отскока. Единицы — метры мира, отчёт переводит в сантиметры. */
+    this._apexY = null;
+    this._bounceApexY = null;
+    this._lastBallY = null;
+    this._lastAiShot = null;
+    this._snap = null;
+    this._penetrationArmed = false;
+    this._apexLogged = true;
   }
 
   /** Отметить причину на этот розыгрыш: 'engine' сильнее 'input'. */
@@ -288,6 +304,13 @@ class PhysicsWatchdog {
     const p1 = s.p1, p0 = s.p0 || p1;
     const dt = Number.isFinite(s.dt) ? s.dt : 0;
 
+    /* --- 0а. апекс: как высоко мяч поднимался над столом ---------------- */
+    if (Number.isFinite(p1.y)) {
+      this._lastBallY = p1.y;
+      if (this._apexY === null || p1.y > this._apexY) this._apexY = p1.y;
+      if (this._bounceApexY === null || p1.y > this._bounceApexY) this._bounceApexY = p1.y;
+    }
+
     /* --- 0. телепорт и NaN: причина 'engine' для ухода мяча ---------- */
     const nanBall = !Number.isFinite(p1.y) || !Number.isFinite(p1.z) ||
       (s.ball && s.ball.v && (!Number.isFinite(s.ball.v.x) || !Number.isFinite(s.ball.v.y) ||
@@ -308,20 +331,30 @@ class PhysicsWatchdog {
     }
 
     /* --- 1. сильный удар в стол: мяч внутри плиты -------------------- */
+    /* Только ВХОД сверху и только живой мяч. Мяч, который промахнулся,
+     * скатился с края и уже катится ПОД плитой (в логе: y=0.316, v.y −3.03,
+     * глубина 0.46 м), «провалившимся» не является — он и не был над
+     * столом. Без этого условия каждый промах под столом давал тикет. */
     const inFootprint = Math.abs(p1.x) <= PHc.T_HALF_WID && Math.abs(p1.z) <= PHc.T_HALF_LEN;
-    if (inFootprint && p1.y < PHc.TABLE_Y + PHc.R - R.penetrationTol) {
-      this._penetrationSteps++;
-      if (this._penetrationSteps >= R.penetrationSteps && !this._intoTable) {
-        this._intoTable = true;
-        const speed = s.ball && Number.isFinite(s.ball.speed) ? s.ball.speed : null;
-        if (this.ticket('BALL_INTO_TABLE', {
-          time: s.time, depth: +(PHc.TABLE_Y + PHc.R - p1.y).toFixed(4),
-          x: +p1.x.toFixed(3), y: +p1.y.toFixed(3), z: +p1.z.toFixed(3),
-          speed, strong: speed !== null ? speed >= R.strongSpeed : null,
-          ball: { p: [p1.x, p1.y, p1.z], v: s.ball && s.ball.v ? [s.ball.v.x, s.ball.v.y, s.ball.v.z] : null },
-        })) { /* один тикет на удар */ }
+    const surface = PHc.TABLE_Y + PHc.R;
+    const ballLive = !(s.ball && s.ball.live === false);
+    const below = inFootprint && ballLive && p1.y < surface - R.penetrationTol;
+    if (below) {
+      if (!this._penetrationArmed && Number.isFinite(p0.y) && p0.y >= surface) this._penetrationArmed = true;
+      if (this._penetrationArmed) {
+        this._penetrationSteps++;
+        if (this._penetrationSteps >= R.penetrationSteps && !this._intoTable) {
+          this._intoTable = true;
+          const speed = s.ball && Number.isFinite(s.ball.speed) ? s.ball.speed : null;
+          if (this.ticket('BALL_INTO_TABLE', {
+            time: s.time, depth: +(surface - p1.y).toFixed(4),
+            x: +p1.x.toFixed(3), y: +p1.y.toFixed(3), z: +p1.z.toFixed(3),
+            speed, strong: speed !== null ? speed >= R.strongSpeed : null,
+            ball: { p: [p1.x, p1.y, p1.z], v: s.ball && s.ball.v ? [s.ball.v.x, s.ball.v.y, s.ball.v.z] : null },
+          })) { /* один тикет на удар */ }
+        }
       }
-    } else if (this._penetrationSteps) this._penetrationSteps = 0;
+    } else { this._penetrationSteps = 0; this._penetrationArmed = false; }
 
     /* --- 1б. сильный удар за экран: мяч вышел из арены ----------------- */
     if (!this._offArena && (Math.abs(p1.x) > R.arena.x || Math.abs(p1.z) > R.arena.z ||
@@ -481,7 +514,11 @@ class PhysicsWatchdog {
     if (!pos || !Number.isFinite(pos.y)) { this[key] = 0; return; }
     const R = this.rules;
     if (this.probe) { this.probe.poses++; if (wdOverTable(pos, R.racketOverMargin)) this.probe.frames++; }
-    if (wdOverTable(pos, R.racketOverMargin) && pos.y < floorY) {
+    const mesh = typeof paddleTableClearance === 'function' && (pad.normal || pad.q);
+    const clearance = mesh ? paddleTableClearance(pos, pad.normal, pad.roll, WD_PH().TABLE_Y,
+      WD_PH().T_HALF_WID, WD_PH().T_HALF_LEN, pad.q) : null;
+    const under = mesh ? clearance < -R.penetrationTol : wdOverTable(pos, R.racketOverMargin) && pos.y < floorY;
+    if (under) {
       this[key] += dt;
       if (this[key] >= R.racketFloorDwellSec) {
         this.context(side, null);
@@ -489,7 +526,8 @@ class PhysicsWatchdog {
           time: wdNum(time), at: 'frame', who, side,
           racket: [ +pos.x.toFixed(3), +pos.y.toFixed(3), +pos.z.toFixed(3) ],
           floor: +floorY.toFixed(3),
-          below: +(floorY - pos.y).toFixed(3),
+          below: +(mesh ? -clearance : floorY - pos.y).toFixed(3),
+          geometry: mesh ? 'blade-rubber-handle' : 'center-only',
           seconds: +this[key].toFixed(3),
           overTable: true,
         });
@@ -560,6 +598,9 @@ class PhysicsWatchdog {
           outPx: Number.isFinite(outPx) ? Math.round(outPx) : null,
           seconds: +this._offScreenSec.toFixed(3),
           x: +b.p.x.toFixed(3), y: +b.p.y.toFixed(3), z: +b.p.z.toFixed(3),
+          /* Апекс с последнего удара в сантиметрах над столом: именно его
+           * видит игрок, а не пиксели. */
+          apexCm: this._apexY === null ? null : Math.round((this._apexY - WD_PH().TABLE_Y) * 100),
           speed: b.v ? +Math.hypot(b.v.x, b.v.y, b.v.z).toFixed(2) : null,
           ...ctx,
         });
@@ -567,17 +608,27 @@ class PhysicsWatchdog {
     } else this._offScreenSec = 0;
   }
 
-  /** Потолок темпа удара: контракт × снаряжение × бонус за точность. */
+  /** Потолок темпа удара — ФИЗИЧЕСКИЙ, а не «характер архетипа».
+   *
+   *  `archetypes[id].speed` — это множитель жеста внутри deriveStroke
+   *  (40_swipe.js:492: `vmag = clamp(vmag * A.speed * powerScale, vmin, vmax)`),
+   *  а не потолок: SIDE со speed 0.33 при сильном жесте всё равно имеет
+   *  право дойти до vmax. Пока потолок умножался на этот множитель,
+   *  честные PUSH/BLOCK/DRIVE получали SPEED_CEILING (в логе: 12 из 15
+   *  тикетов были ложными — 14.47 «против» лимита 12.05).
+   *
+   *  Реальные потолки: `racket.vmax` для всех, `spin.sideVmax` для SIDE
+   *  (его движок режет отдельно, 70_game.js — и не должен обходить),
+   *  `AI_LEVELS[].vmagMax` для бота. Снаряжение и бонус за точный контакт
+   *  применяются ДО этих потолков, поэтому входят только в допуск. */
   speedLimit(st) {
     const R = this.rules, sc = wdStrokeConfig();
     const cfg = sc && sc.racket ? sc.racket : null;
     const vmax = cfg && Number.isFinite(cfg.vmax) ? cfg.vmax : 19.5;
-    const arch = sc && sc.archetypes ? sc.archetypes[st && st.strokeId] : null;
-    const archK = arch && Number.isFinite(arch.speed) ? arch.speed : 1;
     const timingK = cfg && cfg.contact && Number.isFinite(cfg.contact.speedBonus) ? cfg.contact.speedBonus : 1.05;
-    let limit = vmax * archK * R.equipK * timingK * (1 + R.speedTol);
+    let limit = vmax * R.equipK * timingK * (1 + R.speedTol);
     if (st && st.strokeId === 'SIDE' && sc && sc.spin && Number.isFinite(sc.spin.sideVmax))
-      limit = Math.min(limit, sc.spin.sideVmax * R.equipK * timingK * (1 + R.speedTol));
+      limit = Math.min(limit, sc.spin.sideVmax * (1 + R.speedTol));
     if (st && st.side === -1) {
       const L = wdAiLevel(st.aiLevel);
       if (L && Number.isFinite(L.vmagMax))
@@ -598,6 +649,9 @@ class PhysicsWatchdog {
     if (!st) return;
     this.context(st.side, st.aiLevel);
     if (this.probe) this.probe.strokes++;
+    /* Апекс предыдущего удара закрываем ДО смены контекста: если мяч так и
+     * не дошёл до стола (сетка, аут), строка всё равно нужна. */
+    if (this._apexY !== null && !this._apexLogged) this._finalizeApex(null, null);
     const R = this.rules;
     const vR = st.vR || (st.racket && st.racket.vR);
     const vmag = Number.isFinite(st.vmag) ? st.vmag
@@ -634,7 +688,37 @@ class PhysicsWatchdog {
       time: wdNum(st.time),
     };
     if (vmag !== null && limit && vmag <= limit) this._markCause('input', 'legal_stroke');
+    /* Новый удар: апекс считаем от точки контакта. */
+    this._apexY = Number.isFinite(this._lastBallY) ? this._lastBallY : null;
+    this._bounceApexY = null;
+    this._apexLogged = false;
     if (st.side === -1) this._pushAiShot(st, vmag, limit);
+  }
+
+  /** Закрыть строку апекса: сколько мяч поднялся над столом с последнего
+   *  удара/отскока. Пишется на каждом отскоке (первый — дуга удара,
+   *  второй — дуга после отскока) и на следующем ударе, если стола мяч
+   *  так и не коснулся. */
+  _finalizeApex(time, speed) {
+    if (this._apexY === null) return;
+    const PHc = WD_PH(), st = this._lastStroke || null;
+    const cm = y => (y === null || !Number.isFinite(y) ? null : Math.round((y - PHc.TABLE_Y) * 100));
+    const row = {
+      time: wdNum(time),
+      side: st ? st.side : null, aiLevel: st ? st.aiLevel : null, strokeId: st ? st.strokeId : null,
+      apexCm: cm(this._apexY),
+      bounceApexCm: cm(this._bounceApexY),
+      speed: wdNum(speed),
+    };
+    this.apexLog.push(row);
+    while (this.apexLog.length > this.rules.maxApexRows) this.apexLog.shift();
+    if (this._lastAiShot && st && st.side === -1) {
+      this._lastAiShot.apexCm = row.apexCm;
+      this._lastAiShot.bounceApexCm = row.bounceApexCm;
+    }
+    this._apexLogged = true;
+    /* Следующий отрезок меряем уже от поверхности: дуга после отскока. */
+    this._bounceApexY = null;
   }
 
   /** Поля последнего удара для тикетов об улетевшем мяче. */
@@ -658,6 +742,11 @@ class PhysicsWatchdog {
       strokeId: st.strokeId || null, quality: wdNum(st.quality),
       vmag: vmag === null ? null : +vmag.toFixed(3),
       limit: limit === null ? null : +limit.toFixed(3),
+      /* Насколько игра ПОДТЯНУЛА клинок к мячу перед ударом. Контракт
+       * разрешает 0.42 м (reach в tryAiHit), но именно эта подтяжка
+       * выглядит в игре как «ракетка прыгнула к мячу». */
+      snap: this._snap && this._snap.who === 'opponent' ? this._snap.reach : null,
+      apexCm: null, bounceApexCm: null,
       contact: st.contact ? [ +st.contact.x.toFixed(3), +st.contact.y.toFixed(3), +st.contact.z.toFixed(3) ] : null,
       racket: pad.pos ? [ +pad.pos.x.toFixed(3), +pad.pos.y.toFixed(3), +pad.pos.z.toFixed(3) ] : null,
       normal: pad.normal ? [ +pad.normal.x.toFixed(3), +pad.normal.y.toFixed(3), +pad.normal.z.toFixed(3) ] : null,
@@ -667,6 +756,9 @@ class PhysicsWatchdog {
         v: [ +b.v.x.toFixed(2), +b.v.y.toFixed(2), +b.v.z.toFixed(2) ],
         spin: b.w ? +Math.hypot(b.w.x, b.w.y, b.w.z).toFixed(1) : null } : null,
     });
+    /* Ссылка на только что записанную строку: апекс долетит позже, на
+     * отскоке, и допишется в неё же. */
+    this._lastAiShot = this.aiShots[this.aiShots.length - 1];
     if (this.aiShots.length > this.rules.maxAiShots) this.aiShots.shift();
   }
 
@@ -675,6 +767,8 @@ class PhysicsWatchdog {
     if (!t) return;
     const R = this.rules;
     if (Number.isFinite(t.time)) this._lastTableContactT = t.time;
+    /* Апекс после удара и после отскока — в сантиметрах над столом. */
+    this._finalizeApex(t.time, Number.isFinite(t.speed) ? t.speed : null);
     const edge = Number.isFinite(t.edge) ? t.edge : 0;
     if (edge <= 0.25) return;
     const now = Number.isFinite(t.time) ? t.time : null;
@@ -699,10 +793,21 @@ class PhysicsWatchdog {
     const padX = pad.pos ? pad.pos.x : pad.x, padY = pad.pos ? pad.pos.y : pad.y, padZ = pad.pos ? pad.pos.z : pad.z;
     if (![padX, padY, padZ].every(Number.isFinite)) return;
     this.context(c.side, c.aiLevel);
+    /* Насколько клинок «подтянули» к мячу на этом ударе. Раньше это число
+     * было недоступно (журнал всегда видел 0.000 м, потому что позу уже
+     * переставили в точку контакта), и «ракетка в стороне, а мяч отбит»
+     * никак не проверялось. */
+    const preSnap = c.padBefore || null;
+    const bX = preSnap ? (preSnap.x === undefined ? (preSnap.pos ? preSnap.pos.x : padX) : preSnap.x) : padX;
+    const bY = preSnap ? (preSnap.y === undefined ? (preSnap.pos ? preSnap.pos.y : padY) : preSnap.y) : padY;
+    const bZ = preSnap ? (preSnap.z === undefined ? (preSnap.pos ? preSnap.pos.z : padZ) : preSnap.z) : padZ;
+    const reach = [bX, bY, bZ].every(Number.isFinite) ? wdDist(p.x, p.y, p.z, bX, bY, bZ) : null;
+    if (reach !== null) this._snap = { who: c.side === -1 ? 'opponent' : 'player', reach: +reach.toFixed(3) };
     this.lastContact = {
       time: wdNum(c.time), side: c.side, serve: !!c.serve,
       point: [ +p.x.toFixed(3), +p.y.toFixed(3), +p.z.toFixed(3) ],
       racket: [ +padX.toFixed(3), +padY.toFixed(3), +padZ.toFixed(3) ],
+      reach: reach === null ? null : +reach.toFixed(3),
     };
 
     /* 3. ракетка под столом — но только пока она висит НАД плитой.
@@ -712,14 +817,18 @@ class PhysicsWatchdog {
     /* Порог свой у каждой стороны: у игрока клинок поднят контрактом до
      * +0.175 м, у бота он законно опускается к мячу на 4 см над плитой. */
     const floorY = PHc.TABLE_Y + (c.side === -1 ? R.opponentFloorOverTable : R.racketFloorOverTable);
-    if (overTable && padY < floorY) {
+    const mesh = typeof paddleTableClearance === 'function' && (pad.normal || pad.q);
+    const clearance = mesh ? paddleTableClearance(pad.pos || pad, pad.normal, pad.roll,
+      PHc.TABLE_Y, PHc.T_HALF_WID, PHc.T_HALF_LEN, pad.q) : null;
+    if (mesh ? clearance < -R.penetrationTol : overTable && padY < floorY) {
       this.context(c.side, c.aiLevel);
       this.ticket('RACKET_UNDER_TABLE', {
         time: c.time, at: c.serve ? 'serve_contact' : 'contact',
         who: c.side === -1 ? 'opponent' : 'player',
         racket: [ +padX.toFixed(3), +padY.toFixed(3), +padZ.toFixed(3) ],
         floor: +floorY.toFixed(3),
-        below: +(floorY - padY).toFixed(3),
+        below: +(mesh ? -clearance : floorY - padY).toFixed(3),
+        geometry: mesh ? 'blade-rubber-handle' : 'center-only',
         point: [ +p.x.toFixed(3), +p.y.toFixed(3), +p.z.toFixed(3) ],
       });
     }
@@ -767,6 +876,72 @@ class PhysicsWatchdog {
     return out;
   }
 
+  /** Медиана/максимум по списку чисел — без внешних зависимостей. */
+  _stats(list) {
+    const xs = (list || []).filter(Number.isFinite).sort((a, b) => a - b);
+    if (!xs.length) return null;
+    const at = p => xs[Math.min(xs.length - 1, Math.max(0, Math.round((xs.length - 1) * p)))];
+    return { n: xs.length, median: at(0.5), p90: at(0.9), max: xs[xs.length - 1] };
+  }
+
+  /** Апекс мяча над столом в сантиметрах: сколько он поднимался после удара
+   *  и после отскока. Именно это видит игрок, а не пиксели за краем кадра. */
+  apexSummary() {
+    const rows = this.apexLog || [];
+    const pick = (who, key) => this._stats(rows.filter(r => (who === 'all' || r.side === who))
+      .map(r => r[key]));
+    const shape = who => ({
+      afterStroke: pick(who, 'apexCm'),
+      afterBounce: pick(who, 'bounceApexCm'),
+      ballSpeed: pick(who, 'speed'),
+    });
+    /* По ударам: видно, что у SERVE_TOP и LOB дуга выше, чем у DRIVE. */
+    const byStroke = {};
+    for (const r of rows) {
+      const k = r.strokeId || 'none';
+      (byStroke[k] = byStroke[k] || []).push(r);
+    }
+    for (const k of Object.keys(byStroke)) {
+      const list = byStroke[k];
+      byStroke[k] = { n: list.length, apex: this._stats(list.map(r => r.apexCm)),
+        afterBounce: this._stats(list.map(r => r.bounceApexCm)) };
+    }
+    return {
+      unit: 'cm over the table surface',
+      all: shape('all'), player: shape(1), opponent: shape(-1), byStroke,
+      rows: rows.length,
+      recent: rows.slice(-20),
+    };
+  }
+
+  /** Сколько игра подтягивает клинок к мячу перед ударом бота. */
+  snapSummary() {
+    const shots = (this.aiShots || []).filter(s => Number.isFinite(s.snap));
+    return { ...(this._stats(shots.map(s => s.snap)) || { n: 0, median: null, p90: null, max: null }),
+      contract: 0.42 };
+  }
+
+  /** Замеры бота по УРОВНЯМ: заявленный потолок один, а фактический темп
+   *  и высота мяча по уровням разные — по этому блоку видно, что “уровень
+   *  сильнее” означает больше скорости, а не больше высоты. */
+  aiLevelSummary() {
+    const shots = this.aiShots || [];
+    const levels = Array.from(new Set(shots.map(s => s.level).filter(Number.isFinite))).sort();
+    const out = {};
+    for (const level of levels) {
+      const mine = shots.filter(s => s.level === level);
+      out[level] = {
+        shots: mine.length,
+        speeds: this._stats(mine.map(s => s.after && s.after.speed)),
+        vmag: this._stats(mine.map(s => s.vmag)),
+        apex: this._stats(mine.map(s => s.apexCm)),
+        snap: this._stats(mine.map(s => s.snap)),
+        overCeiling: mine.filter(s => Number.isFinite(s.vmag) && Number.isFinite(s.limit) && s.vmag > s.limit).length,
+      };
+    }
+    return out;
+  }
+
   report() {
     const classes = {};
     for (const [name, codes] of Object.entries(WATCHDOG_CLASSES)) {
@@ -783,7 +958,9 @@ class PhysicsWatchdog {
       lastContact: this.lastContact,
       limits: { speed: { vmax: (wdStrokeConfig() && wdStrokeConfig().racket || {}).vmax || 19.5 },
         spin: { cap: this.spinLimit() } },
-      aiShots: { total: (this.aiShots || []).length, ring: (this.aiShots || []).slice() },
+      apex: this.apexSummary(),
+      aiShots: { total: (this.aiShots || []).length, ring: (this.aiShots || []).slice(),
+        snap: this.snapSummary(), byLevel: this.aiLevelSummary() },
       probe: { ...this.probe },
       gates,
     };
@@ -1032,6 +1209,40 @@ class PhysicsWatchdog {
         w.substep({ dt: 1 / 600, time: 6.001, p0: { x: 0, y: 1.1, z: 1.88 }, p1: { x: 0, y: 1.1, z: 1.88 },
           ball: { v: { x: 0, y: 0, z: 4 }, speed: 4 }, hitSeq: 9 });
         add('clean serve: no tickets', 0, w.tickets.length);
+      }
+      /* --- 1в. мяч уже ПОД плитой (промах, укатился) — не баг ---------- */
+      {
+        const w = fresh(); const PHc = WD_PH();
+        for (let i = 0; i < 6; i++) w.substep({ dt: 1 / 600, time: i / 600,
+          p0: { x: 0.3, y: PHc.TABLE_Y - 0.40, z: 0.4 },
+          p1: { x: 0.3, y: PHc.TABLE_Y - 0.42, z: 0.4 },
+          ball: { v: { x: 0, y: -3, z: 0.2 }, speed: 3 }, hitSeq: 0 });
+        add('ball rolling under the plate: allowed', 0, w.counts.BALL_INTO_TABLE);
+      }
+      /* --- 7. апекс мяча в сантиметрах над столом ---------------------- */
+      {
+        const w = fresh(); const PHc = WD_PH();
+        w.substep({ dt: 1 / 600, time: 0, p0: { x: 0, y: PHc.TABLE_Y + 0.3, z: 1.0 },
+          p1: { x: 0, y: PHc.TABLE_Y + 0.3, z: 1.0 },
+          ball: { v: { x: 0, y: 3, z: -4 }, speed: 5 }, hitSeq: 0 });
+        w.stroke({ time: 0.01, side: 1, strokeId: 'LOB', vmag: 5,
+          ball: { v: { x: 0, y: 3, z: -4 }, w: { x: 0, y: 0, z: 0 } } });
+        let y = PHc.TABLE_Y + 0.3;
+        for (let i = 1; i <= 60; i++) {
+          y += 0.02;
+          w.substep({ dt: 1 / 600, time: 0.01 + i / 600, p0: { x: 0, y: y - 0.02, z: 1.0 },
+            p1: { x: 0, y, z: 1.0 }, ball: { v: { x: 0, y: 1, z: -4 }, speed: 4 }, hitSeq: 0 });
+        }
+        w.tableContact({ time: 0.2, edge: 0, edgeAxis: 'z', side: -1, speed: 4 });
+        const row = w.apexLog[w.apexLog.length - 1] || null;
+        add('apex is measured in cm over the table', 'yes', row && row.apexCm > 100 ? 'yes' : 'no');
+      }
+      /* --- 8. подтяжка клинка к мячу записана ------------------------- */
+      {
+        const w = fresh();
+        w.contact({ time: 2, side: -1, contact: { x: 0, y: 1.0, z: -1.6 },
+          pad: { pos: { x: 0, y: 1.0, z: -1.6 } }, padBefore: { x: 0.2, y: 1.0, z: -1.6 } });
+        add('blade snap distance is recorded', 0.2, w.lastContact.reach);
       }
       return checks;
     };

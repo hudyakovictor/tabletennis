@@ -3,7 +3,7 @@
  *
  *  Layers:
  *   1. Visual: particles, flash, screen effects
- *   2. Audio: layered sounds based on quality/spin/speed
+ *   2. Audio: one physical contact, no duplicate whoosh/score sounds
  *   3. Haptic: variable vibration patterns
  *   4. Camera: micro-reaction on impact
  *
@@ -42,14 +42,6 @@ const HIT_FEEDBACK = {
     POINT_WON: [12, 28, 12, 28],
     SERVE: [6, 18, 6],
   },
-
-  // Audio layering
-  AUDIO: {
-    woodHitBase: 0.4,
-    rubberFrictionBase: 0.3,
-    whooshBase: 0.2,
-    spinVolumeMultiplier: 0.3,
-  },
 };
 
 /**
@@ -63,7 +55,7 @@ class HitFeedbackSystem {
     this._audio = game.audio;
     this._camera = game;
     this._hapticEnabled = true;
-    this._lastHitTime = 0;
+    this._lastHitTime = -Infinity;
     this._cooldown = 0.05;  // prevent feedback spamming
   }
 
@@ -92,8 +84,8 @@ class HitFeedbackSystem {
     const spinType = this.determineSpinType(spin, ctx.side);
 
     // Quality-based scaling
-    const quality = clamp(ctx.quality || 1, 0, 1);
-    const speed = ctx.speed || 0;
+    const quality = clamp(Number.isFinite(ctx.quality) ? ctx.quality : 1, 0, 1);
+    const speed = Number.isFinite(ctx.speed) ? ctx.speed : 0;
 
     // ---- VISUAL FEEDBACK ----
     this.visual(quality, speed, spinType, spinMag, ctx);
@@ -147,46 +139,14 @@ class HitFeedbackSystem {
   }
 
   /**
-   * Audio feedback: layered sounds.
+   * Game owns contact, swing, net, edge and point events. Standalone callers
+   * may dispatch their contact here; feedback never fabricates another event.
    */
   audio(quality, speed, spinType, spinMag, ctx) {
     const audio = this._audio;
-    if (!audio || !audio.initialized) return;
-
-    // ---- Layer 1: Wood impact (body sound) ----
-    // Quality determines wood vs rubber ratio
-    const woodVolume = HIT_FEEDBACK.AUDIO.woodHitBase * (1 - quality * 0.4);
-    // Higher quality = more wood, less rubber
-    const woodPitch = 0.9 + quality * 0.2 + speed * 0.005;
-
-    if (!ctx.skipBaseHitAudio && audio.hitRacket) {
-      audio.hitRacket(speed, 0, quality < 0.4);
-    }
-
-    // ---- Layer 2: Rubber friction (spin sound) ----
-    if (spinMag > 30) {
-      if (audio.whoosh) {
-        audio.whoosh(clamp(spinMag / 80, 0, 1));
-      }
-    }
-
-    // ---- Layer 3: Air whoosh (speed sound) ----
-    if (speed > 8 && spinMag <= 30) {
-      if (audio.whoosh) {
-        audio.whoosh(clamp((speed - 8) / 25, 0, 0.6));
-      }
-    }
-
-    // ---- Layer 4: Special event sounds ----
-    if (ctx.isNetCord && audio.hitNet) {
-      audio.hitNet();
-    }
-    if (ctx.isEdge && audio.hitEdge) {
-      audio.hitEdge();
-    }
-    if (ctx.isWinner && ctx.side > 0 && audio.point) {
-      audio.point(true);
-    }
+    if (!audio || !audio.ok || ctx.skipBaseHitAudio || ctx.preview) return;
+    if (audio.hitRacket) audio.hitRacket(speed, Number.isFinite(ctx.contactSlip) ? ctx.contactSlip : 0,
+      ctx.soft === true || quality < 0.4, ctx.contactId);
   }
 
   /**

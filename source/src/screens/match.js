@@ -49,16 +49,28 @@ Router.def('match', {
       GameHost.send('pause'); UI.openNotifications({ readOnly: true }); this.watchSheets();
     });
     el.querySelector('[data-act=diag-mark]').addEventListener('click', diagnosticMarkFrame);
-    /* Слоу-мо «разобрать траекторию»: свободный тумблер в движок; состояние
-       кнопки живёт здесь, движок лишь замедляет время розыгрыша. */
+    /* The engine confirms the effective inspector state and mode restrictions. */
     const smBtn = el.querySelector('[data-act=slowmo]');
     smBtn.addEventListener('click', () => {
-      const on = smBtn.getAttribute('aria-pressed') !== 'true';
-      smBtn.setAttribute('aria-pressed', String(on)); smBtn.classList.toggle('on', on);
-      GameHost.send('slowmo', { on }); haptic('select'); Sfx.soft();
+      if (smBtn.disabled || !GameHost.inspector?.allowed) return;
+      smBtn.disabled = true;
+      GameHost.send('slowmo', { on: !GameHost.inspector.effective }); haptic('select'); Sfx.soft();
     });
     const dv = el.querySelector('[data-act=dev]'); if (dv) dv.addEventListener('click', () => devZoneSheet());
+    this.syncSlowmo();
     this.intro();
+  },
+  syncSlowmo() {
+    const button = this.el && this.el.querySelector('.m-slowmo'); if (!button) return;
+    const inspector = GameHost.inspector;
+    button.disabled = !GameHost.calibrationReady || !inspector?.allowed;
+    button.classList.toggle('on', !!inspector?.effective); button.setAttribute('aria-pressed', String(!!inspector?.effective));
+  },
+  refreshLocale(el) {
+    I18n.localizeDOM(el, this.render()); this.syncSlowmo();
+    const serve = el.querySelector('.mx-srv');
+    if (serve && serve.classList.contains('on')) serve.textContent = this.st.server > 0 ? t('match.youServe') : t('match.oppServe');
+    return true;
   },
   later(fn, ms) { const t = setTimeout(() => this.alive && fn(), ms); this.timers.push(t); return t; },
   async intro() {
@@ -93,6 +105,7 @@ Router.def('match', {
     clearTimeout(this.bt); this.bt = setTimeout(() => b.classList.remove('on'), ms);
   },
   onMsg(m) {
+    if (this.alive && ['ready', 'settings', 'calibration', 'slowmo', 'calibrationPending', 'sessionKind'].includes(m.type)) this.syncSlowmo();
     const el = this.el, st = this.st; if (!this.alive || st.over && m.type !== 'replayEnd' && m.type !== 'matchEnd') return;
     const serveEl = el.querySelector('.m-serve'), rallyEl = el.querySelector('.m-rally'), rallyN = rallyEl.querySelector('b');
     if (m.type === 'serve') {
@@ -225,9 +238,10 @@ Router.def('match', {
       const r = document.createElement('div'); r.className = 'mx-replay';
       r.innerHTML = `<span class="rec"><i></i>${t('match.replay', { n: res.stats.maxRally })}</span><button class="b3 dark sm pe" data-a="skip">${t('common.next')} ›</button>`; mx.appendChild(r);
       const done = new Promise((ok) => {
-        const off = GameHost.on((x) => { if (x.type === 'replayEnd') { off(); ok(); } });
-        r.querySelector('[data-a=skip]').addEventListener('click', () => { GameHost.send('skipReplay'); off(); ok(); });
-        this.later(() => { off(); ok(); }, 16000);
+        const finish = this.replayResolve = () => { this.replayOff?.(); this.replayOff = null; this.replayResolve = null; ok(); };
+        this.replayOff = GameHost.on((x) => { if (x.type === 'replayEnd') finish(); });
+        r.querySelector('[data-a=skip]').addEventListener('click', () => { GameHost.send('skipReplay'); finish(); });
+        this.later(finish, 16000);
       });
       GameHost.send('replay');
       await done; if (!this.alive) return;
@@ -245,6 +259,7 @@ Router.def('match', {
   },
   leave() {
     this.alive = false; this.off && this.off(); this.timers.forEach(clearTimeout); clearTimeout(this.bt);
+    this.replayResolve?.(); this.replayOff?.(); this.replayOff = null; this.replayResolve = null;
     TGX.guard(false);
     if (this._mo) { this._mo.disconnect(); this._mo = null; }
     // fullscreen НЕ выключаем — весь путь (поиск → матч → итог) живёт в иммерсиве

@@ -1,11 +1,27 @@
 /* ---------- синтез звука (WebAudio, без файлов) ---------- */
 const Sfx = (() => {
   let ctx = null, master = null, noiseBuf = null;
+  const sources = new Map();
+  function stop() {
+    for (const [source, cleanup] of sources) { try { source.stop(); } catch (e) {} cleanup(); }
+    sources.clear();
+  }
+  function sync() {
+    const levels = repairAudioLevels(S.audioLevels, S.volume);
+    const gain = S.sfx !== false ? .55 * levels.master * levels.effects : 0;
+    if (master) { master.gain.cancelScheduledValues(ctx.currentTime); master.gain.value = gain; }
+    if (!gain) stop();
+    return gain;
+  }
+  function track(source, nodes) {
+    const cleanup = () => { sources.delete(source); source.onended = null; for (const node of [source, ...nodes]) try { node.disconnect(); } catch (e) {} };
+    sources.set(source, cleanup); source.onended = cleanup;
+  }
   function ensure() {
-    if (ctx) { if (ctx.state === 'suspended') ctx.resume(); return true; }
+    if (ctx) { sync(); if (ctx.state === 'suspended') ctx.resume().catch(() => {}); return true; }
     try {
       ctx = new (window.AudioContext || window.webkitAudioContext)();
-      master = ctx.createGain(); master.gain.value = .55;
+      master = ctx.createGain(); sync();
       const comp = ctx.createDynamicsCompressor(); comp.threshold.value = -14; comp.ratio.value = 4;
       master.connect(comp); comp.connect(ctx.destination);
       noiseBuf = ctx.createBuffer(1, ctx.sampleRate * .5, ctx.sampleRate);
@@ -13,22 +29,23 @@ const Sfx = (() => {
       return true;
     } catch (e) { return false; }
   }
-  const ok = () => S.sfx && ensure();
+  const ok = () => sync() > 0 && ensure();
   function tone(freq, dur, { type = 'sine', vol = .3, slide = 0, delay = 0, attack = .004 } = {}) {
     const t = ctx.currentTime + delay; const o = ctx.createOscillator(); const g = ctx.createGain();
     o.type = type; o.frequency.setValueAtTime(freq, t); if (slide) o.frequency.exponentialRampToValueAtTime(Math.max(20, freq * slide), t + dur);
     g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(vol, t + attack); g.gain.exponentialRampToValueAtTime(.0001, t + dur);
-    o.connect(g); g.connect(master); o.start(t); o.stop(t + dur + .02);
+    o.connect(g); g.connect(master); track(o, [g]); o.start(t); o.stop(t + dur + .02);
   }
   function noise(dur, { f = 2000, q = 1, vol = .3, type = 'bandpass', delay = 0, sweep = 0 } = {}) {
     const t = ctx.currentTime + delay; const s = ctx.createBufferSource(); s.buffer = noiseBuf;
     const fl = ctx.createBiquadFilter(); fl.type = type; fl.frequency.setValueAtTime(f, t); fl.Q.value = q;
     if (sweep) fl.frequency.exponentialRampToValueAtTime(f * sweep, t + dur);
     const g = ctx.createGain(); g.gain.setValueAtTime(vol, t); g.gain.exponentialRampToValueAtTime(.0001, t + dur);
-    s.connect(fl); fl.connect(g); g.connect(master); s.start(t); s.stop(t + dur + .02);
+    s.connect(fl); fl.connect(g); g.connect(master); track(s, [fl, g]); s.start(t); s.stop(t + dur + .02);
   }
   return {
     unlock: ensure,
+    sync, stop,
     tap() { if (!ok()) return; tone(880, .06, { type: 'triangle', vol: .18, slide: 1.4 }); },
     soft() { if (!ok()) return; tone(520, .07, { type: 'sine', vol: .14, slide: 1.2 }); },
     tab() { if (!ok()) return; tone(660, .08, { type: 'triangle', vol: .16, slide: 1.5 }); tone(990, .06, { type: 'sine', vol: .08, delay: .03 }); },

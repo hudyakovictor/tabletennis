@@ -111,7 +111,7 @@ Router.def('train', {
     host.innerHTML = body; sc.scrollTop = top;
   },
   guideHTML(lesson = {}, state = {}) {
-    const feedback = state.feedback, example = feedback && this.catalog && this.catalog.strokes.find(s => s.id === feedback.expected.id);
+    const feedback = state.feedback || state.latestFeedback, example = feedback && this.catalog && this.catalog.strokes.find(s => s.id === feedback.expected.id);
     if (example && !(lesson.gesture && lesson.gesture.kind === 'tap')) lesson = { ...lesson, ...example };
     const controls = lesson.controls || {}, input = state.inputMode || this.inputMode;
     const fields = [[t('train.feature'), lesson.feature], [t('train.advantage'), lesson.advantage], [t('train.when'), lesson.when], [t('train.risk'), lesson.risk], [t('train.counter'), lesson.counter]];
@@ -276,6 +276,17 @@ Router.def('train', {
   },
   onMsg(m) {
     if (!this.alive) return;
+    if (m.type === 'preview' && this.previewing) {
+      if (m.active) return;
+      const back = this.previewBack || 'reference'; this.previewing = false; this.previewBack = null;
+      this.menu.hidden = !!this.active; this.live.hidden = !this.active;
+      this.showPanel(back, false);
+      if (m.opened === false || m.error) {
+        const status = this.dialog.querySelector('[data-demo-status]');
+        if (status) status.textContent = t('train.previewUnavailable');
+      }
+      return;
+    }
     const catalog = m.type === 'ready' ? m.trainingCatalog : m.type === 'trainingCatalog' ? m.catalog : null;
     if (catalog) { this.catalog = catalog; this.updateMenu(); }
     if (m.type === 'trainingProgress') this.updateMenu();
@@ -302,7 +313,7 @@ Router.def('train', {
     const key = [m.sessionId, m.id, m.stage, m.phase, quiz.prompt, quiz.explanation, m.phase === 'review' || m.phase === 'question' ? m.msg : ''].join('|');
     if (key !== this.phaseKey || this.answerPending && m.phase === 'question') {
       this.phaseKey = key; this.answerPending = false;
-      if (panel && this.overlay !== 'reference' && this.overlay !== 'pause') this.showPanel(panel);
+      if (panel && !this.previewing && this.overlay !== 'reference' && this.overlay !== 'pause') this.showPanel(panel);
     }
   },
   updateLive(m) {
@@ -323,7 +334,6 @@ Router.def('train', {
     q('[data-act=retry]').hidden = m.phase !== 'fail';
   },
   requiredPanel() {
-    if (this.last.phase === 'fail' && this.last.stage !== 'check') return 'feedback';
     return { intro: 'intro', question: 'question', review: 'review', done: 'finishing' }[this.last.phase] || null;
   },
   panelHTML(kind) {
@@ -354,7 +364,7 @@ Router.def('train', {
     }
     if (kind === 'feedback') {
       title = m.feedback && m.feedback.title || m.msg || t('train.tryAgain');
-      body = this.feedbackHTML(m.feedback) + demo();
+      body = this.feedbackHTML(m.feedback || m.latestFeedback) + demo();
       actions = btn('retry', t('train.retry'), 'green') + btn('reference', t('train.details')) + btn('academy', t('academy.title'));
     }
     if (kind === 'pause') {
@@ -383,7 +393,6 @@ Router.def('train', {
     this.dialog.innerHTML = this.panelHTML(kind); this.cover.hidden = false;
     this.menu.inert = true; this.live.inert = true;
     this.dialog.focus({ preventScroll: true });
-    if (['intro', 'feedback', 'reference'].includes(kind)) this.playDemo();
   },
   closePanel() {
     this.stopDemo(); this.overlay = null; this.cover.hidden = true; this.dialog.innerHTML = '';
@@ -407,31 +416,33 @@ Router.def('train', {
   playDemo(realPace = false) {
     this.stopDemo();
     const status = this.dialog.querySelector('[data-demo-status]'); if (!status) return;
-    const views = [...this.dialog.querySelectorAll('svg[data-demo-view]')].map((svg) => ({
-      ball: svg.querySelector('.academy-demo-ball'),
-      duration: svg.dataset.demoView === 'gesture' ? realPace ? Number(svg.dataset.demoDuration) || 180 : Math.max(900, (Number(svg.dataset.demoDuration) || 180) * 6) : 2400,
-      paths: ['incoming', 'recommended', 'gesture'].map((leg) => svg.querySelector(`[data-demo-leg="${leg}"]`)).filter(Boolean)
-    })).filter((view) => view.ball && view.paths.length && !view.ball.closest('details:not([open])') && view.ball.closest('svg').getBoundingClientRect().height > 0);
-    if (!views.length) return;
-    const position = (view, progress) => {
-      progress = Math.max(0, Math.min(1, progress));
-      const part = Math.min(view.paths.length - 1, Math.floor(progress * view.paths.length)), path = view.paths[part];
-      const p = path.getPointAtLength(path.getTotalLength() * Math.min(1, progress * view.paths.length - part));
-      view.ball.setAttribute('cx', p.x); view.ball.setAttribute('cy', p.y); view.ball.style.opacity = '1';
-    };
-    const reduced = () => S.rm || (this.motionQuery && this.motionQuery.matches);
-    if (reduced()) { views.forEach((view) => position(view, 1)); status.textContent = t('train.demoReduced'); return; }
-    status.textContent = t(realPace ? 'train.demoLive' : 'train.demoSlow'); const start = performance.now(), duration = Math.max(...views.map((view) => view.duration));
-    const frame = (now) => {
-      if (!this.alive || !this.overlay || !status.isConnected) { this.demoRAF = null; return; }
-      const progress = reduced() ? 1 : Math.min(1, (now - start) / duration);
-      views.forEach((view) => position(view, reduced() ? 1 : Math.min(1, (now - start) / view.duration)));
-      if (progress < 1) this.demoRAF = requestAnimationFrame(frame);
-      else { this.demoRAF = null; status.textContent = reduced() ? t('train.demoReduced') : t('train.demoFinished'); }
-    };
-    this.demoRAF = requestAnimationFrame(frame);
+    const item = this.active ? this.last.lesson || {} : this.selected(); if (!item) return;
+    const options = { rate: realPace ? 1 : .25 };
+    if (this.active ? this.active.mode === 'course' : this.mode === 'course') options.lessonId = this.last.id || item.id;
+    else { options.technique = this.active && this.active.stroke || item.id; options.strokeId = item.stroke; }
+    this.previewBack = this.overlay; this.previewing = true;
+    this.cover.hidden = this.menu.hidden = this.live.hidden = true;
+    if (!GameHost.openPreview(options)) {
+      this.previewing = false; this.previewBack = null; this.cover.hidden = false;
+      this.menu.hidden = !!this.active; this.live.hidden = !this.active; status.textContent = t('train.previewUnavailable');
+    }
   },
-  stopDemo() { if (this.demoRAF != null) cancelAnimationFrame(this.demoRAF); this.demoRAF = null; },
+  stopDemo() {
+    if (this.previewing) { this.previewing = false; this.previewBack = null; GameHost.closePreview(); }
+  },
+  refreshLocale() {
+    if (!this.alive) return;
+    I18n.localizeDOM(this.el, this.render());
+    this.updateMenu(); if (this.active) this.updateLive(this.last);
+    if (this.overlay && !this.previewing) {
+      const scroll = this.dialog.querySelector('.academy-dialog-scroll'), top = scroll && scroll.scrollTop || 0;
+      const focus = document.activeElement && document.activeElement.dataset;
+      this.dialog.innerHTML = this.panelHTML(this.overlay);
+      this.dialog.querySelector('.academy-dialog-scroll').scrollTop = top;
+      const button = focus && (focus.act ? this.dialog.querySelector(`[data-act="${focus.act}"]`) : focus.answer ? this.dialog.querySelector(`[data-answer="${focus.answer}"]`) : null);
+      if (button) button.focus({ preventScroll: true });
+    }
+  },
   cancel() {
     if (this.sessionId) this.retired.add(this.sessionId);
     this.active = null; this.sessionId = null; this.summary = null;
@@ -459,5 +470,9 @@ Router.def('train', {
     this.el.removeEventListener('click', this.click); this.el.removeEventListener('keydown', this.keydown); this.el.removeEventListener('pointerdown', this.pointerdown);
     this.cancel();
   },
-  onBack() { if (this.active) this.toMenu(); else this.exit(); }
+  onBack() {
+    if (this.previewing) { GameHost.closePreview(); return; }
+    if (this.overlay === 'reference') { this.returnReference(); return; }
+    if (this.active) this.toMenu(); else this.exit();
+  }
 });

@@ -46,8 +46,31 @@ const I18n = {
     S.lang = lang; saveNow();
     if (typeof GameHost !== 'undefined') GameHost.send('locale', { lang });
     if (typeof Nav !== 'undefined' && Nav.build) Nav.build();
-    if (typeof Sheet !== 'undefined' && Sheet.cur) Sheet.close(true);
-    if (typeof Router !== 'undefined' && Router.cur) Router.go(Router.cur, { replace: true, mode: 'push' });
+    if (typeof Router !== 'undefined' && !Router.refreshLocale?.()) {
+      const active = Router.active;
+      if (active && typeof active.d.render === 'function') this.localizeDOM(active.el, active.d.render(active.data));
+    }
+    if (typeof document.getElementById === 'function' && document.getElementById('langseg') && typeof openSettings === 'function') openSettings();
+  },
+  localizeDOM(el, markup, skip = '.num, [data-cur] .v, .sb-score, .m-rally b, .m-banner, .mx-count, .mx-srv') {
+    if (!el || typeof markup !== 'string') return;
+    const template = document.createElement('template'); template.innerHTML = markup;
+    const sync = (old, fresh) => {
+      if (old.nodeType !== fresh.nodeType) return;
+      if (old.nodeType === 3) {
+        if (!old.parentElement?.closest(skip) && old.nodeValue !== fresh.nodeValue) old.nodeValue = fresh.nodeValue;
+        return;
+      }
+      if (old.nodeType === 1) {
+        if (old.tagName !== fresh.tagName) return;
+        for (const key of ['title', 'aria-label', 'aria-description', 'placeholder'])
+          if (fresh.hasAttribute(key)) old.setAttribute(key, fresh.getAttribute(key));
+      }
+      const a = [...old.childNodes], b = [...fresh.childNodes];
+      if (a.length === b.length) for (let i = 0; i < a.length; i++) sync(a[i], b[i]);
+    };
+    const current = [...el.childNodes], fresh = [...template.content.childNodes];
+    if (current.length === fresh.length) current.forEach((node, i) => sync(node, fresh[i]));
   },
   _lookup(key) {
     const d = this.dicts[this.lang];

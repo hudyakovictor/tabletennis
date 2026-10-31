@@ -114,11 +114,7 @@ function texRubber(color) {
   const rg = g.createRadialGradient(S / 2, S / 2, S * 0.05, S / 2, S / 2, S * 0.52);
   rg.addColorStop(0, 'rgba(255,255,255,0.10)'); rg.addColorStop(1, 'rgba(0,0,0,0.35)');
   g.fillStyle = rg; g.fillRect(0, 0, S, S);
-  // a logo pressed into the topsheet
-  g.globalAlpha = 0.16; g.fillStyle = '#fff';
-  g.font = '800 30px ui-sans-serif,system-ui,sans-serif'; g.textAlign = 'center';
-  g.fillText('TOPSPIN', S / 2, S * 0.58);
-  g.globalAlpha = 1;
+  // logo removed per requirements
   return c;
 }
 

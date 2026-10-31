@@ -1,7 +1,7 @@
 /* =====================================================================
  *  UI — HUD, menus, the 2D coaching layer.
  *
- *  One evidence-based shot badge in the reading band, one score, and
+ *  Contact labels on the 2D overlay, one score, and
  *  timing brackets on the actual ball. No competing input marker.
  * ===================================================================== */
 'use strict';
@@ -14,7 +14,8 @@ class UI {
     this.game = null;
     this.fx = $('#fx');
     this.fxg = this.fx.getContext('2d');
-    this.shotTimer = 0;
+    this.hitLabels = [];
+    this._labelShotId = -1;
     this.noteTimer = 0;
     this.ripples = [];
     this.captureDebug = false;
@@ -28,7 +29,7 @@ class UI {
     this.reducedMotion = !!(this.motionQuery && this.motionQuery.matches);
     if (this.motionQuery) {
       const onMotionPreference = (event) => {
-        this.reducedMotion = !!event.matches;
+        this.reducedMotion = !!(event.matches || this.game && this.game.motionOff);
         if (this.reducedMotion) this._lastRibbon = null;
       };
       if (this.motionQuery.addEventListener) this.motionQuery.addEventListener('change', onMotionPreference);
@@ -48,8 +49,12 @@ class UI {
     this.dialogObserver = typeof MutationObserver !== 'undefined' ? new MutationObserver(() => this.syncDialogFocus()) : null;
     if (this.dialogObserver) this.dialogObserver.observe(document.body, { subtree: true, attributes: true, attributeFilter: ['class'] });
     document.addEventListener('keydown', (event) => {
+      if (this.game?.preview?.active) return;
       if (event.key === 'Tab') this.trapDialogFocus(event);
       if (event.key === 'Escape' && $('#shotLab').classList.contains('on')) { event.preventDefault(); this.closeShotLab(); }
+      else if (event.key === 'Escape' && this.trainingReference && this.game?.training) {
+        event.preventDefault(); this.trainingReference = false; this.trainSync(this.game.training);
+      }
     }, true);
   }
   attach(game) {
@@ -90,6 +95,7 @@ class UI {
       .filter(el => !el.hidden && el.getAttribute('aria-hidden') !== 'true' && el.getClientRects().length > 0);
   }
   syncDialogFocus() {
+    if (this.game?.preview?.active) return;
     const dialog = this.activeDialog();
     if (dialog === this._focusDialog) return;
     this._focusDialog = dialog;
@@ -329,7 +335,17 @@ class UI {
     $('#tdAgain').addEventListener('click', startTrain);
     $('#trSkip').addEventListener('click', () => { const t = this.game.training; if (t && this.game.paused) { t.skip(); this.game.setPaused(false); this.game.audio.ui('click'); } });
     $('#trExit').addEventListener('click', () => { if (this.game.paused) this.showMainMenu(); });
-    $('#trReference').addEventListener('click', () => { if (this.game.training && this.game.paused) { this.trainingReference = true; this.trainSync(this.game.training); } });
+    $('#trReference').addEventListener('click', () => {
+      if (this.game.training && this.game.paused) {
+        this.trainingReference = true;
+        this.trainSync(this.game.training);
+      }
+    });
+    $('#tIPreview').addEventListener('click', () => {
+      const t = this.game.training;
+      if (t) this.game.openTrainingPreview({ lessonId: t.mode === 'course' ? t.S.id : undefined,
+        strokeId: t.S.stroke, technique: t.S.technique || t.S.stroke });
+    });
     $('#trRepeat').addEventListener('click', () => { if (this.game.training) { this.game.training.action('restart'); this.game.setPaused(false); } });
     $('#trLesson').addEventListener('click', () => this.game.startTraining({ mode: 'course', lessonId: $('#trainLesson').value }));
     $('#trPractice').addEventListener('click', () => this.game.startTraining({ mode: 'stroke', stroke: $('#trainStroke').value }));
@@ -787,17 +803,25 @@ class UI {
   applySetting(k, v) {
     const g = this.game; if (!g) return;
     const s = g.settings;
+    const calibrationKey = k === 'camPitch' ? 'camHeight' : k;
+    if (CALIBRATION_REGISTRY.some(entry => entry.key === calibrationKey)) {
+      let raw = Number(v);
+      if (k === 'spinGain') raw = (raw / 100 - .5) / 1.1 * 100;
+      else if (k === 'arcSens') raw = (raw / 100 - .6) / 1.2 * 100;
+      else if (k === 'camZoom') raw = raw <= 100 ? (raw / 100 - CAM_ADJUST.zoomMin) / (1 - CAM_ADJUST.zoomMin) * 50
+        : 50 + (raw / 100 - 1) / (CAM_ADJUST.zoomMax - 1) * 50;
+      else if (k === 'camPitch') raw = raw <= 0 ? 50 - raw / CAM_ADJUST.pitchMin * 50 : 50 + raw / CAM_ADJUST.pitchMax * 50;
+      applyGameCalibration(g, calibrationKey, raw);
+      this.syncSettings(); g.saveSettings(); return;
+    }
     switch (k) {
       // Gameplay assistance is an authored rule, not a player preference.
       case 'hitZone': case 'assist': case 'posAssist': case 'sens': case 'zone': return;
       case 'vol': s.volume = v / 100; g.audio.setVolume(v / 100); break;
       case 'cam': s.camera = v; break;
-      /* Сamera trim sliders: live, quiet (no click per tick), self-saving. */
-      case 'camZoom': g.setCamZoom(v / 100); return;
-      case 'camPitch': g.setCamPitch(v); return;
       case 'quality': s.quality = v; g.R.quality = v; g.resize(); break;
       case 'hand': case 'grip': g.changePaddlePreference(k, v); break;
-      case 'trail': s.showTrail = v === 'on'; break;
+      case 'trail': s.showTrail = v === 'on'; refreshGameCalibrationPolicy(g, 'trailLen'); break;
       case 'predict': s.showPredict = v === 'on'; break;
       case 'tele': s.showTele = v === 'on'; $('#spin').classList.toggle('on', s.showTele); break;
       case 'coach':
@@ -811,14 +835,7 @@ class UI {
         break;
       case 'haptics': s.haptics = v === 'on'; if (s.haptics) g.buzz(12); break;
       case 'target': s.targetScore = +v; $('#toWin').textContent = v; break;
-      /* Калибровка закрутки: ползунки в процентах, хранится множитель. */
-      case 'spinGain': s.spinGain = clamp(v / 100, 0.5, 1.6); break;
-      case 'arcSens': s.arcSens = clamp(v / 100, 0.6, 1.8); break;
       default: break;
-    }
-    if (k === 'spinGain' || k === 'arcSens') {
-      const val = String(Math.round(s[k] * 100));
-      $$('input[type=range][data-set="' + k + '"]').forEach(r => { if (r.value !== val) r.value = val; });
     }
     g.saveSettings();
     g.audio.ui('click');
@@ -894,27 +911,53 @@ class UI {
     if (document.body.dataset.aiLvl !== lvl) document.body.dataset.aiLvl = lvl;
   }
 
-  showShot() { this.syncShotFeedback(); }
-  syncShotFeedback() {
-    const entry = this.game && this.game.shotJournal && this.game.shotJournal.latest;
-    if (!entry) { this._shotEntry = null; $('#shot').classList.remove('on'); return; }
-    if (entry === this._shotEntry && entry.revision === this._shotRevision) return;
-    this._shotEntry = entry; this._shotRevision = entry.revision;
-    const view = shotHudView(entry);
-    if (!view) return;
-    const el = $('#shot');
-    $('#shotName').textContent = view.title;
-    $('#shotStatus').textContent = view.status;
-    $('#shotMeta').textContent = view.metrics;
-    el.dataset.tone = view.tone; el.classList.add('on');
-    /* Подсветка ИМЕННО этого удара: имя вспыхивает цветом архетипа
-     * (накат — свой цвет, боковая — свой), чтобы глаз связывал жест,
-     * название и полёт мяча без чтения мелкого текста. */
-    const stCol = (typeof STROKES !== 'undefined' && entry.strokeId && STROKES[entry.strokeId])
-      ? STROKES[entry.strokeId].col : null;
-    el.style.setProperty('--shotc', stCol || '#ffd34d');
-    el.classList.remove('pop'); void el.offsetWidth; el.classList.add('pop');
-    this.shotTimer = 7;
+  clearShotFeedback() { this.hitLabels.length = 0; this._labelShotId = -1; }
+  showShot(info, now = performance.now() / 1000) {
+    const g = this.game, stroke = info && info.stroke;
+    const point = info && shotVec(info.contactPoint), velocity = info && shotVec(info.v), spin = info && shotVec(info.w);
+    if (!g || g.demoMode || g.preview?.active || !info || info.side !== 1 || !stroke || !STROKES[stroke.id] ||
+        !point || !velocity || !spin || !Number.isFinite(info.shotId) || info.shotId <= this._labelShotId) return false;
+    this.syncShotFeedback(now);
+    this._labelShotId = info.shotId;
+    const name = { SERVE_TOP: 'TOPSPIN SERVE', SERVE_BACK: 'BACKSPIN SERVE', SERVE_SIDE: 'SIDE SERVE',
+      SERVE_FAST: 'FAST SERVE', SERVE_NO_SPIN: 'NO-SPIN SERVE', CHOP_BLOCK: 'CHOP BLOCK' }[stroke.id] || stroke.id;
+    for (const label of this.hitLabels) label.until = Math.min(label.until, now + .3);
+    this.hitLabels.push({ shotId: info.shotId, name, color: STROKES[stroke.id].col, point,
+      rps: Math.round(measureShotSpin(spin, velocity).totalRps), at: now, until: now + 1.5 });
+    if (this.hitLabels.length > 2) this.hitLabels.shift();
+    return true;
+  }
+  syncShotFeedback(now = performance.now() / 1000) {
+    for (let i = this.hitLabels.length - 1; i >= 0; i--)
+      if (now >= this.hitLabels[i].until) this.hitLabels.splice(i, 1);
+  }
+  drawShotLabels(c, W, H, d, now = performance.now() / 1000) {
+    this.syncShotFeedback(now);
+    const g = this.game;
+    if (!this.hitLabels.length || !g || g.paused || g.demoMode || g.preview?.active || [GS.MENU, GS.MATCH_END].includes(g.state)) return;
+    const rect = this.fx.getBoundingClientRect(), margin = 12 * d;
+    const font = clamp(W / d * .06, 20, 30) * d, unit = ET.lang() === 'en' ? 'rps' : 'об/с';
+    const controls = $$('#score, #topright, #slowmoHud, #playband').filter(el => el.getClientRects().length);
+    c.save(); c.textAlign = 'left'; c.textBaseline = 'bottom'; c.lineJoin = 'round';
+    for (const label of this.hitLabels) {
+      const p = g.project(label.point, this._shotProjection || (this._shotProjection = {}));
+      if (!p || !p.ok || !Number.isFinite(p.x) || !Number.isFinite(p.y)) continue;
+      const pop = g.reducedMotion || this.reducedMotion ? 1 : 1 + .08 * Math.max(0, 1 - (now - label.at) / .16);
+      c.font = '800 ' + font * pop + 'px sans-serif';
+      const text = label.name + ' ' + label.rps + ' ' + unit, width = c.measureText(text).width, height = font * pop;
+      const x = clamp(p.x * W - width / 2, margin, Math.max(margin, W - width - margin));
+      let y = clamp(p.y * H - 30 * d, height + margin, Math.max(height + margin, H - margin));
+      for (const el of controls) {
+        const box = el.getBoundingClientRect(), left = (box.left - rect.left) * d, top = (box.top - rect.top) * d;
+        if (x < left + box.width * d && x + width > left && y > top && y - height < top + box.height * d)
+          y = clamp(p.y * H + 30 * d + height, height + margin, Math.max(height + margin, H - margin));
+      }
+      c.globalAlpha = clamp((label.until - now) / .55, 0, 1);
+      c.lineWidth = 2.5 * d; c.strokeStyle = '#080c14'; c.fillStyle = label.color;
+      c.shadowColor = 'rgba(0,0,0,.65)'; c.shadowBlur = 4 * d;
+      c.strokeText(text, x, y); c.fillText(text, x, y);
+    }
+    c.restore();
   }
   openShotLab() {
     this.syncSettings();
@@ -1142,14 +1185,15 @@ class UI {
       }
       for (const [id, key] of [['trReference', 'reference'], ['trRepeat', 'repeat'], ['trLesson', 'lessonSelect'], ['trPractice', 'strokeSelect'], ['trAccuracy', 'targetSelect']]) $('#' + id).textContent = ET('academy.' + key);
     }
-    const correction = t.phase === 'fail' && t.stage !== 'check';
-    const modal = ['intro', 'question', 'review'].includes(t.phase) || correction || this.trainingReference;
+    const modal = ['intro', 'question', 'review'].includes(t.phase) || this.trainingReference;
     $('#train').classList.toggle('ti-hide', modal); $('#tIntro').classList.toggle('on', modal);
     if (!modal || typeof window !== 'undefined' && window.__TT_EMBED) return;
     const key = [t.sessionId, t.step, t.phase, t.stage, this.trainingReference, this.inputMode, ET.lang(), t.msg].join('|');
     if (this._tIntroKey === key) return;
     this._tIntroKey = key;
-    const view = trainingLessonView(S), info = $('#tIInfo'), feedbackView = correction || this.trainingReference ? t.feedback : null; info.replaceChildren();
+    const view = trainingLessonView(S), info = $('#tIInfo'), feedbackView = this.trainingReference || t.phase === 'review' && !t.checkPassed ? t.feedback || t.latestFeedback : null; info.replaceChildren();
+    $('#tIPreview').hidden = t.stage === 'check' || !['intro', 'review'].includes(t.phase) && !this.trainingReference;
+    $('#tIPreview').textContent = '3D';
     $('#tINo').textContent = ET('ui.lesson', { n: t.step + 1, total: TRAIN_STEPS.length });
     $('#tITitle').textContent = feedbackView ? feedbackView.title : view.title; $('#tIGoal').textContent = view.goal;
     $('#tITip').textContent = trainingTip(S, this.inputMode); $('#tIWait').textContent = feedbackView ? feedbackView.correction : t.msg || '';
@@ -1170,7 +1214,7 @@ class UI {
       }
     }
     const el = $('#tIDiagram'); el.replaceChildren();
-    if (t.phase === 'intro' || this.trainingReference || correction) {
+    if (t.phase === 'intro' || this.trainingReference) {
       const gesture = feedbackView ? feedbackView.expected.gesture : view.gesture, actual = feedbackView && feedbackView.actual.gesture;
       const ps = gesture.points, played = actual && actual.points || [], ratio = actual && actual.viewport[0] > 0 ? actual.viewport[1] / actual.viewport[0] : 1;
       const all = [...ps, ...played], scale = Math.min(400, 125 / Math.max(.18, ...all.map(p => Math.abs(p[0]))), 66 / Math.max(.16, ...all.map(p => Math.abs(p[1]) * ratio)));
@@ -1188,8 +1232,8 @@ class UI {
     }
     $('#tIStart').hidden = t.phase !== 'intro' && !this.trainingReference;
     $('#tIStart').textContent = ET('academy.' + (this.trainingReference ? 'back' : t.stage === 'check' ? 'check' : 'start'));
-    $('#tIRetry').hidden = !correction && (t.phase !== 'review' || t.checkPassed) || this.trainingReference;
-    $('#tIRetry').textContent = ET(correction ? 'academy.motion.retry' : 'academy.retry');
+    $('#tIRetry').hidden = t.phase !== 'review' || t.checkPassed || this.trainingReference;
+    $('#tIRetry').textContent = ET('academy.retry');
     $('#tINext').hidden = t.phase !== 'review' || this.trainingReference;
     $('#tINext').textContent = ET('academy.' + (t.checkPassed ? 'continue' : 'start'));
   }
@@ -1593,7 +1637,6 @@ class UI {
     if (!this.captureDebug && !this.drawCoach(c, W, H, d) && this.game && this.game.training && this.game.training.guide !== 'none') this.drawStrikeRing(c, W, H, d);
     /* направление закрутки рисуется поверх кольца: мяч маленький, ему нужен
      * свой слой, а не попытка разглядеть шов в 8 пикселях */
-    if (!this.captureDebug) this.drawSpinMark(c, W, H, d, dt);
     this.drawCaptureDebug(c, W, H, d);
     this.syncNativeCursor();
 
@@ -1608,7 +1651,7 @@ class UI {
     /* След пальца из калибровки: 0.35× .. 1.25× по толщине и яркости. */
     const trailK = (g._cal && Number.isFinite(g._cal.fingerTrail))
       ? lerp(0.35, 1.25, clamp(g._cal.fingerTrail, 0, 1)) : 1;
-    if (!this.captureDebug && sw.active && sw.samples.length > 1) {
+    if (!this.captureDebug && !g.reducedMotion && sw.active && sw.samples.length > 1) {
       const pts = sw.samples;
       const n = pts.length;
       c.lineCap = 'round'; c.lineJoin = 'round';
@@ -1676,7 +1719,7 @@ class UI {
     }
     c.globalAlpha = 1;
 
-    // Live words are DOM text in the lower play band, never painted on the table.
+    this.drawShotLabels(c, W, H, d);
   }
 
   ripple(x, y, col) { if (!this.reducedMotion) this.ripples.push({ x, y, col, t: 0, life: 0.55 }); }
@@ -1747,7 +1790,6 @@ class UI {
     if (showRally) rb.innerHTML = `РАЛЛИ <b>${g.rally}</b> · РЕКОРД <b>${Math.max(g.bestRally, g.rally)}</b>`;
 
     this.syncShotFeedback();
-    if (this.shotTimer > 0) { this.shotTimer -= dt; if (this.shotTimer <= 0) $('#shot').classList.remove('on'); }
     if (this.noteTimer > 0) { this.noteTimer -= dt; if (this.noteTimer <= 0) this.hideNote(); }
 
     if (g.training && g.training._uiStamp !== g.training.phase + g.training.done + g.training.step + g.training.msg) {

@@ -108,20 +108,38 @@ function paddleFaceAngles(normal) {
  * and drawing happen in the same render frame. No frame-counted timers. */
 class PaddleStrokeMotion {
   constructor() { this.reset(); }
-  reset() { this.active = false; this.stage = 'ready'; this.elapsed = 0; this.fresh = false; }
-  contact(normal, roll, stroke, grip, hand, forehand = true, followEnabled = true) {
+  reset() { this.active = false; this.stage = 'ready'; this.elapsed = 0; this.fresh = false; this.templateMotion = null; }
+  contact(normal, roll, stroke, grip, hand, forehand = true, followEnabled = true, target) {
     this.profile = paddleGripProfile(grip, stroke, forehand);
     this.start = { ...paddleFaceAngles(normal), roll: Number.isFinite(roll) ? roll : 0 };
     this.hand = hand === 'left' ? -1 : 1;
     this.rollDirection = this.hand * (grip === 'penhold' ? -1 : 1);
     this.followEnabled = followEnabled;
     this.elapsed = 0; this.fresh = true; this.active = true; this.stage = 'contact';
+    this.templateMotion = null;
+    if (target && target.pose && target.racket && typeof compileStrokeTemplate === 'function' && PADDLE_TEMPLATES.strokes[stroke]) {
+      const compiled = paddleTemplateFor(stroke, { grip, hand, forehand, side: target.side || 1 });
+      const duration = (this.profile.hold + this.profile.followTime + this.profile.recoverTime) / (1 - compiled.contactPhase);
+      const pose = target.pose;
+      this.templateMotion = retargetStrokeTemplate(compiled, { point: pose.point, q: pose.q,
+        normal, localPoint: pose.localPoint, vR: target.racket.vR, duration });
+      this.templateOutput = this.templateOutput || createStrokeTemplateOutput();
+    }
   }
   sample(dt, ready, interrupt = false) {
     if (interrupt) this.reset();
     if (!this.active) return null;
     if (this.fresh) this.fresh = false;
     else if (Number.isFinite(dt) && dt > 0) this.elapsed += dt;
+    if (this.templateMotion) {
+      const motion = this.templateMotion, phase = motion.contactPhase + this.elapsed / motion.duration;
+      if (phase >= 1) { this.reset(); return null; }
+      const pose = sampleStrokeTemplate(motion, phase, this.templateOutput);
+      this.stage = pose.stage;
+      const angles = paddleFaceAngles(pose.n);
+      return { yaw: angles.yaw, pitch: angles.pitch, roll: this.start.roll, stage: pose.stage,
+        p: pose.p, q: pose.q, normal: pose.n, v: pose.v, vR: pose.vR, point: pose.point, activeFace: pose.activeFace };
+    }
     const p = this.profile, hold = p.hold;
     const follow = this.followEnabled ? p.followTime : 0;
     const end = hold + follow + p.recoverTime;
@@ -144,6 +162,13 @@ class PaddleStrokeMotion {
   }
 }
 
+const PADDLE_TEMPLATE_CACHE = new Map();
+function paddleTemplateFor(stroke, options = {}) {
+  const key = [stroke, options.side || 1, options.hand || 'right', options.grip || 'shakehand', options.forehand !== false].join('|');
+  if (!PADDLE_TEMPLATE_CACHE.has(key)) PADDLE_TEMPLATE_CACHE.set(key, compileStrokeTemplate(stroke, options));
+  return PADDLE_TEMPLATE_CACHE.get(key);
+}
+
 /** Exact vertical support of the meshes in 60_scene / 56_rig. Includes
  * both rubber layers and the offset rectangular handle (metres).
  * Y projection of a lookRotation basis depends only on normal.y and roll. */
@@ -159,15 +184,104 @@ function paddleBottomExtent(normal, roll) {
   return Math.max(blade, rubber, handle);
 }
 function keepPaddleAboveTable(pos, normal, roll, tableY, halfWidth, halfLength) {
-  // Start lifting outside the conservative .18 m mesh footprint, so a
-  // below-table bat does not teleport when it crosses the table edge.
-  const x = smoothstep(halfWidth + .24, halfWidth + .18, Math.abs(pos.x));
-  const z = smoothstep(halfLength + .24, halfLength + .18, Math.abs(pos.z));
-  if (x * z <= 0) return 0;
-  const minY = tableY + paddleBottomExtent(normal, roll) + .006;
-  const lift = Math.max(0, minY - pos.y) * x * z;
+  const clearance = paddleTableClearance(pos, normal, roll, tableY, halfWidth, halfLength);
+  const lift = Math.max(0, .006 - clearance);
   pos.y += lift;
   return lift;
+}
+
+// The same 44-sided blade, rubbers and box handle that Scene renders.
+const PADDLE_LOCAL_FACES = (() => {
+  const faces = [];
+  for (const [rx, ry, thick, cz] of [[.077, .082, .007, 0],
+    [.072, .077, .0015, .0085], [.072, .077, .0015, -.0085]]) {
+    const rings = [-thick, thick].map(z => Array.from({ length: 44 }, (_, i) =>
+      [rx * Math.cos(i * TAU / 44), ry * Math.sin(i * TAU / 44), cz + z]));
+    faces.push(...rings);
+    for (let i = 0; i < 44; i++) {
+      const j = (i + 1) % 44;
+      faces.push([rings[0][i], rings[0][j], rings[1][j], rings[1][i]]);
+    }
+  }
+  const corners = [];
+  for (const x of [-.015, .015]) for (const y of [-.175, -.075]) for (const z of [-.011, .011]) corners.push([x, y, z]);
+  for (const indices of [[0, 1, 3, 2], [4, 6, 7, 5], [0, 4, 5, 1], [2, 3, 7, 6], [0, 2, 6, 4], [1, 5, 7, 3]])
+    faces.push(indices.map(i => corners[i]));
+  return faces;
+})();
+
+function paddlePoseQuaternion(normal, roll = 0, out = Q.new()) {
+  Q.lookRotation(out, normal, { x: 0, y: 1, z: 0 });
+  return Q.mul(out, out, Q.setAxisAngle(Q.new(), 0, 0, 1, Number.isFinite(roll) ? roll : 0));
+}
+
+/** Minimum surface clearance inside the actual tabletop footprint. Infinity
+ * means no overlap: low recovery behind the end line is not penetration. */
+function paddleTableClearance(pos, normal, roll, tableY = PH.TABLE_Y, halfWidth = PH.T_HALF_WID, halfLength = PH.T_HALF_LEN, quaternion) {
+  if (!pos || ![pos.x, pos.y, pos.z].every(Number.isFinite)) return Infinity;
+  if (Math.abs(pos.x) > halfWidth + .18 || Math.abs(pos.z) > halfLength + .18) return Infinity;
+  const q = quaternion || paddlePoseQuaternion(normal || { x: 0, y: 0, z: -1 }, roll);
+  if (!quaternion && Math.abs(pos.x) < halfWidth - .18 && Math.abs(pos.z) < halfLength - .18)
+    return pos.y - paddleBottomExtent(normal || { x: 0, y: 0, z: -1 }, roll) - tableY;
+  const matrix = M4.compose(M4.create(), pos, q, { x: 1, y: 1, z: 1 });
+  if (Math.abs(pos.x) < halfWidth - .18 && Math.abs(pos.z) < halfLength - .18) {
+    const bx = matrix[1], by = matrix[5], bz = matrix[9];
+    const wood = -Math.hypot(.077 * bx, .082 * by) - Math.abs(.007 * bz);
+    const rubber = -Math.hypot(.072 * bx, .077 * by) - Math.abs(.010 * bz);
+    const handle = -.125 * by - Math.abs(.015 * bx) - Math.abs(.05 * by) - Math.abs(.011 * bz);
+    return pos.y + Math.min(wood, rubber, handle) - tableY;
+  }
+  let minimum = Infinity;
+  for (const face of PADDLE_LOCAL_FACES) {
+    let polygon = face.map(([x, y, z]) => [matrix[0] * x + matrix[4] * y + matrix[8] * z + pos.x,
+      matrix[1] * x + matrix[5] * y + matrix[9] * z + pos.y,
+      matrix[2] * x + matrix[6] * y + matrix[10] * z + pos.z]);
+    for (const [axis, sign, bound] of [[0, 1, halfWidth], [0, -1, halfWidth], [2, 1, halfLength], [2, -1, halfLength]]) {
+      if (!polygon.length) break;
+      const clipped = [];
+      let a = polygon[polygon.length - 1], da = bound - sign * a[axis];
+      for (const b of polygon) {
+        const db = bound - sign * b[axis];
+        if ((da >= 0) !== (db >= 0)) {
+          const t = da / (da - db);
+          clipped.push(a.map((value, i) => value + (b[i] - value) * t));
+        }
+        if (db >= 0) clipped.push(b);
+        a = b; da = db;
+      }
+      polygon = clipped;
+    }
+    for (const p of polygon) minimum = Math.min(minimum, p[1] - tableY);
+  }
+  return minimum;
+}
+
+/** Anchor one rubber surface to the pre-impact ball, without a second radius
+ * offset. Low contacts use the lower blade, not a separately lifted drawing. */
+function paddleContactPose(ballP, racket, options = {}) {
+  const normal = racket.normal, activeFace = options.forehand === false ? -1 : 1;
+  const requestedRoll = Number.isFinite(options.roll) ? options.roll :
+    (options.hand === 'left' ? -1 : 1) * (options.grip === 'penhold' ? Math.PI - .08 : .28);
+  const point = V3.addScaled(V3.new(), ballP, normal, -PH.R);
+  let best = null, bestCost = Infinity;
+  for (const roll of [requestedRoll, Math.PI / 2, -Math.PI / 2]) {
+    const face = V3.mul(V3.new(), normal, activeFace), q = paddlePoseQuaternion(face, roll);
+    const matrix = M4.compose(M4.create(), { x: 0, y: 0, z: 0 }, q, { x: 1, y: 1, z: 1 });
+    for (const [x, y] of [[0, .012], [0, -.07], [0, .07], [-.068, 0], [.068, 0]]) {
+      const localPoint = { x, y, z: activeFace * .010 };
+      const offset = V3.new(matrix[0] * x + matrix[4] * y + matrix[8] * localPoint.z,
+        matrix[1] * x + matrix[5] * y + matrix[9] * localPoint.z,
+        matrix[2] * x + matrix[6] * y + matrix[10] * localPoint.z);
+      const pos = V3.sub(V3.new(), point, offset);
+      const clearance = paddleTableClearance(pos, normal, roll, PH.TABLE_Y, PH.T_HALF_WID, PH.T_HALF_LEN, q);
+      if (clearance < -.001 - 1e-9) continue;
+      const cost = Math.abs(paddleAngleDelta(requestedRoll, roll)) * .04 + Math.hypot(x, y - .012);
+      if (cost >= bestCost) continue;
+      bestCost = cost;
+      best = { pos, normal: V3.clone(normal), q, roll, point, localPoint, activeFace, clearance };
+    }
+  }
+  return best;
 }
 
 /** Time-based tactical reads. frame % 4 would read at only 7.5 Hz on a
