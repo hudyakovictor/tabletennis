@@ -29,7 +29,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { load, root } = require('./helpers.cjs');
 
-const lib = load(['10_math.js', '30_physics.js', '55_ai.js'],
+const lib = load(['10_math.js', '30_physics.js', '40_swipe.js', '55_ai.js'],
   ['OpponentAI', 'AI_LEVELS', 'AI_TACTICS', 'AI_SERVE_CAPS', 'AI_ATTACK_STROKES', 'PH', 'V3', 'predict', 'impactRacket']);
 const { PH, V3, AI_LEVELS } = lib;
 const AI_SRC = fs.readFileSync(path.join(root, 'tt/src/55_ai.js'), 'utf8');
@@ -243,6 +243,54 @@ test('WTF активно использует SMASH и COUNTER, HARD бьёт с
     `атака WTF: ${(wtf.frac(['SMASH', 'COUNTER']) * 100).toFixed(1)}%`);
   assert.ok(wtf.frac(['SMASH']) > hard.frac(['SMASH']), 'SMASH у WTF чаще, чем у HARD');
   assert.ok(hard.frac(['SMASH']) > easy.frac(['SMASH']), 'SMASH у HARD чаще, чем у EASY');
+});
+
+test('SIDE joins the existing lateral variety without giving EASY extra attacking strength', () => {
+  const plan = { x: 0, y: PH.TABLE_Y + .30, z: -1.2, speed: 9, short: false, wide: false };
+  for (let level = 1; level < AI_LEVELS.length; level++) {
+    const ai = new lib.OpponentAI(level), game = fixtureGame();
+    rig(ai, [0, .10]);
+    assert.equal(ai.pickStroke(game, plan), 'SIDE');
+    rig(ai, [0, .50]);
+    assert.equal(ai.pickStroke(game, plan), 'HOOK');
+    rig(ai, [0, .90]);
+    assert.equal(ai.pickStroke(game, plan), 'FADE');
+  }
+  const easy = new lib.OpponentAI(0);
+  rig(easy, [0, .10]);
+  assert.equal(easy.pickStroke(fixtureGame(), plan), 'PUSH');
+});
+
+test('BANANA is restricted to HARD/WTF low short balls over the table in the natural backhand lane', () => {
+  const plan = { x: .35, y: PH.TABLE_Y + .12, z: -1.05, speed: 6, short: true, wide: false };
+  for (let level = 0; level < AI_LEVELS.length; level++) {
+    const ai = new lib.OpponentAI(level), game = fixtureGame();
+    ai.rng = () => .01;
+    if (level < 2) assert.notEqual(ai.pickStroke(game, plan), 'BANANA');
+    else {
+      assert.equal(ai.pickStroke(game, plan), 'BANANA');
+      for (const bad of [{ x: -.35 }, { short: false }, { z: -1.8 }, { y: PH.TABLE_Y + .4 }, { speed: 18 }])
+        assert.notEqual(ai.pickStroke(game, { ...plan, ...bad }), 'BANANA');
+      ai.hand = 'left';
+      assert.notEqual(ai.pickStroke(game, plan), 'BANANA');
+      assert.equal(ai.pickStroke(game, { ...plan, x: -.35 }), 'BANANA');
+    }
+  }
+});
+
+test('CHOP_BLOCK is selective on a fast topspin, not a generic substitute for every PUSH/BLOCK', () => {
+  const ai = new lib.OpponentAI(2), game = fixtureGame();
+  const plan = { x: 0, y: PH.TABLE_Y + .14, z: -1.1, speed: 12, short: false, wide: false };
+  V3.set(game.ball.w, -300, 0, 0);
+  ai.rng = () => .001;
+  assert.equal(ai.pickStroke(game, plan), 'CHOP_BLOCK');
+  for (const bad of [{ speed: 5 }, { z: -2.0 }, { y: PH.TABLE_Y + .45 }])
+    assert.notEqual(ai.pickStroke(game, { ...plan, ...bad }), 'CHOP_BLOCK');
+  V3.zero(game.ball.w);
+  assert.notEqual(ai.pickStroke(game, plan), 'CHOP_BLOCK');
+  V3.set(game.ball.w, -300, 0, 0);
+  ai.rng = () => .9;
+  assert.notEqual(ai.pickStroke(game, plan), 'CHOP_BLOCK', 'it is a selective response, not the only fast-ball answer');
 });
 
 /* ---------- 7. Ошибки ---------- */

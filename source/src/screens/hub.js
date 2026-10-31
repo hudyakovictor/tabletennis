@@ -36,8 +36,8 @@ Router.def('hub', {
     <div class="hero">
       <canvas class="demo"></canvas>
       <div class="side l">
-        <button class="fab pop" style="--d:2" data-act="quests" data-press><span class="fic"><img src="${ILL['ic-quest']}" alt="" width="34" height="34"></span>${qr ? `<span class="dot">${qr}</span>` : ''}<em>${t('hub.quests')}</em></button>
-        <button class="fab pop" style="--d:3" data-act="events" data-press><span class="fic"><img src="${ILL['ic-trophy']}" alt="" width="34" height="34"></span><em>${t('hub.events')}</em></button>
+        <button class="fab pop" style="--d:2" data-act="quests" data-press><span class="fic"><img src="${ILL['ic-quest']}" alt="" width="34" height="34"></span>${qr ? `<span class="dot">${qr}</span>` : ''}<em data-l10n="hub.quests">${t('hub.quests')}</em></button>
+        <button class="fab pop" style="--d:3" data-act="events" data-press><span class="fic"><img src="${ILL['ic-trophy']}" alt="" width="34" height="34"></span><em data-l10n="hub.events">${t('hub.events')}</em></button>
       </div>
       <div class="side r">
         <button class="fab pop ${freeLeft <= 0 ? 'free' : ''}" style="--d:2" data-act="gifts" data-press><span class="fchest">${Art.icon('gift', { c: '#FFE9B0' })}</span><em class="num" id="freeT" data-gift="1">${freeLeft > 0 ? fmtLeft(freeLeft) : t('hub.gift')}</em></button>
@@ -45,7 +45,7 @@ Router.def('hub', {
     </div>
     <div class="playzone play-grid">
       <button class="b3 modebtn rise" style="--d:2" data-modebtn="free" data-press><span class="mb-i"><img src="${ILL['ic-swirl']}" alt="" width="120" height="120"></span><span class="mb-t"><b>${t('mode.free')}</b><small>${t('hub.freeSub')}</small></span></button>
-      <button class="b3 modebtn gold rise" style="--d:3" data-modebtn="ranked" data-press><span class="mb-i"><img src="${ILL['ic-cross']}" alt="" width="120" height="120"></span><span class="mb-t"><b>${t('hub.online')}</b><small>${t('hub.onlineSub')}</small></span></button>
+      <button class="b3 modebtn gold rise" style="--d:3" data-modebtn="ranked" data-press><span class="mb-i"><img src="${ILL['ic-cross']}" alt="" width="120" height="120"></span><span class="mb-t"><b>${t('mode.ranked')}</b><small>${t('mode.rankedSub')}</small></span></button>
       <button class="b3 modebtn dark rise" style="--d:4" data-modebtn="practice" data-press><span class="mb-i"><img src="${ILL['ic-basket']}" alt="" width="120" height="120"></span><span class="mb-t"><b>${t('mode.practice')}</b><small>${t('hub.practiceSub')}</small></span></button>
       <button class="b3 modebtn dark rise" style="--d:5" data-modebtn="career" data-press><span class="mb-i"><img src="${ILL['ic-medalp']}" alt="" width="120" height="120"></span><span class="mb-t"><b>${t('hub.career')}</b><small>${t('hub.careerSub')}</small></span></button>
     </div>
@@ -64,13 +64,13 @@ Router.def('hub', {
     const on = F.filter((f) => f.st !== 'off').length;
     return `<div class="friends rise" style="--d:6">
       <button class="fr-band" data-act="friends" data-press>
-        <span class="fr-band-t">${Art.icon('users', { c: '#9BE8FF' })}<b>${t('common.friends')}</b><i class="fr-band-on num">${t('hub.onlineCount', { n: on })}</i></span>
+        <span class="fr-band-t">${Art.icon('users', { c: '#9BE8FF' })}<b data-l10n="common.friends">${t('common.friends')}</b><i class="fr-band-on num" data-online-count="${on}">${t('hub.onlineCount', { n: on })}</i></span>
         <span class="fr-list">${F.map((f) => { const p = PEOPLE[f.i]; return `<span class="fr-c st-${f.st}" data-f="${f.i}">
           <span class="fr-av">${Art.avatar('p' + f.i, 46)}${f.st === 'play'
             ? `<span class="fr-pd">${Art.paddle('#E8202A', 22, { handle: '#F5C25E', rot: 20 })}</span>`
             : `<i class="fr-dot ${f.st}"></i>`}</span>
           <b>${p.s.split(' ')[0]}</b>
-        </span>`; }).join('')}<span class="fr-c fr-inv"><span class="fr-av">${Art.icon('plus', { c: '#9BE8FF', sw: 2.6 })}</span><b>${t('hub.invite')}</b></span></span>
+        </span>`; }).join('')}<span class="fr-c fr-inv"><span class="fr-av">${Art.icon('plus', { c: '#9BE8FF', sw: 2.6 })}</span><b data-l10n="hub.invite">${t('hub.invite')}</b></span></span>
       </button>
     </div>`;
   },
@@ -115,6 +115,8 @@ Router.def('hub', {
   mount(el) {
     UI.bindHud(el);
     this.el = el;
+    let alive = true, navigation = 0; const timers = new Set();
+    const later = (fn, ms) => { const id = setTimeout(() => { timers.delete(id); if (alive) fn(); }, ms); timers.add(id); };
     // живой стол: настоящий движок за интерфейсом (бот против бота, облёт камеры);
     // на «Эконом» — лёгкая 2D-заглушка
     this.lobby = S.quality !== 'low';
@@ -128,14 +130,14 @@ Router.def('hub', {
     const g = this.game;
     if (g) {
       g.on = (ev, d) => {
-        if (ev === 'point') setTimeout(() => !g.dead && g.serve(Math.random() < .5 ? 'p' : 'o'), 700);
+        if (ev === 'point') later(() => !g.dead && g.serve(Math.random() < .5 ? 'p' : 'o'), 700);
       };
-      setTimeout(() => g.serve('o'), 600);
+      later(() => g.serve('o'), 600);
     }
     // дорога лиги
-    setTimeout(() => { const i = el.querySelector('.road .bar i'); i && i.style.setProperty('--p', i.dataset.p); }, 400);
+    later(() => { const i = el.querySelector('.road .bar i'); i && i.style.setProperty('--p', i.dataset.p); }, 400);
     // таймеры: слоты сундуков + кулдаун подарка — оба живые, без застывших подписей
-    this.timer = setInterval(() => {
+    const timer = setInterval(() => {
       $$('[data-ends]', el).forEach((b) => (b.textContent = fmtLeft(+b.dataset.ends - Date.now())));
       const gft = el.querySelector('#freeT');
       if (gft) {
@@ -145,18 +147,20 @@ Router.def('hub', {
       }
       UI.refreshNotifications();
     }, 1000);
-    el.addEventListener('click', (e) => {
+    const click = (e) => {
       /* Router.go при busy молча возвращается: тап по плитке во время перехода
        * splash → hub терялся без всякого ответа. Ждём освобождения и повторяем. */
       const goRoute = (id, opt) => {
         if (!Router.screens[id]) return;
+        const intent = ++navigation;
         if (!Router.busy) { Router.go(id, opt); return; }
         let tries = 0;
         const tick = () => {
+          if (!alive || intent !== navigation || Router.cur !== 'hub') return;
           if (!Router.busy) { if (Router.cur !== id) Router.go(id, opt); }
-          else if (++tries < 40) setTimeout(tick, 50);
+          else if (++tries < 40) later(tick, 50);
         };
-        setTimeout(tick, 50);
+        later(tick, 50);
       };
       const a = e.target.closest('[data-act],[data-modebtn],[data-chest],[data-f]'); if (!a) return;
       const mb = a.dataset.modebtn;
@@ -173,9 +177,7 @@ Router.def('hub', {
         }
         if (mb === 'practice') goRoute('train', { data: { then: 'hub' } });
         else if (mb === 'career') goRoute('profile');
-        /* Плитка подписана «Онлайн» — значит ведёт в лобби матча с другом,
-         * а не в радар под бота: рейтинговый бой остаётся большой кнопкой. */
-        else if (mb === 'ranked') goRoute('online');
+        else if (mb === 'ranked') goRoute('mm');
         else goRoute('mm');
         return;
       }
@@ -198,11 +200,21 @@ Router.def('hub', {
       if (k === 'events') this.eventsSheet();
       if (k === 'friends') this.friendsSheet();
       if (k === 'gifts') this.giftsSheet(a);
-    });
+    };
+    el.addEventListener('click', click);
     // пасхалка: тап по столу = искры
-    cv.addEventListener('pointerdown', (e) => { const p = FX.pt({ getBoundingClientRect: () => ({ left: e.clientX, top: e.clientY, width: 0, height: 0 }) }); FX.burst(p.x, p.y, { c: ['#2EE6FF', '#fff'], count: 12, speed: 6, size: .7 }); Sfx.paddle(1.2); });
+    const spark = (e) => { const p = FX.pt({ getBoundingClientRect: () => ({ left: e.clientX, top: e.clientY, width: 0, height: 0 }) }); FX.burst(p.x, p.y, { c: ['#2EE6FF', '#fff'], count: 12, speed: 6, size: .7 }); Sfx.paddle(1.2); };
+    cv.addEventListener('pointerdown', spark);
+    const lobby = this.lobby;
+    return () => { alive = false; timers.forEach(clearTimeout); clearInterval(timer); el.removeEventListener('click', click); cv.removeEventListener('pointerdown', spark); if (g) g.destroy(); this.game = null; this.el = null; if (lobby) GameHost.show(false); };
   },
-  leave() { this.game && this.game.destroy(); this.game = null; this.el = null; clearInterval(this.timer); if (this.lobby) { GameHost.show(false); GameHost.send('attract'); } },
+  refreshLocale(el) {
+    UI.refreshHud(el); UI.localize(el);
+    const labels = { free: ['mode.free', 'hub.freeSub'], ranked: ['mode.ranked', 'mode.rankedSub'], practice: ['mode.practice', 'hub.practiceSub'], career: ['hub.career', 'hub.careerSub'] };
+    $$('[data-modebtn]', el).forEach((button) => { const keys = labels[button.dataset.modebtn]; button.querySelector('.mb-t b').textContent = t(keys[0]); button.querySelector('.mb-t small').textContent = t(keys[1]); });
+    const left = (S.freeAt || 0) - Date.now(), gift = el.querySelector('#freeT'); if (gift) gift.textContent = left > 0 ? fmtLeft(left) : t('hub.gift');
+    const online = el.querySelector('[data-online-count]'); if (online) online.textContent = t('hub.onlineCount', { n: Number(online.dataset.onlineCount) });
+  },
   chestTap(i, btn) {
     const c = S.chests[i]; if (!c) return;
     if (c.state === 'ready') { Router.go('chest', { data: { kind: c.kind, slot: i } }); return; }
@@ -270,7 +282,10 @@ Router.def('hub', {
     const F = [[0, PEOPLE[0]], [5, PEOPLE[5]]];
     Sheet.open(`<div class="h1" style="margin:4px 4px 14px">${t('common.friends')}</div>
       <div class="pnl sgroup">${F.map(([i, p]) => `<div class="fr-row">${Art.avatar('p' + i, 42)}<span class="fr-n"><b>${p.s}</b><small>${p.club} · ${fmt(p.r)}</small></span><button class="b3 dark sm" disabled>${t('common.soonCap')}</button></div>`).join('')}</div>
-      <p class="dim" style="font-size:11.5px;margin:14px 4px 0;line-height:1.55">${t('friends.note')}</p>`);
+      <p class="dim" style="font-size:11.5px;margin:14px 4px 0;line-height:1.55">${t('friends.note')}</p>
+      <button class="b3 gold block" data-online style="margin-top:14px">${t('hub.online')}</button>`, {
+      onOpen: (w) => { const button = w.querySelector('[data-online]'), click = () => { TGX.fullscreen(true); Sheet.close(true); Router.go('online'); }; button.addEventListener('click', click); return () => button.removeEventListener('click', click); }
+    });
   }
 });
 

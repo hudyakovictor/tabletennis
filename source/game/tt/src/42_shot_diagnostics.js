@@ -42,13 +42,15 @@ function shotHudView(entry) {
   const full = shotFeedbackView(entry);
   if (!entry.contact) return { ...full, title: '', status: entry.outcome === 'no_swipe' ? 'Мяч пропущен' : entry.outcome === 'rejected' ? 'Нет удара' : full.status, metrics: '' };
   const spin = entry.contact.spin;
+  const total = Number.isFinite(spin.totalRps) ? spin.totalRps : 0;
   const components = [ ['Верхнее', spin.topRps], ['Боковое', spin.sideRps], ['Продольное', spin.corkRps] ];
   components.sort((a, b) => Math.abs(b[1]) - Math.abs(a[1]));
   let [label, value] = components[0];
   if (label === 'Верхнее' && value < 0) label = 'Нижнее';
-  return { ...full, title: (STROKES[entry.strokeId] || {}).short || '',
+  const strokeName = (STROKES[entry.strokeId] || {}).short || (STROKES[entry.strokeId] || {}).name || '';
+  return { ...full, title: strokeName,
     status: entry.outcome === 'pending' ? 'Контакт' : full.status,
-    metrics: spin.totalRps < 1 ? 'Без вращения' : `${label} ${Math.round(Math.abs(value))} об/с` };
+    metrics: total < 1 ? '0 об/с' : `${label} ${Math.round(Math.abs(value))} об/с`, tone: 'hit' };
 }
 
 class ShotJournal {

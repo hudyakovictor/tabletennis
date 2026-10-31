@@ -13,13 +13,15 @@ function setServerSeason(data) {
     if (!e || e.type !== 'season' || !e.config || !e.config.season || !['active', 'scheduled', 'finished'].includes(e.status)) continue;
     const n = e.config.season.n, start = Date.parse(e.startsAt), end = Date.parse(e.endsAt), pass = e.config.pass;
     if (!Number.isSafeInteger(n) || n <= 0 || !Number.isFinite(start) || !Number.isFinite(end) || start >= end || !Array.isArray(pass) || !pass.length || pass.length > 100) return false;
-    const validReward = (r) => r && Number.isSafeInteger(r.n) && r.n > 0 && (
-      r.k === 'coins' || r.k === 'gems' ||
-      (r.k === 'chest' && r.n === 1 && ['silver', 'gold', 'epic'].includes(r.kind)) ||
-      (r.k === 'card' && r.n === 1 && /^#[0-9a-f]{6}$/i.test(r.col))
-    );
-    if (!pass.every((r, i) => r && r.s === n && r.l === i + 1 && validReward(r.f) && validReward(r.p))) return false;
-    seasons.push({ n, start, end, days: (end - start) / 864e5, pass, closed: e.status === 'finished' });
+    const reward = (r) => {
+      if (!r || !Number.isSafeInteger(r.n) || r.n <= 0) return null;
+      if (r.k === 'coins' || r.k === 'gems' || (r.k === 'chest' && r.n === 1 && ['silver', 'gold', 'epic'].includes(r.kind))) return { ...r };
+      const item = typeof Catalog !== 'undefined' && Catalog.rewardItem(r);
+      return item ? { k: 'card', n: 1, itemId: item.id } : null;
+    };
+    const normalized = pass.map((r, i) => r && r.s === n && r.l === i + 1 ? { ...r, f: reward(r.f), p: reward(r.p) } : null);
+    if (!normalized.every((r) => r && r.f && r.p)) return false;
+    seasons.push({ n, start, end, days: (end - start) / 864e5, pass: normalized, closed: e.status === 'finished' });
   }
   _serverSeasons = seasons.sort((a, b) => b.start - a.start || b.n - a.n);
   _calendarAt = at;
@@ -58,7 +60,7 @@ const seasonLeftShort = (now = Date.now()) => {
 };
 const passTier = (l, seasonN) => {
   const f = l % 5 === 0 ? { k: 'chest', kind: 'silver', n: 1 } : l % 2 ? { k: 'coins', n: 50 + l * 10 } : { k: 'gems', n: 2 + (l >> 1) };
-  const p = l % 5 === 0 ? { k: 'chest', kind: l % 10 === 0 ? 'epic' : 'gold', n: 1 } : l % 3 === 0 ? { k: 'card', n: 1, col: ['#FF4B3E', '#9F6BFF', '#2EC9FF'][l % 3] } : { k: 'gems', n: 5 + l };
+  const p = l % 5 === 0 ? { k: 'chest', kind: l % 10 === 0 ? 'epic' : 'gold', n: 1 } : l % 3 === 0 ? { k: 'card', n: 1, itemId: ['r-coral', 'r-void', 'r-teal'][(Math.floor(l / 3) - 1) % 3] } : { k: 'gems', n: 5 + l };
   return { s: seasonN, l, f, p };
 };
 const PASS = [...Array(20)].map((_, i) => passTier(i + 1, HARD_SEASON.n));

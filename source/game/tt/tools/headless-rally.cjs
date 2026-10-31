@@ -364,7 +364,10 @@ for (const r of results) {
   const s = r.stats;
   console.log(`${String(r.name).padEnd(6)} ударов ${String(s.strokes).padStart(3)} · замах ${String(s.swings).padStart(3)}` +
     ` · отказ ${String(s.declines).padStart(3)} · vmag ${s.maxVmag.toFixed(2)} (${(s.maxVmagRatio * 100).toFixed(0)}% потолка, ${(s.maxVmagVsLevel * 100).toFixed(0)}% уровня)` +
-    ` · поз ${s.uniquePoses} · мяч ${(s.maxBallSpeed * 3.6).toFixed(0)} км/ч · apex ${s.maxBallY.toFixed(2)} м` +
+    ` · поз ${s.uniquePoses} · мяч ${(s.maxBallSpeed * 3.6).toFixed(0)} км/ч` +
+    /* Апекс в сантиметрах НАД СТОЛОМ: мировая координата y ничего не говорит
+     * игроку (пол — не ориентир), а высота стола известна точно. */
+    ` · apex ${Math.round((s.maxBallY - PH.TABLE_Y) * 100)} см над столом` +
     ` · вне кадра: input ${s.causes.input} / engine ${s.causes.engine}` +
     ` · клинок: ${s.probe.armedSteps} взведённых, ${s.probe.planeCrossings} пересеч.` +
     ` · гейты ${r.gates}` + (r.engine.length ? ` · ТИКЕТЫ ${JSON.stringify(gate.byCode)}` : ''));

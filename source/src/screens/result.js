@@ -87,17 +87,17 @@ Router.def('result', {
   full: true,
   get mood() { return 'gold'; },
   render(d) {
-    d = d || Demo.result(true); this.d = d; const o = PEOPLE[d.opp];
+    d = d || this.d || Demo.result(true); const changed = this.d !== d; this.d = d; const o = PEOPLE[d.opp];
     /* Дельта — по той же формуле Эло, что и на сервере: иначе экран показал бы
      * одно число, а профиль после синхронизации — другое. */
-    const delta = ratingDelta(S.rating, o && o.r, d.win); this.delta = delta;
+    const delta = changed ? ratingDelta(S.rating, o && o.r, d.win) : this.delta; this.delta = delta;
     const medals = [
       { on: d.win, tk: 'result.win' }, { on: d.stats.perfect >= 3, tk: 'medal.perfect' }, { on: d.stats.maxRally >= 8, tk: 'medal.rally' }
     ];
     this.medals = medals;
     /* Награду решаем здесь, а применяем в mount: экран обязан показывать ровно
      * то, что игрок получит. Сундук обещаем только при свободном слоте. */
-    this.loot = d.win ? { coins: 90, chest: (S.chests || []).some((c) => !c) } : null;
+    if (changed) this.loot = d.win ? { coins: 90, chest: (S.chests || []).some((c) => !c) } : null;
     const L = leagueOf(S.rating), N = nextLeague(S.rating);
     /* Ход матча: кумулятивная разница очков по ходу серии — видно, кто вёл
      * и где был перелом. Аналитическая зрелищность без единого лишнего
@@ -136,6 +136,7 @@ Router.def('result', {
       ${analysisSheet(d)}
     </div>`;
   },
+  refreshLocale(el) { I18n.localizeDOM(el, this.render(this.d)); return true; },
   mount(el) {
     const d = this.d; const res = el.querySelector('.res'); this.alive = true;
     /* Награды применяем СРАЗУ, до дорожки анимации (идемпотентно через d.applied).

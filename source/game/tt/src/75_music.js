@@ -2,13 +2,9 @@
  *  MUSIC SYSTEM — dynamic ambient soundtrack
  *
  *  Layers:
- *   1. Base: constant ambient pad (always present)
+ *   1. Base: quiet pad while playing
  *   2. Tension: builds with rally intensity
- *   3. Climax: on big moments (winners, smash, etc.)
- *   4. Resolution: after point ends
- *
- *  This creates emotional arc through music — critical for
- *  award-winning game feel.
+ *   3. Climax/resolution: visual parameters, no extra impact stingers
  * ===================================================================== */
 'use strict';
 
@@ -39,6 +35,8 @@ class MusicSystem {
     // Pre-computed procedural audio buffers (synthesized)
     this._buffers = {};
     this._initialized = false;
+    this._texturePromise = null;
+    this._sources = new Map();
 
     // Music parameters
     this._bpm = 90;
@@ -48,22 +46,17 @@ class MusicSystem {
 
   /**
    * Initialize the music system.
-   * Creates procedural audio buffers using OfflineAudioContext.
+   * Textures are rendered lazily after live audio has been unlocked.
    */
   async init() {
-    if (this._initialized) return;
+    if (this._initialized) return true;
     if (!this.audio || typeof this.audio.setVolume !== 'function') {
       console.warn('MusicSystem: AudioEngine not available');
-      return;
+      return false;
     }
 
-    try {
-      // Create procedural ambient textures using oscillators
-      await this._createAmbientTextures();
-      this._initialized = true;
-    } catch (e) {
-      console.warn('MusicSystem: init failed', e);
-    }
+    this._initialized = true;
+    return true;
   }
 
   /**
@@ -71,8 +64,10 @@ class MusicSystem {
    * Uses oscillators and noise for synthetic but pleasant sounds.
    */
   async _createAmbientTextures() {
-    if (typeof OfflineAudioContext === 'undefined') return;
-    const ctx = new OfflineAudioContext(2, 44100 * 2, 44100);
+    const Offline = typeof OfflineAudioContext !== 'undefined' ? OfflineAudioContext :
+      typeof window !== 'undefined' ? window.webkitOfflineAudioContext : null;
+    if (!Offline) return;
+    const ctx = new Offline(2, 44100 * 2, 44100);
 
     const baseOscs = [];
     const baseOscNodes = [];
@@ -110,7 +105,7 @@ class MusicSystem {
     const baseBuffer = await ctx.startRendering();
     this._buffers.base = baseBuffer;
 
-    const tensionCtx = new OfflineAudioContext(2, 44100 * 2, 44100);
+    const tensionCtx = new Offline(2, 44100 * 2, 44100);
     const tensionOscs = [];
     const tensionNodes = [];
     const tensionFreqs = [130, 165, 196, 220];
@@ -123,7 +118,7 @@ class MusicSystem {
       gain.gain.value = 0.04 / tensionFreqs.length;
 
       const lfo = tensionCtx.createOscillator();
-      lfo.frequency.value = 0.5 + i * 0.2;
+      lfo.frequency.value = i % 2 ? 1 : 0.5;
       const lfoGain = tensionCtx.createGain();
       lfoGain.gain.value = 15;
       lfo.connect(lfoGain);
@@ -152,32 +147,6 @@ class MusicSystem {
 
     const tensionBuffer = await tensionCtx.startRendering();
     this._buffers.tension = tensionBuffer;
-
-    // ---- Resolution layer: chord progression ----
-    // Pleasant resolving chord
-    const resCtx = new OfflineAudioContext(2, 44100 * 2, 44100);
-    const chordFreqs = [220, 261.63, 329.63, 440]; // A, C, E, A — Am chord
-    for (let i = 0; i < chordFreqs.length; i++) {
-      const osc = resCtx.createOscillator();
-      osc.type = 'sine';
-      osc.frequency.value = chordFreqs[i];
-
-      const gain = resCtx.createGain();
-      gain.gain.value = 0.06 / chordFreqs.length;
-
-      const envelope = gain; // Use gain as envelope
-      envelope.gain.setValueAtTime(0, 0);
-      envelope.gain.linearRampToValueAtTime(0.06, 0.1);
-      envelope.gain.exponentialRampToValueAtTime(0.001, 1.8);
-
-      osc.connect(envelope);
-      envelope.connect(resCtx.destination);
-      osc.start(0);
-      osc.stop(2);
-    }
-
-    const resBuffer = await resCtx.startRendering();
-    this._buffers.resolution = resBuffer;
   }
 
   /**
@@ -201,13 +170,43 @@ class MusicSystem {
 
     // Update layer gains
     this._updateLayerGains(gameState);
+    this._syncPlayback(gameState);
+  }
+
+  _syncPlayback(gameState) {
+    const audio = this.audio;
+    if (!audio.ok || !audio.canPlay || !audio.canPlay('music') || !audio.musicBus ||
+        this.state === MUSIC_STATE.IDLE || gameState.paused || gameState.preview) {
+      this.stop(); return;
+    }
+    if (!this._texturePromise) this._texturePromise = this._createAmbientTextures().catch(e => {
+      console.warn('MusicSystem: textures failed', e);
+    });
+    for (const key of ['base', 'tension']) {
+      const buffer = this._buffers[key], level = this.currentLayerGain[key];
+      let voice = this._sources.get(key);
+      if (!buffer || (!voice && level < 0.001)) continue;
+      if (!voice) {
+        const c = audio.ctx, source = c.createBufferSource(), gain = c.createGain();
+        source.buffer = buffer; source.loop = true; gain.gain.value = 0;
+        source.connect(gain); gain.connect(audio.musicBus);
+        voice = { source, gain }; this._sources.set(key, voice);
+        audio._trackSource(source, [gain], 'music', () => { this._sources.delete(key); });
+        try { source.start(c.currentTime); } catch (_) { audio._stopSource(source); continue; }
+      }
+      voice.gain.gain.setTargetAtTime(level, audio.ctx.currentTime, 0.3);
+    }
+  }
+  stop() {
+    for (const voice of [...this._sources.values()]) this.audio._stopSource(voice.source);
+    this._sources.clear();
   }
 
   /**
    * Compute music intensity from game state.
    */
   computeIntensity(gameState) {
-    const g = gameState;
+    const g = gameState || {};
     let intensity = 0;
 
     // Rally length adds intensity

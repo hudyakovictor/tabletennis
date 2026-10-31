@@ -1,5 +1,6 @@
 /* ---------- Telegram WebApp (по спецификации Mini Apps) ---------- */
 const TGX = {
+  _bound: null, _events: [], _backVisible: false, _orientationT: 0, _sdkPromise: null, _sdkCancel: null,
   get w() { return window.Telegram && window.Telegram.WebApp && window.Telegram.WebApp.initData !== undefined ? window.Telegram.WebApp : null; },
   get inTG() { const w = this.w; return !!(w && w.platform && w.platform !== 'unknown'); },
   mob() { const w = this.w; return !!(w && ['android', 'ios'].includes(w.platform)); },
@@ -11,24 +12,72 @@ const TGX = {
     document.documentElement.style.setProperty('--tgb', ((c.bottom || 0) + (s.bottom || 0)) + 'px');
     document.documentElement.style.setProperty('--tglr', ((c.left || 0) + (s.left || 0)) + 'px');
   },
+  telegramEnv() {
+    if (this.inTG) return true;
+    try {
+      const params = new URLSearchParams(location.hash.slice(1));
+      const platform = params.get('tgWebAppPlatform');
+      return !!(platform && platform !== 'unknown' && params.has('tgWebAppData'));
+    } catch (e) { return false; }
+  },
+  load() {
+    if (this.w) { this.init(); return Promise.resolve(true); }
+    if (!this.telegramEnv()) return Promise.resolve(false);
+    if (this._sdkPromise) return this._sdkPromise;
+    this._sdkPromise = new Promise((resolve) => {
+      const script = document.createElement('script'); script.src = 'https://telegram.org/js/telegram-web-app.js'; script.async = true;
+      let timer = 0;
+      const finish = (loaded) => {
+        if (!this._sdkCancel) return;
+        this._sdkCancel = null; clearTimeout(timer); script.removeEventListener('load', ready); script.removeEventListener('error', failed);
+        if (loaded) this.init(); else script.remove();
+        resolve(loaded);
+      };
+      const ready = () => finish(!!this.w), failed = () => finish(false);
+      this._sdkCancel = () => finish(false);
+      script.addEventListener('load', ready); script.addEventListener('error', failed);
+      timer = setTimeout(failed, 10000);
+      document.head.appendChild(script);
+    });
+    return this._sdkPromise;
+  },
+  _disposeBindings() {
+    clearTimeout(this._orientationT); this._orientationT = 0;
+    const w = this._bound; if (!w) return;
+    this._bound = null;
+    this._events.forEach((event) => { try { w.offEvent && w.offEvent(event, this._onInsets); } catch (e) {} }); this._events = [];
+    try { if (w.BackButton && w.BackButton.offClick) w.BackButton.offClick(this._onBack); } catch (e) {}
+    this._onInsets = null; this._onBack = null;
+  },
+  dispose() {
+    this._disposeBindings();
+    if (this._sdkCancel) this._sdkCancel();
+    this._sdkPromise = null;
+  },
   init() {
-    const w = this.w; if (!w) return;
+    const w = this.w; if (!w) return false;
+    if (this._bound === w) { this._insets(); return true; }
+    this._disposeBindings(); this._bound = w;
+    this._onInsets = () => { if (this._bound === w) this._insets(); };
+    this._onBack = () => { if (this._bound === w) Router.back(); };
     try {
       w.ready(); w.expand();
       if (w.disableVerticalSwipes) w.disableVerticalSwipes();      // свайп-закрытие не должно ронять розыгрыш
       if (w.setHeaderColor) w.setHeaderColor('#05060F');
       if (w.setBackgroundColor) w.setBackgroundColor('#05060F');
       if (w.setBottomBarColor) w.setBottomBarColor('#05060F');
-      this._insets();
-      ['contentSafeAreaChanged', 'safeAreaChanged', 'fullscreenChanged', 'viewportChanged'].forEach((ev) => {
-        try { w.onEvent && w.onEvent(ev, () => this._insets()); } catch (e) {}
-      });
-      if (w.BackButton) w.BackButton.onClick(() => Router.back());
       const u = w.initDataUnsafe && w.initDataUnsafe.user;
       if (u && u.first_name) { S.name = (u.first_name + ' ' + (u.last_name || '')).trim(); if (u.username) S.nick = '@' + u.username; }
     } catch (e) {}
+    this._insets();
+    ['contentSafeAreaChanged', 'safeAreaChanged', 'fullscreenChanged', 'viewportChanged'].forEach((event) => {
+      try { if (w.onEvent) { w.onEvent(event, this._onInsets); this._events.push(event); } } catch (e) {}
+    });
+    try { if (w.BackButton) w.BackButton.onClick(this._onBack); } catch (e) {}
+    this.back(this._backVisible);
+    return true;
   },
-  back(show) { const w = this.w; if (!w || !w.BackButton) return; try { show ? w.BackButton.show() : w.BackButton.hide(); } catch (e) {} },
+  back(show) { this._backVisible = !!show; const w = this.w; if (!w || !w.BackButton) return; try { show ? w.BackButton.show() : w.BackButton.hide(); } catch (e) {} },
   /* иммерсивный полноэкранный режим. Вход — только по жесту пользователя
      (только так клиенты его принимают); вызываем из обработчика «В бой». */
   fullscreen(on) {
@@ -39,9 +88,11 @@ const TGX = {
         // lockOrientation фиксирует ТЕКУЩУЮ ориентацию — лочим только в портрете,
         // иначе зафиксируем случайный ландшафт. Десктопу ориентацию не трогаем.
         if (this.mob() && w.lockOrientation && !w.isOrientationLocked && window.innerHeight >= window.innerWidth) {
-          setTimeout(() => { try { w.lockOrientation(); } catch (e) {} }, 150);
+          clearTimeout(this._orientationT);
+          this._orientationT = setTimeout(() => { this._orientationT = 0; if (this.w === w) try { w.lockOrientation(); } catch (e) {} }, 150);
         }
       } else {
+        clearTimeout(this._orientationT); this._orientationT = 0;
         if (this.mob() && w.unlockOrientation && w.isOrientationLocked) { try { w.unlockOrientation(); } catch (e) {} }
         if (w.isFullscreen && w.exitFullscreen) { try { w.exitFullscreen(); } catch (e) {} }
       }

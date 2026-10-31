@@ -11,7 +11,7 @@
    уровень 1. Всё остальное зарабатывается матчами (см. сложность формы в
    screens/match.js). */
 const SAVE_KEY = 'ttu-v2';
-const SAVE_VERSION = 7;
+const SAVE_VERSION = 9;
 const DEFAULT_STATE = {
   v: SAVE_VERSION, lang: null,
   name: 'Anton Spin', nick: '@anton_tt', club: 'Spin Lab',
@@ -21,6 +21,7 @@ const DEFAULT_STATE = {
   /* История рейтинга для графика в профиле: [{t, r}], 30 дней. */
   hist: [],
   passLvl: 0, passXp: 0, passSeason: 4, premium: false, claimed: { f: [], p: [] },
+  rewardReceipts: [],
   chests: [
     { id: 'c1', kind: 'silver', state: 'ready' },
     { id: 'c2', kind: 'gold', state: 'unlocking', endsAt: Date.now() + (2 * 3600 + 14 * 60) * 1000 },
@@ -28,12 +29,14 @@ const DEFAULT_STATE = {
     null
   ],
   owned: ['r-teal', 'b-ink', 't-coral'], equipped: { rubber: 'r-teal', blade: 'b-ink', trail: 't-coral' },
-  sfx: true, music: true, vibro: true, rm: false, quality: 'high', assist: true, tutorial: true, hint: true, tutorialDone: false,
+  sfx: true, music: true, vibro: true, rm: false, quality: 'mid', assist: true, tutorial: true, hint: true, tutorialDone: false,
+  audioLevels: { master: .8, effects: .9, music: .25, ambient: .2 },
+  cal: {}, // Sparse raw preferences; the engine registry supplies all calibration defaults.
   training: { version: 1, lessons: {}, lastLesson: null },
   /* Уровень бота: выбор игрока (0 EASY … 3 WTF), а не лига. Живёт в
      профиле и переживает перезапуск. Ступенька по умолчанию — СРЕДНИЙ. */
   diff: 1,
-  missShots: true, missShotHalf: 350  // automatic first-press gallery crop in CSS px
+  missShots: false, missShotHalf: 350  // automatic first-press gallery crop in CSS px
 };
 /* Шаги миграции: MIGRATIONS[v] переводит сейв версии v в v+1 (мутирует черновик). */
 const MIGRATIONS = {
@@ -62,7 +65,30 @@ const MIGRATIONS = {
   5: (s) => { if (!Number.isFinite(s.passSeason)) s.passSeason = 4; },
   // A legacy tutorial flag is not proof of mastering the new curriculum.
   6: (s) => { s.training = repairTrainingState(s.training); },
+  7: (s) => { s.cal = repairCalibrationPreferences(s.cal); s.audioLevels = repairAudioLevels(s.audioLevels, s.volume); },
+  8: (s) => { s.rewardReceipts = repairRewardReceipts(s.rewardReceipts); },
 };
+function repairRewardReceipts(raw) {
+  return [...new Set((Array.isArray(raw) ? raw : []).filter(id => typeof id === 'string' && id.trim() && id.length <= 192))];
+}
+function repairAudioLevels(raw, legacyVolume) {
+  const out = { ...DEFAULT_STATE.audioLevels };
+  const levels = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {};
+  for (const key of Object.keys(out)) {
+    const value = Object.prototype.hasOwnProperty.call(levels, key) && Number.isFinite(levels[key]) ? levels[key] : key === 'master' ? legacyVolume : undefined;
+    if (Number.isFinite(value)) out[key] = Math.max(0, Math.min(1, value));
+  }
+  return out;
+}
+function repairCalibrationPreferences(raw) {
+  const out = {};
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return out;
+  for (const key of Object.keys(raw).slice(0, 100)) {
+    if (!/^[a-zA-Z][a-zA-Z0-9]{0,47}$/.test(key) || ['constructor', 'prototype'].includes(key) || !Number.isFinite(raw[key])) continue;
+    out[key] = Math.max(0, Math.min(100, raw[key]));
+  }
+  return out;
+}
 function repairTrainingState(raw) {
   const out = { version: 1, lessons: {}, lastLesson: null };
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return out;
@@ -118,15 +144,36 @@ function awardTrainingCompletion(state, catalog) {
 const Store = {
   ok: (() => { try { const k = '__t'; localStorage.setItem(k, '1'); localStorage.removeItem(k); return true; } catch (e) { return false; } })(),
   read(key) { if (!this.ok) return null; try { return JSON.parse(localStorage.getItem(key) || 'null'); } catch (e) { return null; } },
-  write(key, s) { if (!this.ok) return; try { localStorage.setItem(key, JSON.stringify(s)); } catch (e) {} },
+  write(key, s) { if (!this.ok) return false; try { localStorage.setItem(key, JSON.stringify(s)); return true; } catch (e) { return false; } },
   load() {
     let raw = this.read(SAVE_KEY);
     if (!raw || typeof raw !== 'object') raw = this.read(SAVE_KEY + '.bak');   // битый основной → бэкап
-    if (!raw || typeof raw !== 'object') return null;
+    // The old embedded engine really stored these preferences, independently of the shell.
+    const legacyProfile = this.read('topspin.arena.save.v1');
+    const legacySettings = legacyProfile && legacyProfile.settings && typeof legacyProfile.settings === 'object' ? legacyProfile.settings : {};
+    const legacyQuality = legacySettings.quality === 'medium' ? 'mid' : ['high', 'low'].includes(legacySettings.quality) ? legacySettings.quality : null;
+    if (!raw || typeof raw !== 'object') {
+      if (!Number.isFinite(legacySettings.volume) && typeof legacySettings.sound !== 'boolean' && !legacySettings.audioLevels &&
+          typeof legacySettings.haptics !== 'boolean' && !Number.isFinite(legacySettings.difficulty) && !legacyQuality) return null;
+      const fresh = structuredClone(DEFAULT_STATE);
+      fresh.audioLevels = repairAudioLevels(legacySettings.audioLevels, legacySettings.volume);
+      if (legacySettings.sound === false) fresh.sfx = false;
+      if (typeof legacySettings.haptics === 'boolean') fresh.vibro = legacySettings.haptics;
+      if (Number.isFinite(legacySettings.difficulty)) fresh.diff = Math.max(0, Math.min(3, Math.round(legacySettings.difficulty)));
+      if (legacyQuality) fresh.quality = legacyQuality;
+      return fresh;
+    }
     const from = Number.isFinite(raw.v) ? raw.v : 1;
     if (from > SAVE_VERSION) return raw;                                        // сейв новее игры: не ломаем
     if (from < SAVE_VERSION) this.write(SAVE_KEY + '.bak', raw);                // бэкап до миграции
     const draft = Object.assign(structuredClone(DEFAULT_STATE), raw);
+    const importingAudio = from < 8 && !Object.prototype.hasOwnProperty.call(raw, 'audioLevels');
+    draft.audioLevels = repairAudioLevels(raw.audioLevels || (importingAudio ? legacySettings.audioLevels : null),
+      Number.isFinite(raw.volume) ? raw.volume : importingAudio ? legacySettings.volume : undefined);
+    if (importingAudio && legacySettings.sound === false) draft.sfx = false;
+    if (from < 8 && !Object.prototype.hasOwnProperty.call(raw, 'vibro') && typeof legacySettings.haptics === 'boolean') draft.vibro = legacySettings.haptics;
+    if (from < 8 && !Object.prototype.hasOwnProperty.call(raw, 'diff') && Number.isFinite(legacySettings.difficulty)) draft.diff = legacySettings.difficulty;
+    if (from < 8 && !Object.prototype.hasOwnProperty.call(raw, 'quality') && legacyQuality) draft.quality = legacyQuality;
     for (let v = from; v < SAVE_VERSION; v++) { if (MIGRATIONS[v]) MIGRATIONS[v](draft); }
     draft.v = SAVE_VERSION;
     /* форма важнее значений: недостающие ветки добираем из дефолтов */
@@ -139,13 +186,23 @@ const Store = {
     if (!draft.equipped || typeof draft.equipped !== 'object') draft.equipped = Object.assign({}, DEFAULT_STATE.equipped);
     if (!Array.isArray(draft.chests)) draft.chests = structuredClone(DEFAULT_STATE.chests);
     draft.training = repairTrainingState(draft.training);
+    draft.rewardReceipts = repairRewardReceipts(draft.rewardReceipts);
+    draft.cal = repairCalibrationPreferences(draft.cal);
+    for (const key of ['sfx', 'vibro', 'rm', 'hint', 'missShots']) if (typeof draft[key] !== 'boolean') draft[key] = DEFAULT_STATE[key];
+    if (!['high', 'mid', 'low'].includes(draft.quality)) draft.quality = DEFAULT_STATE.quality;
+    draft.diff = Number.isFinite(draft.diff) ? Math.max(0, Math.min(3, Math.round(draft.diff))) : DEFAULT_STATE.diff;
     return draft;
   },
-  save(s) { this.write(SAVE_KEY, s); }
+  save(s) { return this.write(SAVE_KEY, s); }
 };
 const S = Store.load() || structuredClone(DEFAULT_STATE);
+const motionPreferenceQuery = (() => {
+  try { return typeof window !== 'undefined' && window.matchMedia ? window.matchMedia('(prefers-reduced-motion: reduce)') : null; }
+  catch (e) { return null; }
+})();
+function effectiveReducedMotion() { return S.rm === true || !!(motionPreferenceQuery && motionPreferenceQuery.matches); }
 let _saveT = 0;
-const saveNow = () => { if (_saveT) { clearTimeout(_saveT); _saveT = 0; } Store.save(S); };
+const saveNow = () => { if (_saveT) { clearTimeout(_saveT); _saveT = 0; } return Store.save(S); };
 /* save() — отложить запись; повторные вызовы сливаются в одну */
 const save = () => { if (_saveT) return; _saveT = setTimeout(saveNow, 250); };
 if (typeof document !== 'undefined') {

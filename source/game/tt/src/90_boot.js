@@ -68,18 +68,22 @@
       const rawDt = (now - last) / 1000;
       const dt = Math.min(rawDt, 0.1);
       last = now;
-      if (game.debugRecording) {
+      if (game.debugRecording && !game.preview?.active) {
         game._debugLastFrameDelta = rawDt;
         if (!game.paused && rawDt > .05) game.logInput('frame_gap', { outcome: { rawSeconds: rawDt, appliedSeconds: dt } });
       }
       const t0 = performance.now();
-      if (!game.paused) game.update(dt);
+      const preview = game.preview?.active, awake = !game._ttSleeping;
+      if (awake) {
+        if (preview) game.preview.update(rawDt);
+        else if (!game.paused) game.update(dt);
+      }
       const t1 = performance.now();
-      game.render();
+      if (awake) game.render();
       const t2 = performance.now();
-      ui.tick(dt);
+      if (awake && !preview) ui.tick(dt);
       const t3 = performance.now();
-      if (perf) perf.frame(rawDt * 1000, [t1 - t0, t2 - t1, t3 - t2]);
+      if (perf && awake && !preview) perf.frame(rawDt * 1000, [t1 - t0, t2 - t1, t3 - t2]);
       requestAnimationFrame(frame);
     }
     requestAnimationFrame((t) => { last = t; frame(t); });

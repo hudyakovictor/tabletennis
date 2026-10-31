@@ -6,7 +6,11 @@
 const DEVMODE = /[?&]dev=1/.test(location.search);
 const GameHost = {
   frame: null, ready: false, q: [], subs: new Set(), rules: null,
+  calibrationRegistry: [], calibration: null, calibrationReady: false, calibrationRequestId: 0, calibrationAckId: 0,
+  _calibrationImported: false,
+  inspector: null, sessionKind: 'free',
   trainingCatalog: null, trainSnapshot: null, trainRequestId: 0, trainSessionId: null,
+  preview: null, previewRequestId: 0, _previewReturn: null,
   debug: (() => { try { return sessionStorage.getItem('ttu-debug-recording') === '1'; } catch (e) { return false; } })(),
   setDebug(on) {
     this.debug = !!on;
@@ -43,11 +47,62 @@ const GameHost = {
     // слой ещё не показан (заставка, меню) — движок стартует спящим и не рендерит впустую
     if (!$('#gamelayer').classList.contains('on')) { this._asleep = true; this.send('sleep'); }
   },
-  reload() { if (this.frame) this.frame.remove(); this.frame = null; this.ready = false; this.q = []; this.ensure(); },
+  reload() {
+    if (this.frame) this.frame.remove(); this.frame = null; this.ready = false; this.q = [];
+    this.calibrationReady = false; this.calibration = null; this.calibrationRegistry = []; this.inspector = null;
+    this.notify({ type: 'calibrationPending' }); this.ensure();
+  },
+  syncSettings() {
+    document.body.classList.toggle('rm', effectiveReducedMotion());
+    if (typeof Sfx !== 'undefined') Sfx.sync();
+    this.send('settings', { quality: this._recoveryQuality || S.quality, motionOff: !!S.rm,
+      sound: S.sfx !== false, haptics: S.vibro !== false, hint: S.hint !== false, debug: this.debug,
+      audioLevels: repairAudioLevels(S.audioLevels, S.volume), calibrations: repairCalibrationPreferences(S.cal),
+      missShots: { on: S.missShots === true, half: S.missShotHalf } });
+  },
+  syncReducedMotion() {
+    const effective = effectiveReducedMotion(); document.body.classList.toggle('rm', effective);
+    this.send('rm', { on: !!S.rm }); this.notify({ type: 'motionPreference', effective });
+  },
+  acceptCalibration(m) {
+    const state = m.calibration;
+    if (!this.ready || !state || !this.calibrationRegistry.length || Number.isFinite(m.requestId) && m.requestId !== this.calibrationRequestId) return false;
+    if (!this.calibrationRegistry.every(entry => state.requested && state.effective && state.raw && state.values &&
+      Number.isFinite(state.requested[entry.key]) && state.requested[entry.key] >= 0 && state.requested[entry.key] <= 1 &&
+      Number.isFinite(state.effective[entry.key]) && state.effective[entry.key] >= 0 && state.effective[entry.key] <= 1 &&
+      Number.isFinite(state.raw[entry.key]) && Number.isFinite(state.values.requested && state.values.requested[entry.key]) &&
+      Number.isFinite(state.values.effective && state.values.effective[entry.key]))) return false;
+    this.calibration = state; this.sessionKind = state.sessionKind;
+    if (Number.isFinite(m.requestId)) { this.calibrationReady = true; this.calibrationAckId = m.requestId; }
+    if (state.inspector) this.inspector = { ...state.inspector };
+    return true;
+  },
+  notify(m) { this.subs.forEach(fn => { try { fn(m); } catch (err) { console.error(err); } }); },
   // то, что надо повторить новому iframe после потери GPU-контекста
   mode: null, sticky: {}, paused: false, losses: [],
   send(type, data) {
     const m = Object.assign({ __tt: 1, type }, data || {});
+    if (['attract', 'lobby', 'match', 'train', 'quit'].includes(type) && this.preview && (this.preview.active || this.preview.pending)) {
+      this._previewReturn = null;
+      this.send('previewClose', { requestId: this.previewRequestId }); this.preview = null;
+    }
+    if (type === 'previewOpen') {
+      m.requestId = ++this.previewRequestId;
+      this.preview = { active: false, pending: true, requestId: m.requestId };
+    }
+    if (type === 'settings' || type === 'cal') m.requestId = ++this.calibrationRequestId;
+    if (type === 'quality') this._recoveryQuality = null;
+    if (['attract', 'lobby', 'match', 'train'].includes(type)) {
+      if (this.ready) this.syncSettings();
+      if (type === 'match') {
+        const selected = typeof MODE !== 'undefined' && MODE && MODE.id;
+        m.sessionKind = ['free', 'practice', 'ranked', 'career', 'check', 'online'].includes(m.sessionKind)
+          ? m.sessionKind : m.free ? 'free' : ['free', 'practice', 'ranked'].includes(selected) ? selected : 'practice';
+      } else m.sessionKind = type === 'train' ? m.sessionKind === 'check' || m.resume && m.resume.stage === 'check' ? 'check' : 'practice' : 'free';
+      delete m.hint; // Preferences have one source, never a stale copy captured in mode.data.
+      this.sessionKind = m.sessionKind;
+      if (!m.resume) this.inspector = null;
+    }
     if (type === 'train') {
       m.requestId = ++this.trainRequestId; m.progress = repairTrainingState(S.training);
       this.trainSessionId = null; this.trainSnapshot = null;
@@ -55,20 +110,35 @@ const GameHost = {
     if (['attract', 'lobby', 'match', 'train'].includes(type)) { this.mode = { type, data: { ...m } }; this.paused = false; }
     if (['quiet', 'mute', 'hint', 'quality', 'rm', 'debug'].includes(type)) this.sticky[type] = data || {};
     if (type === 'pause') this.paused = true; if (type === 'resume' || type === 'quit') this.paused = false;
-    if (type === 'quit') this.mode = { type: 'attract', data: {} };
+    if (type === 'quit') { this.mode = { type: 'attract', data: {} }; this.sessionKind = 'free'; this.inspector = null; }
     if (this.debug && typeof HostDiagnostics !== 'undefined' &&
         ['debug', 'pause', 'resume', 'slowmo', 'sleep', 'wake', 'match', 'train', 'quit'].includes(type))
       HostDiagnostics.record('host_command', { command: type, on: data && typeof data.on === 'boolean' ? data.on : null, ready: this.ready });
     if (this.ready && this.frame) this.frame.contentWindow.postMessage(m, '*'); else this.q.push(m);
   },
   on(fn) { this.subs.add(fn); return () => this.subs.delete(fn); },
+  openPreview(options) {
+    if (this.preview && (this.preview.active || this.preview.pending)) return false;
+    this.ensure();
+    this._previewReturn = { shown: $('#gamelayer').classList.contains('on') };
+    this.send('pause'); this.show(true); this.send('previewOpen', options);
+    return true;
+  },
+  closePreview() {
+    if (this.preview && (this.preview.active || this.preview.pending)) this.send('previewClose', { requestId: this.previewRequestId });
+  },
   recover(m) {
+    if (this.preview && (this.preview.active || this.preview.pending)) {
+      this.preview = null; this._previewReturn = null;
+      this.notify({ type: 'preview', active: false, error: 'context_lost' });
+    }
     const now = Date.now(); this.losses = this.losses.filter((t) => now - t < 60000); this.losses.push(now);
     const ov = $('#glRecover'); ov && ov.classList.add('on');
-    const mode = this.mode, sticky = Object.assign({}, this.sticky), paused = this.paused;
-    if (this.losses.length >= 3) sticky.quality = { q: 'low' };   // третья потеря за минуту — разгружаем GPU
+    const mode = this.mode, quiet = this.sticky.quiet, paused = this.paused;
+    const inspect = this.inspector && this.inspector.requested;
+    if (this.losses.length >= 3) this._recoveryQuality = 'low';   // temporary GPU relief, not a saved preference
     this.reload();
-    Object.entries(sticky).forEach(([t, d]) => this.send(t, d));
+    if (quiet) this.send('quiet', quiet);
     if (mode) {
       if (mode.type === 'match' && m.inMatch) this.send('match', Object.assign({}, mode.data, { resume: { score: m.score, server: m.server } }));
       else if (mode.type === 'train') {
@@ -79,6 +149,7 @@ const GameHost = {
       else if (mode.type !== 'match') this.send(mode.type, mode.data);
       else this.send('attract');
     }
+    if (inspect && mode && (mode.type === 'train' || mode.type === 'match' && m.inMatch)) this.send('slowmo', { on: true });
     if (paused) this.send('pause');
     if (!$('#gamelayer').classList.contains('on')) { this._asleep = true; this.send('sleep'); }
     this._recovering = true;
@@ -117,21 +188,55 @@ window.addEventListener('message', (e) => {
   }
   if (m.type === 'ready') {
     GameHost.ready = true; GameHost.rules = m.rules;
+    const seen = new Set();
+    GameHost.calibrationRegistry = Array.isArray(m.calibrationRegistry) ? m.calibrationRegistry.slice(0, 100).filter(entry => {
+      if (!entry || !/^[a-zA-Z][a-zA-Z0-9]{0,47}$/.test(entry.key) || ['constructor', 'prototype'].includes(entry.key) || seen.has(entry.key) ||
+          !Number.isFinite(entry.min) || !Number.isFinite(entry.max) || entry.max <= entry.min ||
+          !Number.isFinite(entry.default) || entry.default < entry.min || entry.default > entry.max) return false;
+      seen.add(entry.key); return true;
+    }).map(entry => ({ key: entry.key, default: entry.default, min: entry.min, max: entry.max,
+      step: entry.step === 'any' || Number.isFinite(entry.step) && entry.step > 0 ? entry.step : 'any',
+      group: entry.group, scope: entry.scope, unit: entry.unit, precision: entry.precision,
+      competitiveLocked: entry.competitiveLocked === true, requiresMotion: entry.requiresMotion === true,
+      labelRu: String(entry.labelRu || entry.key), labelEn: String(entry.labelEn || entry.key),
+      descriptionRu: String(entry.descriptionRu || ''), descriptionEn: String(entry.descriptionEn || '') })) : [];
+    if (!GameHost._calibrationImported && GameHost.calibrationRegistry.length) {
+      GameHost._calibrationImported = true;
+      const saved = repairCalibrationPreferences(m.calibrationPreferences);
+      S.cal = repairCalibrationPreferences(S.cal); let imported = false;
+      for (const entry of GameHost.calibrationRegistry) {
+        if (!Object.prototype.hasOwnProperty.call(S.cal, entry.key) && Object.prototype.hasOwnProperty.call(saved, entry.key)) {
+          S.cal[entry.key] = saved[entry.key]; imported = true;
+        }
+      }
+      if (imported) saveNow();
+    }
+    GameHost.calibrationReady = false; GameHost.calibration = null;
     if (m.trainingCatalog && m.trainingCatalog.version === 1) GameHost.trainingCatalog = m.trainingCatalog;
     if (GameHost._recovering) { GameHost._recovering = false; setTimeout(() => { const ov = $('#glRecover'); ov && ov.classList.remove('on'); }, 350); }
-    if (GameHost.debug) GameHost.send('debug', { on: true });
-    GameHost.send('quality', { q: S.quality });
-    GameHost.send('rm', { on: !!S.rm });
-    GameHost.send('mute', { on: S.sfx === false });
-    GameHost.send('haptics', { on: S.vibro !== false });
-    GameHost.send('hint', { on: !!S.hint });
+    // Apply a fresh complete settings packet before any queued/recovered mode.
+    GameHost.syncSettings();
     if (S.equipped) GameHost.send('equip', { equipped: S.equipped });
     GameHost.send('locale', { lang: I18n.lang });
-    /* вся сохранённая калибровка (включая закрутку) — в движок сразу,
-       а не только когда игрок тронет ползунок */
-    if (S.cal) for (const k in S.cal) GameHost.send('cal', { k, v: S.cal[k] });
-    GameHost.send('missShots', { on: S.missShots !== false, half: S.missShotHalf });
-    const q = GameHost.q; GameHost.q = []; q.forEach((x) => GameHost.frame.contentWindow.postMessage(x, '*'));
+    const q = GameHost.q; GameHost.q = [];
+    const settingsCommands = ['settings', 'quality', 'rm', 'mute', 'haptics', 'hint', 'cal', 'missShots', 'debug', 'equip', 'locale'];
+    const modeCommands = ['attract', 'lobby', 'match', 'train', 'quit'];
+    let lastMode = -1; q.forEach((x, i) => { if (modeCommands.includes(x.type)) lastMode = i; });
+    q.forEach((x, i) => {
+      if (settingsCommands.includes(x.type) || modeCommands.includes(x.type) && i !== lastMode) return;
+      if (x.type === 'match' || x.type === 'train') delete x.hint;
+      GameHost.frame.contentWindow.postMessage(x, '*');
+    });
+  }
+  if (['settings', 'calibration', 'slowmo'].includes(m.type)) GameHost.acceptCalibration(m);
+  if (m.type === 'paused') GameHost.paused = !!m.v;
+  if (m.type === 'preview') {
+    if (m.requestId !== GameHost.previewRequestId) return;
+    GameHost.preview = { ...m, pending: false }; GameHost.paused = !!m.paused;
+    if (!m.active && GameHost._previewReturn) {
+      const back = GameHost._previewReturn; GameHost._previewReturn = null;
+      if (!back.shown) GameHost.show(false);
+    }
   }
   if (m.type === 'trainingCatalog' && m.catalog && m.catalog.version === 1) GameHost.trainingCatalog = m.catalog;
   if (['train', 'trainingProgress', 'trainDone'].includes(m.type)) {
@@ -165,8 +270,14 @@ window.addEventListener('message', (e) => {
     MissShots.captureError = String(m.message || 'capture failed');
     if (GameHost.debug && typeof HostDiagnostics !== 'undefined') HostDiagnostics.record('calibration_shot_error', { message: MissShots.captureError });
   }
-  GameHost.subs.forEach((f) => { try { f(m); } catch (err) { console.error(err); } });
+  GameHost.notify(m);
 });
+
+if (motionPreferenceQuery) {
+  const sync = () => GameHost.syncReducedMotion();
+  if (motionPreferenceQuery.addEventListener) motionPreferenceQuery.addEventListener('change', sync);
+  else if (motionPreferenceQuery.addListener) motionPreferenceQuery.addListener(sync);
+}
 
 /* ---------- статистика зоны удара: реальные попытки с реальных пальцев ---------- */
 const ZoneStats = {
@@ -226,7 +337,9 @@ const ZoneStats = {
   /** подпись текущей зоны в том же формате, что пишет игра: бока/верх/низ/радиус */
   sigNow(input) {
     const R = Object.assign({}, GameHost.rules || {}, GameHost.devRules());
-    return [input === 'mouse' ? R.contactSideMousePx : R.contactSideTouchPx, R.contactBackPx, R.contactForwardPx, R.captureRadius].map((v) => +(+v).toFixed(2)).join('/');
+    const capture = GameHost.calibration && GameHost.calibration.capture;
+    const radius = capture && Number.isFinite(capture.radius) ? capture.radius : R.captureRadius;
+    return [input === 'mouse' ? R.contactSideMousePx : R.contactSideTouchPx, R.contactBackPx, R.contactForwardPx, radius].map((v) => +(+v).toFixed(2)).join('/');
   },
   sigLabel(sig) { if (!sig) return 'до записи настроек'; const [s, b, f, r] = sig.split('/'); return `бока ${s} · верх ${b} · низ ${f} · r ${r}`; },
   compare(input) {

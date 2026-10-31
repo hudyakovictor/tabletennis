@@ -4,7 +4,8 @@
    подачи и точность контакта (ZoneStats). Пока матчей мало, радар
    смешивается с нейтральными значениями, чтобы не скакать от одного матча. */
 const ICON_FILL = new Set(['star', 'bolt', 'fire', 'crown']);   // у контурных иконок (мишень, часы) заливка превращает их в кляксу
-const SPIN_STROKES = new Set(['LOOP', 'COUNTER', 'FLICK', 'PUSH', 'CHOP', 'HOOK', 'FADE', 'LOB']);
+const SPIN_STROKES = new Set(['LOOP', 'COUNTER', 'FLICK', 'PUSH', 'CHOP', 'HOOK', 'FADE', 'SIDE', 'LOB',
+  'BANANA', 'CHOP_BLOCK', 'SERVE_TOP', 'SERVE_BACK', 'SERVE_SIDE']);
 const ACH = [
   { id: 'first_win', tk: 'ach.first_win', dk: 'ach.first_winD', i: 'trophy' },
   { id: 'streak3', tk: 'ach.streak3', dk: 'ach.streak3D', i: 'fire' },

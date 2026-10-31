@@ -1,26 +1,69 @@
 const MISS_SHOT_SIZES = [350, 300, 400, 100, 20];
-/* Калибровка сгруппирована по смыслу: длинный плоский список из 16 ползунков
-   не читается. Почти всё читается движком напрямую из g._cal, поэтому
-   значение применяется на лету — перезапускать матч не нужно. */
-const CAL = [
-  { g: 'camera', k: 'camHeight', tk: 'cal.camHeight', dk: 'cal.camHeightD', min: 0, max: 100, def: 50 },
-  { g: 'camera', k: 'camZoom', tk: 'cal.camZoom', dk: 'cal.camZoomD', min: 0, max: 100, def: 50 },
-  { g: 'camera', k: 'camSway', tk: 'cal.camSway', dk: 'cal.camSwayD', min: 0, max: 100, def: 40 },
-  { g: 'racket', k: 'padSpeed', tk: 'cal.padSpeed', dk: 'cal.padSpeedD', min: 0, max: 100, def: 55 },
-  { g: 'racket', k: 'padSmooth', tk: 'cal.padSmooth', dk: 'cal.padSmoothD', min: 0, max: 100, def: 35 },
-  { g: 'racket', k: 'fingerTrail', tk: 'cal.fingerTrail', dk: 'cal.fingerTrailD', min: 0, max: 100, def: 55 },
-  { g: 'strike', k: 'spinGain', tk: 'cal.spinGain', dk: 'cal.spinGainD', min: 0, max: 100, def: 45 },
-  { g: 'strike', k: 'arcSens', tk: 'cal.arcSens', dk: 'cal.arcSensD', min: 0, max: 100, def: 33 },
-  { g: 'strike', k: 'tossHeight', tk: 'cal.tossHeight', dk: 'cal.tossHeightD', min: 0, max: 100, def: 45 },
-  { g: 'ball', k: 'ballSize', tk: 'cal.ballSize', dk: 'cal.ballSizeD', min: 0, max: 100, def: 50 },
-  { g: 'ball', k: 'trailLen', tk: 'cal.trailLen', dk: 'cal.trailLenD', min: 0, max: 100, def: 45 },
-  { g: 'ball', k: 'flytime', tk: 'cal.flytime', dk: 'cal.flytimeD', min: 0, max: 100, def: 50 },
-  { g: 'ball', k: 'tableGlow', tk: 'cal.tableGlow', dk: 'cal.tableGlowD', min: 0, max: 100, def: 50 },
-  { g: 'help', k: 'hintRadius', tk: 'cal.hintRadius', dk: 'cal.hintRadiusD', min: 0, max: 100, def: 60 },
-  { g: 'help', k: 'captureK', tk: 'cal.captureK', dk: 'cal.captureKD', min: 0, max: 100, def: 50 },
-  { g: 'help', k: 'hintGlow', tk: 'cal.hintGlow', dk: 'cal.hintGlowD', min: 0, max: 100, def: 65 },
-  { g: 'help', k: 'slowmoDepth', tk: 'cal.slowmoDepth', dk: 'cal.slowmoDepthD', min: 0, max: 100, def: 60 }
-];
+const settingsText = (ru, en) => I18n.lang === 'ru' ? ru : en;
+function calibrationLabel(entry, value) {
+  if (!Number.isFinite(value)) return settingsText('Ожидание', 'Pending');
+  const number = value.toFixed(Number.isInteger(entry.precision) ? Math.max(0, Math.min(3, entry.precision)) : 2);
+  const unit = { deg: '°', ms: settingsText(' мс', ' ms'), 'm/s': settingsText(' м/с', ' m/s'), x: 'x', '%': '%' }[entry.unit] || '';
+  return number + unit;
+}
+function refreshSettingsCalibration(w, message) {
+  const list = w.querySelector('[data-cal-list]'), summary = w.querySelector('[data-cal-summary]'), reset = w.querySelector('[data-a=calReset]');
+  const registry = GameHost.calibrationRegistry, state = GameHost.calibration;
+  const ready = GameHost.ready && GameHost.calibrationReady && registry.length && state;
+  reset.disabled = !ready;
+  summary.textContent = registry.length ? t('set.calibOpen', { n: registry.length }) : settingsText('Калибровка: ожидаем движок', 'Calibration: waiting for the engine');
+  const motion = w.querySelector('[data-motion-state]');
+  motion.textContent = effectiveReducedMotion() ? settingsText('Уменьшение движения действует (ОС или настройка).', 'Reduced motion is active (OS or preference).') : '';
+  const hint = w.querySelector('[data-hint-state]');
+  hint.textContent = ready && state.hint && !state.hint.allowed ? settingsText('В этом режиме действует регламентная помощь; личная настройка сохранена.', 'This mode uses regulation guidance; your preference is saved.') : '';
+  if (!ready) {
+    list.replaceChildren(); delete list.dataset.keys;
+    const waiting = document.createElement('p'); waiting.className = 'dim'; waiting.setAttribute('role', 'status');
+    waiting.textContent = settingsText('Значения появятся после подтверждения актуальных настроек движком.', 'Values appear after the engine confirms the current settings.');
+    list.appendChild(waiting); return;
+  }
+  if (list.dataset.keys !== registry.map(entry => entry.key).join('|')) {
+    list.replaceChildren(); let group = '';
+    for (const entry of registry) {
+      if (entry.group !== group) {
+        group = entry.group; const head = document.createElement('div'); head.className = 'cal-grp'; head.textContent = t('cal.g.' + group); list.appendChild(head);
+      }
+      const row = document.createElement('div'); row.className = 'calrow'; row.dataset.calrow = entry.key;
+      row.innerHTML = '<div class="cal-t"><b></b><small data-cal-description></small><small data-cal-effective></small></div><div class="cal-c"><input type="range"><span class="cal-v num"></span></div>';
+      row.querySelector('b').textContent = settingsText(entry.labelRu, entry.labelEn);
+      row.querySelector('[data-cal-description]').textContent = settingsText(entry.descriptionRu, entry.descriptionEn);
+      const input = row.querySelector('input'); input.min = entry.min; input.max = entry.max; input.step = entry.step; input.dataset.cal = entry.key;
+      input.setAttribute('aria-label', settingsText(entry.labelRu, entry.labelEn));
+      row.querySelector('.cal-v').style.whiteSpace = 'nowrap'; list.appendChild(row);
+    }
+    list.dataset.keys = registry.map(entry => entry.key).join('|');
+  }
+  for (const entry of registry) {
+    const row = list.querySelector(`[data-calrow="${entry.key}"]`), input = row.querySelector('input'), note = row.querySelector('[data-cal-effective]');
+    if (message && Number.isFinite(message.requestId) && message.requestId === GameHost.calibrationRequestId && +input.dataset.pending <= message.requestId) delete input.dataset.pending;
+    const wanted = S.cal && S.cal[entry.key];
+    const pending = !!input.dataset.pending || GameHost.calibrationRequestId > GameHost.calibrationAckId && Number.isFinite(wanted) && Math.abs(wanted - state.raw[entry.key]) > 1e-9;
+    if (!input.dataset.pending) input.value = pending ? wanted : state.raw[entry.key];
+    const reason = state.restrictions && state.restrictions[entry.key];
+    input.disabled = reason === 'competitive';
+    const requested = calibrationLabel(entry, state.values.requested[entry.key]), effective = calibrationLabel(entry, state.values.effective[entry.key]);
+    row.querySelector('.cal-v').textContent = reason === 'competitive' && entry.competitiveLocked ? effective : requested;
+    let text = '';
+    if (pending) text = settingsText('Сохранено; ожидаем подтверждения движка.', 'Saved; waiting for engine confirmation.');
+    else if (reason === 'competitive') text = entry.competitiveLocked
+      ? settingsText(`Регламент: ${effective}. Личное значение ${requested} сохранено.`, `Regulation: ${effective}. Your ${requested} preference is saved.`)
+      : entry.scope === 'inspector' ? settingsText(`Инспектор недоступен в этом режиме; сохранено ${requested}.`, `The inspector is unavailable in this mode; ${requested} is saved.`)
+        : settingsText(`Учебные подсказки недоступны в этом режиме; сохранено ${requested}.`, `Training hints are unavailable in this mode; ${requested} is saved.`);
+    else if (reason === 'training-only') text = settingsText('Действует только в обучении; личное значение сохранено.', 'Only active in training; your preference is saved.');
+    else if (reason === 'hint-off') text = settingsText('Подсказки выключены; личное значение сохранено.', 'Hints are off; your preference is saved.');
+    else if (reason === 'inspector-off') text = settingsText('Инспектор выключен; включается отдельной кнопкой в игре.', 'The inspector is off; enable it with the separate in-game button.');
+    else if (reason === 'reduced-motion') text = settingsText('Эффект выключен уменьшением движения; личное значение сохранено.', 'Reduced motion disables this effect; your preference is saved.');
+    else if (reason === 'trail-off') text = settingsText('Отображение шлейфа выключено.', 'Trail rendering is off.');
+    else if (requested !== effective) text = settingsText(`Эффективно: ${effective}. Сохранено: ${requested}.`, `Effective: ${effective}. Saved: ${requested}.`);
+    note.textContent = text; note.hidden = !text;
+    input.setAttribute('aria-valuetext', text ? `${requested}. ${text}` : effective);
+  }
+}
 
 /* The original gallery uses ttu-miss-shots. Display legacy and new records
  * with DOM text setters rather than interpreting stored data as markup. */
@@ -58,32 +101,37 @@ function zoomMissShot(w, s, previousFocus) {
 function openSettings() {
   // Дефолт — только для нового сейва: раньше эта строка включала галерею
   // обратно при каждом открытии настроек, и выключить её было невозможно.
-  if (S.missShots === undefined) S.missShots = true;
+  if (S.missShots === undefined) S.missShots = false;
   S.missShotHalf = MISS_SHOT_SIZES.includes(+S.missShotHalf) ? +S.missShotHalf : 350;
-  const row = (k, t, i, d) => `<div class="srow"><span class="si">${Art.icon(i, { c: '#9BE8FF' })}</span><span class="st"><b>${t}</b><small>${d}</small></span><button class="tgl ${S[k] ? 'on' : ''}" data-k="${k}" aria-label="${t}" aria-pressed="${!!S[k]}"></button></div>`;
-  S.cal = S.cal || {};
-  let lastCalGroup = null;
-  const cal = CAL.map((c) => {
-    const v = S.cal[c.k] !== undefined ? S.cal[c.k] : c.def;
-    const head = c.g !== lastCalGroup ? (lastCalGroup = c.g, `<div class="cal-grp">${t('cal.g.' + c.g)}</div>`) : '';
-    return `${head}<div class="calrow"><div class="cal-t"><b>${t(c.tk)}</b><small>${t(c.dk)}</small></div><div class="cal-c"><input type="range" min="${c.min}" max="${c.max}" value="${v}" data-cal="${c.k}" aria-label="${t(c.tk)}"><span class="cal-v num" data-calv="${c.k}">${v}</span></div></div>`;
+  const row = (k, title, i, d, value = S[k]) => `<div class="srow"><span class="si">${Art.icon(i, { c: '#9BE8FF' })}</span><span class="st"><b>${title}</b><small>${d}</small></span><button class="tgl ${value ? 'on' : ''}" data-k="${k}" aria-label="${title}" aria-pressed="${!!value}"></button></div>`;
+  S.cal = repairCalibrationPreferences(S.cal);
+  const levels = repairAudioLevels(S.audioLevels, S.volume);
+  const audioRows = [['master', 'Общая громкость', 'Master volume'], ['effects', 'Эффекты и интерфейс', 'Effects and interface'],
+    ['music', 'Музыка', 'Music'], ['ambient', 'Окружение', 'Ambient']].map(([key, ru, en]) => {
+    const value = levels[key] * 100, label = settingsText(ru, en);
+    return `<div class="calrow"><div class="cal-t"><b>${label}</b></div><div class="cal-c"><input type="range" min="0" max="100" step="any" value="${value}" data-audio="${key}" aria-label="${label}"><span class="cal-v num" data-audiov="${key}">${+value.toFixed(1)}%</span></div></div>`;
   }).join('');
+  if (!GameHost.frame) GameHost.ensure();
   Sheet.open(`<div class="h1" style="margin:4px 4px 14px">${t('set.title')}</div>
     <div class="settings-diff">
       <div class="settings-diff-head"><b>${t('set.diff')}</b><small>${t('set.diffHint')}</small></div>
       <div class="seg" id="dseg" role="group" aria-label="${t('set.diff')}"><span class="pill"></span>${DIFFS.map((d) => `<button data-v="${d.id}" class="${S.diff === d.id ? 'on' : ''}">${t(d.tk)}</button>`).join('')}</div>
       <div class="settings-diff-info" id="diffDescription">${t(diffOf(S.diff).sk)}</div>
     </div>
-    <div class="pnl sgroup">${row('sfx', t('set.sfx'), 'sound', t('set.sfxD'))}${row('vibro', t('set.vibro'), 'vibe', t('set.vibroD'))}${row('hint', t('set.hint'), 'target', t('set.hintD'))}${row('rm', t('set.rm'), 'motion', t('set.rmD'))}</div>
+    <div class="pnl sgroup">${row('sfx', t('set.sfx'), 'sound', t('set.sfxD'))}${row('vibro', t('set.vibro'), 'vibe', t('set.vibroD'))}${row('hint', t('set.hint'), 'target', settingsText('Учебные маркеры и ранний сигнал мяча; в соревновании помощь ограничена.', 'Training markers and early ball cues; competition restricts assistance.'))}${row('rm', t('set.rm'), 'motion', t('set.rmD'))}</div>
+    <p class="dim" data-motion-state style="font-size:11px;margin:6px 4px"></p><p class="dim" data-hint-state style="font-size:11px;margin:6px 4px"></p>
+    <div class="cap" style="margin:18px 4px 8px">${settingsText('Уровни звука', 'Audio levels')}</div>
+    <div class="pnl calib"><div class="cal-list" style="padding-top:14px" data-audio-list>${audioRows}<p class="dim" data-audio-state style="font-size:11px;margin:0"></p></div></div>
     <div class="cap" style="margin:18px 4px 8px">${t('set.quality')}</div>
     <div class="seg" id="qseg"><span class="pill"></span>${['high', 'mid', 'low'].map((q) => `<button data-v="${q}" class="${S.quality === q ? 'on' : ''}">${{ high: t('quality.high'), mid: t('quality.mid'), low: t('quality.low') }[q]}</button>`).join('')}</div>
     <div class="cap" style="margin:18px 4px 8px">${t('set.language')}</div>
     <div class="seg" id="langseg"><span class="pill"></span>${I18n.LANGS.map((L) => `<button data-v="${L.id}" class="${I18n.lang === L.id ? 'on' : ''}">${L.name}</button>`).join('')}</div>
     <div class="pnl sgroup" style="margin-top:10px"><div class="srow"><span class="si">${Art.icon('expand', { c: '#9BE8FF' })}</span><span class="st"><b>${t('set.fullscreen')}</b><small>${t('set.fullscreenD')}</small></span><button class="b3 dark sm" data-a="fs" style="margin-left:auto">${t('set.fullscreenBtn')}</button></div></div>
     <div class="cap" style="margin:18px 4px 8px">${t('set.calib')} <small class="dim" style="text-transform:none;font-weight:400;font-size:11px">${t('set.calibHint')}</small></div>
-    <details class="pnl calib"><summary class="cal-sum">${Art.icon('target', { c: '#9BE8FF' })} ${t('set.calibOpen', { n: CAL.length })}</summary><div class="cal-list">${cal}</div><div class="cal-foot"><button class="b3 dark sm block" data-a="calReset">${t('set.calibReset')}</button></div></details>
+    <details class="pnl calib" data-calibration><summary class="cal-sum">${Art.icon('target', { c: '#9BE8FF' })} <span data-cal-summary></span></summary><div class="cal-list" data-cal-list></div><div class="cal-foot"><button class="b3 dark sm block" data-a="calReset" disabled>${t('set.calibReset')}</button></div></details>
     <div class="cap" style="margin:18px 4px 8px">${t('set.missesTitle')} <small class="dim" style="text-transform:none;font-weight:400;font-size:11px">${t('set.missesHint')}</small></div>
     <div class="pnl sgroup miss-gallery">
+      ${row('debug', settingsText('Диагностическая запись', 'Diagnostic recording'), 'target', settingsText('Локальный журнал для разбора; по умолчанию выключен.', 'Local analysis journal; off by default.'), GameHost.debug)}
       ${row('missShots', t('set.missesSave'), 'target', t('set.missesSaveD'))}
       <div class="srow"><span class="st"><b>${t('set.missesSize')}</b></span>
         <select data-miss-size aria-label="${t('set.missesSize')}">${MISS_SHOT_SIZES.map(n => `<option value="${n}" ${S.missShotHalf === n ? 'selected' : ''}>${t('set.missesSize' + n)}</option>`).join('')}</select></div>
@@ -95,7 +143,17 @@ function openSettings() {
     </div>
     <p class="dim" style="font-size:11.5px;margin:14px 4px 0;line-height:1.5">${t('set.version', { v: '2.0.0' })}</p>`, {
     onOpen: (w) => {
-      let displayedShots = [];
+      let displayedShots = [], clearTimer = 0;
+      const refreshAudio = () => {
+        const values = repairAudioLevels(S.audioLevels, S.volume);
+        w.querySelector('[data-audio-state]').textContent = S.sfx === false ? settingsText('Звук выключен; уровни сохранены.', 'Muted; your levels are saved.')
+          : values.master === 0 ? settingsText('Общая громкость 0%: звук не воспроизводится.', 'Master volume is 0%: no audio plays.')
+          : values.effects === 0 ? settingsText('Эффекты и звуки интерфейса выключены (0%).', 'Effects and interface sounds are off (0%).') : '';
+      };
+      refreshAudio(); refreshSettingsCalibration(w);
+      const off = GameHost.on(message => {
+        if (['ready', 'calibrationPending', 'calibration', 'settings', 'slowmo', 'motionPreference'].includes(message.type)) refreshSettingsCalibration(w, message);
+      });
       const refreshMisses = () => {
         const shots = displayedShots = MissShots.all(), grid = w.querySelector('.miss-grid');
         w.querySelector('[data-miss-stat]').textContent = t('set.missesStatD', { n: shots.length });
@@ -119,31 +177,29 @@ function openSettings() {
       w.addEventListener('click', (e) => {
         const calReset = e.target.closest('[data-a=calReset]');
         if (calReset) {
-          CAL.forEach((c) => {
-            S.cal[c.k] = c.def;
-            const r = w.querySelector(`[data-cal="${c.k}"]`); if (r) r.value = c.def;
-            const v = w.querySelector(`[data-calv="${c.k}"]`); if (v) v.textContent = c.def;
-            GameHost.ready && GameHost.send('cal', { k: c.k, v: c.def });
-          });
+          if (!GameHost.ready || !GameHost.calibrationReady) return;
+          S.cal = Object.fromEntries(GameHost.calibrationRegistry.map(entry => [entry.key, entry.default]));
+          GameHost.send('cal', { values: S.cal });
+          w.querySelectorAll('input[data-cal]').forEach(input => { input.value = S.cal[input.dataset.cal]; input.dataset.pending = String(GameHost.calibrationRequestId); });
+          refreshSettingsCalibration(w);
           save(); haptic('select'); Sfx.soft(); toast(t('set.calibResetDone'), 'target');
           return;
         }
         const thumb = e.target.closest('.miss-thumb');
         if (thumb) { zoomMissShot(w, displayedShots[+thumb.dataset.shotIndex], thumb); return; }
         const row = e.target.closest('.srow'); const toggle = e.target.closest('.tgl') || (row && row.querySelector('.tgl')); if (!toggle) return;
-        const k = toggle.dataset.k; S[k] = !S[k]; save(); toggle.classList.toggle('on', S[k]); toggle.setAttribute('aria-pressed', String(!!S[k]));
+        const k = toggle.dataset.k;
+        const value = k === 'debug' ? GameHost.setDebug(!GameHost.debug) : (S[k] = !S[k]);
+        if (k !== 'debug') { save(); GameHost.syncSettings(); }
+        toggle.classList.toggle('on', value); toggle.setAttribute('aria-pressed', String(!!value));
+        Sfx.sync(); refreshAudio(); refreshSettingsCalibration(w);
         haptic('select'); Sfx.soft();
-        if (k === 'sfx' && GameHost.ready) GameHost.send('mute', { on: !S.sfx });
-        if (k === 'vibro' && GameHost.ready) GameHost.send('haptics', { on: !!S.vibro });
-        if (k === 'hint' && GameHost.ready) GameHost.send('hint', { on: !!S.hint });
-        if (k === 'rm') { document.body.classList.toggle('rm', S.rm); GameHost.ready && GameHost.send('rm', { on: S.rm }); }
-        if (k === 'missShots' && GameHost.ready) GameHost.send('missShots', { on: S.missShots, half: S.missShotHalf });
       });
       w.querySelector('[data-miss-size]').addEventListener('change', e => {
         const n = +e.target.value; S.missShotHalf = MISS_SHOT_SIZES.includes(n) ? n : 350; save();
         if (GameHost.ready) GameHost.send('missShots', { on: S.missShots, half: S.missShotHalf });
       });
-      const clearButton = w.querySelector('[data-a=missClear]'); let clearArmed = false, clearTimer = 0;
+      const clearButton = w.querySelector('[data-a=missClear]'); let clearArmed = false;
       clearButton.addEventListener('click', () => {
         if (!clearArmed) {
           clearArmed = true; clearButton.textContent = t('set.missesClearConfirm');
@@ -154,10 +210,22 @@ function openSettings() {
         MissShots.clear(); Sfx.soft(); haptic('select'); refreshMisses();
       });
       w.addEventListener('input', (e) => {
+        const audio = e.target.closest('input[data-audio]');
+        if (audio) {
+          const value = +audio.value; if (!Number.isFinite(value)) return;
+          S.audioLevels = repairAudioLevels(S.audioLevels, S.volume); S.audioLevels[audio.dataset.audio] = clamp(value, 0, 100) / 100;
+          if (audio.dataset.audio === 'master' && Object.prototype.hasOwnProperty.call(S, 'volume')) S.volume = S.audioLevels.master;
+          save(); Sfx.sync(); GameHost.syncSettings(); refreshAudio();
+          w.querySelector(`[data-audiov="${audio.dataset.audio}"]`).textContent = `${+(S.audioLevels[audio.dataset.audio] * 100).toFixed(1)}%`;
+          return;
+        }
         const r = e.target.closest('input[data-cal]'); if (!r) return;
-        S.cal[r.dataset.cal] = +r.value; save();
-        const v = w.querySelector(`[data-calv="${r.dataset.cal}"]`); if (v) v.textContent = r.value;
-        GameHost.ready && GameHost.send('cal', { k: r.dataset.cal, v: +r.value });
+        if (!GameHost.ready || !GameHost.calibrationReady || r.disabled) return;
+        const entry = GameHost.calibrationRegistry.find(row => row.key === r.dataset.cal), value = +r.value;
+        if (!entry || !Number.isFinite(value)) return;
+        S.cal[r.dataset.cal] = clamp(value, entry.min, entry.max); save();
+        GameHost.send('cal', { k: r.dataset.cal, v: S.cal[r.dataset.cal] });
+        r.dataset.pending = String(GameHost.calibrationRequestId); refreshSettingsCalibration(w);
       });
       UI.seg($('#qseg', w), (v) => setQuality(v));
       /* Единственный выбор уровня бота: сохраняется в профиле и применяется
@@ -172,6 +240,7 @@ function openSettings() {
       UI.seg($('#langseg', w), (v) => I18n.setLang(v));
       const fsBtn = w.querySelector('[data-a=fs]');
       fsBtn && fsBtn.addEventListener('click', () => TGX.toggleFullscreen());
+      return () => { off(); clearTimeout(clearTimer); };
     }
   });
 }

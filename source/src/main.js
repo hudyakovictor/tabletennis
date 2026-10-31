@@ -19,23 +19,26 @@ Router.def('splash', {
     </div>`;
   },
   mount(el) {
+    let alive = true; const timers = new Set();
+    const later = (fn, ms) => { const id = setTimeout(() => { timers.delete(id); if (alive) fn(); }, ms); timers.add(id); };
     // мяч ударяется о «стол» — частицы + хаптика
-    setTimeout(() => { const r = el.querySelector('.sp-ball').getBoundingClientRect(); const d = $('#device').getBoundingClientRect(); FX.ring(r.left - d.left + r.width / 2, r.top - d.top + r.height, '#FFE28A'); haptic('rigid'); }, 500);
-    setTimeout(() => { const r = el.querySelector('.sp-t2').getBoundingClientRect(); const d = $('#device').getBoundingClientRect(); FX.burst(r.left - d.left + r.width / 2, r.top - d.top + r.height / 2, { count: 40, c: ['#FF7A4D', '#FFE28A', '#fff'] }); }, 1500);
+    later(() => { const r = el.querySelector('.sp-ball').getBoundingClientRect(); const d = $('#device').getBoundingClientRect(); FX.ring(r.left - d.left + r.width / 2, r.top - d.top + r.height, '#FFE28A'); haptic('rigid'); }, 500);
+    later(() => { const r = el.querySelector('.sp-t2').getBoundingClientRect(); const d = $('#device').getBoundingClientRect(); FX.burst(r.left - d.left + r.width / 2, r.top - d.top + r.height / 2, { count: 40, c: ['#FF7A4D', '#FFE28A', '#fff'] }); }, 1500);
     // движок прогревается под заставкой, но после первых кадров логотипа: разбор игры — одна длинная задача
     const useGame = S.quality !== 'low', t0 = performance.now();
-    if (useGame) setTimeout(() => { try { GameHost.ensure(); } catch (e) {} }, 450);
+    if (useGame) later(() => { try { GameHost.ensure(); } catch (e) {} }, 450);
     let p = 0, ti = 0; const bar = $('#spBar', el), pct = $('#spPct', el), tip = $('#spTip', el);
     const tipT = setInterval(() => { ti = (ti + 1) % TIPS.length; tip.animate([{ opacity: 0, transform: 'translateY(6px)' }, { opacity: 1, transform: 'none' }], { duration: 300 }); tip.textContent = t(TIPS[ti]); }, 2600);
     const step = () => {
-      if (Router.cur !== 'splash') { clearInterval(tipT); return; }
+      if (!alive || Router.cur !== 'splash') { clearInterval(tipT); return; }
       // полоса честная: последние 12% ждут готовности движка (но не дольше 9 с — дальше хаб сам догрузит)
       const engineOk = !useGame || GameHost.ready || performance.now() - t0 > 9000;
       p = Math.min(engineOk ? 100 : 88, p + rnd(4, 13)); bar.style.setProperty('--p', p / 100); pct.textContent = Math.round(p) + '%';
-      if (p < 100) setTimeout(step, p >= 88 ? 60 : rnd(80, 190));
-      else { clearInterval(tipT); setTimeout(() => Router.go('hub', { mode: 'wipe' }), 350); }
+      if (p < 100) later(step, p >= 88 ? 60 : rnd(80, 190));
+      else { clearInterval(tipT); later(() => Router.go('hub', { mode: 'wipe' }), 350); }
     };
-    setTimeout(step, 1100);
+    later(step, 1100);
+    return () => { alive = false; timers.forEach(clearTimeout); timers.clear(); clearInterval(tipT); };
   }
 });
 
@@ -47,7 +50,9 @@ Router.def('splash', {
 })();
 
 /* ---------- boot ---------- */
+let booted = false;
 function boot() {
+  if (booted) return; booted = true;
   TGX.init();
   I18n.init();            // язык: S.lang → Telegram language_code → браузер → ru
   Progress.watchSeason();
@@ -55,6 +60,8 @@ function boot() {
   mob(); window.addEventListener('resize', mob);
   document.body.classList.toggle('rm', !!S.rm || matchMedia('(prefers-reduced-motion: reduce)').matches);
   document.body.classList.toggle('in-tg', TGX.inTG);
+  // SDK loading never gates offline boot or the splash/game route.
+  TGX.load().then(() => { mob(); document.body.classList.toggle('in-tg', TGX.inTG); try { Progress.boot(); } catch (e) {} });
   try { FX.init(); } catch (e) { console.error(e); }
   try { BG.init(); } catch (e) { console.error(e); }
   Nav.build(); Dev.build();
@@ -71,6 +78,6 @@ function boot() {
   } else Router.go('splash');
   window.addEventListener('resize', () => { try { FX.resize(); BG.resize(); } catch (e) {} });
 }
-if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot); else boot();
-// Telegram SDK грузится async — переинициализируем, когда появится
-window.addEventListener('load', () => { if (TGX.w) TGX.init(); try { Progress.boot(); } catch (e) {} });
+if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot, { once: true }); else boot();
+window.addEventListener('pagehide', () => TGX.dispose());
+window.addEventListener('pageshow', (e) => { if (e.persisted) TGX.load(); });

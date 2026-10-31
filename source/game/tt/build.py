@@ -8,9 +8,9 @@ SRC = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'src')
 REPO = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 OUT = sys.argv[1] if len(sys.argv) > 1 else os.path.join(REPO, 'build', 'engine.html')
 
-JS_ORDER = ['05_stroke_config.js','03_i18n.js','10_math.js','12_match_rules.js','20_gl.js','25_career.js','27_network.js','30_physics.js','38_paddle_motion.js','40_swipe.js','42_shot_diagnostics.js','43_input_telemetry.js','44_diagnostics.js','44_miss_shots.js','45_perf.js','46_physics_watchdog.js','50_audio.js',
+JS_ORDER = ['05_stroke_config.js','06_calibration.js','03_i18n.js','10_math.js','12_match_rules.js','20_gl.js','25_career.js','27_network.js','30_physics.js','37_stroke_motion_data.js','38_paddle_motion.js','40_swipe.js','42_shot_diagnostics.js','43_input_telemetry.js','44_diagnostics.js','44_miss_shots.js','45_perf.js','46_physics_watchdog.js','50_audio.js',
             '55_ai.js','56_rig.js','57_camera.js','58_coach.js','59_replay.js','60_scene.js','61_particles.js','62_arena.js',
-            '64_training_data.js','65_train.js','75_feedback.js','75_music.js','76_emotion.js','81_uiAnim.js','84_racket.js',
+            '64_training_data.js','65_train.js','66_training_preview.js','75_feedback.js','75_music.js','76_emotion.js','81_uiAnim.js','84_racket.js',
             '86_meta.js','70_game.js','80_ui.js','90_boot.js','92_embed.js']
 
 # Every module in src/ MUST be in JS_ORDER: a file that is present on disk
@@ -51,6 +51,15 @@ if not os.environ.get('TT_NO_ARENA'):
             with open(ap, 'rb') as fh:
                 arena[key] = 'data:image/jpeg;base64,' + base64.b64encode(fh.read()).decode('ascii')
 js = 'window.__TT_ARENA = ' + json.dumps(arena) + ';\n\n' + js
+
+# One offline sample bank; offsets, gain and playback policy live in AudioEngine.
+audio_files = {'swing': 'missing the ball.mp3', 'ball1': '43d6230aeba4b8c.mp3',
+               'ball2': '8eba8ea8ef04f24.mp3', 'ball3': 'c3c37baf3cd71bd.mp3'}
+audio = {}
+for key, filename in audio_files.items():
+    with open(os.path.join(REPO, 'source', 'src', 'sounds', filename), 'rb') as sample:
+        audio[key] = base64.b64encode(sample.read()).decode('ascii')
+js = 'const TT_AUDIO_SAMPLES = ' + json.dumps(audio) + ';\n\n' + js
 
 stamp = datetime.datetime.now(datetime.timezone.utc).strftime('%Y-%m-%d')
 # A date alone cannot distinguish two different builds deployed on the same

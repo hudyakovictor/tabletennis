@@ -5,7 +5,7 @@ const { load } = require('./helpers.cjs');
 const lib = load(['10_math.js', '12_match_rules.js', '30_physics.js', '38_paddle_motion.js',
   '40_swipe.js', '42_shot_diagnostics.js', '56_rig.js', '57_camera.js', '70_game.js'],
   ['Game', 'SwipeTracker', 'isRealStroke', 'tapStrokeMetrics', 'ShotJournal', 'V3', 'PH', 'GS',
-    'rigViewProj', 'integrateBall', 'predict'],
+    'rigViewProj', 'integrateBall', 'predict', 'M4'],
   { window: { addEventListener() {} }, document: { addEventListener() {},
     body: { style: {}, classList: { toggle() {} } }, documentElement: { style: {} } } });
 
@@ -90,6 +90,14 @@ test('a neutral rally tap is not a serve unless explicitly stamped for a contact
   assert.equal(tap.dx, 0); assert.equal(tap.dy, 0); assert.equal(tap.curl, 0);
 });
 
+function renderedContactBall(g) {
+  const pad = g.player, local = pad.contactPose.localPoint;
+  const m = lib.M4.compose(lib.M4.create(), pad.pos, pad.q, lib.V3.new(1, 1, 1));
+  return lib.V3.new(m[0] * local.x + m[4] * local.y + m[8] * local.z + m[12] + pad.normal.x * lib.PH.R,
+    m[1] * local.x + m[5] * local.y + m[9] * local.z + m[13] + pad.normal.y * lib.PH.R,
+    m[2] * local.x + m[6] * local.y + m[10] * local.z + m[14] + pad.normal.z * lib.PH.R);
+}
+
 test('mouse and touch confirm a click on release without waiting for any animation frame', () => {
   for (const type of ['mouse', 'touch']) for (const scale of [1, .3]) {
     const { g, send } = inputGame(type, scale), contact = lib.V3.clone(g.ball.p), time = g.time;
@@ -103,7 +111,7 @@ test('mouse and touch confirm a click on release without waiting for any animati
     assert.equal(g.stats.shots, 1);
     assert.equal(g.ball.trailGrade, 'yellow');
     assert.equal(g.shotJournal.latest.contact.incoming.gesture.tap, true);
-    assert.ok(lib.V3.dist(g.player.pos, contact) < 1e-9, 'the drawn paddle must be at the actual contact');
+    assert.ok(lib.V3.dist(renderedContactBall(g), contact) < 1e-6, 'the rendered rubber, not the blade center, must touch the actual ball');
     assert.equal(g.anticipation.active, false);
     assert.equal(lib.V3.len(g.anticipation.visualOffset), 0);
     send('pointerup');
@@ -157,6 +165,8 @@ test('a legal falling toss can be served by a confirmed click; a rising toss can
     if (vy < 0) {
       assert.equal(g.state, lib.GS.RALLY);
       assert.equal(g.matchTasks.serves, 1);
+      assert.equal(g.shotJournal.latest.strokeId, 'SERVE_NO_SPIN');
+      assert.ok(lib.V3.len(g.ball.w) / (2 * Math.PI) < 1, 'flat serve spin is tested before the first bounce');
       const flight = lib.predict(lib.V3.clone(g.ball.p), lib.V3.clone(g.ball.v), lib.V3.clone(g.ball.w),
         { dt: lib.PH.SIM_DT, maxT: 2.2, stopAfterBounces: 2, out: {} });
       assert.ok(flight.landed && flight.landed.z > 0 && flight.b2 && flight.b2.z < 0 && !flight.hitNet,
@@ -175,7 +185,7 @@ test('a confirmed short click follows the same moving ball without rewinding the
     const contact = lib.V3.clone(g.ball.p);
     send('pointerup', start, 1060);
     assert.equal(g.ball.lastHitBy, 1, `${type}/${scale}: the original short click lost its moving ball`);
-    assert.ok(lib.V3.dist(g.player.pos, contact) < 1e-9, 'contact must use the current ball, not the down snapshot');
+    assert.ok(lib.V3.dist(renderedContactBall(g), contact) < 1e-6, 'the rendered contact must use the current ball, not the down snapshot');
     assert.equal(g.stats.shots, 1);
   }
 });

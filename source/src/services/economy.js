@@ -47,6 +47,90 @@ const Wallet = {
   }
 };
 
+/* Reward effects and their receipt are committed together, before animation. */
+const Rewards = {
+  has(id) { return Array.isArray(S.rewardReceipts) && S.rewardReceipts.includes(id); },
+  passReceipt(seasonN, lane, level) { return `pass:${seasonN}:${lane}:${level}`; },
+  passClaimed(seasonN, lane, level) { return S.claimed[lane].includes(level) || this.has(this.passReceipt(seasonN, lane, level)); },
+  _grant(receipts, rewards, { cost = null, claim = null, premium = false } = {}) {
+    const fail = (why) => ({ ok: false, why });
+    if (!Array.isArray(receipts) || !receipts.length || new Set(receipts).size !== receipts.length || receipts.some((id) => typeof id !== 'string' || !id.trim() || id.trim() !== id || id.length > 192) || !Array.isArray(rewards) || (!rewards.length && !premium)) return fail('unavailable');
+    if (S.rewardReceipts !== undefined && !Array.isArray(S.rewardReceipts)) return fail('unavailable');
+    if (claim && (!['f', 'p'].includes(claim.lane) || !Number.isSafeInteger(claim.level) || claim.level < 1 || !S.claimed || !Array.isArray(S.claimed[claim.lane]))) return fail('unavailable');
+    if (claim && S.claimed[claim.lane].includes(claim.level)) return fail('claimed');
+    if (receipts.some((id) => this.has(id))) return fail('claimed');
+    const balances = { coins: S.coins, gems: S.gems }, credits = { coins: 0, gems: 0 };
+    if (Object.values(balances).some((n) => !Number.isSafeInteger(n) || n < 0) || !Array.isArray(S.owned) || !Array.isArray(S.chests)) return fail('unavailable');
+    if (cost) {
+      if (!['coins', 'gems'].includes(cost.cur) || !Number.isSafeInteger(cost.amt) || cost.amt <= 0) return fail('unavailable');
+      if (balances[cost.cur] < cost.amt) return fail('funds');
+      balances[cost.cur] -= cost.amt;
+    }
+    const owned = S.owned.slice(), chests = S.chests.slice(), items = [];
+    for (const r of rewards) {
+      if (!r || !Number.isSafeInteger(r.n) || r.n <= 0) return fail('unavailable');
+      if (r.k === 'coins' || r.k === 'gems') {
+        balances[r.k] += r.n; credits[r.k] += r.n;
+        if (!Number.isSafeInteger(balances[r.k])) return fail('unavailable');
+      } else if (r.k === 'card') {
+        const item = Catalog.rewardItem(r); if (!item) return fail('unavailable');
+        if (!owned.includes(item.id)) { owned.push(item.id); items.push(item.id); }
+      } else if (r.k === 'chest' && r.n === 1 && ['silver', 'gold', 'epic'].includes(r.kind)) {
+        const slot = chests.findIndex((c) => !c); if (slot < 0) return fail('slotsFull');
+        chests[slot] = { id: receipts[0], kind: r.kind, state: 'ready' };
+      } else return fail('unavailable');
+    }
+    const before = { coins: S.coins, gems: S.gems, owned: S.owned, chests: S.chests, claimed: S.claimed, premium: S.premium, rewardReceipts: S.rewardReceipts };
+    Object.assign(S, { ...balances, owned, chests, rewardReceipts: (S.rewardReceipts || []).concat(receipts) });
+    if (claim) S.claimed = { ...S.claimed, [claim.lane]: S.claimed[claim.lane].concat(claim.level) };
+    if (premium) S.premium = true;
+    try {
+      if (saveNow() === false) throw new Error('save');
+      // Store.write may swallow storage errors; verify the durable receipt.
+      if (typeof Store !== 'undefined') {
+        const stored = Store.read(SAVE_KEY);
+        if (!stored || !Array.isArray(stored.rewardReceipts) || receipts.some((id) => !stored.rewardReceipts.includes(id))) throw new Error('receipt');
+      }
+    } catch (e) { Object.assign(S, before); return fail('storage'); }
+    return { ok: true, items, ...credits };
+  },
+  claimPass(seasonN, lane, level) {
+    Progress.reconcileSeason();
+    const season = globalThis.TTSeason;
+    if (season.seasonOver() || seasonN !== season.seasonNumber() || seasonN !== S.passSeason) return { ok: false, why: 'season' };
+    if (!['f', 'p'].includes(lane) || !Number.isSafeInteger(level) || level < 1) return { ok: false, why: 'unavailable' };
+    if (lane === 'p' && !S.premium) return { ok: false, why: 'premium' };
+    if (level > S.passLvl) return { ok: false, why: 'level' };
+    if (this.passClaimed(seasonN, lane, level)) return { ok: false, why: 'claimed' };
+    const tier = season.currentPass()[level - 1];
+    if (!tier || tier.s !== seasonN || tier.l !== level) return { ok: false, why: 'unavailable' };
+    return this._grant([this.passReceipt(seasonN, lane, level)], [tier[lane]], { claim: { lane, level } });
+  },
+  buyItem(id) {
+    const item = Catalog.byId(id), allowed = Catalog.canBuy(item); if (!allowed.ok) return allowed;
+    return this._grant(['item:' + id], [{ k: 'card', n: 1, itemId: id }], { cost: item.price });
+  },
+  exchangeCoins(id, receipt = 'exchange:' + Date.now().toString(36) + ':' + Math.random().toString(36).slice(2)) {
+    const pack = Catalog.coinPacks().find((p) => p.id === id); if (!pack) return { ok: false, why: 'unavailable' };
+    return this._grant([receipt], [{ k: 'coins', n: pack.c }], { cost: { cur: 'gems', amt: pack.g } });
+  },
+  // This is a server-confirmed receipt boundary, not an openInvoice status callback.
+  confirmPurchase(productId, receipt) {
+    const offer = Catalog.starOffer(productId);
+    if (!offer || !receipt || receipt.confirmed !== true || receipt.status !== 'paid' || receipt.productId !== productId || receipt.currency !== 'XTR' || receipt.amount !== offer.price.amt || typeof receipt.id !== 'string' || !/^[A-Za-z0-9._:-]{1,160}$/.test(receipt.id)) return { ok: false, why: 'unconfirmed' };
+    const receipts = ['purchase:' + receipt.id];
+    if (offer.once) {
+      Progress.reconcileSeason(); const season = globalThis.TTSeason;
+      if (season.seasonOver() || receipt.seasonN !== season.seasonNumber() || receipt.seasonN !== S.passSeason) return { ok: false, why: 'season' };
+      if (offer.premium && S.premium) return { ok: false, why: 'claimed' };
+      receipts.push(`${offer.premium ? 'premium' : 'bundle'}:${receipt.seasonN}`);
+    }
+    const rewards = (offer.items || []).map((itemId) => ({ k: 'card', n: 1, itemId }));
+    if (offer.gems) rewards.push({ k: 'gems', n: offer.gems });
+    return this._grant(receipts, rewards, { premium: !!offer.premium });
+  }
+};
+
 /* =====================================================================
    LEVEL UP — полноэкранная награда
    ===================================================================== */

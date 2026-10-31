@@ -4,6 +4,14 @@ const vm = require('node:vm');
 const { execFileSync } = require('node:child_process');
 const root = path.resolve(__dirname, '..');
 function load(files, names, extra = {}) {
+  if (!process.env.TT_TEST_REF && files.some(f => ['38_paddle_motion.js', '40_swipe.js', '56_rig.js', '70_game.js'].includes(f)) && !files.includes('37_stroke_motion_data.js')) {
+    files = [...files];
+    const index = files.findIndex(f => ['38_paddle_motion.js', '40_swipe.js', '56_rig.js', '70_game.js'].includes(f));
+    files.splice(index, 0, '37_stroke_motion_data.js');
+  }
+  if (!process.env.TT_TEST_REF && files.includes('37_stroke_motion_data.js') && !files.includes('30_physics.js')) {
+    files = [...files]; files.splice(files.indexOf('37_stroke_motion_data.js'), 0, '30_physics.js');
+  }
   if (!process.env.TT_TEST_REF && files.some(f => ['40_swipe.js', '56_rig.js', '70_game.js'].includes(f)) && !files.includes('38_paddle_motion.js')) {
     files = [...files];
     const index = files.findIndex(f => ['40_swipe.js', '56_rig.js', '70_game.js'].includes(f));
@@ -33,7 +41,7 @@ function load(files, names, extra = {}) {
     files.splice(index, 0, '43_input_telemetry.js');
   }
   if (!process.env.TT_TEST_REF && files.some(f => ['12_match_rules.js', '30_physics.js', '38_paddle_motion.js', '40_swipe.js', '70_game.js'].includes(f))) {
-    files = ['05_stroke_config.js', ...files.filter(f => f !== '05_stroke_config.js')];
+    files = ['05_stroke_config.js', '06_calibration.js', ...files.filter(f => !['05_stroke_config.js', '06_calibration.js'].includes(f))];
   }
   const saved = new Map();
   const context = vm.createContext({ console, setInterval, clearInterval, URLSearchParams,

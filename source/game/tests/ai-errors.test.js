@@ -3,8 +3,8 @@
  * as "бот достаёт всё". These tests pin the contract of the execution error:
  *
  *   1. errBase is the rally error rate, errPress piles on under scoreboard
- *      pressure, a serve rolls a third of the base rate.
- *   2. A committed error REALLY misses — the same impactRacket + predict
+ *      pressure. Technical serves deliberately no longer donate points.
+ *   2. A committed rally error REALLY misses — the same launch + predict
  *      pipeline the game runs proves the ball nets, sails or dies.
  *   3. Легенда barely errs (3 %), and a low director handicap widens every
  *      rate instead of being dead code too.
@@ -13,8 +13,8 @@ const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const { load } = require('./helpers.cjs');
 
-const lib = load(['10_math.js', '30_physics.js', '55_ai.js'],
-  ['OpponentAI', 'AI_LEVELS', 'PH', 'V3', 'impactRacket', 'predict']);
+const lib = load(['10_math.js', '30_physics.js', '40_swipe.js', '55_ai.js'],
+  ['OpponentAI', 'AI_LEVELS', 'PH', 'V3', 'resolveRacketLaunch', 'predict']);
 const { PH, V3 } = lib;
 
 function fixtureGame() {
@@ -29,10 +29,9 @@ function goodRacket() {
     vR: V3.new(0, 0.4, 1.0), quality: 0.9, valid: true };
 }
 function flightFaults(rk, game, isServe) {
-  const v = V3.clone(game.ball.v), w = V3.clone(game.ball.w);
-  lib.impactRacket(v, w, rk.normal, rk.vR, rk.quality, rk.rubber || {});
-  const p = V3.addScaled(V3.clone(game.ball.p), game.ball.p, rk.normal, PH.R * 1.05);
-  const o = lib.predict(p, v, w, { dt: 1 / 240, maxT: 2.4, stopAfterBounces: 2, out: {} });
+  const launch = lib.resolveRacketLaunch(game.ball, rk);
+  assert.ok(launch, 'the tested error must actually contact the ball');
+  const o = lib.predict(launch.p, launch.v, launch.w, { dt: PH.SIM_DT, maxT: 2.4, stopAfterBounces: 2, out: {} });
   if (o.diverged) return true;
   if (isServe) return o.hitNet || !o.landed || o.landed.z >= 0 ||
     !o.b2 || o.b2.z < 0 || o.b2.z > PH.T_HALF_LEN + 0.005 || Math.abs(o.b2.x) > PH.T_HALF_WID + 0.005;
@@ -79,15 +78,23 @@ test('both error flavours fault: face closed + dead arm nets, open face + hot ar
   }
 });
 
-test('a serve rolls a THIRD of the base rate, and WTF barely errs', () => {
-  const ai = new lib.OpponentAI(0);                     // serve rate = 0.38/3 ≈ 0.1267
+test('balance change: technical serves never draw execution error RNG or change counters', () => {
   const g = fixtureGame();
-  const noMiss = (rig(ai, [0.20]), ai.applyExecutionError(g, goodRacket(), true));
-  assert.ok(!noMiss.aiError, 'roll 0.20 must not fault a serve (rate ≈ 0.127)');
-  const miss = (rig(ai, [0.10, 0.30]), ai.applyExecutionError(g, goodRacket(), true));
-  assert.equal(miss.aiError, 'net', 'roll 0.10 < 0.127 faults the serve');
-  assert.equal(flightFaults(miss, g, true), true, 'a serve error is a serve fault by the rules');
+  for (let level = 0; level < lib.AI_LEVELS.length; level++) {
+    const ai = new lib.OpponentAI(level);
+    ai.pressure = 1; ai.handicap = 0.70; ai.aggrStreak = 8;
+    ai.rng = () => { assert.fail('serve error bypass must not consume RNG'); };
+    const before = JSON.stringify(ai.stats);
+    const racket = goodRacket();
+    assert.equal(ai.applyExecutionError(g, racket, true), racket);
+    assert.equal(ai.applyExecutionError(g, { ...racket, valid: false }, true).valid, false);
+    assert.equal(ai.applyExecutionError(null, null, true), null);
+    assert.equal(JSON.stringify(ai.stats), before, 'bypass must not change any counter');
+  }
+});
 
+test('WTF still rarely misexecutes a rally, unlike a technical serve', () => {
+  const g = fixtureGame();
   const wtf = new lib.OpponentAI(3);                    // WTF: errBase 0.017
   const cleanL = goodRacket();
   const safe = (rig(wtf, [0.10]), wtf.applyExecutionError(g, cleanL, false));

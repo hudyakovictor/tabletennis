@@ -12,8 +12,10 @@ const STROKE_CONFIG = {
     SIDE: { elev: 22, contact: 33, speed: 0.55, lat: 1.00, back: false, attackLean: false },
     SMASH: { elev: -5, contact: 22, speed: 1.10, lat: 0.45, back: false },
     FLICK: { elev: 50, contact: 58, speed: 0.90, lat: 0.60, back: false },
+    BANANA: { elev: 48, contact: 50, speed: 0.68, lat: 1.55, back: false, attackLean: false },
     PUSH: { elev: -28, contact: 64, speed: 0.56, lat: 0.45, back: true, soft: 0.84 },
     CHOP: { elev: -50, contact: 68, speed: 0.66, lat: 0.40, back: true },
+    CHOP_BLOCK: { elev: -30, contact: 58, speed: 0.40, lat: 0.35, back: true, soft: 0.72, absorb: 0.32 },
     BLOCK: { elev: 11, contact: 26, speed: 0.30, lat: 0.35, back: false, soft: 0.62, absorb: 0.26 },
     LOB: { elev: 66, contact: 50, speed: 0.60, lat: 0.35, back: false },
     HOOK: { elev: 28, contact: 56, speed: 1.00, lat: 1.70, back: false },
@@ -23,6 +25,7 @@ const STROKE_CONFIG = {
     SERVE_BACK: { elev: -34, contact: 64, speed: 0.95, lat: 0.50, back: true },
     SERVE_SIDE: { elev: 0, contact: 62, speed: 0.85, lat: 2.00, back: false },
     SERVE_FAST: { elev: -13, contact: 24, speed: 1.12, lat: 0.60, back: false },
+    SERVE_NO_SPIN: { elev: 0, contact: 0, speed: 0.82, lat: 0, back: false },
   },
   classification: {
     serveSideLatThreshold: 0.35, serveCurlThreshold: 0.38,
@@ -47,6 +50,8 @@ const STROKE_CONFIG = {
     liftUMin: 0.70, lobHeightMax: 0.55,
     fastBlockIncomingSpeed: 8, fastBlockDistMax: 0.18, fastBlockSpeedMax: 0.62,
     flickDistMax: 0.13, flickHeightMax: 0.30, counterIncomingTop: 170,
+    banana: { heightMax: .28, dist: [.05, .12], path: [.08, .17], curlMin: .55, effort: [.45, .85] },
+    chopBlock: { heightMax: .28, dist: [.05, .12], curlMax: .20, topMin: 220, speedMin: 7, effort: [.30, .85] },
     loopUMin: 0.30, counterStrongIncomingTop: 260,
     minGesture: {
       serve: { path: 0.019, dist: 0.014, speed: 0.12 },
@@ -59,7 +64,7 @@ const STROKE_CONFIG = {
     verticalExponent: 1.25, distanceIntentMax: 0.35, intentRange: [0, 1.15],
     contactIntentRange: [20, 74], contactWeights: [0.62, 0.46],
     contactHeightK: 42, contactHeightRange: [-16, 10], contactAngleRange: [14, 80],
-    contactClampByArchetype: { SERVE_SIDE: [10, 22] },
+    contactClampByArchetype: { SERVE_SIDE: [10, 22], SERVE_NO_SPIN: [0, 0] },
     spinGainRange: [0.5, 1.6], spinGainContactK: 8,
     biasContactK: 9, biasSpeedK: 0.08,
     faceGestureK: 0.34, faceCurlK: 0.10,
@@ -91,6 +96,7 @@ const STROKE_CONFIG = {
     sideK: 1,                 // lateral classification sensitivity, not a spin multiplier
     sideBrushVerticalK: 1,    // remove unrequested vertical brush on lateral serves
     sideBrushLateralExp: 1.2, // how much of that brush survives a diagonal swipe
+    mixedBrushK: .72,
     tossMinRise: 0.16, captureRadius: 0.55, qualityRadiusK: 0.40,
     vmin: 1.2, vmax: 12.5, ballMax: 17.5, contactAngleRange: [14, 80], azSwingK: 0.30,
     toss: {
@@ -170,7 +176,7 @@ const STROKE_CONFIG = {
     },
     placement: {
       deadZone: 0.14, gestureK: 0.50, widthK: 0.86, netMargin: 0.16, endMargin: 0.07,
-      depth: { DROP: [0.13, 0], PUSH: [0.46, 0.30], FLICK: [0.55, 0], BLOCK: [0.45, 0.30], LOB: [0.90, 0], SMASH: [0.72, 0], CHOP: [0.58, 0] },
+      depth: { DROP: [0.13, 0], PUSH: [0.46, 0.30], FLICK: [0.55, 0], BANANA: [.55, 0], CHOP_BLOCK: [.45, .15], BLOCK: [0.45, 0.30], LOB: [0.90, 0], SMASH: [0.72, 0], CHOP: [0.58, 0] },
       defaultDepth: [0.34, 0.44, 0.26], depthRange: [0.2, 0.96],
     },
     quality: { base: 0.46, smooth: 0.24, straightness: 0.16, samples: 0.14, sampleCount: 12, curlK: 0.10, curlStart: 1.4, curlMax: 1.6, range: [0.2, 1] },

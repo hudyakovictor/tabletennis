@@ -3,12 +3,13 @@
  *
  *   node tt/tools/ai_serve_map.cjs [--count 1000] [--seed 20261019] [--out test-results] [--level 2]
  *
- * Runs the real OpponentAI.serve -> impactRacket -> predict pipeline at the
+ * Runs the real OpponentAI.serve -> resolveRacketLaunch -> predict pipeline at the
  * authored AI toss contact height. Fails (exit 1) when the landing width
  * collapses: p90-p10 of |x| spread below threshold or legal rate too low. */
 const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
+const { performance } = require('node:perf_hooks');
 const { writePng, heatColor } = require('./png.cjs');
 
 const root = path.resolve(__dirname, '../..');
@@ -19,7 +20,7 @@ const option = (name, fallback) => {
 };
 const count = Math.max(1, Math.floor(Number(option('--count', '1000')) || 1000));
 const seed = Number(option('--seed', '20261019')) >>> 0;
-const level = Math.max(0, Math.min(4, Math.floor(Number(option('--level', '2')) || 0)));
+const level = Math.max(0, Math.min(3, Math.floor(Number(option('--level', '2')) || 0)));
 const outDir = path.resolve(root, option('--out', 'test-results'));
 
 function mulberry32(a) {
@@ -34,11 +35,15 @@ const random = mulberry32(seed);
 const seededMath = Object.create(Math);
 seededMath.random = random;
 
-const files = ['05_stroke_config.js', '10_math.js', '12_match_rules.js', '30_physics.js', '38_paddle_motion.js', '40_swipe.js', '55_ai.js'];
+const files = ['05_stroke_config.js', '10_math.js', '12_match_rules.js', '30_physics.js', '37_stroke_motion_data.js', '38_paddle_motion.js', '40_swipe.js', '55_ai.js'];
 const source = files.map(f => fs.readFileSync(path.join(root, 'tt/src', f), 'utf8')).join('\n');
 const api = vm.runInNewContext(source +
-  '\n;({ OpponentAI, V3, PH, impactRacket, predict, MATCH_RULES, STROKE_CONFIG })', { console, Math: seededMath });
-const { OpponentAI, V3, PH, impactRacket, predict } = api;
+  '\n;({ OpponentAI, V3, PH, resolveRacketLaunch, strokeIdentityMatches, predict, MATCH_RULES, STROKE_CONFIG, AI_SERVE_NET_ROOM, AI_SERVE_APEX })',
+  { console, Math: seededMath });
+const { OpponentAI, V3, PH, resolveRacketLaunch, strokeIdentityMatches, predict } = api;
+/* Запас первого отскока до сетки — то же правило, что в _flightLegal:
+ * отскок вплотную к ленте не оставляет второй дуге места (двойная ошибка). */
+const NET_ROOM = api.AI_SERVE_NET_ROOM;
 
 const ai = new OpponentAI(level);
 const AI_SERVE_CONTACT_Y = api.STROKE_CONFIG.serve.toss.aiContactHeight;
@@ -50,20 +55,33 @@ for (let i = 0; i < count; i++) {
     w: V3.new(), live: true, lastHitBy: 0,
   };
   const game = { ball, time: i, equip: { forSide: () => ({ e: PH.E_RACKET, mu: PH.MU_RACKET, et: PH.ET_RACKET, damp: 1 }) } };
-  const racket = ai.serve(game);
-  const v = V3.clone(ball.v), w = V3.clone(ball.w);
-  const info = impactRacket(v, w, racket.normal, racket.vR, racket.quality, racket.rubber || {});
-  const start = { x: ball.p.x + racket.normal.x * PH.R * 1.05,
-    y: ball.p.y + racket.normal.y * PH.R * 1.05, z: ball.p.z + racket.normal.z * PH.R * 1.05 };
-  const report = {};
-  if (info) predict(start, v, w, { dt: PH.SIM_DT, maxT: 2.4, stopAfterBounces: 2, out: report });
+  const began = performance.now(), racket = ai.serve(game), solveMs = performance.now() - began;
+  const launch = racket.valid !== false ? resolveRacketLaunch(ball, racket) : null;
+  const report = {}, flightPath = [], maxT = api.STROKE_CONFIG.serve.solver.maxT;
+  if (launch) predict(launch.p, launch.v, launch.w, { dt: PH.SIM_DT, maxT, stopAfterBounces: 2,
+    path: flightPath, maxPath: 3 * (Math.ceil(maxT / PH.SIM_DT) + 1), out: report });
+  let postBounceApex = null;
+  if (report.landed) {
+    postBounceApex = PH.R;
+    for (let j = Math.round(report.landed.t / PH.SIM_DT) * 3 + 1; j < flightPath.length; j += 3)
+      postBounceApex = Math.max(postBounceApex, flightPath[j] - PH.TABLE_Y);
+  }
   const b2 = report.b2 || null;
-  const legal = !!(info && b2 && b2.z > 0 && Math.abs(b2.x) <= PH.T_HALF_WID + PH.R * .5 &&
-    Math.abs(b2.z) <= PH.T_HALF_LEN + PH.R * .5 && report.landed && report.landed.z < 0 && !report.hitNet);
+  const identity = !!(launch && strokeIdentityMatches(racket, launch));
+  const legal = !!(identity && b2 && b2.z > 0 && Math.abs(b2.x) <= PH.T_HALF_WID + .005 &&
+    Math.abs(b2.z) <= PH.T_HALF_LEN + .005 && report.landed && report.landed.z < -NET_ROOM &&
+    Math.abs(report.landed.z) <= PH.T_HALF_LEN + .005 && Math.abs(report.landed.x) <= PH.T_HALF_WID + .005 &&
+    !report.hitNet && postBounceApex <= api.AI_SERVE_APEX);
   rows.push({ i, type: racket.stroke ? racket.stroke.id : null, legal, valid: racket.valid !== false,
     aimX: racket.target ? racket.target.x : racket.aim ? racket.aim.x : null,
     aimZ: racket.target ? racket.target.z : racket.aim ? racket.aim.z : null,
-    x: b2 ? b2.x : null, z: b2 ? b2.z : null, bounces: report.bounces || 0, hitNet: !!report.hitNet });
+    x: b2 ? b2.x : null, z: b2 ? b2.z : null, landZ: report.landed ? report.landed.z : null,
+    netRoom: report.landed ? Math.abs(report.landed.z) : null,
+    bounces: report.bounces || 0, hitNet: !!report.hitNet, postBounceApex, solveMs, identity,
+    reason: racket.aiServeDiagnostic ? racket.aiServeDiagnostic.reason : racket.invalidReason || null,
+    attempts: racket.aiServeDiagnostic ? racket.aiServeDiagnostic.attempts : null,
+    frameTries: racket.aiServeDiagnostic ? racket.aiServeDiagnostic.frameTries : null,
+    launch: launch ? { p: launch.p, v: launch.v, w: launch.w } : null });
 }
 
 const legalRows = rows.filter(r => r.legal && Number.isFinite(r.x));
@@ -73,26 +91,38 @@ const pct = (values, q) => {
 };
 const mean = (values) => values.length ? values.reduce((a, b) => a + b, 0) / values.length : null;
 const xs = legalRows.map(r => r.x), zs = legalRows.map(r => r.z);
+const rooms = legalRows.map(r => r.netRoom).filter(Number.isFinite);
+const nearNet = rooms.filter(v => v < NET_ROOM).length;
 const mx = mean(xs);
 const summary = {
   seed, level, count, legal: legalRows.length, legalRate: +(legalRows.length / count).toFixed(4),
   x: { mean: mx, stdev: xs.length ? Math.sqrt(mean(xs.map(x => (x - mx) ** 2))) : null,
     p10: pct(xs, .1), p50: pct(xs, .5), p90: pct(xs, .9), widthP90P10: pct(xs, .9) - pct(xs, .1) },
   z: { p10: pct(zs, .1), p50: pct(zs, .5), p90: pct(zs, .9) },
+  firstBounce: { netRoom: NET_ROOM, nearNet, min: rooms.length ? Math.min(...rooms) : null,
+    p10: pct(rooms, .1), p50: pct(rooms, .5) },
+  postBounceApex: { cap: api.AI_SERVE_APEX, max: legalRows.length ? Math.max(...legalRows.map(r => r.postBounceApex)) : null },
+  solver: { p50Ms: pct(rows.map(r => r.solveMs), .50), p95Ms: pct(rows.map(r => r.solveMs), .95),
+    maxMs: Math.max(...rows.map(r => r.solveMs)), maxAttempts: Math.max(...rows.map(r => r.attempts || 0)),
+    maxFrameTries: Math.max(...rows.map(r => r.frameTries || 0)), deviceValidated: false },
+  invalidReasons: Object.fromEntries([...new Set(rows.filter(r => !r.valid).map(r => r.reason))].map(reason =>
+    [reason, rows.filter(r => !r.valid && r.reason === reason).length])),
   byType: Object.fromEntries([...new Set(rows.map(r => r.type))].map(type => {
     const subset = legalRows.filter(r => r.type === type).map(r => r.x);
     return [type, { legal: subset.length, widthP90P10: subset.length > 4 ? pct(subset, .9) - pct(subset, .1) : null }];
   })),
-  thresholds: { minLegalRate: .95, minWidthP90P10: .55 },
+  thresholds: { minLegalRate: .95, minWidthP90P10: .55, maxP95Ms: 500 },
 };
 summary.pass = summary.legalRate >= summary.thresholds.minLegalRate &&
-  summary.x.widthP90P10 >= summary.thresholds.minWidthP90P10;
+  summary.x.widthP90P10 >= summary.thresholds.minWidthP90P10 && nearNet === 0 &&
+  summary.solver.p95Ms <= summary.thresholds.maxP95Ms;
 
 fs.mkdirSync(outDir, { recursive: true });
 fs.writeFileSync(path.join(outDir, 'ai-serve-map.json'), JSON.stringify({ summary, rows }, null, 2) + '\n');
 fs.writeFileSync(path.join(outDir, 'ai-serve-map.csv'),
-  ['i,type,legal,valid,aimX,aimZ,x,z,bounces,hitNet',
-    ...rows.map(r => [r.i, r.type, r.legal, r.valid, r.aimX, r.aimZ, r.x, r.z, r.bounces, r.hitNet].join(','))].join('\n') + '\n');
+  ['i,type,legal,valid,aimX,aimZ,x,z,landZ,netRoom,bounces,hitNet,postBounceApex,solveMs,reason,attempts,frameTries',
+    ...rows.map(r => [r.i, r.type, r.legal, r.valid, r.aimX, r.aimZ, r.x, r.z, r.landZ, r.netRoom,
+      r.bounces, r.hitNet, r.postBounceApex, r.solveMs, r.reason, r.attempts, r.frameTries].join(','))].join('\n') + '\n');
 
 // Landing heatmap over the receiver's half: x sideways, z depth from net.
 const COLS = 30, ROWS = 28, SCALE = 10, bins = new Float64Array(COLS * ROWS);
