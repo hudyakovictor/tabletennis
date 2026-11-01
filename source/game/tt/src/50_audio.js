@@ -15,6 +15,30 @@ const TT_AUDIO_MANIFEST = Object.freeze([
   Object.freeze({ key: 'swing', events: Object.freeze(['whoosh']), offset: 0.16, duration: 0.275, gain: 0.18 }),
 ]);
 
+/* ТЕМБР КОНТАКТА. Все три сэмпла мяча общие для `hitRacket` и `hitTable`, и до
+ * этой таблицы оба события играли ОДИН И ТОТ ЖЕ сэмпл с ОДНИМ И ТЕМ ЖЕ темпом и
+ * почти одинаковой громкостью: удар по столу на 7 м/с и удар ракеткой на 13 м/с
+ * звучали неотличимо. Отсюда жалоба «странный стук мячика»: на слух нельзя
+ * понять, ЧТО произошло, поэтому отскок от стола читается как удар ракеткой в
+ * пустоте. Таблица даёт каждому событию свой тон (rate — темп воспроизведения,
+ * trim — сколько от сэмпла оставить), а разброс jitter убирает «пулемёт».
+ * Это продуктовое решение владельца проекта, а не измерение материала: сами
+ * транзиенты по-прежнему общие и не различают резину и дерево.
+ * Замер исходников (WebAudio decode): 0.31/0.25/0.44 с, транзиент 1.7–2.6 мс. */
+const TT_AUDIO_TIMBRE = Object.freeze({
+  /* Стол: короткий и звонкий «ток» — короче, выше и тише ракетки. */
+  hitTable: Object.freeze({ rate: 1.12, trim: 0.55, jitter: 0.05 }),
+  /* Ракетка: полный сэмпл, чуть ниже — резина глушит верх. */
+  hitRacket: Object.freeze({ rate: 0.96, trim: 1.0, jitter: 0.03 }),
+});
+function contactTimbre(event, random = Math.random) {
+  const cfg = TT_AUDIO_TIMBRE[event];
+  if (!cfg) return { rate: 1, trim: 1 };
+  const r = typeof random === 'function' ? random() : 0.5;
+  const j = (Number.isFinite(r) ? clamp(r, 0, 1) : 0.5) * 2 - 1;
+  return { rate: clamp(cfg.rate * (1 + j * cfg.jitter), 0.5, 1.8), trim: cfg.trim };
+}
+
 // A handful of individual spectators, never a continuous stadium noise wash.
 function spectatorClapPlan(amount, random = Math.random) {
   const a = clamp(Number.isFinite(amount) ? amount : 0, 0, 1.6);
@@ -167,7 +191,7 @@ class AudioEngine {
     if (this._eventIds.size > 128) this._eventIds.delete(this._eventIds.keys().next().value);
     return true;
   }
-  _playSample(event, level, pan = 0) {
+  _playSample(event, level, pan = 0, timbre = null) {
     const variants = TT_AUDIO_MANIFEST.filter(sample => sample.events.includes(event));
     for (const sample of variants) this._decodeSample(sample.key);
     const ready = variants.filter(sample => {
@@ -178,10 +202,16 @@ class AudioEngine {
     const index = this._sampleRotation[event] ?? 0, sample = ready[index % ready.length];
     this._sampleRotation[event] = index + 1;
     const c = this.ctx, buffer = this._sampleBuffers.get(sample.key);
-    const duration = Math.min(sample.duration, buffer.duration - sample.offset), t = c.currentTime;
+    /* `rate` ускоряет воспроизведение, поэтому и срез сэмпла, и огибающая
+     * считаются в ВЫХОДНЫХ секундах: в координатах буфера это duration*rate. */
+    const rate = timbre && Number.isFinite(timbre.rate) ? clamp(timbre.rate, 0.5, 1.8) : 1;
+    const trim = timbre && Number.isFinite(timbre.trim) ? clamp(timbre.trim, 0.05, 1) : 1;
+    const available = Math.max(0.005, buffer.duration - sample.offset);
+    const duration = Math.min(sample.duration * trim, available / rate), t = c.currentTime;
     let source;
     try {
       source = c.createBufferSource(); source.buffer = buffer;
+      if (rate !== 1 && 'playbackRate' in source && source.playbackRate) source.playbackRate.value = rate;
       const gain = c.createGain(), nodes = [gain], volume = sample.gain * level;
       gain.gain.setValueAtTime(0, t);
       gain.gain.linearRampToValueAtTime(volume, t + 0.0004);
@@ -193,7 +223,7 @@ class AudioEngine {
         gain.connect(p); p.connect(this.bus);
       } else gain.connect(this.bus);
       this._trackSource(source, nodes);
-      source.start(t, sample.offset, duration);
+      source.start(t, sample.offset, Math.min(duration * rate, available));
       return true;
     } catch (_) { if (source) this._stopSource(source); return false; }
   }
@@ -297,7 +327,8 @@ class AudioEngine {
   hitTable(speed, x, eventId) {
     if (!this.canPlay() || !this._once('hitTable', eventId)) return;
     const v = clamp((Number.isFinite(speed) ? Math.abs(speed) : 0) / 7, 0.08, 1.4);
-    if (this._playSample('hitTable', 0.45 + v * 0.5, Number.isFinite(x) ? x * 0.7 : 0)) return;
+    if (this._playSample('hitTable', 0.45 + v * 0.5, Number.isFinite(x) ? x * 0.7 : 0,
+      contactTimbre('hitTable', () => this._random()))) return;
     const t = this.ctx.currentTime;
     this._noise(0.055 + v * 0.02, 0.26 * v, 'bandpass', 2400 + v * 2600, 2.2, t);
     this._tone(820 + v * 340 + (this._random() * 2 - 1) * 40, 0.075, 0.30 * v, 'triangle', t, 0.55);
@@ -307,7 +338,8 @@ class AudioEngine {
   hitRacket(speed, slip, soft, eventId) {
     if (!this.canPlay() || !this._once('hitRacket', eventId)) return;
     const v = clamp((Number.isFinite(speed) ? Math.abs(speed) : 0) / 13, 0.1, 1.5), t = this.ctx.currentTime;
-    if (this._playSample('hitRacket', (0.45 + v * 0.5) * (soft ? 0.8 : 1))) return;
+    if (this._playSample('hitRacket', (0.45 + v * 0.5) * (soft ? 0.8 : 1), 0,
+      contactTimbre('hitRacket', () => this._random()))) return;
     const body = soft ? 0.55 : 1;
     this._tone(300 + v * 240, 0.085, 0.34 * v * body, 'triangle', t, 0.42);
     this._noise(0.05, 0.16 * v * body, 'bandpass', 1300 + v * 1200, 1.4, t);

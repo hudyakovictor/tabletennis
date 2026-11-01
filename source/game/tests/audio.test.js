@@ -185,7 +185,41 @@ test('physical contact and swing each play one sample with no synthetic layers',
   a.hitTable(7, .5, 'bounce'); a.whoosh(1, 'swing');
   assert.equal(f.sources().length, 4); assert.equal(f.effects().length, 4);
   assert.deepEqual(f.effects().map(source => source.buffer.key), ['ball1', 'ball2', 'ball1', 'swing']);
-  assert.ok(f.effects().every(source => source.starts[0][0] === a.ctx.currentTime && source.playbackRate.value === 1));
+  assert.ok(f.effects().every(source => source.starts[0][0] === a.ctx.currentTime));
+  /* Один сэмпл на событие и никаких синтетических слоёв — как и раньше. Но
+   * стол и ракетка звучат РАЗНО: стол короче и выше (rate > 1), ракетка глуше
+   * (rate < 1). До этого решения оба события играли один сэмпл с одним темпом,
+   * и отскок от стола был на слух неотличим от удара ракеткой («странный стук»).
+   * Транзиенты по-прежнему общие: различие — тембр события, не «материал». */
+  const [hitA, hitB, table, swing] = f.effects();
+  for (const hit of [hitA, hitB]) {
+    assert.ok(hit.playbackRate.value < 1 && hit.playbackRate.value > 0.9, `racket rate ${hit.playbackRate.value}`);
+    assert.equal(hit.starts[0][2] > 0.1, true, 'the racket keeps the whole measured transient');
+  }
+  assert.ok(table.playbackRate.value > 1 && table.playbackRate.value < 1.25, `table rate ${table.playbackRate.value}`);
+  assert.ok(table.starts[0][2] < hitA.starts[0][2] * 0.75, 'the bounce is audibly shorter than the hit');
+  assert.equal(swing.playbackRate.value, 1, 'the swing is untouched by the contact timbre map');
+});
+
+test('contact timbre is a bounded, deterministic map with no invented material', () => {
+  const lib = load(['10_math.js', '05_stroke_config.js', '50_audio.js'], ['contactTimbre', 'TT_AUDIO_TIMBRE']);
+  const { contactTimbre, TT_AUDIO_TIMBRE } = lib;
+  assert.deepEqual(Object.keys(TT_AUDIO_TIMBRE).sort(), ['hitRacket', 'hitTable']);
+  for (const event of ['hitTable', 'hitRacket']) {
+    const cfg = TT_AUDIO_TIMBRE[event];
+    for (const r of [0, 0.25, 0.5, 0.75, 1]) {
+      const t = contactTimbre(event, () => r);
+      assert.ok(t.rate > 0.5 && t.rate < 1.8, `${event} rate ${t.rate}`);
+      assert.ok(t.trim > 0 && t.trim <= 1, `${event} trim ${t.trim}`);
+      assert.ok(Math.abs(t.rate - cfg.rate) <= cfg.rate * cfg.jitter + 1e-9, 'jitter stays inside its band');
+    }
+    assert.ok(contactTimbre(event, () => 0.5).rate > 0);
+  }
+  const table = contactTimbre('hitTable'), racket = contactTimbre('hitRacket');
+  assert.ok(table.rate > racket.rate * 1.05, 'a table bounce is always brighter than a racket hit');
+  assert.ok(table.trim < racket.trim, 'and always shorter');
+  const other = contactTimbre('whoosh', () => 0.5);   // объект из vm: сравниваем по полям
+  assert.equal(other.rate, 1); assert.equal(other.trim, 1, 'other events are untouched');
 });
 test('manifest cuts measured silence/tails without assigning invented contact materials', async () => {
   const f = fixture(), a = await ready(f);
