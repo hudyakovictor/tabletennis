@@ -53,6 +53,19 @@ function parkServeBall(out, pad, hand) {
     clamp(pad.pos.z - toss.paddleZOffset, PH.T_HALF_LEN + toss.endLineMargin, toss.farZ));
 }
 
+/* Передача мяча в руку подающего между очками.
+ *
+ * В SERVE_READY мяч не моделируется: он паркуется у ракетки, поэтому задать его
+ * положение можно только телепортом. Замер живого матча: на кадре перехода этот
+ * телепорт достигал 7.9 м (с пола за дальней линией в точку подачи), и мяч в
+ * этот момент ещё нарисован — прыжок виден глазом.
+ *
+ * Перелёт рисовать нельзя: 6 м за один кадр — это полоса, а не движение. Поэтому
+ * на `serve.hold.appear` секунд мяч СКРЫТ (`isHeldBallPending`), и он появляется
+ * уже в руке. Точка парковки при этом остаётся авторитетной с первого кадра, так
+ * что подача всегда начинается ровно из неё.
+ */
+
 /* Насколько мяч зелёный в этом кадре: 0 — белый, 1 — «бей сейчас».
  * Единственный носитель тайминга в матче. Тон считается по ВРЕМЕНИ до
  * контакта, а не по факту пересечения бокса захвата: по замерам живого
@@ -950,7 +963,13 @@ class Game {
     const s = this.server;
     const b = this.ball;
     const x = s > 0 ? 0 : rndSym(toss.readyXJitter);
-    V3.set(b.p, x, PH.TABLE_Y + toss.readyHeight, s * (PH.T_HALF_LEN + toss.readyEndMargin));
+    /* Парковка в руке — телепорт по построению. Если передача взведена (мяч
+     * только что остановился), точку НЕ трогаем: её доведёт SERVE_READY через
+     * holdServeBallAt. Иначе кадр перехода прыгал в парковку, а следующий кадр
+     * возвращал мяч в точку остановки — двойной скачок вместо одного плавного. */
+    const handing = !!this._handover;
+    if (handing) this._handover.left = STROKE_CONFIG.serve.hold.appear;
+    else V3.set(b.p, x, PH.TABLE_Y + toss.readyHeight, s * (PH.T_HALF_LEN + toss.readyEndMargin));
     V3.zero(b.v); V3.zero(b.w); Q.identity(b.q);
     b.live = false; b.hist.length = 0; b.lastHitBy = 0; this.netTouched = false;
     b.trailGrade = null; b.golden = null;
@@ -967,7 +986,7 @@ class Game {
     /* Every point begins from the same known state: bat back in the centre,
      * cursor binding re-anchored, no stale intercept from the last rally. */
     this.resetPaddle();
-    if (s > 0) parkServeBall(b.p, this.player, this.settings.hand);
+    if (s > 0 && !handing) parkServeBall(b.p, this.player, this.settings.hand);
     this.setState(GS.SERVE_READY);
     this.audio.resetRally();
     this.recorder.begin(this.time, s);
@@ -993,6 +1012,9 @@ class Game {
     const pad = this.player;
     const toss = STROKE_CONFIG.serve.toss;
     // ITTF requires a near-vertical toss of at least 16 cm; we throw ~30 cm
+    /* Бросок начинается ровно из парковки: незавершённая передача в руку не
+     * имеет права сдвинуть точку вылета. */
+    this._handover = null;
     parkServeBall(b.p, pad, this.settings && this.settings.hand);
     /* Высота подброса из калибровки: 2.10..2.85 м/с throw (нейтраль 0.45 →
      * прежние ~2.45). Выше — больше времени на замах, ниже — быстрее темп. */
@@ -1005,6 +1027,28 @@ class Game {
     this.isServeBall = true;
     this.setState(GS.SERVE_TOSS);
     this.audio.ui('toss');
+  }
+
+  /** Мяч ещё не в руке: между очками его прячут, чтобы не рисовать прыжок. */
+  isHeldBallPending() { return !!this._handover; }
+
+  /** Отсчитать скрытое окно передачи (вызывается каждый кадр SERVE_READY). */
+  tickHandover(dt) {
+    const h = this._handover;
+    if (!h) return false;
+    h.left = Math.max(0, (Number.isFinite(h.left) ? h.left : 0) - Math.max(0, dt || 0));
+    if (h.left > 0) return true;
+    this._handover = null;
+    return false;
+  }
+
+  /** Мяч в свободной руке игрока: парковка у ракетки + отсчёт передачи.
+   *  Пока мяч скрыт, парковка всё равно авторитетна — подача начинается из неё. */
+  holdBall(out, dt) {
+    const park = this._parkTarget || (this._parkTarget = V3.new());
+    parkServeBall(park, this.player, this.settings && this.settings.hand);
+    V3.copy(out, park);
+    return this.tickHandover(dt);
   }
 
   /** How many reference pixels one centimetre at the meeting point is on THIS screen and camera:
@@ -1173,6 +1217,9 @@ class Game {
       return;
     }
     if (this.state === GS.POINT || this.state === GS.MATCH_END) return;
+    /* Взводим передачу мяча в руку подающего: на ближайшие `serve.hold.appear`
+     * секунд мяч скрыт, чтобы кадр парковки не читался как прыжок (см. выше). */
+    this._handover = { left: STROKE_CONFIG.serve.hold.appear };
     /* очко закончилось — шлейф мёртвого мяча умирает вместе с ним,
      * а не висит «мерзкой полосой» до следующей подачи */
     this.ball.hist.length = 0; this.ball.trailGrade = null; this.ball.golden = null;
@@ -1920,6 +1967,12 @@ class Game {
       this._netHit || (this._netHit = { x: 0, y: 0, z: 0 }));
     if (nk > 0) {
       const nh = this._netHit;
+      /* Точка контакта — та, где шаг реально пересёк плоскость сети, а не конец
+       * шага. Стол так делает давно (tableContact возвращает интерполяцию), а
+       * сеть — нет: на 6 м/с мяч записывался и рисовался до 1 см ЗА сеткой, а
+       * на подаче — до 3 см, и только потом отскакивал. Для глаза это «мяч
+       * провалился сквозь сетку и его оттуда вытолкнуло». */
+      b.p.x = nh.x; b.p.y = nh.y;
       if (nk === 2) {
         clipTape(b.p, b.v, b.w);
         this.audio.hitNet();
@@ -3444,8 +3497,17 @@ class Game {
 
     // during your own toss the bat slides under the ball: serving is about
     // the stroke you choose, not about pixel-hunting a 40 mm sphere
-    const serveSlide = this.state === GS.SERVE_TOSS && this.server === 1 &&
-      this.ball.lastHitBy === 0 && this.recenterT <= 0;
+    /* ...и НАЧИНАЯ С ГОТОВНОСТИ, а не с момента броска. Замер живой подачи
+     * (60 Гц, палец у мяча): в SERVE_READY кисть стояла на 1.21 м при мяче на
+     * 0.90 м — ракетка висела на 14–31 см ВЫШЕ удерживаемого мяча, а на нажатии
+     * цель подхвата прыгала на 0.34 м вниз, и клинок за 6 кадров проваливался
+     * на ~0.20 м. Глаз читает такой рывок как «ракетка махнула по пустоте», а
+     * мяч при этом «сам» прыгает вверх. Один и тот же подхват в обеих фазах
+     * убирает разрыв: ракетка стоит ПОД мячом ещё до броска. */
+    const serveHold = this.state === GS.SERVE_READY && this.server === 1 && !this.ball.live &&
+      this.recenterT <= 0;
+    const serveSlide = serveHold || (this.state === GS.SERVE_TOSS && this.server === 1 &&
+      this.ball.lastHitBy === 0 && this.recenterT <= 0);
     if (serveSlide) {
       const tracking = STROKE_CONFIG.serve.tracking;
       const k = tracking.weights[0] + tracking.weights[1] * A;
@@ -4124,10 +4186,12 @@ class Game {
           /* park the ball in front of the AI's OWN bat every frame — a serve
            * tossed 25 cm away from the paddle reads as ball and racket living
            * in different worlds */
-          V3.set(this.ball.p, this.ai.pos.x,
+          V3.set(this._aiPark || (this._aiPark = V3.new()), this.ai.pos.x,
             PH.TABLE_Y + STROKE_CONFIG.serve.toss.height,
             clamp(this.ai.pos.z + STROKE_CONFIG.serve.toss.aiPaddleZOffset,
               -(PH.T_HALF_LEN + STROKE_CONFIG.serve.toss.aiFarMargin), -STROKE_CONFIG.serve.toss.aiNearZ));
+          this.tickHandover(dt);
+          V3.copy(this.ball.p, this._aiPark);
           this.aiServeTimer -= dt;
           if (this.aiServeTimer <= 0) {
             const toss = STROKE_CONFIG.serve.toss;
@@ -4139,7 +4203,7 @@ class Game {
           }
         } else {
           this.serveHint = clamp(this.serveHint + dtReal, 0, 3);
-          parkServeBall(this.ball.p, this.player, this.settings.hand);
+          this.holdBall(this.ball.p, dt);          // парковка + отсчёт передачи
         }
         break;
       case GS.SERVE_TOSS:
@@ -4459,7 +4523,9 @@ class Game {
     const STRIKE_FULL = 0.15;
     // помощь хосту (g.hintContact): заевшемуся игроку мяч зеленеет заранее
     const STRIKE_LEAD = this.hintContact ? 0.45 : 0.30;
-    if (this.ball.live || this.state === GS.SERVE_READY || this._idleStill) {
+    /* Мяч между очками проходит склейку: пока он «летит в руку», его не рисуют,
+     * иначе кадр парковки — это рывок на несколько метров за 1/60 с. */
+    if ((this.ball.live || this.state === GS.SERVE_READY || this._idleStill) && !this.isHeldBallPending()) {
       const BS = (this._cal && this._cal.ballSize !== undefined) ? (0.8 + this._cal.ballSize * 0.5) : 1;
       M4.compose(tmp.m, this.ball.p, this.ball.q, V3.set(tmp.scl, BS, BS, BS));
       const hints = this.hintContact !== false && !(typeof gameplayCalibrationLocked === 'function' && gameplayCalibrationLocked(this));
