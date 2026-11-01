@@ -1255,7 +1255,12 @@ class Game {
   /* ------------------------- ball <-> world ------------------------ */
   onBounce(side, speed, info) {
     if (this.ball.lastHitBy === 1 && this.shotJournal) this.shotJournal.bounce(side, this.time);
-    if (!(info && info.edge > 0.25)) this.audio.hitTable(speed, this.ball.p.x);
+    /* Every bounce is one event with its own id: the ball cannot tick twice
+     * for the same contact, and a real second bounce still sounds. */
+    if (!(info && info.edge > 0.25)) {
+      this._bounceSeq = (this._bounceSeq || 0) + 1;
+      this.audio.hitTable(speed, this.ball.p.x, 'b' + this._bounceSeq);
+    }
     this.addMark(this.ball.p.x, this.ball.p.z, speed);
     this.emitParticles(this.ball.p.x, PH.TABLE_Y + 0.005, this.ball.p.z,
       4 + (speed > 9 ? 4 : 0), 0.5 + speed * 0.06, 0.26, 0.016, 1, 1, 0.92, { x: 0, y: 0.7, z: 0 });
@@ -1451,7 +1456,8 @@ class Game {
 
     /* an off-centre contact sounds like wood, not like rubber */
     const softHit = !!(racket.arch && racket.arch.soft) || (side > 0 && this.lastSweet !== undefined && this.lastSweet < 0.38);
-    this.audio.hitRacket(speed, info ? info.contactSlip : 0, softHit, side + '/' + this.shotId);
+    this.audio.hitRacket(speed, info ? info.contactSlip : 0, softHit, side + '/' + this.shotId,
+      contactP ? contactP.x : b.p.x);
     if (side > 0 && this.lastSweet !== undefined && this.lastSweet < 0.30) this.buzz(16);
     if (this.feedback) {
       this.feedback.execute({
@@ -2454,7 +2460,8 @@ class Game {
     const motion = this.paddleMotion || (this.paddleMotion = new PaddleStrokeMotion());
     motion.contact(n, pad.roll || 0, 'BLOCK', this.settings.grip, this.settings.hand,
       gripped.forehand, this.settings.followThrough !== false);
-    if (this.audio && this.audio.hitRacket) this.audio.hitRacket(V3.len(b.v) + 1.5, 0.5, true);
+    if (this.audio && this.audio.hitRacket)
+      this.audio.hitRacket(V3.len(b.v) + 1.5, 0.5, true, 'block/' + this.shotId, b.p.x);
     this.msg('СТЕНКА!', 0.7, '#9fd0ff');
     this.buzz([4, 12]);
     this.emitParticles(b.p.x, b.p.y, b.p.z, 5, 0.5, 0.25, 0.010, 0.62, 0.82, 1);

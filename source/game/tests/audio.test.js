@@ -185,7 +185,15 @@ test('physical contact and swing each play one sample with no synthetic layers',
   a.hitTable(7, .5, 'bounce'); a.whoosh(1, 'swing');
   assert.equal(f.sources().length, 4); assert.equal(f.effects().length, 4);
   assert.deepEqual(f.effects().map(source => source.buffer.key), ['ball1', 'ball2', 'ball1', 'swing']);
-  assert.ok(f.effects().every(source => source.starts[0][0] === a.ctx.currentTime && source.playbackRate.value === 1));
+  assert.ok(f.effects().every(source => source.starts[0][0] === a.ctx.currentTime));
+  /* Один и тот же банк, но стол и накладка различаются миксом: отскок
+   * короче, выше по тону и тише удара, иначе подача (удар + два отскока)
+   * звучит как один и тот же шарик, стукнутый дважды. */
+  const [racket, , table, swing] = f.effects();
+  assert.ok(racket.playbackRate.value < 1, 'racket knock stays low');
+  assert.ok(table.playbackRate.value > 1, 'table tick is pitched up');
+  assert.equal(swing.playbackRate.value, 1);
+  assert.ok(table.starts[0][2] < racket.starts[0][2], 'table tick is cut shorter');
 });
 test('manifest cuts measured silence/tails without assigning invented contact materials', async () => {
   const f = fixture(), a = await ready(f);
@@ -221,7 +229,26 @@ test('contact speed changes only bounded gain, independent of simulation tempo',
   slow.a.hitRacket(13, 80, false); fast.a.hitRacket(13, 80, false); soft.a.hitRacket(13, 80, true);
   assert.equal(peakGain(slow.effects()[0]), peakGain(fast.effects()[0]));
   assert.ok(peakGain(soft.effects()[0]) < peakGain(slow.effects()[0]));
-  fast.a.hitRacket(1000, 0); assert.ok(peakGain(fast.effects()[1]) <= .51 * 1.2);
+  fast.a.hitRacket(1000, 0); assert.ok(peakGain(fast.effects()[1]) <= .51);
+});
+
+test('a smash is audibly harder than a push and the table never outsounds the racket', async () => {
+  const f = fixture(), a = await ready(f);
+  a.hitRacket(3, 0, false, 'push'); a.hitRacket(28, 0, false, 'smash');
+  const push = peakGain(f.effects()[0]), smash = peakGain(f.effects()[1]);
+  assert.ok(smash >= push * 3, `expected a real dynamic range, got ${push} vs ${smash}`);
+  a.hitTable(28, 0, 'bounce'); const table = peakGain(f.effects()[2]);
+  assert.ok(table < smash, 'the table tick must stay under the racket contact');
+});
+
+test('one bounce is one tick: a repeated table contact cannot double-click', async () => {
+  const f = fixture(), a = await ready(f);
+  a.hitTable(7, 0); a.hitTable(7, 0);
+  assert.equal(f.effects().length, 1, 'legacy caller without an id is rate limited');
+  a.ctx.currentTime += .05; a.hitTable(7, 0);
+  assert.equal(f.effects().length, 2, 'a later real bounce still sounds');
+  a.hitTable(7, 0, 'b1'); a.hitTable(7, 0, 'b1'); a.hitTable(7, 0, 'b2');
+  assert.equal(f.effects().length, 4, 'ids deduplicate one contact and keep the next');
 });
 test('sample rotation and procedural audience/noise never consume simulation RNG', async () => {
   const f = fixture(); vm.runInContext('Math.random = () => { throw Error("simulation RNG consumed"); };', f.context);

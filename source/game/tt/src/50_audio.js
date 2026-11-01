@@ -15,6 +15,36 @@ const TT_AUDIO_MANIFEST = Object.freeze([
   Object.freeze({ key: 'swing', events: Object.freeze(['whoosh']), offset: 0.16, duration: 0.275, gain: 0.18 }),
 ]);
 
+/* ------------------------------------------------------------------ *
+ *  MIX OF ONE CONTACT
+ *
+ *  The bank holds three ball recordings and no separate table/racket
+ *  takes, so the two materials are told apart by the MIX, not by a new
+ *  sample: the table answers a short, bright, higher-pitched tick, the
+ *  rubber answers a longer, lower-pitched knock. Both were previously
+ *  played from the same variant with the same nearly flat `0.45 + v·0.5`
+ *  level — a serve (racket, own bounce, opponent bounce) read as the same
+ *  ball being struck twice, and a smash was no louder than a push.
+ *
+ *  Level now follows the physical impact speed over ≈14 dB, from a soft
+ *  push to a smash, and the transient survives the master compressor.
+ *  `pan` is metres of the contact along the table; it is scaled per
+ *  material so the racket click is not glued to the centre of the room.
+ * ------------------------------------------------------------------ */
+const TT_IMPACT = Object.freeze({
+  hitRacket: Object.freeze({ ref: 14, floor: 0.13, curve: 1.5, trim: 1, pan: 0.62,
+    pitchSoft: 0.90, pitchHard: 0.97, duration: 0.12 }),
+  hitTable: Object.freeze({ ref: 10, floor: 0.06, curve: 1.35, trim: 0.62, pan: 0.7,
+    pitchSoft: 1.34, pitchHard: 1.18, duration: 0.07 }),
+});
+const impactNorm = (speed, ref) => clamp((Number.isFinite(speed) ? Math.abs(speed) : 0) / ref, 0, 1);
+const impactLevel = (mix, n, soft) =>
+  (mix.floor + (1 - mix.floor) * Math.pow(n, mix.curve)) * mix.trim * (soft ? 0.8 : 1);
+/* A harder contact is not only louder, it is brighter: pitch slides from the
+ * soft end to the hard end instead of the recording playing at one pitch. */
+const impactPitch = (mix, n) => mix.pitchSoft + (mix.pitchHard - mix.pitchSoft) * n;
+const impactPan = (mix, x) => (Number.isFinite(x) ? clamp(x * mix.pan, -1, 1) : 0);
+
 // A handful of individual spectators, never a continuous stadium noise wash.
 function spectatorClapPlan(amount, random = Math.random) {
   const a = clamp(Number.isFinite(amount) ? amount : 0, 0, 1.6);
@@ -44,7 +74,7 @@ class AudioEngine {
     this._randomState = 0x51a7d10; this._unlockTarget = null; this._unlockHandler = null; this._unlocked = false;
     this._lastApplause = -Infinity; this._lastReaction = -Infinity; this._rallyMilestone = 0;
     this._noiseBuf = null; this._crowdGain = null; this._crowdAmount = 0.5;
-    this._lastWhoosh = -Infinity; this._lastEdge = -Infinity;
+    this._lastWhoosh = -Infinity; this._lastEdge = -Infinity; this._lastTableT = -Infinity;
   }
   init() {
     if (this.ok && this.ctx && this.ctx.state !== 'closed') return true;
@@ -56,8 +86,12 @@ class AudioEngine {
       const c = this.ctx = new AC({ latencyHint: 'interactive' });
       this.master = c.createGain();
       this.comp = c.createDynamicsCompressor();
-      this.comp.threshold.value = -16; this.comp.knee.value = 24; this.comp.ratio.value = 7;
-      this.comp.attack.value = 0.003; this.comp.release.value = 0.22;
+      /* −16 dB / 7:1 flattened every ball impact to one loudness — a smash and
+       * a push came out equally loud, which is why power stopped being audible.
+       * −10 dB / 3.5:1 with a slower attack keeps the peaks and still catches
+       * a loud crowd under them. */
+      this.comp.threshold.value = -10; this.comp.knee.value = 18; this.comp.ratio.value = 3.5;
+      this.comp.attack.value = 0.006; this.comp.release.value = 0.2;
       this.conv = c.createConvolver(); this.conv.buffer = this._makeIR(0.55, 3.1);
       this.wet = c.createGain(); this.wet.gain.value = 0.08;
       this.dry = c.createGain(); this.dry.gain.value = 1;
@@ -167,7 +201,7 @@ class AudioEngine {
     if (this._eventIds.size > 128) this._eventIds.delete(this._eventIds.keys().next().value);
     return true;
   }
-  _playSample(event, level, pan = 0) {
+  _playSample(event, level, pan = 0, pitch = 1, maxDuration = 0) {
     const variants = TT_AUDIO_MANIFEST.filter(sample => sample.events.includes(event));
     for (const sample of variants) this._decodeSample(sample.key);
     const ready = variants.filter(sample => {
@@ -178,14 +212,18 @@ class AudioEngine {
     const index = this._sampleRotation[event] ?? 0, sample = ready[index % ready.length];
     this._sampleRotation[event] = index + 1;
     const c = this.ctx, buffer = this._sampleBuffers.get(sample.key);
-    const duration = Math.min(sample.duration, buffer.duration - sample.offset), t = c.currentTime;
+    /* The table tick is cut short and the racket knock keeps its body: the
+     * length belongs to the material, not to the recording. */
+    const recorded = Math.min(sample.duration, buffer.duration - sample.offset);
+    const duration = Math.min(recorded, maxDuration > 0 ? maxDuration : recorded), t = c.currentTime;
     let source;
     try {
       source = c.createBufferSource(); source.buffer = buffer;
+      source.playbackRate.value = pitch;
       const gain = c.createGain(), nodes = [gain], volume = sample.gain * level;
       gain.gain.setValueAtTime(0, t);
       gain.gain.linearRampToValueAtTime(volume, t + 0.0004);
-      gain.gain.setValueAtTime(volume, t + duration - 0.004);
+      gain.gain.setValueAtTime(volume, t + Math.max(0.002, duration - 0.004));
       gain.gain.linearRampToValueAtTime(0, t + duration);
       source.connect(gain);
       if (pan !== 0 && c.createStereoPanner) {
@@ -223,7 +261,7 @@ class AudioEngine {
   }
   stopEffects() {
     for (const source of [...this._effectSources]) this._stopSource(source);
-    this._eventIds.clear(); this._lastWhoosh = -Infinity; this._lastEdge = -Infinity;
+    this._eventIds.clear(); this._lastWhoosh = -Infinity; this._lastEdge = -Infinity; this._lastTableT = -Infinity;
   }
   stopMusic() { for (const source of [...this._musicSources]) this._stopSource(source); }
   _stopAmbient() {
@@ -294,23 +332,39 @@ class AudioEngine {
   }
 
   /* ---------------- gameplay events ---------------- */
+  /** Ball on the table: short bright tick. `x` is metres along the table. */
   hitTable(speed, x, eventId) {
     if (!this.canPlay() || !this._once('hitTable', eventId)) return;
-    const v = clamp((Number.isFinite(speed) ? Math.abs(speed) : 0) / 7, 0.08, 1.4);
-    if (this._playSample('hitTable', 0.45 + v * 0.5, Number.isFinite(x) ? x * 0.7 : 0)) return;
+    const mix = TT_IMPACT.hitTable, n = impactNorm(speed, mix.ref);
+    /* Legacy callers pass no id. One bounce is one tick: without this guard a
+     * ball rolling/resting on the surface (or a duplicated contact) fired the
+     * very same click several times per frame, which is heard as the ball
+     * being struck twice. */
+    if (!(typeof eventId === 'string' || Number.isFinite(eventId))) {
+      const now = this.ctx.currentTime;
+      if (now - (this._lastTableT ?? -Infinity) < 0.035) return;
+      this._lastTableT = now;
+    }
+    const level = impactLevel(mix, n, false);
+    if (this._playSample('hitTable', level, impactPan(mix, x), impactPitch(mix, n), mix.duration)) return;
     const t = this.ctx.currentTime;
-    this._noise(0.055 + v * 0.02, 0.26 * v, 'bandpass', 2400 + v * 2600, 2.2, t);
-    this._tone(820 + v * 340 + (this._random() * 2 - 1) * 40, 0.075, 0.30 * v, 'triangle', t, 0.55);
-    this._tone(214 + (this._random() * 2 - 1) * 12, 0.15, 0.12 * v, 'sine', t, 0.6);
+    this._noise(0.045 + n * 0.015, 0.42 * level, 'bandpass', 2800 + n * 2400, 2.2, t);
+    this._tone(980 + n * 320 + (this._random() * 2 - 1) * 40, 0.06, 0.46 * level, 'triangle', t, 0.55);
+    this._tone(240 + (this._random() * 2 - 1) * 12, 0.10, 0.16 * level, 'sine', t, 0.6);
   }
-  /** Contact speed sets level; slip shapes only an unavailable-sample fallback. */
-  hitRacket(speed, slip, soft, eventId) {
+  /**
+   * Ball on the rubber: longer, lower knock. Contact speed sets level and
+   * brightness (a smash is audibly harder, a push is a soft tap); `slip`
+   * shapes only an unavailable-sample fallback. `x` is metres along the table.
+   */
+  hitRacket(speed, slip, soft, eventId, x) {
     if (!this.canPlay() || !this._once('hitRacket', eventId)) return;
-    const v = clamp((Number.isFinite(speed) ? Math.abs(speed) : 0) / 13, 0.1, 1.5), t = this.ctx.currentTime;
-    if (this._playSample('hitRacket', (0.45 + v * 0.5) * (soft ? 0.8 : 1))) return;
+    const mix = TT_IMPACT.hitRacket, n = impactNorm(speed, mix.ref);
+    const level = impactLevel(mix, n, soft === true), t = this.ctx.currentTime;
+    if (this._playSample('hitRacket', level, impactPan(mix, x), impactPitch(mix, n), mix.duration)) return;
     const body = soft ? 0.55 : 1;
-    this._tone(300 + v * 240, 0.085, 0.34 * v * body, 'triangle', t, 0.42);
-    this._noise(0.05, 0.16 * v * body, 'bandpass', 1300 + v * 1200, 1.4, t);
+    this._tone(280 + n * 300, 0.085, 0.62 * level * body, 'triangle', t, 0.42);
+    this._noise(0.05, 0.30 * level * body, 'bandpass', 1100 + n * 1400, 1.4, t);
     const sl = clamp((Number.isFinite(slip) ? slip : 0) / 16, 0, 1);
     if (sl > 0.05) this._noise(0.10 + sl * 0.09, 0.14 * sl, 'bandpass', 3600 + sl * 3800, 0.9, t);
   }
