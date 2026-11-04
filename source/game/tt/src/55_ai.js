@@ -155,10 +155,7 @@ class OpponentAI {
     this.roll = 0.28;
     this.faceNormal = V3.new(0, -Math.sin(15 * DEG), Math.cos(15 * DEG));
     this.lastStrokeId = null;
-    this.levelIndex = clamp(levelIndex, 0, AI_LEVELS.length - 1);
-    this.L = AI_LEVELS[this.levelIndex];
-    this.maxSpeed = this.L.move;
-    this.pace = this.L.paceOpen;
+    this.setLevel(levelIndex);
 
     // State
     this.phase = 'IDLE';
@@ -720,7 +717,9 @@ class OpponentAI {
 
     const archId = plan.archId || 'DRIVE';
     let racket = racketForStroke(archId, this._strokeContext(game), {
-      vmag: clamp(plan.speed * (0.7 + 0.3 * this.pace), L.vmagMin, L.vmagMax),
+      // Ease rally pace before solving so the chosen shot is re-aimed at its
+      // target, rather than slowing an already-solved ball in flight.
+      vmag: clamp(plan.speed * (0.7 + 0.3 * this.pace) * .92, L.vmagMin, L.vmagMax),
       aim: plan.aim,
       quality: 0.75 + 0.20 * L.skill,
     });

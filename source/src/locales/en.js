@@ -99,7 +99,7 @@ I18n.add('en', {
   'analysis.tipRallyT': 'Rally length',
   'analysis.tipRally': 'Rallies are short: first just return the ball safely — a flat shot to the middle — and attack only the high balls.',
   'analysis.tipSpinT': 'Add spin',
-  'analysis.tipSpin': 'An arc swipe — like the letter C — spins the ball sideways: a C curves it left, a mirrored arc curves it right. A spinning ball is harder to return, and spin strength can be raised in Settings → Calibration.',
+  'analysis.tipSpin': 'An arc swipe — like the letter C — spins the ball sideways: a C curves it left, a mirrored arc curves it right. A more pronounced arc produces more sidespin.',
   'medal.perfect': 'Perfect ×3', 'medal.rally': 'Rally 8+',
   'coach.tipLabel': 'Tip:', 'coach.fallback': 'put your finger under the ball and swipe up through it as it reaches you.',
   'coach.title': 'Match review · contact {pct}%', 'coach.goodTitle': 'Clean technique',

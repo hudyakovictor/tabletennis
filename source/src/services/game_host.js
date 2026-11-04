@@ -57,7 +57,8 @@ const GameHost = {
     if (typeof Sfx !== 'undefined') Sfx.sync();
     this.send('settings', { quality: this._recoveryQuality || S.quality, motionOff: !!S.rm,
       sound: S.sfx !== false, haptics: S.vibro !== false, hint: S.hint !== false, debug: this.debug,
-      audioLevels: repairAudioLevels(S.audioLevels, S.volume), calibrations: repairCalibrationPreferences(S.cal),
+      audioLevels: repairAudioLevels(S.audioLevels, S.volume), calibrations: Object.fromEntries(Object.entries(repairCalibrationPreferences(S.cal)).filter(([key]) =>
+        ['camHeight', 'camZoom', 'camSway', 'fingerTrail', 'ballSize', 'trailLen', 'tableGlow', 'hintRadius', 'hintGlow', 'slowmoDepth'].includes(key))),
       missShots: { on: S.missShots === true, half: S.missShotHalf } });
   },
   syncReducedMotion() {
@@ -254,6 +255,14 @@ window.addEventListener('message', (e) => {
       m = { ...m, ...result, courseComplete: m.mode === 'course' && result.courseComplete, rewarded: !!rewarded };
       if (rewarded || result.courseComplete) saveNow();
     }
+  }
+  if (m.type === 'cameraCalibration' && m.values && typeof m.values === 'object') {
+    S.cal = repairCalibrationPreferences(S.cal);
+    for (const key of ['camHeight', 'camZoom']) {
+      if (Number.isFinite(m.values[key])) S.cal[key] = clamp(m.values[key], 0, 100);
+    }
+    if (GameHost.calibrationAckId === GameHost.calibrationRequestId) GameHost.acceptCalibration(m);
+    save();
   }
   if (m.type === 'haptic') haptic(m.kind);
   if (m.type === 'attempt') ZoneStats.add(m);

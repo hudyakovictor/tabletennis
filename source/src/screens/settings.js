@@ -8,7 +8,8 @@ function calibrationLabel(entry, value) {
 }
 function refreshSettingsCalibration(w, message) {
   const list = w.querySelector('[data-cal-list]'), summary = w.querySelector('[data-cal-summary]'), reset = w.querySelector('[data-a=calReset]');
-  const registry = GameHost.calibrationRegistry, state = GameHost.calibration;
+  const visible = new Set(['camHeight', 'camZoom', 'camSway', 'fingerTrail', 'ballSize', 'trailLen', 'tableGlow', 'hintRadius', 'hintGlow']);
+  const registry = GameHost.calibrationRegistry.filter(entry => visible.has(entry.key)), state = GameHost.calibration;
   const ready = GameHost.ready && GameHost.calibrationReady && registry.length && state;
   reset.disabled = !ready;
   summary.textContent = registry.length ? t('set.calibOpen', { n: registry.length }) : settingsText('Калибровка: ожидаем движок', 'Calibration: waiting for the engine');
@@ -152,7 +153,7 @@ function openSettings() {
       };
       refreshAudio(); refreshSettingsCalibration(w);
       const off = GameHost.on(message => {
-        if (['ready', 'calibrationPending', 'calibration', 'settings', 'slowmo', 'motionPreference'].includes(message.type)) refreshSettingsCalibration(w, message);
+        if (['ready', 'calibrationPending', 'calibration', 'settings', 'slowmo', 'motionPreference', 'cameraCalibration'].includes(message.type)) refreshSettingsCalibration(w, message);
       });
       const refreshMisses = () => {
         const shots = displayedShots = MissShots.all(), grid = w.querySelector('.miss-grid');

@@ -126,8 +126,8 @@ class PaddleStrokeMotion {
     this.followEnabled = followEnabled;
     this.elapsed = 0; this.fresh = true; this.active = true; this.stage = 'contact';
     this.templateMotion = null;
-    if (target && target.pose && target.racket && typeof compileStrokeTemplate === 'function' && PADDLE_TEMPLATES.strokes[stroke]) {
-      const compiled = paddleTemplateFor(stroke, { grip, hand, forehand, side: target.side || 1 });
+    if (followEnabled && target && target.pose && target.racket && typeof compileStrokeTemplate === 'function' && PADDLE_TEMPLATES.strokes[stroke]) {
+      const compiled = paddleTemplateFor(stroke, { grip, hand, forehand, side: target.side || 1, activeFace: target.pose.activeFace });
       const duration = (this.profile.hold + this.profile.followTime + this.profile.recoverTime) / (1 - compiled.contactPhase);
       const pose = target.pose;
       this.templateMotion = retargetStrokeTemplate(compiled, { point: pose.point, q: pose.q,
@@ -173,7 +173,7 @@ class PaddleStrokeMotion {
 
 const PADDLE_TEMPLATE_CACHE = new Map();
 function paddleTemplateFor(stroke, options = {}) {
-  const key = [stroke, options.side || 1, options.hand || 'right', options.grip || 'shakehand', options.forehand !== false].join('|');
+  const key = [stroke, options.side || 1, options.hand || 'right', options.grip || 'shakehand', options.forehand !== false, options.activeFace || 0].join('|');
   if (!PADDLE_TEMPLATE_CACHE.has(key)) PADDLE_TEMPLATE_CACHE.set(key, compileStrokeTemplate(stroke, options));
   return PADDLE_TEMPLATE_CACHE.get(key);
 }
@@ -268,7 +268,7 @@ function paddleTableClearance(pos, normal, roll, tableY = PH.TABLE_Y, halfWidth 
 /** Anchor one rubber surface to the pre-impact ball, without a second radius
  * offset. Low contacts use the lower blade, not a separately lifted drawing. */
 function paddleContactPose(ballP, racket, options = {}) {
-  const normal = racket.normal, activeFace = options.forehand === false ? -1 : 1;
+  const normal = racket.normal, activeFace = options.activeFace === 1 || options.activeFace === -1 ? options.activeFace : options.forehand === false ? -1 : 1;
   const requestedRoll = Number.isFinite(options.roll) ? options.roll :
     (options.hand === 'left' ? -1 : 1) * (options.grip === 'penhold' ? Math.PI - .08 : .28);
   const point = V3.addScaled(V3.new(), ballP, normal, -PH.R);

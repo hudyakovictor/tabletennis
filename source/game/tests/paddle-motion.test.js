@@ -358,3 +358,27 @@ test('a block may open its face for a ball the spin does not lift', () => {
   assert.ok(flat[1] >= 15, `flat-ball block face capped at ${flat[1]}°`);
   assert.equal(top[1], 0, 'topspin keeps the classic closed block');
 });
+
+test('player keeps one active rubber at contact and during follow for either hand and grip', () => {
+  for (const grip of ['shakehand', 'penhold']) for (const hand of ['left', 'right']) for (const forehand of [true, false]) {
+    const ball = V3.new(0, lib.PH.TABLE_Y + .3, 1.6), normal = V3.norm(V3.new(), V3.new(.1, -.2, -1));
+    const pose = lib.paddleContactPose(ball, {normal}, {grip, hand, forehand, activeFace: 1, roll: .3});
+    assert.ok(pose); assert.equal(pose.activeFace, 1);
+    const motion = new PaddleStrokeMotion();
+    motion.contact(normal, .3, 'DRIVE', grip, hand, forehand, true, {pose, racket: {normal, vR: V3.new(0,0,-2)}, side: 1});
+    const out = motion.sample(0, {yaw: 0, pitch: 0, roll: .3});
+    assert.equal(out.activeFace, 1);
+  }
+});
+
+test('ready wrist leans about 45 degrees in opposite directions at the table edges', () => {
+  for (const hand of ['left', 'right']) {
+    const roll = x => lib.playerWristPose(V3.new(x, 1.18, 1.78), V3.new(), hand, {grip: 'shakehand'}).roll;
+    assert.ok(roll(-.8) < -.65 && roll(-.8) > -1, `${hand} left ${roll(-.8)}`);
+    assert.ok(roll(.8) > .65 && roll(.8) < 1, `${hand} right ${roll(.8)}`);
+    const base = hand === 'left' ? -Math.PI : Math.PI;
+    const pen = x => lib.playerWristPose(V3.new(x, 1.18, 1.78), V3.new(), hand, {grip: 'penhold'}).roll - base;
+    assert.ok(pen(-.8) > .65 && pen(-.8) < 1, `${hand} penhold left ${pen(-.8)}`);
+    assert.ok(pen(.8) < -.65 && pen(.8) > -1, `${hand} penhold right ${pen(.8)}`);
+  }
+});

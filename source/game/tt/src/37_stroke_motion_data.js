@@ -380,7 +380,7 @@ const { PADDLE_TEMPLATES, compileStrokeTemplate, sampleStrokeTemplate,
         (options.forehand !== undefined && typeof options.forehand !== 'boolean'))
       throw new RangeError('Invalid stroke side/hand/grip');
     const side = options.side ?? 1, hand = options.hand ?? 'right', grip = options.grip ?? 'shakehand';
-    const forehand = options.forehand ?? (data.hand === 'fh'), activeFace = forehand ? 1 : -1;
+    const forehand = options.forehand ?? (data.hand === 'fh'), activeFace = options.activeFace === 1 || options.activeFace === -1 ? options.activeFace : forehand ? 1 : -1;
     const mirror = (hand === 'left' ? -1 : 1) * (forehand === (data.hand === 'fh') ? 1 : -1);
     const sx = mirror * side, sz = side;
     const contact = createStrokeTemplateOutput();

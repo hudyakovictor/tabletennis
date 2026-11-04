@@ -41,8 +41,8 @@ const CAMERA_ORDER = ['BROADCAST', 'DYNAMIC', 'LOW'];
 
 /* Player trim on top of the authored fit. Zoom is a pure lens operation so
    the stance floor and the blade's size survive it; pitch rotates the eye
-   around the look point inside an absolute elevation band. Old saves may
-   still carry a trim; new input paths never change it. The loadSettings
+   around the look point inside an absolute elevation band. Mouse and touch
+   gestures update these trims as well as the settings sliders. The loadSettings
    clamps in Game mirror
    [zoomMin, zoomMax] and [pitchMin, pitchMax] and must stay in sync. */
 const CAM_ADJUST = Object.freeze({
