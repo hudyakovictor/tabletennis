@@ -120,7 +120,7 @@ const TT = (() => {
       const incoming = b.live && ((side === 'o' && b.vy > 0) || (side === 'p' && b.vy < 0));
       if (incoming) {
         P.react -= dt;
-        if (P.react <= 0) { const pr = this.predictCross(planeY); if (pr) { P.tx = pr.x + (P.err || 0); P.tz = clamp(pr.z, .05, .6); } }
+        if (P.react <= 0) { const pr = this.predictCross(planeY); if (pr) { P.tx = pr.x + (P.err || 0); P.tz = clamp(pr.z, .05, .6); } else { const vx = b.vx, vy = b.vy; const estT = Math.max(1e-3, (planeY - b.y) / vy); P.tx = clamp(b.x + vx * estT, -1.1, 1.1); P.tz = clamp(b.z + ( -G * estT * estT / 2 + b.vz * estT), .05, .6); } }
       } else { P.tx = lerp(P.tx, 0, dt * 1.2); P.tz = .22; P.react = .12 / this.diff; P.err = rnd(-.06, .06) * (1.3 - this.diff); }
       /* В демо «ИИ против ИИ» (живой фон хаба) боты двигались рывками:
        * gain 9 на дистанцию + скорость до 2.2 м/с выглядело как телепортация.
@@ -151,11 +151,11 @@ const TT = (() => {
       if (this.mode === 'play') {
         const P = this.pp; const f = this.finger;
         const w = this.unprojectPlaneY(f.sx, f.sy - 64, PY);
-        let tx = clamp(w.x, -1.1, 1.1);
+        let tx = clamp(f.sx, -1.1, 1.1);
         const pr = b.live && b.vy < 0 ? this.predictCross(PY) : null;
         let tz = clamp(w.z, .03, .65);
         if (pr) { tz = lerp(tz, pr.z, this.assist ? .88 : .55); if (this.assist && Math.abs(pr.x - tx) < .28) tx = lerp(tx, pr.x, .22); }
-        const nx = lerp(P.x, tx, Math.min(1, dtR * 30)); P.vx = (nx - P.x) / Math.max(1e-4, dtR); P.x = nx; P.z = lerp(P.z, tz, Math.min(1, dtR * 16));
+        const nx = lerp(P.x, tx, Math.min(1, dtR * 30)); P.vx = (nx - P.x) / Math.max(1e-4, dtR); if (Math.abs(P.vx) > 15) { const sign = Math.sign(P.vx); P.vx = sign * 15; } P.x = nx; P.z = lerp(P.z, tz, Math.min(1, dtR * 16));
         P.ang = lerp(P.ang, clamp(-P.vx * .06, -.7, .7), Math.min(1, dtR * 12));
         if (this.state === 'serve-p') { b.x = P.x; b.y = PY + .02; b.z = P.z + .1 + Math.abs(Math.sin(this.t * 4)) * .18; }
       } else this.aiDrive(this.pp, PY, 'p', dtR);
@@ -210,12 +210,17 @@ const TT = (() => {
     }
     humanHit(rel) {
       const b = this.ball; const v = this.fingerVel();
-      const q = 1 - rel; const power = clamp(-v.vy / 2000, 0, 1);
+      const q = 1 - rel; const power = clamp(Math.abs(v.vy) / 2000, 0, 1);
       const perfect = q > .6 && power > .3;
       const weak = q < .1 && Math.random() < .45;
       let tx = clamp(v.vx / 1700, -1, 1) * .62 + (b.x - this.pp.x) * .8 + rnd(-.06, .06);
       if (Math.abs(v.vx) > 2600) tx = Math.sign(v.vx) * rnd(.7, .9); // риск: в аут
       tx = clamp(tx, -.92, .92);
+      const sidespin = (b.x - this.pp.x) * (1 - rel) * .15 * (S.cal && S.cal.spinGain !== undefined ? clamp(S.cal.spinGain, 0, 1) : 1);
+      tx = clamp(tx + sidespin, -.92, .92);
+      const arcSens = S.cal && S.cal.arcSens !== undefined ? clamp(S.cal.arcSens, 0, 1) : 1;
+      const effectiveSidespin = arcSens > 0.5 ? sidespin : 0;
+      tx = clamp(tx + effectiveSidespin, -.92, .92);
       const ty = lerp(NY + .45, L - .18, clamp(.35 + power * .65 + rnd(-.1, .1), 0, 1));
       let T = lerp(.6, .42, power) * (perfect ? .78 : 1);
       this.shoot(tx, ty, T, 'p', { net: weak });
@@ -234,6 +239,8 @@ const TT = (() => {
       const smash = b.z > .32 && Math.random() < .35 * this.diff;
       const awayFrom = toP ? this.pp.x : this.op.x;
       let tx = clamp(-Math.sign(awayFrom || rnd(-1, 1)) * rnd(.15, .6) + rnd(-.15, .15), -.66, .66);
+      const spinMult = S.cal && S.cal.spinGain !== undefined ? clamp(S.cal.spinGain, 0, 1) : 1;
+      tx = clamp(tx + rnd(-.1, .1) * spinMult, -.66, .66);
       const ty = toP ? rnd(.3, NY - .3) : rnd(NY + .3, L - .25);
       const T = (smash ? .44 : rnd(.52, .64)) - this.diff * .04;
       this.shoot(tx, ty, T, side); P.flash = 1; this.lastShot = { perfect: false, power: smash ? .9 : .3 };
