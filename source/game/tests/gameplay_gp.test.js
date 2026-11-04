@@ -354,7 +354,7 @@ test('serve styles keep physical spin signatures (same swipe, four directions)',
     `sidespin serve must spin about the vertical axis (wy ${side.w.y.toFixed(0)}, wx/wz ${side.w.x.toFixed(0)}/${side.w.z.toFixed(0)})`);
 });
 
-test('net cord: short slowmo + widened capture window, then restored', () => {
+test('net cord widens capture temporarily without automatically slowing time', () => {
   const { V3, PH, GS, setCaptureForgiveness, getCaptureForgiveness } = GAME_LIB;
   // шнур, как на тракте рендера, живёт в netContactStep: мяч летит на ленту
   const g = mkGameStub();
@@ -368,9 +368,10 @@ test('net cord: short slowmo + widened capture window, then restored', () => {
     g.time += 1 / 60;
     g.player.lastHitT = g.time;
     g.stepPhysics(1 / 60);
-    cord = g.slowmoUntil > g.time;
+    cord = g._cordForgiveUntil > g.time;
   }
-  assert.ok(cord, 'tape clip did not trigger cord drama');
+  assert.ok(cord, 'tape clip did not trigger capture aid');
+  assert.ok(!g.slowmoUntil, 'net cord must not start automatic slow motion');
   assert.ok(getCaptureForgiveness() > 1.2, 'capture window widened after cord');
   // окно возвращается обратно через 0.9 с игрового времени
   for (let i = 0; i < 90 && g._cordForgiveUntil; i++) {

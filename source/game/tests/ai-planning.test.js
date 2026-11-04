@@ -210,3 +210,22 @@ test('a low outside recovery cannot cross the table edge by exceeding the AI tra
   }
   assert.ok(ai.pos.z > -1.25, 'a safe bounded recovery still makes forward progress');
 });
+
+test('solved bot returns on normal and short balls clear the net and land legally', () => {
+  let verified = 0;
+  for (let level = 0; level < lib.AI_LEVELS.length; level++) for (const z of [-1.15, -.8, -.4]) for (const height of [.22, .32]) {
+    const game = fixture(level), ai = game.ai;
+    V3.set(game.ball.p, .1, PH.TABLE_Y + height, z);
+    V3.set(game.ball.v, 0, -.3, -4); V3.zero(game.ball.w);
+    ai.commit = { archId: 'DRIVE', speed: 5, aim: {x: 0, z: .8} }; ai.swingAt = game.strokeTime;
+    ai.applyExecutionError = (_game, racket) => racket;
+    const racket = ai.swing(game);
+    if (!racket || racket.valid === false) continue; // no legal solution is not a hit
+    const launch = lib.resolveRacketLaunch(game.ball, racket);
+    assert.ok(launch && ai._flightLegal(game.ball, racket, false), `level ${level}, z ${z}, height ${height}`);
+    const flight = lib.predict(launch.p, launch.v, launch.w, {dt: PH.SIM_DT, maxT: 2.6, stopOnFirstBounce: true});
+    assert.ok(!flight.hitNet && flight.landed && flight.landed.z > 0 && Math.abs(flight.landed.x) <= PH.T_HALF_WID + .005, `level ${level}, z ${z}, height ${height}`);
+    verified++;
+  }
+  assert.ok(verified >= 24, `only ${verified} physically verified returns`);
+});

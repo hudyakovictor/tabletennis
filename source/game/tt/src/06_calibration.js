@@ -48,8 +48,8 @@ const CALIBRATION_REGISTRY = Object.freeze([
     descriptionEn: 'A short time-based trail, not ball speed; 0 disables the trail completely.' },
   { key: 'flytime', default: 50, neutral: 1, group: 'ball', scope: 'gameplay', unit: 'x', precision: 2, competitiveLocked: true,
     labelRu: 'Темп симуляции', labelEn: 'Simulation pace',
-    descriptionRu: '0.35x / 1.00x / 1.25x. Меняется время, не импульсы мяча; в соревновании и проверке действует 1.00x.',
-    descriptionEn: '0.35x / 1.00x / 1.25x. Changes time, not ball impulses; competition and checks use 1.00x.' },
+    descriptionRu: 'Устаревшая настройка: обычное время всегда 1.00x.',
+    descriptionEn: 'Legacy setting: normal time is always 1.00x.' },
   { key: 'tableGlow', default: 0, group: 'ball', scope: 'visual', unit: '%', precision: 0,
     labelRu: 'Дополнительное свечение стола', labelEn: 'Extra table glow',
     descriptionRu: 'Дополнительная эмиссия без изменения фактуры; 0 сохраняет исходный стол.',
@@ -88,8 +88,8 @@ function normalizeCalibrations(raw) {
 }
 
 function calibrationPace(valueNormalized) {
-  const n = Math.max(0, Math.min(1, calibrationNumber(valueNormalized, .5)));
-  return n <= .5 ? .35 + 1.3 * n : 1 + .5 * (n - .5);
+  // Retained for the legacy wire contract; match time no longer has a pace dial.
+  return 1;
 }
 
 function calibrationSessionKind(g) {

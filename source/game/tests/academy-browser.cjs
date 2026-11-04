@@ -11,7 +11,10 @@ const { repo } = require('./helpers.cjs');
   if (process.env.ACADEMY_SKIP_BUILD !== '1') execFileSync('python3', [path.join(repo, 'source/build.py')], { stdio: 'inherit' });
   const custom = process.env.CHROME_BIN || (process.platform === 'darwin' ? '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome' : null);
   const browser = await puppeteer.launch({ executablePath: custom || await chromium.executablePath(), headless: true,
-    args: custom ? ['--no-sandbox', '--enable-unsafe-swiftshader', '--use-gl=angle', '--use-angle=swiftshader', '--autoplay-policy=no-user-gesture-required'] : chromium.args });
+    // This suite uses separate browser contexts; Chromium cannot create them
+    // in the package's single-process mode.
+    args: custom ? ['--no-sandbox', '--enable-unsafe-swiftshader', '--use-gl=angle', '--use-angle=swiftshader', '--autoplay-policy=no-user-gesture-required']
+      : chromium.args.filter(arg => arg !== '--single-process') });
   let checks = 0;
   try {
     for (const [width, height] of [[1280, 800], [390, 844], [320, 568]]) {
@@ -150,8 +153,11 @@ const { repo } = require('./helpers.cjs');
       assert.equal(await page.evaluate(() => Router.screens.train.overlay), null, 'a miss must not open a blocking review');
       const correction = await frame.evaluate(() => {
         const t = window.__game.training, before = [t.attempts, t.done], ballNo = t.ballNo;
-        const feedback = t.feedback; t.update(1.49, .52); const brief = t.phase;
-        t.update(.02, .007);
+        // The failing frame may already have advanced the feedback clock.
+        // Test either side of its actual deadline, not 1.49s from now.
+        const feedback = t.feedback, remaining = Math.max(0, 1.5 - t.t);
+        t.update(Math.max(0, remaining - .001), .52); const brief = t.phase;
+        t.update(.002, .007);
         return { phase: t.phase, brief, ballNo, nextBall: t.ballNo, before, after: [t.attempts, t.done], feedback,
           latest: t.snapshot().latestFeedback, current: t.feedback };
       });

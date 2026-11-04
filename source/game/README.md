@@ -131,7 +131,7 @@ python3 -m http.server 8000 --bind 0.0.0.0 --directory play
 | `positionAssist` | 0,85 | общая помощь позиции |
 | `sensitivity` | 1 | нормализованная чувствительность контракта |
 
-Коды отказа: `OUTSIDE_ZONE`, `NO_FRESH_SWIPE`, `STATIC_CLICK`, `DEPTH_FAIL`, `TIMING_LATE`, `TIMING_EARLY`, `CONSUMED`, `SERVE_TOSS_LOW`, `WRONG_DIRECTION`, `BOUNCE_ILLEGAL`.
+Коды отказа: `OUTSIDE_ZONE`, `NO_FRESH_SWIPE`, `STATIC_CLICK`, `DEPTH_FAIL`, `TIMING_LATE`, `TIMING_EARLY`, `CONSUMED`, `SERVE_TOSS_LOW`, `WRONG_DIRECTION`, `BOUNCE_ILLEGAL`, `RACKET_TABLE_COLLISION`.
 <!-- END GENERATED MATCH_RULES -->
 
 Отладка ввода:

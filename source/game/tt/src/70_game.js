@@ -143,8 +143,9 @@ class Game {
     const saved = this.profile.data.settings || {}, rawCal = saved.cal && typeof saved.cal === 'object' && !Array.isArray(saved.cal) ? saved.cal : {};
     this.savedCalibrationPreferences = {};
     const normalizedCal = normalizeCalibrations(rawCal);
+    const savedVisualCal = new Set(['camHeight', 'camZoom', 'camSway', 'fingerTrail', 'ballSize', 'trailLen', 'tableGlow', 'hintRadius', 'hintGlow', 'slowmoDepth']);
     for (const entry of CALIBRATION_REGISTRY) {
-      if (Object.prototype.hasOwnProperty.call(rawCal, entry.key) && Number.isFinite(calibrationNumber(rawCal[entry.key], NaN)))
+      if (savedVisualCal.has(entry.key) && Object.prototype.hasOwnProperty.call(rawCal, entry.key) && Number.isFinite(calibrationNumber(rawCal[entry.key], NaN)))
         this.savedCalibrationPreferences[entry.key] = normalizedCal[entry.key] === entry.default / 100 ? entry.default : normalizedCal[entry.key] * 100;
     }
     // Import shipped scalar preferences only when no raw calibration was saved.
@@ -158,9 +159,11 @@ class Game {
         ? 50 - saved.camPitch / CAM_ADJUST.pitchMin * 50 : 50 + saved.camPitch / CAM_ADJUST.pitchMax * 50 : NaN,
     };
     for (const [key, value] of Object.entries(legacyCal))
-      if (!Object.prototype.hasOwnProperty.call(this.savedCalibrationPreferences, key) && Number.isFinite(value))
+      if (savedVisualCal.has(key) && !Object.prototype.hasOwnProperty.call(this.savedCalibrationPreferences, key) && Number.isFinite(value))
         this.savedCalibrationPreferences[key] = clamp(value, 0, 100);
     this.loadSettings();
+    // Legacy hidden spin-bias is no longer a player-facing physics dial.
+    this.settings.spinBias = 'norm';
     this.ai.setLevel(this.settings.difficulty);
 
     this.ball = {
@@ -388,9 +391,32 @@ class Game {
     };
     const evSimTime = (tReal) => this.strokeTime + Math.max(0, tReal - this.time) * (this.timeScale || 1);
 
-    // Left pointer = stroke. The camera is fixed: no right-drag, no wheel.
+    // Primary pointer strikes; right drag and two-finger gestures adjust the view.
     const ptrs = new Map();
     let activeStrokePointerId = null;
+    let cameraDrag = null, cameraGesture = null, suppressTouches = false;
+    const cameraPair = () => {
+      const pair = [...ptrs.values()].slice(0, 2);
+      if (pair.length < 2) return null;
+      return { y: (pair[0].y + pair[1].y) / 2,
+        distance: Math.max(1, Math.hypot(pair[0].x - pair[1].x, pair[0].y - pair[1].y)) };
+    };
+    const cameraAdjust = (pitch, zoom) => {
+      const values = {};
+      if (Number.isFinite(pitch)) {
+        pitch = clamp(pitch, CAM_ADJUST.pitchMin, CAM_ADJUST.pitchMax);
+        values.camHeight = 50 + 50 * pitch / (pitch < 0 ? -CAM_ADJUST.pitchMin : CAM_ADJUST.pitchMax);
+        applyGameCalibration(this, 'camHeight', values.camHeight);
+      }
+      if (Number.isFinite(zoom)) {
+        zoom = clamp(zoom, CAM_ADJUST.zoomMin, CAM_ADJUST.zoomMax);
+        values.camZoom = zoom < 1 ? 50 * (zoom - CAM_ADJUST.zoomMin) / (1 - CAM_ADJUST.zoomMin)
+          : 50 + 50 * (zoom - 1) / (CAM_ADJUST.zoomMax - 1);
+        applyGameCalibration(this, 'camZoom', values.camZoom);
+      }
+      this.saveSettings();
+      if (this.onCameraCalibrationChange) this.onCameraCalibrationChange(values);
+    };
     const domEvent = e => ({ type: e.type, pointerId: e.pointerId, pointerType: e.pointerType || null,
       clientX: Number.isFinite(e.clientX) ? e.clientX : null, clientY: Number.isFinite(e.clientY) ? e.clientY : null,
       button: e.button, buttons: e.buttons, pressure: Number.isFinite(e.pressure) ? e.pressure : null,
@@ -408,7 +434,7 @@ class Game {
       if (this.preview?.active) return;
       if (this.debugRecording) this.logInput('input_cancel', { dom: event ? domEvent(event) : null,
         outcome: { reason, active: !!this.swipe.active, pointerDown: !!this.pointerDown, pointers: ptrs.size } });
-      ptrs.clear(); dropStroke();
+      ptrs.clear(); cameraDrag = cameraGesture = null; suppressTouches = false; dropStroke();
     };
     const down = (e) => {
       if (this.preview?.active) return;
@@ -416,10 +442,12 @@ class Game {
         if (this.debugRecording) this.logInput('pointer_ignored', { dom: domEvent(e), outcome: { reason: this.paused ? 'PAUSED' : 'NON_PLAY_STATE' } });
         return;
       }
-      if (e.button === 2 || e.button === 1) {
-        if (this.debugRecording) this.logInput('pointer_ignored', { dom: domEvent(e), outcome: { reason: 'NON_PRIMARY_BUTTON' } });
+      if (e.button === 2) {
+        dropStroke(); ptrs.clear(); suppressTouches = false;
+        cameraDrag = { id: e.pointerId, y: e.clientY, pitch: this.settings.camPitch || 0 };
         e.preventDefault(); return;
       }
+      if (e.button === 1) { e.preventDefault(); return; }
       if (this.demoMode) this.stopDemo(); // a real stroke always takes control
       this.audio.init(); this.audio.resume();
       ptrs.set(e.pointerId, { x: e.clientX, y: e.clientY });
@@ -429,17 +457,20 @@ class Game {
         if (this.debugRecording) this.logInput('pointer_ignored', { dom: domEvent(e), outcome: { reason: 'REPLAY_SKIPPED' } });
         this.skipReplay(); return;
       }
-      if (ptrs.size >= 2) {                          // a second finger cancels
+      if (ptrs.size >= 2 || suppressTouches) {      // never turn a camera gesture into a stroke
         if (this.debugRecording) this.logInput('input_cancel', { dom: domEvent(e), outcome: { reason: 'SECOND_POINTER', pointers: ptrs.size } });
-        dropStroke();
+        dropStroke(); suppressTouches = true;
+        const pair = cameraPair();
+        cameraGesture = pair && { ...pair, pitch: this.settings.camPitch || 0, zoom: this.settings.camZoom || 1 };
         return;
       }
       const n = norm(e);
 
-      // ---- ANTICIPATION TRIGGER ----
-      // Before a swipe, pull the paddle back slightly to telegraph
-      // the upcoming stroke. This is critical for game feel.
-      if (this.settings.anticipationHint && !this.anticipation.active) {
+      // A preparatory pull-back is reserved for the player's own serve.
+      // Rally gestures still use the normal admission and contact pipeline.
+      const preparingServe = this.server === 1 &&
+        (this.state === GS.SERVE_READY || this.state === GS.SERVE_TOSS);
+      if (preparingServe && this.settings.anticipationHint && !this.anticipation.active) {
         const centerX = 0.5;
         const dx = n.x - centerX;
         const dy = n.y - 0.55;
@@ -581,8 +612,18 @@ class Game {
 
     const move = (e) => {
       if (this.preview?.active) return;
+      if (cameraDrag && e.pointerId === cameraDrag.id) {
+        cameraAdjust(cameraDrag.pitch - (e.clientY - cameraDrag.y) * .08, null);
+        if (e.cancelable) e.preventDefault(); return;
+      }
       const p = ptrs.get(e.pointerId);
       if (p) { p.x = e.clientX; p.y = e.clientY; }
+      if (suppressTouches) {
+        const pair = cameraPair();
+        if (pair && cameraGesture) cameraAdjust(cameraGesture.pitch - (pair.y - cameraGesture.y) * .08,
+          cameraGesture.zoom * pair.distance / cameraGesture.distance);
+        if (e.cancelable) e.preventDefault(); return;
+      }
       if (this.swipe.active && activeStrokePointerId !== null && e.pointerId !== activeStrokePointerId) {
         if (e.cancelable) e.preventDefault();
         return;
@@ -620,7 +661,13 @@ class Game {
 
     const up = (e) => {
       if (this.preview?.active) return;
+      if (cameraDrag && cameraDrag.id === e.pointerId) { cameraDrag = null; e.preventDefault(); return; }
       ptrs.delete(e.pointerId);
+      if (suppressTouches) {
+        cameraGesture = null;
+        if (!ptrs.size) suppressTouches = false;
+        e.preventDefault(); return;
+      }
       if (e.button === 2 || e.button === 1) {
         e.preventDefault();
         return;
@@ -692,15 +739,15 @@ class Game {
       if (activeStrokePointerId !== null && e.pointerId !== activeStrokePointerId) { ptrs.delete(e.pointerId); return; }
       this.cancelInput('pointercancel', e);
     });
-    c.addEventListener('lostpointercapture', (e) => { if (ptrs.has(e.pointerId)) this.cancelInput('lostpointercapture', e); });
+    c.addEventListener('lostpointercapture', (e) => { if (ptrs.has(e.pointerId) || cameraDrag && cameraDrag.id === e.pointerId) this.cancelInput('lostpointercapture', e); });
     c.addEventListener('contextmenu', (e) => e.preventDefault());
     // Hover movement follows the bat. A held right button is not a camera command.
     window.addEventListener('pointermove', (e) => {
       if (this.preview?.active || e.target === c) return;
-      if (ptrs.has(e.pointerId)) move(e);
+      if (ptrs.has(e.pointerId) || cameraDrag && cameraDrag.id === e.pointerId) move(e);
       else if (!ptrs.size && !this.swipe.active) track(e);
     });
-    window.addEventListener('pointerup', (e) => { if (ptrs.has(e.pointerId)) up(e); });
+    window.addEventListener('pointerup', (e) => { if (ptrs.has(e.pointerId) || cameraDrag && cameraDrag.id === e.pointerId) up(e); });
     window.addEventListener('blur', () => { this.cancelInput('window_blur'); this.setPaused(true); });
     document.addEventListener('visibilitychange', () => {
       if (this.debugRecording) this.logInput('visibility', { outcome: { state: document.visibilityState } });
@@ -711,9 +758,12 @@ class Game {
       if (this.debugArchive) this.debugArchive.flush();
       this.saveSettings(); this.profile.save(true); this.career.save();
     });
-    // The wheel used to dolly the camera. A page that scrolls nowhere should
-    // still not jump, so it is swallowed — but it changes nothing on screen.
-    c.addEventListener('wheel', (e) => { e.preventDefault(); }, { passive: false });
+    c.addEventListener('wheel', (e) => {
+      if (this.preview?.active || this.paused) return;
+      const delta = e.deltaY * (e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? c.clientHeight : 1);
+      cameraAdjust(null, (this.settings.camZoom || 1) * Math.exp(-clamp(delta, -500, 500) * .001));
+      e.preventDefault();
+    }, { passive: false });
     c.style.touchAction = 'none';
 
     /* Keep vertical gestures in the mini app when Telegram supports the API;
@@ -798,6 +848,7 @@ class Game {
      * complete()/quit(). Здесь учебник сбрасывается мимо них: без этой
      * строки свободная игра могла остаться с учебным захватом (×1.55 ко
      * всем осям) — мяч бьётся «дальше кольца» до самого конца сессии. */
+    this.clearCordCaptureBoost();
     if (typeof setCaptureForgiveness === 'function') setCaptureForgiveness(1);
     this.matchWinner = 0;
     this._idleStill = false;           // витрина «ракетки на столе» — только в меню/лобби
@@ -961,6 +1012,16 @@ class Game {
     if (this.messages.length > 4) this.messages.shift();
   }
 
+  /* Cancel temporary net-cord assistance before changing capture modes. */
+  clearCordCaptureBoost() {
+    if (!this._cordForgiveUntil) return;
+    this._cordForgiveUntil = 0;
+    if (typeof setCaptureForgiveness === 'function') {
+      setCaptureForgiveness(Number.isFinite(this._cordBaseForgive) ? this._cordBaseForgive : 1);
+    }
+    this._cordBaseForgive = 1;
+  }
+
   /* --------------------------- serving ----------------------------- */
   prepServe() {
     const toss = STROKE_CONFIG.serve.toss;
@@ -975,12 +1036,7 @@ class Game {
     this.serveBounces = 0;
     this.isServeBall = true;
     this._footZ = PADDLE_STANCE_Z;
-    if (this._cordForgiveUntil) {
-      this._cordForgiveUntil = 0;
-      if (typeof setCaptureForgiveness === 'function') {
-        setCaptureForgiveness(Number.isFinite(this._cordBaseForgive) ? this._cordBaseForgive : 1);
-      }
-    }
+    this.clearCordCaptureBoost();
     /* Every point begins from the same known state: bat back in the centre,
      * cursor binding re-anchored, no stale intercept from the last rally. */
     this.resetPaddle();
@@ -1528,7 +1584,7 @@ class Game {
       if (racket.isServe) this.matchTasks.serves++;
       this.buzz(Math.round(lerp(8, 26, clamp(speed / 90, 0, 1))));
       this.shakeIt(clamp(speed / 55, 0.03, 0.38) * 0.45, V3.new(rndSym(0.4), 0.5, 1));
-      if (this.settings.slowmoOnBigShots && speed * 3.6 > 92) this.punchSlowmo(0.42, 0.26);
+      // Time is changed only by the player's separate slow-motion control.
       // refresh the landing preview
       if (this.settings.showPredict) {
         predict(V3.clone(b.p), V3.clone(b.v), V3.clone(b.w),
@@ -1553,7 +1609,7 @@ class Game {
 
   punchSlowmo(scale, dur) {
     if (typeof gameplayCalibrationLocked === 'function' && gameplayCalibrationLocked(this)) return;
-    this.targetTimeScale = scale;
+    this.targetTimeScale = clamp(Number.isFinite(scale) ? scale : 1, 0.1, 1);
     this.slowmoUntil = this.time + dur;
   }
 
@@ -1760,9 +1816,9 @@ class Game {
   /** Play a recorded moment. `after` runs when the clip ends or is skipped. */
   watchMoment(moment, hero, after) {
     if (!moment) return false;
+    if (!this.replayer.play(moment, hero ? 0.35 : 0.5, () => this.endReplay())) return false;
     this.setSlowmoHold(false);
     this.ball.live = true;
-    if (!this.replayer.play(moment, hero ? 0.35 : 0.5, () => this.endReplay())) return false;
     this.replayAfter = after || null;
     const back = this.state;
     this.replayFrom = back === GS.MATCH_END ? GS.MATCH_END : GS.POINT;
@@ -1861,10 +1917,7 @@ class Game {
   /* ------------------------------ step ----------------------------- */
   stepPhysics(dt) {
     const b = this.ball;
-    if (this._cordForgiveUntil && this.time >= this._cordForgiveUntil) {
-      this._cordForgiveUntil = 0;
-      if (typeof setCaptureForgiveness === 'function') setCaptureForgiveness(this._cordBaseForgive || 1);
-    }
+    if (this._cordForgiveUntil && this.time >= this._cordForgiveUntil) this.clearCordCaptureBoost();
     if (!b.live) return;
     // a ball that has run out of energy settles instead of micro-bouncing
     if (b.p.y - PH.R <= PH.TABLE_Y + 0.004 && Math.abs(b.v.y) < 0.30 &&
@@ -1907,15 +1960,9 @@ class Game {
          * unreadable for the RECEIVER, not random for the game. */
         const info = bounceTable(b.p, b.v, b.w);
         if (info && info.edge > 0.25) {
-          /* FIX «прилипает на кромке и трещит»: мяч с остаточной скоростью
-           * елозил по белой линии и давал контакт рёбра на КАЖДОМ подшаге
-           * (240 Гц) — ребро-звук повторялся серией, мяч полз как по рельсе.
-           * Настоящий шарик с рёбра стола СКАЧЕТ прочь: решительный подхват
-           * вверх + выталкивание из полосы кромки устраняют повторные
-           * контакты физически, а событие-эффект защёлкнут на 0.45 с. */
-          b.v.y = Math.max(b.v.y, 0.55);
-          if (info.edgeAxis === 'x') b.p.x += Math.sign(b.p.x || 1) * 0.003;
-          else b.p.z += Math.sign(b.p.z || 1) * 0.003;
+          // Only the feedback is rate-limited here. bounceTable already
+          // resolves the contact; adding a private lift/displacement changed
+          // the live trajectory without changing the AI/solver prediction.
           if (this.time - (this._edgeFxT || -9) > 0.45) {
             this._edgeFxT = this.time;
             this.audio.hitEdge();
@@ -1944,11 +1991,8 @@ class Game {
         this.emitParticles(nh.x, PH.NET_TOP, 0, 8, 1.1, 0.3, 0.014, 1, 0.9, 0.5);
         this.netTouched = true;
         if (b.lastHitBy === 1 && this.shotJournal) this.shotJournal.net();
-        /* Шнур — не сухой лотерейный аут, а отыгрываемая драма: короткий
-         * буллет-тайм (0.5×, 0.35 с) и временно расширенное окно приёма
-         * (×1.5 на 0.9 с), чтобы обе стороны имели честный шанс вытащить
-         * «счастливый» мяч. Базовый forgive восстанавливается в stepPhysics. */
-        this.punchSlowmo(0.5, 0.35);
+        /* Шнур временно расширяет окно приёма, не изменяя время игры.
+         * Базовый forgive восстанавливается в stepPhysics. */
         if (typeof getCaptureForgiveness === 'function' && typeof setCaptureForgiveness === 'function') {
           if (!(this._cordForgiveUntil > this.time)) {
             this._cordBaseForgive = getCaptureForgiveness();
@@ -2447,7 +2491,7 @@ class Game {
     const n = V3.norm(V3.new(), pad.normal);
     if (n.x * b.v.x + n.y * b.v.y + n.z * b.v.z > 0) return false; // грань отвернута от мяча
     const gripped = playerWristPose(pad.pos, pad.vel, this.settings.hand, { grip: this.settings.grip, forehand: pad.forehand });
-    const rubber = this.equip ? (this.equip.forSide(gripped.forehand ? 1 : -1) || {}) : {};
+    const rubber = this.equip ? (this.equip.forSide(1) || {}) : {};
     const vR = V3.mul(V3.new(), pad.vel || V3.new(), 0.4);
     vR.z -= 0.9;                                    // лёгкий выпад навстречу — «стенка» живая
     const p0 = V3.clone(b.p), v0 = V3.clone(b.v), w0 = V3.clone(b.w);
@@ -2927,7 +2971,7 @@ class Game {
     const strokePos = inputPad ? inputPad.pos : pad.pos;
     const forehand = paddleForehand(strokePos.x, this.settings.hand, pad.forehand);
     const grip = playerWristPose(strokePos, pad.vel, this.settings.hand, { grip: this.settings.grip, forehand });
-    const sideParams = this.equip.forSide(grip.forehand ? 1 : -1);
+    const sideParams = this.equip.forSide(1);
     const radius = MATCH_RULES.sweetRadius;
     const sweet = clamp((1 - hit.rad / reachRadius) * (sideParams.sweet || this.equip.sweetK), 0, 1);
     const offLat = clamp((hit.x - hit.px) / Math.max(radius, 1e-4), -1, 1);
@@ -2960,6 +3004,12 @@ class Game {
       };
       racket = deriveStroke(m, ctx);
       racket.vmag *= this.equip.vmagK;
+      if (!isServeStroke) {
+        // Tune intent before solving, never scale the finished ball velocity:
+        // the trajectory solver must see the same speed that will be played.
+        racket.vmag *= .90;
+        racket.vmagCap = m.tap && !m.compactFlick ? 6.5 : 14;
+      }
       /* Precision pays twice: a swipe peaking exactly at the contact gets a
        * pace bonus on top of the tq quality bonus — this is what makes the
        * exact hit a winner, not just a neat one. */
@@ -3060,7 +3110,7 @@ class Game {
     }
 
     const contactPose = paddleContactPose(contact, racket, { grip: this.settings.grip,
-      hand: this.settings.hand, forehand, roll: pad.roll });
+      hand: this.settings.hand, forehand, roll: pad.roll, activeFace: 1 });
     if (!contactPose && !hit.edge) { this.logPressRejection('RACKET_TABLE_COLLISION'); return; }
     racket.contactInput = { pressZone: this.swipe.pressZone && { ...this.swipe.pressZone }, capture: captureSample && { ...captureSample, route: hit.captureKind || 'ccd' }, p: shotVec(contact), v: shotVec(b.v), w: shotVec(b.w), gesture: { ...m },
       context: { grip: this.settings.grip, hand: this.settings.hand, forehand, isServe: isServeStroke,
@@ -3564,7 +3614,9 @@ class Game {
     const fine = this.pointerFine !== false;
     const eta = incoming && Number.isFinite(o.reachT) ? Math.max(0, o.reachT - readClock.age) : undefined;
     const spdIn = incoming ? V3.len(this.ball.v) : 0;
-    this._prep = expSmooth(this._prep || 0, (this.pointerDown && !intent) ? 1 : 0, 14, dt);
+    // Do not cock the wrist backwards when preparing an ordinary return.
+    // Clear any remaining serve preparation as soon as the rally starts.
+    this._prep = servingNow ? expSmooth(this._prep || 0, (this.pointerDown && !intent) ? 1 : 0, 14, dt) : 0;
 
     let aimYaw = 0, aimPitch = 0;
     if (fine && !intent) {
@@ -3675,7 +3727,7 @@ class Game {
     pad.pitch = face.pitch; pad.yaw = face.yaw;
     pad.motionStage = strokePose ? strokePose.stage : intent ? 'swing' : this._prep > .02 ? 'prepare' : 'ready';
     if (!strokePose?.q) {
-      pad.activeFace = pad.forehand === false ? -1 : 1;
+      pad.activeFace = 1;
       paddlePoseQuaternion(V3.mul(this._bladeFace || (this._bladeFace = V3.new()), pad.normal, pad.activeFace),
         pad.roll, pad.q || (pad.q = Q.new()));
     }
@@ -3704,7 +3756,10 @@ class Game {
     const b = this.ball, pad = this.player;
     w.on = false; w.ready = 0; w.contactable = false; w.kind = 'none';
     const clock = this.strikeReadClock || (this.strikeReadClock = new PaddleReadClock());
-    const incoming = this.state === GS.RALLY && b.live && b.lastHitBy === -1 && b.v.z > .2;
+    // A short ball can stop or reverse after its legal bounce and still be
+    // returnable. Use the same short-ball envelope as paddle footwork.
+    const looseShort = b.p.z > .02 && b.p.z < 1.30 && b.p.y < PH.TABLE_Y + .60;
+    const incoming = this.state === GS.RALLY && b.live && b.lastHitBy === -1 && (b.v.z > .2 || looseShort);
     const read = clock.advance(dt, incoming, this.shotId);
     if (this.paused || (this.replayer && this.replayer.on)) { w.k = 0; return; }
     if (this.state === GS.SERVE_TOSS && this.server === 1 && b.live && b.lastHitBy === 0) {
@@ -3781,6 +3836,8 @@ class Game {
     applyGameCalibration(this, 'camZoom', 50);
     applyGameCalibration(this, 'camHeight', 50);
     this.setCameraPreset(CAMERA_ORDER[0]);
+    this.saveSettings();
+    if (this.onCameraCalibrationChange) this.onCameraCalibrationChange({ camZoom: 50, camHeight: 50 });
   }
 
   /* The camera is rebuilt AFTER the paddle has been placed, so the clamp
@@ -3833,11 +3890,14 @@ class Game {
     } else {
       V3.copy(pad.pos, ai.pos);
       const fn = ai.faceNormal, an = ai.anim || {}, windup = an.windup || 0, swing = an.swing || 0;
+      // Keep the bot's timing and swing logic intact, but do not visibly
+      // cock its racket for returns. A preparatory pose is serve-only.
+      const visualWindup = this.state === GS.SERVE_TOSS && this.server === -1 ? windup : 0;
       const normal = this._aiNorm || (this._aiNorm = V3.new());
-      V3.set(normal, fn.x + windup * .14 - swing * .10,
-        fn.y - windup * .25 + swing * .16, fn.z);
+      V3.set(normal, fn.x + visualWindup * .14 - swing * .10,
+        fn.y - visualWindup * .25 + swing * .16, fn.z);
       V3.norm(pad.normal, normal);
-      pad.roll = (ai.roll ?? .28) + windup * .24 - swing * .12;
+      pad.roll = (ai.roll ?? .28) + visualWindup * .24 - swing * .12;
       pad.activeFace = ai.forehand === false ? -1 : 1;
       paddlePoseQuaternion(V3.mul(normal, pad.normal, pad.activeFace), pad.roll, pad.q);
       if (windup > .05 && ai.plan && this._aiSwingSoundShot !== this.shotId) {
@@ -4111,17 +4171,13 @@ class Game {
     }
     if (this.slowmoUntil && this.time > this.slowmoUntil) { this.targetTimeScale = 1; this.slowmoUntil = 0; }
     this.updateSlowmo(dtReal);
-    /* Калибровка «Скорость мяча» (flytime 0..1): общий темп матча,
-     * тренировочная насадка. Регламентную физику не трогает — это
-     * честное замедление времени как у существующего slow-mo. */
-    const cal = this._calEffective || this._cal;
-    const value = cal && Number.isFinite(cal.flytime) ? cal.flytime : .5;
-    const ft = typeof calibrationPace === 'function' ? calibrationPace(value)
-      : value <= .5 ? lerp(.35, 1, value * 2) : lerp(1, 1.25, (value - .5) * 2);
+    // Normal play always runs at real time; only an explicit slow-motion
+    // effect may reduce it. Legacy flytime preferences cannot accelerate it.
     const inspectorActive = this.inspectSlowmo && this.slowmo.allowed;
-    const targetScale = inspectorActive || this.slowmo.active || this.slowmoUntil ? this.targetTimeScale : ft;
+    const requestedScale = inspectorActive || this.slowmo.active || this.slowmoUntil ? this.targetTimeScale : 1;
+    const targetScale = clamp(Number.isFinite(requestedScale) ? requestedScale : 1, 0.1, 1);
     this.timeScale = typeof gameplayCalibrationLocked === 'function' && gameplayCalibrationLocked(this)
-      ? 1 : expSmooth(this.timeScale, targetScale, 9, dtReal);
+      ? 1 : clamp(expSmooth(Number.isFinite(this.timeScale) ? this.timeScale : 1, targetScale, 9, dtReal), 0.1, 1);
     const dt = Math.min(dtReal, 0.05) * this.timeScale;
     this.strokeTime += dt;
     this.stateSimT = (this.stateSimT || 0) + dt;
@@ -4295,8 +4351,13 @@ class Game {
       if (this.followThrough.t >= this.followThrough.duration) this.followThrough.active = false;
     }
 
-    // Update anticipation
-    if (this.settings.anticipationHint) {
+    // Anticipation must never carry a serve pull-back into a rally.
+    const serveAnticipation = this.server === 1 &&
+      (this.state === GS.SERVE_READY || this.state === GS.SERVE_TOSS);
+    if (!serveAnticipation || !this.settings.anticipationHint) {
+      this.anticipation.active = false;
+      V3.zero(this.anticipation.visualOffset);
+    } else {
       if (this.anticipation.active) {
         this.anticipation.t += dtReal;
         const progress = this.anticipation.t / this.anticipation.duration;

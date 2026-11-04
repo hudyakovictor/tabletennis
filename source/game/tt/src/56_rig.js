@@ -50,7 +50,7 @@ function playerWristPose(pos, vel, hand, phase = {}) {
   const readyRoll = penhold ? 0.08 : 0.28; // relaxed ready grip (~16°), never rigid 12 o'clock
   const cross = clamp((px * h + 0.24) / 0.32, 0, 1);
   const mix = cross * cross * (3 - 2 * cross);
-  const sideRoll = lerp(-1.05, 1.35, mix);
+  const sideRoll = lerp(-Math.PI / 4, Math.PI / 4, mix);
   const preparation = clamp(phase.preparation || 0, 0, 1);
   const follow = clamp(phase.follow || 0, 0, 1);
   const direction = 2 * mix - 1;
@@ -154,7 +154,7 @@ function playerWristPose(pos, vel, hand, phase = {}) {
     pitch: clamp(pitch, -0.90, 0.78),
     // Handle-up penhold reverses local roll: the same world-space wrist
     // motion must not lean the handle in the opposite lateral direction.
-    roll: (penhold ? h * Math.PI : 0) + clamp(roll * (penhold ? (forehand ? -0.65 : -0.85) : 1), -1.55, 1.55),
+    roll: (penhold ? h * Math.PI : 0) + clamp(roll * (penhold ? -1 : 1), -1.55, 1.55),
     forehand,
   };
 }

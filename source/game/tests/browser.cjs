@@ -34,17 +34,25 @@ async function horizontalInputs(page, target, offset, pointerTypes) {
         },{scale,serving});
         const x=offset.x+point.x,y=offset.y+point.y;
         const label=`${pointerType}/${scale}/${serving?'serve':'rally'}/${direction}`;
-        if(pointerType==='touch') await cdp.send('Input.dispatchTouchEvent',{type:'touchStart',touchPoints:[{x,y,id:1}]});
+        // CDP round trips can take seconds under load; give the simulated
+        // touch a realistic 80 ms hardware timeline instead of benchmarking
+        // the host scheduler as the player's swipe speed.
+        const touchTime = Date.now() / 1000;
+        if(pointerType==='touch') await cdp.send('Input.dispatchTouchEvent',{type:'touchStart',touchPoints:[{x,y,id:1}],timestamp:touchTime});
         else {await page.mouse.move(x,y);await page.mouse.down();}
         assert.equal(await target.evaluate(()=>window.__game.stats.shots),0,`${label}: down stole the swipe`);
         if(pointerType==='touch') {
-          for(let i=1;i<=4;i++) await cdp.send('Input.dispatchTouchEvent',{type:'touchMove',touchPoints:[{x:x+direction*point.width*.08*i/4,y,id:1}]});
+          for(let i=1;i<=4;i++) await cdp.send('Input.dispatchTouchEvent',{type:'touchMove',touchPoints:[{x:x+direction*point.width*.08*i/4,y,id:1}],timestamp:touchTime+i*.02});
         } else await page.mouse.move(x+direction*point.width*.08,y,{steps:4});
         const result=await target.evaluate(serving=>{
           const g=window.__game,gesture=g.shotJournal.latest?.contact?.incoming?.gesture;
           const flight=predict(V3.clone(g.ball.p),V3.clone(g.ball.v),V3.clone(g.ball.w),
             {dt:PH.SIM_DT,maxT:2.6,stopAfterBounces:serving?2:1,stopOnFirstBounce:!serving,out:{}});
-          return {hit:g.ball.lastHitBy,stroke:g.lastShotInfo?.stroke?.id,tap:gesture?.tap===true,curl:gesture?.curl,
+          const rect = g.canvas.getBoundingClientRect();
+          const targetEl = document.elementFromPoint(rect.left + g.pointer.x * rect.width, rect.top + g.pointer.y * rect.height);
+          return {input:{active:g.swipe.active, zone:g.swipe.pressZone, metrics:g.swipe.m,
+              target:targetEl && (targetEl.id || targetEl.className || targetEl.tagName)},
+            hit:g.ball.lastHitBy,stroke:g.lastShotInfo?.stroke?.id,tap:gesture?.tap===true,curl:gesture?.curl,
             wx:g.ball.w.x,wy:g.ball.w.y,shots:g.stats.shots,
             flight:{net:!!flight.hitNet,land:flight.landed?+flight.landed.z.toFixed(2):null,
               x:flight.landed?+flight.landed.x.toFixed(2):null,
@@ -72,7 +80,7 @@ async function horizontalInputs(page, target, offset, pointerTypes) {
         assert.ok(Math.abs(result.curl)<.05,`${label}: sidespin must not require curl`);
         assert.ok(Math.abs(result.wy)>Math.abs(result.wx)&&direction*result.wy>0,`${label}: wrong spin ${JSON.stringify(result)}`);
         assert.equal(result.legal, true, `${label}: the side stroke did not produce a playable flight ${JSON.stringify(result)}`);
-        if(pointerType==='touch') await cdp.send('Input.dispatchTouchEvent',{type:'touchEnd',touchPoints:[]});
+        if(pointerType==='touch') await cdp.send('Input.dispatchTouchEvent',{type:'touchEnd',touchPoints:[],timestamp:touchTime+.10});
         else await page.mouse.up();
         assert.equal(await target.evaluate(()=>window.__game.stats.shots),1,`${label}: release duplicated the hit`);
         checks++;
@@ -363,9 +371,9 @@ async function horizontalInputs(page, target, offset, pointerTypes) {
           g.ui.setInputMode('mouse');
           document.dispatchEvent(new PointerEvent('pointerdown',{pointerType:'touch'}));
           const help=document.getElementById('cameraHelp').textContent;
-          const touch=g.ui.inputMode==='touch' && !g.ui.hasFinePointer && !/Колесо|ПКМ|высот/i.test(help);
+          const touch=g.ui.inputMode==='touch' && !g.ui.hasFinePointer && /пальц/i.test(help);
           document.dispatchEvent(new PointerEvent('pointerdown',{pointerType:'mouse'}));
-          return touch && g.ui.inputMode==='mouse' && /вид/i.test(help) && /вид/i.test(document.getElementById('cameraHelp').textContent);
+          return touch && g.ui.inputMode==='mouse' && /ПКМ/i.test(document.getElementById('cameraHelp').textContent);
         });
         check('only fixed camera presets are available in settings, no camera sliders', () => {
           g.ui.openSettings();document.querySelector('[data-camera="DYNAMIC"]').click();
@@ -378,26 +386,17 @@ async function horizontalInputs(page, target, offset, pointerTypes) {
           document.getElementById('camReset').click();g.ui.closeSettings();
           return selected && applied && g.settings.camera==='BROADCAST' && !('cameraControls' in g);
         });
-        check('touch play cannot move the camera: no drag, no wheel, no two fingers', () => {
-          g.startMatch(2);g.server=-1;g.prepServe();
-          g.updateCamera(1/60);
-          g.fov=g.fovT;g.updateCamera(0); // settle any previous hit's lens pulse
-          const before={eye:{...g.camPos},look:{...g.camLook},fov:g.fov,shift:g.camShiftY};
-          g.ui.setInputMode('touch');
-          // Use the real input handlers, but synthetic pointer IDs cannot be captured.
+        check('camera gestures cancel strokes and change camera settings', () => {
+          g.startMatch(2);g.server=-1;g.prepServe();g.camReset();
           const capture=g.canvas.setPointerCapture;g.canvas.setPointerCapture=()=>{};
           try {
-            for(const id of [71,72])g.canvas.dispatchEvent(new PointerEvent('pointerdown',{pointerId:id,pointerType:'touch',button:0,clientX:180,clientY:400}));
-            for(const id of [71,72])g.canvas.dispatchEvent(new PointerEvent('pointermove',{pointerId:id,pointerType:'touch',buttons:1,clientX:230,clientY:180}));
-            // a right-button drag (desktop height control) and a wheel event on touch
-            g.canvas.dispatchEvent(new PointerEvent('pointerdown',{pointerId:73,pointerType:'mouse',button:2,clientX:200,clientY:400}));
-            g.canvas.dispatchEvent(new PointerEvent('pointermove',{pointerId:73,pointerType:'mouse',buttons:2,clientX:200,clientY:120}));
-            g.canvas.dispatchEvent(new PointerEvent('pointerup',{pointerId:73,pointerType:'mouse',button:2,clientX:200,clientY:120}));
-            g.canvas.dispatchEvent(new WheelEvent('wheel',{deltaY:-240,bubbles:true,cancelable:true}));
-            for(const id of [71,72])g.canvas.dispatchEvent(new PointerEvent('pointerup',{pointerId:id,pointerType:'touch',button:0,clientX:230,clientY:180}));
-            g.updateCamera(1/60);
-            return g.camPos.y===before.eye.y && g.camPos.z===before.eye.z && g.fov===before.fov && g.camShiftY===before.shift;
-          } finally {g.canvas.setPointerCapture=capture;g.cancelInput();g.returnToMenu();}
+            for(const [id,x] of [[71,160],[72,240]]) g.canvas.dispatchEvent(new PointerEvent('pointerdown',{pointerId:id,pointerType:'touch',button:0,clientX:x,clientY:400}));
+            g.canvas.dispatchEvent(new PointerEvent('pointermove',{pointerId:71,pointerType:'touch',buttons:1,clientX:130,clientY:300}));
+            g.canvas.dispatchEvent(new PointerEvent('pointermove',{pointerId:72,pointerType:'touch',buttons:1,clientX:270,clientY:300}));
+            const ok=g.settings.camPitch>0 && g.settings.camZoom>1 && !g.swipe.active && !g.pointerDown;
+            for(const id of [71,72])g.canvas.dispatchEvent(new PointerEvent('pointerup',{pointerId:id,pointerType:'touch',button:0,clientX:200,clientY:300}));
+            return ok && !g.swipe.active && !g.pointerDown;
+          } finally {g.canvas.setPointerCapture=capture;g.cancelInput();g.camReset();g.returnToMenu();}
         });
         const incomingBall = () => {
           g.startMatch(2); g.setState(GS.RALLY); g.time+=1;
@@ -508,10 +507,12 @@ async function horizontalInputs(page, target, offset, pointerTypes) {
           } finally {g.setInspectSlowmo(false);g.cancelInput();g.returnToMenu();g.paused=true;}
         });
         check('clicks cannot volley, linger as held input, or survive cancellation', () => {
-          const event=(type)=>{
+          const event=(type, timestampOffset=0)=>{
             const p=g.project(g.player.pos,{}),r=g.canvas.getBoundingClientRect();
-            g.canvas.dispatchEvent(new PointerEvent(type,{pointerId:61,pointerType:'mouse',button:0,
-              buttons:type==='pointerup'?0:1,clientX:r.left+p.x*r.width,clientY:r.top+p.y*r.height,bubbles:true,cancelable:true}));
+            const e = new PointerEvent(type,{pointerId:61,pointerType:'mouse',button:0,
+              buttons:type==='pointerup'?0:1,clientX:r.left+p.x*r.width,clientY:r.top+p.y*r.height,bubbles:true,cancelable:true});
+            if (timestampOffset) Object.defineProperty(e, 'timeStamp', { value: e.timeStamp + timestampOffset });
+            g.canvas.dispatchEvent(e);
           };
           try {
             incomingBall();g.paused=false;g.rallyBounces=[];
@@ -519,7 +520,8 @@ async function horizontalInputs(page, target, offset, pointerTypes) {
             if(g.ball.lastHitBy!==-1)return false; // no volley before our bounce
             incomingBall();g.paused=false;
             g.ball.p.z-=.84; // a hold begun before contact must not arm a future tap
-            event('pointerdown');g.time+=.5;g.strokeTime+=.5;event('pointerup');
+            // Input age uses DOM timestamps, not just the manually advanced game clock.
+            event('pointerdown');g.time+=.5;g.strokeTime+=.5;event('pointerup', 500);
             if(g.playerStrokeIntent(false))return false;
             V3.copy(g.ball.p,g.player.pos);
             g.tryPlayerHit(V3.clone(g.ball.p));if(g.ball.lastHitBy!==-1)return false;
@@ -1089,30 +1091,48 @@ async function horizontalInputs(page, target, offset, pointerTypes) {
         g._camUpdate=g.update;g._camStep=g.updateCamera;
         g.update=()=>{};g.updateCamera=()=>{};
       });
-      const camBefore=await page.evaluate(()=>({y:window.__game.camPos.y,z:window.__game.camPos.z,
-        fov:window.__game.fov,shift:window.__game.camShiftY}));
       await page.mouse.move(width*.5,height*.45);
+      const zoom0=await page.evaluate(()=>window.__game.settings.camZoom);
       await page.mouse.wheel({deltaY:-240});
+      const zoomIn=await page.evaluate(()=>window.__game.settings.camZoom);
       await page.mouse.wheel({deltaY:240});
+      const zoomOut=await page.evaluate(()=>window.__game.settings.camZoom);
       await page.mouse.down({button:'right'});
       await page.mouse.move(width*.5,height*.45-35,{steps:4});
-      await page.mouse.move(width*.5+35,height*.45-35,{steps:4});
       await page.mouse.up({button:'right'});
-      const cameraInput = await page.evaluate(before=>{
+      const cameraInput = await page.evaluate(()=>{
         const g=window.__game;
-        /* fov подводится экспоненциальным сглаживанием и никогда не
-         * совпадает побитово: допуск 0.1° отсеивает шум подводки, но
-         * колесо/правый драг дают градусы — их он не спрячет. */
-        const unchanged = !g.swipe.active && !g.pointerDown && !('cameraControls' in g) &&
-          Math.abs(g.camPos.y-before.y)<1e-9 && Math.abs(g.camPos.z-before.z)<1e-9 &&
-          Math.abs(g.fov-before.fov)<0.1 && g.camShiftY===before.shift;
+        const out={pitch:g.settings.camPitch,swipe:g.swipe.active,down:g.pointerDown};
         g.update=g._camUpdate;delete g._camUpdate;
-        g.updateCamera=g._camStep;delete g._camStep;
-        return { unchanged, swipe: g.swipe.active, pointerDown: g.pointerDown, dy: g.camPos.y-before.y,
-          dz: g.camPos.z-before.z, fov: g.fov, expectedFov: before.fov, shift: g.camShiftY, expectedShift: before.shift };
-      },camBefore);
-      assert.equal(cameraInput.unchanged,true,'wheel or right-drag moved the camera: '+JSON.stringify(cameraInput));
-      count++; console.log(`PASS ${width}x${height}: wheel and right-drag cannot zoom, tilt or stroke`);
+        g.updateCamera=g._camStep;delete g._camStep;return out;
+      });
+      assert.ok(zoomIn>zoom0 && zoomOut<zoomIn && cameraInput.pitch>0 && !cameraInput.swipe && !cameraInput.down,
+        'wheel and right drag must change camera without striking: '+JSON.stringify({zoom0,zoomIn,zoomOut,cameraInput}));
+      count++; console.log(`PASS ${width}x${height}: real wheel and right-drag adjust camera without a stroke`);
+      if(width<600) {
+        await page.evaluate(()=>{const g=window.__game;g.camReset();g.setState(GS.RALLY);g.cancelInput();g.stats.shots=0;});
+        const cdp=await page.createCDPSession(), timestamp=Date.now()/1000;
+        const p=(id,x,y)=>({id,x,y});
+        await cdp.send('Input.dispatchTouchEvent',{type:'touchStart',touchPoints:[p(1,140,400)],timestamp});
+        await cdp.send('Input.dispatchTouchEvent',{type:'touchStart',touchPoints:[p(1,140,400),p(2,240,400)],timestamp:timestamp+.02});
+        await cdp.send('Input.dispatchTouchEvent',{type:'touchMove',touchPoints:[p(1,110,350),p(2,270,350)],timestamp:timestamp+.04});
+        const during=await page.evaluate(()=>({pitch:window.__game.settings.camPitch,zoom:window.__game.settings.camZoom,shots:window.__game.stats.shots,active:window.__game.swipe.active}));
+        await cdp.send('Input.dispatchTouchEvent',{type:'touchEnd',touchPoints:[p(2,270,350)],timestamp:timestamp+.06});
+        await cdp.send('Input.dispatchTouchEvent',{type:'touchMove',touchPoints:[p(2,270,300)],timestamp:timestamp+.08});
+        await cdp.send('Input.dispatchTouchEvent',{type:'touchEnd',touchPoints:[],timestamp:timestamp+.10});
+        const t2=timestamp+.20;
+        await cdp.send('Input.dispatchTouchEvent',{type:'touchStart',touchPoints:[p(3,110,350)],timestamp:t2});
+        await cdp.send('Input.dispatchTouchEvent',{type:'touchStart',touchPoints:[p(3,110,350),p(4,270,350)],timestamp:t2+.02});
+        await cdp.send('Input.dispatchTouchEvent',{type:'touchMove',touchPoints:[p(3,145,400),p(4,235,400)],timestamp:t2+.04});
+        const pinchIn=await page.evaluate(()=>({pitch:window.__game.settings.camPitch,zoom:window.__game.settings.camZoom}));
+        await cdp.send('Input.dispatchTouchEvent',{type:'touchEnd',touchPoints:[],timestamp:t2+.06});
+        await cdp.detach();
+        const after=await page.evaluate(()=>({shots:window.__game.stats.shots,active:window.__game.swipe.active,down:window.__game.pointerDown}));
+        assert.ok(during.pitch>0 && during.zoom>1 && pinchIn.pitch<during.pitch && pinchIn.zoom<during.zoom && !during.active && during.shots===0 && after.shots===0 && !after.active && !after.down,
+          'native two-finger gesture changes camera without a stroke: '+JSON.stringify({during,pinchIn,after}));
+        count++;console.log(`PASS ${width}x${height}: native two-finger pan and pinch cannot strike`);
+      }
+      await page.evaluate(()=>window.__game.camReset());
       await page.evaluate(()=>{window.__game.setCameraPreset('DYNAMIC');window.__game.updateCamera(0);});
       await page.keyboard.press('c');
       await page.evaluate(()=>window.__game.updateCamera(0));
@@ -1171,6 +1191,7 @@ async function horizontalInputs(page, target, offset, pointerTypes) {
         const context = new OfflineAudioContext(2, 44100 * 4, 44100);
         const a = new AudioEngine(); a.ctx=context;a.ok=true;a.muted=false;
         a.bus=context.createGain();a.bus.connect(context.destination);
+        a.ambientBus=context.createGain();a.ambientBus.connect(context.destination);
         a._noiseBuf=context.createBuffer(1,44100*2,44100);
         const noise=a._noiseBuf.getChannelData(0);for(let i=0;i<noise.length;i++)noise[i]=Math.random()*2-1;
         a.applause(1.6);a.onRallyHit(4);
@@ -1239,6 +1260,10 @@ async function horizontalInputs(page, target, offset, pointerTypes) {
       count++;console.log(`PASS ${width}x${height}: retained shell camera calibration keeps the table and opponent visible`);
       await page.evaluate(()=>{GameHost.send('cal',{k:'camZoom',v:50});GameHost.send('cal',{k:'camHeight',v:50});});
       await frame.waitForFunction('window.__game.settings.camZoom === 1 && window.__game.settings.camPitch === 0',{timeout:10000});
+      // The inspector is intentionally locked in ranked matches. Exercise the
+      // actual shell control in free play, where slow motion is permitted.
+      await page.evaluate(()=>GameHost.send('match',{diff:2,target:11,free:true,sessionKind:'free'}));
+      await page.waitForFunction("GameHost.inspector?.allowed && !document.querySelector('[data-act=slowmo]').disabled",{timeout:10000});
       await page.click('[data-act=slowmo]');
       await frame.waitForFunction('window.__game.inspectSlowmo === true',{timeout:10000});
       const bounds=await page.evaluate(()=>{const r=document.querySelector('#gamelayer iframe').getBoundingClientRect();return {x:r.left,y:r.top};});
@@ -1248,15 +1273,23 @@ async function horizontalInputs(page, target, offset, pointerTypes) {
         V3.set(g.player.pos,0,1.05,1.5);V3.copy(g.player.prevPos,g.player.pos);V3.set(g.player.normal,0,0,-1);
         V3.copy(g.ball.p,g.player.pos);V3.set(g.ball.v,0,0,6);V3.zero(g.ball.w);g.ball.live=true;g.ball.lastHitBy=-1;
         g.player.lastHitT=g.time-1;g.shotJournal.reset();g.stats.shots=0;
+        // Observe pointerdown in the same event dispatch. A round trip to the
+        // test process between touchStart and touchEnd can turn a tap into a
+        // long hold on a busy browser, even though simulation is frozen.
+        g.canvas.addEventListener('pointerdown',()=>{window.__testDownShots=g.stats.shots;},{once:true});
         // Finish any cinematic camera interpolation before targeting the canvas.
         g.updateCamera(4);g.updateCamera(0);
         const p=g.project(g.ball.p),r=g.canvas.getBoundingClientRect();return {x:r.left+p.x*r.width,y:r.top+p.y*r.height};
       });
-      let touch;
-      if(width<600)touch=await page.touchscreen.touchStart(bounds.x+point.x,bounds.y+point.y);
-      else {await page.mouse.move(bounds.x+point.x,bounds.y+point.y);await page.mouse.down();}
-      assert.equal(await frame.evaluate(()=>window.__game.stats.shots),0,'shipped shell down must not steal a swipe');
-      if(touch)await touch.end();else await page.mouse.up();
+      if(width<600) {
+        // Keep the hardware tap short even if Chromium takes a long time to
+        // process the pointerdown handler before acknowledging the CDP call.
+        const cdp=await page.createCDPSession(), timestamp=Date.now()/1000;
+        await cdp.send('Input.dispatchTouchEvent',{type:'touchStart',touchPoints:[{x:bounds.x+point.x,y:bounds.y+point.y,id:1}],timestamp});
+        await cdp.send('Input.dispatchTouchEvent',{type:'touchEnd',touchPoints:[],timestamp:timestamp+.08});
+        await cdp.detach();
+      } else {await page.mouse.move(bounds.x+point.x,bounds.y+point.y);await page.mouse.down();await page.mouse.up();}
+      assert.equal(await frame.evaluate(()=>window.__testDownShots),0,'shipped shell down must not steal a swipe');
       assert.equal(await frame.evaluate(()=>{
         const g=window.__game,shot=g.shotJournal.latest;
         return !!shot.contact && shot.contact.incoming.gesture.tap && shot.pressZone.accepted &&

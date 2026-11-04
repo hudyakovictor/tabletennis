@@ -50,7 +50,7 @@ test('ready sends current settings before mode, discards old hint/cal packets an
   f.ready();
   const settings = f.sent.find(m => m.type === 'settings'), match = f.sent.find(m => m.type === 'match');
   assert.ok(f.sent.indexOf(settings) < f.sent.indexOf(match)); assert.equal(settings.hint, true);
-  assert.equal(settings.audioLevels.master, 0); assert.equal(settings.calibrations.flytime, 0);
+  assert.equal(settings.audioLevels.master, 0); assert.equal(settings.calibrations.flytime, undefined);
   assert.equal(match.sessionKind, 'ranked'); assert.equal(Object.hasOwn(match, 'hint'), false);
   assert.equal(Object.hasOwn(f.GameHost.mode.data, 'hint'), false);
   assert.equal(f.sent.some(m => m.type === 'hint' || m.type === 'cal'), false);
@@ -74,7 +74,7 @@ test('ready imports only real stored engine keys once, with explicit shell value
   const f = hostFixture({ cal: { flytime: 0 } });
   f.ready({ flytime: 90, camHeight: 10, camZoom: 0, spinGain: 73.25, arcSens: null, unknown: 100 });
   assert.deepEqual(plain(f.S.cal), { flytime: 0, camHeight: 10, camZoom: 0, spinGain: 73.25 });
-  assert.deepEqual(f.sent.find(m => m.type === 'settings').calibrations, plain(f.S.cal));
+  assert.deepEqual(f.sent.find(m => m.type === 'settings').calibrations, { camHeight: 10, camZoom: 0 });
   f.GameHost.reload(); f.ready({ tableGlow: 100 }); assert.equal(Object.hasOwn(f.S.cal, 'tableGlow'), false);
   const fresh = hostFixture(); fresh.ready(); assert.deepEqual(plain(fresh.S.cal), {});
 });
@@ -93,7 +93,7 @@ test('GPU recovery replays current preferences before the saved mode and preserv
   f.ready();
   const settings = f.sent.find(m => m.type === 'settings'), match = f.sent.find(m => m.type === 'match'), inspector = f.sent.find(m => m.type === 'slowmo');
   assert.ok(f.sent.indexOf(settings) < f.sent.indexOf(match)); assert.ok(f.sent.indexOf(match) < f.sent.indexOf(inspector));
-  assert.equal(settings.hint, false); assert.equal(settings.audioLevels.master, 0); assert.equal(settings.calibrations.flytime, 0);
+  assert.equal(settings.hint, false); assert.equal(settings.audioLevels.master, 0); assert.equal(settings.calibrations.flytime, undefined);
   assert.equal(match.sessionKind, 'practice'); assert.equal(Object.hasOwn(match, 'hint'), false); assert.deepEqual(match.resume.score, [3, 4]);
   assert.equal(inspector.on, true);
 });
@@ -122,7 +122,7 @@ function embedFixture() {
     setAiTrend() {}, trendFromHistory() {},
     setInspectSlowmo(on) { this.inspectSlowmo = on && this.slowmo.allowed; return this.inspectSlowmo; },
     startTraining(m) { this.training = { stage: 'practice', sessionId: 't1', revision: 0, options: m, snapshot() { return { stage: this.stage }; } }; },
-    setPaused(v) { this.paused = v; } };
+    setPaused(v) { this.paused = v; }, syncAudioQuiet() {} };
   const window = { __TT_EMBED: true, __game: g, parent: { postMessage(m) { sent.push(plain(m)); } }, addEventListener(type, fn) { if (type === 'message') listeners.push(fn); } };
   const document = { readyState: 'complete', visibilityState: 'visible', documentElement: { classList: classes() }, getElementById: () => null };
   const ET = key => key; ET.lang = () => 'ru'; ET.set = () => {};
@@ -130,7 +130,7 @@ function embedFixture() {
     PH: { TABLE_Y: .76 }, GS: { MENU: 0, SERVE_READY: 1, SERVE_TOSS: 2, RALLY: 3, POINT: 4 },
     MATCH_RULES: { version: 4, captureRadius: .2, contactSideTouchPx: 48, contactSideMousePx: 40, contactBackPx: 120, contactForwardPx: 150 },
     TRAIN_STEPS: [], trainingCatalog: () => ({ version: 1, lessons: [] }),
-    createMissShotCapture: () => ({ setEnabled() {}, setHalf() {}, getHalf: () => 350, request: () => null, fail() {} }),
+    createMissShotCapture: () => ({ setEnabled() {}, setHalf() {}, getHalf: () => 350, request: () => null, cancel() {}, fail() {} }),
     V3: {}, TAU: Math.PI * 2 });
   vm.runInContext(calSource + '\napplyGameCalibrations(window.__game, {});\n' + embedSource, context);
   const command = (type, data) => listeners.forEach(fn => fn({ data: { __tt: 1, type, ...data } }));
@@ -169,7 +169,7 @@ test('automatic training check stage refreshes effective policy without erasing 
   assert.equal(check.sessionKind, 'check'); assert.equal(check.pace, 1); assert.equal(f.g._capCalK, 1);
   assert.equal(f.g._cal.flytime, 0); assert.equal(f.g._cal.captureK, 1);
   f.g.training.stage = 'practice'; f.g.update(.016);
-  assert.equal(f.sent.findLast(m => m.type === 'calibration').calibration.pace, .35); assert.equal(f.g._capCalK, 1.3);
+  assert.equal(f.sent.findLast(m => m.type === 'calibration').calibration.pace, 1); assert.equal(f.g._capCalK, 1.3);
 });
 
 test('embed stores requested motionOff and propagates OS OR user motion to Game and UI', () => {
@@ -295,23 +295,20 @@ test('settings never presents calibrations as applied before ready/ack and rebui
   assert.equal(f.view.querySelectorAll('input[data-cal]').length, 0); assert.equal(f.reset.disabled, true);
   f.host.ready = true; f.refreshSettingsCalibration(f.view); assert.equal(f.view.querySelectorAll('input[data-cal]').length, 0);
   f.host.calibrationReady = true; f.refreshSettingsCalibration(f.view);
-  assert.equal(f.view.querySelectorAll('input[data-cal]').length, 17); assert.equal(f.reset.disabled, false);
-  const speed = f.view.querySelector('[data-calrow="padSpeed"]');
-  assert.equal(speed.querySelector('input').step, 'any'); assert.equal(+speed.querySelector('input').value, 100 * (1 - .84) / .36);
+  assert.equal(f.view.querySelectorAll('input[data-cal]').length, 9); assert.equal(f.reset.disabled, false);
+  const speed = f.view.querySelector('[data-calrow="camZoom"]');
+  assert.equal(speed.querySelector('input').step, 'any'); assert.equal(+speed.querySelector('input').value, 50);
   assert.equal(speed.querySelector('.cal-v').textContent, '1.00x'); assert.equal(f.audioList.textContent, 'audio must remain');
   f.host.ready = false; f.host.calibrationReady = false; f.refreshSettingsCalibration(f.view);
   f.host.ready = true; f.host.calibrationReady = true; f.refreshSettingsCalibration(f.view);
-  assert.equal(f.view.querySelectorAll('input[data-cal]').length, 17);
+  assert.equal(f.view.querySelectorAll('input[data-cal]').length, 9);
 });
 
-test('settings shows effective regulation values and saved preferences instead of raw percentages', () => {
+test('settings hides physics and simulation pace while retaining player preferences', () => {
   const f = settingsFixture({ cal: { flytime: 0, captureK: 100 } }); f.g.sessionKind = 'ranked';
   f.host.ready = f.host.calibrationReady = true; f.host.calibration = f.applyGameCalibrations(f.g, f.S.cal); f.refreshSettingsCalibration(f.view);
-  const pace = f.view.querySelector('[data-calrow="flytime"]');
-  assert.equal(pace.querySelector('input').disabled, true); assert.equal(pace.querySelector('input').value, '0');
-  assert.equal(pace.querySelector('.cal-v').textContent, '1.00x'); assert.match(pace.querySelector('[data-cal-effective]').textContent, /0\.35x/);
-  assert.equal(f.view.querySelector('[data-calrow="captureK"]').querySelector('input').disabled, true);
-  assert.equal(f.view.querySelector('[data-calrow="slowmoDepth"]').querySelector('input').disabled, true);
+  for (const key of ['flytime', 'captureK', 'spinGain', 'padSpeed', 'slowmoDepth']) assert.equal(f.view.querySelector(`[data-calrow="${key}"]`), null);
+  for (const key of ['camZoom', 'camHeight', 'trailLen', 'hintRadius']) assert.ok(f.view.querySelector(`[data-calrow="${key}"]`));
   assert.equal(f.S.cal.flytime, 0); assert.equal(f.S.cal.captureK, 100);
 });
 
@@ -331,7 +328,7 @@ test('settings reset sends all registry defaults in one packet and never resets 
   const after = plain(f.S); delete after.cal; assert.deepEqual(after, before);
   assert.equal(f.messages.length, 1); assert.equal(f.messages[0].type, 'cal'); assert.equal(Object.keys(f.messages[0].values).length, 17);
   for (const entry of f.CALIBRATION_REGISTRY) assert.equal(f.messages[0].values[entry.key], entry.default);
-  assert.match(f.view.querySelector('[data-calrow="flytime"]').querySelector('[data-cal-effective]').textContent, /подтверждения/);
+  assert.match(f.view.querySelector('[data-calrow="camZoom"]').querySelector('[data-cal-effective]').textContent, /подтверждения/);
 });
 
 test('volume slider saves explicit zero, updates the old stored alias and synchronizes mute before host traffic', () => {
@@ -357,10 +354,22 @@ test('current locale callback replaces the settings sheet without resuming or re
 
 test('reopening settings retains a saved but unacknowledged slider position and reports it as pending', () => {
   const f = settingsFixture(); f.host.ready = f.host.calibrationReady = true; f.openSettings();
-  const input = f.view.querySelector('[data-calrow="flytime"]').querySelector('input'); input.value = '0'; f.view.dispatch('input', input);
-  f.openSettings(); const row = f.view.querySelector('[data-calrow="flytime"]');
+  const input = f.view.querySelector('[data-calrow="camZoom"]').querySelector('input'); input.value = '0'; f.view.dispatch('input', input);
+  f.openSettings(); const row = f.view.querySelector('[data-calrow="camZoom"]');
   assert.equal(row.querySelector('input').value, '0'); assert.match(row.querySelector('[data-cal-effective]').textContent, /подтверждения/);
   f.host.calibration = f.applyGameCalibrations(f.g, f.S.cal); f.host.calibrationAckId = f.host.calibrationRequestId;
   f.refreshSettingsCalibration(f.view, { requestId: f.host.calibrationRequestId });
-  assert.equal(row.querySelector('.cal-v').textContent, '0.35x'); assert.equal(row.querySelector('[data-cal-effective]').hidden, true);
+  assert.equal(row.querySelector('.cal-v').textContent, '0.60x'); assert.equal(row.querySelector('[data-cal-effective]').hidden, true);
+});
+
+test('camera gesture preferences update the host and are sent on the next session', () => {
+  const f = hostFixture(); f.ready();
+  f.message({type: 'settings', requestId: f.GameHost.calibrationRequestId, calibration: plain(f.snapshot())});
+  const state = plain(f.applyGameCalibrations({settings: {}, sessionKind: 'free', slowmo: {allowed: true}}, {camHeight: 75, camZoom: 80}));
+  f.message({type: 'cameraCalibration', values: {camHeight: 75, camZoom: 80, captureK: 100}, calibration: state});
+  assert.equal(f.S.cal.camHeight, 75); assert.equal(f.S.cal.camZoom, 80); assert.equal(f.S.cal.captureK, undefined);
+  assert.equal(f.GameHost.calibration.raw.camZoom, 80);
+  f.GameHost.syncSettings();
+  const packet = f.sent.findLast(m => m.type === 'settings');
+  assert.equal(packet.calibrations.camHeight, 75); assert.equal(packet.calibrations.camZoom, 80);
 });

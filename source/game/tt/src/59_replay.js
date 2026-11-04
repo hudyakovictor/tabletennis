@@ -245,6 +245,10 @@ class MomentPlayer {
     V3.set(g.aiPaddle.pos, L(9), L(10), L(11));
     V3.set(g.aiPaddle.normal, L(12), L(13), L(14));
     V3.norm(g.aiPaddle.normal, g.aiPaddle.normal);
+    // Recorded normals/roll replace the live pose. The live quaternions belong
+    // to the last game frame and must not override them in the renderer.
+    g.player.poseReady = false;
+    g.aiPaddle.poseReady = false;
     V3.copy(g.ai.pos, g.aiPaddle.pos);
     g.ball.live = true;
     // trail: rebuild the last few frames of history so the ball draws a streak
