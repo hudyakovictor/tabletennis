@@ -54,6 +54,8 @@
       return state;
     };
 
+    g.onCameraCalibrationChange = values => post('cameraCalibration', { values, calibration: calibrationState(g) });
+
     // Restore the calibration gallery from the earlier branch. Capture on
     // pointerdown, not on pause; the host decides which attempts were misses.
     const missCap = createMissShotCapture({ getCanvas: () => g.canvas,

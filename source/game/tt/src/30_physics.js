@@ -492,8 +492,8 @@ const _pp = V3.new(), _pv = V3.new(), _pw = V3.new();
  * @param {object} res  out: {hitTableZ, hitTableX, tToTable, apexY, crossZ:{t,x,y}, out:boolean}
  */
 function predict(p0, v0, w0, opts = {}) {
-  const dt = opts.dt || 1 / 240;
-  const maxT = opts.maxT || 3.0;
+  const dt = Number.isFinite(opts.dt) && opts.dt > 0 ? opts.dt : 1 / 240;
+  const maxT = Number.isFinite(opts.maxT) && opts.maxT > 0 ? opts.maxT : 3.0;
   const stopZ = opts.stopZ;              // stop when z crosses this plane (towards the player)
   const stopDir = opts.stopDir || 1;
   V3.copy(_pp, p0); V3.copy(_pv, v0); V3.copy(_pw, w0);
@@ -502,7 +502,8 @@ function predict(p0, v0, w0, opts = {}) {
   out.bounces = 0; out.hitNet = false; out.landed = null; out.b2 = null; out.b3 = null; out.apex = -1; out.cross = null;
   out.planeCross = null; out.netCross = null; out.floor = null;
   out.reachT = -1; out.reach = null; out.path = opts.path || null;
-  out.diverged = false; out.edge = 0;
+  // Callers reuse result objects across predictions; collision evidence is per flight.
+  out.diverged = false; out.edge = 0; out.edgeBounce = null; out.netKind = null;
   const maxPath = opts.maxPath || 400;
   if (out.path) out.path.length = 0;
   let t = 0, prevX = _pp.x, prevY = _pp.y, prevZ = _pp.z;
@@ -512,7 +513,8 @@ function predict(p0, v0, w0, opts = {}) {
     integrateBall(_pp, _pv, _pw, dt);
     t += dt;
     if (!saneV(_pv) || !saneV(_pp)) { out.diverged = true; break; }
-    if (out.path && (out.path.length < maxPath)) out.path.push(_pp.x, _pp.y, _pp.z);
+    const pathIndex = out.path && out.path.length < maxPath ? out.path.length : -1;
+    if (pathIndex >= 0) out.path.push(_pp.x, _pp.y, _pp.z);
     if (_pp.y > out.apex) out.apex = _pp.y;
 
     /* The plane crossing is recorded even when the ball clears the net —
@@ -541,6 +543,12 @@ function predict(p0, v0, w0, opts = {}) {
       const hit = tableContact(prevX, prevY, prevZ, _pp.x, _pp.y, _pp.z, _tabHit);
       if (hit) {
       _pp.x = hit.x; _pp.z = hit.z; _pp.y = hit.y + 1e-5;
+      // The integrated endpoint may already be below the table or past a
+      // line. The visual sample must use the same interpolated contact as
+      // the trajectory and landing verdict, including on a stopping bounce.
+      if (pathIndex >= 0) {
+        out.path[pathIndex] = _pp.x; out.path[pathIndex + 1] = _pp.y; out.path[pathIndex + 2] = _pp.z;
+      }
       out.bounces++;
       if (out.bounces === 1) { out.landed = { x: hit.x, z: hit.z, t, vy: _pv.y, speed: V3.len(_pv) }; bounceSide = Math.sign(hit.z); }
       else if (out.bounces === 2) out.b2 = { x: hit.x, z: hit.z, t, speed: V3.len(_pv) };

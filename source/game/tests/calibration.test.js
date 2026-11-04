@@ -65,13 +65,9 @@ test('raw normalization retains zero/fractions and rejects invalid or inherited 
   assert.equal(Object.hasOwn(poisoned, '__proto__'), false); assert.equal(Object.hasOwn(poisoned, 'constructor'), false); assert.equal(poisoned.flytime, 0);
 });
 
-test('pace is exactly .35/1/1.25 at 0/50/100 and monotonic on both segments', () => {
+test('legacy pace settings cannot change or accelerate normal time', () => {
   const { calibrationPace: pace } = load();
-  assert.equal(pace(0), .35); assert.equal(pace(.5), 1); assert.equal(pace(1), 1.25);
-  assert.equal(pace(.25), .675); assert.equal(pace(.75), 1.125);
-  assert.equal(pace(-10), .35); assert.equal(pace(10), 1.25);
-  for (const invalid of [null, true, '', NaN, Infinity, {}, undefined]) assert.equal(pace(invalid), 1);
-  for (let i = 1; i <= 1000; i++) assert.ok(pace(i / 1000) >= pace((i - 1) / 1000));
+  for (const value of [-10, 0, .25, .5, .75, 1, 10, null, NaN, Infinity, undefined]) assert.equal(pace(value), 1);
 });
 
 test('startup applies every exact neutral default, leaving ball physics, clocks and progress unchanged', () => {
@@ -118,7 +114,7 @@ for (const kind of ['free', 'practice', 'ranked', 'career', 'check', 'online']) 
     assert.equal(api.gameplayCalibrationLocked(g), locked); assert.equal(state.locked, locked); assert.equal(state.sessionKind, kind);
     assert.equal(g._cal.flytime, 0); assert.equal(g._cal.captureK, 1); assert.equal(g._cal.slowmoDepth, 1);
     assert.equal(g._calEffective.flytime, locked ? .5 : 0); assert.equal(g._calEffective.captureK, locked ? .5 : 1);
-    assert.equal(state.pace, locked ? 1 : .35); assert.equal(state.requestedPace, .35);
+    assert.equal(state.pace, 1); assert.equal(state.requestedPace, 1);
     assert.equal(g._capCalK, locked ? 1 : 1.3); assert.equal(g.settings.spinGain, 1.6);
     assert.equal(state.inspector.requested, true); assert.equal(state.inspector.effective, !locked); assert.equal(state.hint.effective, !locked);
     assert.equal(g.settings.hint, !locked);
@@ -131,7 +127,7 @@ for (const extra of [{ network: { isInMatch: true } }, { career: { active: true 
     assert.equal(api.gameplayCalibrationLocked(g), true); assert.equal(g._calEffective.flytime, .5); assert.equal(g._calEffective.captureK, .5);
     g.network.isInMatch = false; g.career.active = false; g.training = null; g.sessionKind = 'free';
     const resumed = api.refreshGameCalibrationPolicy(g);
-    assert.equal(resumed.locked, false); assert.equal(resumed.pace, .35); assert.equal(g._capCalK, 1.3);
+    assert.equal(resumed.locked, false); assert.equal(resumed.pace, 1); assert.equal(g._capCalK, 1.3);
     assert.equal(g._cal.flytime, 0); assert.equal(g._cal.captureK, 1);
   });
 }
