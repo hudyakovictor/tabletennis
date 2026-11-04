@@ -86,3 +86,13 @@ test('the shell fingerprint in the committed bundle matches the sources', () => 
   assert.match(a || '', /^shell [0-9a-f]{12}$/, 'SHELL_BUILD missing in play/index.html');
   assert.equal(a, b, 'SHELL_BUILD differs: the committed bundle was built from other sources');
 });
+
+test('every engine stylesheet, including technique preview, is bundled in the fresh game', () => {
+  const html = freshBuild();
+  const css = html.match(/<style>([\s\S]*?)<\/style>/)?.[1];
+  assert.ok(css, 'engine style block is missing');
+  const src = path.join(root, 'tt/src');
+  for (const file of fs.readdirSync(src).filter(name => name.endsWith('.css'))) {
+    assert.ok(css.includes(fs.readFileSync(path.join(src, file), 'utf8')), `${file} missing from bundled engine`);
+  }
+});

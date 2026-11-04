@@ -32,6 +32,10 @@ function trainingPath(p, v, w, bounces = 2) {
   const path = [[p.x, p.y, p.z]];
   const stride = Math.max(1, Math.round(1 / 40 / PH.SIM_DT)) * 3;
   for (let i = 0; i < flat.length; i += stride) path.push([flat[i], flat[i + 1], flat[i + 2]]);
+  // Downsampling must not omit the actual final contact from the diagram.
+  const last = path[path.length - 1], end = result.end;
+  if (end && [end.x, end.y, end.z].every(Number.isFinite) &&
+      (last[0] !== end.x || last[1] !== end.y || last[2] !== end.z)) path.push([end.x, end.y, end.z]);
   return { path, result };
 }
 
@@ -148,6 +152,8 @@ class Trainer {
     }
   }
   configureHelp() {
+    // A pending cord bonus belongs to the previous mode, not this stage.
+    this.g.clearCordCaptureBoost?.();
     if (typeof setCaptureForgiveness === 'function') setCaptureForgiveness(this.stage === 'practice' ? 1.25 : 1);
     if (this.g.setSlowmoAllowed) this.g.setSlowmoAllowed(this.stage !== 'check');
     if (this.S.sparring && this.g.ai) {
@@ -179,6 +185,7 @@ class Trainer {
     this.sync(); this.g.ui && this.g.ui.trainDone(this);
   }
   restoreHelp() {
+    this.g.clearCordCaptureBoost?.();
     if (typeof setCaptureForgiveness === 'function') setCaptureForgiveness(1);
     if (this.g.setSlowmoAllowed) this.g.setSlowmoAllowed(true);
     if (this.g.ai && this.g.ai.setLevel && Number.isFinite(this.oldAiLevel)) this.g.ai.setLevel(this.oldAiLevel);

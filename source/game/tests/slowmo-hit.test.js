@@ -375,3 +375,67 @@ test('the shot journal follows the same scaled expiry as collision detection', (
   journal.expire(10.9, 5.26);
   assert.equal(entry.outcome, 'no_contact');
 });
+
+test('holding a press prepares the racket only during the player serve', () => {
+  for (const type of ['mouse', 'touch']) {
+    const resting = inputGame(type).g, held = inputGame(type).g;
+    for (const g of [resting, held]) {
+      g.ball.live = false; g._calValues = { captureK: 1 }; g.pointer = { x: .5, y: .55 };
+    }
+    held.pointerDown = true;
+    for (let i = 0; i < 25; i++) { resting.updatePlayerPaddle(1 / 60); held.updatePlayerPaddle(1 / 60); }
+    assert.equal(held._prep, 0, `${type}: rally press must not trigger a backswing`);
+    assert.notEqual(held.player.motionStage, 'prepare');
+    assert.ok(lib.V3.dist(resting.player.normal, held.player.normal) < 1e-8, 'the racket face is not cocked backwards');
+    assert.ok(Math.abs(resting.player.roll - held.player.roll) < 1e-8);
+    held.state = lib.GS.SERVE_TOSS; held.server = 1; held.ball.lastHitBy = 0;
+    for (let i = 0; i < 25; i++) held.updatePlayerPaddle(1 / 60);
+    assert.ok(held._prep > .5, `${type}: serve preparation remains`);
+    held.state = lib.GS.RALLY; held.updatePlayerPaddle(1 / 60);
+    assert.equal(held._prep, 0, 'a serve backswing must not leak into the rally');
+  }
+});
+
+test('press anticipation is limited to the player serve, not rally shots', () => {
+  for (const type of ['mouse', 'touch']) {
+    const rally = inputGame(type); rally.send('pointerdown', { x: .7, y: .7 });
+    assert.equal(rally.g.anticipation.active, false);
+    const serve = inputGame(type); serve.g.state = lib.GS.SERVE_TOSS;
+    serve.g.server = 1; serve.g.ball.lastHitBy = 0;
+    serve.send('pointerdown', { x: .7, y: .7 });
+    assert.equal(serve.g.anticipation.active, true);
+  }
+});
+
+test('plain mouse and touch taps produce a controlled, legal return on both sides', () => {
+  for (const type of ['mouse', 'touch']) for (const hand of ['left', 'right']) for (const x of [-.35, 0, .35]) {
+    const { g, send } = inputGame(type); g.settings.hand = hand;
+    g.ball.p.x = x; g.player.pos.x = x; g.player.prevPos.x = x;
+    send('pointerdown'); send('pointerup');
+    assert.equal(g.stats.shots, 1, `${type}/${hand}/${x} did not make contact`);
+    assert.equal(g.player.activeFace, 1);
+    assert.ok(lib.V3.len(g.ball.v) < 14, `${type}/${hand}/${x}: ${lib.V3.len(g.ball.v)} m/s`);
+    const flight = lib.predict(lib.V3.clone(g.ball.p), lib.V3.clone(g.ball.v), lib.V3.clone(g.ball.w),
+      { dt: lib.PH.SIM_DT, maxT: 2.6, stopOnFirstBounce: true, out: {} });
+    assert.ok(flight.landed && flight.landed.z < 0 && Math.abs(flight.landed.z) <= lib.PH.T_HALF_LEN && Math.abs(flight.landed.x) <= lib.PH.T_HALF_WID,
+      `${type}/${hand}/${x}: ${JSON.stringify(flight.landed)}`);
+  }
+});
+
+test('normal game time ignores legacy pace and clamps any accelerated target; explicit slowmo remains', () => {
+  for (const flytime of [0, .5, 1]) for (const mode of ['normal', 'slow', 'badScale']) {
+    const { g } = inputGame();
+    Object.assign(g, { frame: 0, stateT: 0, stateSimT: 0, sessionKind: 'free',
+      network: { isInMatch: false }, _cal: { flytime }, _calEffective: { flytime },
+      _calPolicyKey: 'free|||false', slowmoUntil: mode === 'badScale' ? 10 : 0,
+      targetTimeScale: mode === 'badScale' ? 1.8 : mode === 'slow' ? .34 : 1,
+      timeScale: mode === 'badScale' ? 1.7 : 1, inspectSlowmo: false,
+      slowmo: { allowed: true, active: mode === 'slow' } });
+    g.updateSlowmo = () => {};
+    g.updateShotDiagnostics = () => { throw new Error('stop-after-clock'); };
+    assert.throws(() => g.update(.016), /stop-after-clock/);
+    assert.ok(g.timeScale <= 1, `${flytime}/${mode}: ${g.timeScale}`);
+    if (mode === 'normal') assert.equal(g.timeScale, 1);
+    if (mode === 'slow') assert.ok(g.timeScale < 1);
+  }
+});

@@ -152,6 +152,21 @@ test('spatially reachable legal incoming ball opens the window without automatic
   assert.equal(g._strike.ready, 1); assert.equal(JSON.stringify(g.ball), before);
 });
 
+test('a legal short ball still in reach shows its contact window when stationary or reversing', () => {
+  for (const vz of [0, -.3]) {
+    const g = fixture();
+    V3.set(g.ball.p, 0, 1.01, .8);
+    V3.copy(g.player.pos, g.ball.p);
+    g.ball.v.z = vz;
+    g.updateStrikeWindow(1 / 60);
+    assert.equal(g._strike.on, true);
+    assert.equal(g._strike.contactable, true);
+    g.rallyBounces = [];
+    g.updateStrikeWindow(1 / 60);
+    assert.equal(g._strike.on, false, 'do not advertise a volley');
+  }
+});
+
 test('paused and replay states suppress gameplay timing hints', () => {
   for (const mode of ['pause', 'replay']) {
     const g = fixture(); if (mode === 'pause') g.paused = true; else g.replayer.on = true;

@@ -22,9 +22,15 @@ if _missing or _extra:
     raise SystemExit('build.py: JS_ORDER out of sync — missing: %s, unknown: %s'
                      % (_missing, _extra))
 
-css  = open(os.path.join(SRC,'05_style.css'),encoding='utf-8').read()
-if os.path.exists(os.path.join(SRC,'06_embed.css')):
-    css += '\n' + open(os.path.join(SRC,'06_embed.css'),encoding='utf-8').read()
+# Keep the cascade explicit, and fail rather than silently shipping a new
+# stylesheet on disk without it (as happened to the technique preview).
+CSS_ORDER = ['05_style.css', '06_embed.css', '07_preview.css']
+_missing_css = sorted(set(f for f in os.listdir(SRC) if f.endswith('.css')) - set(CSS_ORDER))
+_extra_css = sorted(set(CSS_ORDER) - set(os.listdir(SRC)))
+if _missing_css or _extra_css:
+    raise SystemExit('build.py: CSS_ORDER out of sync — missing: %s, unknown: %s'
+                     % (_missing_css, _extra_css))
+css = '\n'.join(open(os.path.join(SRC, f), encoding='utf-8').read() for f in CSS_ORDER)
 body = open(os.path.join(SRC,'02_body.html'),encoding='utf-8').read()
 with open(os.path.join(os.path.dirname(SRC), 'assets', 'table-tennis-ultimate.png'), 'rb') as asset:
     logo = 'data:image/png;base64,' + base64.b64encode(asset.read()).decode('ascii')
