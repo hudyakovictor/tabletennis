@@ -178,9 +178,10 @@
       return r;
     });
     wrap(g, '_tryPassiveBlock', function (orig) {
+      const contactAttempt = syncAdmission();
       const ok = orig.apply(null, [].slice.call(arguments, 1));
       if (ok && !lobby) {
-        if (att) { att.contact = true; att.sweet = 0.72; flush(); }
+        if (contactAttempt && att === contactAttempt) { att.contact = true; att.sweet = 0.72; flush(); }
         const p = this.ball && this.ball.p ? this.project(this.ball.p, {}) : null;
         post('hit', { by: 1, rally: this.rally, kmh: Math.round(V3.len(this.ball.v) * 3.6),
           stroke: 'BLOCK', sweet: 0.72, x: p && p.ok ? p.x : 0.5, y: p && p.ok ? p.y : 0.6 });
@@ -249,11 +250,22 @@
      * falling toss): where the finger landed relative to the meeting point,
      * how early, and what happened. The host keeps the last few hundred and
      * turns them into a tuning report — real phones, real fingers. */
-    let att = null;
+    let att = null, tossCandidate = false;
+    const syncAdmission = () => {
+      const sw = g.swipe, z = sw && sw.pressZone;
+      if (!att || !sw || att.gestureId !== sw.gestureId || att.shotId !== g.shotId ||
+          z && z.shotId !== att.shotId) return null;
+      if (z) { att.accepted = !!z.accepted; att.zoneReason = z.reason || null; }
+      if (tossCandidate && isRealStroke(sw.active ? sw.m : sw.lastReleased, true)) {
+        tossCandidate = false;
+        if (att.captureId) armShot(att.captureId);
+      }
+      return att;
+    };
     g.cancelPendingCapture = () => {
       clearTimeout(shotTimer); shotQueue = null; missCap.cancel();
       if (att && att.captureId) post('shotdrop', { id: att.captureId });
-      att = null;
+      att = null; tossCandidate = false;
     };
     /* A miss explained in one line, right where the eye already is (the
      * shot pill). Built from the same attempt record the stats use, so the
@@ -300,6 +312,11 @@ const showTip = (text) => { if (text) tip = { text, until: g.time + 4.6 }; };
     const resetAssist = () => { if (autoHint) g.hintContact = false; missStreak = 0; autoHint = false; autoHits = 0; };
     const flush = () => {
       if (!att) return;
+      syncAdmission();
+      if (tossCandidate && !att.contact) {
+        if (att.captureId) post('shotdrop', { id: att.captureId });
+        att = null; tossCandidate = false; return;
+      }
       if (!lobby && !g.demoMode) {
         post('attempt', att);
         // A successful contact removes only this attempt's frame, as in the
@@ -311,18 +328,25 @@ const showTip = (text) => { if (text) tip = { text, until: g.time + 4.6 }; };
           else showTip(onMiss() || missTip(att));
         }
       }
-      att = null;
+      att = null; tossCandidate = false;
     };
     g.onPressZone = function (z, cp, serving) {
       flush();
       if (lobby || this.demoMode || !z) return;
       lastAttemptShot = this.shotId;
+      const readyToss = this.state === GS.SERVE_READY;
+      if (readyToss && !(z.singleGestureToss && z.pendingServeDrop)) return;
+      serving = !!serving || readyToss;
       const incoming = this.state === GS.RALLY && this.ball.live && this.ball.lastHitBy === -1;
       if (!serving && !incoming) return;
-      if (this.state === GS.SERVE_READY) return;            // the toss tap is not a stroke
+      // A READY press is only a candidate: a real one-motion serve preserves
+      // its initial evidence, while a stationary toss tap is discarded on flush.
+      tossCandidate = readyToss;
       const capture = calibrationState(this).capture;
       att = { t: +this.time.toFixed(3), kind: serving ? 'serve' : 'rally', input: z.pointerType || 'touch',
         accepted: !!z.accepted, zoneReason: z.reason || null,
+        acceptedAtPress: !!z.accepted, zoneReasonAtPress: z.reason || null,
+        gestureId: this.swipe.gestureId, shotId: this.shotId,
         dx: Number.isFinite(z.pointerX) && Number.isFinite(z.x) ? Math.round(z.pointerX - z.x) : null,
         dy: Number.isFinite(z.pointerY) && Number.isFinite(z.y) ? Math.round(z.pointerY - z.y) : null,
         lead: cp && Number.isFinite(cp.t) ? +cp.t.toFixed(3) : null,
@@ -344,7 +368,7 @@ const showTip = (text) => { if (text) tip = { text, until: g.time + 4.6 }; };
         const ball = ballScreen && ballScreen.ok ? { x: ballScreen.x * z.vw, y: ballScreen.y * z.vh } : null;
         att.captureId = missCap.request({ press: { x: z.pressX * z.vw, y: z.pressY * z.vh },
           vw: z.vw, vh: z.vh, zone, ball, kind: att.kind, input: att.input, training: att.training,
-          gameTime: this.time, gestureId: this.swipe.gestureId, shotId: this.shotId,
+          gameTime: this.time, gestureId: att.gestureId, shotId: att.shotId,
           greenAtPress: z.pressContactable, accepted: att.accepted, zoneReason: z.reason,
           dx: att.dx, dy: att.dy });
       } catch (e) {
@@ -352,15 +376,21 @@ const showTip = (text) => { if (text) tip = { text, until: g.time + 4.6 }; };
         if (this.debugRecording) this.logInput('calibration_capture', { outcome: {
           id: att.captureId || null, captured: false, error: String(e && e.message || e) } });
       }
-      if (att.captureId) armShot(att.captureId);
+      if (att.captureId && !tossCandidate) armShot(att.captureId);
     };
+    // Promotions happen during input/physics, before applyHit can consume the
+    // gesture or change shotId. Never read a newer gesture as this attempt.
+    for (const name of ['promotePendingServeZone', 'promotePendingRallyBackswing']) {
+      wrap(g, name, function (orig, ...args) { const result = orig(...args); syncAdmission(); return result; });
+    }
     wrap(g, 'logPressRejection', function (orig, reason, detail) {
-      if (att && !att.reason && !att.contact) att.reason = reason;
+      if (syncAdmission() && !att.reason && !att.contact) att.reason = reason;
       return orig(reason, detail);
     });
     wrap(g, 'applyHit', function (orig, side) {
+      const contactAttempt = side > 0 ? syncAdmission() : null;
       const r = orig.apply(null, [].slice.call(arguments, 1));
-      if (side > 0 && att) { att.contact = true; att.sweet = +(this.lastSweet || 0).toFixed(2); flush(); }
+      if (contactAttempt && att === contactAttempt) { att.contact = true; att.sweet = +(this.lastSweet || 0).toFixed(2); flush(); }
       return r;
     });
     wrap(g, 'setState', function (orig, st) { if (st !== GS.RALLY && st !== GS.SERVE_TOSS) flush(); return orig(st); });

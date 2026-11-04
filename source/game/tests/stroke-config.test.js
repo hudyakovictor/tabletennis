@@ -4,7 +4,7 @@ const { load } = require('./helpers.cjs');
 
 function fresh(extra) {
   return load(['10_math.js', '12_match_rules.js', '30_physics.js', '38_paddle_motion.js', '40_swipe.js', '70_game.js'],
-    ['STROKE_CONFIG', 'ARCH', 'PH', 'V3', 'SwipeTracker', 'classifyStroke', 'deriveStroke', 'refineRacket',
+    ['STROKE_CONFIG', 'ARCH', 'PH', 'V3', 'SwipeTracker', 'isRealStroke', 'classifyStroke', 'deriveStroke', 'refineRacket',
       'strokeFrame', 'impactRacket', 'predict', 'launchPoint', 'MATCH_RULES', 'playerInCaptureRange',
       'PADDLE_PROFILES', 'paddleGripProfile', 'PaddleStrokeMotion', 'parkServeBall', 'Game', 'GS'], extra);
 }
@@ -100,6 +100,79 @@ test('straight horizontal rally strokes create sidespin after aiming for both si
     assert.equal(flight.hitNet, false);
     assert.equal(Math.sign(flight.landed?.z), -side);
   }
+});
+
+test('recognized near-closed arcs remain lateral despite their short or zero chord', () => {
+  const l = fresh(), ctx = { side: 1, ball: { x: 0, y: 1.12, z: 1.65 }, ballSpeed: 6, arcSens: 1.8 };
+  for (const curl of [-2.4, 2.4]) for (const dist of [0, .01, .027]) for (const speed of [1.7, 2.4]) {
+    const m = metrics({ samples: 16, dist, pathLen: .16, curl, straightness: dist / .16,
+      speed, releaseSpeed: speed, peakSpeed: speed });
+    assert.equal(l.isRealStroke(m, false), true);
+    assert.equal(l.classifyStroke(m, ctx, speed / l.STROKE_CONFIG.racket.speed.inputScale).id,
+      curl < 0 ? 'HOOK' : 'FADE', `curl=${curl}, chord=${dist}, speed=${speed}`);
+  }
+  const jitter = metrics({ samples: 4, dist: .01, pathLen: .01, curl: 0 });
+  assert.equal(l.isRealStroke(jitter, false), false);
+  assert.equal(l.classifyStroke(metrics({ dist: .2, pathLen: .3, curl: -.8 }), ctx, .1).id, 'LOB');
+});
+
+test('the same arc keeps its spin direction across the chord-direction threshold', () => {
+  const l = fresh();
+  const p = l.V3.new(0, 1.12, 1.65), incoming = l.V3.new(0, -.1, 6), spin = l.V3.new();
+  for (const direction of [-1, 1]) for (const assist of [0, .85, 1]) {
+    const values = [];
+    for (const magnitude of [.249, .251]) {
+      const right = direction * magnitude;
+      const m = metrics({ samples: 12, dist: .15, pathLen: .20, curl: direction * .8,
+        right, up: Math.sqrt(1 - right * right), straightness: .75, smooth: .9,
+        speed: 2.4, releaseSpeed: 2.4, peakSpeed: 2.4 });
+      const raw = l.deriveStroke(m, { side: 1, ball: p, ballVelocity: incoming, ballSpin: spin,
+        ballSpeed: 6, spinGain: 1, arcSens: 1.8 });
+      const racket = l.refineRacket(p, incoming, spin, raw, assist, .85);
+      const v = l.V3.clone(incoming), w = l.V3.clone(spin);
+      assert.ok(l.impactRacket(v, w, racket.normal, racket.vR, .85, racket.rubber));
+      assert.equal(raw.stroke.id, direction < 0 ? 'HOOK' : 'FADE');
+      values.push(w.y);
+    }
+    assert.equal(Math.sign(values[0]), Math.sign(values[1]), `${direction}/${assist}: spin flipped ${values}`);
+    assert.ok(Math.abs(values[1] - values[0]) < 10, 'a tiny chord change must not reverse the brush');
+  }
+});
+
+test('bounded gesture history retains total turning after the curved samples are evicted', () => {
+  const l = fresh();
+  for (const direction of [-1, 1]) {
+    const small = new l.SwipeTracker(), large = new l.SwipeTracker(); large.maxSamples = 512;
+    for (const tracker of [small, large]) {
+      tracker.down(.5, .7, 0);
+      for (let i = 1; i <= 24; i++) {
+        const angle = Math.PI / 2 * i / 24;
+        tracker.move(.5 + direction * .12 * Math.sin(angle), .58 + .12 * Math.cos(angle), i * .008);
+      }
+      for (let i = 1; i <= 90; i++) tracker.move(.5 + direction * .12, .58 - i * .003, (24 + i) * .008);
+      tracker.up(.5 + direction * .12, .58 - 91 * .003, 115 * .008);
+    }
+    assert.ok(small.samples.length <= small.maxSamples);
+    near(small.m.pathLen, large.m.pathLen);
+    near(small.m.curl, large.m.curl);
+    const ctx = { side: 1, ball: { y: 1.12, z: 1.65 }, ballSpeed: 6, arcSens: 1.8 };
+    assert.equal(l.classifyStroke(small.m, ctx, .5).id, l.classifyStroke(large.m, ctx, .5).id);
+    small.cancel(); near(small.evictedCurl, 0);
+  }
+});
+
+test('inverse aiming starts from the separated physical launch point, not the ball contact center', () => {
+  const l = fresh(), p = l.V3.new(0, 1.12, 1.65), v = l.V3.new(0, -.1, 6), w = l.V3.new(120, 0, 0);
+  const original = l.context.solveLaunch;
+  let calls = 0;
+  l.context.solveLaunch = (origin, ...args) => {
+    calls++;
+    near(l.V3.dist(origin, p), l.PH.R * l.STROKE_CONFIG.racket.launchSeparation);
+    return original(origin, ...args);
+  };
+  const raw = l.deriveStroke(metrics(), { side: 1, ball: p, ballVelocity: v, ballSpin: w, ballSpeed: 6 });
+  l.refineRacket(p, v, w, raw, .85, .85);
+  assert.ok(calls > 0);
 });
 
 test('spin weights, archetypes, contact clamps and gain bounds are live configuration', () => {

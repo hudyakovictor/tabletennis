@@ -356,6 +356,8 @@ function bounceTable(p, v, w) {
     _edgeN.y = 1;
     n = V3.norm(_edgeN, _edgeN);
     e *= 1 - 0.30 * k;                  // a corner is wood and air, not a sprung top
+    // A confirmed descending tabletop contact cannot separate from its impact normal.
+    if (v.y < 0 && V3.dot(v, n) > 0) n = N_UP;
   }
   const info = impactSphere(v, w, n, ZERO3, e, PH.MU_TABLE, PH.ET_TABLE);
   p.y = PH.TABLE_Y + PH.R + 1e-5;
@@ -586,8 +588,8 @@ const _ELEV = [-0.34, -0.26, -0.19, -0.13, -0.08, -0.04, 0, 0.035, 0.07, 0.105,
   0.145, 0.19, 0.24, 0.30, 0.36, 0.43, 0.51, 0.60, 0.70, 0.81, 0.93, 1.06];
 /** Sparse grid for the cheap first pass; the winner is polished afterwards. */
 const _ELEV_SCAN = [-0.34, -0.19, -0.08, 0, 0.035, 0.07, 0.105, 0.145, 0.24, 0.36, 0.51, 0.70, 0.93, 1.06];
-/** Integration steps: coarse for the scan, medium for the polish, production
- *  step for the answer that is handed to the impact solver. */
+/** Search steps: coarse for the scan, medium for the polish, fine for local
+ *  corrections. The final answer is verified at PH.SIM_DT. */
 const DT_SCAN = 1 / 130, DT_POLISH = 1 / 200, DT_FINE = 1 / 260;
 
 function _tryLaunch(from, spin, speed, ux, uz, elev, netClear, out, dt) {
@@ -713,7 +715,7 @@ function solveLaunch(from, target, spin, opts = {}) {
   }
 
   // 5. answer confirmed at the step the impact solver works at
-  const fin = _tryLaunch(from, spin, speed, ux, uz, best.elev, netClear, o, DT_FINE);
+  const fin = _tryLaunch(from, spin, speed, ux, uz, best.elev, netClear, o, PH.SIM_DT);
   best = { score: scoreOf(fin), elev: best.elev, ...fin };
   if (!best) return null;
   return {

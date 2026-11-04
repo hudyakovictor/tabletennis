@@ -281,16 +281,32 @@ if (motionPreferenceQuery) {
 
 /* ---------- статистика зоны удара: реальные попытки с реальных пальцев ---------- */
 const ZoneStats = {
-  KEY: 'ttu-zone-stats', MAX: 300, mem: [],
-  all() { try { return JSON.parse(localStorage.getItem(this.KEY) || 'null') || this.mem; } catch (e) { return this.mem; } },
+  KEY: 'ttu-zone-stats', MAX: 300, mem: null,
+  all() {
+    if (this.mem !== null) return this.mem;
+    try { const rows = JSON.parse(localStorage.getItem(this.KEY) || 'null'); this.mem = Array.isArray(rows) ? rows.slice(-this.MAX) : []; }
+    catch (e) { this.mem = []; }
+    return this.mem;
+  },
   add(a) {
+    const ext = Array.isArray(a.ext) && a.ext.length === 3 && a.ext.every(v => Number.isFinite(v) && v >= 0) &&
+      a.ext[0] > 0 && a.ext[2] > 0 ? a.ext.slice() : null;
     const x = { t: Date.now(), kind: a.kind, input: a.input, accepted: a.accepted, zoneReason: a.zoneReason, dx: a.dx, dy: a.dy,
-      lead: a.lead, contact: a.contact, reason: a.reason, sweet: a.sweet, training: a.training, rules: a.rules, sig: a.sig || null };
+      lead: a.lead, contact: a.contact, reason: a.reason, sweet: a.sweet, training: a.training, rules: a.rules, sig: a.sig || null,
+      ext, kx: Number.isFinite(a.kx) && a.kx > 0 ? a.kx : null,
+      gestureId: Number.isFinite(a.gestureId) ? a.gestureId : null, shotId: Number.isFinite(a.shotId) ? a.shotId : null,
+      acceptedAtPress: typeof a.acceptedAtPress === 'boolean' ? a.acceptedAtPress : null,
+      zoneReasonAtPress: typeof a.zoneReasonAtPress === 'string' ? a.zoneReasonAtPress.slice(0, 300) : null };
     const L = this.all(); L.push(x); while (L.length > this.MAX) L.shift();
     this.mem = L; try { localStorage.setItem(this.KEY, JSON.stringify(L)); } catch (e) {}
   },
-  LOG: 'ttu-match-log', memLog: [],
-  matches() { try { return JSON.parse(localStorage.getItem(this.LOG) || 'null') || this.memLog; } catch (e) { return this.memLog; } },
+  LOG: 'ttu-match-log', memLog: null,
+  matches() {
+    if (this.memLog !== null) return this.memLog;
+    try { const rows = JSON.parse(localStorage.getItem(this.LOG) || 'null'); this.memLog = Array.isArray(rows) ? rows.slice(-30) : []; }
+    catch (e) { this.memLog = []; }
+    return this.memLog;
+  },
   logMatch(c, win) {
     if (!c || c.n < 3) return;
     const L = this.matches(); L.push({ t: Date.now(), pct: c.pct, n: c.n, win: !!win, key: c.key }); while (L.length > 30) L.shift();

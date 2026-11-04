@@ -61,7 +61,7 @@ function fixtureGame(over = {}) {
       live: true, lastHitBy: 1, golden: null },
     player: { pos: V3.new(0.20, PH.TABLE_Y, 1.15) },
     ai: { pos: V3.new(0, PH.TABLE_Y, -1.2) },
-    time: 0, strokeTime: 0, shotId: 1, netTouched: false, rally: 1,
+    time: 0, strokeTime: 0, shotId: 1, netTouched: false, rally: 1, rallyBounces: [-1],
     ...over,
   };
 }
@@ -401,11 +401,15 @@ test('восприятие сразу, решение — через L.react: EA
   assert.ok(delays[0] / delays[3] > 4, 'разница между EASY и WTF больше чем в 4 раза');
 });
 
-/* Реальный прилёт: мяч уже отскочил на стороне игрока и идёт к боту. */
+/* Legal incoming flights: faster balls descend sooner, rather than sailing
+ * over the AI's court without the required bounce. */
 function incomingGame(speed, dx) {
+  const bounceLead = 1.45 / speed;
   return fixtureGame({
-    ball: { p: V3.new(dx, PH.TABLE_Y + 0.35, 0.55), v: V3.new(0, 1.2, -speed), w: V3.new(0, 0, 20),
+    ball: { p: V3.new(dx, PH.TABLE_Y + 0.35, 0.55),
+      v: V3.new(0, PH.G * bounceLead / 2 - (0.35 - PH.R) / bounceLead, -speed), w: V3.new(0, 0, 20),
       live: true, lastHitBy: 1, golden: null },
+    rallyBounces: [],
   });
 }
 /* Успевает ли уровень физически дотянуться: гоняем think и ищем кадр, где
@@ -417,6 +421,10 @@ function capture(level, speed, reps = 20) {
     const ai = new lib.OpponentAI(level);
     ai.rng = lcg(100 + k);
     const g = incomingGame(speed, -0.5 + k * 0.05);
+    const flight = lib.predict(g.ball.p, g.ball.v, g.ball.w,
+      { dt: PH.SIM_DT, maxT: 2.4, stopOnFirstBounce: true });
+    assert.ok(flight.landed && flight.landed.z < 0 && !flight.hitNet,
+      `${ai.L.name}/${speed}: reaction is tested on a legal own-court bounce`);
     for (let i = 0; i < 240; i++) {
       g.strokeTime = i / 120;
       ai.think(g, 1 / 120);

@@ -45,13 +45,9 @@ const WATCHDOG_ENGINE_CODES = Object.freeze([
 
 /** Коды, которые валят гейт. `BALL_OFF_FRAME` с cause='input' — объяснение,
  *  почему удар не получился, а не аномалия. */
-function wdCountsForGate(tickets, counts) {
+function wdCountsForGate(counts, excluded) {
   const out = { ...counts };
-  for (const row of tickets || []) {
-    if (row.code === 'BALL_OFF_FRAME' && row.detail && row.detail.cause === 'input') {
-      out.BALL_OFF_FRAME = (out.BALL_OFF_FRAME || 0) - 1;
-    }
-  }
+  for (const [code, count] of Object.entries(excluded)) out[code] = (out[code] || 0) - count;
   return out;
 }
 
@@ -182,6 +178,7 @@ class PhysicsWatchdog {
     this.resetShot();
     this.tickets = [];
     this.counts = {};
+    this.excludedCounts = { BALL_OFF_FRAME: 0 };
     for (const code of WATCHDOG_CODES) this.counts[code] = 0;
     this.lastTicket = null;
     this.lastContact = null;
@@ -275,6 +272,8 @@ class PhysicsWatchdog {
     if (now !== null && Number.isFinite(last) && now - last < this.rules.ticketCooldownSec) return null;
     if (now !== null) this._lastAt[code] = now;
     this.counts[code] = (this.counts[code] || 0) + 1;
+    // Exclusions have the same lifetime as counts, not the bounded ticket tail.
+    if (code === 'BALL_OFF_FRAME' && detail.cause === 'input') this.excludedCounts.BALL_OFF_FRAME++;
     if (WATCHDOG_ENGINE_CODES.includes(code)) this._markCause('engine', code);
     const side = Number.isFinite(detail.side) ? detail.side : this._ctxSide;
     const aiLevel = Number.isFinite(detail.aiLevel) ? detail.aiLevel : this._ctxLevel;
@@ -726,6 +725,7 @@ class PhysicsWatchdog {
     const s = this._lastStroke;
     if (!s) return { who: null, vmag: null, limit: null, limitRatio: null };
     return {
+      side: s.side,
       who: s.side === -1 ? 'opponent' : 'player',
       aiLevel: s.aiLevel,
       strokeId: s.strokeId,
@@ -952,7 +952,7 @@ class PhysicsWatchdog {
       version: this.version, rules: this.rules, classes, codes: WATCHDOG_CLASSES,
       counts: { ...this.counts }, total: this.tickets.length, tickets: this.tickets.slice(),
       /* cause='input' — законный исход удара: в счёт аномалий не идёт. */
-      gateCounts: wdCountsForGate(this.tickets, this.counts),
+      gateCounts: wdCountsForGate(this.counts, this.excludedCounts),
       causes: this._causeCounts(),
       lastStroke: this._lastStroke,
       lastContact: this.lastContact,
@@ -1149,7 +1149,7 @@ class PhysicsWatchdog {
         add('BALL_OFF_FRAME (legal shot)', 1, w.counts.BALL_OFF_FRAME);
         add('off-frame cause=input', 'input', (firstOf(w, 'BALL_OFF_FRAME') || {}).detail?.cause || 'none');
         add('off-frame input does not fail the gate', 0,
-          wdCountsForGate(w.tickets, w.counts).BALL_OFF_FRAME);
+          wdCountsForGate(w.counts, w.excludedCounts).BALL_OFF_FRAME);
       }
       /* --- 4д2. мяч улетел после бага движка: cause=engine, гейт красный -- */
       {
@@ -1163,7 +1163,7 @@ class PhysicsWatchdog {
           project, viewport: { w: 1280, h: 760 } });
         add('off-frame cause=engine', 'engine', (firstOf(w, 'BALL_OFF_FRAME') || {}).detail?.cause || 'none');
         add('off-frame engine fails the gate', 1,
-          wdCountsForGate(w.tickets, w.counts).BALL_OFF_FRAME);
+          wdCountsForGate(w.counts, w.excludedCounts).BALL_OFF_FRAME);
         const off = firstOf(w, 'BALL_OFF_FRAME');
         add('off-frame carries vmag/limit', 'yes',
           off && Number.isFinite(off.detail.limitRatio) && Number.isFinite(off.detail.vmag) ? 'yes' : 'none');
@@ -1178,7 +1178,7 @@ class PhysicsWatchdog {
           ball: { live: true, p: { x: 0.1, y: 2.4, z: -0.4 }, v: { x: 0, y: 1, z: 0 } },
           project, viewport: { w: 1280, h: 760 } });
         add('legal lob off the frame is not an anomaly', 0,
-          wdCountsForGate(w.tickets, w.counts).BALL_OFF_FRAME);
+          wdCountsForGate(w.counts, w.excludedCounts).BALL_OFF_FRAME);
       }
       /* --- 3д. клинок за кадром, пока мяч жив -------------------------- */
       {

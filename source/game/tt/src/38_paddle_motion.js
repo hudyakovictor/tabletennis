@@ -97,6 +97,15 @@ function stepPaddleAngle(current, target, rate, dt, maxSpeed = 12, wrap = false)
   const remaining = Math.min(error, boundary) * Math.exp(-rate * (t - linearTime));
   return current + Math.sign(delta) * (error - remaining);
 }
+
+/** Bound displacement itself, including diagonal travel, not just telemetry. */
+function stepPaddlePosition(current, target, rate, dt, maxSpeed, out = current) {
+  const x = target.x - current.x, y = target.y - current.y, z = target.z - current.z;
+  const distance = Math.hypot(x, y, z);
+  if (!Number.isFinite(distance) || !(distance > 1e-9)) return V3.copy(out, current);
+  const amount = stepPaddleAngle(0, distance, rate, dt, maxSpeed) / distance;
+  return V3.set(out, current.x + x * amount, current.y + y * amount, current.z + z * amount);
+}
 function paddleFaceAngles(normal) {
   const length = Math.hypot(normal.x, normal.y, normal.z);
   if (!Number.isFinite(length) || length < 1e-8) return { yaw: 0, pitch: -15 * DEG };

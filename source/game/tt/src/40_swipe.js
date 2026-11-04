@@ -20,6 +20,7 @@ class SwipeTracker {
     this.originY = 0;
     this.originT = 0;
     this.evictedPathLen = 0;
+    this.evictedCurl = 0; this.evictedSegment = null;
     this.m = this.blankMetrics();
     this.lastReleased = null;
     /* Which gesture has already been a real swipe (see
@@ -45,6 +46,7 @@ class SwipeTracker {
     this.active = true; this.startT = t;
     this.originX = x; this.originY = y; this.originT = t;
     this.evictedPathLen = 0;
+    this.evictedCurl = 0; this.evictedSegment = null;
     // Gesture speed uses real time, but its opportunity to meet the ball
     // must age in the same (possibly slowed) time as the ball's physics.
     this.sampleSimTime = Number.isFinite(simTime) ? simTime : null;
@@ -69,10 +71,7 @@ class SwipeTracker {
       return;
     }
     s.push({ x, y, t });
-    if (s.length > this.maxSamples) {
-      if (s.length >= 2) this.evictedPathLen += Math.hypot(s[1].x - s[0].x, s[1].y - s[0].y);
-      s.shift();
-    }
+    this.trimSamples();
     this.compute(t);
   }
   /** Abandon the gesture without producing a stroke — used when a second
@@ -83,9 +82,20 @@ class SwipeTracker {
     this.realGestureId = -1; this.realAt = 0; this.realAtSim = null;
     this.sampleSimTime = null; this.releaseSimTime = null;
     this.evictedPathLen = 0;
+    this.evictedCurl = 0; this.evictedSegment = null;
     this.samples.length = 0;
     this.lastReleased = null;
     this.m = this.blankMetrics();
+  }
+  trimSamples() {
+    while (this.samples.length > this.maxSamples) {
+      const old = this.samples.shift(), first = this.samples[0];
+      const x = first.x - old.x, y = first.y - old.y, distance = Math.hypot(x, y);
+      this.evictedPathLen += distance;
+      const prev = this.evictedSegment;
+      if (prev && distance > 1e-5) this.evictedCurl += Math.atan2(prev.x * y - prev.y * x, prev.x * x + prev.y * y);
+      this.evictedSegment = { x, y };
+    }
   }
   up(x, y, t, simTime) {
     if (!this.active) return null;
@@ -99,12 +109,7 @@ class SwipeTracker {
       if (this.samples.length > 1) { last.x = x; last.y = y; last.t = Math.max(last.t, t); }
     } else {
       this.samples.push({ x, y, t });
-      if (this.samples.length > this.maxSamples) {
-        if (this.samples.length >= 2) {
-          this.evictedPathLen += Math.hypot(this.samples[1].x - this.samples[0].x, this.samples[1].y - this.samples[0].y);
-        }
-        this.samples.shift();
-      }
+      this.trimSamples();
     }
     this.compute(t);
     this.active = false;
@@ -125,7 +130,7 @@ class SwipeTracker {
     m.dur = Math.max(0.0025, b.t - ot);
 
     // path length + curl (signed turning, + = counter-clockwise on screen)
-    let pl = this.evictedPathLen || 0, curl = 0, jerkAcc = 0, prevSpeed = 0, speedChanges = 0;
+    let pl = this.evictedPathLen || 0, curl = this.evictedCurl || 0, jerkAcc = 0, prevSpeed = 0, speedChanges = 0;
     let activePeak = 0;
     const peakCut = b.t - 0.28;
     for (let i = 1; i < n; i++) {
@@ -139,8 +144,9 @@ class SwipeTracker {
       }
       if (i > 1) { jerkAcc += Math.abs(sp - prevSpeed); speedChanges++; }
       prevSpeed = sp;
-      if (i > 1) {
-        const qx = s[i - 1].x - s[i - 2].x, qy = s[i - 1].y - s[i - 2].y;
+      if (i > 1 || this.evictedSegment) {
+        const qx = i > 1 ? s[i - 1].x - s[i - 2].x : this.evictedSegment.x;
+        const qy = i > 1 ? s[i - 1].y - s[i - 2].y : this.evictedSegment.y;
         const cr = qx * py - qy * px, dp = qx * px + qy * py;
         if (seg > 1e-5) curl += Math.atan2(cr, dp);     // signed turn, radians
       }
@@ -297,11 +303,6 @@ function classifyBaseStroke(m, ctx, sp01) {
   if (latMag > C.sideLatThreshold && Math.abs(u) < C.horizontalUMax &&
       Math.abs(m.curl || 0) <= C.sideCurlThreshold &&
       (m.compactFlick || (m.pathLen ?? m.dist ?? 0) >= C.minGesture.rally.path)) return STROKES.SIDE;
-  // tiny gesture = touch play
-  if (m.dist < C.touchDistMax && sp01 < C.touchSpeedMax) {
-    if (incSpeed > C.blockIncomingSpeed || incomingTop > C.blockIncomingTop) return STROKES.BLOCK;
-    return (overTable && hAboveTable < C.dropHeightMax) ? STROKES.DROP : STROKES.BLOCK;
-  }
   /* ДУГА «С» = БОКОВАЯ ЗАКРУТКА. Жест рисует дугу: большой суммарный
    * поворот при заметно более длинном пути, чем хорда. Направление хорды
    * у дуги случайно (та же «С» сверху вниз и снизу вверх — один жест),
@@ -319,10 +320,17 @@ function classifyBaseStroke(m, ctx, sp01) {
      * Порог curl=0.55/arcSens (было 0.85) — палец на телефоне не рисует
      * идеальную C: реалистичная дуга даёт 0.5–0.7 рад. */
     const lobLift = slow && u > C.liftUMin;
-    if (!lobLift && Math.abs(m.curl) >= C.arcCurlThreshold / arcSens && m.dist >= C.arcDistMin &&
-      (bend >= C.arcBendMin || (m.straightness <= C.arcStraightnessMax && Math.abs(m.curl) >= C.arcStrongCurlThreshold / arcSens))) {
+    const closedArc = m.dist < C.arcDistMin && (m.pathLen || 0) >= C.minGesture.arc.path &&
+      Math.abs(m.curl) >= C.minGesture.arc.curl;
+    if (!lobLift && Math.abs(m.curl) >= C.arcCurlThreshold / arcSens && (m.dist >= C.arcDistMin || closedArc) &&
+      (closedArc || bend >= C.arcBendMin || (m.straightness <= C.arcStraightnessMax && Math.abs(m.curl) >= C.arcStrongCurlThreshold / arcSens))) {
       return m.curl < 0 ? STROKES.HOOK : STROKES.FADE;
     }
+  }
+  // A short chord is touch play only after genuine near-closed arcs are recognized.
+  if (m.dist < C.touchDistMax && sp01 < C.touchSpeedMax) {
+    if (incSpeed > C.blockIncomingSpeed || incomingTop > C.blockIncomingTop) return STROKES.BLOCK;
+    return (overTable && hAboveTable < C.dropHeightMax) ? STROKES.DROP : STROKES.BLOCK;
   }
   /* Finishing a high ball always beats everything else — but only if the
    * hand is actually going forward/up. A fast DOWNWARD gesture was caught
@@ -468,7 +476,8 @@ function deriveStroke(m, ctx) {
    * curl, когда хорда молчит, поэтому «С» округляет мяч, даже если палец
    * вернулся почти в исходную точку. Знак согласован с классификатором:
    * curl < 0 (буква «С») — удар вокруг левого бока мяча. */
-  const rLat = Math.abs(r) >= S.lateralGestureMin ? r
+  const arcBrush = st.id === 'HOOK' || st.id === 'FADE';
+  const rLat = !arcBrush && Math.abs(r) >= S.lateralGestureMin ? r
     : clamp(-(m.curl || 0) / S.lateralCurlScale, -1, 1) * ((st.id === 'HOOK' || st.id === 'FADE' || st.id === 'BANANA' || st.id === 'SERVE_SIDE') ? 1 : S.nonSideCurlK);
   const latMix = clamp((A.lat - S.lateralArchetypeBase) / S.lateralArchetypeSpan, 0, 1) * clamp(Math.abs(rLat) * S.lateralIntentK, 0, 1);
 
@@ -1448,7 +1457,7 @@ function refineRacket(ballP, ballV, ballW, racket, assist, quality) {
   /* ---- 3. converge the stroke rotation onto that target ----------- */
   let dE = 0, dA = 0, sc = 1, dmp = 1, sol = null, converged = false;
   for (let outer = 0; outer < 3; outer++) {
-    sol = solveLaunch(ballP, target, _rw, {
+    sol = solveLaunch(V3.clone(launchPoint(ballP, _rn)), target, _rw, {
       speed: V3.len(_rv),
       netClear: racket.netClear,
       speedForgive: 0,                       // power is the player's business

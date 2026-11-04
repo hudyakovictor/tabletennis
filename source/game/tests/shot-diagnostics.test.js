@@ -38,10 +38,13 @@ test('stationary click is rejected, not classified as a topspin', () => {
 });
 test('one gesture updates one record; holding can resume but never duplicates contact', () => {
   const j = attempt(), sw = gesture(); j.expire(.4);
+  assert.equal(j.latest.reason, 'TIMING_EARLY');
   j.observe(1, sw.lastReleased, { time: .41, sampleTime: .41, active: true, isServe: false, strokeId: 'LOOP' });
   assert.equal(j.latest.outcome, 'pending'); assert.equal(j.records.length, 1);
+  assert.equal(j.latest.reason, null);
   contact(j); j.observe(1, sw.lastReleased, { time: .5, sampleTime: .5, active: false, strokeId: 'CHOP' });
   assert.equal(j.latest.strokeId, 'LOOP'); assert.equal(j.records.length, 1);
+  assert.equal(j.latest.reason, null);
 });
 test('actual contact snapshots measured vectors, not mutable ball references', () => {
   const { j, b } = contact(); near(j.latest.contact.spin.topRps, 20); near(j.latest.contact.spin.sideRps, 5);
@@ -127,9 +130,9 @@ test('calibration CLI refuses to overwrite its comparison baseline', () => {
 test('resuming an initially too-weak held gesture clears the old rejection', () => {
   const sw = new SwipeTracker(), j = new ShotJournal(); sw.down(.5, .7, 0); sw.move(.5, .7, .05);
   j.observe(1, sw.m, { time: .05, sampleTime: .05, active: true, isServe: false, strokeId: null }); j.expire(.3);
-  assert.equal(j.latest.outcome, 'rejected'); sw.move(.5, .3, .35);
+  assert.equal(j.latest.outcome, 'rejected'); assert.equal(j.latest.reason, 'STATIC_CLICK'); sw.move(.5, .3, .35);
   j.observe(1, sw.m, { time: .35, sampleTime: .35, active: true, isServe: false, strokeId: 'LOOP' });
-  assert.equal(j.latest.outcome, 'pending'); assert.equal(j.latest.valid, true);
+  assert.equal(j.latest.outcome, 'pending'); assert.equal(j.latest.valid, true); assert.equal(j.latest.reason, null);
 });
 
 test('live HUD uses a short stroke/result and one spin component; full details stay in journal', () => {

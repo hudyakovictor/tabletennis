@@ -67,6 +67,45 @@ test('recorder reset releases highlights and last clip between matches', () => {
   assert.equal(recorder.lastClip, null);
 });
 
+test('a low-FPS rally never borrows frames from the preceding rally or plays too fast', () => {
+  const { g, MomentRecorder, MomentPlayer } = fixture(), recorder = new MomentRecorder();
+  recorder.beginRally(0, null);
+  for (let i = 0; i < 300; i++) { g.ball.p.x = -10; recorder.push(i / 30, g); }
+  recorder.beginRally(10, [0, 0]);
+  for (let i = 0; i < 60; i++) { g.ball.p.x = 100 + i; recorder.push(10 + i / 20, g); }
+  for (let i = 0; i < 3; i++) recorder.addContact(10 + i, { by: 1, stroke: 'DRIVE', speed: 50, spin: 20 });
+  const clip = recorder.endRally(13, g, { winner: 1, reason: 'POINT', score: [1, 0], target: 11 });
+  assert.ok(clip);
+  for (let i = 0; i < clip.frames.length; i += 16) assert.ok(clip.frames[i] >= 100, 'the clip contains an earlier rally');
+  const player = new MomentPlayer(); player.play(clip, 1); player.i = 6;
+  player.update(.2, g);
+  assert.ok(Math.abs(g.ball.p.x - 108) < .01, `20 Hz input played at the wrong speed: ${g.ball.p.x}`);
+});
+
+test('recorded clips have the same fixed-rate timeline from 14 through 120 FPS', () => {
+  for (const fps of [14, 20, 30, 60, 120]) {
+    const { g, MomentRecorder } = fixture(), recorder = new MomentRecorder();
+    recorder.beginRally(0, null);
+    for (let i = 0; i <= fps * 3; i++) {
+      g.ball.p.x = 100 + i / fps;
+      recorder.push(i / fps, g);
+    }
+    const clip = recorder.captureClip(3);
+    assert.equal(clip.hz, 30);
+    assert.equal(clip.len, 91, `${fps} FPS produced ${clip.len} frames instead of a three-second timeline`);
+    for (let i = 0; i < clip.len; i++) assert.ok(Math.abs(clip.frames[i * 16] - 100 - i / 30) < 1e-4);
+  }
+});
+
+test('a new rally with no recorded frames cannot replay a previous rally', () => {
+  const { g, MomentRecorder, MomentPlayer } = fixture(), recorder = new MomentRecorder();
+  recorder.beginRally(0, null);
+  for (let i = 0; i < 60; i++) recorder.push(i / 30, g);
+  recorder.beginRally(5, null);
+  assert.equal(recorder.captureClip(5), null);
+  assert.equal(new MomentPlayer().play({ frames: new Float32Array(), hz: 30 }), false);
+});
+
 test('music point and climax effects stay silent even with active unmuted audio', () => {
   const { MusicSystem } = load(['10_math.js', '75_music.js'], ['MusicSystem']);
   let nodes = 0;

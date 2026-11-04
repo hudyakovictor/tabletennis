@@ -80,7 +80,7 @@ class ShotJournal {
     entry.deadlineSim = Number.isFinite(context.sampleSimTime) ? context.sampleSimTime + windowSec : null;
     const withinWindow = Number.isFinite(context.simTime) && Number.isFinite(entry.deadlineSim)
       ? context.simTime <= entry.deadlineSim : context.time <= entry.deadline;
-    if (['no_contact', 'rejected'].includes(entry.outcome) && valid && withinWindow) { entry.outcome = 'pending'; entry.revision++; }
+    if (['no_contact', 'rejected'].includes(entry.outcome) && valid && withinWindow) { entry.outcome = 'pending'; entry.reason = null; entry.revision++; }
     if (entry.pressZone && !entry.pressZone.accepted) { entry.outcome = 'outside'; return entry; }
     if (!valid && !context.active && entry.outcome !== 'rejected') { entry.outcome = 'rejected'; entry.revision++; }
     return entry;
@@ -100,6 +100,7 @@ class ShotJournal {
     const e = this.records.find(r => r.gestureId === gestureId && !r.contact);
     if (!e || !zone) return;
     e.pressZone = { ...zone, accepted: true, reason: null };
+    e.reason = null;
     if (e.outcome === 'outside' || e.outcome === 'rejected') { e.outcome = 'pending'; e.revision++; }
   }
   noteOutcome(tag) {
@@ -153,7 +154,7 @@ class ShotJournal {
     const outgoing = { v: shotVec(ball.v), w: shotVec(ball.w) };
     const input = racket.contactInput || null;
     entry.strokeId = racket.stroke ? racket.stroke.id : 'DRIVE'; entry.valid = true;
-    entry.isServe = !!racket.isServe; entry.outcome = 'pending'; entry.revision++;
+    entry.isServe = !!racket.isServe; entry.outcome = 'pending'; entry.reason = null; entry.revision++;
     entry.contact = { time, speedKmh: V3.len(ball.v) * 3.6, spin: measureShotSpin(ball.w, ball.v),
       quality: clamp(Number.isFinite(racket.quality) ? racket.quality : 0, 0, 1),
       incoming: input, outgoing, normal: shotVec(racket.normal), racketVelocity: shotVec(racket.vR),

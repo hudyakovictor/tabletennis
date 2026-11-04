@@ -3,6 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
+const { load: loadEngine } = require('./helpers.cjs');
 
 const source = fs.readFileSync(path.join(__dirname, '../tt/src/06_calibration.js'), 'utf8');
 const plain = value => JSON.parse(JSON.stringify(value));
@@ -196,3 +197,53 @@ test('policy refresh repairs global capture drift and unrelated full settings do
   api.applyGameCalibrations(g, {}); assert.equal(g.ball.hist.length, 96);
   api.applyGameCalibration(g, 'trailLen', 10); assert.equal(g.ball.hist.length, 9);
 });
+
+for (const hz of [60, 120]) {
+  test(`timed trail shrink at ${hz} Hz keeps the exact cutoff paired through the next live append`, () => {
+    const api = load(), g = game();
+    const { Game } = loadEngine(['10_math.js', '30_physics.js', '70_game.js'], ['Game']);
+    api.applyGameCalibrations(g, { trailLen: 100 });
+    const samples = Array.from({ length: hz + 1 }, (_, i) => g.time - 1 + i / hz);
+    g.ball.histTimes = [...samples]; g.ball.hist = samples.flatMap(t => [t, 2 * t, -t]);
+    g.ball.trailSampleAt = g.time;
+    api.applyGameCalibration(g, 'trailLen', 33);
+    for (let step = 0; step < 2; step++) {
+      const cutoff = g.time - .176, expected = [cutoff, ...samples.filter(t => t > cutoff)];
+      assert.equal(g.ball.hist.length, g.ball.histTimes.length * 3, 'positions and timestamps remain paired');
+      assert.equal(g.ball.histTimes.length, expected.length);
+      for (let i = 0; i < expected.length; i++) {
+        assert.ok(Math.abs(g.ball.histTimes[i] - expected[i]) < 1e-12, 'the oldest sample is exactly at the cutoff');
+        for (const [axis, factor] of [[0, 1], [1, 2], [2, -1]]) {
+          assert.ok(Math.abs(g.ball.hist[i * 3 + axis] - factor * expected[i]) < 1e-12, 'interpolation preserves timestamp/position pairing');
+        }
+      }
+      if (!step) {
+        g.time += 1 / hz; samples.push(g.time); g.ball.p = { x: g.time, y: 2 * g.time, z: -g.time };
+        Game.prototype.recordBallTrail.call(g);
+      }
+    }
+    api.applyGameCalibration(g, 'trailLen', 0);
+    assert.equal(g.ball.hist.length, 0); assert.equal(g.ball.histTimes.length, 0); assert.equal(g.scene.mesh.trail.count, 0);
+  });
+}
+
+for (const toggle of ['requested motion', 'OS motion', 'trail visibility']) {
+  test(`${toggle} policy toggle clears both timed histories immediately and retains the trail request`, () => {
+    const api = load(), g = game();
+    const { Game } = loadEngine(['10_math.js', '30_physics.js', '70_game.js'], ['Game']);
+    api.applyGameCalibrations(g, { trailLen: 33 });
+    g.ball.histTimes = [9.99, 10]; g.ball.hist = [0, 1, 2, 3, 4, 5];
+    if (toggle === 'requested motion') g.motionOff = true;
+    else if (toggle === 'OS motion') g.motionQuery.matches = true;
+    else g.settings.showTrail = false;
+    const off = api.refreshGameCalibrationPolicy(g, '_policy');
+    assert.equal(g.ball.hist.length, 0); assert.equal(g.ball.histTimes.length, 0); assert.equal(g.scene.mesh.trail.count, 0);
+    assert.equal(off.requested.trailLen, .33); assert.equal(off.active.trailLen, false);
+    g.motionOff = false; g.motionQuery.matches = false; g.settings.showTrail = true;
+    assert.equal(api.refreshGameCalibrationPolicy(g, '_policy').active.trailLen, true);
+    assert.equal(g.ball.hist.length, 0, 'reenabling does not restore an old trail');
+    g.time += 1 / 60; g.ball.p = { x: 0, y: 1, z: 2 };
+    Game.prototype.recordBallTrail.call(g);
+    assert.equal(g.ball.hist.length, 3); assert.equal(g.ball.histTimes.length, 1); assert.equal(g.ball.histTimes[0], g.time);
+  });
+}
