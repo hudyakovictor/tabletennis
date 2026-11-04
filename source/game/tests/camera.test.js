@@ -26,7 +26,7 @@ const NAMES = ['cameraRigFor', 'rigViewProj', 'tabletopBounds', 'tableScreenBoun
   'paddleTargetFromPointer', 'projectPoint', 'unprojectToPlane', 'clampPaddleToFrustum',
   'paddleVisibleOk', 'lensFovDeg', 'horizontalFovDeg', 'rigMargin', 'tableFrameShift',
   'tableTopScreenY', 'PH', 'M4', 'paddleLimitsFor', 'depthForPointer', 'quantizeDepth',
-  'CAM_ADJUST', 'pointerBladeSolve'];
+  'CAM_ADJUST', 'pointerBladeSolve', 'REACH_SHELL'];
 const lib = load(['10_math.js', '30_physics.js', '57_camera.js'], NAMES);
 
 const VIEWPORTS = [
@@ -314,6 +314,27 @@ test('an admitted press owns the depth plane: forceZ keeps the blade on the poin
       assert.ok(forced >= 6, `${mode} ${w}x${h}: only ${forced} forced samples`);
     }
   }
+});
+
+test('lifting across the height boundary does not abruptly jump the blade toward the net', () => {
+  for (const [w, h] of VIEWPORTS) for (const mode of lib.CAMERA_ORDER) {
+    const aspect = w / h, rig = lib.cameraRigFor(mode, null, aspect);
+    const vp = lib.rigViewProj(rig, aspect);
+    const boundary = lib.projectPoint(vp, { x: 0, y: lib.PH.TABLE_Y + lib.REACH_SHELL.yHiHard,
+      z: lib.PADDLE_STANCE_Z }, {});
+    const before = lib.pointerBladeSolve(rig, aspect, .5, boundary.y + .00001);
+    const after = lib.pointerBladeSolve(rig, aspect, .5, boundary.y - .00001);
+    assert.ok(Math.abs(after.tz - before.tz) < .005, `${mode} ${w}x${h}: depth jumped ${before.tz} -> ${after.tz}`);
+  }
+});
+
+test('reusing the pointer solve buffer does not retain a previous forced depth or pinned side', () => {
+  const aspect = 1280 / 760, rig = lib.cameraRigFor('BROADCAST', null, aspect), out = {};
+  lib.pointerBladeSolve(rig, aspect, .99, .5, { out, forceZ: 1.1 });
+  assert.equal(out.forcedZ, true);
+  lib.pointerBladeSolve(rig, aspect, .5, .55, { out });
+  assert.notEqual(out.forcedZ, true);
+  assert.equal(out.pinned, 0);
 });
 
 test('pointer → blade is the exact inverse of the projection', () => {

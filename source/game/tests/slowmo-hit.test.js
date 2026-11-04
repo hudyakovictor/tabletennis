@@ -1,12 +1,13 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const { load } = require('./helpers.cjs');
+const windowHandlers = new Map();
 
 const lib = load(['10_math.js', '12_match_rules.js', '30_physics.js', '38_paddle_motion.js',
   '40_swipe.js', '42_shot_diagnostics.js', '56_rig.js', '57_camera.js', '70_game.js'],
-  ['Game', 'SwipeTracker', 'isRealStroke', 'tapStrokeMetrics', 'ShotJournal', 'V3', 'PH', 'GS',
+  ['Game', 'SwipeTracker', 'PaddleStrokeMotion', 'isRealStroke', 'tapStrokeMetrics', 'ShotJournal', 'V3', 'PH', 'GS',
     'rigViewProj', 'integrateBall', 'predict', 'M4'],
-  { window: { addEventListener() {} }, document: { addEventListener() {},
+  { window: { addEventListener(type, handler) { windowHandlers.set(type, handler); } }, document: { addEventListener() {},
     body: { style: {}, classList: { toggle() {} } }, documentElement: { style: {} } } });
 
 function inputGame(pointerType = 'touch', scale = 1) {
@@ -33,10 +34,14 @@ function inputGame(pointerType = 'touch', scale = 1) {
   g._liveRig = { eye: V3.new(0, 1.68, 2.38), look: V3.new(0, .74, -.25), fov: 44, shiftY: 0 };
   g.R = { viewProj: lib.rigViewProj(g._liveRig, width / height), aspect: () => width / height };
   g.bindInput();
-  const send = (type, point = g.project(g.ball.p, {}), timestamp = g.time * 1000) => handlers.get(type)({
+  const event = (type, point, timestamp, extra) => ({
     type, pointerId: 1, pointerType, button: 0, buttons: type === 'pointerup' ? 0 : 1,
-    clientX: point.x * width, clientY: point.y * height, timeStamp: timestamp, cancelable: true, preventDefault() {} });
-  return { g, send };
+    clientX: point.x * width, clientY: point.y * height, timeStamp: timestamp, cancelable: true, preventDefault() {}, ...extra });
+  const send = (type, point = g.project(g.ball.p, {}), timestamp = g.time * 1000, extra = {}) =>
+    handlers.get(type)(event(type, point, timestamp, extra));
+  const sendWindow = (type, point = g.project(g.ball.p, {}), timestamp = g.time * 1000, extra = {}) =>
+    windowHandlers.get(type)(event(type, point, timestamp, extra));
+  return { g, send, sendWindow, width, height };
 }
 
 function releasedSwipe() {
@@ -264,6 +269,101 @@ test('fast drags delivered in the same animation frame keep their start point', 
   assert.equal(sw.lastReleased.sy, .75);
   assert.ok(sw.lastReleased.dy < -.30);
   assert.equal(lib.isRealStroke(sw.lastReleased, false), true);
+});
+
+test('hardware gesture timing survives a stalled render clock without collapsing later samples', () => {
+  const { g, send } = inputGame();
+  g.tryInputHit = () => {};
+  send('pointerdown', { x: .5, y: .7 }, 1000);
+  send('pointermove', { x: .5, y: .6 }, 1200);
+  send('pointermove', { x: .5, y: .5 }, 1500);
+  send('pointerup', { x: .5, y: .4 }, 1600);
+  assert.ok(Math.abs(g.swipe.lastReleased.dur - .6) < 1e-9);
+  assert.ok(Math.abs(g.swipe.samples.at(-1).t - g.swipe.samples.at(-2).t - .1) < 1e-9);
+  assert.equal(g.time, 1, 'hardware input must not advance the simulation');
+});
+
+test('coalesced pointer samples retain the curved path instead of only its short chord', () => {
+  const { g, send, width, height } = inputGame();
+  g.tryInputHit = () => {};
+  const points = [[.50, .70], [.42, .66], [.38, .58], [.42, .50], [.50, .46], [.56, .50]];
+  send('pointerdown', { x: points[0][0], y: points[0][1] }, 1000);
+  const samples = points.slice(1).map(([x, y], i) => ({ pointerId: 1, pointerType: 'touch',
+    clientX: x * width, clientY: y * height, timeStamp: 1020 + i * 20 }));
+  send('pointermove', { x: points.at(-1)[0], y: points.at(-1)[1] }, 1100,
+    { getCoalescedEvents: () => samples });
+  assert.ok(g.swipe.m.samples >= points.length);
+  assert.ok(g.swipe.m.pathLen > .40, `path was reduced to ${g.swipe.m.pathLen}`);
+  assert.ok(Math.abs(g.swipe.m.curl) > 2, `curve was reduced to ${g.swipe.m.curl}`);
+});
+
+test('a late cancellation from a different pointer cannot abandon the current stroke', () => {
+  const { g, send } = inputGame();
+  send('pointerdown');
+  send('pointercancel', undefined, 1010, { pointerId: 9 });
+  assert.equal(g.swipe.active, true);
+  assert.equal(g.pointerDown, true);
+  send('pointercancel');
+  assert.equal(g.swipe.active, false);
+});
+
+test('window release completes a stroke when pointer capture was unavailable', () => {
+  const { g, send, sendWindow } = inputGame('mouse');
+  g.canvas.setPointerCapture = () => { throw Error('capture unavailable'); };
+  g.tryInputHit = () => {};
+  send('pointerdown', { x: .5, y: .7 }, 1000);
+  sendWindow('pointermove', { x: .5, y: .5 }, 1050);
+  sendWindow('pointerup', { x: .5, y: .4 }, 1100);
+  assert.equal(g.pointerDown, false);
+  assert.equal(g.swipe.active, false);
+  assert.equal(lib.isRealStroke(g.swipe.lastReleased, false), true);
+});
+
+test('paddle tracking bounds actual three-dimensional travel, not only the logged velocity', () => {
+  for (const fps of [30, 60, 120, 240]) {
+    const { g } = inputGame();
+    g.ball.live = false; g._calValues = { captureK: 1 };
+    g.pointer = { x: .05, y: .35 };
+    const start = lib.V3.clone(g.player.pos);
+    g.updatePlayerPaddle(1 / fps);
+    const actualSpeed = lib.V3.dist(start, g.player.pos) * fps;
+    assert.ok(actualSpeed <= 15 + 1e-6, `${fps} Hz: actual travel reached ${actualSpeed} m/s`);
+    assert.ok(Math.abs(actualSpeed - lib.V3.len(g.player.vel)) < 1e-6, 'telemetry must describe actual travel');
+  }
+});
+
+test('post-contact recovery remains bounded after the gesture has been released', () => {
+  for (const fps of [30, 60, 120, 240]) {
+    const { g } = inputGame();
+    g.ball.live = false; g._calValues = { captureK: 1 };
+    g.pointer = { x: .05, y: .35 };
+    g.paddleMotion = new lib.PaddleStrokeMotion();
+    g.paddleMotion.contact(lib.V3.new(0, -.2, -1), .28, 'DRIVE', 'shakehand', 'right');
+    for (let frame = 0; frame < fps * .2; frame++) {
+      const start = lib.V3.clone(g.player.pos);
+      g.updatePlayerPaddle(1 / fps);
+      assert.ok(lib.V3.dist(start, g.player.pos) * fps <= 6 + 1e-6, `${fps} Hz: released recovery exceeded 6 m/s`);
+    }
+  }
+});
+
+test('downward mouse and touch swipes return short post-bounce balls near the net', () => {
+  for (const type of ['mouse', 'touch']) for (const scale of [1, .3]) {
+    for (const z of [.45, .65, .90]) {
+      const { g, send } = inputGame(type, scale);
+      lib.V3.set(g.ball.p, .05, lib.PH.TABLE_Y + .20, z);
+      lib.V3.set(g.ball.v, 0, -.1, .5); lib.V3.set(g.ball.w, -120, 0, 0);
+      const p = g.project(g.ball.p, {});
+      send('pointerdown', { x: p.x, y: p.y - .09 }, 1000);
+      send('pointermove', p, 1040);
+      assert.equal(g.ball.lastHitBy, 1, `${type}/${scale}/z=${z}: short ball was unreachable`);
+      assert.ok(g.ball.v.z < 0, 'the return must travel toward the opponent');
+      assert.notEqual(g.shotJournal.latest.contact?.incoming.gesture.tap, true);
+      const flight = lib.predict(g.ball.p, g.ball.v, g.ball.w,
+        { dt: lib.PH.SIM_DT, maxT: 2.6, stopOnFirstBounce: true, out: {} });
+      assert.ok(!flight.hitNet && flight.landed?.z < 0, `${type}/${scale}/z=${z}: short return did not clear the net`);
+    }
+  }
 });
 
 test('the shot journal follows the same scaled expiry as collision detection', () => {

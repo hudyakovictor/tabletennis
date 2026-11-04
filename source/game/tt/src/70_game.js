@@ -377,9 +377,10 @@ class Game {
         _lastEvT = Math.max(_lastEvT, this.time);
         return _lastEvT;
       }
-      if (_domT0 === null || Math.abs((this.time - _gameT0) - (ts - _domT0) * 0.001) > 0.22) {
+      if (_domT0 === null || (!this.swipe.active && Math.abs((this.time - _gameT0) - (ts - _domT0) * 0.001) > 0.22)) {
         _domT0 = ts;
         _gameT0 = this.time;
+        _lastEvT = this.time;
       }
       const mapped = _gameT0 + Math.max(0, (ts - _domT0) * 0.001);
       _lastEvT = Math.max(_lastEvT, mapped);
@@ -586,13 +587,21 @@ class Game {
         if (e.cancelable) e.preventDefault();
         return;
       }
-      const n = track(e);
       if (this.swipe.active && ptrs.size < 2) {
-        const tEv = evTime(e), simEv = evSimTime(tEv);
         const z = this.swipe.pressZone;
-        if (z) this.swipe.tapMaxMovePx = Math.max(this.swipe.tapMaxMovePx || 0,
-          Math.hypot((n.rawX - z.pressX) * z.vw, (n.rawY - z.pressY) * z.vh));
-        this.swipe.move(n.rawX, n.rawY, tEv, simEv);
+        let samples = [];
+        if (typeof e.getCoalescedEvents === 'function') samples = e.getCoalescedEvents();
+        // Collect the whole hardware path before resolving a hit. Resolving
+        // each intermediate point would steal an arc as its first straight leg.
+        let n;
+        for (const sample of [...samples, e]) {
+          if (Number.isFinite(sample.pointerId) && sample.pointerId !== e.pointerId) continue;
+          n = track(sample);
+          const tEv = evTime(sample), simEv = evSimTime(tEv);
+          if (z) this.swipe.tapMaxMovePx = Math.max(this.swipe.tapMaxMovePx || 0,
+            Math.hypot((n.rawX - z.pressX) * z.vw, (n.rawY - z.pressY) * z.vh));
+          this.swipe.move(n.rawX, n.rawY, tEv, simEv);
+        }
         this.promotePendingServeZone();
         this.promotePendingRallyBackswing(n);
         const sp = this.swipe.m.speed;
@@ -605,7 +614,7 @@ class Game {
           inputType: e.pointerType || (this.pointerFine === false ? 'touch' : 'mouse'),
           dom: this.debugRecording ? domEvent(e) : null });
         this.tryInputHit(this.swipe.m);
-      }
+      } else track(e);
       if (e.cancelable) e.preventDefault();
     };
 
@@ -679,11 +688,19 @@ class Game {
     });
     c.addEventListener('pointermove', move);
     c.addEventListener('pointerup', up);
-    c.addEventListener('pointercancel', (e) => this.cancelInput('pointercancel', e));
+    c.addEventListener('pointercancel', (e) => {
+      if (activeStrokePointerId !== null && e.pointerId !== activeStrokePointerId) { ptrs.delete(e.pointerId); return; }
+      this.cancelInput('pointercancel', e);
+    });
     c.addEventListener('lostpointercapture', (e) => { if (ptrs.has(e.pointerId)) this.cancelInput('lostpointercapture', e); });
     c.addEventListener('contextmenu', (e) => e.preventDefault());
     // Hover movement follows the bat. A held right button is not a camera command.
-    window.addEventListener('pointermove', (e) => { if (!this.preview?.active && !ptrs.size && !this.swipe.active) track(e); }, { passive: true });
+    window.addEventListener('pointermove', (e) => {
+      if (this.preview?.active || e.target === c) return;
+      if (ptrs.has(e.pointerId)) move(e);
+      else if (!ptrs.size && !this.swipe.active) track(e);
+    });
+    window.addEventListener('pointerup', (e) => { if (ptrs.has(e.pointerId)) up(e); });
     window.addEventListener('blur', () => { this.cancelInput('window_blur'); this.setPaused(true); });
     document.addEventListener('visibilitychange', () => {
       if (this.debugRecording) this.logInput('visibility', { outcome: { state: document.visibilityState } });
@@ -2433,7 +2450,7 @@ class Game {
     const rubber = this.equip ? (this.equip.forSide(gripped.forehand ? 1 : -1) || {}) : {};
     const vR = V3.mul(V3.new(), pad.vel || V3.new(), 0.4);
     vR.z -= 0.9;                                    // лёгкий выпад навстречу — «стенка» живая
-    const v0 = V3.clone(b.v), w0 = V3.clone(b.w);
+    const p0 = V3.clone(b.p), v0 = V3.clone(b.v), w0 = V3.clone(b.w);
     const info = impactRacket(b.v, b.w, n, vR, 0.30, rubber);
     if (!info) { V3.copy(b.v, v0); V3.copy(b.w, w0); return false; }
     V3.addScaled(b.p, b.p, n, PH.R * 0.6);          // отлепить от грани для CCD следующего шага
@@ -2465,12 +2482,11 @@ class Game {
     }
     if (this.shotJournal && typeof this.shotJournal.noteOutcome === 'function')
       this.shotJournal.noteOutcome('BLOCK');
-    if (this.training) {
-      const racket = { stroke: STROKES.BLOCK, arch: ARCH.BLOCK, normal: n, vR, quality: .30,
-        rubber, contactInput: { p: V3.clone(pad.pos), v: v0, w: w0, gesture: { ...this.swipe.m } } };
-      if (this.shotJournal) this.shotJournal.capture(this.swipe.gestureId, this.time, racket, b, { shotId: this.shotId });
-      this.training.onPlayerHit({ stroke: STROKES.BLOCK, quality: .30, power: 0 }, racket, b.p);
-    }
+    const racket = { stroke: STROKES.BLOCK, arch: ARCH.BLOCK, normal: n, vR, quality: .30,
+      rubber, contactInput: { p: p0, v: v0, w: w0, gesture: { ...this.swipe.m }, passive: true } };
+    if (this.shotJournal) this.shotJournal.capture(this.swipe.gestureId, this.time, racket, b,
+      { shotId: this.shotId, grip: this.settings.grip, hand: this.settings.hand });
+    if (this.training) this.training.onPlayerHit({ stroke: STROKES.BLOCK, quality: .30, power: 0 }, racket, b.p);
     this.logInput('contact', { outcome: { contact: true, route: 'passive_block',
       distanceM: V3.dist(b.p, pad.pos) } });
     return true;
@@ -3179,8 +3195,15 @@ class Game {
     const aiSimNow = Number.isFinite(this.strokeTime) ? this.strokeTime : this.time;
     if (!ai.readyToStrike(aiSimNow) && V3.dist(b.p, ai.pos) > 0.22) return;
     const reach = V3.dist(b.p, ai.pos);
-    if (b.p.z > ai.pos.z + 0.08) return;
     if (reach > 0.42) return;
+    /* A short ball that has already bounced on the AI's side sits well
+     * below the resting bat. The old `b.p.z > ai.pos.z + 0.08` gate refused
+     * every such recovery even when the bot had a valid plan, a committed
+     * backswing and enough 3-D reach — it was the last blocker for the
+     * "unreturnable short ball". Only a ball still travelling away from the
+     * AI (leaving its half) may be refused on height; an approaching or
+     * stationary post-bounce ball must be playable. */
+    if (b.v.z > 0.02 && b.p.z > ai.pos.z + 0.08) return;
 
     /* ITTF 2.07: the ball must touch the AI's court before the AI returns
      * it. The old test only refused while the ball was still over the table,
@@ -3526,11 +3549,11 @@ class Game {
     const calRate = (this._cal && Number.isFinite(this._cal.padSmooth))
       ? lerp(1 / cfg.trackingLagRange[0], 1 / cfg.trackingLagRange[1], clamp(this._cal.padSmooth, 0, 1)) : 1 / cfg.trackingLag;
     const rate = this.recenterT > 0 ? 1 / cfg.resetTrackingLag : calRate;
-    const zDrive = pointerDepth || this._reachFwd > 1e-4;
     this._padTarget = { tx, ty, tz, rate, lock: rallyStrokeActive && !!(this.swipe && this.swipe.realGestureId === this.swipe.gestureId), footZ: this._footZ };
-    pad.pos.x = expSmooth(pad.pos.x, tx, rate, dt);
-    pad.pos.y = expSmooth(pad.pos.y, ty, rate, dt);
-    pad.pos.z = expSmooth(pad.pos.z, tz, rate * (zDrive ? 1 : cfg.depthTrackingK), dt);
+    const destination = V3.set(this._padDestination || (this._padDestination = V3.new()), tx, ty, tz);
+    const recovering = this.paddleMotion?.active && !this.playerStrokeIntent(this.state === GS.SERVE_TOSS);
+    const maxSpeed = recovering ? cfg.recoveryMaxSpeed : cfg.trackingMaxSpeed;
+    stepPaddlePosition(pad.pos, destination, rate, dt, maxSpeed);
     V3.sub(pad.vel, pad.pos, pad.prevPos);
     V3.mul(pad.vel, pad.vel, 1 / Math.max(dt, 1e-4));
 
@@ -3659,8 +3682,14 @@ class Game {
     const clearance = paddleTableClearance(pad.pos, pad.normal, pad.roll, PH.TABLE_Y, PH.T_HALF_WID, PH.T_HALF_LEN, pad.q);
     const lifted = clearance < .006 ? .006 - clearance : 0;
     if (lifted) pad.pos.y += lifted;
-    if (lifted) pad.vel.y = (pad.pos.y - pad.prevPos.y) / Math.max(dt, 1e-4);
-    if (strokePose?.q) V3.mul(pad.vel, V3.sub(pad.vel, pad.pos, pad.prevPos), 1 / Math.max(dt, 1e-4));
+    stepPaddlePosition(pad.prevPos, pad.pos, Infinity, dt, maxSpeed, pad.pos);
+    const finalClearance = paddleTableClearance(pad.pos, pad.normal, pad.roll, PH.TABLE_Y, PH.T_HALF_WID, PH.T_HALF_LEN, pad.q);
+    if (finalClearance < .006) {
+      // Lift before advancing across the edge, rather than buying table
+      // clearance with an unbounded vertical teleport.
+      V3.set(pad.pos, pad.prevPos.x, pad.prevPos.y + Math.min(maxSpeed * dt, Math.max(0, pad.pos.y - pad.prevPos.y + .006 - finalClearance)), pad.prevPos.z);
+    }
+    V3.mul(pad.vel, V3.sub(pad.vel, pad.pos, pad.prevPos), 1 / Math.max(dt, 1e-4));
     pad.poseReady = true;
     pad.swing = Math.max(0, pad.swing - dt * 4.5);
     pad.hitRadius = MATCH_RULES.sweetRadius;

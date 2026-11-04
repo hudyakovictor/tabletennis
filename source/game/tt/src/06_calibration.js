@@ -153,8 +153,8 @@ function trimBallTrail(g, durationMs, reducedMotion = g && g.reducedMotion) {
     if (times.length === 1 && times[0] < cutoff) { h.length = 0; times.length = 0; }
     return;
   }
-  // Backward compatibility with frame-count based trail tests
-  const points = Math.round(durationMs / 32);
+  // Untimed histories retain the original 60 Hz frame-count convention.
+  const points = Math.round(durationMs / (1000 / 60));
   if (points <= 0) { h.length = 0; if (times) times.length = 0; if (g.scene && g.scene.mesh && g.scene.mesh.trail) g.scene.mesh.trail.count = 0; return; }
   const max = points * 3;
   if (h.length > max) h.splice(0, h.length - max);
@@ -231,16 +231,13 @@ function refreshGameCalibrationPolicy(g, changedKey) {
     } else if (entry.key === 'spinGain' || entry.key === 'arcSens') g.settings[entry.key] = value;
     else if (entry.key === 'tableGlow' && g.scene && g.scene.mat && g.scene.mat.table) {
       g.scene.mat.table = { ...g.scene.mat.table, emissive: [.018 * state.effective.tableGlow, .042 * state.effective.tableGlow, .10 * state.effective.tableGlow] };
-    } else if (entry.key === 'trailLen' && g.ball && Array.isArray(g.ball.hist)) {
-      const ms = value;
-      const points = Math.round(ms / 32);
-      if ((!points || previousTrail !== state.effective.trailLen || changedKey === 'trailLen') && g.ball.hist.length > points * 3) {
-        g.ball.hist.splice(0, g.ball.hist.length - points * 3);
-      }
-      if (!points) { g.ball.hist.length = 0; if (g.ball.histTimes) g.ball.histTimes.length = 0; }
-      if (!points && g.scene && g.scene.mesh && g.scene.mesh.trail) g.scene.mesh.trail.count = 0;
     }
   }
+  if (!state.active.trailLen || !g._calValues.trailLen || previousTrail !== state.effective.trailLen ||
+      g._calTrailActive !== state.active.trailLen || changedKey === 'trailLen') {
+    trimBallTrail(g, g._calValues.trailLen, state.reducedMotion);
+  }
+  g._calTrailActive = state.active.trailLen;
   g._swayCal = state.reducedMotion ? 0 : state.effective.camSway;
   if (g._capCalK !== g._calValues.captureK || typeof getCaptureCalibration === 'function' && getCaptureCalibration() !== g._calValues.captureK) {
     g._capCalK = g._calValues.captureK;

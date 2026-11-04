@@ -79,7 +79,7 @@ const PADDLE_LIMITS = {
    * `depthForPointer` lets the pointer push the blade back out when it aims
    * lower, so the map stays exact instead of clamping — the blade leans in
    * for a short ball, yet a low cursor still moves it. */
-  zStepIn: 0.78,           // lean over the table for a short ball
+  zStepIn: 0.30,           // reach a legal short bounce near the net
 };
 /* The stance the camera is authored around: the bat stays in one plane
    unless the footwork assist steps it in or the follow-through carries it. */
@@ -177,6 +177,7 @@ const REACH_SHELL = Object.freeze({
 let _pbsW = null;
 function pointerBladeSolve(rig, aspect, px, py, opts) {
   const o = (opts && opts.out) || {};
+  o.forcedZ = false; o.pinned = 0;
   const stance = PADDLE_STANCE_Z;
   const rs = REACH_SHELL;
   const limFor = (zc) => paddleLimitsFor(zc);
@@ -186,14 +187,14 @@ function pointerBladeSolve(rig, aspect, px, py, opts) {
     o.tx = PADDLE_HOME.x; o.ty = PADDLE_HOME.y; o.tz = stance;
     o.reachFwd = 0; o.exact = true; o.zByPointer = false; return o;
   }
-  const yRaw = _pbsW.y;
-  /* (2) целевая высота — мягкая оболочка руки */
-  const ySoft = PH.TABLE_Y + softSat(yRaw - PH.TABLE_Y,
-    rs.yLoSoft, rs.yHiSoft, rs.yLoHard, rs.yHiHard);
+  const stanceLimits = limFor(stance);
+  // Meet the boundary continuously. Switching to an already-saturated
+  // height here made a one-pixel lift jump the depth by several centimetres.
+  const boundaryY = clamp(_pbsW.y, PH.TABLE_Y + Math.max(rs.yLoHard, stanceLimits.yLo),
+    PH.TABLE_Y + Math.min(rs.yHiHard, stanceLimits.yHi));
   /* (3) bisection: найти z, где луч даёт высоту, допустимую на ЭТОЙ глубине
    * (лимита низа над столом/за краем и потолка руки). y(z) монотонно растёт
    * с z (глубже стоишь — выше на экране та же точка). */
-  const zIn = opts && Number.isFinite(opts.zHint) ? clamp(opts.zHint, PADDLE_LIMITS.zStepIn, PADDLE_LIMITS.zFar) : stance;
   const yAt = (z) => { const w = _pbsW2 || (_pbsW2 = {}); return unprojectToPlane(rig, aspect, px, py, z, w) ? w.y : NaN; };
   const inShell = (z, y) => {
     const lim = limFor(z);
@@ -208,7 +209,7 @@ function pointerBladeSolve(rig, aspect, px, py, opts) {
     /* биссекция по z: y монотонно растёт с z */
     let a = PADDLE_LIMITS.zStepIn, b = PADDLE_LIMITS.zFar;
     const ya = yAt(a), yb = yAt(b);
-    const wantY = clamp(ySoft, Math.min(ya, yb), Math.max(ya, yb));
+    const wantY = clamp(boundaryY, Math.min(ya, yb), Math.max(ya, yb));
     for (let i = 0; i < 24; i++) {
       const mid = 0.5 * (a + b), ym = yAt(mid);
       if (ym > wantY) b = mid; else a = mid;
@@ -832,15 +833,21 @@ function reachFor(rig, aspect, planeZ) {
      * stops a pixel earlier — while growing it would. */
     box.sx0 = clamp(Math.max(box.sx0, PLAY_RECT.left), 0, 1);
     box.sx1 = clamp(Math.min(box.sx1, PLAY_RECT.right), 0, 1);
-    box.sy0 = clamp(Math.max(box.sy0, PLAY_RECT.top), 0, 1);
-    box.sy1 = clamp(Math.min(box.sy1, PLAY_RECT.bottom), 0, 1);
+    const sy0 = box.sy0, sy1 = box.sy1;
+    box.sy0 = clamp(Math.max(sy0, PLAY_RECT.top), 0, 1);
+    box.sy1 = clamp(Math.min(sy1, PLAY_RECT.bottom), 0, 1);
     /* No "widen it back out if it got small" fallback. A leaned-in blade
      * really can occupy only a narrow band, and widening the rectangle would
      * advertise rows the blade cannot reach — the clamp would then stop it
      * short of the cursor. The band's size is the depth search's business;
      * the rectangle's job is to be true. Only ordering is guaranteed here. */
     if (box.sx0 > box.sx1) { const m = (box.sx0 + box.sx1) / 2; box.sx0 = m - 0.01; box.sx1 = m + 0.01; }
-    if (box.sy0 > box.sy1) { const m = (box.sy0 + box.sy1) / 2; box.sy0 = m - 0.01; box.sy1 = m + 0.01; }
+    if (box.sy0 > box.sy1) {
+      // A near-net plane can project above PLAY_RECT. Keep its real boundary
+      // instead of advertising a made-up band the blade cannot occupy.
+      const edge = clamp(sy1 < PLAY_RECT.top ? sy1 : sy0, 0, 1);
+      box.sy0 = edge; box.sy1 = edge;
+    }
   }
   if (_reachCache.size > 400) _reachCache.clear();
   _reachCache.set(key, box);

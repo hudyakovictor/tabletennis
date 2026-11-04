@@ -133,6 +133,9 @@ async function download(dir) {
     assert.equal(first.storage, 'saved');
     assert.equal(await frame.evaluate(() => __game.swipe.active), true, 'image exists before release or pause');
     check('first pointerdown captures ±350 px at actual render resolution, clipped at screen edges');
+    // This fixture is intentionally a miss, not a fast released tap (which
+    // legitimately resolves a contact before the next animation frame).
+    await frame.evaluate(() => __game.cancelInput('gallery_miss_fixture'));
     await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
     await frame.evaluate(() => __game.setState(GS.POINT));
     await page.waitForFunction(id => MissShots.get(id) && MissShots.get(id).status === 'miss', {}, first.shot.id);
@@ -162,20 +165,52 @@ async function download(dir) {
     await page.evaluate(() => Sheet.close());
     await page.waitForFunction('!Sheet.cur');
     await frame.waitForFunction('__game.paused === false', { timeout: 15000 });
-    await touchPoint(page, frame, cdp);
+    await touchPoint(page, frame, cdp, true);
     await page.waitForFunction('MissShots.all().length === 2', { timeout: 30000 });
     const second = await page.evaluate(() => MissShots.all().at(-1));
     assert.equal(second.half, 400);
     assert.equal(second.w, expected(second.pressX, second.vw, 400));
     assert.equal(second.h, expected(second.pressY, second.vh, 400));
     assert.notEqual(second.id, first.shot.id);
-    // In this fixed incoming-ball fixture, a released valid tap reaches the
-    // paddle. It tests that only the matching successful image is removed.
-    const contact = await frame.evaluate(() => { const g = __game; g.tryPlayerHit(V3.clone(g.ball.p)); return g.ball.lastHitBy; });
+    // The held press lets us inspect its JPEG before a controlled real swipe
+    // contacts. A quick release is tested separately with result-before-image.
+    const contact = await frame.evaluate(() => {
+      const g = __game, p = g.project(g.ball.p, {});
+      g.swipe.move(p.x, p.y - .04, g.time + .04, g.strokeTime);
+      g.swipe.move(p.x, p.y - .08, g.time + .08, g.strokeTime);
+      g.tryPlayerHit(V3.clone(g.ball.p)); return g.ball.lastHitBy;
+    });
     assert.equal(contact, 1, 'controlled fixture should make a contact');
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
     await page.waitForFunction(id => !MissShots.get(id), {}, second.id);
     assert.ok(await page.evaluate(id => !!MissShots.get(id), first.shot.id));
     check('±400 mode works, and a contact removes only its own image');
+
+    await page.evaluate(() => {
+      window._galleryRace = [];
+      window._galleryRaceOff = GameHost.on(m => {
+        if (['shot', 'shotresult'].includes(m.type)) window._galleryRace.push({ type: m.type, id: m.id, contact: m.contact });
+      });
+    });
+    const tapPoint = await incoming(frame);
+    const immediate = await frame.evaluate(p => {
+      const g = __game, init = { bubbles: true, cancelable: true, pointerId: 47, pointerType: 'touch',
+        button: 0, clientX: p.x, clientY: p.y };
+      // Both events and the following render share one task, deterministically
+      // placing applyHit/shotresult before the deferred JPEG capture.
+      g.canvas.dispatchEvent(new PointerEvent('pointerdown', { ...init, buttons: 1 }));
+      g.canvas.dispatchEvent(new PointerEvent('pointerup', { ...init, buttons: 0 }));
+      const side = g.ball.lastHitBy; g.render(); return side;
+    }, tapPoint);
+    assert.equal(immediate, 1, 'a same-task tap must resolve a real contact');
+    await page.waitForFunction(() => window._galleryRace.some(m => m.type === 'shot') &&
+      window._galleryRace.some(m => m.type === 'shotresult' && m.contact), { timeout: 30000 });
+    const race = await page.evaluate(() => { window._galleryRaceOff(); return window._galleryRace; });
+    const outcome = race.find(m => m.type === 'shotresult' && m.contact);
+    assert.ok(race.findIndex(m => m.type === 'shot' && m.id === outcome.id) > race.indexOf(outcome));
+    assert.equal(await page.evaluate(id => MissShots.get(id), outcome.id), null);
+    assert.ok(await page.evaluate(id => !!MissShots.get(id), first.shot.id));
+    check('a contact before deferred JPEG leaves no phantom miss and preserves other frames');
 
     await page.reload();
     await page.waitForSelector('.mx.live', { timeout: 30000 });
@@ -192,8 +227,10 @@ async function download(dir) {
       const old = Storage.prototype.setItem;
       Storage.prototype.setItem = function (k, v) { if (k === 'ttu-miss-shots') throw new Error('quota test'); return old.call(this, k, v); };
     });
-    await touchPoint(page, frame2, cdp);
+    await touchPoint(page, frame2, cdp, true);
     await page.waitForFunction('MissShots.storage === "memory" && MissShots.all().length === 2', { timeout: 30000 });
+    await frame2.evaluate(() => { __game.cancelInput('gallery_quota_fixture'); __game.setState(GS.POINT); });
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
     await activate(page, '[data-act=pause]'); await activate(page, '.sheet-wrap.open [data-a=settings]');
     const warning = await page.$eval('[data-miss-storage]', e => e.textContent);
     assert.match(warning, /только до закрытия страницы|only until this page is closed/);

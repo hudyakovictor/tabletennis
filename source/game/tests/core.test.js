@@ -95,6 +95,43 @@ test('physical drop rebounds within table-tennis calibration range', () => {
   const height = peak - PH.TABLE_Y - PH.R;
   assert.ok(height > .23 && height < .27, `rebound ${height}`);
 });
+for (const axis of ['x', 'z']) for (const sign of [-1, 1]) for (const direction of ['outward', 'inward']) {
+  test(`${axis} edge ${sign}, ${direction}: confirmed contact rebounds without an immediate double bounce`, () => {
+    const { PH, V3, tableContact, bounceTable, integrateBall, predict } = load(
+      ['10_math.js', '30_physics.js'], ['PH', 'V3', 'tableContact', 'bounceTable', 'integrateBall', 'predict']);
+    const p = V3.new(.5, PH.TABLE_Y + PH.R, .5), v = V3.new(6, -.1, 6), w = V3.new();
+    p[axis] = sign * ((axis === 'x' ? PH.T_HALF_WID : PH.T_HALF_LEN) - .001);
+    v[axis] = sign * (direction === 'outward' ? .5 : -.5);
+    const start = V3.clone(p), incoming = V3.clone(v);
+    assert.ok(tableContact(p.x, p.y + .0001, p.z, p.x, p.y, p.z, {}), 'contact is on the tabletop from above');
+    const info = bounceTable(p, v, w);
+    assert.ok(info && info.Jn > 0, 'a confirmed contact delivers a real normal impulse');
+    assert.equal(info.edgeAxis, axis); assert.ok(info.edge > 0);
+    assert.ok(v.y > 0, `rebound vy=${v.y}`);
+    assert.equal(p.x, start.x); assert.equal(p.z, start.z);
+    if (direction === 'outward') assert.ok(v.y < .1, 'no artificial minimum rebound speed');
+    const previous = V3.clone(p);
+    integrateBall(p, v, w, PH.SIM_DT);
+    assert.equal(tableContact(previous.x, previous.y, previous.z, p.x, p.y, p.z, {}), null);
+    const flight = predict(start, incoming, V3.new(), { dt: PH.SIM_DT, maxT: 2 * PH.SIM_DT });
+    assert.equal(flight.bounces, 1); assert.equal(flight.b2, null);
+    assert.ok(flight.end.y > PH.TABLE_Y + PH.R);
+  });
+}
+for (const wy of [0, -300, 300]) {
+  test(`inverse launch verification matches production landing and clearance, sidespin ${wy}`, () => {
+    const { PH, V3, solveLaunch, predict } = load(
+      ['10_math.js', '30_physics.js'], ['PH', 'V3', 'solveLaunch', 'predict']);
+    const from = V3.new(0, .84, .65), spin = V3.new(0, wy, 0);
+    const solved = solveLaunch(from, { x: 0, z: -.75 }, spin, { speed: 5, netClear: .03, speedForgive: 0 });
+    assert.ok(solved && solved.landed, 'low-ball fixture has a verified landing');
+    const flight = predict(from, V3.new(solved.vx, solved.vy, solved.vz), spin,
+      { dt: PH.SIM_DT, maxT: 2.4, stopOnFirstBounce: true });
+    assert.equal(flight.hitNet, false); assert.ok(flight.netCross && flight.landed && flight.landed.z < 0);
+    assert.deepEqual(solved.landed, flight.landed);
+    assert.equal(solved.clear, flight.clear);
+  });
+}
 test('predict clears reused result fields between flights', () => {
   const { predict, V3 } = load(['10_math.js', '30_physics.js'], ['predict', 'V3']);
   const out = {};

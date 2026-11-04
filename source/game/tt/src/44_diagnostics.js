@@ -79,7 +79,7 @@ function diagnosticSnapshot(game) {
       shotId: diagNumber(game.shotId), score: Array.isArray(game.score) ? game.score.slice() : null,
       server: diagNumber(game.server), rally: diagNumber(game.rally), serveBall: !!game.isServeBall,
       lastHitBy: diagNumber(b.lastHitBy), bounces: Array.isArray(game.rallyBounces) ? game.rallyBounces.slice() : [],
-      inTraining: !!game.isTraining, online: !!(game.network && game.network.isInMatch) },
+      inTraining: !!game.training, online: !!(game.network && game.network.isInMatch) },
     ball: { position: diagVec(b.p), velocity: diagVec(b.v), spin: diagVec(b.w), live: !!b.live,
       speed: diagNumber(b.speed), radius: typeof PH !== 'undefined' ? diagNumber(PH.R) : null },
     paddle: { position: diagVec(p.pos), previousPosition: diagVec(p.prevPos || p.prev),
@@ -132,6 +132,11 @@ class DiagnosticArchive {
       try {
         if (typeof indexedDB === 'undefined' || !indexedDB) throw new Error('IndexedDB unavailable');
         const req = indexedDB.open(DIAGNOSTIC_DB, 2);
+        let settled = false;
+        const unavailable = error => {
+          if (settled) return;
+          settled = true; this.status = 'unavailable'; this.error = diagErrorText(error); resolve(false);
+        };
         req.onupgradeneeded = () => {
           const db = req.result;
           if (!db.objectStoreNames.contains('chunks')) {
@@ -141,9 +146,13 @@ class DiagnosticArchive {
           // One latest explicitly bookmarked PNG globally, not one per match.
           if (!db.objectStoreNames.contains('frames')) db.createObjectStore('frames');
         };
-        req.onerror = () => { this.status = 'unavailable'; this.error = diagErrorText(req.error && req.error.message); resolve(false); };
-        req.onblocked = () => { this.status = 'unavailable'; this.error = 'IndexedDB blocked'; resolve(false); };
+        req.onerror = () => unavailable(req.error && req.error.message);
+        req.onblocked = () => unavailable('IndexedDB blocked');
         req.onsuccess = () => {
+          // An abandoned blocked request can still succeed when another tab
+          // closes. Its already-false ready promise must never become available.
+          if (settled) { req.result.close(); return; }
+          settled = true;
           this.db = req.result; this.status = 'available';
           this.db.onversionchange = () => { this.db.close(); this.db = null; this.status = 'unavailable'; };
           if (this.running) this.timer = setInterval(() => this.scheduleFlush(), 3000);
@@ -162,8 +171,8 @@ class DiagnosticArchive {
   scheduleFlush() {
     if (this.flushScheduled || this.status !== 'available' || !this.pending.length) return;
     this.flushScheduled = true;
-    this.flush().catch(e => { this.error = diagErrorText(e && e.message || e); this.status = 'unavailable'; })
-      .finally(() => { this.flushScheduled = false; if (this.pending.length >= 256) this.scheduleFlush(); });
+    this.flush().catch(e => { this.error = diagErrorText(e && e.message || e); this.status = 'unavailable'; return false; })
+      .then(ok => { this.flushScheduled = false; if (ok && this.pending.length >= 256) this.scheduleFlush(); });
   }
   async flush() {
     if (!(await this.ready) || !this.db) return false;

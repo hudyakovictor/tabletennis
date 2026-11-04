@@ -521,65 +521,63 @@ class OpponentAI {
    * ================================================================== */
 
   /** Where will the ball be when it is comfortable to hit it, and when? */
-  computePlan(game) {
+  computePlan(game, read = null) {
     const ball = game.ball;
+    const ownBounces = Array.isArray(game.rallyBounces) ? game.rallyBounces.filter(s => s === this.side).length : 0;
+    this._lastShort = false;
+    if (ownBounces > 1) return null;
+    const bounced = ownBounces === 1;
+    const serveOwnBounce = game.isServeBall && game.serveBounces === 0;
+    const dt = PH.SIM_DT;
     const o = this._pred;
     predict(V3.clone(ball.p), V3.clone(ball.v), V3.clone(ball.w), {
-      dt: 1 / 240, maxT: 2.4, stopZ: -PH.T_HALF_LEN - 0.26, stopDir: -1,
-      stopAtPlane: false, out: o,
+      dt, maxT: 2.4, stopAfterBounces: bounced ? 1 : serveOwnBounce ? 3 : 2, out: o,
     });
 
-    if (o.landed && o.landed.z < 0) {
-      const inSpeed = V3.len(ball.v);
-      const topIn = this.side * ball.w.x;
-      let zHit = -PH.T_HALF_LEN
-        - clamp(0.10 + inSpeed * 0.030 + Math.max(0, topIn) * 0.00022, 0.08, 0.62);
-      if (o.landed.z > -0.62) zHit = Math.max(zHit, o.landed.z - 0.52);
-      zHit = clamp(zHit, -2.05, -0.95);
+    // After the real own-court bounce, predict.landed is the DEAD second bounce.
+    // A deep-plane crossing alone does not make an unbounced out ball playable.
+    const landing = bounced ? { x: ball.p.x, z: ball.p.z, t: 0 }
+      : serveOwnBounce && o.landed && o.landed.z > 0 ? o.b2 : o.landed;
+    if (o.diverged || !landing || landing.z >= 0 || (!bounced &&
+      (Math.abs(landing.x) > PH.T_HALF_WID + PH.R || Math.abs(landing.z) > PH.T_HALF_LEN + PH.R))) return null;
+    const latestT = o.endT - 2 * dt;
+    if (latestT <= landing.t + dt) return null;
 
-      const q = this._q;
+    const inSpeed = V3.len(ball.v);
+    const topIn = this.side * ball.w.x;
+    let zHit = -PH.T_HALF_LEN
+      - clamp(0.10 + inSpeed * 0.030 + Math.max(0, topIn) * 0.00022, 0.08, 0.62);
+    if (landing.z > -0.62) zHit = Math.max(zHit, landing.z - 0.52);
+    zHit = clamp(zHit, -2.05, -PH.R);
+
+    const q = this._q;
+    predict(V3.clone(ball.p), V3.clone(ball.v), V3.clone(ball.w),
+      { dt, maxT: latestT, stopZ: zHit, stopDir: -1, stopAtPlane: true, out: q });
+    if (!q.reach || q.endT - landing.t < (bounced ? dt : 0.055) || q.end.y < PH.TABLE_Y + PH.R) {
+      // A short/stationary/reversing ball may never reach the comfortable plane.
+      // Meet its real post-bounce flight instead, before the next bounce/net/floor.
+      const interceptT = Math.min(latestT,
+        landing.t + clamp(0.055 + (0.16 - inSpeed * 0.008), 0.055, 0.19));
       predict(V3.clone(ball.p), V3.clone(ball.v), V3.clone(ball.w),
-        { dt: 1 / 240, maxT: 2.4, stopZ: zHit, stopDir: -1, stopAtPlane: true, out: q });
-
-      let interceptT = q.endT;
-      const sinceBounce = interceptT - o.landed.t;
-      if (sinceBounce < 0.055) {
-        interceptT = o.landed.t + clamp(0.055 + (0.16 - inSpeed * 0.008), 0.055, 0.19);
-        predict(V3.clone(ball.p), V3.clone(ball.v), V3.clone(ball.w),
-          { dt: 1 / 240, maxT: interceptT, out: q });
-      }
-      const simNow = Number.isFinite(game.strokeTime) ? game.strokeTime : game.time;
-      /* Короткий мяч у сетки — ещё один честный источник ошибки (см.
-       * applyExecutionError): его читают один раз на мяч, здесь. */
-      this._lastShort = o.landed.z > -0.55;
-      return {
-        x: q.end.x,
-        y: clamp(q.end.y, PH.TABLE_Y + 0.04, PH.TABLE_Y + 0.80),
-        z: clamp(q.end.z, -2.15, -1.00),
-        t: simNow + interceptT,
-        speed: V3.len(q.endV),
-        bounceT: o.landed.t,
-        short: o.landed.z > -0.55,
-        wide: Math.abs(o.landed.x) > PH.T_HALF_WID * 0.58,
-        willLandIn: Math.abs(o.landed.x) <= PH.T_HALF_WID + PH.R,
-        errUnitX: this._gauss(),
-        errUnitY: this._gauss(),
-      };
+        { dt, maxT: interceptT, out: q });
     }
-    if (o.reach) {
-      const simNow = Number.isFinite(game.strokeTime) ? game.strokeTime : game.time;
-      this._lastShort = false;
-      return {
-        x: o.reach.x, y: clamp(o.reach.y, PH.TABLE_Y + 0.04, PH.TABLE_Y + 0.95),
-        z: clamp(o.reach.z, -2.45, -1.05),
-        t: simNow + o.reachT, speed: 8, bounceT: 0, short: false, wide: false,
-        willLandIn: true,
-        errUnitX: this._gauss(),
-        errUnitY: this._gauss(),
-      };
-    }
-    this._lastShort = false;
-    return null;
+    if (q.diverged || q.hitNet || q.endT >= o.endT || q.endT <= landing.t ||
+      q.end.z >= -PH.R || q.end.z < -2.45 || q.end.y < PH.TABLE_Y + PH.R) return null;
+    const simNow = Number.isFinite(game.strokeTime) ? game.strokeTime : game.time;
+    this._lastShort = read ? read.short : landing.z > -0.55;
+    return {
+      x: q.end.x,
+      y: clamp(q.end.y, PH.TABLE_Y + 0.04, PH.TABLE_Y + 0.80),
+      z: q.end.z,
+      t: simNow + q.endT,
+      speed: V3.len(q.endV),
+      bounceT: landing.t,
+      short: this._lastShort,
+      wide: read ? read.wide : Math.abs(landing.x) > PH.T_HALF_WID * 0.58,
+      willLandIn: true,
+      errUnitX: read ? read.errUnitX : this._gauss(),
+      errUnitY: read ? read.errUnitY : this._gauss(),
+    };
   }
 
   /** Anticipation noise — coherent per-shot read error that sharpens as ball approaches */
@@ -593,7 +591,7 @@ class OpponentAI {
     const target = {
       x: clamp(plan.x + ex * blur, -1.12, 1.12),
       y: clamp(plan.y + ey * blur * 0.42, PH.TABLE_Y - 0.05, PH.TABLE_Y + 0.96),
-      z: clamp(plan.z - 0.055, -2.5, -1.05),
+      z: clamp(plan.z - 0.055, -2.5, -PH.R),
     };
     const pose = game.aiPaddle;
     keepPaddleAboveTable(target, pose ? pose.normal : this.faceNormal, pose ? pose.roll : this.roll,
@@ -831,7 +829,8 @@ class OpponentAI {
     const ball = game.ball;
 
     // Update readiness
-    const incoming = ball.live && ball.lastHitBy === 1 && ball.v.z < 0;
+    const ownBounces = Array.isArray(game.rallyBounces) ? game.rallyBounces.filter(s => s === this.side).length : 0;
+    const incoming = ball.live && ball.lastHitBy === 1 && ownBounces < 2 && (ball.v.z < 0 || ball.p.z < 0);
     if (!incoming) {
       this.plan = null; this.commit = null; this.phase = 'IDLE'; this._percept = null;
     }
@@ -849,6 +848,16 @@ class OpponentAI {
       this.plan = null; this.commit = null; this.phase = 'IDLE'; this._percept = null;
       if (this.anim.lean < 0.5) this.anim.lean = 0.5;
       return;
+    }
+    if (incoming && ownBounces === 1 && this.plan && this.plan.bounceT > 0) {
+      const previous = this.plan;
+      const p = this.computePlan(game, previous);
+      this.plan = p;
+      if (p && this.commit) {
+        p.archId = previous.archId; p.aim = previous.aim;
+        this.commit = p; this.swingAt = p.t;
+      } else if (p) this._percept = p;
+      else { this.commit = null; this._percept = null; this.phase = 'IDLE'; }
     }
     if (incoming && this.phase === 'IDLE') {
       /* ГЛАЗА И РУКИ РАЗДЕЛЕНЫ. Прогноз траектории бот строит сразу — по нему
@@ -903,19 +912,23 @@ class OpponentAI {
       const t = this.noisyTarget(this.plan, game);
       V3.copy(this.target, t);
 
-      // Smooth movement (respects Career maxSpeed slowdown modifier if active)
-      const moveBase = Number.isFinite(this.maxSpeed) && this.maxSpeed > 0 ? this.maxSpeed : this.L.move;
+      // Limit actual translation, including Career slowdown, from the live pose.
+      const moveBase = Number.isFinite(this.maxSpeed) && this.maxSpeed >= 0 ? this.maxSpeed : this.L.move;
       const moveRate = clamp(moveBase * 2.5, 2, 12);
-      this._moveSmooth.x = expSmooth(this._moveSmooth.x, this.target.x, moveRate, dt);
-      this._moveSmooth.y = expSmooth(this._moveSmooth.y, this.target.y, moveRate, dt);
-      this._moveSmooth.z = expSmooth(this._moveSmooth.z, this.target.z, moveRate * 0.9, dt);
+      const moveDt = Number.isFinite(dt) ? clamp(dt, 0, 1) : 0;
+      V3.copy(this.lastPos, this.pos);
+      stepPaddlePosition(this.pos, this.target, moveRate, moveDt, moveBase, this._moveSmooth);
 
       // The same constrained center is used for contact, drawing and diagnostics.
-      V3.copy(this.pos, this._moveSmooth);
       const pose = game.aiPaddle;
-      keepPaddleAboveTable(this.pos, pose ? pose.normal : this.faceNormal, pose ? pose.roll : this.roll,
+      const lift = keepPaddleAboveTable(this._moveSmooth, pose ? pose.normal : this.faceNormal, pose ? pose.roll : this.roll,
         PH.TABLE_Y, PH.T_HALF_WID, PH.T_HALF_LEN);
-      V3.copy(this._moveSmooth, this.pos);
+      if (lift > 0 && V3.dist(this._moveSmooth, this.pos) > moveBase * moveDt + 1e-9) {
+        // Get above the edge before translating across it; a collision lift is not a speed exemption.
+        V3.set(this._moveSmooth, this.pos.x, Math.max(this.pos.y, this._moveSmooth.y), this.pos.z);
+        stepPaddlePosition(this.pos, this._moveSmooth, moveRate, moveDt, moveBase, this._moveSmooth);
+      }
+      V3.copy(this.pos, this._moveSmooth);
       if (game.ai !== this) V3.copy(game.ai.pos, this.pos);
 
       // Compute velocity for visual purposes

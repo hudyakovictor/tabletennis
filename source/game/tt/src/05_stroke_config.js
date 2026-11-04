@@ -161,6 +161,7 @@ const STROKE_CONFIG = {
     },
     snapDistance: 0.06, snapAssist: [0.35, 0.25], snapFrames: 1.5, // contact hold in reference 60 Hz frames
     trackingLag: 1 / 55, trackingLagRange: [1 / 68, 1 / 36], resetTrackingLag: 1 / 32, depthTrackingK: 0.7,
+    trackingMaxSpeed: 15, recoveryMaxSpeed: 6,
     launchSeparation: 1.05,
     validation: { coarseDt: 1 / 160, maxT: 2.2 },
     contact: {

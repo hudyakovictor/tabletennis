@@ -46,6 +46,15 @@ test('detailed snapshot records real gates and screen prediction without mutatin
   assert.equal(sub.clocks.substep, 1); assert.equal(sub.clocks.substeps, 3);
 });
 
+test('snapshot training state follows the active training object', () => {
+  const g = fixture();
+  assert.equal(lib.diagnosticSnapshot(g).match.inTraining, false);
+  g.training = { stage: 'practice' };
+  assert.equal(lib.diagnosticSnapshot(g).match.inTraining, true);
+  g.training = null;
+  assert.equal(lib.diagnosticSnapshot(g).match.inTraining, false);
+});
+
 test('release evidence distinguishes a recognized tap from a stationary rejection', () => {
   const g = fixture(), records = [];
   g.logInput = (type, extra) => { records.push({ type, ...extra }); return records.at(-1); };
@@ -109,6 +118,36 @@ test('archive failure is explicit and leaves live logging available', async () =
   assert.deepEqual(Array.from(await archive.read()), []);
   archive.stop();
   assert.equal(lib.diagErrorText('https://example.test/game?token=secret#frag'), 'https://example.test/game');
+});
+
+test('a blocked archive stays unavailable and closes a late successful open', async () => {
+  const request = {}, calls = { closed: 0, scheduled: 0 };
+  const { DiagnosticArchive } = load(['44_diagnostics.js'], ['DiagnosticArchive'],
+    { indexedDB: { open: () => request } });
+  const archive = new DiagnosticArchive('blocked'); archive.running = false;
+  archive.pending = Array.from({ length: 256 }, (_, seq) => ({ seq }));
+  // Count requests without running the old infinite microtask retry chain.
+  archive.scheduleFlush = () => { calls.scheduled++; };
+  request.onblocked(); assert.equal(await archive.ready, false);
+  request.result = { close() { calls.closed++; } };
+  request.onsuccess();
+  assert.equal(archive.status, 'unavailable');
+  assert.equal(archive.db, null); assert.equal(calls.closed, 1); assert.equal(calls.scheduled, 0);
+  assert.equal(await archive.flush(), false);
+});
+
+test('an unsuccessful archive flush cannot spin on a full pending queue', async () => {
+  const archive = new lib.DiagnosticArchive('failed-flush'); await archive.ready;
+  archive.status = 'available'; archive.pending = Array.from({ length: 256 }, (_, seq) => ({ seq }));
+  let calls = 0;
+  archive.flush = async () => {
+    calls++;
+    if (calls > 1) archive.status = 'unavailable'; // bound the broken implementation's retry in this regression
+    return false;
+  };
+  archive.scheduleFlush(); await new Promise(setImmediate);
+  assert.equal(calls, 1);
+  assert.equal(archive.flushScheduled, false); assert.equal(archive.pending.length, 256);
 });
 
 test('the analyzer accepts detailed JSON reports as well as JSONL and summarizes failures', () => {

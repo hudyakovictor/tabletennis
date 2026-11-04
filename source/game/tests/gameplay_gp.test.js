@@ -240,8 +240,8 @@ test('coach freeze fires once per drill per session', () => {
 /* ================== пакет №2: кромка, стенка, стили подач, шнур ========== */
 
 const GAME_LIB = load(['10_math.js', '12_match_rules.js', '30_physics.js', '38_paddle_motion.js',
-  '40_swipe.js', '56_rig.js', '70_game.js'],
-  ['Game', 'V3', 'PH', 'GS', 'setCaptureForgiveness', 'getCaptureForgiveness']);
+  '40_swipe.js', '42_shot_diagnostics.js', '56_rig.js', '70_game.js'],
+  ['Game', 'V3', 'PH', 'GS', 'ShotJournal', 'setCaptureForgiveness', 'getCaptureForgiveness']);
 
 function mkGameStub() {
   const { Game, V3, PH, GS } = GAME_LIB;
@@ -295,6 +295,8 @@ test('passive hold-to-block reflects the ball (weak, forward, no teleport)', () 
   const g = mkGameStub();
   // стенка доступна только жесту, уже побывавшему реальным замахом
   g.swipe = { active: true, pressZone: null, gestureId: 3, consumedGestureId: -1, realGestureId: 3 };
+  g.shotJournal = new GAME_LIB.ShotJournal();
+  g.shotJournal.create(g.swipe.gestureId, g.time);
   const b = g.ball, pad = g.player;
   b.p = V3.new(pad.pos.x + 0.03, pad.pos.y - 0.02, pad.pos.z - 0.12);
   b.v = V3.new(0.1, -0.4, 4.8);    // мяч летит к игроку (+z)
@@ -307,6 +309,14 @@ test('passive hold-to-block reflects the ball (weak, forward, no teleport)', () 
   assert.ok(V3.len(b.v) < vLen0 * 1.4, 'passive block is not a power shot');
   assert.ok(Math.abs(pad.pos.x - 0.05) < 1e-9, 'no paddle teleport');
   assert.equal(g.stats.blocks, 1);
+  assert.ok(g.shotJournal.latest.contact, 'a real passive block must be recorded outside training');
+  assert.equal(g.shotJournal.latest.strokeId, 'BLOCK');
+  assert.equal(g.shotJournal.latest.contact.incoming.passive, true);
+  assert.equal(g.shotJournal.latest.contact.incoming.v.z, 4.8);
+  g.shotJournal.expire(g.time + 1);
+  assert.equal(g.shotJournal.latest.outcome, 'pending', 'a recorded block cannot expire as no_contact');
+  g.shotJournal.bounce(-1, g.time + .2);
+  assert.equal(g.shotJournal.latest.outcome, 'table');
 });
 
 test('serve styles keep physical spin signatures (same swipe, four directions)', () => {

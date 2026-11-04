@@ -43,6 +43,8 @@ class MomentRecorder {
   constructor() {
     this.cap = REPLAY_HZ * REPLAY_RING_S;
     this.f = new Float32Array(this.cap * REPLAY_FLOATS);
+    this.inputPose = new Float32Array(REPLAY_FLOATS);
+    this.previousPose = new Float32Array(REPLAY_FLOATS);
     this.n = 0; this.head = 0;          // ring state (n = filled, head = write cursor)
     this.beginT = 0; this.marks = [];   // indices into the ring for the current rally
     this.events = [];                   // contacts of the current rally
@@ -61,30 +63,43 @@ class MomentRecorder {
     this.inputDecisions.length = 0;
     this.rallyStart = this.head;
     this.rallyT = t;
+    this.rallyFrames = 0; this.lastT = -Infinity; this.lastInputT = -Infinity;
     this.netClip = false;
     this.deficit = score ? Math.max(0, score[1] - score[0]) : 0;
   }
 
   /** one frame of play: everything the renderer needs to show it again */
   push(t, g) {
-    /* The ring is authored at REPLAY_HZ: the game used to push EVERY rendered
-     * frame (120-144 Hz on a phone), so the 45 s window held 5-6 s of play and
-     * the "keep the whole rally" contract was a lie. The caller throttles too;
-     * this is the authoritative guard. */
-    if (Number.isFinite(this.lastT) && t - this.lastT < 1 / REPLAY_HZ - 1e-6) return false;
-    this.lastT = t;
-    const i = this.head * REPLAY_FLOATS, f = this.f;
+    if (!Number.isFinite(t) || t < this.lastInputT) return false;
+    const f = this.inputPose;
     const b = g.ball.p, p = g.player.pos, ap = g.aiPaddle.pos;
-    f[i] = b.x; f[i + 1] = b.y; f[i + 2] = b.z;
-    f[i + 3] = p.x; f[i + 4] = p.y; f[i + 5] = p.z;
-    f[i + 6] = g.player.normal.x; f[i + 7] = g.player.normal.y; f[i + 8] = g.player.normal.z;
-    f[i + 9] = ap.x; f[i + 10] = ap.y; f[i + 11] = ap.z;
-    f[i + 12] = g.aiPaddle.normal.x; f[i + 13] = g.aiPaddle.normal.y; f[i + 14] = g.aiPaddle.normal.z;
-    f[i + 15] = Number.isFinite(g.player.roll) ? g.player.roll : 0;
-    this.head = (this.head + 1) % this.cap;
-    if (this.n < this.cap) this.n++;
-    this.t = t;
-    return true;
+    f[0] = b.x; f[1] = b.y; f[2] = b.z;
+    f[3] = p.x; f[4] = p.y; f[5] = p.z;
+    f[6] = g.player.normal.x; f[7] = g.player.normal.y; f[8] = g.player.normal.z;
+    f[9] = ap.x; f[10] = ap.y; f[11] = ap.z;
+    f[12] = g.aiPaddle.normal.x; f[13] = g.aiPaddle.normal.y; f[14] = g.aiPaddle.normal.z;
+    f[15] = Number.isFinite(g.player.roll) ? g.player.roll : 0;
+    // Resample onto the playback clock even below 30 FPS. Simply throttling
+    // slow input recorded 20 Hz poses that the player then ran at 30 Hz.
+    const step = 1 / REPLAY_HZ, previous = this.previousPose;
+    let next = Number.isFinite(this.lastT) ? this.lastT + step : t;
+    const due = Math.floor((t - next) / step + 1e-6) + 1;
+    if (due > this.cap) next += (due - this.cap) * step;
+    let stored = false;
+    for (; next <= t + 1e-6; next += step) {
+      const u = Number.isFinite(this.lastInputT) && t > this.lastInputT
+        ? clamp((next - this.lastInputT) / (t - this.lastInputT), 0, 1) : 1;
+      const index = this.head * REPLAY_FLOATS;
+      for (let k = 0; k < REPLAY_FLOATS; k++) this.f[index + k] = lerp(previous[k], f[k], u);
+      const roll = Math.atan2(Math.sin(f[15] - previous[15]), Math.cos(f[15] - previous[15]));
+      this.f[index + 15] = previous[15] + roll * u;
+      this.head = (this.head + 1) % this.cap;
+      this.n = Math.min(this.cap, this.n + 1);
+      this.rallyFrames = Math.min(this.cap, this.rallyFrames + 1);
+      this.lastT = next; this.t = next; stored = true;
+    }
+    previous.set(f); this.lastInputT = t;
+    return stored;
   }
 
   /** @param e {by, stroke, speed, spin, quality, slip} */
@@ -105,7 +120,8 @@ class MomentRecorder {
 
   /** Capture the current rally's frames for debug replay regardless of beauty score */
   captureClip(t) {
-    const len = Math.min(this.n, Math.max(25, Math.round((t - this.rallyT) * REPLAY_HZ) + 4));
+    const len = Math.min(this.n, this.rallyFrames);
+    if (!len) return null;
     const clip = new Float32Array(len * REPLAY_FLOATS);
     for (let k = 0; k < len; k++) {
       const src = ((this.head - len + k) % this.cap + this.cap) % this.cap;
@@ -122,13 +138,8 @@ class MomentRecorder {
     const shots = this.events.length;
     if (shots < 3) { this.beginRally(t, null); return null; }   // a 2-shot point is never beautiful
 
-    // ring → linear clip, oldest first
-    const len = Math.min(this.n, Math.round((t - this.rallyT) * REPLAY_HZ) + 3);
-    const clip = new Float32Array(len * REPLAY_FLOATS);
-    for (let k = 0; k < len; k++) {
-      const src = ((this.head - len + k) % this.cap + this.cap) % this.cap;
-      clip.set(this.f.subarray(src * REPLAY_FLOATS, src * REPLAY_FLOATS + REPLAY_FLOATS), k * REPLAY_FLOATS);
-    }
+    const clip = this.captureClip(t);
+    if (!clip) { this.beginRally(t, null); return null; }
 
     let peakSpeed = 0, peakSpin = 0, finish = 'drive', mine = 0;
     for (const e of this.events) {
@@ -150,7 +161,7 @@ class MomentRecorder {
       + BEAUTY.finish(finish) + BEAUTY.clutch(m) + BEAUTY.comeback(m) + BEAUTY.netClip(m);
 
     const moment = {
-      score, shots, frames: clip, hz: REPLAY_HZ, poseVersion: 2,
+      score, shots, frames: clip.frames, hz: REPLAY_HZ, poseVersion: 2,
       speed: peakSpeed, spin: peakSpin, finish,
       events: this.events.slice(),
       inputDecisions: this.inputDecisions.slice(),
@@ -189,7 +200,7 @@ class MomentPlayer {
   }
 
   play(moment, speed, onEnd) {
-    if (!moment) return false;
+    if (!moment || !moment.frames || moment.frames.length < REPLAY_FLOATS) return false;
     this.moment = moment;
     this.i = 0; this.hold = 0; this.camPhase = 0;
     this.speed = speed || 0.35;
@@ -238,6 +249,7 @@ class MomentPlayer {
     g.ball.live = true;
     // trail: rebuild the last few frames of history so the ball draws a streak
     g.ball.hist.length = 0;
+    if (g.ball.histTimes) g.ball.histTimes.length = 0;
     const back = Math.min(10, i0);
     for (let k = back; k >= 0; k--) {
       const o = (i0 - k) * REPLAY_FLOATS;

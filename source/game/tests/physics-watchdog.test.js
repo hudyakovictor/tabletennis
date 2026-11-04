@@ -196,6 +196,34 @@ test('tickets are deduplicated by cooldown and bounded by the ring', () => {
   assert.equal(w.counts.CORNER_STUCK, overflow, 'counters keep counting after the ring is full');
 });
 
+test('input off-frame outcomes stay excluded after their tickets leave the ring', () => {
+  const w = new PhysicsWatchdog({ maxTickets: 2 });
+  for (let i = 0; i < 6; i++) w.ticket('BALL_OFF_FRAME', { time: i, cause: 'input' });
+  const report = w.report();
+  assert.equal(report.total, 2);
+  assert.equal(report.counts.BALL_OFF_FRAME, 6);
+  assert.equal(report.gateCounts.BALL_OFF_FRAME, 0);
+  assert.equal(w.ticket('BALL_OFF_FRAME', { time: 5.1, cause: 'input' }), null);
+  w.point();
+  w.ticket('BALL_OFF_FRAME', { time: 6, cause: 'input' });
+  assert.equal(w.report().gateCounts.BALL_OFF_FRAME, 0, 'point reset must preserve lifetime exclusions');
+});
+
+test('mixed off-frame lifetime counts keep engine failures and reset exclusions together', () => {
+  const w = new PhysicsWatchdog({ maxTickets: 2 });
+  for (let i = 0; i < 7; i++) w.ticket('BALL_OFF_FRAME', { time: i, cause: i % 3 === 0 ? 'engine' : 'input' });
+  w.ticket('CORNER_STUCK', { time: 10 }); w.ticket('CORNER_STUCK', { time: 11 });
+  const report = w.report();
+  assert.equal(report.counts.BALL_OFF_FRAME, 7);
+  assert.equal(report.gateCounts.BALL_OFF_FRAME, 3);
+  assert.equal(report.gateCounts.CORNER_STUCK, 2);
+  w.reset();
+  assert.equal(w.report().gateCounts.BALL_OFF_FRAME, 0);
+  w.ticket('BALL_OFF_FRAME', { time: 0, cause: 'engine' });
+  assert.equal(w.report().counts.BALL_OFF_FRAME, 1);
+  assert.equal(w.report().gateCounts.BALL_OFF_FRAME, 1);
+});
+
 test('report exposes counts, classes, tickets and green gates', () => {
   const w = new PhysicsWatchdog();
   w.ticket('RACKET_UNDER_TABLE', { time: 1, at: 'contact' });
@@ -521,6 +549,25 @@ test('the same off-frame ball after an over-ceiling stroke is cause=engine and f
   assert.equal(row.aiLevel, 1);
   assert.equal(w.report().gateCounts.BALL_OFF_FRAME, 1, 'аномалия движка валит гейт');
   assert.equal(w.report().gateCounts.SPEED_CEILING, 1);
+});
+
+test('live off-frame tickets name the hitter, not the receiver or another blade detector', () => {
+  const { Game, V3 } = load(['10_math.js', '30_physics.js', '46_physics_watchdog.js', '70_game.js'], ['Game', 'V3']);
+  for (const side of [-1, 1]) for (const racketTicket of [false, true]) {
+    const w = new PhysicsWatchdog(), g = Object.create(Game.prototype);
+    Object.assign(g, { time: 1, watchdog: w, vw: 1280, vh: 760, ai: { levelIndex: 2 },
+      ball: { live: true, lastHitBy: side, p: V3.new(0, 1.2, -.3), v: V3.new(0, 1, -6), w: V3.new() },
+      player: { pos: V3.new(0, 1.1, 1.7) }, aiPaddle: { pos: V3.new(0, 1.1, -1.7) } });
+    g.project = p => p === g.ball.p || racketTicket && p === (side === -1 ? g.player.pos : g.aiPaddle.pos)
+      ? { ok: true, x: .5, y: -.6 } : { ok: true, x: .5, y: .5 };
+    w.stroke({ time: 1, side, aiLevel: 2, strokeId: 'DRIVE', vmag: 6, ball: g.ball });
+    for (let i = 0; i < 20; i++) { g.time = 1 + i / 60; g.watchdogFrame(1 / 60); }
+    const row = w.tickets.find(t => t.code === 'BALL_OFF_FRAME');
+    assert.ok(row);
+    assert.equal(row.who, side === -1 ? 'opponent' : 'player');
+    assert.equal(row.side, side, 'stroke owner must override mutable receiver/blade context');
+    assert.equal(row.detail.side, side);
+  }
 });
 
 test('a speed jump inside one substep marks the shot as engine-caused', () => {
