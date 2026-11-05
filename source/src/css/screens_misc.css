@@ -23,7 +23,6 @@
 .preloader.launched .pl-wordmark,.preloader.launched .pl-ring,.preloader.launched .pl-readout{opacity:0}
 .preloader.revealed{pointer-events:none}.preloader.revealed .pl-backdrop{opacity:0}
 .screen.intro-entry .rise,.screen.intro-entry .pop{animation:none;opacity:1;transform:none}
-.lobby-demo{position:absolute;inset:0;width:100%;height:100%;z-index:1;pointer-events:none}
 @keyframes plArrive{from{opacity:0;transform:translateY(10px) scale(.95)}to{opacity:1;transform:none}}
 body.rm .pl-ball{animation:none}
 @media(prefers-reduced-motion:reduce){.pl-ball{animation:none}.pl-backdrop,.pl-wordmark,.pl-readout,.pl-ring{transition:opacity .18s linear}.pl-progress{transition:none}}
@@ -39,8 +38,7 @@ body.in-game #screens{pointer-events:none}
 .screen[data-id=match],.screen[data-id=train]{pointer-events:none;background:transparent}
 .mx{position:absolute;inset:0;pointer-events:none}
 .mx .pe,.mx .pe *{pointer-events:auto}
-.mx .sb{transform:translateY(-130%);transition:transform .7s var(--spring2)}
-.mx.live .sb{transform:none}
+.mx:not(.live) .match-hud-slot{visibility:hidden}
 .mx .match-actions{opacity:0;pointer-events:none;transform:translateY(-14px);transition:opacity .4s,transform .5s var(--spring2)}
 .mx.live .match-actions{opacity:1;pointer-events:auto;transform:none}
 /* letterbox */
@@ -159,13 +157,6 @@ body.rm .academy-tabs button,body.rm .academy .b3,body.rm .academy .ib{transitio
 .dz-row input{width:100%;accent-color:#35C6F4}
 .dz-row b{text-align:right;color:#9BE8FF;font-size:12px}
 .dz-row .tgl{grid-column:2/4;justify-self:end}
-
-.mx-srv{position:absolute;left:50%;top:calc(var(--sat) + var(--tgt) + 96px);transform:translateX(-50%);z-index:4;padding:7px 14px;border-radius:999px;
-  font:900 11px/1 var(--display);letter-spacing:.08em;text-transform:uppercase;white-space:nowrap;opacity:0;pointer-events:none}
-.mx-srv.me{background:linear-gradient(180deg,#FF8A6B,#D9362B);box-shadow:0 3px 0 #7A1A10,0 0 20px rgba(255,90,60,.45)}
-.mx-srv.op{background:linear-gradient(180deg,#5FD8FF,#1A7FD0);box-shadow:0 3px 0 #0A3A6A,0 0 20px rgba(46,201,255,.45)}
-.mx-srv.on{animation:srvpop 1.8s var(--spring2) forwards}
-@keyframes srvpop{0%{opacity:0;transform:translateX(-50%) translateY(-10px) scale(.8)}12%{opacity:1;transform:translateX(-50%) scale(1)}82%{opacity:1;transform:translateX(-50%) scale(1)}100%{opacity:0;transform:translateX(-50%) translateY(-6px) scale(.95)}}
 
 /* лобби: настоящий стол за хабом.
    Характер signal arena — navy-вуаль, мягкие teal/coral-свечения и слабая

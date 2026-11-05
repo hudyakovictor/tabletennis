@@ -36,7 +36,7 @@ function hostFixture(raw = {}) {
     matchMedia: () => ({ matches: false, addEventListener() {} }) });
   vm.runInContext(stateSource + '\n' + calSource + '\n' + hostSource + '\n;globalThis.api = { S, GameHost, ZoneStats, applyGameCalibrations, calibrationState };', context);
   const api = context.api; api.GameHost.ensure();
-  const message = data => listeners.forEach(fn => fn({ data: { __tt: 1, ...data }, source: api.GameHost.frame.contentWindow }));
+  const message = (data, source = api.GameHost.frame.contentWindow) => listeners.forEach(fn => fn({ data: { __tt: 1, ...data }, source }));
   const registry = vm.runInContext('CALIBRATION_REGISTRY', context);
   const ready = (preferences = {}) => message({ type: 'ready', rules: { captureRadius: .2 }, calibrationRegistry: plain(registry), calibrationPreferences: preferences, trainingCatalog: { version: 1, lessons: [] } });
   const snapshot = () => api.applyGameCalibrations({ settings: {}, sessionKind: api.GameHost.sessionKind, slowmo: { allowed: true } }, api.S.cal);
@@ -98,6 +98,57 @@ test('GPU recovery replays current preferences before the saved mode and preserv
   assert.equal(inspector.on, true);
 });
 
+function matchHudSnapshot(seq = 1) {
+  return { schema: 1, matchId: 'match-test', seq, rallyId: 2, visible: true, free: false, staminaEnabled: true,
+    phase: 'RALLY', score: [7, 7], target: 11, server: 1, rally: 3, paused: false, matchPoint: 0,
+    players: [{ side: 1, energy: 48, capacity: 70, fatigue: 30, limited: true },
+      { side: -1, energy: 56, capacity: 80, fatigue: 20, limited: false }],
+    contacts: [null, null], whiffs: [null, null], event: null, result: null };
+}
+
+test('match snapshots reject a different frame, stale sequence, old request and malformed resources', () => {
+  const f = hostFixture(); f.ready(); f.GameHost.send('match', { sessionKind: 'ranked' });
+  const received = []; f.GameHost.on(m => { if (m.type === 'hud') received.push(m); });
+  const hud = (snapshot, hudRequestId = f.GameHost.hudRequestId, source) => f.message({ type: 'hud', snapshot, hudRequestId }, source);
+  hud(matchHudSnapshot(), undefined, {}); assert.equal(received.length, 0);
+  hud(matchHudSnapshot()); assert.equal(received.length, 1);
+  hud(matchHudSnapshot()); hud(matchHudSnapshot(0)); hud(matchHudSnapshot(2), f.GameHost.hudRequestId - 1);
+  assert.equal(received.length, 1);
+  const invalid = matchHudSnapshot(2); invalid.players[0].energy = 90;
+  hud(invalid); assert.equal(received.length, 1);
+  const fresh = matchHudSnapshot(2); hud(fresh); fresh.players[0].energy = 0;
+  assert.equal(f.GameHost.matchSnapshot.players[0].energy, 48, 'cache is detached from incoming data');
+  assert.equal(received.length, 2);
+  f.GameHost.send('quit'); hud(matchHudSnapshot(3)); assert.equal(received.length, 2);
+  f.GameHost.send('match', { sessionKind: 'practice' });
+  const next = matchHudSnapshot(); next.matchId = 'next-match'; hud(next);
+  assert.equal(f.GameHost.matchSnapshot.matchId, 'next-match');
+});
+
+test('the engine is the stroke palette source and invalid catalog entries are discarded', () => {
+  const f = hostFixture(); f.message({ type: 'ready', strokeCatalog: [
+    { id: 'LOOP', col: '#44aaff' }, { id: 'SERVE_TOP', col: '#44aaff' },
+    { id: 'LOOP', col: '#ffffff' }, { id: 'BAD', col: 'url(javascript:bad)' }, { id: '__proto__', col: '#ffffff' }
+  ] });
+  assert.deepEqual(plain(f.GameHost.strokeCatalog), [{ id: 'LOOP', col: '#44aaff' }, { id: 'SERVE_TOP', col: '#44aaff' }]);
+});
+
+test('GPU recovery and an explicit iframe reload carry the full checkpoint, never just score', () => {
+  const f = hostFixture(); f.ready(); f.GameHost.send('match', { sessionKind: 'ranked' });
+  const checkpoint = { schema: 1, matchId: 'recovered', score: [7, 7], server: -1,
+    players: [{ energy: 23, fatigue: 30, regenDelayRemaining: .31, low: true },
+      { energy: 49, fatigue: 18, regenDelayRemaining: .09, low: false }], recoveredPointId: 13 };
+  f.GameHost.frame.contentWindow.__game = { captureMatchResume: () => checkpoint };
+  f.GameHost.send('pause'); f.GameHost.reload(); f.ready();
+  assert.deepEqual(f.sent.findLast(m => m.type === 'match').resume, checkpoint);
+  assert.equal(f.sent.at(-1).type, 'pause');
+  checkpoint.players[0].energy = 0;
+  assert.equal(f.GameHost.matchResume.players[0].energy, 23);
+  f.GameHost.recover({ inMatch: true, resume: f.GameHost.matchResume, score: [7, 7], server: -1 }); f.ready();
+  assert.equal(f.sent.findLast(m => m.type === 'match').resume.players[0].energy, 23);
+  assert.equal(f.sent.findLast(m => m.type === 'match').resume.players[0].regenDelayRemaining, .31);
+});
+
 test('shell OS listener keeps effective reduced motion active while requested rm stays independent', () => {
   const f = hostFixture({ rm: true }); f.ready(); f.query.matches = false; f.motionListeners[0]({ matches: false });
   assert.equal(f.body.classList.contains('rm'), true); assert.equal(f.S.rm, true);
@@ -136,6 +187,36 @@ function embedFixture() {
   const command = (type, data) => listeners.forEach(fn => fn({ source: window.parent, data: { __tt: 1, type, ...data } }));
   return { g, ui, audio, sent, command, query: g.motionQuery, updates: () => updates, resizes: () => resizes, networkHandlers };
 }
+
+test('the common confirmed-contact record publishes one legacy hit and whiffs do not publish hits', () => {
+  const f = embedFixture(); f.command('match', { hudRequestId: 8 });
+  const snapshot = matchHudSnapshot();
+  snapshot.contacts[0] = { matchId: snapshot.matchId, rallyId: 2, eventId: 5, swingId: 3, side: 1,
+    stroke: 'BLOCK', kmh: 27.8, rps: 21, quality: .30, sweet: .72, energy: 48, capacity: 70, limited: true, x: .24, y: .62 };
+  snapshot.event = { id: 5, type: 'hit', side: 1 };
+  f.g.onMatchHud(snapshot); f.g.onMatchHud(snapshot);
+  const hits = f.sent.filter(m => m.type === 'hit');
+  assert.equal(hits.length, 1); assert.equal(hits[0].sweet, .72); assert.equal(hits[0].stroke, 'BLOCK');
+  assert.equal(hits[0].kmh, 28); assert.equal(hits[0].x, .24);
+  assert.equal(f.sent.findLast(m => m.type === 'hud').hudRequestId, 8);
+  snapshot.seq++; snapshot.event = { id: 6, type: 'whiff', side: -1 }; f.g.onMatchHud(snapshot);
+  assert.equal(f.sent.filter(m => m.type === 'hit').length, 1);
+  snapshot.contacts[1] = { ...snapshot.contacts[0], eventId: 7, side: -1, stroke: 'LOOP', sweet: 0 };
+  snapshot.event = { id: 7, type: 'hit', side: -1 }; f.g.onMatchHud(snapshot);
+  assert.equal(f.sent.filter(m => m.type === 'hit').length, 2);
+  assert.equal(f.sent.findLast(m => m.type === 'hit').by, -1);
+});
+
+test('embed recovery passes the checkpoint atomically without another prepServe or score rewrite', () => {
+  const f = embedFixture(), calls = [], resume = { schema: 1, matchId: 'same-match', score: [7, 7], server: -1 };
+  f.g.startMatch = (diff, state) => { calls.push({ diff, state }); f.g.score = [8, 7]; return true; };
+  f.g.prepServe = () => { throw Error('duplicate preparation after atomic restore'); };
+  f.command('match', { diff: 2, resume });
+  assert.deepEqual(plain(calls), [{ diff: 2, state: resume }]);
+  assert.deepEqual(f.g.score, [8, 7], 'bridge cannot overwrite restored Game data');
+  f.g.startMatch = () => false; f.command('match', { diff: 2, resume: { corrupt: true } });
+  assert.equal(f.g.paused, true); assert.equal(f.sent.findLast(m => m.type === 'error').code, 'invalid_match_resume');
+});
 
 test('embed ready publishes the registry and cal/settings/slowmo/status do not wake a sleeping arena', () => {
   const f = embedFixture(); assert.equal(f.sent.find(m => m.type === 'ready').calibrationRegistry.length, 17);

@@ -156,6 +156,20 @@
       obj[name] = function (...args) { return fn.call(this, orig.bind(this), ...args); };
     };
     const stateName = (s) => Object.keys(GS).find((k) => GS[k] === s) || String(s);
+    let hudRequestId = 0, lastHudHit = '';
+    g.onMatchHud = snapshot => {
+      if (lobby) return;
+      post('hud', { snapshot, hudRequestId });
+      const event = snapshot.event;
+      if (!snapshot.visible || event?.type !== 'hit') return;
+      const contact = snapshot.contacts[event.side > 0 ? 0 : 1];
+      const key = snapshot.matchId + ':' + event.id;
+      if (!contact || contact.eventId !== event.id || key === lastHudHit) return;
+      lastHudHit = key;
+      post('hit', { by: contact.side, rally: snapshot.rally, kmh: Math.round(contact.kmh), stroke: contact.stroke,
+        sweet: contact.sweet ?? (contact.side > 0 ? g.lastSweet || 0 : 0),
+        x: contact.x ?? .5, y: contact.y ?? .6, eventId: contact.eventId, matchId: contact.matchId });
+    };
     // Снимок промаха снимается в ближайшем кадре: буфер читается сразу после
     // draw, пока браузер его не очистил, но уже вне обработчика касания.
     wrap(g, 'render', function (orig) {
@@ -184,7 +198,7 @@
     });
     wrap(g, 'applyHit', function (orig, side, racket, contactP) {
       const r = orig(side, racket, contactP, ...[].slice.call(arguments, 4));
-      if (lobby) return r;
+      if (lobby || this.getMatchSnapshot?.().visible) return r;
       const p = contactP ? this.project(contactP, {}) : null;
       post('hit', { by: side, rally: this.rally, kmh: Math.round(V3.len(this.ball.v) * 3.6),
         stroke: racket && racket.stroke ? racket.stroke.id : '', sweet: side > 0 ? (this.lastSweet || 0) : 0,
@@ -196,9 +210,11 @@
       const ok = orig.apply(null, [].slice.call(arguments, 1));
       if (ok && !lobby) {
         if (contactAttempt && att === contactAttempt) { att.contact = true; att.sweet = 0.72; flush(); }
-        const p = this.ball && this.ball.p ? this.project(this.ball.p, {}) : null;
-        post('hit', { by: 1, rally: this.rally, kmh: Math.round(V3.len(this.ball.v) * 3.6),
-          stroke: 'BLOCK', sweet: 0.72, x: p && p.ok ? p.x : 0.5, y: p && p.ok ? p.y : 0.6 });
+        if (!this.getMatchSnapshot?.().visible) {
+          const p = this.ball && this.ball.p ? this.project(this.ball.p, {}) : null;
+          post('hit', { by: 1, rally: this.rally, kmh: Math.round(V3.len(this.ball.v) * 3.6),
+            stroke: 'BLOCK', sweet: 0.72, x: p && p.ok ? p.x : 0.5, y: p && p.ok ? p.y : 0.6 });
+        }
       }
       return ok;
     });
@@ -457,8 +473,8 @@ const showTip = (text) => { if (text) tip = { text, until: g.time + 4.6 }; };
       g.lobbyScene?.stop();
       if (g.preview?.active) g.preview.close(false);
       post('glLost', { state: stateName(g.state), lobby, training: g.training ? g.training.step : null,
-        inMatch: !lobby && !g.training && !g.demoMode && [GS.SERVE_READY, GS.SERVE_TOSS, GS.RALLY, GS.POINT].includes(g.state),
-        score: (g.score || [0, 0]).slice(), server: g.server });
+        inMatch: !lobby && !g.training && [GS.SERVE_READY, GS.SERVE_TOSS, GS.RALLY, GS.POINT].includes(g.state),
+        score: (g.score || [0, 0]).slice(), server: g.server, resume: g.captureMatchResume?.() });
     }, false);
 
     // Non-lobby attract/prematch screens retain their original still life.
@@ -626,7 +642,7 @@ const showTip = (text) => { if (text) tip = { text, until: g.time + 4.6 }; };
       if (!statusOnly && !['sleep', 'mute', 'haptics', 'equip', 'quality', 'rm', 'debug', 'hint', 'inputMode', 'attract', 'quit', 'quiet', 'pause', 'resume', 'locale', 'missShots', 'cal', 'settings', 'sessionKind', 'slowmo'].includes(m.type)) wake();
       switch (m.type) {
         case 'net': netCommand(m); break;
-        case 'sleep': g.cancelPendingCapture(); g.clearContactFlashes?.(); g.lobbyScene?.suspend(); g._ttSleeping = true; g.syncAudioQuiet(); break;
+        case 'sleep': g.cancelPendingCapture(); g.cancelInput?.(); g.clearContactFlashes?.(); g.lobbyScene?.suspend(); g._ttSleeping = true; g.syncAudioQuiet(); break;
         case 'wake': break;
         case 'previewOpen':
           leaveLobby();
@@ -671,6 +687,7 @@ const showTip = (text) => { if (text) tip = { text, until: g.time + 4.6 }; };
           setCine('prematch', m.dur || 2.0); break;
         case 'match':
           leaveLobby();
+          hudRequestId = Number.isSafeInteger(m.hudRequestId) ? m.hudRequestId : 0;
           g.sessionKind = ['free', 'practice', 'ranked', 'career', 'check', 'online'].includes(m.sessionKind) ? m.sessionKind : m.free ? 'free' : 'practice';
           g.inspectSlowmoRequested = false; g.inspectSlowmo = false;
           refreshGameCalibrationPolicy(g, '_policy');
@@ -684,16 +701,12 @@ const showTip = (text) => { if (text) tip = { text, until: g.time + 4.6 }; };
           if (Number.isFinite(m.trend)) g.setAiTrend(m.trend);
           else g.aiTrend = g.trendFromHistory();
           resetAssist();
-          g.startMatch(Number.isFinite(m.diff) ? m.diff : g.settings.difficulty);
+          if (g.startMatch(Number.isFinite(m.diff) ? m.diff : g.settings.difficulty, m.resume || null) === false) {
+            hostPause(true); post('error', { code: 'invalid_match_resume', msg: 'Match recovery state is invalid' }); break;
+          }
           refreshGameCalibrationPolicy(g); publishCalibration();
-          if (m.resume && Array.isArray(m.resume.score)) {
-            // the engine was rebuilt after a lost GPU context: continue the same match, no fly-in
-            const [a, b] = m.resume.score; g.score = [a | 0, b | 0];
-            if (m.resume.server === 1 || m.resume.server === -1) g.server = m.resume.server;
-            const T = g.settings.targetScore || 11;
-            g.servesLeft = (a >= T - 1 && b >= T - 1) ? 1 : 2 - ((a + b) % 2);
-            g.prepServe(); cine.mode = null;
-          } else if (cine.mode === 'attract') setCine('prematch', 1.2);
+          if (m.resume) cine.mode = null;
+          else if (cine.mode === 'attract') setCine('prematch', 1.2);
           break;
         case 'train':
           leaveLobby();
@@ -772,6 +785,7 @@ const showTip = (text) => { if (text) tip = { text, until: g.time + 4.6 }; };
       }
     });
     post('ready', { rules: Object.assign({}, MATCH_RULES), trainingCatalog: trainingCatalog(),
+      strokeCatalog: typeof STROKES === 'undefined' ? [] : Object.values(STROKES).map(({ id, col }) => ({ id, col })),
       calibrationRegistry: CALIBRATION_REGISTRY, calibration: calibrationState(g),
       calibrationPreferences: g.savedCalibrationPreferences || {},
       steps: TRAIN_STEPS.map((s) => ({ id: s.id, title: ET(s.title) })) });

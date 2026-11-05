@@ -25,7 +25,6 @@ docs/ARCHITECTURE.ru.md
 | `data/` | чистые данные и каталоги без DOM | `leagues.js`, `catalog.js` (маркетплейс), `season.js` |
 | `ui/` | переиспользуемый рендер: иконки, арт предметов, фон, FX | `art.js`, `item_art.js`, `bg.js`, `fx.js`, `ui.js` |
 | `services/` | состояние и правила поверх data | `economy.js` (кошелёк), `career.js` (лиги/миссии/ачивки), `game_host.js` (мост в движок), `api.js` (единственная точка сети), `progress.js` (очередь фактов + слияние серверного прогресса) |
-| `engine2d/` | лёгкий 2D-канвас демо-режим хаба (фолбэк, не WebGL) | `engine.js` |
 | `screens/` | экраны: один файл = один экран, регистрируется `Router.def('<id>', {...})` | `hub`, `shop`, `pass`, `ranks`, `profile`, `settings`, `matchmaking`, `match`, `training`, `result` |
 | `main.js` | бут: порядок инициализации и сплэш. Всегда последний в order | |
 

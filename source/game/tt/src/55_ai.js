@@ -31,12 +31,25 @@
 
 /* ---------------------------------------------------------------------
  *  LEVELS
+ *
+ *  standOff — насколько бот отходит от линии стола (метры за T_HALF_LEN).
+ *  В профессиональном настольном теннисе игрок бьёт не у самой тумбы:
+ *  после подставки он отходит на полный замах, и контакт происходит в 0,4–0,7 м
+ *  за линией. Поэтому стойка растёт с уровнем, а вместе с ней vmag-окно
+ *  (сила ракетки) и deepness (мяч кладётся ближе к дальней линии).
+ *  powerK — во сколько раз бот догружает прилетевший мяч своим свингом.
+ *  Без него скорость ответа почти равна скорости прилёта и разницы между
+ *  уровнями по км/ч почти нет; с ним СЛОЖНЫЙ и WTF бьют сильнее,
+ *  а не просто быстрее возят мяч туда-сюда. У ЛЁГКОГО ровно 1,0: спарринг
+ *  для новичков и training-режим должны оставаться на прежней скорости.
  * ------------------------------------------------------------------- */
 const AI_LEVELS = [
   {
     id: 0, name: 'EASY', tag: 'EASY', ru: 'ЛЁГКИЙ', elo: 900, style: 'PUSHER',
     react: 0.42, move: 1.7, posErr: 0.30, skill: 0.32, spinRead: 0.18,
     aggro: 0.08, variety: 0.30,
+    standOff: 0.00,
+    powerK: 1.00,
     vmagMin: 2.0, vmagMax: 3.8, paceOpen: 0.16, paceRamp: 0.02, paceMax: 0.32,
     windup: 0.38, errBase: 0.37, errPress: 0.16, deepness: 0.48, placeSkill: 0.12,
     counterRate: 0.01, smashRate: 0.01, dropRate: 0.02,
@@ -45,24 +58,30 @@ const AI_LEVELS = [
     id: 1, name: 'MEDIUM', tag: 'MEDIUM', ru: 'СРЕДНИЙ', elo: 1400, style: 'ALLROUND',
     react: 0.28, move: 2.55, posErr: 0.16, skill: 0.58, spinRead: 0.45,
     aggro: 0.25, variety: 0.60,
-    vmagMin: 3.2, vmagMax: 6.8, paceOpen: 0.26, paceRamp: 0.045, paceMax: 0.62,
-    windup: 0.30, errBase: 0.19, errPress: 0.09, deepness: 0.70, placeSkill: 0.36,
+    standOff: 0.12,
+    powerK: 1.06,
+    vmagMin: 3.4, vmagMax: 7.4, paceOpen: 0.26, paceRamp: 0.05, paceMax: 0.70,
+    windup: 0.30, errBase: 0.19, errPress: 0.09, deepness: 0.74, placeSkill: 0.36,
     counterRate: 0.08, smashRate: 0.20, dropRate: 0.05,
   },
   {
     id: 2, name: 'HARD', tag: 'HARD', ru: 'СЛОЖНЫЙ', elo: 1900, style: 'ATTACK',
     react: 0.17, move: 3.8, posErr: 0.06, skill: 0.79, spinRead: 0.72,
     aggro: 0.54, variety: 0.78,
-    vmagMin: 5.0, vmagMax: 12.0, paceOpen: 0.38, paceRamp: 0.075, paceMax: 0.90,
-    windup: 0.235, errBase: 0.075, errPress: 0.055, deepness: 0.86, placeSkill: 0.64,
+    standOff: 0.34,
+    powerK: 1.26,
+    vmagMin: 5.6, vmagMax: 13.6, paceOpen: 0.42, paceRamp: 0.085, paceMax: 0.98,
+    windup: 0.235, errBase: 0.075, errPress: 0.055, deepness: 0.92, placeSkill: 0.64,
     counterRate: 0.26, smashRate: 0.58, dropRate: 0.08,
   },
   {
     id: 3, name: 'WTF', tag: 'WTF', ru: 'WTF', elo: 2700, style: 'ATTACK',
     react: 0.09, move: 5.8, posErr: 0.023, skill: 0.95, spinRead: 0.965,
     aggro: 0.82, variety: 0.90,
-    vmagMin: 6.6, vmagMax: 16.2, paceOpen: 0.50, paceRamp: 0.105, paceMax: 1.0,
-    windup: 0.165, errBase: 0.017, errPress: 0.019, errPressAbs: true, deepness: 0.94, placeSkill: 0.94,
+    standOff: 0.42,
+    powerK: 1.40,
+    vmagMin: 7.2, vmagMax: 17.6, paceOpen: 0.50, paceRamp: 0.105, paceMax: 1.0,
+    windup: 0.165, errBase: 0.017, errPress: 0.019, errPressAbs: true, deepness: 0.97, placeSkill: 0.94,
     counterRate: 0.66, smashRate: 0.92, dropRate: 0.135,
   },
 ];
@@ -84,7 +103,10 @@ const AI_TACTICS = {
 };
 
 /* Serve pace and placement limits apply to the racket BEFORE the verified
- * launch. Spin is never changed after impact to disguise a different flight. */
+ * launch. Spin is never changed after impact to disguise a different flight.
+ * Порог 9,6 не случайно: при 9,8 подача с подрезкой на СЛОЖНОМ теряет
+ * идентичность вращения (ракетка слишком быстрая, чтобы мяч успел закрутиться
+ * назад) — контракт ai-serve-contract это ловит. Сила уровня живёт в розыгрыше. */
 const AI_SERVE_CAPS = [
   { vmag: 4.4, orbit: PH.T_HALF_WID * 0.44 },  // EASY
   { vmag: 6.0, orbit: PH.T_HALF_WID * 0.55 },  // MEDIUM
@@ -134,7 +156,9 @@ function makeRacket(side, archId, o) {
     elev: o.elev !== undefined ? o.elev : A.elev,
     contact: o.contact !== undefined ? o.contact : A.contact,
     azSwing: o.azSwing || 0, azFace: o.azFace || 0,
-    vmag: o.vmag !== undefined ? o.vmag : 11,
+    vmag: (o.vmag !== undefined ? o.vmag : 11) * (Number.isFinite(o.effortBudget?.effortScale) ? clamp(o.effortBudget.effortScale, 0, 1) : 1),
+    requestedVmag: o.vmag !== undefined ? o.vmag : 11,
+    effortBudget: o.effortBudget,
     aim: o.aim, quality: o.quality !== undefined ? o.quality : 0.85,
     isServe: !!o.isServe,
     netClear: o.netClear !== undefined ? o.netClear
@@ -174,8 +198,8 @@ class OpponentAI {
     this.trendRaw = 0;
     this.stats = OpponentAI._blankStats();
 
-    // Home position
-    this.home = V3.new(0, PH.TABLE_Y + 0.20, -(PH.T_HALF_LEN + 0.25));
+    // Home position — глубина стойки берётся из уровня (см. setLevel)
+    this.home = V3.new(0, PH.TABLE_Y + 0.20, -this.homeDepth);
     this.target = V3.clone(this.home);
     this.pos = V3.clone(this.home);
     this.lastPos = V3.clone(this.home);
@@ -238,6 +262,11 @@ class OpponentAI {
     this.L = AI_LEVELS[this.levelIndex];
     this.maxSpeed = this.L.move;
     this.pace = this.L.paceOpen;
+    /* Стойка и плоскость контакта меряются одной величиной: с уровнем бот
+     * отходит за линию стола, как игрок с полным замахом. reset() поставит
+     * pos на home, а внутри розыгрыша бот уедет глубже через plan.z. */
+    this.homeDepth = PH.T_HALF_LEN + 0.25 + this.L.standOff;
+    if (this.home) this.home.z = -this.homeDepth;
   }
 
   /** Адаптация между матчами: -1 (игрок проигрывает) … +1 (игрок выигрывает).
@@ -317,7 +346,7 @@ class OpponentAI {
    *  deep rescues must survive the clamp, or the director is a dead letter. */
   setHandicap(h) { this.handicap = clamp(h, 0.68, 1.08); }
 
-  _strokeContext(game) {
+  _strokeContext(game, effortBudget) {
     const b = game.ball;
     this.forehand = paddleForehand(b.p.x * this.side, this.hand, this.forehand);
     return {
@@ -327,11 +356,13 @@ class OpponentAI {
       equip: (game.aiEquip || game.equip) && typeof (game.aiEquip || game.equip).forSide === 'function'
         ? (game.aiEquip || game.equip).forSide(this.forehand ? 1 : -1) : undefined,
       powerScale: 1, spinBias: 'norm',
+      effortBudget,
     };
   }
 
   _scaleRacket(racket, cap) {
     if (!racket || !racket.vR) return racket;
+    racket = enforceRacketEffort(racket);
     const cut = this.handicap < 1 ? 1 - (1 - this.handicap) * 0.45 : 1;
     const scale = Math.min(1, cap / Math.max(racket.vmag, 0.5)) * cut;
     if (scale >= 1) return racket;
@@ -362,6 +393,7 @@ class OpponentAI {
    * racket is returned untouched.
    */
   applyExecutionError(game, racket, isServe) {
+    racket = enforceRacketEffort(racket);
     if (isServe || !racket || racket.valid === false || !game || !game.ball) return racket;
     const L = this.L;
     const pressure = clamp(this.pressure, 0, 1);
@@ -399,6 +431,7 @@ class OpponentAI {
         bad.vR = V3.mul(V3.clone(racket.vR), racket.vR, 1 + 0.060 * step);
       }
       if (racket.arch) bad = resolvedRacketFrame(bad, bad.normal, bad.vR);
+      else bad = enforceRacketEffort(bad);
       if (isFault(bad)) {
         this.stats.errors++;
         if (kind === 'net') this.stats.net++; else this.stats.long++;
@@ -482,16 +515,18 @@ class OpponentAI {
   // Only rallies may switch to a defensive family; serves preserve their intent.
   _ensureLegal(game, racket, plan) {
     const ball = game.ball;
+    racket = enforceRacketEffort(racket);
     if (this._flightLegal(ball, racket, false)) return racket;
     const L = this.L;
     const aim = { x: clamp(((plan.aim && plan.aim.x) || 0) * 0.5, -0.42, 0.42),
       z: -this.side * PH.T_HALF_LEN * 0.62 };
-    const ctx = this._strokeContext(game);
+    const ctx = this._strokeContext(game, racket.effortBudget);
     for (const id of ['BLOCK', 'PUSH', 'LOOP']) {
       const cand = racketForStroke(id, ctx, {
         vmag: clamp(plan.speed * 0.55, 2.2, Math.min(4.6, Math.max(3.0, L.vmagMin + 1.2))),
         aim, quality: 0.8 + 0.1 * L.skill,
       });
+      cand.effortRequest = racket.effortRequest;
       cand.netClear = 0.12;
       const solved = this._scaleRacket(refineRacket(ball.p, ball.v, ball.w, cand,
         Math.max(L.skill, 0.85), cand.quality), L.vmagMax);
@@ -542,10 +577,15 @@ class OpponentAI {
 
     const inSpeed = V3.len(ball.v);
     const topIn = this.side * ball.w.x;
-    let zHit = -PH.T_HALF_LEN
+    /* Плоскость встречи = линия стола + отход уровня + запас на замах под
+     * скорость прилёта. На СЛОЖНОМ это ~0,5 м за линией: бот реально играет
+     * с дистанции, как профи, а не прижавшись к тумбе. Пол -2,20 не косметика:
+     * глубже клинок надолго зависал за столом, и долгий-мяч на медленном
+     * снижении засчитывался сторожем как пролёт сквозь ракетку. */
+    let zHit = -PH.T_HALF_LEN - this.L.standOff
       - clamp(0.10 + inSpeed * 0.030 + Math.max(0, topIn) * 0.00022, 0.08, 0.62);
     if (landing.z > -0.62) zHit = Math.max(zHit, landing.z - 0.52);
-    zHit = clamp(zHit, -2.05, -PH.R);
+    zHit = clamp(zHit, -2.20, -PH.R);
 
     const q = this._q;
     predict(V3.clone(ball.p), V3.clone(ball.v), V3.clone(ball.w),
@@ -600,6 +640,14 @@ class OpponentAI {
    *  DECISION
    * ================================================================== */
 
+  _effortPreference(game) {
+    if (typeof game.getEffortBudget !== 'function') return 1;
+    const cap = STROKE_CONFIG.racket.vmax;
+    const budget = game.getEffortBudget(this.side,
+      { strokeId: 'SMASH', requestedVmag: cap, freshVmagCap: cap, effort: 1 });
+    return Number.isFinite(budget?.effortScale) ? clamp(budget.effortScale, .15, 1) : 1;
+  }
+
   /** Pick the stroke */
   pickStroke(game, plan) {
     const L = this.L, T = this.tactic, ball = game.ball;
@@ -615,45 +663,46 @@ class OpponentAI {
     const aggro = clamp((L.aggro * 0.7 + T.risk * 0.5) * (0.85 + this.pace * 0.3)
       + this.mood * 0.08 - this.pressure * 0.07 + this._trendAmp() * 0.8, 0, 1.1);
     const r = this._rand();
+    const effort = this._effortPreference(game), attack = effort * effort;
 
     if (this.levelIndex >= 2 && plan.short && overTable && backhand && hTable >= 0.04 && hTable <= 0.28 &&
-      inSpeed < 12 && r < 0.12 + (this.levelIndex - 2) * 0.10) return 'BANANA';
+      inSpeed < 12 && r < (0.12 + (this.levelIndex - 2) * 0.10) * effort) return 'BANANA';
     if (heavyTop && inSpeed > 8 && overTable && hTable >= 0.04 && hTable < 0.26 &&
       r < 0.10 * L.spinRead) return 'CHOP_BLOCK';
 
     if (hNet > 0.17 && inSpeed < 13.5) {
-      if (r < L.smashRate * (0.55 + aggro * 0.6)) return 'SMASH';
+      if (r < L.smashRate * (0.55 + aggro * 0.6) * attack) return 'SMASH';
       return 'DRIVE';
     }
     if (deepMe) {
-      if (hTable > 0.26 && r < 0.42 + aggro * 0.34) return 'LOOP';
+      if (hTable > 0.26 && r < (0.42 + aggro * 0.34) * effort) return 'LOOP';
       if (r < 0.30) return 'LOB';
       return r < 0.62 ? 'DRIVE' : 'CHOP';
     }
     if (inSpeed > 17.5) {
-      const block = 0.78 - aggro * 0.42;
+      const block = 0.78 - aggro * 0.42 + (1 - effort) * 0.15;
       if (r < block) return 'BLOCK';
-      return r < block + L.counterRate ? 'COUNTER' : 'DRIVE';
+      return r < block + L.counterRate * effort ? 'COUNTER' : 'DRIVE';
     }
     if (backspin) {
-      if (hTable < 0.10 && plan.short) return r < 0.30 + aggro * 0.35 ? 'FLICK' : 'PUSH';
-      if (r < 0.30 + aggro * 0.55) return 'LOOP';
+      if (hTable < 0.10 && plan.short) return r < (0.30 + aggro * 0.35) * effort ? 'FLICK' : 'PUSH';
+      if (r < (0.30 + aggro * 0.55) * effort) return 'LOOP';
       return 'PUSH';
     }
     if (plan.short && hTable < 0.16) {
       if (r < L.dropRate) return 'DROP';
-      return r < 0.26 + aggro * 0.42 ? 'FLICK' : 'PUSH';
+      return r < (0.26 + aggro * 0.42) * effort ? 'FLICK' : 'PUSH';
     }
-    if (heavyTop && r < L.counterRate + aggro * 0.2) return 'COUNTER';
+    if (heavyTop && r < (L.counterRate + aggro * 0.2) * effort) return 'COUNTER';
 
     if (L.style === 'PUSHER' && r < 0.55 - aggro * 0.3) return 'PUSH';
-    if (r < 0.07 * L.variety * T.wide) {
+    if (r < 0.07 * L.variety * T.wide * effort) {
       const lateral = this._rand();
       return lateral < 1 / 3 ? 'SIDE' : lateral < 2 / 3 ? 'HOOK' : 'FADE';
     }
     if (r < 0.07 * L.variety * T.wide + 0.08 * (1 - aggro)) return 'PUSH';
 
-    if (r < 0.34 + aggro * 0.46) return 'LOOP';
+    if (r < (0.34 + aggro * 0.46) * effort) return 'LOOP';
     return 'DRIVE';
   }
 
@@ -686,6 +735,15 @@ class OpponentAI {
     } else {
       wantZ = lerp(-0.55, -PH.T_HALF_LEN * 0.75, T.depth + 0.2 * this._rand());
     }
+    /* deepness — тяга цели к дальней линии. Ниже 0,55 её нет вовсе (ЛЁГКИЙ с
+     * 0,48 остаётся на прежней раздаче), выше — дотягивает до 0,92 длины
+     * половины стола (~11 см от линии, как у профи). СЛОЖНЫЙ (0,92) кладёт
+     * топ-спин почти в линию и выносит игрока за тумбу. Drop не тянем: он
+     * живёт именно тем, что остаётся коротким. */
+    const pull = clamp((L.deepness - 0.55) / 0.42, 0, 1) * 0.55;
+    if (pull > 0 && archId !== 'DROP') {
+      wantZ = -Math.min(PH.T_HALF_LEN * 0.92, lerp(Math.abs(wantZ), PH.T_HALF_LEN, pull));
+    }
 
     if (plan.wide && roll < 0.4 + T.wide * 0.4) {
       wantX = playerSide * sign(wantX || 1) * (0.75 + 0.20 * this._rand());
@@ -706,8 +764,24 @@ class OpponentAI {
    *  SWING EXECUTION — gameplay owns the impact
    * ================================================================== */
 
+  _swingOptions(plan) {
+    const L = this.L;
+    return {
+      // Ease rally pace before solving so the chosen shot is re-aimed at its
+      // target, rather than slowing an already-solved ball in flight.
+      /* powerK догружает ответ: уровень бьёт не «в ответ прилёту», а сильнее
+       * его ровно во столько раз, насколько он сильнее как игрок. */
+      vmag: clamp(plan.speed * (0.7 + 0.3 * this.pace) * .92 * L.powerK, L.vmagMin, L.vmagMax),
+      aim: plan.aim, quality: 0.75 + 0.20 * L.skill,
+    };
+  }
+
+  describeEffort(game, plan = this.commit) {
+    return plan ? describeProfileEffort(plan.archId || 'DRIVE', this._strokeContext(game), this._swingOptions(plan)) : null;
+  }
+
   /** Build a solved stroke without mutating the live ball */
-  swing(game) {
+  swing(game, budget) {
     const now = Number.isFinite(game.strokeTime) ? game.strokeTime : game.time;
     if (!this.commit || now < this.swingAt) return null;
 
@@ -716,13 +790,11 @@ class OpponentAI {
     const plan = this.commit;
 
     const archId = plan.archId || 'DRIVE';
-    let racket = racketForStroke(archId, this._strokeContext(game), {
-      // Ease rally pace before solving so the chosen shot is re-aimed at its
-      // target, rather than slowing an already-solved ball in flight.
-      vmag: clamp(plan.speed * (0.7 + 0.3 * this.pace) * .92, L.vmagMin, L.vmagMax),
-      aim: plan.aim,
-      quality: 0.75 + 0.20 * L.skill,
-    });
+    const ctx = this._strokeContext(game), options = this._swingOptions(plan);
+    const request = describeProfileEffort(archId, ctx, options);
+    ctx.effortBudget = budget === undefined ? game.getEffortBudget?.(this.side, request) : budget;
+    let racket = racketForStroke(archId, ctx, options);
+    racket.effortRequest = request;
 
     // Solve on copies. The game applies the returned impact exactly once.
     racket = this._scaleRacket(refineRacket(ball.p, ball.v, ball.w, racket, L.skill, racket.quality), L.vmagMax);
@@ -760,13 +832,20 @@ class OpponentAI {
   }
 
   /** Serve — solved against both required bounces */
-  serve(game) {
+  serve(game, budget) {
     const ball = game.ball;
     const L = this.L;
 
     const r = this._rand();
-    const serveType = r < 0.30 ? 'SERVE_TOP' : r < 0.55 ? 'SERVE_BACK' : r < 0.75 ? 'SERVE_SIDE'
+    let serveType = r < 0.30 ? 'SERVE_TOP' : r < 0.55 ? 'SERVE_BACK' : r < 0.75 ? 'SERVE_SIDE'
       : r < 0.90 ? 'SERVE_FAST' : 'SERVE_NO_SPIN';
+    const effort = this._effortPreference(game);
+    if (effort < 1) {
+      const sideWeight = .20 * effort, fastWeight = .15 * effort * effort;
+      const pick = r * (.65 + sideWeight + fastWeight);
+      serveType = pick < .30 ? 'SERVE_TOP' : pick < .55 ? 'SERVE_BACK' : pick < .55 + sideWeight ? 'SERVE_SIDE'
+        : pick < .55 + sideWeight + fastWeight ? 'SERVE_FAST' : 'SERVE_NO_SPIN';
+    }
     const CAP = AI_SERVE_CAPS[this.levelIndex];
     let aimX = clamp(this._sym(0.50), -CAP.orbit, CAP.orbit);
     if (CAP.vmag <= 6 || serveType === 'SERVE_SIDE')
@@ -777,11 +856,14 @@ class OpponentAI {
     const verticalBrush = mixed < 1 / 3 ? -0.40 : mixed > 2 / 3 ? 0.40 : 0;
     const vmag = Math.min(lerp(6, 11, L.skill), CAP.vmag) * (0.85 + 0.15 * this.pace);
     const ctx = this._strokeContext(game);
+    const request = describeProfileEffort(serveType, ctx, { vmag, direction, verticalBrush });
+    ctx.effortBudget = budget === undefined ? game.getEffortBudget?.(this.side, request) : budget;
     let finalRacket, diagnostic, frameTries = 0;
     for (let attempt = 0; attempt < AI_SERVE_SOLVES; attempt++) {
       const prototype = racketForStroke(serveType, ctx, { direction, verticalBrush,
         vmag: vmag * (attempt ? 0.78 : 1), quality: 0.80 + 0.15 * L.skill,
         aim: attempt ? { x: aimX * 0.35, z: -this.side * PH.T_HALF_LEN * 0.72 } : { x: aimX, z: aimZ } });
+      prototype.effortRequest = request;
       prototype.vmagCap = CAP.vmag;
       finalRacket = this._scaleRacket(refineRacket(ball.p, ball.v, ball.w, prototype, 1, prototype.quality), CAP.vmag);
       diagnostic = this._serveVerdict(ball, finalRacket);
@@ -789,7 +871,12 @@ class OpponentAI {
         const lateral = diagnostic.secondBounce ? Math.sign(diagnostic.secondBounce.x) : direction;
         const yaw = diagnostic.secondBounce ? clamp(Math.atan2(-diagnostic.secondBounce.x,
           Math.abs(diagnostic.secondBounce.z - ball.p.z)), -0.40, 0.40) : 0;
-        const tweaks = diagnostic.reason === 'width_cap'
+        const centerYaw = clamp(Math.atan2(-ball.p.x, Math.abs(aimZ - ball.p.z)) - finalRacket.azFace, -1.15, 1.15);
+        const capScale = racketEffortCap(finalRacket) / Math.max(.5, finalRacket.vmag);
+        // A weak second arc needs a centered face and available work, not four slower retries.
+        const tweaks = ctx.effortBudget && diagnostic.reason === 'second_bounce_missing'
+          ? [[0, centerYaw, capScale], [.10, centerYaw, capScale * .85], [.20, centerYaw, capScale * .70], [-.10, centerYaw, capScale]]
+          : diagnostic.reason === 'width_cap'
           ? [[0, -lateral * 0.12, 1], [0, lateral * 0.12, 1], [0, -lateral * 0.26, 1], [0, lateral * 0.26, 1]]
           : diagnostic.reason === 'post_bounce_apex'
             ? [[0.20, yaw, 0.85], [0.20, yaw, 0.75], [0.50, yaw, serveType === 'SERVE_NO_SPIN' ? 0.80 : 0.55], [0.60, yaw, 0.50]]

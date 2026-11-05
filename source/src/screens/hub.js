@@ -30,7 +30,6 @@ Router.def('hub', {
     return `${UI.hud()}
     <div class="hub-content scroll">
     <div class="hero">
-      <canvas class="demo"></canvas>
       <span class="hero-mark" aria-hidden="true">SIGNAL · ARENA</span>
     </div>
     <div class="playzone">
@@ -40,13 +39,15 @@ Router.def('hub', {
         <button class="zh-meta" type="button" data-modebtn="career" aria-label="${leagueName(L)} · ${fmt(S.rating)} — ${t('hub.career')}"><span class="zm-badge" aria-hidden="true">${Art.badge(L, 18)}</span><span class="zm-t num">${leagueName(L)} · ${fmt(S.rating)}</span><span class="zm-go" aria-hidden="true">›</span></button>
       </div>
       <!-- Иконки — стикеры из iconideas/ (webp в src/ill, ключи ic-*): крупнее в
-           три раза, поэтому карточки режимов стали вертикальными плашками.
+           три раза, поэтому карточки режимов стали вертикальными плашками:
+           сверху стикер, снизу заголовок из двух слов без описания.
+           Нижний ряд — те же заголовки, но стикер слева и описание справа.
            Верхний ряд (режимы игры) и нижний (награды) красятся в два цвета
            из той же гаммы — см. .modebtn / .modebtn.sec в screens_hub.css. -->
       <div class="play-grid">
-        <button class="b3 modebtn mode-free rise" style="--d:2" data-modebtn="free" data-press><span class="mb-i" aria-hidden="true"><img src="${ILL['ic-free']}" alt="" width="120" height="120"></span><span class="mb-t"><b>${t('mode.free')}</b><small>${t('hub.freeSub')}</small></span></button>
-        <button class="b3 modebtn mode-ranked rise" style="--d:3" data-modebtn="ranked" data-press><span class="mb-i" aria-hidden="true"><img src="${ILL['ic-ranked']}" alt="" width="120" height="120"></span><span class="mb-t"><b>${t('mode.ranked')}</b><small>${t('hub.rankedSub')}</small></span></button>
-        <button class="b3 modebtn mode-practice rise" style="--d:4" data-modebtn="practice" data-press><span class="mb-i" aria-hidden="true"><img src="${ILL['ic-practice']}" alt="" width="120" height="120"></span><span class="mb-t"><b>${t('mode.practice')}</b><small>${t('hub.practiceSub')}</small></span></button>
+        <button class="b3 modebtn mode-free rise" style="--d:2" data-modebtn="free" data-press><span class="mb-i" aria-hidden="true"><img src="${ILL['ic-free']}" alt="" width="120" height="120"></span><span class="mb-t"><b>${t('mode.free')}</b></span></button>
+        <button class="b3 modebtn mode-ranked rise" style="--d:3" data-modebtn="ranked" data-press><span class="mb-i" aria-hidden="true"><img src="${ILL['ic-ranked']}" alt="" width="120" height="120"></span><span class="mb-t"><b>${t('mode.ranked')}</b></span></button>
+        <button class="b3 modebtn mode-practice rise" style="--d:4" data-modebtn="practice" data-press><span class="mb-i" aria-hidden="true"><img src="${ILL['ic-practice']}" alt="" width="120" height="120"></span><span class="mb-t"><b>${t('mode.practice')}</b></span></button>
       </div>
       <div class="grid-row2">
         <button class="b3 modebtn mode-quest sec rise" style="--d:5" data-act="quests" data-press>${qr ? `<span class="dot">${qr}</span>` : ''}<span class="mb-i" aria-hidden="true"><img src="${ILL['ic-quests']}" alt="" width="120" height="120"></span><span class="mb-t"><b>${t('hub.quests')}</b><small id="questSub" class="num">${qr ? t('hub.questsReady', { n: qr }) : t('hub.questsSub')}</small></span></button>
@@ -124,17 +125,10 @@ Router.def('hub', {
     this.el = el;
     let alive = true, navigation = 0; const timers = new Set();
     const later = (fn, ms) => { const id = setTimeout(() => { timers.delete(id); if (alive) fn(); }, ms); timers.add(id); };
-    // живой стол: настоящий движок за интерфейсом (бот против бота, облёт камеры);
-    // на «Эконом» — лёгкая 2D-заглушка
-    this.lobby = true;
-    if (this.lobby) {
-      el.classList.add('lobby');
-      GameHost.ensure(); GameHost.send('quiet', { on: true }); GameHost.send('lobby'); GameHost.show(true, 'lobby');
-    }
-    const cv = el.querySelector('canvas.demo');
-    cv.style.display = 'none';
-    if (!this.lobby) { el.classList.add('lobby'); this.game = Preloader.ensureDemo(); }
-    const g = this.game;
+    // живой стол: настоящий движок за интерфейсом (бот против бота, облёт камеры).
+    // Лёгкая 2D-заглушка для «Эконома» удалена: стол один на все качества.
+    el.classList.add('lobby');
+    GameHost.ensure(); GameHost.send('quiet', { on: true }); GameHost.send('lobby'); GameHost.show(true, 'lobby');
     // таймеры: слоты сундуков + кулдаун подарка
     const timer = setInterval(() => {
       $$('[data-ends]', el).forEach((b) => (b.textContent = fmtLeft(+b.dataset.ends - Date.now())));
@@ -201,17 +195,14 @@ Router.def('hub', {
       if (k === 'gifts') this.giftsSheet(a);
     };
     el.addEventListener('click', click);
-    // пасхалка: тап по столу = искры
-    const spark = (e) => { const p = FX.pt({ getBoundingClientRect: () => ({ left: e.clientX, top: e.clientY, width: 0, height: 0 }) }); FX.burst(p.x, p.y, { c: ['#2EE6FF', '#fff'], count: 12, speed: 6, size: .7 }); Sfx.paddle(1.2); };
-    cv.addEventListener('pointerdown', spark);
-    const lobby = this.lobby;
-    return () => { alive = false; timers.forEach(clearTimeout); clearInterval(timer); el.removeEventListener('click', click); cv.removeEventListener('pointerdown', spark); if (g) Preloader.releaseDemo(g); this.game = null; this.el = null; if (lobby) GameHost.show(false); };
+    return () => { alive = false; timers.forEach(clearTimeout); clearInterval(timer); el.removeEventListener('click', click); this.el = null; GameHost.show(false); };
   },
   leave() { Preloader.cancel(); },
   refreshLocale(el) {
     UI.refreshHud(el); UI.localize(el);
-    const labels = { free: ['mode.free', 'hub.freeSub'], ranked: ['mode.ranked', 'hub.rankedSub'], practice: ['mode.practice', 'hub.practiceSub'] };
-    $$('[data-modebtn]', el).forEach((button) => { const keys = labels[button.dataset.modebtn]; if (!keys) return; button.querySelector('.mb-t b').textContent = t(keys[0]); button.querySelector('.mb-t small').textContent = t(keys[1]); });
+    /* Три режима — только заголовок: описаний у них больше нет. */
+    const labels = { free: 'mode.free', ranked: 'mode.ranked', practice: 'mode.practice' };
+    $$('[data-modebtn]', el).forEach((button) => { const key = labels[button.dataset.modebtn]; if (!key) return; button.querySelector('.mb-t b').textContent = t(key); });
     // Вторичные карточки живут на data-act, а не на data-modebtn, поэтому их
     // заголовки переводим отдельно — иначе при смене языка они остаются старыми.
     const qb = el.querySelector('[data-act="quests"] .mb-t b'), gb = el.querySelector('[data-act="gifts"] .mb-t b');

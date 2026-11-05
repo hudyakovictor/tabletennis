@@ -2,7 +2,6 @@
  *  GAME — state machine, ITTF rules, continuous collision detection,
  *  camera rig, VFX, replay recorder.
  * ===================================================================== */
-'use strict';
 
 /* Where the opponent's bat meets its own toss, metres above the table. */
 const AI_SERVE_CONTACT_Y = STROKE_CONFIG.serve.toss.aiContactHeight;
@@ -13,6 +12,7 @@ const GS = {
 };
 
 const PHYS_DT = PH.SIM_DT;        // 600 Hz — and the same step every solver verdicts on
+let matchSerial = 0;
 
 /* --------------------------- particles ----------------------------- */
 /* Particles — см. 61_particles.js (пул спрайт-вспышек, вынесен из Game). */
@@ -197,6 +197,12 @@ class Game {
     this.training = null;
     this.time = 0; this.frame = 0; this.stateT = 0; this.stateSimT = 0;
     this.sessionKind = 'free';
+    this.stamina = [Stamina.fresh(), Stamina.fresh()];
+    this._matchId = null;
+    this._hudSeq = this._hudEventId = this._rallyId = this._serveId = this._swingId = 0;
+    this._matchContacts = [null, null]; this._matchWhiffs = [null, null];
+    this._pendingCredit = null; this._creditedRally = -1;
+    this._playerWork = this._aiWork = null;
     /* Внутренний масштаб рендера: 1 — как выбрал игрок в quality, ниже —
      * движок сам экономит пиксели на слабом телефоне (решает PerfMonitor). */
     this.renderScale = 1;
@@ -383,7 +389,7 @@ class Game {
         _lastEvT = Math.max(_lastEvT, this.time);
         return _lastEvT;
       }
-      if (_domT0 === null || (!this.swipe.active && Math.abs((this.time - _gameT0) - (ts - _domT0) * 0.001) > 0.22)) {
+      if (_domT0 === null || (!this.swipe.active && !this._playerWork?.held && Math.abs((this.time - _gameT0) - (ts - _domT0) * 0.001) > 0.22)) {
         _domT0 = ts;
         _gameT0 = this.time;
         _lastEvT = this.time;
@@ -428,6 +434,7 @@ class Game {
       receivedAt: typeof performance !== 'undefined' ? performance.now() : null,
       trusted: !!e.isTrusted, cancelable: !!e.cancelable });
     const dropStroke = () => {
+      this._cancelPlayerWork();
       activeStrokePointerId = null;
       this.swipe.cancel();
       this.pointerDown = false;
@@ -497,6 +504,7 @@ class Game {
       this.pointerFine = pointerType !== 'touch' && pointerType !== 'pen';
 
       this.swipe.down(n.rawX, n.rawY, tEv, simEv);
+      this._beginPlayerWork(n.rawX, n.rawY, tEv, simEv);
       this.swipe.tapMaxMovePx = 0;
       const rect = c.getBoundingClientRect();
       const serveReadyPress = this.state === GS.SERVE_READY && this.server === 1;
@@ -627,11 +635,11 @@ class Game {
           cameraGesture.zoom * pair.distance / cameraGesture.distance);
         if (e.cancelable) e.preventDefault(); return;
       }
-      if (this.swipe.active && activeStrokePointerId !== null && e.pointerId !== activeStrokePointerId) {
+      if (activeStrokePointerId !== null && e.pointerId !== activeStrokePointerId) {
         if (e.cancelable) e.preventDefault();
         return;
       }
-      if (this.swipe.active && ptrs.size < 2) {
+      if ((this.swipe.active || this._playerWork?.held) && ptrs.size < 2) {
         const z = this.swipe.pressZone;
         let samples = [];
         if (typeof e.getCoalescedEvents === 'function') samples = e.getCoalescedEvents();
@@ -645,6 +653,7 @@ class Game {
           if (z) this.swipe.tapMaxMovePx = Math.max(this.swipe.tapMaxMovePx || 0,
             Math.hypot((n.rawX - z.pressX) * z.vw, (n.rawY - z.pressY) * z.vh));
           this.swipe.move(n.rawX, n.rawY, tEv, simEv);
+          this._samplePlayerWork(n.rawX, n.rawY, tEv, simEv);
         }
         this.promotePendingServeZone();
         this.promotePendingRallyBackswing(n);
@@ -678,6 +687,8 @@ class Game {
         e.preventDefault(); return;
       }
       if (!this.swipe.active) {
+        const n = norm(e), tEv = evTime(e);
+        this._samplePlayerWork(n.rawX, n.rawY, tEv, evSimTime(tEv), true);
         activeStrokePointerId = null;
         if (this.debugRecording) this.logInput('pointer_ignored', { dom: domEvent(e), outcome: { reason: 'RELEASE_WITHOUT_ACTIVE_PRESS' } });
         this.pointerDown = false; return;
@@ -714,6 +725,7 @@ class Game {
           sw.lastReleased = compactStrokeMetrics(sw.lastReleased, n.x, n.y);
         }
       }
+      this._samplePlayerWork(n.rawX, n.rawY, tEv, simEv, true, sw.lastReleased);
       this.updateShotDiagnostics();
       this.logSwipeRelease({ pointer: { x: n.x, y: n.y }, pointerId: e.pointerId, buttons: e.buttons,
         inputType: e.pointerType || (this.pointerFine === false ? 'touch' : 'mouse'),
@@ -748,7 +760,7 @@ class Game {
     window.addEventListener('blur', () => { this.cancelInput('window_blur'); this.setPaused(true); });
     document.addEventListener('visibilitychange', () => {
       if (this.debugRecording) this.logInput('visibility', { outcome: { state: document.visibilityState } });
-      if (document.hidden) { this.cancelInput('document_hidden'); this.setPaused(true); this.profile.save(true); }
+      if (document.hidden || document.visibilityState === 'hidden') { this.cancelInput('document_hidden'); this.setPaused(true); this.profile.save(true); }
     });
     window.addEventListener('pagehide', (e) => {
       if (this.debugRecording) this.logInput('pagehide', { outcome: { persisted: !!e.persisted } });
@@ -838,8 +850,259 @@ class Game {
     return v;
   }
 
+  /* ----------------------- match effort / HUD ----------------------- */
+  matchHudVisible() {
+    return !!this._matchId && this.state !== GS.MENU && !this.training &&
+      !this.preview?.active && !this.network?.isInMatch && !this.lobbyScene?.active;
+  }
+
+  staminaEnabled() {
+    return this.matchHudVisible() && !this.freePlay;
+  }
+
+  _effortActive() {
+    return this.matchHudVisible() && !this.paused && !this._ttSleeping && !this.replayer?.on &&
+      !(typeof document !== 'undefined' && (document.hidden || document.visibilityState === 'hidden')) &&
+      (this.state === GS.RALLY || this.state === GS.SERVE_TOSS || this.state === GS.SERVE_READY);
+  }
+
+  getStaminaState(side) {
+    const state = this.stamina?.[side === -1 ? 1 : 0] || Stamina.fresh();
+    const enabled = this.staminaEnabled(), effortScale = enabled ? Stamina.effortScale(state) : 1;
+    return { enabled, energy: state.energy, capacity: Stamina.capacity(state), fatigue: state.fatigue,
+      effortScale, limited: enabled && effortScale < 1 - 1e-8, low: state.low };
+  }
+
+  getEffortBudget(side, request) {
+    if (!this.staminaEnabled()) return null;
+    return Stamina.deriveEffortBudget(this.stamina?.[side === -1 ? 1 : 0] || Stamina.fresh(), { ...request, side });
+  }
+
+  _chargeStamina(side, work) {
+    if (!this.staminaEnabled() || !this._effortActive() || !(work > 0)) return;
+    const i = side === -1 ? 1 : 0;
+    this.stamina[i] = Stamina.charge(this.stamina[i], work);
+    this._matchHudDirty = true;
+  }
+
+  _advanceStamina(simDt) {
+    if (!this.staminaEnabled() || !this._effortActive() || this.state !== GS.RALLY || !this.ball.live) return;
+    for (let i = 0; i < 2; i++) {
+      const previous = this.stamina[i], next = Stamina.advance(previous, simDt);
+      this.stamina[i] = next;
+      if (next.energy !== previous.energy || next.low !== previous.low) this._matchHudDirty = true;
+    }
+  }
+
+  _playerEffortContext(serving) {
+    return { side: 1, isServe: serving, grip: this.settings?.grip, hand: this.settings?.hand,
+      forehand: paddleForehand(this.player?.pos?.x ?? 0, this.settings?.hand, this.player?.forehand),
+      ball: V3.clone(this.ball.p), ballSpin: V3.clone(this.ball.w), ballVelocity: V3.clone(this.ball.v),
+      ballSpeed: V3.len(this.ball.v), equip: this.equip?.forSide(1) || {},
+      moveYaw: this.padYaw || 0, movePitch: this.padPitch || 0,
+      spinBias: this.settings?.spinBias || 'norm', spinGain: this.settings?.spinGain ?? 1, arcSens: this.settings?.arcSens ?? 1 };
+  }
+
+  _beginPlayerWork(x, y, time, simTime) {
+    this._finishSwingWork(this._playerWork);
+    if (!this._effortActive()) { this._playerWork = null; return; }
+    const serving = this.server === 1 && (this.state === GS.SERVE_READY || this.state === GS.SERVE_TOSS);
+    const tracker = new SwipeTracker();
+    tracker.down(x, y, time, simTime);
+    // This tracker belongs to the physical press, not the consumed contact gesture.
+    this._playerWork = { side: 1, swingId: ++this._swingId, gestureId: this.swipe.gestureId,
+      rallyId: this._rallyId, shotId: this.shotId, serving, tracker, held: true, paid: 0,
+      basePaid: 0, lastTime: time, lastSim: simTime,
+      ctx: this._playerEffortContext(serving), x, y, expires: Infinity, contacted: false, finished: false };
+  }
+
+  _samplePlayerWork(x, y, time, simTime, release = false, tapMetrics = null) {
+    const work = this._playerWork;
+    if (!work?.held || !this._effortActive()) return;
+    const distance = Math.hypot(x - work.x, y - work.y);
+    // Accumulate sub-pixel input at its anchor; jitter and stationary holds do no work.
+    if (!release && distance < .002) return;
+    const dx = x - work.x, dy = y - work.y;
+    if (distance >= .002 && work.paid > work.basePaid &&
+        (time - work.lastTime > .25 || work.direction &&
+          (dx * work.direction.x + dy * work.direction.y) / distance < -.5)) {
+      work.basePaid = work.paid;
+      work.segmentState = null;
+      work.tracker.down(work.x, work.y, work.lastTime, work.lastSim);
+    }
+    if (release) work.tracker.up(x, y, time, simTime);
+    else work.tracker.move(x, y, time, simTime);
+    if (distance >= .002) work.direction = { x: dx / distance, y: dy / distance };
+    work.lastTime = time; work.lastSim = simTime;
+    work.x = x; work.y = y;
+    const m = tapMetrics?.tap ? tapMetrics : work.tracker.m;
+    if (isRealStroke(m, work.serving) && (distance >= .002 || !work.paid)) {
+      const request = describeStrokeEffort(m, work.ctx);
+      const kind = m.tap && !m.compactFlick ? 'tap' : 'swing';
+      // One ordinary stroke pays once; a long held path continues doing positive work.
+      const total = work.basePaid + Stamina.cost({ ...request, kind }) * Math.max(1, (m.pathLen || 0) / .30);
+      const extra = Math.max(0, total - work.paid);
+      if (extra > 1e-9) {
+        if (work.contacted || work.finished) {
+          work.swingId = ++this._swingId; work.contacted = false; work.finished = false;
+        }
+        work.request = request;
+        work.segmentState = work.segmentState || { ...this.stamina[0] };
+        work.budget = this.staminaEnabled() ? Stamina.deriveEffortBudget(work.segmentState, { ...request, side: 1, actionId: work.swingId }) : null;
+        work.paid = total;
+        this._chargeStamina(1, extra);
+      }
+    }
+    if (release) {
+      work.held = false;
+      const admitted = this.swipe.pressZone?.accepted && this.swipe.pressZone.shotId === work.shotId;
+      work.expires = simTime + (work.serving ? 1.15 : admitted ? Math.max(.25, CONTACT_CORRIDOR_RULES.strokeReleaseWindowSec) : .25);
+    }
+  }
+
+  _finishSwingWork(work) {
+    if (!work || work.finished) return;
+    work.finished = true;
+    if (!work.paid || work.contacted || work.rallyId !== this._rallyId || !this.matchHudVisible()) return;
+    const id = ++this._hudEventId;
+    this._matchWhiffs[work.side === -1 ? 1 : 0] = { id, swingId: work.swingId };
+    this._matchEvent = { id, type: 'whiff', side: work.side };
+    this._syncMatchHud(true);
+  }
+
+  _cancelPlayerWork() {
+    this._finishSwingWork(this._playerWork);
+    if (this._playerWork) this._playerWork.held = false;
+  }
+
+  _expireSwingWork() {
+    const work = this._playerWork;
+    if (work && !work.held && this.strokeTime >= work.expires) this._finishSwingWork(work);
+  }
+
+  getMatchSnapshot() {
+    const visible = this.matchHudVisible(), target = this.settings.targetScore;
+    const score = this.score.slice(), winner = this.matchWinner || 0;
+    const matchPoint = !this.freePlay && !winner
+      ? score[0] >= target - 1 && score[0] > score[1] ? 1 : score[1] >= target - 1 && score[1] > score[0] ? -1 : 0 : 0;
+    return { schema: 1, matchId: this._matchId || '', seq: this._hudSeq || 0,
+      rallyId: this._rallyId || 0, serveId: this._serveId || 0, visible, free: !!this.freePlay,
+      staminaEnabled: this.staminaEnabled(), phase: this.state, score, target, server: this.server,
+      rally: this.rally, paused: !!this.paused, matchPoint,
+      players: [1, -1].map(side => ({ side, ...this.getStaminaState(side) })),
+      contacts: [0, 1].map(i => visible && this._matchContacts?.[i] ? { ...this._matchContacts[i] } : null),
+      whiffs: [0, 1].map(i => visible && this._matchWhiffs?.[i] ? { ...this._matchWhiffs[i] } : null),
+      event: visible && this._matchEvent ? { ...this._matchEvent } : null,
+      result: visible && this._matchResult ? { ...this._matchResult, winner } : null };
+  }
+
+  _syncMatchHud(immediate = false, type = null, side = 0) {
+    if (!this._matchId || this._matchHudSuppressed) return;
+    if (type) this._matchEvent = { id: ++this._hudEventId, type, side };
+    if (!immediate && (!this._matchHudDirty || (this._hudElapsed || 0) < .1 - 1e-9)) return;
+    this._hudSeq++; this._hudElapsed = 0; this._matchHudDirty = false;
+    const snapshot = this.getMatchSnapshot();
+    this.onMatchHud?.(snapshot);
+    this.ui?.syncMatchHud?.(snapshot);
+  }
+
+  _publishMatchContact(side, racket, contact, quality, sweet) {
+    if (!this.matchHudVisible()) return;
+    const i = side === -1 ? 1 : 0;
+    if (this._matchContacts?.[i]?.shotId === this.shotId) return;
+    const work = side === -1 ? this._aiWork : this._playerWork;
+    if (work) work.contacted = true;
+    const state = this.getStaminaState(side), id = ++this._hudEventId;
+    const point = typeof this.project === 'function' && this.R ? this.project(contact, {}) : null;
+    this._matchContacts[i] = { matchId: this._matchId, eventId: id, rallyId: this._rallyId,
+      swingId: work?.swingId || ++this._swingId, side, shotId: this.shotId,
+      stroke: racket.stroke?.id || 'DRIVE', kmh: V3.len(this.ball.v) * 3.6, rps: V3.len(this.ball.w) / TAU,
+      quality: Number.isFinite(quality) ? quality : null, sweet: Number.isFinite(sweet) ? sweet : null,
+      energy: state.energy, capacity: state.capacity, limited: !!racket.effortBudget?.limited,
+      ...(point?.ok ? { x: point.x, y: point.y } : {}) };
+    this._matchWhiffs[i] = null;
+    this._matchEvent = { id, type: 'hit', side };
+    this._syncMatchHud(true);
+  }
+
+  captureMatchResume() {
+    if (!this._matchId || this.network?.isInMatch || this.training || this.state === GS.MENU || this.lobbyScene?.active) return null;
+    const replay = this.state === GS.REPLAY;
+    return { schema: 1, matchId: this._matchId, seq: this._hudSeq, eventId: this._hudEventId,
+      rallyId: this._rallyId, serveId: this._serveId, swingId: this._swingId,
+      stamina: this.stamina.map(s => ({ ...s })), pendingCredit: this._pendingCredit, creditedRally: this._creditedRally,
+      score: this.score.slice(), server: this.server, servesLeft: this.servesLeft,
+      phase: replay ? this.replayFrom || GS.POINT : this.state, winner: this.matchWinner || 0,
+      demo: !!this.demoMode, free: !!this.freePlay, target: this.settings.targetScore, paused: !!this.paused,
+      rally: this.rally, bestRally: this.bestRally, shotId: this.shotId,
+      stateT: replay ? 0 : this.stateT, stateSimT: replay ? 0 : this.stateSimT,
+      aiServeTimer: Math.max(0, this.aiServeTimer || 0), aiServeX: this.aiServeX || 0,
+      aiSwingRemaining: Number.isFinite(this.aiSwingAt) ? this.aiSwingAt - this.strokeTime : 0,
+      tossStartY: this.tossStartY || 0, tossApex: this.tossApex || 0,
+      isServeBall: !!this.isServeBall, serveBounces: this.serveBounces, rallyBounces: this.rallyBounces.slice(), netTouched: !!this.netTouched,
+      ball: { p: { ...this.ball.p }, v: { ...this.ball.v }, w: { ...this.ball.w }, q: { ...this.ball.q },
+        live: replay ? false : !!this.ball.live, lastHitBy: this.ball.lastHitBy },
+      aiWork: this._aiWork ? { side: -1, shotId: this._aiWork.shotId, rallyId: this._aiWork.rallyId,
+        swingId: this._aiWork.swingId, paid: this._aiWork.paid,
+        contacted: !!this._aiWork.contacted, finished: !!this._aiWork.finished } : null,
+      contacts: this._matchContacts.map(c => c && { ...c }), whiffs: this._matchWhiffs.map(w => w && { ...w }),
+      event: this._matchEvent && { ...this._matchEvent }, result: this._matchResult && { ...this._matchResult } };
+  }
+
+  _validateMatchResume(data) {
+    if (!data || data.schema !== 1 || typeof data.matchId !== 'string' || !data.matchId || data.matchId.length > 128) return null;
+    const integer = n => Number.isSafeInteger(n) && n >= 0;
+    const side = n => n === 1 || n === -1;
+    const vector = v => v && ['x', 'y', 'z'].every(k => Number.isFinite(v[k]));
+    if (!['seq', 'eventId', 'rallyId', 'serveId', 'swingId', 'rally', 'bestRally', 'shotId', 'serveBounces'].every(k => integer(data[k])) ||
+        !Array.isArray(data.score) || data.score.length !== 2 || !data.score.every(integer) ||
+        !Number.isInteger(data.target) || data.target < 1 || data.target > 999 || !side(data.server) ||
+        ![1, 2].includes(data.servesLeft) || ![0, 1, -1].includes(data.winner) ||
+        ![GS.SERVE_READY, GS.SERVE_TOSS, GS.RALLY, GS.POINT, GS.MATCH_END].includes(data.phase) ||
+        !['demo', 'free', 'paused', 'isServeBall', 'netTouched'].every(k => typeof data[k] === 'boolean') ||
+        !['stateT', 'stateSimT', 'aiServeTimer', 'tossStartY', 'tossApex'].every(k => Number.isFinite(data[k]) && data[k] >= 0) ||
+        !Number.isFinite(data.aiSwingRemaining) || !Number.isFinite(data.aiServeX) ||
+        !Number.isSafeInteger(data.creditedRally) || data.creditedRally < -1 || data.creditedRally > data.rallyId ||
+        !(data.pendingCredit === null || data.pendingCredit === data.rallyId && data.pendingCredit > data.creditedRally &&
+          !data.free && [GS.POINT, GS.MATCH_END].includes(data.phase) && data.result && side(data.result.who)) ||
+        !Array.isArray(data.rallyBounces) || data.rallyBounces.length > 1000 || !data.rallyBounces.every(side) ||
+        !data.ball || !['p', 'v', 'w'].every(k => vector(data.ball[k])) || !vector(data.ball.q) || !Number.isFinite(data.ball.q.w) ||
+        typeof data.ball.live !== 'boolean' || ![0, 1, -1].includes(data.ball.lastHitBy) ||
+        !Array.isArray(data.stamina) || data.stamina.length !== 2) return null;
+    const stamina = data.stamina.map(s => Stamina.validateRestore(s));
+    if (stamina.some(s => !s)) return null;
+    const winner = !data.free && Math.max(...data.score) >= data.target && Math.abs(data.score[0] - data.score[1]) >= 2
+      ? data.score[0] > data.score[1] ? 1 : -1 : 0;
+    if (data.winner !== winner || data.phase === GS.MATCH_END && !winner || winner && ![GS.POINT, GS.MATCH_END].includes(data.phase)) return null;
+    if (!Array.isArray(data.contacts) || data.contacts.length !== 2 || !Array.isArray(data.whiffs) || data.whiffs.length !== 2) return null;
+    for (let i = 0; i < 2; i++) {
+      const c = data.contacts[i], w = data.whiffs[i];
+      if (c && (c.matchId !== data.matchId || c.side !== (i ? -1 : 1) || c.rallyId !== data.rallyId ||
+          !integer(c.eventId) || c.eventId > data.eventId || !integer(c.swingId) || c.swingId > data.swingId ||
+          !integer(c.shotId) || typeof c.stroke !== 'string' ||
+          !['kmh', 'rps', 'energy', 'capacity'].every(k => Number.isFinite(c[k]) && c[k] >= 0) ||
+          c.energy > c.capacity || c.capacity > STAMINA_CONFIG.energyMax || typeof c.limited !== 'boolean' ||
+          !['quality', 'sweet'].every(k => c[k] === null || Number.isFinite(c[k]) && c[k] >= 0 && c[k] <= 1) ||
+          !['x', 'y'].every(k => c[k] === undefined || Number.isFinite(c[k])))) return null;
+      if (w && (!integer(w.id) || w.id > data.eventId || !integer(w.swingId) || w.swingId > data.swingId)) return null;
+    }
+    if (data.event && (!integer(data.event.id) || data.event.id > data.eventId || typeof data.event.type !== 'string' || ![0, 1, -1].includes(data.event.side))) return null;
+    if (data.result && (!integer(data.result.id) || data.result.id > data.eventId || ![0, 1, -1].includes(data.result.who) || typeof data.result.reason !== 'string')) return null;
+    if (data.aiWork !== null && (!data.aiWork || data.aiWork.side !== -1 || data.aiWork.rallyId !== data.rallyId ||
+        !integer(data.aiWork.shotId) || data.aiWork.shotId > data.shotId || !integer(data.aiWork.swingId) || data.aiWork.swingId > data.swingId ||
+        !Number.isFinite(data.aiWork.paid) || data.aiWork.paid < 0 ||
+        typeof data.aiWork.contacted !== 'boolean' || typeof data.aiWork.finished !== 'boolean')) return null;
+    return { ...data, stamina };
+  }
+
   /* --------------------------- match flow -------------------------- */
-  startMatch(diff) {
+  startMatch(diff, resume = null) {
+    const restored = resume === null ? null : this._validateMatchResume(resume);
+    if (resume !== null && !restored) return false;
+    this._matchHudSuppressed = true;
+    if (restored) { this.freePlay = restored.free; this.demoMode = restored.demo; this._keepDemo = restored.demo; }
+    this.cancelInput?.('match_start');
+    this._playerWork = this._aiWork = null;
     this.lobbyScene?.stop();
     this.setSessionKind(this.network.isInMatch ? 'online' : this.career.active ? 'career' : this.freePlay ? 'free' : this.sessionKind === 'practice' ? 'practice' : 'ranked');
     this.endReplay(false); // cancel old callbacks; never complete an old match here
@@ -888,6 +1151,20 @@ class Game {
     }
     // career and online are scored modes: no bullet time there
     this.setSlowmoAllowed(!(this.career.active || this.network.isInMatch));
+    this._matchId = restored ? restored.matchId : Date.now().toString(36) + '-' + (++matchSerial).toString(36);
+    this.stamina = restored ? restored.stamina.map(s => ({ ...s })) : [Stamina.fresh(), Stamina.fresh()];
+    this._hudSeq = restored ? restored.seq : 0;
+    this._hudEventId = restored ? restored.eventId : 0;
+    this._rallyId = restored ? restored.rallyId : 0;
+    this._serveId = restored ? restored.serveId : 0;
+    this._swingId = restored ? restored.swingId : 0;
+    this._pendingCredit = restored ? restored.pendingCredit : null;
+    this._creditedRally = restored ? restored.creditedRally : -1;
+    this._matchContacts = restored ? restored.contacts.map(c => c && { ...c }) : [null, null];
+    this._matchWhiffs = restored ? restored.whiffs.map(w => w && { ...w }) : [null, null];
+    this._matchEvent = restored?.event ? { ...restored.event } : null;
+    this._matchResult = restored?.result ? { ...restored.result } : null;
+    this._hudElapsed = 0; this._matchHudDirty = false;
     this.score = [0, 0]; this.games = [0, 0];
     this.rally = 0; this.bestRally = 0;
     this.stats = { shots: 0, aiShots: 0, winners: 0, errors: 0, blocks: 0, edgeHits: 0, edgeBalls: 0,
@@ -897,12 +1174,40 @@ class Game {
     this.audio.init(); this.audio.resume();
     if (!this._keepDemo) this.demoMode = false;
     this._keepDemo = false;
+    if (restored) {
+      this.score = restored.score.slice(); this.server = restored.server; this.servesLeft = restored.servesLeft;
+      this.settings.targetScore = restored.target; this.demoMode = restored.demo; this.freePlay = restored.free;
+      this.matchWinner = restored.winner; this.rally = restored.rally; this.bestRally = restored.bestRally; this.shotId = restored.shotId;
+      this._aiWork = restored.aiWork && { ...restored.aiWork };
+      this.isServeBall = restored.isServeBall; this.serveBounces = restored.serveBounces;
+      this.rallyBounces = restored.rallyBounces.slice(); this.netTouched = restored.netTouched;
+      for (const key of ['p', 'v', 'w']) V3.copy(this.ball[key], restored.ball[key]);
+      Q.copy(this.ball.q, restored.ball.q);
+      this.ball.live = restored.ball.live; this.ball.lastHitBy = restored.ball.lastHitBy; this.ball.hist.length = 0;
+      this.ball.trailStroke = null; this.ball.trailGrade = null; this.ball.golden = null;
+      this.aiServeTimer = restored.aiServeTimer; this.aiServeX = restored.aiServeX;
+      this.aiSwingAt = this.strokeTime + restored.aiSwingRemaining;
+      this.tossStartY = restored.tossStartY; this.tossApex = restored.tossApex;
+      this.setState(restored.phase);
+      this.stateT = restored.stateT; this.stateSimT = restored.stateSimT;
+      this.setPaused(restored.paused);
+      this.swipeReleasedAt = -Infinity;
+      this.audio.resetRally(); this.recorder.begin(this.time, this.server);
+      this.moments.beginRally(this.time, this.score);
+      this.ai.setPressure(this.score[1], this.score[0], restored.target);
+      this._matchHudSuppressed = false;
+      this._syncMatchHud(true);
+      return true;
+    }
     this.prepServe();
+    this._matchHudSuppressed = false;
+    this._syncMatchHud(true, 'serve', this.server);
     if (this.demoMode) {
       this.msg('НАБЛЮДЕНИЕ · БОТЫ ИГРАЮТ', 3.0, '#39c6ff', true);
     } else {
       this.msg(this.server === 1 ? 'ТВОЯ ПОДАЧА' : 'ПОДАЁТ СОПЕРНИК', 1.6, '#7fd4ff');
     }
+    return true;
   }
   startDemo(diff = 2) {
     this.career.stop();
@@ -974,6 +1279,7 @@ class Game {
     this.training.begin();
     this.ui && this.ui.trainShow(this.training);
     if (typeof document !== 'undefined' && document.body) document.body.classList.add('is-playing');
+    this._syncMatchHud(true);
   }
   stopTraining() {
     if (this.training) this.training.quit();
@@ -989,6 +1295,7 @@ class Game {
     if (typeof document !== 'undefined' && document.body) {
       document.body.classList.toggle('is-playing', s !== GS.MENU && s !== GS.MATCH_END);
     }
+    if (previous !== s) this._syncMatchHud(true);
   }
 
   /* Pause only makes sense during a live rally or serve prep; leaving the play
@@ -1005,7 +1312,9 @@ class Game {
     this.cancelPendingCapture?.();
     this.swipe.lastReleased = null; this.swipeReleasedAt = this.lastSwipeT = -Infinity;
     this._pendingTap = null; this.mouseTrail = []; this.ui?.clearShotFeedback?.();
-    return this.preview.open(options);
+    const opened = this.preview.open(options);
+    this._syncMatchHud(true);
+    return opened;
   }
 
   setPaused(v) {
@@ -1020,12 +1329,14 @@ class Game {
     this.paused = next;
     this.syncAudioQuiet();
     if (this.paused && !wasPaused && this.cancelInput) this.cancelInput('pause');
+    if (this.paused && !wasPaused) this._cancelPlayerWork();
     /* world стоит, а кадр паузы всё равно рисуется: застывшую на полугасании
      * пульсу видно как артефакт, а после resume она бы «догорела» заново */
     if (this.paused) this.clearContactFlashes();
     if (this.debugRecording && wasPaused !== this.paused) this.logInput('pause', { outcome: { paused: this.paused, requested: !!v } });
     if (typeof document !== 'undefined' && document.body)
       document.body.classList.toggle('is-paused', this.paused);
+    if (wasPaused !== this.paused) this._syncMatchHud(true, 'pause');
   }
 
   /** Гасит контактные вспышки синхронно (пауза, сон, потеря контекста, replay,
@@ -1062,6 +1373,23 @@ class Game {
 
   /* --------------------------- serving ----------------------------- */
   prepServe() {
+    if (this.matchWinner) return false;
+    this.cancelInput?.('serve');
+    this._cancelPlayerWork();
+    if (this._matchId) {
+      if (this._pendingCredit !== null && this._pendingCredit > this._creditedRally) {
+        if (this.staminaEnabled()) this.stamina = this.stamina.map(state => {
+          const energy = Math.min(Stamina.capacity(state), state.energy + STAMINA_CONFIG.pointRecovery);
+          return { ...state, energy, low: energy < STAMINA_CONFIG.lowEnter - 1e-9 ||
+            energy <= STAMINA_CONFIG.lowExit + 1e-9 && state.low };
+        });
+        this._creditedRally = this._pendingCredit;
+      }
+      this._pendingCredit = null;
+      this._rallyId++; this._serveId++;
+      this._matchContacts = [null, null]; this._matchWhiffs = [null, null]; this._matchResult = null;
+      this._playerWork = this._aiWork = null;
+    }
     const toss = STROKE_CONFIG.serve.toss;
     const s = this.server;
     const b = this.ball;
@@ -1095,6 +1423,7 @@ class Game {
        * по центру, НИКОГДА с последней позиции розыгрыша */
       this.aiServeX = rndSym(toss.aiServeXJitter);
     }
+    this._syncMatchHud(true, 'serve', this.server);
   }
   startToss() {
     /* Not while the bat is still gliding home. The requirement is that every
@@ -1316,6 +1645,8 @@ class Game {
       return;
     }
     if (this.state === GS.POINT || this.state === GS.MATCH_END) return;
+    this._cancelPlayerWork();
+    if (this.staminaEnabled()) this._pendingCredit = this._rallyId;
     /* очко закончилось — шлейф мёртвого мяча умирает вместе с ним,
      * а не висит «мерзкой полосой» до следующей подачи */
     this.ball.hist.length = 0; this.ball.trailGrade = null; this.ball.golden = null;
@@ -1393,6 +1724,12 @@ class Game {
       if (isMatchPoint) this._careerDecisiveActive = true;
     }
     this.ui && this.ui.syncScore();
+    if (this.matchHudVisible()) {
+      const id = ++this._hudEventId;
+      this._matchResult = { id, who, reason, winner: this.matchWinner || 0 };
+      this._matchEvent = { id, type: 'point', side: who };
+      this._syncMatchHud(true);
+    }
   }
 
   /* ------------------------- ball <-> world ------------------------ */
@@ -1593,6 +1930,9 @@ class Game {
       if (this.ai && typeof this.ai.recordHit === 'function')
         this.ai.recordHit({ v: this._preHit?.v || b.v }, racket, { p: b.p, v: b.v, w: b.w, info }, this.strokeTime ?? this.time);
     }
+    if (this.state === GS.SERVE_TOSS) this.setState(GS.RALLY);
+    this._publishMatchContact(side, racket, contactP, quality,
+      side > 0 ? (this.lastSweet !== undefined ? this.lastSweet : 1) : 1);
 
     /* Hit classification for audio routing:
      * STRONG  = high speed AND clean sweet-spot contact → boosted impact + whoosh
@@ -1641,7 +1981,7 @@ class Game {
         rim: side > 0 && this.lastSweet !== undefined && this.lastSweet < 0.42,
       };
       if (this.shotJournal) this.shotJournal.capture(this.swipe.gestureId, this.time,
-        { ...racket, quality }, b, { grip: this.settings.grip, hand: this.settings.hand, shotId: this.shotId });
+        { ...racket, quality }, b, { grip: this.settings?.grip, hand: this.settings?.hand, shotId: this.shotId });
       this.ui && this.ui.showShot(this.lastShotInfo);
       this.recorder.addShot(1, Object.assign({
         x: contactP.x, y: contactP.y, z: contactP.z, quality,
@@ -2122,12 +2462,21 @@ class Game {
   /** net touch on a service: no point, the serve is simply taken again. */
   letServe() {
     if (this.training) { this.training.onLet(); return; }
+    this._cancelPlayerWork();
+    this._pendingCredit = null;
+    if (this._matchId) {
+      this._matchContacts = [null, null]; this._matchWhiffs = [null, null];
+      const id = ++this._hudEventId;
+      this._matchResult = { id, who: 0, reason: 'LET', winner: 0 };
+      this._matchEvent = { id, type: 'let', side: this.server };
+    }
     this.msg('ПЕРЕПОДАЧА (LET)', 1.4, '#9fd0ff');
     this.audio.ui();
     this.ball.live = false;
     this.lastPoint = null;
     this.setState(GS.POINT);
     this.stateT = 0.35;              // short pause, nothing is scored
+    this._syncMatchHud(true);
   }
 
   updateShotDiagnostics() {
@@ -2449,8 +2798,9 @@ class Game {
    * реальности подался бы» больше не бывает. Для розыгрыша карабкание не
    * нужно: срезанный мяч честно летит куда ушёл (иногда в сетку/за стол —
    * это увидено и объяснимо, в отличие от беззвучного промаха). */
-  _glanceRacket(m, contact, isServe, sideParams) {
+  _glanceRacket(m, contact, isServe, sideParams, budget) {
     const R = GRACE_RULES, b = this.ball;
+    if (budget === undefined) budget = this.getEffortBudget(1, describeStrokeEffort(m, this._playerEffortContext(isServe)));
     const pv = this.player.vel ? V3.len(this.player.vel) : 0;
     const swipeSpd = m && Number.isFinite(m.releaseSpeed) ? m.releaseSpeed * 1.9
       : m && Number.isFinite(m.peakSpeed) ? m.peakSpeed * 1.9 : 0;
@@ -2478,8 +2828,9 @@ class Game {
         const spd = lerp(...glance.speedMs, si / glance.steps);
         /* тосс сбоку тянем обратно к столу, иначе боковая царапня уходит
          * в белую линию или вылетает за боковушку */
-        const vR = V3.new(clamp(-contact.x * glance.counterAim + lat * 0.35, -.7, .7), lift, -spd);
-        const n = mkNormal();
+        const candidate = enforceRacketEffort({ side: 1, isServe, stroke: strokeRef,
+          normal: mkNormal(), vR: V3.new(clamp(-contact.x * glance.counterAim + lat * 0.35, -.7, .7), lift, -spd) }, budget);
+        const { normal: n, vR } = candidate;
         const v = V3.clone(b.v), w = V3.clone(b.w);
         if (!impactRacket(v, w, n, vR, R.quality, rubber)) continue;
         const p0 = V3.addScaled(V3.clone(contact), contact, n, PH.R * STROKE_CONFIG.racket.launchSeparation);
@@ -2488,7 +2839,7 @@ class Game {
             o.landed.z > 0 && Math.abs(o.landed.x) <= PH.T_HALF_WID + glance.courtMargin &&
             o.b2 && o.b2.z < 0 && o.b2.z >= -PH.T_HALF_LEN - glance.courtMargin &&
             Math.abs(o.b2.x) <= PH.T_HALF_WID + glance.courtMargin) {
-          return { normal: n, vR, vmag: V3.len(vR), quality: R.quality, valid: true,
+          return { ...candidate, normal: n, vR, vmag: V3.len(vR), quality: R.quality, valid: true,
             stroke: strokeRef, rubber: { ...rubber }, sweet: 0, timing: .5, glance: true,
             azSwing: lat * .3, azFace: lat * .3, elev: 25, faceElev: 25 };
         }
@@ -2496,18 +2847,18 @@ class Game {
       /* ничего не подошло (тосс улетел над сеткой и т.п.) — всё равно бей,
        * но коротко и честно: пусть это будет видимый недолёт, а не тишина */
       const n = mkNormal();
-      return { normal: n, vR: V3.new(lat * .6, 1.45, -3.3), vmag: 3.6, quality: R.quality,
+      return enforceRacketEffort({ side: 1, isServe, normal: n, vR: V3.new(lat * .6, 1.45, -3.3), vmag: 3.6, quality: R.quality,
         valid: false, stroke: strokeRef, rubber: { ...rubber }, sweet: 0, timing: .5,
-        glance: true, azSwing: 0, azFace: 0, elev: 24, faceElev: 24 };
+        glance: true, azSwing: 0, azFace: 0, elev: 24, faceElev: 24 }, budget);
     }
     // розыгрыш: срезанный возврат с приоритетом «через сетку, мягко»
     const n = mkNormal();
     const vR = V3.new(lat * 0.9, carry * 0.62 + 0.6, -carry);
     b.w.x += rand() * R.scatterSpin * .5;
     b.w.z += rand() * R.scatterSpin;   // боковое битое вращение — фирменный признак края
-    return { normal: n, vR, vmag: V3.len(vR), quality: R.quality, valid: true,
+    return enforceRacketEffort({ side: 1, isServe, normal: n, vR, vmag: V3.len(vR), quality: R.quality, valid: true,
       stroke: strokeRef, rubber: { ...rubber }, sweet: 0, timing: .5, glance: true,
-      azSwing: lat * .3, azFace: lat * .3, elev: 30, faceElev: 30 };
+      azSwing: lat * .3, azFace: lat * .3, elev: 30, faceElev: 30 }, budget);
   }
 
   /* ==== Видимость вращения: крошка-шлейф раскрашивает дугу ================
@@ -2563,12 +2914,16 @@ class Game {
     if (!this.rallyBounces.some((s) => s > 0)) return false;      // ITTF: сначала свой отскок
     const closing = (b.p.x - pad.pos.x) * b.v.x + (b.p.y - pad.pos.y) * b.v.y + (b.p.z - pad.pos.z) * b.v.z;
     if (closing > 0.05) return false;                             // мяч уже уходит
-    const n = V3.norm(V3.new(), pad.normal);
+    let n = V3.norm(V3.new(), pad.normal);
     if (n.x * b.v.x + n.y * b.v.y + n.z * b.v.z > 0) return false; // грань отвернута от мяча
     const gripped = playerWristPose(pad.pos, pad.vel, this.settings.hand, { grip: this.settings.grip, forehand: pad.forehand });
     const rubber = this.equip ? (this.equip.forSide(1) || {}) : {};
-    const vR = V3.mul(V3.new(), pad.vel || V3.new(), 0.4);
+    let vR = V3.mul(V3.new(), pad.vel || V3.new(), 0.4);
     vR.z -= 0.9;                                    // лёгкий выпад навстречу — «стенка» живая
+    const request = describeProfileEffort('BLOCK', this._playerEffortContext(false),
+      { vmag: V3.len(vR) / (1 - (ARCH.BLOCK.absorb || 0)) });
+    const effortBudget = this.getEffortBudget(1, request);
+    ({ normal: n, vR } = enforceRacketEffort({ side: 1, stroke: STROKES.BLOCK, arch: ARCH.BLOCK, normal: n, vR }, effortBudget));
     const p0 = V3.clone(b.p), v0 = V3.clone(b.v), w0 = V3.clone(b.w);
     const info = impactRacket(b.v, b.w, n, vR, 0.30, rubber);
     if (!info) { V3.copy(b.v, v0); V3.copy(b.w, w0); return false; }
@@ -2602,10 +2957,11 @@ class Game {
     }
     if (this.shotJournal && typeof this.shotJournal.noteOutcome === 'function')
       this.shotJournal.noteOutcome('BLOCK');
-    const racket = { stroke: STROKES.BLOCK, arch: ARCH.BLOCK, normal: n, vR, quality: .30,
+    const racket = { side: 1, stroke: STROKES.BLOCK, arch: ARCH.BLOCK, normal: n, vR, quality: .30, effortBudget,
       rubber, contactInput: { p: p0, v: v0, w: w0, gesture: { ...this.swipe.m }, passive: true } };
     if (this.shotJournal) this.shotJournal.capture(this.swipe.gestureId, this.time, racket, b,
       { shotId: this.shotId, grip: this.settings.grip, hand: this.settings.hand });
+    this._publishMatchContact(1, racket, p0, .30, .72);
     if (this.training) this.training.onPlayerHit({ stroke: STROKES.BLOCK, quality: .30, power: 0 }, racket, b.p);
     this.logInput('contact', { outcome: { contact: true, route: 'passive_block',
       distanceM: V3.dist(b.p, pad.pos) } });
@@ -2620,6 +2976,7 @@ class Game {
    * чем кадр рендера). */
   _playerFlightLegal(contact, racket, isServe) {
     if (!racket || racket.valid === false || !racket.normal || !racket.vR) return false;
+    racket = enforceRacketEffort(racket);
     const b = this.ball;
     const v = V3.clone(b.v), w = V3.clone(b.w);
     if (!impactRacket(v, w, racket.normal, racket.vR, racket.quality ?? .5, racket.rubber || {})) return false;
@@ -3056,9 +3413,12 @@ class Game {
     this.lastSweet = sweet;
 
     // ---- build the stroke from the live gesture --------------------
+    const paidWork = this._playerWork?.gestureId === sw.gestureId && this._playerWork.rallyId === this._rallyId ? this._playerWork : null;
+    const request = paidWork?.request || describeStrokeEffort(m, this._playerEffortContext(isServeStroke));
+    const effortBudget = this.staminaEnabled() ? paidWork?.budget || this.getEffortBudget(1, request) : null;
     let racket, quality;
     if (hit.edge) {
-      racket = this._glanceRacket(m, contact, isServeStroke, sideParams);
+      racket = this._glanceRacket(m, contact, isServeStroke, sideParams, effortBudget);
       quality = GRACE_RULES.quality;
       racket.quality = quality;
     } else if (m) {
@@ -3069,7 +3429,7 @@ class Game {
       const tq = contactCfg.timingQuality[timingIndex];
       this.lastTiming = tband;
       const ctx = {
-        side: 1, grip: this.settings.grip, hand: this.settings.hand, forehand, isServe: isServeStroke,
+        side: 1, grip: this.settings?.grip, hand: this.settings?.hand, forehand, isServe: isServeStroke,
         ball: { x: contact.x, y: contact.y, z: contact.z },
         ballSpin: b.w, ballSpeed: V3.len(b.v), ballVelocity: b.v,
         powerScale: 1,
@@ -3077,6 +3437,7 @@ class Game {
         equip: sideParams,
         spinBias: this.settings.spinBias || 'norm',
         spinGain: this.settings.spinGain ?? 1, arcSens: this.settings.arcSens ?? 1,
+        effortBudget,
       };
       racket = deriveStroke(m, ctx);
       racket.vmag *= this.equip.vmagK;
@@ -3116,6 +3477,7 @@ class Game {
       const rawShotFrame = { normal: shotVec(rawNormal), vR: shotVec(rawSwing),
         faceElev: racket.faceElev, swingElevation: racket.elev, swingAzimuth: racket.azSwing,
         faceAzimuth: racket.azFace, speed: racket.vmag, rubber: { ...racket.rubber } };
+      racket = enforceRacketEffort({ ...racket, normal: rawNormal, vR: rawSwing }, effortBudget);
       racket = refineRacket(contact, b.v, b.w, racket, assistLvl, quality);
       if (racket.valid === false && clamp(assistLvl, 0, 1) < 0.999) {
         /* Не только подача: в розыгрыше ассист 0.85 тоже мог не найти лега —
@@ -3167,8 +3529,8 @@ class Game {
             for (const [lift, target] of contactCfg.softening) {
               const scale = Math.min(1, target * (this.equip.vmagK || 1) / Math.max(racket.vmag, 1e-6));
               strokeFrame(racket, (racket.dElev || 0) + lift, racket.dAz || 0, scale, sw, nm);
-              const cand = { ...racket, valid: true, softened: true, vmag: racket.vmag * scale,
-                vR: V3.clone(sw), normal: V3.clone(nm) };
+              const cand = enforceRacketEffort({ ...racket, valid: true, softened: true, vmag: racket.vmag * scale,
+                vR: V3.clone(sw), normal: V3.clone(nm) }, effortBudget);
               if (this._playerFlightLegal(contact, cand, isServeStroke)) { gentle = cand; break; }
             }
             if (gentle) racket = gentle;
@@ -3185,11 +3547,12 @@ class Game {
       racket.unassisted = rawShotFrame;
     }
 
+    racket = enforceRacketEffort(racket, effortBudget);
     const contactPose = paddleContactPose(contact, racket, { grip: this.settings.grip,
       hand: this.settings.hand, forehand, roll: pad.roll, activeFace: 1 });
     if (!contactPose && !hit.edge) { this.logPressRejection('RACKET_TABLE_COLLISION'); return; }
     racket.contactInput = { pressZone: this.swipe.pressZone && { ...this.swipe.pressZone }, capture: captureSample && { ...captureSample, route: hit.captureKind || 'ccd' }, p: shotVec(contact), v: shotVec(b.v), w: shotVec(b.w), gesture: { ...m },
-      context: { grip: this.settings.grip, hand: this.settings.hand, forehand, isServe: isServeStroke,
+      context: { grip: this.settings?.grip, hand: this.settings?.hand, forehand, isServe: isServeStroke,
         equip: { ...sideParams }, vmagK: this.equip.vmagK, moveYaw: this.padYaw || 0, movePitch: this.padPitch || 0 } };
     this._preHit = { v: V3.clone(b.v), w: V3.clone(b.w) };
     const info = impactRacket(b.v, b.w, racket.normal, racket.vR, quality, racket.rubber || {});
@@ -3308,6 +3671,8 @@ class Game {
      * flying through the point-end pause. Its plan used to survive the point
      * and pull the next serve into a phantom backswing. */
     if (this.state !== GS.RALLY) return;
+    if (this.paused || this._ttSleeping || this.preview?.active || this.replayer?.on ||
+        (typeof document !== 'undefined' && (document.hidden || document.visibilityState === 'hidden'))) return;
     const b = this.ball, pad = this.aiPaddle, ai = this.ai;
     if (!b.live || b.lastHitBy === -1) return;
     /* A serve must bounce on the receiver's side before it can be returned.
@@ -3320,8 +3685,18 @@ class Game {
     // backswing — that is what makes the shot readable in advance
     const aiSimNow = Number.isFinite(this.strokeTime) ? this.strokeTime : this.time;
     if (!ai.readyToStrike(aiSimNow) && V3.dist(b.p, ai.pos) > 0.22) return;
+    if (this._aiWork?.shotId === this.shotId && this._aiWork.rallyId === this._rallyId) return;
+    const requested = ai.describeEffort?.(this, ai.commit || ai.plan);
+    const budget = requested ? this.getEffortBudget(-1, requested) : null;
+    let racket = ai.swing(this, budget);
+    if (!racket) return;
+    racket = enforceRacketEffort(racket, budget || racket.effortBudget);
+    const request = racket.effortRequest || requested || { strokeId: racket.stroke?.id || 'DRIVE', effort: 0 };
+    const work = this._aiWork = { side: -1, swingId: ++this._swingId, shotId: this.shotId,
+      rallyId: this._rallyId, paid: Stamina.cost(request), request, budget };
+    this._chargeStamina(-1, work.paid);
     const reach = V3.dist(b.p, ai.pos);
-    if (reach > 0.42) return;
+    if (reach > 0.42) { this._finishSwingWork(work); return; }
     /* A short ball that has already bounced on the AI's side sits well
      * below the resting bat. The old `b.p.z > ai.pos.z + 0.08` gate refused
      * every such recovery even when the bot had a valid plan, a committed
@@ -3329,21 +3704,18 @@ class Game {
      * "unreturnable short ball". Only a ball still travelling away from the
      * AI (leaving its half) may be refused on height; an approaching or
      * stationary post-bounce ball must be playable. */
-    if (b.v.z > 0.02 && b.p.z > ai.pos.z + 0.08) return;
+    if (b.v.z > 0.02 && b.p.z > ai.pos.z + 0.08) { this._finishSwingWork(work); return; }
 
     /* ITTF 2.07: the ball must touch the AI's court before the AI returns
      * it. The old test only refused while the ball was still over the table,
      * so a ball that had already flown past the end line — a point the bot
      * had won — could still be “returned” and the rally carried on from a
      * dead ball. */
-    if (!this.rallyBounces.some((s) => s < 0)) return;
-
-    const racket = ai.swing(this);
-    if (!racket) { return; }
+    if (!this.rallyBounces.some((s) => s < 0)) { this._finishSwingWork(work); return; }
     const contact = V3.clone(b.p);
     const contactPose = paddleContactPose(contact, racket, { hand: 'right', grip: 'shakehand', forehand: racket.forehand, roll: pad.roll });
     const launch = resolveRacketLaunch(b, racket);
-    if (!contactPose || !launch || !strokeIdentityMatches(racket, launch)) return;
+    if (!contactPose || !launch || !strokeIdentityMatches(racket, launch)) { this._finishSwingWork(work); return; }
     this._preHit = { v: V3.clone(b.v), w: V3.clone(b.w) };
     const info = launch.info;
     if (this.watchdog) this.watchdog.contact({ time: this.time, side: -1, serve: false,
@@ -3782,7 +4154,7 @@ class Game {
     faceFromWrist(rest, this.padYaw, this.padPitch, 1);
     if (m) {
       const ctx = {
-        side: 1, grip: this.settings.grip, hand: this.settings.hand, forehand: pad.forehand, isServe: servingNow,
+        side: 1, grip: this.settings?.grip, hand: this.settings?.hand, forehand: pad.forehand, isServe: servingNow,
         ball: { x: pad.pos.x, y: pad.pos.y, z: pad.pos.z },
         ballSpin: this.ball.w, ballSpeed: V3.len(this.ball.v), ballVelocity: this.ball.v, moveYaw: this.padYaw, movePitch: this.padPitch,
       };
@@ -4146,10 +4518,12 @@ class Game {
       const curY = lerp(g.y0, g.y1, progress);
       this.pointer = { x: curX, y: curY };
       this.pointerDown = true;
-      this.swipe.move(curX, curY, this.time);
+      this.swipe.move(curX, curY, this.time, this.strokeTime);
+      this._samplePlayerWork(curX, curY, this.time, this.strokeTime);
 
       if (progress >= 1) {
-        this.swipe.up(g.x1, g.y1, this.time);
+        this.swipe.up(g.x1, g.y1, this.time, this.strokeTime);
+        this._samplePlayerWork(g.x1, g.y1, this.time, this.strokeTime, true);
         this.pointerDown = false;
         this.swipeReleasedAt = this.time;
         this.lastSwipeT = this.time;
@@ -4231,7 +4605,8 @@ class Game {
 
     this.pointer = { x: x0, y: y0 };
     this.pointerDown = true;
-    this.swipe.down(x0, y0, this.time);
+    this.swipe.down(x0, y0, this.time, this.strokeTime);
+    this._beginPlayerWork(x0, y0, this.time, this.strokeTime);
     /* The attract-mode bot does not go through pointerdown, so it must not
      * inherit a rejected press zone from the last human gesture. */
     const rectD = this.canvas && this.canvas.getBoundingClientRect ? this.canvas.getBoundingClientRect() : null;
@@ -4249,6 +4624,7 @@ class Game {
   /* ------------------------------ update --------------------------- */
   update(dtReal) {
     if (this.preview?.active) return;
+    if (this.paused || (typeof document !== 'undefined' && document.hidden)) return;
     if (!Number.isFinite(dtReal) || dtReal <= 0) return;
     dtReal = Math.min(dtReal, 0.1);
     if (this.state === GS.MENU) {
@@ -4277,6 +4653,7 @@ class Game {
     }
     this.time += dtReal;
     this.stateT += dtReal;
+    this._hudElapsed = (this._hudElapsed || 0) + dtReal;
     const policyKey = [this.sessionKind, this.training?.stage, this.career?.active, this.network.isInMatch].join('|');
     if (policyKey !== this._calPolicyKey && typeof refreshGameCalibrationPolicy === 'function') {
       this._calPolicyKey = policyKey; refreshGameCalibrationPolicy(this);
@@ -4299,6 +4676,7 @@ class Game {
     }
 
     this.updateShotDiagnostics();
+    this._expireSwingWork();
 
     // state machine
     switch (this.state) {
@@ -4352,7 +4730,7 @@ class Game {
         if (this.server === -1 && this.ball.lastHitBy === 0 && this.stateSimT > STROKE_CONFIG.serve.toss.aiContactDelay &&
           ((this.ball.v.y < 0 && this.ball.p.y <= PH.TABLE_Y + STROKE_CONFIG.serve.toss.aiContactHeight) ||
             this.strokeTime > this.aiSwingAt + STROKE_CONFIG.serve.toss.aiTimeout)) {
-          const racket = this.ai.serve(this);
+          const racket = enforceRacketEffort(this.ai.serve(this));
           const contact = V3.clone(this.ball.p);
           const contactPose = racket && paddleContactPose(contact, racket, { hand: 'right', grip: 'shakehand', forehand: racket.forehand, roll: this.aiPaddle.roll });
           const launch = racket && resolveRacketLaunch(this.ball, racket);
@@ -4362,6 +4740,10 @@ class Game {
             this.ball.live = false; this.aiServeTimer = .25; this.setState(GS.SERVE_READY);
             break;
           }
+          const request = racket.effortRequest || { strokeId: racket.stroke.id, effort: 0 };
+          this._aiWork = { side: -1, swingId: ++this._swingId, shotId: this.shotId, rallyId: this._rallyId,
+            paid: Stamina.cost(request), request, budget: racket.effortBudget };
+          this._chargeStamina(-1, this._aiWork.paid);
           this._preHit = { v: V3.clone(this.ball.v), w: V3.clone(this.ball.w) };
           const info = launch.info;
           if (this.watchdog) this.watchdog.contact({ time: this.time, side: -1, serve: true,
@@ -4424,6 +4806,7 @@ class Game {
       this._subK = 0; this._subN = nSub;
       while (this._acc >= PHYS_DT && guard++ < 400) {
         this._subPad = this.substepPadPose(this._subK++, nSub);
+        this._advanceStamina(PHYS_DT);
         this.stepPhysics(PHYS_DT);
         this._acc -= PHYS_DT;
         if (!this.ball.live) break;
@@ -4448,6 +4831,7 @@ class Game {
     else this.ai.think(this, dt);
     this.updateOpponentPose(dt);
     this.tryAiHit();
+    this._syncMatchHud();
     this.watchdogFrame(dtReal);
     this.particles.update(dt, dtReal);
     for (const m of this.marks) m.t += dtReal;
