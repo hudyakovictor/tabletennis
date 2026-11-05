@@ -11,13 +11,13 @@ async function launchBrowser() {
   return puppeteer.launch({ executablePath, headless: true, args: ['--no-sandbox'] });
 }
 
-async function pageFixture(t, browser, screens = [], { width = 390, height = 844, main = false } = {}) {
+async function pageFixture(t, browser, screens = [], { width = 390, height = 844, main = false, matchHUD = false } = {}) {
   const page = await browser.newPage(); t.after(() => page.close());
   await page.setViewport({ width, height });
   await page.setRequestInterception(true); page.on('request', (request) => request.abort());
   const errors = []; page.on('pageerror', (error) => errors.push(error.message));
   const stubs = `
-    const trace = { saves: [], host: [], messages: [], audio: [], fx: [], demos: 0, destroyed: 0, grants: 0 };
+    const trace = { saves: [], host: [], messages: [], audio: [], fx: [], grants: 0 };
     const S = { name: 'Test Player', nick: '@test', club: 'Club', rating: 1000, level: 1, coins: 1000, gems: 250, passSeason: 4, passLvl: 20, passXp: 0, premium: true, claimed: { f: [], p: [] }, owned: ['r-teal', 'b-ink', 't-coral'], equipped: { rubber: 'r-teal', blade: 'b-ink', trail: 't-coral' }, rewardReceipts: [], chests: [null,null,null,null], quality: 'low', rm: true, vibro: false, diff: 1, lang: null, sfx: true };
     const saveNow = () => trace.saves.push(JSON.parse(JSON.stringify(S))); const save = saveNow;
     const Sfx = new Proxy({}, { get: (_, key) => () => trace.audio.push(key) });
@@ -31,7 +31,6 @@ async function pageFixture(t, browser, screens = [], { width = 390, height = 844
     const Api = { enabled: false };
     const Progress = { board: null, boardSubs: [], reconcileSeason() {}, watchSeason() {}, boot() {}, leaderboard: async () => null, onBoard(fn) { this.boardSubs.push(fn); return () => { this.boardSubs = this.boardSubs.filter((x) => x !== fn); }; } };
     const GameHost = { ready: true, subs: new Set(), ensure: () => trace.host.push('ensure'), reload: () => trace.host.push('reload'), send(cmd, data) { trace.host.push(cmd); trace.messages.push({ type: cmd, ...data }); }, show: (on) => trace.host.push(on ? 'show' : 'hide'), on(fn) { this.subs.add(fn); return () => this.subs.delete(fn); } };
-    const TT = { Game: class { constructor(cv) { trace.demos++; this.cv = cv; this.dead = false; } prepareLobby() {} launchLobby() {} serve() { trace.host.push('demo-serve'); } destroy() { if (!this.dead) trace.destroyed++; this.dead = true; } } };
     const PEOPLE = [{n:'One Player',s:'One Player',r:1200,club:'Club',wr:50,c:['#fff','#ccc']}, {n:'Two Player',s:'Two Player',r:1100,club:'Club',wr:50,c:['#fff','#ccc']}, {n:'Three Player',s:'Three Player',r:1050,club:'Club',wr:50,c:['#fff','#ccc']}, {n:'Four Player',s:'Four Player',r:950,club:'Club',wr:50,c:['#fff','#ccc']}, {n:'Five Player',s:'Five Player',r:900,club:'Club',wr:50,c:['#fff','#ccc']}, {n:'Six Player',s:'Six Player',r:850,club:'Club',wr:50,c:['#fff','#ccc']}];
     const leagueOf = () => ({id:'bronze',min:0}), nextLeague = () => null, leagueName = () => 'Bronze';
     const MM_POOL = { bronze: [0] }; let BATTLE = {opp:0};
@@ -42,9 +41,10 @@ async function pageFixture(t, browser, screens = [], { width = 390, height = 844
     EventTarget.prototype.removeEventListener = function(event, fn, options) { const map = listenerRecords.get(this); if (map) map.get(listenerKey(event,options))?.delete(fn); return removeListener.call(this,event,fn,options); };
     window.fixture = { S, trace, host: GameHost, emitHost: m => GameHost.subs.forEach(fn => fn(m)), listenerCount: (target,event,capture=false) => listenerRecords.get(target)?.get(event + ':' + capture)?.size || 0 };
   `;
-  const modules = ['core/util.js', 'core/i18n.js', 'locales/ru.js', 'locales/en.js', 'core/ui_core.js', 'ui/ui.js', 'services/economy.js', 'data/catalog.js', 'data/season.js', ...screens.map((id) => 'screens/' + id + '.js'), 'ui/preloader.js', ...(main ? ['main.js'] : [])];
+  const modules = ['core/util.js', 'core/i18n.js', 'locales/ru.js', 'locales/en.js', 'core/ui_core.js', 'ui/ui.js', 'services/economy.js', 'data/catalog.js', 'data/season.js', ...(matchHUD || screens.includes('match') ? ['ui/stroke_icons.js', 'ui/match_hud.js'] : []), ...screens.map((id) => 'screens/' + id + '.js'), 'ui/preloader.js', ...(main ? ['main.js'] : [])];
   const script = stubs + '\n' + modules.map(read).join('\n') + '\nfixture.Preloader = Preloader; fixture.Router = Router; fixture.Sheet = Sheet; fixture.UI = UI; fixture.Progress = Progress; fixture.Rewards = Rewards; fixture.mode = () => typeof MODE === "undefined" ? null : MODE.id; fixture.battle = () => BATTLE;';
-  const css = ['css/base.css', 'css/screens_hub.css', 'css/screens_meta.css', 'css/screens_misc.css'].map(read).join('\n');
+  let css = ['css/base.css', 'css/screens_hub.css', 'css/screens_meta.css', ...(matchHUD ? ['css/screens_battle.css'] : []), 'css/screens_misc.css', ...(matchHUD ? ['css/match_hud.css'] : [])].map(read).join('\n');
+  if (matchHUD) for (const font of ['unb900', 'unb600', 'man600', 'man800']) css = css.replace('__' + font.toUpperCase() + '__', 'data:font/woff2;base64,' + fs.readFileSync(path.join(__dirname, '../src', font + '.woff2')).toString('base64'));
   await page.setContent(`<html><head><meta name="viewport" content="width=device-width,initial-scale=1"><style>${css}</style></head><body class="rm"><div id="desk"><div id="deviceWrap"><div id="device"><div id="gamelayer"></div><div id="screens"><button id="opener">Open</button></div><nav id="nav"></nav><div id="sheets"></div><div id="wipe"></div><div id="toasts"></div><div id="flash"></div>${main ? read('ui/preloader.html') : ''}</div></div></div></body></html>`);
   await page.addScriptTag({ content: script });
   if (main) await page.waitForFunction(() => fixture.Router.cur && !fixture.Router.busy);

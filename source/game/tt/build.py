@@ -7,8 +7,9 @@ SRC = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'src')
 # поэтому по умолчанию собирается в build/engine.html (в git не попадает).
 REPO = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 OUT = sys.argv[1] if len(sys.argv) > 1 else os.path.join(REPO, 'build', 'engine.html')
+SHARED = os.path.join(REPO, 'source', 'src')
 
-JS_ORDER = ['05_stroke_config.js','06_calibration.js','03_i18n.js','10_math.js','12_match_rules.js','20_gl.js','25_career.js','27_network.js','30_physics.js','37_stroke_motion_data.js','38_paddle_motion.js','40_swipe.js','42_shot_diagnostics.js','43_input_telemetry.js','44_diagnostics.js','44_miss_shots.js','45_perf.js','46_physics_watchdog.js','50_audio.js',
+JS_ORDER = ['05_stroke_config.js','06_calibration.js','03_i18n.js','10_math.js','12_match_rules.js','13_stamina.js','20_gl.js','25_career.js','27_network.js','30_physics.js','37_stroke_motion_data.js','38_paddle_motion.js','40_swipe.js','42_shot_diagnostics.js','43_input_telemetry.js','44_diagnostics.js','44_miss_shots.js','45_perf.js','46_physics_watchdog.js','50_audio.js',
             '55_ai.js','56_rig.js','57_camera.js','58_coach.js','59_replay.js','60_scene.js','61_particles.js','62_arena.js',
             '64_training_data.js','65_train.js','66_training_preview.js','75_feedback.js','75_music.js','76_emotion.js','81_uiAnim.js','84_racket.js',
             '86_meta.js','70_game.js','80_ui.js','90_boot.js','92_embed.js']
@@ -31,6 +32,12 @@ if _missing_css or _extra_css:
     raise SystemExit('build.py: CSS_ORDER out of sync — missing: %s, unknown: %s'
                      % (_missing_css, _extra_css))
 css = '\n'.join(open(os.path.join(SRC, f), encoding='utf-8').read() for f in CSS_ORDER)
+css += '\n' + open(os.path.join(SHARED, 'css', 'match_hud.css'), encoding='utf-8').read()
+for family, weight, filename in [('Unb', 900, 'unb900.woff2'), ('Unb', 600, 'unb600.woff2'),
+                                 ('Man', 600, 'man600.woff2'), ('Man', 800, 'man800.woff2')]:
+    with open(os.path.join(SHARED, filename), 'rb') as font:
+        data = base64.b64encode(font.read()).decode('ascii')
+    css += '\n@font-face{font-family:"%s";font-weight:%s;font-display:block;src:url(data:font/woff2;base64,%s) format("woff2")}' % (family, weight, data)
 body = open(os.path.join(SRC,'02_body.html'),encoding='utf-8').read()
 with open(os.path.join(os.path.dirname(SRC), 'assets', 'table-tennis-ultimate.png'), 'rb') as asset:
     logo = 'data:image/png;base64,' + base64.b64encode(asset.read()).decode('ascii')
@@ -38,6 +45,17 @@ if os.environ.get('TT_NO_LOGO'):
     logo = 'data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw=='
 body = body.replace('{{BRAND_LOGO}}', logo)
 js_parts=[]
+# The component, drawings and dictionary blocks have one authored source.
+locales = []
+for lang in ['ru', 'en']:
+    text = open(os.path.join(SHARED, 'locales', lang + '.js'), encoding='utf-8').read()
+    block = re.search(r'/\* MATCH_HUD_BEGIN[^*]*\*/(.*?)/\* MATCH_HUD_END \*/', text, re.S)
+    if not block:
+        raise SystemExit('Missing shared HUD dictionary block: ' + lang)
+    locales.append(json.dumps(lang) + ': {' + block.group(1) + '}')
+js_parts.append('const TT_HUD_TEXT = {' + ','.join(locales) + '};')
+for f in ['ui/stroke_icons.js', 'ui/match_hud.js']:
+    js_parts.append('/* ====== shared ' + f + ' ====== */\n' + open(os.path.join(SHARED, f), encoding='utf-8').read())
 for f in JS_ORDER:
     p=os.path.join(SRC,f)
     s=open(p,encoding='utf-8').read()

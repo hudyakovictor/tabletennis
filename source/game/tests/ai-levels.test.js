@@ -37,13 +37,14 @@ const AI_SRC = fs.readFileSync(path.join(root, 'tt/src/55_ai.js'), 'utf8');
 /* Окна из ТЗ §3.1–3.4. Значения вне окна — это уже другой уровень. */
 const SPEC = [
   { style: 'PUSHER', react: [0.40, 0.45], move: [1.6, 1.8], posErr: [0.28, 0.32],
-    errBase: [0.34, 0.40], aggro: [0.05, 0.10], vmagMax: [3.5, 4.0] },
+    errBase: [0.34, 0.40], aggro: [0.05, 0.10], standOff: [0.00, 0.05], vmagMax: [3.5, 4.0] },
   { style: 'ALLROUND', react: [0.26, 0.30], move: [2.4, 2.7], posErr: [0.14, 0.18],
-    errBase: [0.16, 0.22], aggro: [0.22, 0.28], vmagMax: [6.5, 7.0] },
+    errBase: [0.16, 0.22], aggro: [0.22, 0.28], standOff: [0.08, 0.18], vmagMax: [7.0, 7.8] },
   { style: 'ATTACK', react: [0.16, 0.18], move: [3.6, 4.0], posErr: [0.05, 0.07],
-    errBase: [0.06, 0.09], aggro: [0.50, 0.58], vmagMax: [11.5, 12.5] },
+    errBase: [0.06, 0.09], aggro: [0.50, 0.58], standOff: [0.28, 0.40], vmagMax: [13.0, 14.2] },
   { style: 'ATTACK', react: [0.085, 0.095], move: [5.6, 6.0], posErr: [0.020, 0.026],
-    errBase: [0.014, 0.020], errPress: [0.016, 0.022], aggro: [0.80, 0.85], vmagMax: [16.0, 16.5],
+    errBase: [0.014, 0.020], errPress: [0.016, 0.022], aggro: [0.80, 0.85], vmagMax: [17.2, 18.0],
+    standOff: [0.40, 0.55],
     spinRead: [0.96, 0.97], placeSkill: [0.93, 0.95], counterRate: [0.62, 0.70],
     smashRate: [0.90, 0.94], dropRate: [0.12, 0.15] },
 ];
@@ -91,7 +92,7 @@ test('четыре уровня: стили и все параметры вну�
     }
   });
   // уровень реально растёт от строки к строке
-  for (const k of ['move', 'aggro', 'vmagMax', 'skill', 'placeSkill', 'counterRate', 'smashRate'])
+  for (const k of ['move', 'aggro', 'vmagMax', 'skill', 'placeSkill', 'counterRate', 'smashRate', 'standOff', 'deepness', 'powerK', 'vmagMin'])
     for (let i = 1; i < AI_LEVELS.length; i++)
       assert.ok(AI_LEVELS[i][k] > AI_LEVELS[i - 1][k], `${k} должен расти: ${i}`);
   for (const k of ['react', 'posErr', 'errBase'])
@@ -590,4 +591,36 @@ test('20 матчей на уровень: выше уровень — мень�
   assert.ok(((easy.mix.SMASH || 0) / Object.values(easy.mix).reduce((a, b) => a + b, 0)) < 0.02,
     'EASY не смашит даже в матче');
   assert.ok((wtf.mix.SMASH || 0) > (easy.mix.SMASH || 0), 'WTF смашит чаще EASY');
+});
+
+/* ---------- 11. Стойка «профи»: дистанция вместо прыжка к тумбе ---------- */
+
+test('с уровнем бот отходит за линию стола — и стойка, и плоскость контакта', () => {
+  for (let lv = 0; lv < AI_LEVELS.length; lv++) {
+    const L = AI_LEVELS[lv];
+    const home = new lib.OpponentAI(lv).home.z;
+    assert.ok(Math.abs(home + (PH.T_HALF_LEN + 0.25 + L.standOff)) < 1e-9,
+      `${L.name}: стойка = дальняя линия + 0,25 + standOff (${home.toFixed(2)})`);
+  }
+  // смена уровня посреди сессии обязана двигать стойку, а не только таблицу
+  const bot = new lib.OpponentAI(0);
+  const near = bot.home.z;
+  bot.setLevel(2);
+  assert.ok(bot.home.z < near - 0.30, `СЛОЖНЫЙ отходит глубже ЛЁГКОГО: ${bot.home.z} против ${near}`);
+  bot.reset();
+  assert.ok(Math.abs(bot.pos.z - bot.home.z) < 1e-9, 'reset() ставит в стойку уровня');
+
+  /* Тот же подлёт — более высокий уровень встречает мяч дальше за линией. */
+  const meetZ = (lv) => {
+    const ai = new lib.OpponentAI(lv);
+    ai.rng = lcg(91 + lv);
+    const plan = ai.computePlan(incomingGame(8, 0.1));
+    assert.ok(plan, `${AI_LEVELS[lv].name}: подлёт играбельный`);
+    return plan.z;
+  };
+  const easy = meetZ(0), medium = meetZ(1), hard = meetZ(2);
+  assert.ok(medium <= easy + 1e-9, `MEDIUM не прижимается к столу ближе EASY: ${medium} vs ${easy}`);
+  assert.ok(hard < easy - 0.05, `СЛОЖНЫЙ бьёт с дистанции: ${hard} против ${easy}`);
+  // и по-прежнему в пределах правила: не дальше досягаемости клинка (-2.45)
+  for (const z of [easy, medium, hard]) assert.ok(z > -2.45, `плоскость контакта ${z} вне правила`);
 });

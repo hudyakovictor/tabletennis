@@ -108,7 +108,11 @@ const _q = {};
 const REACH_X = 1.12;
 function moveBlade(stub, ball, dt, level) {
   const ai = stub.ai.pos;
-  const stopZ = Math.max(-2.05, Math.min(-1.05, ai.z));
+  /* Плоскость клинка не искусственно «-2.05»: в игре её держит clamp
+   * noisyTarget (-2.5 … -R) и отход уровня (AI_LEVELS.standOff). Прокси
+   * обязан идти по той же границе, иначе сторож не видит позы глубокой
+   * стойки СЛОЖНОГО и WTF — как раз те, где клинок ниже и дальше тумбы. */
+  const stopZ = Math.max(-2.45, Math.min(-1.05, ai.z));
   lib.predict(V3.clone(ball.p), V3.clone(ball.v), V3.clone(ball.w),
     { dt: 1 / 240, maxT: 2.4, stopZ, stopDir: -1, stopAtPlane: true, out: _q });
   const aim = _q.end && Number.isFinite(_q.end.x) ? _q.end : ball.p;
@@ -182,6 +186,7 @@ function strokeOnce(w, ball, stub, levelIndex, ai, stats) {
       ai.think(stub, frameDt);
       moveBlade(stub, ball, frameDt, lib.AI_LEVELS[levelIndex] || { move: 3 });
       stats.poses.add(`${stub.ai.pos.x.toFixed(3)},${stub.ai.pos.y.toFixed(3)},${stub.ai.pos.z.toFixed(3)}`);
+      if (stub.ai.pos.z < stats.bladeMinZ) stats.bladeMinZ = stub.ai.pos.z;
       /* ровно условия 70_game.watchdogArmFrame: план есть, мяч летит к боту,
        * уже отскочил на его половине и ещё перед ним */
       w.armOpponent(!!(ai.commit && ball.live && ball.lastHitBy === 1 && botBounce &&
@@ -198,6 +203,10 @@ function strokeOnce(w, ball, stub, levelIndex, ai, stats) {
             racket.quality, racket.rubber || {});
           if (info) {
             V3.copy(contact, ball.p);
+            stats.contactBehind.push(Math.abs(contact.z) - PH.T_HALF_LEN);
+            /* скорость мяча СРАЗУ после контакта клинка бота — это и есть
+             * «сила удара» уровня, а не максимум за весь полёт */
+            stats.shotSpeed += V3.len(ball.v); stats.shotN++;
             const vmag = Number.isFinite(racket.vmag) ? racket.vmag : V3.len(racket.vR);
             const limit = w.speedLimit({ side: -1, strokeId: (racket.stroke && racket.stroke.id) || null, aiLevel: levelIndex });
             stats.maxVmag = Math.max(stats.maxVmag, vmag);
@@ -237,7 +246,11 @@ function runLevel(levelIndex, strokes) {
   const ai = new OpponentAI(levelIndex);
   const stub = makeStub();
   const stats = { strokes: 0, swings: 0, declines: 0, bounces: 0, nets: 0, hitSeq: 0, poses: new Set(),
-    maxVmagRatio: 0, maxVmag: 0, maxVmagVsLevel: 0, maxX: 0, maxZ: 0, maxBallSpeed: 0, maxBallY: 0, codes: {} };
+    maxVmagRatio: 0, maxVmag: 0, maxVmagVsLevel: 0, maxX: 0, maxZ: 0, maxBallSpeed: 0, maxBallY: 0,
+    /* стойка бота: насколько глубоко клинок уходит за линию стола и где
+     * происходит контакт. Уровень «профи» обязан быть видно по этим числам, а
+     * не только по км/ч. */
+    contactBehind: [], bladeMinZ: 0, shotSpeed: 0, shotN: 0, codes: {} };
 
   for (let n = 0; n < strokes; n++) {
     stats.strokes++;
@@ -365,6 +378,11 @@ for (const r of results) {
   console.log(`${String(r.name).padEnd(6)} ударов ${String(s.strokes).padStart(3)} · замах ${String(s.swings).padStart(3)}` +
     ` · отказ ${String(s.declines).padStart(3)} · vmag ${s.maxVmag.toFixed(2)} (${(s.maxVmagRatio * 100).toFixed(0)}% потолка, ${(s.maxVmagVsLevel * 100).toFixed(0)}% уровня)` +
     ` · поз ${s.uniquePoses} · мяч ${(s.maxBallSpeed * 3.6).toFixed(0)} км/ч` +
+    /* Средняя сила удара бота и глубина его стойки: то, ради чего level
+     * вообще называют «профессиональным». */
+    (s.shotN ? ` · удар бота ${((s.shotSpeed / s.shotN) * 3.6).toFixed(0)} км/ч` : '') +
+    (s.contactBehind.length ? ` · контакт ${((s.contactBehind.reduce((a, b) => a + b, 0) / s.contactBehind.length)).toFixed(2)} м за линией (макс ${Math.max(...s.contactBehind).toFixed(2)})` : '') +
+    ` · стойка клинка ${s.bladeMinZ.toFixed(2)} м` +
     /* Апекс в сантиметрах НАД СТОЛОМ: мировая координата y ничего не говорит
      * игроку (пол — не ориентир), а высота стола известна точно. */
     ` · apex ${Math.round((s.maxBallY - PH.TABLE_Y) * 100)} см над столом` +

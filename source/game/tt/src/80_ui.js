@@ -163,6 +163,7 @@ class UI {
     for (const { node, attribute, key } of this._staticAttributes) node.setAttribute(attribute, ET(key));
     document.documentElement.lang = ET.lang();
     document.documentElement.style.setProperty('--menu-scroll-copy', JSON.stringify(ET('ЛИСТАЙ ВНИЗ ↓')));
+    this.syncMatchHud();
   }
   updateInputCopy() {
     const touch = this.inputMode === 'touch';
@@ -891,8 +892,37 @@ class UI {
   }
 
   /* ------------------------------ HUD ----------------------------- */
+  usesMatchHud() {
+    const g = this.game;
+    return !!(g && typeof g.getMatchSnapshot === 'function' && !g.training && !g.preview?.active &&
+      !g.lobbyScene?.active && !g.network?.isInMatch && g.sessionKind !== 'online' &&
+      [GS.SERVE_READY, GS.SERVE_TOSS, GS.RALLY, GS.POINT, GS.MATCH_END].includes(g.state));
+  }
+  syncMatchHud(snapshot) {
+    const g = this.game;
+    if (!g || typeof MatchHUD === 'undefined') return;
+    const active = this.usesMatchHud();
+    this._matchHudActive = active; this._hudMotion = !!g.reducedMotion;
+    document.documentElement.classList.toggle('has-match-hud', active);
+    // Embedded offline play has exactly one HUD, owned by the host.
+    if (!active || window.__TT_EMBED) {
+      this.matchHud?.dispose(); this.matchHud = null;
+      return;
+    }
+    const translate = (key, vars = {}) => {
+      const dict = TT_HUD_TEXT[ET.lang()] || TT_HUD_TEXT.ru;
+      return String(dict[key] ?? ET(key)).replace(/\{(\w+)\}/g, (all, name) => vars[name] ?? all);
+    };
+    const options = { t: translate, strokeCatalog: Object.values(STROKES).map(({ id, col }) => ({ id, col })),
+      names: g.demoMode ? [translate('hud.bot') + ' 1', translate('hud.bot') + ' 2'] : [ET('hud.you'), ET('hud.opponent')],
+      botLevel: ET(g.ai.L.ru || g.ai.L.name), reducedMotion: !!g.reducedMotion,
+      reason: (who, reason) => ET(String(reason || '')) };
+    if (!this.matchHud) this.matchHud = MatchHUD.mount($('#hud'), options);
+    this.matchHud.update(snapshot || g.getMatchSnapshot(), options);
+  }
   syncScore() {
     const g = this.game;
+    if (this.usesMatchHud()) { this.syncMatchHud(); return; }
     const a = $('#ptsA'), b = $('#ptsB');
     const changedA = a.textContent !== String(g.score[0]);
     const changedB = b.textContent !== String(g.score[1]);
@@ -934,6 +964,7 @@ class UI {
   clearShotFeedback() { this.hitLabels.length = 0; this._labelShotId = -1; }
   showShot(info, now = performance.now() / 1000) {
     const g = this.game, stroke = info && info.stroke;
+    if (this.usesMatchHud()) { this.clearShotFeedback(); return false; }
     const point = info && shotVec(info.contactPoint), velocity = info && shotVec(info.v), spin = info && shotVec(info.w);
     if (!g || g.demoMode || g.preview?.active || !info || info.side !== 1 || !stroke || !STROKES[stroke.id] ||
         !point || !velocity || !spin || !Number.isFinite(info.shotId) || info.shotId <= this._labelShotId) return false;
@@ -952,6 +983,7 @@ class UI {
       if (now >= this.hitLabels[i].until) this.hitLabels.splice(i, 1);
   }
   drawShotLabels(c, W, H, d, now = performance.now() / 1000) {
+    if (this.usesMatchHud()) { this.clearShotFeedback(); return; }
     this.syncShotFeedback(now);
     const g = this.game;
     if (!this.hitLabels.length || !g || g.paused || g.demoMode || g.preview?.active || [GS.MENU, GS.MATCH_END].includes(g.state)) return;
@@ -1749,6 +1781,8 @@ class UI {
   /* ------------------------------ tick ----------------------------- */
   tick(dt) {
     const g = this.game; if (!g) return;
+    const arcade = this.usesMatchHud();
+    if (arcade !== this._matchHudActive || !!g.reducedMotion !== this._hudMotion) this.syncMatchHud();
     this.syncPauseControl();
     this.syncSlowmoControl();
     this.drawOverlay(dt);
@@ -1758,7 +1792,7 @@ class UI {
     if (g.state === GS.POINT && g.stateT < 0.95)
       statusText = g.lastPoint ? ET(g.lastPoint.who > 0 ? 'Твоё очко' : 'Очко сопернику') : ET('Переигровка');
 
-    if (g.training || g.demoMode || g.paused) statusText = '';
+    if (arcade || g.training || g.demoMode || g.paused) statusText = '';
     status.textContent = statusText;
     status.hidden = !statusText;
 
@@ -1769,10 +1803,11 @@ class UI {
     const box = $('#msgs');
     const bDemo = $('#btnDemoExit');
     if (bDemo) bDemo.style.display = (g.demoMode && g.state !== 'MENU' && g.state !== 'MATCH_END') ? 'block' : 'none';
-    const messageSignature = g.messages.slice(-2).map(m => m.text + '|' + m.col).join('\n');
+    const messages = arcade ? [] : g.messages.slice(-2);
+    const messageSignature = messages.map(m => m.text + '|' + m.col).join('\n');
     if (messageSignature !== this._messageSignature) {
       this._messageSignature = messageSignature;
-      box.innerHTML = g.messages.slice(-2).map((m) =>
+      box.innerHTML = messages.map((m) =>
         `<div class="msg${m.big ? ' big' : ''}" style="color:${m.col}">${m.text}</div>`).join('');
     }
 
@@ -1783,7 +1818,7 @@ class UI {
       const live = g.state === 'RALLY' || g.state === 'SERVE_READY' || g.state === 'SERVE_TOSS';
       const us = g.score[0] >= T - 1 && g.score[0] > g.score[1];
       const them = g.score[1] >= T - 1 && g.score[1] > g.score[0];
-      const on = live && !g.training && (us || them);
+      const on = !arcade && live && !g.training && (us || them);
       mpi.classList.toggle('on', on);
       mpi.classList.toggle('them', them && !us);
       if (on) mpi.textContent = ET(them && !us ? 'МАТЧБОЛ СОПЕРНИКА' : 'МАТЧБОЛ');
@@ -1807,7 +1842,7 @@ class UI {
     }
 
     const rb = $('#rally');
-    const showRally = !g.training && g.rally > 2;
+    const showRally = !arcade && !g.training && g.rally > 2;
     rb.classList.toggle('on', showRally);
     if (showRally) rb.innerHTML = ET('РАЛЛИ <b>{rally}</b> · РЕКОРД <b>{best}</b>', { rally: g.rally, best: Math.max(g.bestRally, g.rally) });
 

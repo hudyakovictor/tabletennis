@@ -17,7 +17,6 @@
 /* Сцена: живой стол остаётся главным. Сверху только CSS-слои — canvas,
    iframe и камера не затронуты. */
 .hero{position:relative;flex:0 0 clamp(170px,42vh,320px);min-height:150px;max-height:320px;isolation:isolate}
-.hero canvas.demo{position:absolute;inset:0;z-index:0;width:100%;height:100%}
 .hero::before{content:"";position:absolute;inset:0;z-index:1;pointer-events:none;opacity:.5;
   background-image:radial-gradient(circle at 1px 1px,rgba(150,205,232,.30) 1px,transparent 1.4px);background-size:18px 18px;
   -webkit-mask-image:radial-gradient(120% 90% at 50% 76%,#000 0%,rgba(0,0,0,.4) 55%,transparent 84%);
@@ -59,9 +58,11 @@
 /* Карточки. Два цвета — обе пары взяты из гаммы самих стикеров iconideas
    (синий корпуса сундука #3054B2 и золото фурнитуры #FDD039): верхний ряд —
    три режима игры в синем, нижний ряд — задания и подарок в золоте.
-   Размер иконки задаёт --mbi: в три раза против прежних 40/46/32 px. */
+   Размер иконки задаёт --mbi: в три раза против прежних 40/46/32 px.
+   Верхний ряд: стикер сверху, снизу только заголовок (описаний нет).
+   Нижний ряд: стикер слева, справа заголовок тем же шрифтом и описание меньше. */
 .modebtn{--h:auto;--accent:#4C7FE0;--lip:#060d24;--mbi:120px;position:relative;isolation:isolate;display:flex;flex-direction:column;
-  align-items:flex-start;justify-content:space-between;gap:6px;height:auto;min-height:190px;padding:0;overflow:hidden;
+  align-items:flex-start;justify-content:space-between;gap:6px;height:auto;min-height:176px;padding:0;overflow:hidden;
   border-radius:17px;text-align:left;text-shadow:none;
   background:radial-gradient(120% 85% at 30% -12%,color-mix(in srgb,var(--accent) 34%,transparent),transparent 62%),
     linear-gradient(180deg,#16264a 0%,#0a1024 100%);
@@ -79,19 +80,27 @@
 .modebtn .mb-i::before{content:"";position:absolute;inset:-9px;z-index:-1;border-radius:50%;pointer-events:none;
   background:radial-gradient(circle,color-mix(in srgb,var(--accent) 26%,transparent),transparent 70%)}
 .modebtn .mb-i svg,.modebtn .mb-i img{width:100%;height:100%;display:block;object-fit:contain;border-radius:0;filter:drop-shadow(0 6px 10px rgba(0,0,0,.5))}
-.modebtn .mb-t{position:relative;z-index:1;display:block;flex:none;min-width:0;width:100%;padding:6px 11px 11px;text-align:left}
-/* Заголовки карточек — Manrope: Unbounded на 10–12 px в трёх колонках
-   не влезает даже целиком («Рейтинговый»), а здесь строки совпадают по
-   высоте и не расползаются на узких экранах. */
-.modebtn b{display:block;font:800 11px/13px var(--body);letter-spacing:.02em;text-transform:uppercase;color:#eaf4ff;min-height:26px}
-.modebtn small{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;margin-top:4px;
-  font:600 9.5px/12px var(--body);letter-spacing:0;text-transform:none;color:rgba(198,222,246,.72);min-height:24px}
+.modebtn .mb-t{position:relative;z-index:1;display:block;flex:none;min-width:0;width:100%;padding:6px 9px 12px;text-align:left}
+/* Все пять заголовков — одним шрифтом (Manrope 900): Unbounded на 10–12 px в
+   трёх колонках не влезает даже целиком («Рейтинговый матч»), а здесь строки
+   совпадают по высоте и не расползаются на узких экранах.
+   Кегль тянется по ширине палубы (cqw) и сидит на .mb-t: заголовок берёт 1em,
+   описание — .84em, т.е. всегда чуть меньше заголовка при любой ширине.
+   Считаем по самому длинному слову: в Manrope 900 капс «ТРЕНИРОВКА» занимает
+   7,65 ширины шрифта, колонка карточки — (100cqw - 40)/3 минус 18 px полей;
+   знаменатель 24 вместо 22,95 оставляет запас на букву «Я» и жирину.
+   min-height держит две строки, чтобы плашки верхнего ряда оставались
+   одинаковыми. */
+.modebtn .mb-t{font-size:clamp(9.4px, calc((100cqw - 94px) / 24), 12.5px)}
+.modebtn b{display:block;font:900 1em/1.15 var(--body);letter-spacing:0;
+  text-transform:uppercase;color:#eaf4ff;text-shadow:0 1px 0 rgba(0,0,0,.32);min-height:2.3em}
+.modebtn small{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;margin-top:.28em;
+  font:700 .84em/1.2 var(--body);letter-spacing:0;text-transform:none;color:rgba(198,222,246,.72);min-height:0}
 
-.modebtn.mode-free b{font:900 12px/13px var(--body);letter-spacing:.01em;text-shadow:0 1px 0 rgba(0,0,0,.32)}
-
-/* Вторичные карточки: те же крупные стикеры, но золотая группа и колонка */
-.modebtn.sec{--accent:#FDD039;--lip:#2a1c02;--mbi:96px;flex-direction:column;align-items:flex-start;justify-content:space-between;gap:8px;
-  min-height:150px;height:auto;padding:12px 11px 11px;border-radius:16px;
+/* Вторичные карточки: та же золотая группа и крупные стикеры, но ряд —
+   иконка слева, текст справа. */
+.modebtn.sec{--accent:#FDD039;--lip:#2a1c02;--mbi:76px;flex-direction:row;align-items:center;justify-content:flex-start;gap:10px;
+  min-height:112px;height:auto;padding:10px 11px;border-radius:16px;
   background:radial-gradient(120% 85% at 30% -12%,color-mix(in srgb,var(--accent) 34%,transparent),transparent 62%),
     linear-gradient(180deg,#3a2a0e 0%,#1a1206 100%);
   box-shadow:inset 0 1px 0 rgba(255,240,200,.16),inset 0 0 0 1px rgba(253,208,57,.34),0 4px 0 var(--lip),0 12px 20px -12px rgba(0,0,0,.85)}
@@ -99,9 +108,9 @@
 .modebtn.sec::after{left:11px;right:11px;top:0;bottom:auto;height:2px;opacity:.8}
 .modebtn.sec .mb-i::before{inset:-6px}
 .modebtn.sec .mb-i{margin:0}
-.modebtn.sec .mb-t{flex:1 1 auto;width:100%;min-width:0;padding:0}
-.modebtn.sec b{font:800 10.5px/13px var(--body);letter-spacing:.04em;color:#fff2cf;min-height:0}
-.modebtn.sec small{margin-top:3px;font:600 9px/11px var(--body);color:rgba(255,236,190,.66);min-height:0;-webkit-line-clamp:1}
+.modebtn.sec .mb-t{flex:1 1 auto;width:auto;min-width:0;padding:0}
+.modebtn.sec b{color:#fff2cf;min-height:1.15em}
+.modebtn.sec small{margin-top:.22em;color:rgba(255,236,190,.72)}
 /* Готовый подарок: та же золотая группа, но свечение и оправа сильнее —
    состояние читается без отдельного цвета и без новой заливки. */
 .modebtn.mode-gift.ready{background:radial-gradient(130% 120% at 16% -10%,rgba(253,208,57,.4),transparent 62%),
@@ -127,14 +136,9 @@ body.q-low .playzone{background:linear-gradient(180deg,rgba(6,10,24,0),rgba(5,8,
 @media(max-width:360px){
   .playzone{gap:8px;padding:12px 10px 8px}
   .play-grid,.grid-row2{gap:6px}
-  .modebtn{--mbi:108px;min-height:176px}
-  .modebtn .mb-t{padding:5px 9px 9px}
-  .modebtn b{font-size:9.5px;line-height:11px;min-height:22px}
-  .modebtn.mode-free b{font-size:10.5px;line-height:11px}
-  .modebtn small{font-size:8.5px;line-height:11px;min-height:22px}
-  .modebtn.sec{--mbi:84px;min-height:132px;padding:9px 8px 8px;gap:6px}
-  .modebtn.sec b{font-size:9.5px;line-height:12px}
-  .modebtn.sec small{font-size:8px;line-height:10px}
+  .modebtn{--mbi:108px;min-height:162px}
+  .modebtn .mb-t{padding:5px 8px 10px}
+  .modebtn.sec{--mbi:64px;min-height:96px;padding:9px 9px;gap:8px}
   .zh-meta{font-size:9px}
   .zh-meta .zm-badge{width:16px;height:16px}
   .hero-mark{display:none}
@@ -143,18 +147,14 @@ body.q-low .playzone{background:linear-gradient(180deg,rgba(6,10,24,0),rgba(5,8,
    заголовки. Считаем по ширине палубы, а не окна: на desktop приложение
    живёт в узкой колонке и медиазапрос окна соврал бы. */
 @container (min-width:421px){
-  .modebtn b{font-size:13px;line-height:15px;min-height:30px}
-  .modebtn.mode-free b{font-size:14px;line-height:15px}
-  .modebtn small{font-size:10.5px;line-height:13px;min-height:26px}
-  .modebtn.sec b{font-size:11px;line-height:13px}
-  .modebtn.sec small{font-size:9.5px;line-height:12px}
+  .modebtn.sec{--mbi:88px;min-height:124px}
 }
 @media(max-height:700px){.hero{flex:0 0 34vh;min-height:150px}}
 @media(max-height:500px) and (min-width:600px){
   .hero{flex:0 0 82px;min-height:82px;max-height:82px}
   .playzone{gap:8px;padding:10px 12px 8px}
-  .modebtn{--mbi:102px;min-height:170px}
-  .modebtn.sec{min-height:150px}
+  .modebtn{--mbi:102px;min-height:158px}
+  .modebtn.sec{--mbi:70px;min-height:100px}
   .hero-mark{display:none}
 }
 

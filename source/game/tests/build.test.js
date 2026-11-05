@@ -32,7 +32,7 @@ test('standalone bundle parses as a browser script (no duplicate declarations or
   const html = freshBuild();
   const firstModule = html.indexOf('/* ====== ');
   assert.ok(firstModule > 0);
-  assert.equal(html.indexOf('/* ====== 05_stroke_config.js ====== */'), firstModule);
+  assert.equal(html.indexOf('/* ====== shared ui/stroke_icons.js ====== */'), firstModule);
   const scripts = [...html.matchAll(/<script\b[^>]*>([\s\S]*?)<\/script>/g)];
   assert.ok(scripts.length > 0);
   for (const [, source] of scripts) assert.doesNotThrow(() => new vm.Script(source, { filename: 'game.html' }));

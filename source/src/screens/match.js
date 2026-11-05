@@ -2,20 +2,12 @@ Router.def('match', {
   full: true, mood: 'battle', game: true,
   render() {
     const o = PEOPLE[BATTLE.opp]; const T = TARGET[MODE.id] || 11;
-    /* Свободная игра: счёт не ведётся, матч не заканчивается, результат и
-       рейтинг не пишутся. Прочерк в каждой строке не притворяется счётом. */
     const free = MODE.id === 'free';
-    const D = diffOf(S.diff);
+    const text = value => String(value ?? '').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]));
     return `<div class="mx cine">
       <div class="mx-bars"><i></i><i></i></div>
       <div class="m-vig"></div>
-      <div class="sb">
-        <div class="sb-in" role="group" aria-label="${free ? t('match.freeNoScore') : t('match.score')}">
-          <div class="sb-row me"><span class="sb-name">${S.name.split(' ')[0]}</span><i class="srv" data-srv="1" aria-hidden="true">${t('match.serve')}</i>${free ? '<b class="sb-score">—</b>' : '<b class="sb-score num" id="scP">0</b>'}</div>
-          <div class="sb-row op"><span class="sb-name">${o.s.split(' ').pop()}</span><i class="srv" data-srv="-1" aria-hidden="true">${t('match.serve')}</i>${free ? '<b class="sb-score">—</b>' : '<b class="sb-score num" id="scO">0</b>'}</div>
-        </div>
-        <span class="ai-lvl" data-l="${D.id}" title="${t('diff.botLevel')}">${D.name}</span>
-      </div>
+      <div class="match-hud-slot"></div>
       <div class="match-actions pe">
         ${UI.notificationButton('m-notifications')}
         <button class="ib m-slowmo" data-act="slowmo" aria-label="${t('match.slowmo')}" title="${t('match.slowmo')}" aria-pressed="false">${Art.icon('clock', { c: 'currentColor', fill: 'none', sw: 2 })}<span>${t('match.slowmo')}</span></button>
@@ -23,14 +15,10 @@ Router.def('match', {
       </div>
       <button class="ib m-diag-shot pe" data-act="diag-mark" ${GameHost.debug ? '' : 'hidden'} aria-label="${t('debug.mark')}"><span aria-hidden="true">●</span> ${t('debug.mark')}</button>
       ${devBtn()}
-      <div class="m-rally"><span>${t('match.rally')}</span><b class="num">×0</b></div>
-      <div class="m-banner"></div>
-      <div class="mx-srv"></div>
-      <div class="m-serve">${Art.icon('paddle', { c: '#FFB3A6' })}<span>${t('match.serveHint')}</span></div>
       <div class="mx-intro">
-        <div class="lt op" style="--c1:${o.c[0]};--c2:${o.c[1]}"><span><small>${o.club} · ${fmt(o.r)}</small><b>${o.n}</b></span></div>
+        <div class="lt op" style="--c1:${o.c[0]};--c2:${o.c[1]}"><span><small>${text(o.club)} · ${fmt(o.r)}</small><b>${text(o.n)}</b></span></div>
         <div class="mx-chip"><span>${t(MODE.tk)}</span><b>${free ? t('match.freeNoScore') : t('match.matchTo', { n: T })}</b></div>
-        <div class="lt me" style="--c1:#FF7A4D;--c2:#B4161E"><span><small>${S.club} · ${fmt(S.rating)}</small><b>${S.name}</b></span></div>
+        <div class="lt me" style="--c1:#FF7A4D;--c2:#B4161E"><span><small>${text(S.club)} · ${fmt(S.rating)}</small><b>${text(S.name)}</b></span></div>
       </div>
       <div class="vs-count mx-count"></div>
     </div>`;
@@ -40,6 +28,8 @@ Router.def('match', {
     TGX.fullscreen(true);                // застрять в иммерсиве можно и без жеста — хуже не станет
     TGX.guard(true);                     // не дать случайно закрыть приложение среди розыгрыша
     this.el = el; this.alive = true; this.timers = [];
+    this.hudSnapshot = null;
+    this.hud = MatchHUD.mount(el.querySelector('.match-hud-slot'), this.hudOptions());
     const st = this.st = { p: 0, o: 0, server: 0, over: false, hits: 0, perfect: 0, smash: 0, maxRally: 0, myServes: 0, live: false, spin: 0, oppHits: 0, rallyHits: 0, servePts: 0, serveWon: 0, seq: [] };
     GameHost.ensure(); GameHost.show(true); GameHost.send('quiet', { on: true }); GameHost.send('mute', { on: !S.sfx });
     this.off = GameHost.on((m) => this.onMsg(m));
@@ -66,10 +56,13 @@ Router.def('match', {
     button.disabled = !GameHost.calibrationReady || !inspector?.allowed;
     button.classList.toggle('on', !!inspector?.effective); button.setAttribute('aria-pressed', String(!!inspector?.effective));
   },
+  hudOptions() {
+    return { t, strokeCatalog: GameHost.strokeCatalog || [], names: [S.name, PEOPLE[BATTLE.opp].s],
+      botLevel: t(diffOf(S.diff).tk), reducedMotion: effectiveReducedMotion(), reason: REASON };
+  },
   refreshLocale(el) {
     I18n.localizeDOM(el, this.render()); this.syncSlowmo();
-    const serve = el.querySelector('.mx-srv');
-    if (serve && serve.classList.contains('on')) serve.textContent = this.st.server > 0 ? t('match.youServe') : t('match.oppServe');
+    if (this.hudSnapshot) this.hud.update(this.hudSnapshot, this.hudOptions());
     return true;
   },
   later(fn, ms) { const t = setTimeout(() => this.alive && fn(), ms); this.timers.push(t); return t; },
@@ -100,29 +93,24 @@ Router.def('match', {
     mx.classList.remove('bars', 'cine'); mx.classList.add('live'); this.st.live = true;
     await sleep(520); c.innerHTML = '';
   },
-  banner(html, cls = '', ms = 1000) {
-    const b = this.el.querySelector('.m-banner'); b.className = 'm-banner ' + cls; b.innerHTML = html; void b.offsetWidth; b.classList.add('on');
-    clearTimeout(this.bt); this.bt = setTimeout(() => b.classList.remove('on'), ms);
-  },
   onMsg(m) {
     if (this.alive && ['ready', 'settings', 'calibration', 'slowmo', 'calibrationPending', 'sessionKind'].includes(m.type)) this.syncSlowmo();
+    if (this.alive && m.type === 'hud') {
+      this.hudSnapshot = m.snapshot;
+      this.hud.update(m.snapshot, this.hudOptions());
+      this.st.p = m.snapshot.score[0]; this.st.o = m.snapshot.score[1];
+      return;
+    }
+    if (this.alive && this.hudSnapshot && ['ready', 'settings', 'motionPreference'].includes(m.type))
+      this.hud.update(this.hudSnapshot, this.hudOptions());
     const el = this.el, st = this.st; if (!this.alive || st.over && m.type !== 'replayEnd' && m.type !== 'matchEnd') return;
-    const serveEl = el.querySelector('.m-serve'), rallyEl = el.querySelector('.m-rally'), rallyN = rallyEl.querySelector('b');
     if (m.type === 'serve') {
-      if (m.server !== st.server) {
-        const c = el.querySelector('.mx-srv');
-        c.className = 'mx-srv ' + (m.server > 0 ? 'me' : 'op'); c.textContent = m.server > 0 ? t('match.youServe') : t('match.oppServe');
-        void c.offsetWidth; c.classList.add('on');
-      }
       st.server = m.server;
-      $$('.srv', el).forEach((s) => { const on = +s.dataset.srv === m.server; s.classList.toggle('on', on); s.setAttribute('aria-hidden', String(!on)); });
       if (m.server > 0) st.myServes++;
-      // подсказка подачи — ТОЛЬКО когда подаёт игрок; при подаче бота всегда прячем
-      if (m.server > 0 && st.myServes <= 3) serveEl.classList.add('on'); else serveEl.classList.remove('on');
     }
     if (m.type === 'hit') {
       if (m.by > 0) {
-        st.hits++; serveEl.classList.remove('on');
+        st.hits++;
         if (SPIN_STROKES.has(m.stroke)) st.spin++; if (m.rally > 1) st.rallyHits++;
         /* В момент удара — НИКАКИХ эффектов поверх кадра: всплески, кольца и
          * стикеры ("ИДЕАЛЬНО!", км/ч) — визуальная плата ровно там, где глаз
@@ -132,32 +120,16 @@ Router.def('match', {
         if (m.stroke === 'SMASH' || m.kmh >= 70) st.smash++;
       }
       else st.oppHits++;
-      if (m.rally >= 3) { rallyEl.classList.add('on'); rallyN.textContent = '×' + m.rally; bump(rallyN); rallyEl.classList.toggle('fire', m.rally >= 10); }
     }
     if (m.type === 'point') {
-      st.maxRally = Math.max(st.maxRally, m.rally || 0); rallyEl.classList.remove('on', 'fire');
+      st.maxRally = Math.max(st.maxRally, m.rally || 0);
       const win = m.who > 0; st.p = m.score[0]; st.o = m.score[1]; st.seq.push(win ? 1 : -1);
       if (st.server > 0) { st.servePts++; if (win) st.serveWon++; }
-      /* В свободной игре цифр на табло нет — обновлять нечего. */
-      const scP = el.querySelector('#scP'), scO = el.querySelector('#scO');
-      if (scP) scP.textContent = st.p; if (scO) scO.textContent = st.o;
-      const sc = el.querySelector(win ? '#scP' : '#scO');
-      if (sc) { sc.classList.remove('flip'); void sc.offsetWidth; sc.classList.add('flip'); }
-      const free = MODE.id === 'free';
-      const vig = el.querySelector('.m-vig');
       if (win) {
         Sfx.point(); haptic('success');
-        /* очко засчитывается счётом, анимацией «flip» и баннером с причиной —
-         * конфетти над цифрой посреди розыгрыша не нужны */
-        const why = REASON(1, m.reason);
-        if (free) { if (why) this.banner(`<b>${why}</b>`, 'win'); }
-        else this.banner(`<b>${t('match.point')}</b>${why ? `<small>${why}</small>` : ''}`, 'win');
       } else {
-        Sfx.lose(); haptic('error'); FX.shake(5, 220);
-        this.banner(`<b>${REASON(-1, m.reason)}</b>${free ? '' : `<small>${t('match.pointToOpp')}</small>`}`, 'lose');
+        Sfx.lose(); haptic('error');
       }
-      vig.classList.toggle('mp', !free && !!m.matchPoint);
-      if (!free && m.matchPoint && !m.winner) this.later(() => { this.banner(`<b>${t('match.matchball')}</b><small>${m.matchPoint > 0 ? t('match.matchballSub') : t('match.matchballOpp')}</small>`, 'mp', 1300); Sfx.rise(.5); haptic('warning'); }, 1150);
     }
     if (m.type === 'paused' && m.v && !m.host && !Sheet.cur && !st.over) this.pause(true);
     /* В свободной игре движок матч не завершает — но если придёт, показывать
@@ -209,8 +181,6 @@ Router.def('match', {
     TGX.guard(false);
     if (this._mo) { this._mo.disconnect(); this._mo = null; }
     const el = this.el, mx = el.querySelector('.mx'); const win = !!m.won;
-    el.querySelector('.m-serve').classList.remove('on'); el.querySelector('.m-vig').classList.remove('mp');
-    clearTimeout(this.bt); this.later(() => el.querySelector('.m-banner').classList.remove('on'), 500);
     const res = { win, me: m.score ? m.score[0] : st.p, op: m.score ? m.score[1] : st.o, opp: BATTLE.opp,
       /* Длительность и режим — факты для сервера: он проверяет правдоподобие
        * и сам считает рейтинг, а не верит присланному «я выиграл». */
@@ -258,7 +228,8 @@ Router.def('match', {
     Router.go('hub');
   },
   leave() {
-    this.alive = false; this.off && this.off(); this.timers.forEach(clearTimeout); clearTimeout(this.bt);
+    this.alive = false; this.off && this.off(); this.timers.forEach(clearTimeout);
+    this.hud?.dispose(); this.hud = null; this.hudSnapshot = null;
     this.replayResolve?.(); this.replayOff?.(); this.replayOff = null; this.replayResolve = null;
     TGX.guard(false);
     if (this._mo) { this._mo.disconnect(); this._mo = null; }

@@ -4,6 +4,9 @@ const vm = require('node:vm');
 const { execFileSync } = require('node:child_process');
 const root = path.resolve(__dirname, '..');
 function load(files, names, extra = {}) {
+  if (!process.env.TT_TEST_REF && files.some(f => ['40_swipe.js', '55_ai.js', '70_game.js'].includes(f)) && !files.includes('13_stamina.js')) {
+    files = [...files]; files.splice(Math.max(0, files.indexOf('10_math.js') + 1), 0, '13_stamina.js');
+  }
   if (!process.env.TT_TEST_REF && files.some(f => ['38_paddle_motion.js', '40_swipe.js', '56_rig.js', '70_game.js'].includes(f)) && !files.includes('37_stroke_motion_data.js')) {
     files = [...files];
     const index = files.findIndex(f => ['38_paddle_motion.js', '40_swipe.js', '56_rig.js', '70_game.js'].includes(f));
@@ -76,7 +79,10 @@ function enginePage() {
   if (engineBuilt) return engineBuilt;
   const ttDir = path.join(root, 'tt');
   const newest = Math.max(newestSourceTime(path.join(ttDir, 'src')),
-    newestSourceTime(path.join(ttDir, 'assets')), fs.statSync(path.join(ttDir, 'build.py')).mtimeMs);
+    newestSourceTime(path.join(ttDir, 'assets')), fs.statSync(path.join(ttDir, 'build.py')).mtimeMs,
+    ...['ui/match_hud.js', 'ui/stroke_icons.js', 'css/match_hud.css', 'locales/ru.js', 'locales/en.js',
+      'unb900.woff2', 'unb600.woff2', 'man600.woff2', 'man800.woff2']
+      .map(file => fs.statSync(path.join(repo, 'source', 'src', file)).mtimeMs));
   const fresh = fs.existsSync(ENGINE_BUILD) && fs.statSync(ENGINE_BUILD).mtimeMs >= newest;
   if (!fresh) {
     execFileSync('python3', [path.join(root, 'tt', 'build.py'), ENGINE_BUILD],

@@ -6,6 +6,7 @@
 const DEVMODE = /[?&]dev=1/.test(location.search);
 const GameHost = {
   frame: null, ready: false, q: [], subs: new Set(), rules: null,
+  strokeCatalog: [], matchSnapshot: null, matchResume: null, hudRequestId: 0,
   calibrationRegistry: [], calibration: null, calibrationReady: false, calibrationRequestId: 0, calibrationAckId: 0,
   _calibrationImported: false,
   inspector: null, sessionKind: 'free',
@@ -47,10 +48,23 @@ const GameHost = {
     // слой ещё не показан (заставка, меню) — движок стартует спящим и не рендерит впустую
     if (!$('#gamelayer').classList.contains('on')) { this._asleep = true; this.send('sleep'); }
   },
-  reload() {
+  captureMatchResume() {
+    try {
+      const resume = this.frame?.contentWindow?.__game?.captureMatchResume?.();
+      if (resume) this.matchResume = structuredClone(resume);
+    } catch (e) { /* The last checkpoint remains usable if the frame is gone. */ }
+    return this.matchResume;
+  },
+  reload({ restoreMatch = true } = {}) {
+    const mode = this.mode, paused = this.paused;
+    const resume = restoreMatch && mode?.type === 'match' ? this.captureMatchResume() : null;
     if (this.frame) this.frame.remove(); this.frame = null; this.ready = false; this.q = [];
     this.calibrationReady = false; this.calibration = null; this.calibrationRegistry = []; this.inspector = null;
     this.notify({ type: 'calibrationPending' }); this.ensure();
+    if (resume) {
+      this.send('match', { ...mode.data, resume });
+      if (paused) this.send('pause');
+    }
   },
   syncSettings() {
     document.body.classList.toggle('rm', effectiveReducedMotion());
@@ -79,6 +93,28 @@ const GameHost = {
     return true;
   },
   notify(m) { this.subs.forEach(fn => { try { fn(m); } catch (err) { console.error(err); } }); },
+  acceptMatchSnapshot(snapshot, requestId) {
+    if (this.mode?.type !== 'match' || requestId !== this.hudRequestId || !snapshot || snapshot.schema !== 1 ||
+        typeof snapshot.matchId !== 'string' || !snapshot.matchId || snapshot.matchId.length > 120 ||
+        !Number.isSafeInteger(snapshot.seq) || snapshot.seq < 0 || !Number.isSafeInteger(snapshot.rallyId) || snapshot.rallyId < 0 ||
+        !Array.isArray(snapshot.score) || snapshot.score.length !== 2 || !snapshot.score.every(n => Number.isSafeInteger(n) && n >= 0) ||
+        !Number.isFinite(snapshot.target) || snapshot.target < 1 || ![1, -1].includes(snapshot.server) ||
+        !Array.isArray(snapshot.players) || snapshot.players.length !== 2 ||
+        !Array.isArray(snapshot.contacts) || snapshot.contacts.length !== 2) return false;
+    const previous = this.matchSnapshot;
+    if (previous && (previous.matchId !== snapshot.matchId || snapshot.seq <= previous.seq)) return false;
+    for (let i = 0; i < 2; i++) {
+      const side = i === 0 ? 1 : -1, player = snapshot.players[i], contact = snapshot.contacts[i];
+      if (!player || player.side !== side || ![player.energy, player.capacity, player.fatigue].every(Number.isFinite) ||
+          player.fatigue < 0 || player.fatigue > 45 || Math.abs(player.capacity - (100 - player.fatigue)) > .001 ||
+          player.energy < 0 || player.energy > player.capacity) return false;
+      if (contact && (contact.side !== side || contact.matchId !== snapshot.matchId || contact.rallyId !== snapshot.rallyId ||
+          !Number.isSafeInteger(contact.eventId) || contact.eventId < 1 || typeof contact.stroke !== 'string' ||
+          !Number.isFinite(contact.kmh) || contact.kmh < 0 || !Number.isFinite(contact.rps) || contact.rps < 0)) return false;
+    }
+    this.matchSnapshot = structuredClone(snapshot);
+    return true;
+  },
   // то, что надо повторить новому iframe после потери GPU-контекста
   mode: null, sticky: {}, paused: false, losses: [],
   send(type, data) {
@@ -96,6 +132,8 @@ const GameHost = {
     if (['attract', 'lobby', 'match', 'train'].includes(type)) {
       if (this.ready) this.syncSettings();
       if (type === 'match') {
+        m.hudRequestId = ++this.hudRequestId;
+        if (!m.resume) { this.matchSnapshot = null; this.matchResume = null; }
         const selected = typeof MODE !== 'undefined' && MODE && MODE.id;
         m.sessionKind = ['free', 'practice', 'ranked', 'career', 'check', 'online'].includes(m.sessionKind)
           ? m.sessionKind : m.free ? 'free' : ['free', 'practice', 'ranked'].includes(selected) ? selected : 'practice';
@@ -111,7 +149,7 @@ const GameHost = {
     if (['attract', 'lobby', 'match', 'train'].includes(type)) { this.mode = { type, data: { ...m } }; this.paused = false; }
     if (['quiet', 'mute', 'hint', 'quality', 'rm', 'debug'].includes(type)) this.sticky[type] = data || {};
     if (type === 'pause') this.paused = true; if (type === 'resume' || type === 'quit') this.paused = false;
-    if (type === 'quit') { this.mode = { type: 'attract', data: {} }; this.sessionKind = 'free'; this.inspector = null; }
+    if (type === 'quit') { this.mode = { type: 'attract', data: {} }; this.sessionKind = 'free'; this.inspector = null; this.matchSnapshot = null; this.matchResume = null; }
     if (this.debug && typeof HostDiagnostics !== 'undefined' &&
         ['debug', 'pause', 'resume', 'slowmo', 'sleep', 'wake', 'match', 'train', 'quit'].includes(type))
       HostDiagnostics.record('host_command', { command: type, on: data && typeof data.on === 'boolean' ? data.on : null, ready: this.ready });
@@ -138,10 +176,12 @@ const GameHost = {
     const mode = this.mode, quiet = this.sticky.quiet, paused = this.paused;
     const inspect = this.inspector && this.inspector.requested;
     if (this.losses.length >= 3) this._recoveryQuality = 'low';   // temporary GPU relief, not a saved preference
-    this.reload();
+    const resume = m.resume || this.captureMatchResume() || { score: m.score, server: m.server };
+    this.matchResume = resume;
+    this.reload({ restoreMatch: false });
     if (quiet) this.send('quiet', quiet);
     if (mode) {
-      if (mode.type === 'match' && m.inMatch) this.send('match', Object.assign({}, mode.data, { resume: { score: m.score, server: m.server } }));
+      if (mode.type === 'match' && m.inMatch) this.send('match', Object.assign({}, mode.data, { resume }));
       else if (mode.type === 'train') {
         const snapshot = this._trainRecovery;
         this.send('train', { ...mode.data, lessonId: snapshot && snapshot.id || mode.data.lessonId,
@@ -189,6 +229,11 @@ window.addEventListener('message', (e) => {
   }
   if (m.type === 'ready') {
     GameHost.ready = true; GameHost.rules = m.rules;
+    const strokeIds = new Set();
+    GameHost.strokeCatalog = Array.isArray(m.strokeCatalog) ? m.strokeCatalog.slice(0, 100).filter(stroke => {
+      if (!stroke || !/^[A-Z][A-Z0-9_]{0,31}$/.test(stroke.id) || !/^#[\da-f]{6}$/i.test(stroke.col) || strokeIds.has(stroke.id)) return false;
+      strokeIds.add(stroke.id); return true;
+    }).map(({ id, col }) => ({ id, col })) : [];
     const seen = new Set();
     GameHost.calibrationRegistry = Array.isArray(m.calibrationRegistry) ? m.calibrationRegistry.slice(0, 100).filter(entry => {
       if (!entry || !/^[a-zA-Z][a-zA-Z0-9]{0,47}$/.test(entry.key) || ['constructor', 'prototype'].includes(entry.key) || seen.has(entry.key) ||
@@ -230,6 +275,10 @@ window.addEventListener('message', (e) => {
     });
   }
   if (['settings', 'calibration', 'slowmo'].includes(m.type)) GameHost.acceptCalibration(m);
+  if (m.type === 'hud') {
+    if (!GameHost.acceptMatchSnapshot(m.snapshot, m.hudRequestId)) return;
+    m = { ...m, snapshot: GameHost.matchSnapshot };
+  }
   if (m.type === 'paused') GameHost.paused = !!m.v;
   if (m.type === 'preview') {
     if (m.requestId !== GameHost.previewRequestId) return;

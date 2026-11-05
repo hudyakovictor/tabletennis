@@ -13,15 +13,15 @@ for (const width of [390, 1280]) test(`free/ranked routes and locale refresh pre
     await Router.go('hub', { mode: 'push' });
     Router.active.el.querySelector('[data-modebtn="free"]').click();
     await Router.go('hub', { mode: 'push' });
-    const root = Router.active.el, game = Router.screens.hub.game, before = JSON.stringify(fixture.S), stack = JSON.stringify(Router.stack);
+    const root = Router.active.el, before = JSON.stringify(fixture.S), stack = JSON.stringify(Router.stack);
     I18n.lang = 'en'; Router.refreshLocale();
-    const refreshed = { sameRoot: Router.active.el === root, sameDemo: Router.screens.hub.game === game, sameState: JSON.stringify(fixture.S) === before, sameStack: JSON.stringify(Router.stack) === stack, title: root.querySelector('[data-modebtn="ranked"] b').textContent };
+    const refreshed = { sameRoot: Router.active.el === root, sameState: JSON.stringify(fixture.S) === before, sameStack: JSON.stringify(Router.stack) === stack, title: root.querySelector('[data-modebtn="ranked"] b').textContent };
     root.querySelector('[data-modebtn="ranked"]').click();
-    return { visits, refreshed, cur: Router.cur, demos: fixture.trace.demos, destroyed: fixture.trace.destroyed };
+    return { visits, refreshed, cur: Router.cur, shows: fixture.trace.host.filter(x => x === 'show').length, hides: fixture.trace.host.filter(x => x === 'hide').length };
   });
   assert.deepEqual(result.visits, [['match', 'free', 0], ['mm', 'ranked', 0]]);
-  assert.deepEqual(result.refreshed, { sameRoot: true, sameDemo: true, sameState: true, sameStack: true, title: 'Ranked' });
-  assert.equal(result.cur, 'mm'); assert.equal(result.demos, result.destroyed); assert.deepEqual(errors, []);
+  assert.deepEqual(result.refreshed, { sameRoot: true, sameState: true, sameStack: true, title: 'League rating' });
+  assert.equal(result.cur, 'mm'); assert.equal(result.shows, result.hides); assert.deepEqual(errors, []);
 });
 
 test('an explicit online lobby route remains available in Friends', async (t) => {

@@ -28,8 +28,9 @@ const settled = (page, id) => page.waitForFunction((screen) => Router.cur === sc
   });
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
   const base = `http://127.0.0.1:${server.address().port}/?s=hub`;
-  const browser = await puppeteer.launch({ executablePath: process.env.CHROME_BIN || await chromium.executablePath(),
-    args: chromium.args, headless: true,
+  const custom = process.env.CHROME_BIN || (process.platform === 'darwin' ? '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome' : null);
+  const browser = await puppeteer.launch({ executablePath: custom || await chromium.executablePath(),
+    args: custom ? ['--no-sandbox', '--enable-unsafe-swiftshader', '--use-gl=angle', '--use-angle=swiftshader'] : chromium.args, headless: true,
     env: { ...process.env, LD_LIBRARY_PATH: [path.join(libs, 'lib'), process.env.LD_LIBRARY_PATH].filter(Boolean).join(':') } });
   const errors = [];
   try {
@@ -156,15 +157,16 @@ const settled = (page, id) => page.waitForFunction((screen) => Router.cur === sc
     await page.waitForSelector('.screen.current[data-id=match] .mx.live', { timeout: 30000 });
     await page.waitForFunction(() => GameHost.frame.contentWindow.__game.freePlay && GameHost.frame.contentWindow.__game.settings.difficulty === 2,
       { timeout: 10000 });
-    const free = await page.evaluate(() => ({ scores: document.querySelectorAll('.screen.current #scP,.screen.current #scO').length,
-      dashes: [...document.querySelectorAll('.screen.current .sb-score')].map((e) => e.textContent), avatar: !!document.querySelector('.screen.current .mx .avatar'),
-      noScoreLabel: document.querySelector('.screen.current .sb-in').getAttribute('aria-label'), level: GameHost.frame.contentWindow.__game.ai.levelIndex }));
-    assert.equal(free.scores, 0); assert.deepEqual(free.dashes, ['—', '—']); assert.equal(free.avatar, false);
-    assert.equal(free.noScoreLabel, 'no score'); assert.equal(free.level, 2);
-    await page.evaluate(() => Router.screens.match.onMsg({ type: 'serve', server: 1 }));
-    assert.equal(await page.$eval('.screen.current .srv[data-srv="1"]', (e) => e.getAttribute('aria-hidden')), 'false');
-    await page.evaluate(() => Router.screens.match.onMsg({ type: 'serve', server: -1 }));
-    assert.equal(await page.$eval('.screen.current .srv[data-srv="-1"]', (e) => e.classList.contains('on')), true);
+    const free = await page.evaluate(() => ({ meters: document.querySelectorAll('.screen.current [role=meter]').length,
+      scoresHidden: [...document.querySelectorAll('.screen.current .match-hud-score-window')].every(e => e.hidden),
+      unlimited: [...document.querySelectorAll('.screen.current .match-hud-unlimited')].map(e => e.textContent),
+      avatar: !!document.querySelector('.screen.current .mx .avatar'), level: GameHost.frame.contentWindow.__game.ai.levelIndex }));
+    assert.equal(free.meters, 0); assert.equal(free.scoresHidden, true); assert.equal(free.avatar, false);
+    assert.deepEqual(free.unlimited, ['Unlimited', 'Unlimited']); assert.equal(free.level, 2);
+    for (const server of [1, -1]) {
+      await page.evaluate(side => { const g = GameHost.frame.contentWindow.__game; g.server = side; g.prepServe(); }, server);
+      await page.waitForFunction(side => !document.querySelector(`.screen.current .match-hud-player[data-side="${side}"] .match-hud-serve`).hidden, {}, server);
+    }
 
     await page.click('.screen.current [data-act=slowmo]');
     await page.waitForFunction(() => GameHost.frame.contentWindow.__game.inspectSlowmo === true);
@@ -189,21 +191,22 @@ const settled = (page, id) => page.waitForFunction((screen) => Router.cur === sc
     await page.waitForSelector('.screen.current[data-id=match] .mx.live', { timeout: 30000 });
     await wait(900); // scoreboard and actions finish their live-entry transitions
     await page.evaluate(() => {
-      const match = Router.screens.match;
-      match.onMsg({ type: 'serve', server: 1 });
-      match.onMsg({ type: 'point', who: 1, score: [2, 3], rally: 0, reason: 'out' });
+      const g = GameHost.frame.contentWindow.__game;
+      g.server = 1; g.prepServe(); g.score = [1, 3]; g.awardPoint(1, 'АУТ');
     });
-    const scored = await page.evaluate(() => ({ p: document.querySelector('.screen.current #scP').textContent,
-      o: document.querySelector('.screen.current #scO').textContent, serve: document.querySelector('.screen.current .srv.on').dataset.srv }));
+    await page.waitForFunction(() => document.querySelector('.screen.current .match-hud-player[data-side="1"] .match-hud-score').textContent === '2');
+    const scored = await page.evaluate(() => ({ p: document.querySelector('.screen.current .match-hud-player[data-side="1"] .match-hud-score').textContent,
+      o: document.querySelector('.screen.current .match-hud-player[data-side="-1"] .match-hud-score').textContent,
+      serve: document.querySelector('.screen.current .match-hud-serve:not([hidden])').closest('[data-side]').dataset.side }));
     assert.deepEqual(scored, { p: '2', o: '3', serve: '1' });
     await page.setViewport({ width: 320, height: 568, isMobile: true, hasTouch: true });
     await page.waitForFunction(() => {
-      const left = document.querySelector('.screen.current .sb').getBoundingClientRect();
+      const left = document.querySelector('.screen.current .match-hud').getBoundingClientRect();
       const right = document.querySelector('.screen.current .match-actions').getBoundingClientRect();
       return Math.abs(left.top - right.top) < 1;
     }, { timeout: 10000 });
     const matchLayout = await page.evaluate(() => {
-      const left = document.querySelector('.screen.current .sb').getBoundingClientRect();
+      const left = document.querySelector('.screen.current .match-hud').getBoundingClientRect();
       const right = document.querySelector('.screen.current .match-actions').getBoundingClientRect();
       return { left: left.left, leftRight: left.right, rightLeft: right.left, right: right.right, top1: left.top, top2: right.top };
     });

@@ -1,20 +1,6 @@
 /* One visible ball: comic sprite at the glass, then the scene's own ball. */
 const Preloader = {
-  session: null, serial: 0, demo: null,
-  ensureDemo(options) {
-    if (!this.demo || this.demo.dead) {
-      const cv = document.createElement('canvas'); cv.className = 'lobby-demo';
-      $('#device').insertBefore(cv, $('#screens'));
-      this.demo = new TT.Game(cv, { mode: 'demo', lobby: true });
-      this.demo.prepareLobby(options || { intro: false });
-    } else if (options) this.demo.prepareLobby(options);
-    return this.demo;
-  },
-  releaseDemo(game) {
-    if (this.session && this.session.demo === game) this.cancel();
-    game.destroy(); game.cv.remove();
-    if (this.demo === game) this.demo = null;
-  },
+  session: null, serial: 0,
   mount() {
     this.cancel();
     const root = $('#preloader'); if (!root) return;
@@ -45,7 +31,7 @@ const Preloader = {
     document.addEventListener('visibilitychange', visibility);
     s.cleanups.push(() => document.removeEventListener('visibilitychange', visibility));
     if (typeof GameHost.on === 'function') s.cleanups.push(GameHost.on(m => this.message(s, m)));
-    const retryLoad = () => { if (S.quality !== 'low') GameHost.reload(); this.mount(); };
+    const retryLoad = () => { GameHost.reload(); this.mount(); };
     retry.addEventListener('click', retryLoad); s.cleanups.push(() => retry.removeEventListener('click', retryLoad));
     const ready = () => { if (!s.alive) return; s.loaded++; this.progress(s, Math.min(99, Math.floor(s.loaded / s.total * 100))); this.maybeStart(s); };
     const keys = ['preloader-ball-intro', 'preloader-ball-spin', 'preloader-paddle', 'preloader-burst'];
@@ -63,12 +49,11 @@ const Preloader = {
     this.later(s, () => {
       s.sceneStarted = true;
       try {
-        if (S.quality === 'low') s.demo = this.ensureDemo({ intro: true, requestId: s.id,
-          onReady: m => this.message(s, m), onFrame: m => this.message(s, m), onHit: m => this.message(s, m) });
-        else {
-          s.engine = true; GameHost.ensure(); GameHost.send('quiet', { on: true });
-          GameHost.send('lobby', { intro: true, requestId: s.id }); GameHost.show(true, 'lobby');
-        }
+        /* Живой стол всегда настоящий движок: лёгкая 2D-заглушка для
+         * «Эконома» удалена вместе с engine2d/. Эконом теперь только
+         * режет разрешение внутри WebGL-движка. */
+        s.engine = true; GameHost.ensure(); GameHost.send('quiet', { on: true });
+        GameHost.send('lobby', { intro: true, requestId: s.id }); GameHost.show(true, 'lobby');
       } catch (e) { this.error(s); }
     }, 240);
     this.later(s, () => { if (!s.sceneReady && !document.hidden) this.error(s); }, 20000);
@@ -194,7 +179,7 @@ const Preloader = {
     if (document.hidden) { s.pendingLaunch = true; return; }
     s.phase = 'flight'; s.root.dataset.phase = 'flight';
     const data = { requestId: s.id, x: .5, y: .48, diameter: (s.impactDiameter || s.width * .9) / s.width };
-    if (s.demo) s.demo.launchLobby(data); else GameHost.send('lobbyLaunch', data);
+    GameHost.send('lobbyLaunch', data);
     this.later(s, () => { if (!document.hidden) this.finish(s); }, 2600);
   },
   message(s, m) {
@@ -229,9 +214,8 @@ const Preloader = {
     if (!s) return;
     s.alive = false; s.timers.forEach(clearTimeout); cancelAnimationFrame(s.faceRaf);
     s.animations.forEach(a => a.cancel()); s.animations.clear(); s.timers.clear(); s.cleanups.splice(0).forEach(fn => fn());
-    if (!keepScene && s.sceneStarted) {
-      if (s.demo && !s.revealed) this.releaseDemo(s.demo);
-      else if (s.engine) { GameHost.send('attract'); if (!s.revealed) GameHost.show(false); }
+    if (!keepScene && s.sceneStarted && s.engine) {
+      GameHost.send('attract'); if (!s.revealed) GameHost.show(false);
     }
   }
 };

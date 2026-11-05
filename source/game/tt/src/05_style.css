@@ -671,3 +671,11 @@ body:has(#tIntro.on) #pauseInd{visibility:hidden}
 .diagnostic-pause a{display:inline-flex;align-items:center;text-decoration:none}
 #diagnosticPreview img{display:block;max-width:100%;max-height:34vh;margin:8px auto;border-radius:8px;object-fit:contain;user-select:auto;-webkit-user-select:auto;-webkit-touch-callout:default}
 #diagnosticText{width:100%;min-height:100px;padding:8px;border:1px solid var(--line);background:#0c1522;color:#fff;font:11px/1.4 monospace;user-select:text;-webkit-user-select:text}
+
+/* The shared match panel replaces only offline match reading cues. */
+html.has-match-hud{--sat:env(safe-area-inset-top,0px);--sab:env(safe-area-inset-bottom,0px);--tgt:0px;--tgb:0px}
+html.has-match-hud #score,html.has-match-hud #rally,html.has-match-hud #mpInd,
+html.has-match-hud #msgs,html.has-match-hud #playStatus{display:none!important}
+html.has-match-hud #topright{top:calc(env(safe-area-inset-top,0px) + 12px);right:12px;display:flex;width:auto;gap:8px}
+html.has-match-hud #topright .ic{width:44px;height:44px;min-width:44px;min-height:44px}
+@media(max-width:620px){html.has-match-hud #topright{flex-direction:column}}

@@ -14,7 +14,7 @@ root = SOURCE_DIR / 'src'
 html = (root/'index.tpl.html').read_text()
 html = html.replace('<!--__PRELOADER__-->', (root/'ui'/'preloader.html').read_text())
 def b64(p): return 'data:font/woff2;base64,' + base64.b64encode((root/p).read_bytes()).decode()
-CSS_ORDER = ['css/base.css','css/screens_hub.css','css/screens_battle.css','css/screens_meta.css','css/screens_misc.css']
+CSS_ORDER = ['css/base.css','css/screens_hub.css','css/screens_battle.css','css/screens_meta.css','css/screens_misc.css','css/match_hud.css']
 css = '\n'.join((root/f).read_text() for f in CSS_ORDER)
 for k,f in {'__UNB900__':'unb900.woff2','__UNB600__':'unb600.woff2','__MAN600__':'man600.woff2','__MAN800__':'man800.woff2'}.items():
     css = css.replace(k, b64(f))
@@ -28,8 +28,8 @@ illjs = 'const ILL = ' + json.dumps(ill) + ';\n'
 # данные, потом UI-примитивы и сервисы, экраны — последними, boot в конце.
 # Файл, отсутствующий в этом списке, в сборку НЕ попадёт.
 order = ['core/util.js','core/i18n.js','locales/ru.js','locales/en.js','core/state.js','core/platform.js','core/audio.js','core/ui_core.js','core/dev.js',
-         'data/leagues.js','ui/art.js','ui/fx.js','services/economy.js','services/api.js','services/progress.js','ui/bg.js','engine2d/engine.js',
-         'ui/ui.js','services/miss_shots.js','services/game_host.js','services/diagnostics.js','services/career.js',
+         'data/leagues.js','ui/art.js','ui/fx.js','services/economy.js','services/api.js','services/progress.js','ui/bg.js',
+         'ui/ui.js','ui/stroke_icons.js','ui/match_hud.js','services/miss_shots.js','services/game_host.js','services/diagnostics.js','services/career.js',
          'screens/hub.js','screens/settings.js','screens/matchmaking.js','screens/online.js','screens/battle_common.js',
          'screens/match.js','screens/training.js','screens/result.js',
           'ui/item_art.js','data/catalog.js','screens/shop.js','data/season.js','screens/pass.js','screens/ranks.js','screens/profile.js','ui/preloader.js','main.js']

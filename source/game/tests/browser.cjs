@@ -825,7 +825,7 @@ async function horizontalInputs(page, target, offset, pointerTypes) {
             g.ui.hitLabels.length===0 && getComputedStyle(document.querySelector('#shot')).display==='none';
           g.returnToMenu();return ok;
         });
-        check('only player contact creates a measured canvas label; bounce and return update only the journal', () => {
+        check('both confirmed contacts populate the common HUD while the player journal stays independent', () => {
           g.startMatch(2);g.career.stop();g.setState(GS.RALLY);g.setPaused(false);g.isServeBall=false;g.ball.live=false;
           const sw=new SwipeTracker();sw.down(.5,.7,0);sw.move(.52,.5,.05);sw.up(.54,.3,.1);
           g.swipe.down(.5,.7,g.time);
@@ -835,21 +835,25 @@ async function horizontalInputs(page, target, offset, pointerTypes) {
           g.applyHit(1,r,contact,.85,null);
           const entry=g.shotJournal.latest;
           if(!entry.contact || entry.outcome!=='pending' || !near(entry.contact.spin.topRps,12))return false;
-          const label=g.ui.hitLabels[0];
-          if(g.ui.hitLabels.length!==1 || label.rps!==Math.round(entry.contact.spin.totalRps) ||
-            label.color!==STROKES[r.stroke.id].col || label.point===contact || !near(label.point.z,contact.z))return false;
+          const first=g.getMatchSnapshot().contacts[0];
+          if(!first || first.stroke!==r.stroke.id || !near(first.rps,entry.contact.spin.totalRps) ||
+            !near(first.kmh,V3.len(g.ball.v)*3.6) || g.ui.hitLabels.length!==0)return false;
+          const label=document.querySelector('.match-hud-contact[data-side="1"]');
+          if(!label || label.style.getPropertyValue('--stroke')!==STROKES[r.stroke.id].col)return false;
           const paint=[],ctx=g.ui.fxg,fill=ctx.fillText;
           ctx.fillText=function(text,x,y){paint.push({text,x,y,font:this.font,color:this.fillStyle});return fill.call(this,text,x,y);};
-          try {g.ui.drawShotLabels(ctx,g.ui.fx.width,g.ui.fx.height,g.ui.dpr,label.at+.2);}
+          try {g.ui.drawShotLabels(ctx,g.ui.fx.width,g.ui.fx.height,g.ui.dpr);}
           finally {ctx.fillText=fill;}
-          if(paint.length!==1 || !paint[0].text.startsWith(r.stroke.id+' '+label.rps+' ') ||
-            paint[0].x<0 || paint[0].y<0 || paint[0].y>g.ui.fx.height || parseFloat(paint[0].font.split(' ')[1])/g.ui.dpr<20)return false;
+          if(paint.length!==0)return false;
           g.netTouched=true;g.shotJournal.net();
           if(entry.outcome!=='pending')return false;
           g.onBounce(-1,2,null);g.ui.syncShotFeedback();
-          if(entry.outcome!=='table' || shotFeedbackView(entry).status!=='На стол' || g.ui.hitLabels[0]!==label)return false;
+          if(entry.outcome!=='table' || shotFeedbackView(entry).status!=='На стол' ||
+            g.getMatchSnapshot().contacts[0].eventId!==first.eventId)return false;
           g.applyHit(-1,r,V3.clone(g.ball.p),.85,null);
-          const ok=entry.outcome==='table' && g.shotJournal.records.length===1 && g.ui.hitLabels.length===1 &&
+          const latest=g.getMatchSnapshot(),second=latest.contacts[1];
+          const ok=entry.outcome==='table' && g.shotJournal.records.length===1 && g.ui.hitLabels.length===0 &&
+            second && second.side===-1 && second.eventId>first.eventId && latest.contacts[0].eventId===first.eventId &&
             !g.ui.showShot(g.lastShotInfo) && getComputedStyle(document.querySelector('#shot')).display==='none';
           g.returnToMenu();return ok;
         });
