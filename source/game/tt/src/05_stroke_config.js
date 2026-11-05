@@ -91,6 +91,12 @@ const STROKE_CONFIG = {
     lateralTurnK: 0.62, lateralTurnKServe: 1.9, lateralGainWeights: [0.72, 0.28], verticalContactLateralK: 0.58,
     sideBrushVerticalK: 1, sideBrushLateralExp: 1.2,
     rubberSoftWeights: [0.5, 0.5], rubberGainWeights: [0.75, 0.25], cap: 1080,
+    /* Потолок нижнего вращения для СЕМЕЙСТВА ОБРАТНЫХ ударов в розыгрыше
+     * (PUSH/CHOP/CHOP_BLOCK/DROP, back:true). Свайп сверху вниз давал
+     * 460-760 рад/с (74-120 об/с) — в 3-5 раз больше реальногоchop (~100-150
+     * рад/с), и после отскока от стола такой мяч «отстреливал назад». Подачи
+     * (SERVE_BACK) здесь не тронуты: для них отдельный контракт (w.x > 250). */
+    rallyBackCap: 320,
   },
   serve: {
     sideK: 1,                 // lateral classification sensitivity, not a spin multiplier
