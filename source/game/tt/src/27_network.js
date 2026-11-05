@@ -59,6 +59,13 @@ function netMirrorState(msg) {
   if (Array.isArray(msg.score)) out.score = [msg.score[1], msg.score[0]];
   if (msg.server === 1 || msg.server === -1) out.server = -msg.server;
   if (msg.who === 1 || msg.who === -1) out.who = -msg.who;
+  /* `lastHitBy` is a SIDE, and each peer is side +1 in its own frame: the
+   * host's own strike is `1` there and `-1` (the opponent struck it) for the
+   * guest. Without mirroring this scalar the guest kept its own value for
+   * ever — after its first return it stayed `1`, so every later incoming ball
+   * was rejected as "already hit" and the guest could never return again.
+   * The mirror is an involution, so 0 (toss, nobody struck) stays 0. */
+  if (Number.isFinite(msg.lastHitBy)) out.lastHitBy = -msg.lastHitBy;
   return out;
 }
 
@@ -159,6 +166,12 @@ class NetworkManager {
     this._lastServerBall = null;
     this._lastGuestHitShot = -1;
     this._lastStateT = this._lastInputT = 0;
+    /* Ordering/dedupe of the relay stream: `_lastStateClock` is the newest
+     * host frame already applied (host `Game.time` is monotone), and
+     * `_lastGuestHitId` is the newest strike id this host has accepted. */
+    this._lastStateClock = null;
+    this._lastGuestHitId = 0;
+    this._guestHitSeq = 0;
   }
 
   joinRoom(roomId) {
@@ -216,13 +229,22 @@ class NetworkManager {
         if (!this.isHost || this.state !== 'IN_MATCH') return;
         const b = this.game.ball;
         if (!b.live) break;
+        /* ONE CONFIRMED CONTACT, once. A duplicated or retransmitted
+         * `guestHit` used to be applied again verbatim: it re-set
+         * `lastHitBy = -1` after the host had already returned the ball, so
+         * the host could hit the same flight a second time (two contacts,
+         * one physical episode). The guest stamps every strike with a
+         * monotone `hitId`; the host accepts each id exactly once. */
+        if (Number.isFinite(msg.hitId)) {
+          if (msg.hitId <= this._lastGuestHitId) break;
+          this._lastGuestHitId = msg.hitId;
+        }
         const mv = Array.isArray(msg.v) ? netFlipZ(msg.v) : null;
         const mw = Array.isArray(msg.w) ? netFlipAxial(msg.w) : null;
         if (mv) V3.set(b.v, mv[0], mv[1], mv[2]);
         if (mw) V3.set(b.w, mw[0], mw[1], mw[2]);
         b.lastHitBy = -1;            // теперь мяч летит к игроку
         if (Number.isFinite(msg.rally)) this.game.rally = msg.rally;
-        this._lastGuestHitShot = -1; // сброс для следующего удара гостя
         break;
       }
       case 'pong':
@@ -287,6 +309,11 @@ class NetworkManager {
       server: g.server,
       rally: g.rally,
       shotId: g.shotId,
+      /* Who struck the ball last, in the HOST's frame. The guest mirrors it:
+       * without this the guest's own `lastHitBy` never returned to "incoming
+       * ball", so its contact gates refused every ball after the first
+       * return. */
+      lastHitBy: Number.isFinite(b.lastHitBy) ? b.lastHitBy : 0,
       state: g.state,   // синхронизация состояния игры для гостя
     });
   }
@@ -312,6 +339,7 @@ class NetworkManager {
       const b = g.ball;
       this._send({
         type: 'guestHit',
+        hitId: ++this._guestHitSeq,
         v: [b.v.x, b.v.y, b.v.z],
         w: [b.w.x, b.w.y, b.w.z],
         rally: g.rally,
@@ -322,6 +350,15 @@ class NetworkManager {
   /* ---- guest: apply host state (interpolated) ---- */
   _applyRemoteState(msg) {
     if (!this._validState(msg)) return;
+    /* The relay guarantees order, but a lagging or duplicated packet must
+     * not be able to rewind the rally: an old frame applied after a newer
+     * one dragged the ball backwards (measured: z 0.52 -> -0.12 with a
+     * 400 ms-old state), and a duplicate re-ran the same lerp twice. Only a
+     * strictly newer host clock is accepted; equal clocks are duplicates. */
+    if (Number.isFinite(msg.t)) {
+      if (Number.isFinite(this._lastStateClock) && msg.t <= this._lastStateClock) return;
+      this._lastStateClock = msg.t;
+    }
     const g = this.game, beforeServer = g.server, beforeA = g.score[0], beforeB = g.score[1];
     this._interpBuf.push({ ...msg, receivedAt: Date.now() });
     if (this._interpBuf.length > 30) this._interpBuf.shift();
@@ -344,6 +381,9 @@ class NetworkManager {
       this.game.ball.live = false;
       if (msg.server === 1 || msg.server === -1) this.game.server = msg.server;
     }
+    /* The contact state is the host's, mirrored (see netMirrorState). It is
+     * what makes the next ball returnable on the guest's side. */
+    if (Number.isFinite(msg.lastHitBy)) this.game.ball.lastHitBy = msg.lastHitBy;
     // apply opponent racket (for rendering)
     if (msg.racket) {
       const op = this._opponentRacket;
@@ -385,6 +425,10 @@ class NetworkManager {
         (msg.racket.sw !== undefined && !Number.isFinite(msg.racket.sw)))) return false;
     if (msg.score && (!Array.isArray(msg.score) || msg.score.length !== 2 ||
         !msg.score.every(n => Number.isInteger(n) && n >= 0 && n < 100000))) return false;
+    /* Contact ownership is a three-valued side, not a free number: a hostile
+     * or corrupt frame must not be able to park the ball in a state no gate
+     * understands. */
+    if (msg.lastHitBy !== undefined && ![-1, 0, 1].includes(msg.lastHitBy)) return false;
     return true;
   }
 

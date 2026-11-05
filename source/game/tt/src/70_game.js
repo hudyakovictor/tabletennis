@@ -804,8 +804,23 @@ class Game {
     const dpr = Math.min(window.devicePixelRatio || 1, this.settings.quality === 'low' ? 1.25 : 2) * (this.renderScale || 1);
     const w = this.canvas.clientWidth || window.innerWidth;
     const h = this.canvas.clientHeight || window.innerHeight;
+    const prevW = this.vw, prevH = this.vh;
     this.R.resize(w, h, dpr);
     this.vw = w; this.vh = h;
+    /* A gesture is stored as NORMALISED screen samples, so its start belongs
+     * to the projection it was pressed in. Rotating the phone, opening the
+     * keyboard or collapsing the URL bar mid-swipe replaces the canvas size,
+     * and every later sample is then expressed in a different projection:
+     * the same finger travel becomes a different angle, a different speed
+     * and a different pixel distance for the tap/slop test. Mixing the two
+     * projections is never a stroke the player made, so the only honest
+     * answer is to drop the gesture (no phantom hit, no press carried into
+     * the new projection) and let the next press start clean. A sub-2 %
+     * change — dpr/quality bookkeeping — is not a projection change. */
+    if (prevW > 0 && prevH > 0 && this.swipe && this.swipe.active) {
+      const drift = Math.abs(w / prevW - 1) + Math.abs(h / prevH - 1);
+      if (drift > 0.02) this.cancelInput('viewport_resize');
+    }
     /* Refit in the same tick: the pointer map inverts the camera that is
      * actually on screen, so a resize must never leave a stale projection
      * behind for even one frame of aiming. */
@@ -3812,9 +3827,8 @@ class Game {
       paddlePoseQuaternion(V3.mul(this._bladeFace || (this._bladeFace = V3.new()), pad.normal, pad.activeFace),
         pad.roll, pad.q || (pad.q = Q.new()));
     }
-    const clearance = paddleTableClearance(pad.pos, pad.normal, pad.roll, PH.TABLE_Y, PH.T_HALF_WID, PH.T_HALF_LEN, pad.q);
-    const lifted = clearance < .006 ? .006 - clearance : 0;
-    if (lifted) pad.pos.y += lifted;
+    /* One shared, idempotent guard: height only, never horizontal. */
+    enforcePaddleTableClearance(pad.pos, pad.normal, pad.roll, .006, PH.TABLE_Y, PH.T_HALF_WID, PH.T_HALF_LEN, pad.q);
     /* prevPos must stay the position the bat had at the START of this frame:
      * the swept-capture CCD (bladePlaneCapture / measureCaptureAllowance) and
      * the frame velocity below both diff pos against it. The old line copied
@@ -3823,12 +3837,13 @@ class Game {
      * playerWristPose) were dead, and right after a stroke (when the template
      * moved pad.pos once more) the pose saw a stale zero velocity while the
      * bat had visibly moved: the "chaotically twitching racket after a hit". */
-    const finalClearance = paddleTableClearance(pad.pos, pad.normal, pad.roll, PH.TABLE_Y, PH.T_HALF_WID, PH.T_HALF_LEN, pad.q);
-    if (finalClearance < .006) {
-      // Lift before advancing across the edge, rather than buying table
-      // clearance with an unbounded vertical teleport.
-      V3.set(pad.pos, pad.prevPos.x, pad.prevPos.y + Math.min(maxSpeed * dt, Math.max(0, pad.pos.y - pad.prevPos.y + .006 - finalClearance)), pad.prevPos.z);
-    }
+    /* Idempotent second pass (see enforcePaddleTableClearance): the pose came
+     * from the stroke template, so the first lift above ran on a different
+     * normal. Height is corrected again; horizontal position is never
+     * rewound to `prevPos` (that rewind froze the bat for a frame and fed the
+     * CCD and `pad.vel` a teleport — the "AI paddle jump" on the player's
+     * side, seen as a stutter along the table edge). */
+    enforcePaddleTableClearance(pad.pos, pad.normal, pad.roll, .006, PH.TABLE_Y, PH.T_HALF_WID, PH.T_HALF_LEN, pad.q);
     V3.mul(pad.vel, V3.sub(pad.vel, pad.pos, pad.prevPos), 1 / Math.max(dt, 1e-4));
     pad.poseReady = true;
     pad.swing = Math.max(0, pad.swing - dt * 4.5);
@@ -3971,9 +3986,21 @@ class Game {
     const ai = this.ai, pad = this.aiPaddle;
     if (!ai || !pad || this._idleStill) return;
     const old = V3.copy(pad.prevPos || (pad.prevPos = V3.new()), pad.pos);
+    /* A ball is on its way to the bot right now. The previous stroke's
+     * template may still be playing (hold + follow + recover ≈ 0.3–0.5 s),
+     * and it owns a position — the OLD contact point. Letting it write
+     * `pad.pos` there every frame also wrote it into `ai.pos`, so the new
+     * intercept computed by AI.think() was thrown away: measured 0.65 m of
+     * travel lost over 0.4 s, i.e. a bot that cannot reach a cross-court
+     * return hit at normal rally tempo (tryAiHit refuses beyond 0.42 m).
+     * Recovery still owns the FACE (the follow-through must be visible);
+     * the intercept owns the POSITION. */
+    const intercepting = !!(this.ball && this.ball.live && this.ball.lastHitBy === 1);
     const pose = this.aiPaddleMotion && this.aiPaddleMotion.sample(dt, { yaw: 0, pitch: -15 * DEG, roll: .28 });
     if (pose?.q) {
-      V3.copy(pad.pos, pose.p); V3.copy(pad.normal, pose.normal);
+      if (intercepting) V3.copy(pad.pos, ai.pos);
+      else V3.copy(pad.pos, pose.p);
+      V3.copy(pad.normal, pose.normal);
       Q.copy(pad.q, pose.q); pad.roll = pose.roll; pad.activeFace = pose.activeFace;
     } else {
       V3.copy(pad.pos, ai.pos);
