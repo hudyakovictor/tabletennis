@@ -385,7 +385,10 @@ function impactRacket(v, w, n, vR, quality = 1, rubber = {}) {
   const e = clamp((e0 - (base.eSpeed ?? PH.E_RACKET_SPEED) * Math.max(0, closing)) * (rubber.damp ?? base.damp ?? 1), ...impact.restitutionRange);
   const info = impactSphere(v, w, n, vR, e, mu, et);
   const wl = V3.len(w);
-  if (wl > STROKE_CONFIG.spin.cap) V3.mul(w, w, STROKE_CONFIG.spin.cap / wl);
+  /* The rubber may carry a tighter per-stroke ceiling (rally backspin family),
+   * never looser than the global cap. */
+  const spinCap = Math.min(Number.isFinite(rubber.cap) ? rubber.cap : Infinity, STROKE_CONFIG.spin.cap);
+  if (wl > spinCap) V3.mul(w, w, spinCap / wl);
   return info;
 }
 

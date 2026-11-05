@@ -811,7 +811,11 @@ function canArmEarlyServeSwipe(projected, pointer, width, height, pointerType = 
     : CONTACT_CORRIDOR_RULES.serveEarlyAlignTouchPx;
   const dx = Math.abs(px - bx);
   const dy = py - by;
-  return dx <= maxSide && dy >= -140 && dy <= 240;
+  /* Vertical window widened (was -140..240 px): a serve gesture started well
+   * below a still-rising toss ball on a tall phone screen used to fall outside
+   * the window, never armed `pendingServeDrop`, and the serve was impossible
+   * from that press position. */
+  return dx <= maxSide && dy >= -160 && dy <= 330;
 }
 
 function evaluateStrokeDirection(zone, m) {
