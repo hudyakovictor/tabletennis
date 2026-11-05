@@ -127,12 +127,22 @@ class PaddleStrokeMotion {
     this.elapsed = 0; this.fresh = true; this.active = true; this.stage = 'contact';
     this.templateMotion = null;
     if (followEnabled && target && target.pose && target.racket && typeof compileStrokeTemplate === 'function' && PADDLE_TEMPLATES.strokes[stroke]) {
-      const compiled = paddleTemplateFor(stroke, { grip, hand, forehand, side: target.side || 1, activeFace: target.pose.activeFace });
-      const duration = (this.profile.hold + this.profile.followTime + this.profile.recoverTime) / (1 - compiled.contactPhase);
-      const pose = target.pose;
-      this.templateMotion = retargetStrokeTemplate(compiled, { point: pose.point, q: pose.q,
-        normal, localPoint: pose.localPoint, vR: target.racket.vR, duration });
-      this.templateOutput = this.templateOutput || createStrokeTemplateOutput();
+      /* A retarget that disagrees with the impact frame (quaternion/normal
+       * mismatch, bad anchor) must never leave the bat frozen or crooked:
+       * fall back to the analytic contact->follow->recover path below, which
+       * is always well-defined. The first sample is still the exact impact
+       * normal either way. */
+      try {
+        const compiled = paddleTemplateFor(stroke, { grip, hand, forehand, side: target.side || 1, activeFace: target.pose.activeFace });
+        const duration = (this.profile.hold + this.profile.followTime + this.profile.recoverTime) / (1 - compiled.contactPhase);
+        const pose = target.pose;
+        this.templateMotion = retargetStrokeTemplate(compiled, { point: pose.point, q: pose.q,
+          normal, localPoint: pose.localPoint, vR: target.racket.vR, duration });
+        this.templateOutput = this.templateOutput || createStrokeTemplateOutput();
+      } catch (err) {
+        this.templateMotion = null;
+        this.templateOutput = null;
+      }
     }
   }
   sample(dt, ready, interrupt = false) {
