@@ -38,19 +38,28 @@ const I18n = {
   init() {
     this.lang = this.detect();
     try { document.documentElement.lang = this.lang; } catch (e) {}
+    this.localizeStatic();
   },
   setLang(lang) {
     if (!this.has(lang) || lang === this.lang) return;
     this.lang = lang;
     try { document.documentElement.lang = lang; } catch (e) {}
+    this.localizeStatic();
     S.lang = lang; saveNow();
-    if (typeof GameHost !== 'undefined') GameHost.send('locale', { lang });
+    if (typeof GameHost !== 'undefined') {
+      if (GameHost.frame) GameHost.frame.title = this.t('hub.gameName');
+      GameHost.send('locale', { lang });
+    }
     if (typeof Nav !== 'undefined' && Nav.build) Nav.build();
     if (typeof Router !== 'undefined' && !Router.refreshLocale?.()) {
       const active = Router.active;
       if (active && typeof active.d.render === 'function') this.localizeDOM(active.el, active.d.render(active.data));
     }
     if (typeof document.getElementById === 'function' && document.getElementById('langseg') && typeof openSettings === 'function') openSettings();
+  },
+  localizeStatic() {
+    if (typeof document === 'undefined' || typeof document.querySelectorAll !== 'function') return;
+    document.querySelectorAll('[data-i18n]').forEach(node => { node.textContent = this.t(node.dataset.i18n); });
   },
   localizeDOM(el, markup, skip = '.num, [data-cur] .v, .sb-score, .m-rally b, .m-banner, .mx-count, .mx-srv') {
     if (!el || typeof markup !== 'string') return;

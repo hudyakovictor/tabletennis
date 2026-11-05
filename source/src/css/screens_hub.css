@@ -2,28 +2,163 @@
    SCREENS
    ===================================================================== */
 
-/* ---------- HUB ---------- */
-.screen[data-id=hub]{padding-bottom:0}
-.hub-content{min-height:0;display:flex;flex-direction:column;padding-bottom:calc(var(--sab) + var(--tgb) + 86px)}
-.road{flex:none;display:flex;align-items:center;gap:6px;margin:4px 14px 0;padding:6px 8px;border-radius:18px;background:rgba(0,0,0,.28);box-shadow:inset 0 1px 0 rgba(255,255,255,.05)}
-.road .bar{flex:1;height:18px}
-.road .rb{width:34px;height:34px;flex:none;filter:drop-shadow(0 4px 6px rgba(0,0,0,.5))}
-.road .rb.next{opacity:.55;filter:grayscale(.6) drop-shadow(0 4px 6px rgba(0,0,0,.5))}
-.hero{position:relative;flex:1 0 200px;min-height:200px}
-.hero canvas.demo{position:absolute;inset:0;width:100%;height:100%}
-.side{position:absolute;top:42px;display:flex;flex-direction:column;gap:26px;z-index:3}
-.side.l .fab em{left:-4px;transform:none}.side.r .fab em{left:auto;right:-4px;transform:none}
-.side.l{left:10px}.side.r{right:10px}
-.fab{position:relative;width:50px;height:50px;border-radius:18px;display:grid;place-items:center;padding:12px;
-  background:linear-gradient(180deg,rgba(52,62,130,.92),rgba(24,29,70,.95));box-shadow:0 4px 0 #090C24,inset 0 1.5px 0 rgba(255,255,255,.2),0 10px 20px -6px rgba(0,0,0,.6);transition:transform .14s var(--spring)}
-.fab.pressed{transform:translateY(3px) scale(.96)}
-.fab em{position:absolute;bottom:-17px;left:50%;transform:translateX(-50%);font:900 10px/1 var(--display);font-style:normal;text-transform:uppercase;letter-spacing:.01em;white-space:nowrap;color:#fff;text-shadow:0 2px 0 rgba(0,0,0,.7),0 0 6px rgba(0,0,0,.8)}
-.fab.free{padding:4px;background:linear-gradient(180deg,#5A3FB0,#2A1C70)}
-.fab.free::after{content:"";position:absolute;inset:-4px;border-radius:21px;border:2px solid #FFC93A;animation:freepulse 1.6s var(--out) infinite;pointer-events:none}
-@keyframes freepulse{from{transform:scale(1);opacity:1}to{transform:scale(1.35);opacity:0}}
-.fab .fchest{animation:bob 2.2s ease-in-out infinite}
-@keyframes bob{0%,100%{transform:translateY(0) rotate(-3deg)}50%{transform:translateY(-4px) rotate(3deg)}}
-.playzone{display:flex;flex-direction:column;align-items:center;gap:12px;padding:0 20px;margin-top:-6px;position:relative;z-index:3}
+/* ---------- HUB: signal-arena deck ----------
+   Композиция 3+2: три режима сверху, две компактные вторичные карточки в
+   настоящей двухколоночной нижней строке. Акценты: teal — свободная игра,
+   дозированное золото — рейтинг, нейтраль — тренировка. */
+.screen[data-id=hub]{
+  padding-bottom:0;
+  --hk-teal:#3ce6d2; --hk-teal-soft:rgba(60,230,210,.22);
+  --hk-gold:#ffc93a; --hk-coral:#ff7a5c;
+  --hk-ink:rgba(212,231,246,.72); --hk-line:rgba(140,185,220,.16);
+}
+.hub-content{min-height:0;display:flex;flex-direction:column;padding-bottom:calc(var(--sab) + var(--tgb) + 88px)}
+
+/* Сцена: живой стол остаётся главным. Сверху только CSS-слои — canvas,
+   iframe и камера не затронуты. */
+.hero{position:relative;flex:0 0 clamp(170px,42vh,320px);min-height:150px;max-height:320px;isolation:isolate}
+.hero canvas.demo{position:absolute;inset:0;z-index:0;width:100%;height:100%}
+.hero::before{content:"";position:absolute;inset:0;z-index:1;pointer-events:none;opacity:.5;
+  background-image:radial-gradient(circle at 1px 1px,rgba(150,205,232,.30) 1px,transparent 1.4px);background-size:18px 18px;
+  -webkit-mask-image:radial-gradient(120% 90% at 50% 76%,#000 0%,rgba(0,0,0,.4) 55%,transparent 84%);
+  mask-image:radial-gradient(120% 90% at 50% 76%,#000 0%,rgba(0,0,0,.4) 55%,transparent 84%)}
+.hero::after{content:"";position:absolute;left:10%;right:10%;bottom:0;z-index:1;height:1px;pointer-events:none;
+  background:linear-gradient(90deg,transparent,var(--hk-teal-soft) 20%,rgba(60,230,210,.55) 50%,rgba(255,122,92,.38) 78%,transparent)}
+.hero-mark{position:absolute;right:7px;top:50%;z-index:2;writing-mode:vertical-rl;white-space:nowrap;pointer-events:none;
+  transform:translateY(-50%);font:800 8.5px/1 var(--body);letter-spacing:.42em;color:rgba(188,236,231,.30)}
+
+/* Палуба управления прижата к низу: между столом и карточками остаётся воздух */
+.playzone{position:relative;z-index:3;flex:none;display:flex;flex-direction:column;gap:12px;width:100%;max-width:620px;container-type:inline-size;
+  margin:auto auto 0;padding:14px 12px 10px;border-radius:26px 26px 0 0;
+  background:radial-gradient(120% 80% at 6% 100%,rgba(28,190,175,.18),transparent 62%),
+    radial-gradient(110% 70% at 102% 96%,rgba(255,100,80,.12),transparent 66%),
+    linear-gradient(180deg,rgba(6,10,24,.74) 0%,rgba(6,10,24,.9) 26%,rgba(5,8,20,.96) 100%)}
+.playzone::before{content:"";position:absolute;left:0;right:0;top:0;height:1px;pointer-events:none;
+  background:linear-gradient(90deg,transparent,rgba(150,210,225,.26) 30%,rgba(150,210,225,.26) 70%,transparent)}
+
+/* Строка-разделитель: «Режимы … лига · рейтинг ›».
+   Лига-чип — вход в «Карьеру» (маршрут прежний), поэтому у него честная
+   зона нажатия 44 px: за счёт отрицательных полей она не растит палубу. */
+.zone-head{display:flex;align-items:center;gap:8px;min-height:16px;padding:0 4px}
+.zone-head b{font:800 9.5px/1 var(--body);letter-spacing:.2em;text-transform:uppercase;color:rgba(214,238,246,.82);white-space:nowrap;
+  text-shadow:0 1px 2px rgba(2,5,14,.85)}
+.zh-dot{flex:none;width:5px;height:5px;border-radius:50%;background:var(--hk-teal);box-shadow:0 0 8px rgba(60,230,210,.9)}
+.zh-line{flex:1;height:1px;min-width:8px;background:linear-gradient(90deg,rgba(140,190,215,.24),rgba(140,190,215,.04))}
+.zh-meta{position:relative;display:flex;align-items:center;gap:5px;height:44px;margin:-14px 0;padding:0 2px;min-width:0;
+  font:800 9.5px/1 var(--body);letter-spacing:.06em;color:rgba(222,238,248,.8);text-shadow:0 1px 2px rgba(2,5,14,.85)}
+.zh-meta .zm-badge{flex:none;width:18px;height:18px;opacity:.92}
+.zh-meta .zm-badge svg{width:100%;height:100%;display:block}
+.zh-meta .zm-t{min-width:0;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
+.zh-meta .zm-go{flex:none;font:800 14px/1 var(--body);color:rgba(150,225,231,.72);transform:translateY(-1px)}
+.zh-meta:active{color:#dff6ff}
+.zh-meta:focus-visible{outline:2px solid #9be8ff;outline-offset:1px;border-radius:9px}
+
+.play-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;padding:0;width:100%}
+.grid-row2{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;padding:0;width:100%}
+
+/* Карточки. Два цвета — обе пары взяты из гаммы самих стикеров iconideas
+   (синий корпуса сундука #3054B2 и золото фурнитуры #FDD039): верхний ряд —
+   три режима игры в синем, нижний ряд — задания и подарок в золоте.
+   Размер иконки задаёт --mbi: в три раза против прежних 40/46/32 px. */
+.modebtn{--h:auto;--accent:#4C7FE0;--lip:#060d24;--mbi:120px;position:relative;isolation:isolate;display:flex;flex-direction:column;
+  align-items:flex-start;justify-content:space-between;gap:6px;height:auto;min-height:190px;padding:0;overflow:hidden;
+  border-radius:17px;text-align:left;text-shadow:none;
+  background:radial-gradient(120% 85% at 30% -12%,color-mix(in srgb,var(--accent) 34%,transparent),transparent 62%),
+    linear-gradient(180deg,#16264a 0%,#0a1024 100%);
+  box-shadow:inset 0 1px 0 rgba(205,230,255,.14),inset 0 0 0 1px rgba(110,160,235,.34),
+    0 5px 0 var(--lip),0 16px 24px -14px rgba(0,0,0,.9);
+  transition:transform .16s var(--spring),box-shadow .16s var(--spring)}
+.modebtn::before{content:"";position:absolute;inset:0;z-index:0;border-radius:inherit;pointer-events:none;opacity:.34;
+  background-image:radial-gradient(circle at 1px 1px,rgba(170,215,235,.22) 1px,transparent 1.3px);background-size:11px 11px;
+  -webkit-mask-image:linear-gradient(180deg,#000 0%,transparent 62%);mask-image:linear-gradient(180deg,#000 0%,transparent 62%)}
+.modebtn::after{content:"";position:absolute;left:11px;right:11px;top:0;z-index:1;height:2px;border-radius:0 0 3px 3px;pointer-events:none;
+  background:linear-gradient(90deg,transparent,var(--accent),transparent);opacity:.7}
+/* СТИКЕР идёт во всю ширину карточки (padding снят), поэтому три колонки на
+   390 px дают 118 px вместо прежних 40 — ровно втрое без переполнения. */
+.modebtn .mb-i{position:relative;z-index:1;width:min(var(--mbi),100%);height:auto;aspect-ratio:1;margin:0 auto;flex:none;display:grid;place-items:center}
+.modebtn .mb-i::before{content:"";position:absolute;inset:-9px;z-index:-1;border-radius:50%;pointer-events:none;
+  background:radial-gradient(circle,color-mix(in srgb,var(--accent) 26%,transparent),transparent 70%)}
+.modebtn .mb-i svg,.modebtn .mb-i img{width:100%;height:100%;display:block;object-fit:contain;border-radius:0;filter:drop-shadow(0 6px 10px rgba(0,0,0,.5))}
+.modebtn .mb-t{position:relative;z-index:1;display:block;flex:none;min-width:0;width:100%;padding:6px 11px 11px;text-align:left}
+/* Заголовки карточек — Manrope: Unbounded на 10–12 px в трёх колонках
+   не влезает даже целиком («Рейтинговый»), а здесь строки совпадают по
+   высоте и не расползаются на узких экранах. */
+.modebtn b{display:block;font:800 11px/13px var(--body);letter-spacing:.02em;text-transform:uppercase;color:#eaf4ff;min-height:26px}
+.modebtn small{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;margin-top:4px;
+  font:600 9.5px/12px var(--body);letter-spacing:0;text-transform:none;color:rgba(198,222,246,.72);min-height:24px}
+
+.modebtn.mode-free b{font:900 12px/13px var(--body);letter-spacing:.01em;text-shadow:0 1px 0 rgba(0,0,0,.32)}
+
+/* Вторичные карточки: те же крупные стикеры, но золотая группа и колонка */
+.modebtn.sec{--accent:#FDD039;--lip:#2a1c02;--mbi:96px;flex-direction:column;align-items:flex-start;justify-content:space-between;gap:8px;
+  min-height:150px;height:auto;padding:12px 11px 11px;border-radius:16px;
+  background:radial-gradient(120% 85% at 30% -12%,color-mix(in srgb,var(--accent) 34%,transparent),transparent 62%),
+    linear-gradient(180deg,#3a2a0e 0%,#1a1206 100%);
+  box-shadow:inset 0 1px 0 rgba(255,240,200,.16),inset 0 0 0 1px rgba(253,208,57,.34),0 4px 0 var(--lip),0 12px 20px -12px rgba(0,0,0,.85)}
+.modebtn.sec::before{opacity:.2}
+.modebtn.sec::after{left:11px;right:11px;top:0;bottom:auto;height:2px;opacity:.8}
+.modebtn.sec .mb-i::before{inset:-6px}
+.modebtn.sec .mb-i{margin:0}
+.modebtn.sec .mb-t{flex:1 1 auto;width:100%;min-width:0;padding:0}
+.modebtn.sec b{font:800 10.5px/13px var(--body);letter-spacing:.04em;color:#fff2cf;min-height:0}
+.modebtn.sec small{margin-top:3px;font:600 9px/11px var(--body);color:rgba(255,236,190,.66);min-height:0;-webkit-line-clamp:1}
+/* Готовый подарок: та же золотая группа, но свечение и оправа сильнее —
+   состояние читается без отдельного цвета и без новой заливки. */
+.modebtn.mode-gift.ready{background:radial-gradient(130% 120% at 16% -10%,rgba(253,208,57,.4),transparent 62%),
+    linear-gradient(180deg,#33290f 0%,#191307 100%);
+  box-shadow:inset 0 1px 0 rgba(255,238,196,.22),inset 0 0 0 1px rgba(255,201,58,.6),0 4px 0 var(--lip),0 14px 24px -12px rgba(255,180,40,.5)}
+.modebtn.mode-gift.ready .mb-i::before{background:radial-gradient(circle,rgba(255,201,58,.38),transparent 70%)}
+.modebtn.mode-gift.ready small{color:#FFE28A}
+.modebtn .dot{top:7px;right:7px}
+
+/* Нажатие, фокус, экономия */
+.modebtn.pressed,.modebtn:active{transform:translateY(3px);
+  box-shadow:inset 0 0 0 1px rgba(150,190,225,.16),0 2px 0 var(--lip),0 8px 14px -10px rgba(0,0,0,.8)}
+.modebtn.mode-free.pressed,.modebtn.mode-free:active{transform:translateY(3px);
+  box-shadow:inset 0 0 0 1px rgba(110,160,235,.5),0 2px 0 var(--lip),0 8px 16px -10px rgba(40,90,190,.55)}
+.modebtn:focus-visible,.mode-chip:focus-visible{outline:2px solid #9be8ff;outline-offset:3px}
+body.q-low .modebtn{background:linear-gradient(180deg,#101733,#0a0f22);box-shadow:inset 0 0 0 1px rgba(150,190,225,.16),0 3px 0 #03060f}
+body.q-low .modebtn::before,body.q-low .hero::before{display:none}
+body.q-low .playzone{background:linear-gradient(180deg,rgba(6,10,24,0),rgba(5,8,20,.9))}
+
+/* Узкие телефоны: те же три колонки, меньше декор — без «перелома» ширины.
+   Иконки по-прежнему втрое против старой сетки (36/40/28 → 108/120/84),
+   но width уже не задан жёстко: max-width карточки сама режет квадрат. */
+@media(max-width:360px){
+  .playzone{gap:8px;padding:12px 10px 8px}
+  .play-grid,.grid-row2{gap:6px}
+  .modebtn{--mbi:108px;min-height:176px}
+  .modebtn .mb-t{padding:5px 9px 9px}
+  .modebtn b{font-size:9.5px;line-height:11px;min-height:22px}
+  .modebtn.mode-free b{font-size:10.5px;line-height:11px}
+  .modebtn small{font-size:8.5px;line-height:11px;min-height:22px}
+  .modebtn.sec{--mbi:84px;min-height:132px;padding:9px 8px 8px;gap:6px}
+  .modebtn.sec b{font-size:9.5px;line-height:12px}
+  .modebtn.sec small{font-size:8px;line-height:10px}
+  .zh-meta{font-size:9px}
+  .zh-meta .zm-badge{width:16px;height:16px}
+  .hero-mark{display:none}
+}
+/* Широкая палуба (планшет/desktop-колонка): те же карточки, но крупнее
+   заголовки. Считаем по ширине палубы, а не окна: на desktop приложение
+   живёт в узкой колонке и медиазапрос окна соврал бы. */
+@container (min-width:421px){
+  .modebtn b{font-size:13px;line-height:15px;min-height:30px}
+  .modebtn.mode-free b{font-size:14px;line-height:15px}
+  .modebtn small{font-size:10.5px;line-height:13px;min-height:26px}
+  .modebtn.sec b{font-size:11px;line-height:13px}
+  .modebtn.sec small{font-size:9.5px;line-height:12px}
+}
+@media(max-height:700px){.hero{flex:0 0 34vh;min-height:150px}}
+@media(max-height:500px) and (min-width:600px){
+  .hero{flex:0 0 82px;min-height:82px;max-height:82px}
+  .playzone{gap:8px;padding:10px 12px 8px}
+  .modebtn{--mbi:102px;min-height:170px}
+  .modebtn.sec{min-height:150px}
+  .hero-mark{display:none}
+}
+
+/* Наследие: чип режима и большая кнопка «В бой» больше не рисуются в хабе */
 .mode-chip{display:flex;align-items:center;gap:10px;height:46px;padding:0 14px 0 6px;border-radius:16px;background:rgba(5,7,22,.72);box-shadow:inset 0 0 0 1px rgba(255,201,58,.28),0 8px 18px rgba(0,0,0,.4);text-align:left;transition:transform .2s var(--spring)}
 .mode-chip.pressed{transform:scale(.96)}
 .mode-chip .mi{width:34px;height:34px;padding:6px;border-radius:12px;background:linear-gradient(180deg,rgba(255,201,58,.3),rgba(255,140,0,.15))}
@@ -35,47 +170,6 @@
 .b3.play.pressed{animation:none}
 @keyframes breathe{0%,100%{transform:scale(1)}50%{transform:scale(1.035)}}
 .screen:not(.live) .b3.play{animation:none}
-/* Компактные режимы: иконка слева, название и описание справа. */
-.play-grid{display:grid;flex:none;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;padding:0 14px;margin-top:0}
-.modebtn{--h:84px;height:84px;min-height:0;flex-direction:row;align-items:center;justify-content:flex-start;gap:8px;padding:8px;text-align:left;border-radius:16px}
-.modebtn .mb-i{width:50px;height:50px;flex:none;display:grid;place-items:center}
-.modebtn .mb-i svg,.modebtn .mb-i img{width:100%;height:100%;display:block;border-radius:8px}
-.modebtn .mb-t{flex:1;min-width:0;text-align:left}
-.modebtn b{display:block;font:800 12.5px/1.12 var(--body);text-transform:none;letter-spacing:0}
-.modebtn small{display:block;margin-top:4px;font:600 10px/1.22 var(--body);letter-spacing:0;text-transform:none;color:rgba(58,26,0,.76)}
-.modebtn.dark small{color:rgba(228,235,255,.72)}
-.modebtn.gold{--c1:#FFE066;--c2:#FFB01F;--c3:#FF8A00}
-.modebtn.dark b{color:#fff}
-@media(max-width:355px){.modebtn{gap:6px}.modebtn .mb-i{width:42px;height:42px}.modebtn b{font-size:11.5px}.modebtn small{font-size:9.5px}}
-@media(max-height:500px) and (min-width:600px){
-  .hero{min-height:120px;flex-basis:120px}
-  .side{top:14px;flex-direction:row;gap:16px}
-  .play-grid{grid-template-columns:repeat(4,minmax(0,1fr))}
-}
-.friends{flex:none;margin:12px 14px 0}
-/* лента друзей одной «пилюлей»-панелью: вся кликабельна → рефералка */
-.fr-band{display:flex;align-items:center;gap:12px;width:100%;padding:10px 12px;border-radius:20px;background:linear-gradient(180deg,rgba(30,38,88,.85),rgba(12,16,44,.9));box-shadow:inset 0 1px 0 rgba(255,255,255,.1),0 4px 0 #080A22;text-align:left}
-.fr-band.pressed{transform:translateY(2px)}
-.fr-band-t{display:flex;align-items:center;gap:8px;flex-direction:column}
-.fr-band-t svg{width:22px;height:22px}
-.fr-band-t b{font:900 12px/1 var(--display);text-transform:uppercase;letter-spacing:.06em}
-.fr-band-on{font-size:10px;color:#43E08A}
-.fr-list{display:flex;gap:10px;margin-left:auto;overflow-x:auto;scrollbar-width:none}
-.fr-list::-webkit-scrollbar{display:none}
-.fr-c{flex:none;display:flex;flex-direction:column;align-items:center;min-width:40px;position:relative}
-.fr-av{position:relative;display:block;width:44px;height:44px}
-.fr-av svg,.fr-av img{display:block}
-.fr-dot{position:absolute;right:-1px;bottom:0;width:11px;height:11px;border-radius:50%;border:2px solid #0A0E26;background:#556}
-.fr-dot.on{background:#33E07C;box-shadow:0 0 7px #33E07C}
-.fr-dot.off{background:#5A6288}
-/* «в матче»: красная ракетка с жёлтой ручкой вместо точки */
-.fr-pd{position:absolute;right:-6px;bottom:-7px;width:24px;height:24px;display:grid;place-items:center;filter:drop-shadow(0 3px 4px rgba(0,0,0,.6))}
-/* оффлайн: аватарка в ч/б и приглушённая */
-.st-off .fr-av{filter:grayscale(1) brightness(.62);opacity:.75}
-.st-off b{color:var(--ink3)}
-.fr-c b{font-size:10px;margin-top:4px;max-width:46px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.fr-inv{display:flex;flex-direction:column;align-items:center}
-.fr-inv .fr-av{border-radius:50%;border:1.6px dashed rgba(155,232,255,.5);display:grid;place-items:center;padding:9px}
 /* панель «Подарки и сундуки» */
 .gf-gift{display:flex;align-items:center;gap:12px}
 .gf-art{flex:none}

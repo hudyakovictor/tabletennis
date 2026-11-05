@@ -31,7 +31,7 @@ const MEET_ASSIST_RADIUS = 0.62;   // metres — outside this the bat is the poi
 const MEET_ASSIST_HORIZON = 0.60;  // seconds to the meeting point
 
 /* Fixed-width ribbon; timestamps, not frame count, determine its duration. */
-const TRAIL_WIDTH = 0.011;   // metres — half-width of the ribbon
+const TRAIL_WIDTH = 0.0154;   // metres — half-width of the ribbon
 
 /* Ориентация мяча — ТОЛЬКО визуал: по ней ничего не считается (b.q нужен
  * только M4.compose в отрисовке). Честные 300 рад/с — это ~48 об/с, а мяч на
@@ -279,9 +279,10 @@ class Game {
         this.reducedMotion = !!event.matches || !!this.motionOff;
         if (this.ui) this.ui.reducedMotion = this.reducedMotion;
         if (this.reducedMotion) {
-          this.shake = 0; this.hitFlash = 0;
-          this.marks.length = 0; this.particles.n = 0;
+           this.shake = 0; this.hitFlash = 0;
+           this.marks.length = 0; this.particles.n = 0; this.contactFlashes.length = 0;
           if (this.R && this.R.post) { this.R.post.radial = 0; this.R.post.flash = 0; }
+          if (this.lobbyScene?.reduceMotion()) this.render();
         }
       };
       if (this.motionQuery.addEventListener) this.motionQuery.addEventListener('change', onMotionPreference);
@@ -312,6 +313,8 @@ class Game {
     this.lastShotInfo = null;
     this.messages = [];
     this.hitFlash = 0;
+    this.contactFlashes = [];
+    this._contactFlashSeen = new Set();
     this.serveHint = 0;
     this._acc = 0;
     this._fpsT = 0; this._fpsN = 0; this.fps = 60;
@@ -645,12 +648,6 @@ class Game {
         }
         this.promotePendingServeZone();
         this.promotePendingRallyBackswing(n);
-        const sp = this.swipe.m.speed;
-        if (sp > 1.6 && this._swingSoundId !== this.swipe.gestureId && this.swipe.consumedId !== this.swipe.gestureId &&
-            isRealStroke(this.swipe.m, !!z?.serving)) {
-          this._swingSoundId = this.swipe.gestureId;
-          this.audio.whoosh(clamp(sp / 4, 0, 1.4), 'player/' + this.swipe.gestureId);
-        }
         this.logInput('pointermove', { pointer: { x: n.x, y: n.y }, pointerId: e.pointerId, buttons: e.buttons,
           inputType: e.pointerType || (this.pointerFine === false ? 'touch' : 'mouse'),
           dom: this.debugRecording ? domEvent(e) : null });
@@ -828,6 +825,7 @@ class Game {
 
   /* --------------------------- match flow -------------------------- */
   startMatch(diff) {
+    this.lobbyScene?.stop();
     this.setSessionKind(this.network.isInMatch ? 'online' : this.career.active ? 'career' : this.freePlay ? 'free' : this.sessionKind === 'practice' ? 'practice' : 'ranked');
     this.endReplay(false); // cancel old callbacks; never complete an old match here
     this.moments.reset();
@@ -841,6 +839,8 @@ class Game {
     this.anticipation.active = false;
     this.audio.stopAudience();
     this.audio.stopEffects?.(); this._swingSoundId = null; this._aiSwingSoundShot = null;
+    this.contactFlashes = [];
+    this._contactFlashSeen = new Set();
     this._demoGesture = null;
     this.matchTasks = { topspin: 0, smash: 0, serves: 0, moments: 0 };
     this.training = null;
@@ -912,6 +912,7 @@ class Game {
   }
 
   returnToMenu() {
+    this.lobbyScene?.stop();
     this.endReplay(false);
     this.freePlay = false;
     this.stopTraining();
@@ -936,6 +937,7 @@ class Game {
       (this.state === GS.MENU || (this.ui ? this.ui.inputMode !== 'touch' : this.pointerFine !== false));
   }
   startTraining(options = {}) {
+    this.lobbyScene?.stop();
     this.setSessionKind('practice');
     this.stopTraining();
     this.endReplay(false);
@@ -964,6 +966,7 @@ class Game {
   }
 
   setState(s) {
+    if (s !== GS.MENU) this.lobbyScene?.stop();
     const previous = this.state;
     this.state = s; this.stateT = 0; this.stateSimT = 0; if (this.paused) this.setPaused(false);
     this.syncAudioQuiet();
@@ -1002,9 +1005,29 @@ class Game {
     this.paused = next;
     this.syncAudioQuiet();
     if (this.paused && !wasPaused && this.cancelInput) this.cancelInput('pause');
+    /* world стоит, а кадр паузы всё равно рисуется: застывшую на полугасании
+     * пульсу видно как артефакт, а после resume она бы «догорела» заново */
+    if (this.paused) this.clearContactFlashes();
     if (this.debugRecording && wasPaused !== this.paused) this.logInput('pause', { outcome: { paused: this.paused, requested: !!v } });
     if (typeof document !== 'undefined' && document.body)
       document.body.classList.toggle('is-paused', this.paused);
+  }
+
+  /** Гасит контактные вспышки синхронно (пауза, сон, потеря контекста, replay,
+   *  reduced motion). Книга дедупликации НЕ трогается: тот же shotId не должен
+   *  родить пульсу второй раз после resume. */
+  clearContactFlashes() {
+    if (this.contactFlashes) this.contactFlashes.length = 0;
+  }
+
+  /** Пульса живёт в НЕЗАМЕДЛЕННОМ времени матча: `now` всегда Game.time, а не
+   *  strokeTime и не масштабированный dt, иначе слоу-мо растягивало бы вспышку. */
+  ageContactFlashes(now) {
+    const arr = this.contactFlashes;
+    if (!arr) return;
+    for (let i = arr.length - 1; i >= 0; i--) {
+      if (now - arr[i].birth >= arr[i].life) arr.splice(i, 1);
+    }
   }
 
   msg(text, dur = 1.4, col = '#fff', big = false) {
@@ -1030,8 +1053,13 @@ class Game {
     const x = s > 0 ? 0 : rndSym(toss.readyXJitter);
     V3.set(b.p, x, PH.TABLE_Y + toss.readyHeight, s * (PH.T_HALF_LEN + toss.readyEndMargin));
     V3.zero(b.v); V3.zero(b.w); Q.identity(b.q);
-    b.live = false; b.hist.length = 0; b.lastHitBy = 0; this.netTouched = false;
+    b.live = false; b.hist.length = 0; b.lastHitBy = 0; b.trailStroke = null; this.netTouched = false;
     b.trailGrade = null; b.golden = null;
+    /* Новая генерация подачи — чистим и дедупликацию вспышек: числовой
+     * shotId после resetMatch повторяется, и без сброса первый контакт
+     * подачи молча пропал бы как «уже показанный». */
+    this.clearContactFlashes();
+    if (this._contactFlashSeen) this._contactFlashSeen.clear();
     this.rallyBounces.length = 0;
     this.serveBounces = 0;
     this.isServeBall = true;
@@ -1478,6 +1506,8 @@ class Game {
     b.lastHitBy = side;
     this._hitSeq = (this._hitSeq || 0) + 1;   // сторож: в этом подшаге контакт был
     this.shotId++;                       // the opponent reacts once per shot
+    b.trailStroke = racket.stroke || null;
+    this._recordContactFlash(side, racket.stroke && racket.stroke.id, contactP, this.time);
     this.rallyBounces.length = 0;
     this.netTouched = false;
     // career perks act on the player's own shots: the chosen boosts scale
@@ -1522,9 +1552,22 @@ class Game {
         this.ai.recordHit({ v: this._preHit?.v || b.v }, racket, { p: b.p, v: b.v, w: b.w, info }, this.strokeTime ?? this.time);
     }
 
-    /* an off-centre contact sounds like wood, not like rubber */
+    /* Hit classification for audio routing:
+     * STRONG  = high speed AND clean sweet-spot contact → boosted impact + whoosh
+     * SLOPPY  = high speed but off-centre → whoosh only (no ball sound)
+     * NORMAL  = everything else → plain ball impact */
     const softHit = !!(racket.arch && racket.arch.soft) || (side > 0 && this.lastSweet !== undefined && this.lastSweet < 0.38);
-    this.audio.hitRacket(speed, info ? info.contactSlip : 0, softHit, side + '/' + this.shotId);
+    const sweet = side > 0 ? (this.lastSweet !== undefined ? this.lastSweet : 1) : 1;
+    const isStrongHit = speed > 7.5 && (quality ?? 0.8) > 0.70 && sweet > 0.50;
+    const isFastSloppy = !isStrongHit && speed > 7.5 && (sweet < 0.50 || (quality ?? 0.8) < 0.70);
+    if (isStrongHit) {
+      this.audio.hitRacket(speed, info ? info.contactSlip : 0, false, side + '/' + this.shotId, 1);
+      this.audio.whoosh(clamp(speed / 10, 0.6, 1.4), 'hit/' + this.shotId);
+    } else if (isFastSloppy) {
+      this.audio.whoosh(clamp(speed / 12, 0.4, 1.0), 'sloppy/' + this.shotId);
+    } else {
+      this.audio.hitRacket(speed, info ? info.contactSlip : 0, softHit, side + '/' + this.shotId);
+    }
     if (side > 0 && this.lastSweet !== undefined && this.lastSweet < 0.30) this.buzz(16);
     if (this.feedback) {
       this.feedback.execute({
@@ -1538,22 +1581,10 @@ class Game {
         skipBaseHaptic: true,
       });
     }
-    /* Контактная вспышка = ВЕРДИКТ ввода (зелёный/жёлтый/красный), как и
-     * шлейф. Фирменный цвет удара (stroke.col: оранжевый топспин, синяя
-     * подрезка) отсюда удалён — именно он рисовал «синий при свайпе вниз,
-     * оранжевый при свайпе вверх» и конфликтовал с языком вердиктов.
-     * Сам всплеск частиц теперь гаснет в матчах: салют ровно в точке, куда
-     * игрок смотрит, — чистая помеха. В ОБУЧЕНИИ он остаётся: там учитель
-     * должен отмечать контакт. */
-    const vg = side > 0 ? this.ball.trailGrade : null;
-    const col = vg === 'green' ? [0.18, 1.0, 0.42]
-      : vg === 'yellow' ? [1.0, 0.80, 0.16]
-      : vg === 'red' ? [1.0, 0.13, 0.12] : [0.92, 0.94, 0.97];
-    if (this.training) {
-      this.emitParticles(contactP.x, contactP.y, contactP.z,
-        side > 0 ? 14 : 9, 0.7 + speed * 0.05, 0.32, 0.019, col[0], col[1], col[2],
-        { x: -racket.normal.x * 0.6, y: -racket.normal.y * 0.6, z: -racket.normal.z * 0.6 });
-    }
+    /* Всплеск частиц в точке контакта убран совсем: салют ровно там, куда
+     * игрок смотрит, — чистая помеха, и в ОБУЧЕНИИ тоже. Контакт теперь
+     * отмечает короткая цветная вспышка цвета принятого удара
+     * (_recordContactFlash); вердикт ввода остаётся за шлейфом и текстом. */
 
     if (side > 0) {
       this.hitFlash = Math.min(this.hitFlash + 0.55, 1);   // периферия, не точка контакта
@@ -1818,6 +1849,7 @@ class Game {
     if (!moment) return false;
     if (!this.replayer.play(moment, hero ? 0.35 : 0.5, () => this.endReplay())) return false;
     this.setSlowmoHold(false);
+    this.clearContactFlashes();
     this.ball.live = true;
     this.replayAfter = after || null;
     const back = this.state;
@@ -1842,6 +1874,7 @@ class Game {
   endReplay(complete = true) {
     this.replayer.stop();
     this.ui && this.ui.replayShow(false);
+    this.clearContactFlashes();
     if (typeof document !== 'undefined') document.body.classList.remove('is-reel');
     this.camFov = undefined;
     if (this.state === GS.REPLAY) {
@@ -2501,6 +2534,8 @@ class Game {
     b.lastHitBy = 1;
     this.shotId++;
     this._hitSeq = (this._hitSeq || 0) + 1;   // «стенка» — тоже контакт для сторожа
+    b.trailStroke = STROKES.BLOCK;
+    this._recordContactFlash(1, 'BLOCK', p0, this.time);
     this.rallyBounces.length = 0;
     this.netTouched = false;
     if (!this.isServeBall) {
@@ -2518,7 +2553,6 @@ class Game {
     if (this.audio && this.audio.hitRacket) this.audio.hitRacket(V3.len(b.v) + 1.5, 0.5, true);
     this.msg('СТЕНКА!', 0.7, '#9fd0ff');
     this.buzz([4, 12]);
-    this.emitParticles(b.p.x, b.p.y, b.p.z, 5, 0.5, 0.25, 0.010, 0.62, 0.82, 1);
     if (this.stats) {
       this.stats.blocks = (this.stats.blocks || 0) + 1;
       this.stats.shots = (this.stats.shots || 0) + 1;
@@ -3515,17 +3549,37 @@ class Game {
       tz = lerp(tz, PADDLE_HOME.z, kHome);
     }
 
-    // during your own toss the bat slides under the ball: serving is about
-    // the stroke you choose, not about pixel-hunting a 40 mm sphere
+    /* Serve wind-up: visual pull-back only, ball hit works as before.
+     * ASCENT  → racket tracks ball + small +z offset (ease-out, decelerating).
+     * DESCENT → offset fades with ease-in, racket converges on ball for hit.
+     * The ball never inherits paddle displacement — physics owns its path. */
     const serveSlide = this.state === GS.SERVE_TOSS && this.server === 1 &&
       this.ball.lastHitBy === 0 && this.recenterT <= 0;
     if (serveSlide) {
+      const windup = STROKE_CONFIG.serve.windup;
+      const b = this.ball;
       const tracking = STROKE_CONFIG.serve.tracking;
+      const startY = this.tossStartY || (PH.TABLE_Y + STROKE_CONFIG.serve.toss.height);
+      const predictedApex = b.p.y + (b.v.y > 0 ? (b.v.y * b.v.y) / (2 * PH.G) : 0);
+      const apexY = Math.max(predictedApex, this.tossApex || startY, startY + 0.01);
+      // Base: track the ball (hit detection works as before)
       const k = tracking.weights[0] + tracking.weights[1] * A;
-      tx = lerp(tx, this.ball.p.x, k);
-      tz = lerp(tz, this.ball.p.z + tracking.zOffset, k);
-      const under = this.ball.p.y - tracking.underBall;
-      ty = lerp(ty, under, k);
+      tx = lerp(tx, b.p.x, k);
+      tz = lerp(tz, b.p.z + tracking.zOffset, k);
+      ty = lerp(ty, b.p.y - tracking.underBall, k);
+      // Wind-up offset: +z during ascent (ease-out), removed during descent (ease-in)
+      if (b.v.y > 0) {
+        const rise = clamp((b.p.y - startY) / (apexY - startY), 0, 1);
+        const easeOut = 1 - (1 - rise) * (1 - rise); // quadratic ease-out
+        tz += windup.amplitude * easeOut;
+        ty -= windup.yDrop * easeOut;
+      } else {
+        const targetY = PH.TABLE_Y + windup.contactY;
+        const fall = clamp((apexY - b.p.y) / Math.max(0.01, apexY - targetY), 0, 1);
+        const easeIn = fall * fall; // quadratic ease-in (accelerating)
+        // Pull the windup offset back toward zero as the racket swings forward
+        tz -= windup.amplitude * (1 - easeIn);
+      }
     }
 
     /* Rally stroke contact anchor: once an admitted gesture is actively
@@ -3900,10 +3954,6 @@ class Game {
       pad.roll = (ai.roll ?? .28) + visualWindup * .24 - swing * .12;
       pad.activeFace = ai.forehand === false ? -1 : 1;
       paddlePoseQuaternion(V3.mul(normal, pad.normal, pad.activeFace), pad.roll, pad.q);
-      if (windup > .05 && ai.plan && this._aiSwingSoundShot !== this.shotId) {
-        this._aiSwingSoundShot = this.shotId;
-        this.audio.whoosh?.(.65, 'ai/' + this.shotId);
-      }
     }
     const clearance = paddleTableClearance(pad.pos, pad.normal, pad.roll, PH.TABLE_Y, PH.T_HALF_WID, PH.T_HALF_LEN, pad.q);
     if (clearance < .006) pad.pos.y += .006 - clearance;
@@ -4141,6 +4191,7 @@ class Game {
     if (!Number.isFinite(dtReal) || dtReal <= 0) return;
     dtReal = Math.min(dtReal, 0.1);
     if (this.state === GS.MENU) {
+      this.lobbyScene?.update(dtReal);
       this.updateCamera(dtReal);
       this.profile.maybeSave(dtReal);
       return;
@@ -4343,6 +4394,7 @@ class Game {
     for (const m of this.messages) m.t += dtReal;
     while (this.messages.length && this.messages[0].t > this.messages[0].dur) this.messages.shift();
     this.hitFlash = Math.max(0, this.hitFlash - dtReal * 3.2);
+    this.ageContactFlashes(this.time);
 
     // Only the timer advances here. Position and orientation each have one
     // owner in updatePlayerPaddle / PaddleStrokeMotion, before rendering.
@@ -4527,6 +4579,7 @@ class Game {
   }
 
   drawDynamic(shadowPass) {
+    if (this.state === GS.MENU && this.lobbyScene?.active) { this.lobbyScene.draw(shadowPass); return; }
     const R = this.R, S = this.scene, me = S.mesh, ma = S.mat;
     const tmp = S._tmp;
     const d = shadowPass
@@ -4611,9 +4664,10 @@ class Game {
    *  столе» и без масштабирования от высоты — пятна читаются, а альфы и
    *  геометрии вдвое меньше. */
   drawContactShadows() {
+    if (this.state === GS.MENU && this.lobbyScene?.active) { this.lobbyScene.drawShadows(); return; }
     const R = this.R, S = this.scene, b = this.ball;
     const TY = PH.TABLE_Y, HW = PH.T_HALF_WID + 0.05, HL = PH.T_HALF_LEN + 0.05;
-    S.blob(R, 0, 0, 0, 0, 1, 0.23, 1);                       // under the table
+    S.blob(R, 0, 0, 0, 0, 1, 0.12, 1);                       // under the table
     const onTable = (x, z) => Math.abs(x) < HW && Math.abs(z) < HL;
 
     if ((b.live || this.state === GS.SERVE_READY) && onTable(b.p.x, b.p.z) && b.p.y > TY - 0.02) {
@@ -4644,26 +4698,15 @@ class Game {
        *  yellow = counted, but on the edge of a miss,
        *  red    = wrong place or wrong time.
        *  The opponent's returns keep the old spin palette. */
-      let col, k;
-      const grade = this.ball.trailGrade && this.ball.lastHitBy === 1 ? this.ball.trailGrade : null;
-      if (grade) {
-        if (grade === 'green' && Array.isArray(this._customTrailCol)) {
-          col = this._customTrailCol;
-        } else {
-          col = { green: [0.18, 1.0, 0.42], yellow: [1.0, 0.80, 0.16], red: [1.0, 0.13, 0.12] }[grade];
-        }
-        k = grade === 'green' ? 1.0 : 0.9;
-      } else if (this.ball.lastHitBy === 1 && Array.isArray(this._customTrailCol)) {
-        col = this._customTrailCol;
-        k = 0.72;
-      } else {
-        col = [0.9, 0.92, 0.95];
-        k = 0.4;
-      }
-      R.draw(me.trail, M4.identity(tmp.m), {
-        color: [1, 1, 1], rough: 1, blend: 'add', doubleSided: true,
-        emissive: [col[0] * k, col[1] * k, col[2] * k], opacity: grade ? 0.42 : 0.12,
-      });
+       const ts = this.ball.trailStroke || (this.lastShotInfo && this.lastShotInfo.stroke) || null;
+       const hex = (ts && ts.col) ? ts.col : '#a0b4c8';
+       const col = [parseInt(hex.slice(1,3),16)/255, parseInt(hex.slice(3,5),16)/255, parseInt(hex.slice(5,7),16)/255];
+       const k = 0.9;
+       const grade = this.ball.trailGrade && this.ball.lastHitBy === 1 ? this.ball.trailGrade : null;
+       R.draw(me.trail, M4.identity(tmp.m), {
+         color: [col[0], col[1], col[2]], rough: 1, blend: 'add', doubleSided: true, unlit: 1,
+         emissive: [col[0] * k * 1.4, col[1] * k * 1.4, col[2] * k * 1.4], opacity: grade ? 0.8 : 0.3,
+       });
     }
 
     /* bounce marks */
@@ -4687,6 +4730,28 @@ class Game {
       R.draw(me.quad, tmp.m, {
         color: [1, 1, 1], tex: this.scene.tex.ring, blend: 'add', doubleSided: true,
         emissive: [0.15, 0.95, 0.55], rough: 1,
+      });
+    }
+
+    /* contact flash — один сдержанный ореол в ЗАМРОЖЕННОЙ точке контакта.
+     * Ни шлейф, ни частицы его не порождают и не гасят; цвет = принятый
+     * удар, а не вердикт и не косметика инвентаря. */
+    const flashes = this.contactFlashes || [];
+    for (let i = 0; i < flashes.length; i++) {
+      const f = flashes[i];
+      const age = clamp((this.time - f.birth) / f.life, 0, 1);
+      const a = (1 - age) * (1 - age);
+      /* Квад стартует с 1.5 диаметров мяча, а не с его собственного размера:
+       * сфера мяча пишется с depth-mask, а пульса — аддитивно поверх уже
+       * готового кадра, поэтому квад диаметра мяча ЗАЦИКЛИВАЕТСЯ силуэтом
+       * мяча целиком (замер в живом рендере: 0 изменённых пикселей в пике).
+       * 1.5 → 2.2 диаметра оставляют ядро мяча нетронутым (он по-прежнему
+       * ярчайший и самый чёткий) и дают читаемое цветное кольцо вокруг него. */
+      const sz = PH.R * (CONTACT_FLASH_W0 + age * CONTACT_FLASH_W1);
+      this.billboard(tmp.m, f.p, sz, 0);
+      R.draw(me.quad, tmp.m, {
+        color: [1, 1, 1], tex: this.scene.tex.glow, blend: 'add', doubleSided: true, unlit: 1,
+        emissive: [f.r, f.g, f.b], rough: 1, opacity: a * CONTACT_FLASH_OPACITY,
       });
     }
 
@@ -4715,8 +4780,31 @@ class Game {
   drawOpponent() {}
 
 
+  /** Один принятый контакт ракетки — одна короткая световая пульса в точке
+   *  касания. Цвет = ПРИНЯТЫЙ УДАР из канонических STROKES-метаданных (скользящий
+   *  контакт приносит голое `{id:'BLOCK'}` без `.col` — всё равно читаем
+   *  палитру по id), подача берёт цвет того ударного движения, которое она
+   *  исполняет, а неизвестный id остаётся нейтральным: вспышка не имеет права
+   *  выдавать неклассифицированный контакт за конкретный удар. */
+  _recordContactFlash(side, strokeId, contactP, t) {
+    if (this.reducedMotion || this.paused || this._ttSleeping || this.preview?.active) return;
+    if (this.state === GS.MENU || this.state === GS.SPLASH) return;
+    const known = strokeId && STROKES[strokeId] ? strokeId : null;
+    const meta = known ? (STROKES[SERVE_STROKE_ALIAS[known] || known] || STROKES.BLOCK) : null;
+    const rgb = flashRgb(meta);
+    const ident = side + '/' + (this.shotId || 0);
+    if (this._contactFlashSeen && this._contactFlashSeen.has(ident)) return;
+    if (this._contactFlashSeen) this._contactFlashSeen.add(ident);
+    const p = contactP ? V3.clone(contactP) : V3.clone(this.ball.p);
+    const life = CONTACT_FLASH_LIFE_S;
+    if (this.contactFlashes) this.contactFlashes.push({ side, id: known, p, r: rgb[0], g: rgb[1], b: rgb[2], birth: t, life });
+    if (this.contactFlashes && this.contactFlashes.length > 2) this.contactFlashes.splice(0, this.contactFlashes.length - 2);
+  }
+
   render() {
     if (this.preview?.active) { if (!this._ttSleeping) this.preview.render(); return; }
+    const menuLobby = this.state === GS.MENU && this.lobbyScene?.active;
+    if (menuLobby) this.lobbyScene.beforeRender();
     const R = this.R;
     if (R.beginShadow()) {
       this.scene.drawStatic(R, true);
@@ -4727,12 +4815,37 @@ class Game {
     this.drawContactShadows();         // soft grounding shade — единственная «подложка» мяча
     this.drawDynamic(false);           // ball + bats (opaque)
     this.scene.drawNet(R);             // alpha-blended net on top of them
-    this.drawFX();                     // additive trail / particles / decals
-    R.present(this.reducedMotion ? 0 : this.time);
+    if (!menuLobby) this.drawFX();     // lobby never inherits match hints/trails
+    R.present(this.reducedMotion ? 0 : menuLobby ? this.lobbyScene.clock : this.time);
+    if (menuLobby) this.lobbyScene.afterRender();
   }
 }
+
+/* ---------------- contact flash (phase 1) ---------------------------
+ * Одна пульса = один принятый контакт. Живёт в НЕЗАМЕДЛЕННОМ времени
+ * Game.time (120 мс реальных при любом timeScale), не зависит от шлейфа,
+ * частиц и инвентаря. */
+const CONTACT_FLASH_LIFE_S = 0.12;
+const CONTACT_FLASH_OPACITY = 0.24;     // пик; дальше (1-age)^2
+const CONTACT_FLASH_W0 = 3.0;           // 1.5 диаметра мяча в пике (кольцо видно сразу)
+const CONTACT_FLASH_W1 = 1.4;           // к исходу — 2.2 диаметра, потолок плана
 
 function hexToRgb(h) {
   const n = parseInt(h.replace('#', ''), 16);
   return [((n >> 16) & 255) / 255, ((n >> 8) & 255) / 255, (n & 255) / 255];
+}
+
+/* HEX контактной вспышки конвертируется один раз на удар, а не на кадр;
+ * неизвестный удар (meta === null) красится нейтральным — он не «BLOCK»,
+ * он просто принятый контакт без классификации. */
+const FLASH_NEUTRAL_HEX = '#a9b8c6';
+const _flashRgbCache = new Map();
+function flashRgb(stroke) {
+  const key = stroke ? stroke.id : '#neutral';
+  let c = _flashRgbCache.get(key);
+  if (!c) {
+    c = hexToRgb((stroke && stroke.col) || FLASH_NEUTRAL_HEX);
+    _flashRgbCache.set(key, c);
+  }
+  return c;
 }

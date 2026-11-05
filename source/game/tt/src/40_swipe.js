@@ -186,28 +186,39 @@ class SwipeTracker {
 }
 
 /* ------------------------- stroke archetypes ----------------------- */
-/** Every archetype describes how the arm behaves, not how the ball flies. */
+/** Every archetype describes how the arm behaves, not how the ball flies.
+ *  `col` is the ONE palette for a stroke: type labels, the contact flash and,
+ *  later, the ribbon all read it here. Quality verdicts (green/yellow/red) and
+ *  cosmetic inventory tints are a separate language and never live in `col`.
+ *  Serve families keep the colour of the rally stroke they execute: SERVE_TOP
+ *  is a LOOP, SERVE_BACK a PUSH, SERVE_SIDE a SIDE, SERVE_FAST a DRIVE. */
 const STROKES = {
-  LOOP: { id: 'LOOP', name: 'ТОПСПИН-ЛУП', short: 'ЛУП', col: '#ff7a2f', desc: 'Касательный разгон вверх — мощное верхнее вращение' },
-  COUNTER: { id: 'COUNTER', name: 'КОНТРНАКАТ', short: 'КОНТРА', col: '#ff4d6d', desc: 'Встречный топспин по восходящему мячу' },
-  DRIVE: { id: 'DRIVE', name: 'НАКАТ', short: 'НАКАТ', col: '#ffd34d', desc: 'Плоско-поступательный удар с лёгким верхним' },
-  SIDE: { id: 'SIDE', name: 'БОКОВОЙ УДАР', short: 'БОКОВОЙ', col: '#39e08b', desc: 'Горизонтальный свайп — боковое вращение' },
-  SMASH: { id: 'SMASH', name: 'СМЕШ', short: 'СМЕШ', col: '#ff2d2d', desc: 'Завершающий плоский удар сверху' },
-  FLICK: { id: 'FLICK', name: 'ФЛИК', short: 'ФЛИК', col: '#ff9f1c', desc: 'Короткий кистевой подкрут над столом' },
-  PUSH: { id: 'PUSH', name: 'ПОДСТАВКА-ПОДРЕЗКА', short: 'ПОДРЕЗКА', col: '#4dd2ff', desc: 'Короткая подрезка открытой ракеткой' },
-  CHOP: { id: 'CHOP', name: 'ЧОП', short: 'ЧОП', col: '#2f9bff', desc: 'Дальняя защита, тяжёлое нижнее вращение' },
-  BLOCK: { id: 'BLOCK', name: 'БЛОК', short: 'БЛОК', col: '#a0b4c8', desc: 'Пассивный приём — гасит скорость соперника' },
-  LOB: { id: 'LOB', name: 'СВЕЧА', short: 'СВЕЧА', col: '#b388ff', desc: 'Высокая оборонительная свеча с верхним вращением' },
-  HOOK: { id: 'HOOK', name: 'ХУК (боковое)', short: 'ХУК', col: '#39e08b', desc: 'Боковое вращение — мяч уходит дугой' },
-  FADE: { id: 'FADE', name: 'ФЕЙД (боковое)', short: 'ФЕЙД', col: '#39e0c8', desc: 'Обратное боковое вращение' },
-  DROP: { id: 'DROP', name: 'УКОРОЧЕННЫЙ', short: 'УКОРОЧКА', col: '#8fd14f', desc: 'Мягкое гашение у сетки' },
-  BANANA: { id: 'BANANA', name: 'БАНАН', short: 'БАНАН', col: '#ffe08a', desc: 'Крученый боковой удар с резким боковым эффектом' },
-  CHOP_BLOCK: { id: 'CHOP_BLOCK', name: 'ЧОП-БЛОК', short: 'ЧОП-БЛОК', col: '#7fb3ff', desc: 'Комбинированный чоп-блок по нисходящему мячу' },
-  SERVE_TOP: { id: 'SERVE_TOP', name: 'ПОДАЧА-НАКАТ', short: 'НАКАТ', col: '#ff7a2f', desc: 'свайп вверх по мячу — верхнее вращение, мяч садится коротко и подскакивает' },
-  SERVE_BACK: { id: 'SERVE_BACK', name: 'ПОДАЧА РЕЗАНАЯ', short: 'РЕЗАНАЯ', col: '#4dd2ff', desc: 'свайп вниз под мяч — нижнее вращение, мяч плоский и зависает' },
-  SERVE_SIDE: { id: 'SERVE_SIDE', name: 'ПОДАЧА БОКОВАЯ', short: 'БОКОВАЯ', col: '#39e08b', desc: 'свайп поперёк мяча — боковое вращение, дуга в полёте и после стола' },
-  SERVE_FAST: { id: 'SERVE_FAST', name: 'СТРЕМИТЕЛЬНАЯ ПОДАЧА', short: 'БЫСТРАЯ', col: '#ffd34d', desc: 'длинный быстрый свайп — быстрая подача со слабым вращением' },
-  SERVE_NO_SPIN: { id: 'SERVE_NO_SPIN', name: 'ПОДАЧА ПЛОСКАЯ', short: 'ПЛОСКАЯ', col: '#c8d6e5', desc: 'клик по мячу при подаче — плоская подача без вращения' },
+  LOOP: { id: 'LOOP', name: 'ТОПСПИН-ЛУП', short: 'ЛУП', col: '#31d7ff', desc: 'Вверх по касательной: мощное верхнее вращение. Мяч сам оформляет посадку.' },
+  COUNTER: { id: 'COUNTER', name: 'КОНТРНАКАТ', short: 'КОНТРА', col: '#f36bbd', desc: 'Встречный топспин на подъёме. Входящий темп возвращается отправителю.' },
+  DRIVE: { id: 'DRIVE', name: 'НАКАТ', short: 'НАКАТ', col: '#ffab3d', desc: 'Поступательный удар с лёгким верхним вращением. Без лишних согласований.' },
+  SIDE: { id: 'SIDE', name: 'БОКОВОЙ УДАР', short: 'БОКОВОЙ', col: '#39cfa8', desc: 'Горизонтальный свайп даёт боковое вращение. Прямой маршрут отменён.' },
+  SMASH: { id: 'SMASH', name: 'СМЕШ', short: 'СМЕШ', col: '#ff4f64', desc: 'Плоский удар сверху для завершения розыгрыша. Дело закрывается быстро.' },
+  FLICK: { id: 'FLICK', name: 'ФЛИК', short: 'ФЛИК', col: '#ffdd57', desc: 'Короткий кистевой подкрут над столом. Срочный ответ без длинного замаха.' },
+  PUSH: { id: 'PUSH', name: 'ПОДСТАВКА-ПОДРЕЗКА', short: 'ПОДРЕЗКА', col: '#b484ff', desc: 'Короткая подрезка открытой ракеткой. Нижнее вращение мелким шрифтом.' },
+  CHOP: { id: 'CHOP', name: 'ЧОП', short: 'ЧОП', col: '#658bff', desc: 'Дальняя защита с тяжёлым нижним вращением. Атаке вернули документы.' },
+  BLOCK: { id: 'BLOCK', name: 'БЛОК', short: 'БЛОК', col: '#f5f7ff', desc: 'Пассивный приём гасит входящую скорость. Ракетка работает приёмной.' },
+  LOB: { id: 'LOB', name: 'СВЕЧА', short: 'СВЕЧА', col: '#eeaeca', desc: 'Высокая защитная дуга с верхним вращением. Запрос на дополнительное время.' },
+  HOOK: { id: 'HOOK', name: 'ХУК (боковое)', short: 'ХУК', col: '#d878ec', desc: 'Боковое вращение уводит мяч дугой. Маршрут подан с поправкой.' },
+  FADE: { id: 'FADE', name: 'ФЕЙД (боковое)', short: 'ФЕЙД', col: '#58b8d0', desc: 'Обратное боковое вращение. Мяч согласовал объезд в другую сторону.' },
+  DROP: { id: 'DROP', name: 'УКОРОЧЕННЫЙ', short: 'УКОРОЧКА', col: '#71e595', desc: 'Мягко погаси мяч у сетки. Доставка до ближайшего окна.' },
+  BANANA: { id: 'BANANA', name: 'БАНАН', short: 'БАНАН', col: '#ff9579', desc: 'Кручёный удар с резким боковым эффектом. Прямую линию сняли с обслуживания.' },
+  CHOP_BLOCK: { id: 'CHOP_BLOCK', name: 'ЧОП-БЛОК', short: 'ЧОП-БЛОК', col: '#94b5ff', desc: 'Подрезающий блок по падающему мячу. Компактный отказ входящей атаке.' },
+  SERVE_TOP: { id: 'SERVE_TOP', name: 'ПОДАЧА-НАКАТ', short: 'НАКАТ', col: '#31d7ff', desc: 'Веди вверх по мячу: верхнее вращение, короткая посадка и скачок. Подача с продолжением.' },
+  SERVE_BACK: { id: 'SERVE_BACK', name: 'ПОДАЧА РЕЗАНАЯ', short: 'РЕЗАНАЯ', col: '#b484ff', desc: 'Веди вниз под мяч: нижнее вращение, низкий зависающий полёт. Срочность отменена.' },
+  SERVE_SIDE: { id: 'SERVE_SIDE', name: 'ПОДАЧА БОКОВАЯ', short: 'БОКОВАЯ', col: '#39cfa8', desc: 'Веди поперёк мяча: боковое вращение меняет полёт и отскок. Адрес уточняется в пути.' },
+  SERVE_FAST: { id: 'SERVE_FAST', name: 'СТРЕМИТЕЛЬНАЯ ПОДАЧА', short: 'БЫСТРАЯ', col: '#ffab3d', desc: 'Длинный быстрый свайп: быстрая подача со слабым вращением. Экспресс без украшений.' },
+  SERVE_NO_SPIN: { id: 'SERVE_NO_SPIN', name: 'ПОДАЧА ПЛОСКАЯ', short: 'ПЛОСКАЯ', col: '#7fafc2', desc: 'Клик по мячу на подаче: плоский полёт без вращения. Спин в заявке отсутствует.' },
+};
+
+/** The rally stroke a serve executes; the flash must not invent a sixth hue
+ *  for what is mechanically a LOOP/PUSH/SIDE/DRIVE off the toss. */
+const SERVE_STROKE_ALIAS = {
+  SERVE_TOP: 'LOOP', SERVE_BACK: 'PUSH', SERVE_SIDE: 'SIDE', SERVE_FAST: 'DRIVE',
 };
 
 /* ------------------------------------------------------------------ *

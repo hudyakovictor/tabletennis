@@ -2,6 +2,8 @@
  *  EMBED BRIDGE — runs only when the host page set window.__TT_EMBED.
  *
  *  Host → game  (postMessage {__tt:1, type, ...}):
+ *    lobby {intro?,requestId?}   exhibition; intro waits with the ball hidden
+ *    lobbyLaunch {requestId,x,y,diameter} projected splash-ball rebound
  *    attract                    slow orbit over an idle table (menus, VS)
  *    prematch {dur}             fly from the orbit into the playing camera
  *    match {diff,target,free,sessionKind} start a match (free — no score, endless)
@@ -19,6 +21,9 @@
  *    missShots {on, half}       автоматические снимки первого нажатия
  *    net {cmd, url?, code?}     cmd: create | join | status | leave — онлайн
  *  Game → host:
+ *    lobbyReady {requestId,textures,reducedMotion} prepared scene presented
+ *    lobbyFrame {requestId,x,y,diameter,phase,handoff,progress} until handoff
+ *    lobbyHit {requestId,side,first:true} first incoming paddle contact
  *    ready {calibrationRegistry,calibration}, calibration, settings, slowmo,
  *    state, point, hit, serve, matchEnd, train, trainDone, attempt,
  *    preview {requestId,active,paused,...} including direct close/Esc
@@ -100,16 +105,19 @@
     let lastSph = null;
     const origCam = g.updateCamera.bind(g);
     g.updateCamera = function (dt) {
+      if (this.state === GS.MENU && this.lobbyScene?.active) {
+        this.lobbyScene.updateCamera(); lastSph = sph(this.camPos, this.camLook); return;
+      }
       origCam(dt);
       if (!cine.mode) return;
-      cine.t += dt || 0;
+      if (cine.mode !== 'attract' || !g.reducedMotion && document.visibilityState !== 'hidden') cine.t += dt || 0;
       const live = sph(this.camPos, this.camLook);
       const look0 = { x: C.x, y: C.y + 0.05, z: C.z - 0.15 };
       let s, shift = 0;
       if (cine.mode === 'attract') {
         s = lobby   // лобби: стол поднят в кадре выше (под именем игры), взгляд ниже стола
-          ? { a: live.a + 1.05 + cine.t * 0.12 * (g.reducedMotion ? 0.2 : 1), r: live.r * 1.55, h: live.h + 1.2, l: { x: C.x, y: C.y - 0.78, z: C.z - 0.1 } }
-          : { a: live.a + 1.05 + cine.t * 0.16 * (g.reducedMotion ? 0.2 : 1), r: live.r * 1.28, h: live.h + 0.75, l: look0 };
+          ? { a: live.a + 1.05 + cine.t * 0.12, r: live.r * 1.55, h: live.h + 1.2, l: { x: C.x, y: C.y - 0.78, z: C.z - 0.1 } }
+          : { a: live.a + 1.05 + cine.t * 0.16, r: live.r * 1.28, h: live.h + 0.75, l: look0 };
       } else if (cine.mode === 'prematch') {
         const k = easeInOut(clamp(cine.t / cine.dur, 0, 1));
         const from = cine.from || { a: live.a + 1.6, r: live.r * 1.5, h: live.h + 1.4, l: look0 };
@@ -201,12 +209,15 @@
       if (was !== !!this.paused) post('paused', { v: !!this.paused, host: hostCmd });
       return r;
     });
-    const hostPause = (v) => { hostCmd = true; try { g.setPaused(v); } finally { hostCmd = false; } };
+    const hostPause = (v) => { hostCmd = true; try {
+      if (g.lobbyScene?.active) g.lobbyScene.paused = !!v;
+      g.setPaused(v);
+    } finally { hostCmd = false; } };
     wrap(g, 'endReplay', function (orig, complete) { const was = this.replayer && this.replayer.on; const r = orig(complete); if (was) post('replayEnd', {}); return r; });
     wrap(g, 'buzz', function (orig, ms) { post('haptic', { kind: Array.isArray(ms) ? 'success' : ms >= 30 ? 'heavy' : 'light' }); });
     if (ui) {
       ui.showMatchEnd = function (won) {
-        if (lobby) { setTimeout(() => { if (lobby) g.startDemo(1); }, 2500); return; }
+        if (lobby) return;
         const s = g.stats;
         post('matchEnd', { won: !!won, score: g.score.slice(), bestRally: g.bestRally,
           stats: { shots: s.shots, winners: s.winners, errors: s.errors, maxSpeed: Math.round(s.maxSpeed),
@@ -414,7 +425,10 @@ const showTip = (text) => { if (text) tip = { text, until: g.time + 4.6 }; };
     for (const [obj, name] of [[g, 'update'], [g, 'render'], [ui, 'tick']]) {
       wrap(obj, name, function (orig, ...a) { return g._ttSleeping ? undefined : orig(...a); });
     }
-    const wake = () => { if (g._ttSleeping) { g._ttSleeping = false; g.syncAudioQuiet(); post('awake', {}); } };
+    const wake = () => { if (g._ttSleeping) {
+      g.lobbyScene?.suspend(); g._ttSleeping = false; g.syncAudioQuiet(); post('awake', {});
+    } };
+    document.addEventListener('visibilitychange', () => { g.lobbyScene?.suspend(); });
     let previewRequestId = 0;
     const publishPreview = (opened) => post('preview', { ...g.preview?.snapshot(), requestId: previewRequestId,
       active: !!g.preview?.active, paused: !!g.paused, opened, error: opened === false ? g.preview?.error || 'unavailable' : null });
@@ -434,16 +448,16 @@ const showTip = (text) => { if (text) tip = { text, until: g.time + 4.6 }; };
      * what was going on and the host rebuilds the whole iframe and resumes. */
     const glCanvas = document.getElementById('gl');
     if (glCanvas) glCanvas.addEventListener('webglcontextlost', (e) => {
-      e.preventDefault(); g._ttSleeping = true;
+      e.preventDefault(); g._ttSleeping = true; g._ttContextLost = true;
+      g.clearContactFlashes?.();
+      g.lobbyScene?.stop();
       if (g.preview?.active) g.preview.close(false);
       post('glLost', { state: stateName(g.state), lobby, training: g.training ? g.training.step : null,
         inMatch: !lobby && !g.training && !g.demoMode && [GS.SERVE_READY, GS.SERVE_TOSS, GS.RALLY, GS.POINT].includes(g.state),
         score: (g.score || [0, 0]).slice(), server: g.server });
     }, false);
 
-    /* Спокойная «витрина» арены: стол, ракетки на своих местах, мяч лежит
-     * на столе, НИЧЕГО не движется, кроме медленной камеры. Автоматч
-     * бот-на-бота вырезан: два прыгающих автопилота читались как читеры. */
+    // Non-lobby attract/prematch screens retain their original still life.
     const stageIdleArena = () => {
       if (g.demoMode) g.stopDemo();
       const b = g.ball;
@@ -467,6 +481,7 @@ const showTip = (text) => { if (text) tip = { text, until: g.time + 4.6 }; };
       if (cine.mode !== 'attract') setCine('attract');
       g._idleStill = true;              // updatePlayerPaddle не трогает сцену
     };
+    const leaveLobby = () => { lobby = false; g.lobbyScene?.stop(); };
 
     const baseTableCol = g.scene && g.scene.mat && g.scene.mat.table && g.scene.mat.table.color
       ? g.scene.mat.table.color.slice() : null;
@@ -510,6 +525,8 @@ const showTip = (text) => { if (text) tip = { text, until: g.time + 4.6 }; };
       if (typeof m.motionOff === 'boolean') g.motionOff = m.motionOff;
       g.reducedMotion = !!g.motionOff || !!(g.motionQuery && g.motionQuery.matches);
       if (ui) ui.reducedMotion = g.reducedMotion;
+      if (g.reducedMotion) g.clearContactFlashes?.();
+      if (g.lobbyScene?.reduceMotion()) g.render();
       const quality = ['high', 'mid', 'low'].includes(m.quality) ? { high: 'high', mid: 'medium', low: 'low' }[m.quality] : null;
       if (quality && (g.settings.quality !== quality || g.R.quality !== quality)) { g.settings.quality = quality; g.R.quality = quality; g.resize(); }
       if (typeof m.debug === 'boolean') {
@@ -575,7 +592,7 @@ const showTip = (text) => { if (text) tip = { text, until: g.time + 4.6 }; };
          * соперника», а качество отскока дальней ракетки, которую ведут руками. */
         cine.mode = null; lastSph = null;   // остановить attract-камеру
         g.sessionKind = 'online';
-        g.inspectSlowmoRequested = false; g.inspectSlowmo = false; lobby = false;
+        g.inspectSlowmoRequested = false; g.inspectSlowmo = false; leaveLobby();
         g.settings.targetScore = 11; g.freePlay = false;
         resetAssist();
         g.startMatch(2);
@@ -597,16 +614,18 @@ const showTip = (text) => { if (text) tip = { text, until: g.time + 4.6 }; };
     /* ---------------------------- commands -------------------------- */
     window.addEventListener('message', (e) => {
       const m = e.data;
-      if (!m || m.__tt !== 1) return;
+      if (e.source !== window.parent || !m || m.__tt !== 1) return;
+      if (m.type === 'lobby' && m.intro === true && !Number.isSafeInteger(m.requestId)) return;
       // only commands that need a visible, running arena wake it; 'attract'/'quit' just set the scene
       // behind a hidden layer (menus, matchmaking) and must not restart full-rate rendering there
       const statusOnly = m.type === 'net' && m.cmd === 'status';
       if (!statusOnly && !['sleep', 'mute', 'haptics', 'equip', 'quality', 'rm', 'debug', 'hint', 'inputMode', 'attract', 'quit', 'quiet', 'pause', 'resume', 'locale', 'missShots', 'cal', 'settings', 'sessionKind', 'slowmo'].includes(m.type)) wake();
       switch (m.type) {
         case 'net': netCommand(m); break;
-        case 'sleep': g.cancelPendingCapture(); g._ttSleeping = true; g.syncAudioQuiet(); break;
+        case 'sleep': g.cancelPendingCapture(); g.clearContactFlashes?.(); g.lobbyScene?.suspend(); g._ttSleeping = true; g.syncAudioQuiet(); break;
         case 'wake': break;
         case 'previewOpen':
+          leaveLobby();
           previewRequestId = Number.isFinite(m.requestId) ? m.requestId : previewRequestId;
           hostPause(true);
           if (!g.openTrainingPreview(m)) publishPreview(false);
@@ -623,24 +642,31 @@ const showTip = (text) => { if (text) tip = { text, until: g.time + 4.6 }; };
           if (['free', 'practice', 'ranked', 'career', 'check', 'online'].includes(m.sessionKind)) g.sessionKind = m.sessionKind;
           refreshGameCalibrationPolicy(g, '_policy'); publishCalibration(m.requestId); break;
         case 'attract':
-          lobby = false;
+          leaveLobby();
           if (g.state !== GS.MENU) g.returnToMenu();
           g.sessionKind = 'free'; g.inspectSlowmoRequested = false;
           refreshGameCalibrationPolicy(g, '_policy'); publishCalibration();
           stageIdleArena(); break;
-        case 'lobby':                       // тихая витрина: стол и камера, без автоматча
+        case 'lobby':
           lobby = true; g.audio.setMuted(true); resetAssist();
+          if (g.preview?.active) g.preview.close();
           if (g.state !== GS.MENU) g.returnToMenu();
           g.sessionKind = 'free'; g.inspectSlowmoRequested = false;
           refreshGameCalibrationPolicy(g, '_policy'); publishCalibration();
-          stageIdleArena();
+          if (g.demoMode) g.stopDemo();
+          if (!g.lobbyScene) g.lobbyScene = new LobbyExhibition(g, post);
+          g.lobbyScene.prepare(m);
+          g.updateCamera(0); g.render();
+          break;
+        case 'lobbyLaunch':
+          if (lobby && g.state === GS.MENU && g.lobbyScene?.launch(m)) g.render();
           break;
         case 'prematch':
-          lobby = false;
+          leaveLobby();
           if (g.state !== GS.MENU) g.returnToMenu();
           setCine('prematch', m.dur || 2.0); break;
         case 'match':
-          lobby = false;
+          leaveLobby();
           g.sessionKind = ['free', 'practice', 'ranked', 'career', 'check', 'online'].includes(m.sessionKind) ? m.sessionKind : m.free ? 'free' : 'practice';
           g.inspectSlowmoRequested = false; g.inspectSlowmo = false;
           refreshGameCalibrationPolicy(g, '_policy');
@@ -666,7 +692,7 @@ const showTip = (text) => { if (text) tip = { text, until: g.time + 4.6 }; };
           } else if (cine.mode === 'attract') setCine('prematch', 1.2);
           break;
         case 'train':
-          lobby = false;
+          leaveLobby();
           g.sessionKind = m.sessionKind === 'check' || m.resume && m.resume.stage === 'check' ? 'check' : 'practice';
           g.inspectSlowmoRequested = false; g.inspectSlowmo = false;
           refreshGameCalibrationPolicy(g, '_policy');
@@ -688,7 +714,7 @@ const showTip = (text) => { if (text) tip = { text, until: g.time + 4.6 }; };
         case 'resume': hostPause(false); break;
         case 'quit':
           g.cancelPendingCapture();
-          lobby = false; g.inspectSlowmoRequested = false; g.inspectSlowmo = false; g.returnToMenu(); g.sessionKind = 'free';
+          leaveLobby(); g.inspectSlowmoRequested = false; g.inspectSlowmo = false; g.returnToMenu(); g.sessionKind = 'free';
           refreshGameCalibrationPolicy(g, '_policy'); publishCalibration(); setCine('attract'); break;
         case 'outro': setCine('outro'); break;
         case 'live': cine.mode = null; break;
@@ -708,6 +734,8 @@ const showTip = (text) => { if (text) tip = { text, until: g.time + 4.6 }; };
         case 'rm':
           g.motionOff = !!m.on; g.reducedMotion = g.motionOff || !!(g.motionQuery && g.motionQuery.matches);
           if (ui) ui.reducedMotion = g.reducedMotion;
+          if (g.reducedMotion) g.clearContactFlashes?.();
+          if (g.lobbyScene?.reduceMotion()) g.render();
           refreshGameCalibrationPolicy(g, '_policy'); publishCalibration(); break;
         case 'debug':
           if (typeof g.setDiagnosticMode === 'function') g.setDiagnosticMode(!!m.on);

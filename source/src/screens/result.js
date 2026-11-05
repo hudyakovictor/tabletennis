@@ -9,30 +9,30 @@ function confirmSheet(title, text, ok, fn) {
 function devZoneSheet() {
   const R = Object.assign({}, GameHost.rules || {}, GameHost.devRules());
   const F = [
-    ['captureRadius', 'Радиус захвата, м', .08, .62, .01], ['depthTolerance', 'Допуск глубины, м', .08, .62, .01],
-    ['serveCaptureRadius', 'Радиус подачи, м', .2, .9, .01], ['contactForwardPx', 'Зона: вниз (удар ↑), px', 40, 240, 2],
-    ['contactBackPx', 'Зона: вверх (подрезка ↓), px', 0, 200, 2], ['contactSideTouchPx', 'Зона: бока (тач), px', 20, 90, 2],
-    ['contactSideMousePx', 'Зона: бока (мышь), px', 16, 80, 2]
+    ['captureRadius', .08, .62, .01], ['depthTolerance', .08, .62, .01],
+    ['serveCaptureRadius', .2, .9, .01], ['contactForwardPx', 40, 240, 2],
+    ['contactBackPx', 0, 200, 2], ['contactSideTouchPx', 20, 90, 2],
+    ['contactSideMousePx', 16, 80, 2]
   ];
-  const row = ([k, t, a, b, s]) => `<label class="dz-row"><span>${t}</span><input type="range" min="${a}" max="${b}" step="${s}" value="${R[k] ?? a}" data-k="${k}"><b class="num" data-v="${k}">${R[k] ?? a}</b></label>`;
-  Sheet.open(`<div class="h1" style="margin:4px 4px 4px">Зона удара · dev</div><p class="dim" style="margin:0 4px 12px;font-size:11.5px">Изменения перезапускают движок. Хранятся локально (ttu-rules-dev).</p>
+  const row = ([k, a, b, s]) => `<label class="dz-row"><span>${t('zone.field.' + k)}</span><input type="range" min="${a}" max="${b}" step="${s}" value="${R[k] ?? a}" data-k="${k}"><b class="num" data-v="${k}">${R[k] ?? a}</b></label>`;
+  Sheet.open(`<div class="h1" style="margin:4px 4px 4px">${t('zone.title')}</div><p class="dim" style="margin:0 4px 12px;font-size:11.5px">${t('zone.notice')}</p>
     <div class="pnl dz">${F.map(row).join('')}
-    <label class="dz-row"><span>Показать зоны</span><button class="tgl ${GameHost.debug ? 'on' : ''}" data-t="debug"></button></label>
-    <label class="dz-row"><span>Авто-шаг к мячу</span><button class="tgl ${R.autoFootwork !== false ? 'on' : ''}" data-t="autoFootwork"></button></label></div>
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:14px"><button class="b3 dark sm" data-a="reset">Сброс v3</button><button class="b3 green sm" data-a="apply">Применить</button></div>
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:10px"><button class="b3 dark sm" data-a="stats">Статистика · ${ZoneStats.all().length}</button><button class="b3 dark sm" data-a="link">Ссылка с настройкой</button></div>`, {
+    <label class="dz-row"><span>${t('zone.show')}</span><button class="tgl ${GameHost.debug ? 'on' : ''}" data-t="debug"></button></label>
+    <label class="dz-row"><span>${t('zone.auto')}</span><button class="tgl ${R.autoFootwork !== false ? 'on' : ''}" data-t="autoFootwork"></button></label></div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:14px"><button class="b3 dark sm" data-a="reset">${t('zone.reset')}</button><button class="b3 green sm" data-a="apply">${t('zone.apply')}</button></div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:10px"><button class="b3 dark sm" data-a="stats">${t('zone.stats', { n: ZoneStats.all().length })}</button><button class="b3 dark sm" data-a="link">${t('zone.link')}</button></div>`, {
     onOpen: (w) => {
       const draft = Object.assign({}, GameHost.devRules());
       w.addEventListener('input', (e) => { const i = e.target.closest('input[data-k]'); if (!i) return; draft[i.dataset.k] = +i.value; w.querySelector(`[data-v="${i.dataset.k}"]`).textContent = i.value; });
       w.addEventListener('click', (e) => {
-        const t = e.target.closest('[data-t]');
-        if (t) { const k = t.dataset.t; if (k === 'debug') { GameHost.setDebug(!GameHost.debug); t.classList.toggle('on', GameHost.debug); } else { draft[k] = !t.classList.contains('on'); t.classList.toggle('on', draft[k]); } return; }
+        const toggle = e.target.closest('[data-t]');
+        if (toggle) { const k = toggle.dataset.t; if (k === 'debug') { GameHost.setDebug(!GameHost.debug); toggle.classList.toggle('on', GameHost.debug); } else { draft[k] = !toggle.classList.contains('on'); toggle.classList.toggle('on', draft[k]); } return; }
         const a = e.target.closest('[data-a]'); if (!a) return;
         if (a.dataset.a === 'stats') { Sheet.close(true); zoneStatsSheet(); return; }
-        if (a.dataset.a === 'link') { const u = RulesLink.url(RulesLink.clean(Object.assign({}, R, draft)) || {}); copyText(u).then((ok) => toast(ok ? 'Ссылка скопирована — у тестеров будет эта же зона' : 'Не удалось скопировать', ok ? 'check' : 'x')); return; }
+        if (a.dataset.a === 'link') { const u = RulesLink.url(RulesLink.clean(Object.assign({}, R, draft)) || {}); copyText(u).then((ok) => toast(ok ? t('zone.linkCopied') : t('zone.copyFailed'), ok ? 'check' : 'x')); return; }
         if (a.dataset.a === 'reset') GameHost.setDevRules({});
         else GameHost.setDevRules(draft);
-        Sheet.close(true); toast('Движок перезапущен с новой зоной', 'target');
+        Sheet.close(true); toast(t('zone.restarted'), 'target');
         const cur = Router.cur; Router.go(cur, { replace: true, mode: 'wipe', data: cur === 'train' ? { then: 'hub' } : null });
       });
     }

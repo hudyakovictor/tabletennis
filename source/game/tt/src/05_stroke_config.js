@@ -111,6 +111,14 @@ const STROKE_CONFIG = {
       aiContactDelay: 0.10, aiSwingDelay: 0.42, aiTimeout: 0.60,
     },
     tracking: { weights: [0.55, 0.45], zOffset: 0.02, underBall: 0.04 },
+    windup: {
+      amplitude: 0.55,       // pull-back (+z) during ball ascent — clearly visible
+      k: 0.82,               // tracking weight toward ball (hit registration)
+      yDrop: 0.04,           // slight racket drop during backswing
+      contactZ: 0.02,        // z offset ahead of ball at forward-swing meeting
+      contactY: 0.12,        // height above TABLE_Y where racket meets falling ball
+      trackK: 0.80,          // convergence strength toward ball during descent
+    },
     glance: { bandMul: 1.36, liftMs: [1.55, 2.6], speedMs: [1.3, 3.0],
       counterAim: 0.9, sideK: 1.30, fwdK: 1.15, steps: 5, coarseDt: 1 / 120, courtMargin: 0.01 },
     curlRecoveryThreshold: 0.55, curlRecoveryK: 0.30,

@@ -16,40 +16,43 @@ let MODE = MODES[0];
    можно было переоткрывать и бесконечно фармить ту же награду. */
 const questReady = () => Daily.ready();
 const FREE_MS = 4 * 3600 * 1000;           // подарок раз в 4 часа
+/* Подарок: название всегда «Подарок», а состояние живёт отдельной строкой
+   (таймер / «готово»), поэтому текст не прыгает между заголовком и подписью. */
+const giftStatus = (left) => (left > 0 ? t('hub.giftInShort', { time: fmtLeft(left) }) : t('hub.giftReadyShort'));
 const UNLOCK_MS = { wood: 30 * 60 * 1000, silver: 3 * 3600 * 1000, gold: 8 * 3600 * 1000, epic: 12 * 3600 * 1000 };
 
 Router.def('hub', {
   mood: 'arena',
   render() {
-    const L = leagueOf(S.rating), N = nextLeague(S.rating);
-    const p = N ? (S.rating - L.min) / (N.min - L.min) : 1;
     const qr = questReady();
     const freeLeft = (S.freeAt || 0) - Date.now();
-    /* Название зала убрано: «Твой зал · Лига / Арена» перегружало шапку */
+    const L = leagueOf(S.rating);
     return `${UI.hud()}
     <div class="hub-content scroll">
-    <div class="road rise" style="--d:0" data-act="ranks">
-      <span class="rb">${Art.badge(L, 34)}</span>
-      <div class="bar gold"><i style="--p:0" data-p="${p}"></i><span class="lbl num">${fmt(S.rating)} / ${N ? fmt(N.min) : '∞'}</span></div>
-      <span class="rb next">${N ? Art.badge(N, 34) : ''}</span>
-    </div>
     <div class="hero">
       <canvas class="demo"></canvas>
-      <div class="side l">
-        <button class="fab pop" style="--d:2" data-act="quests" data-press><span class="fic"><img src="${ILL['ic-quest']}" alt="" width="34" height="34"></span>${qr ? `<span class="dot">${qr}</span>` : ''}<em data-l10n="hub.quests">${t('hub.quests')}</em></button>
-        <button class="fab pop" style="--d:3" data-act="events" data-press><span class="fic"><img src="${ILL['ic-trophy']}" alt="" width="34" height="34"></span><em data-l10n="hub.events">${t('hub.events')}</em></button>
+      <span class="hero-mark" aria-hidden="true">SIGNAL · ARENA</span>
+    </div>
+    <div class="playzone">
+      <div class="zone-head">
+        <span class="zh-dot" aria-hidden="true"></span><b data-l10n="hub.modesKicker">${t('hub.modesKicker')}</b>
+        <span class="zh-line" aria-hidden="true"></span>
+        <button class="zh-meta" type="button" data-modebtn="career" aria-label="${leagueName(L)} · ${fmt(S.rating)} — ${t('hub.career')}"><span class="zm-badge" aria-hidden="true">${Art.badge(L, 18)}</span><span class="zm-t num">${leagueName(L)} · ${fmt(S.rating)}</span><span class="zm-go" aria-hidden="true">›</span></button>
       </div>
-      <div class="side r">
-        <button class="fab pop ${freeLeft <= 0 ? 'free' : ''}" style="--d:2" data-act="gifts" data-press><span class="fchest">${Art.icon('gift', { c: '#FFE9B0' })}</span><em class="num" id="freeT" data-gift="1">${freeLeft > 0 ? fmtLeft(freeLeft) : t('hub.gift')}</em></button>
+      <!-- Иконки — стикеры из iconideas/ (webp в src/ill, ключи ic-*): крупнее в
+           три раза, поэтому карточки режимов стали вертикальными плашками.
+           Верхний ряд (режимы игры) и нижний (награды) красятся в два цвета
+           из той же гаммы — см. .modebtn / .modebtn.sec в screens_hub.css. -->
+      <div class="play-grid">
+        <button class="b3 modebtn mode-free rise" style="--d:2" data-modebtn="free" data-press><span class="mb-i" aria-hidden="true"><img src="${ILL['ic-free']}" alt="" width="120" height="120"></span><span class="mb-t"><b>${t('mode.free')}</b><small>${t('hub.freeSub')}</small></span></button>
+        <button class="b3 modebtn mode-ranked rise" style="--d:3" data-modebtn="ranked" data-press><span class="mb-i" aria-hidden="true"><img src="${ILL['ic-ranked']}" alt="" width="120" height="120"></span><span class="mb-t"><b>${t('mode.ranked')}</b><small>${t('hub.rankedSub')}</small></span></button>
+        <button class="b3 modebtn mode-practice rise" style="--d:4" data-modebtn="practice" data-press><span class="mb-i" aria-hidden="true"><img src="${ILL['ic-practice']}" alt="" width="120" height="120"></span><span class="mb-t"><b>${t('mode.practice')}</b><small>${t('hub.practiceSub')}</small></span></button>
+      </div>
+      <div class="grid-row2">
+        <button class="b3 modebtn mode-quest sec rise" style="--d:5" data-act="quests" data-press>${qr ? `<span class="dot">${qr}</span>` : ''}<span class="mb-i" aria-hidden="true"><img src="${ILL['ic-quests']}" alt="" width="120" height="120"></span><span class="mb-t"><b>${t('hub.quests')}</b><small id="questSub" class="num">${qr ? t('hub.questsReady', { n: qr }) : t('hub.questsSub')}</small></span></button>
+        <button class="b3 modebtn mode-gift sec rise ${freeLeft <= 0 ? 'ready' : ''}" style="--d:6" data-act="gifts" data-press><span class="mb-i" aria-hidden="true"><img src="${ILL['ic-gift']}" alt="" width="120" height="120"></span><span class="mb-t"><b>${t('hub.gift')}</b><small id="freeT" class="num">${giftStatus(freeLeft)}</small></span></button>
       </div>
     </div>
-    <div class="playzone play-grid">
-      <button class="b3 modebtn rise" style="--d:2" data-modebtn="free" data-press><span class="mb-i"><img src="${ILL['ic-swirl']}" alt="" width="120" height="120"></span><span class="mb-t"><b>${t('mode.free')}</b><small>${t('hub.freeSub')}</small></span></button>
-      <button class="b3 modebtn gold rise" style="--d:3" data-modebtn="ranked" data-press><span class="mb-i"><img src="${ILL['ic-cross']}" alt="" width="120" height="120"></span><span class="mb-t"><b>${t('mode.ranked')}</b><small>${t('mode.rankedSub')}</small></span></button>
-      <button class="b3 modebtn dark rise" style="--d:4" data-modebtn="practice" data-press><span class="mb-i"><img src="${ILL['ic-basket']}" alt="" width="120" height="120"></span><span class="mb-t"><b>${t('mode.practice')}</b><small>${t('hub.practiceSub')}</small></span></button>
-      <button class="b3 modebtn dark rise" style="--d:5" data-modebtn="career" data-press><span class="mb-i"><img src="${ILL['ic-medalp']}" alt="" width="120" height="120"></span><span class="mb-t"><b>${t('hub.career')}</b><small>${t('hub.careerSub')}</small></span></button>
-    </div>
-    ${this.friendsBar()}
     </div>`;
   },
   /* Друзья-лента (3 друга + «+» к рефералке):
@@ -112,8 +115,12 @@ Router.def('hub', {
     if (c.state === 'unlocking') return `<button class="slot unl rise" style="--d:${4 + i}" data-chest="${i}" data-press><span class="sc">${Art.chest(c.kind, 50)}</span><b class="num" data-ends="${c.endsAt}">${fmtLeft(c.endsAt - Date.now())}</b><span class="skip">${Art.gem(14)}18</span></button>`;
     return `<button class="slot lock rise" style="--d:${4 + i}" data-chest="${i}" data-press><span class="sc">${Art.chest(c.kind, 50)}</span><b>${Art.chestName(c.kind)}</b><span class="skip">${Art.icon('clock', { c: '#9BE8FF', sw: 2.6 })}${fmtLeft(UNLOCK_MS[c.kind] || UNLOCK_MS.silver)}</span></button>`;
   },
-  mount(el) {
+  mount(el, data) {
     UI.bindHud(el);
+    if (data && data.preloader) {
+      el.classList.add('intro-entry');
+      if (!document.body.classList.contains('rm')) el.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 220, easing: 'cubic-bezier(.16,1,.3,1)' });
+    }
     this.el = el;
     let alive = true, navigation = 0; const timers = new Set();
     const later = (fn, ms) => { const id = setTimeout(() => { timers.delete(id); if (alive) fn(); }, ms); timers.add(id); };
@@ -125,25 +132,17 @@ Router.def('hub', {
       GameHost.ensure(); GameHost.send('quiet', { on: true }); GameHost.send('lobby'); GameHost.show(true, 'lobby');
     }
     const cv = el.querySelector('canvas.demo');
-    if (this.lobby) cv.style.display = 'none';
-    else this.game = new TT.Game(cv, { mode: 'demo', cam: { y: -1.55, z: 1.15, pitch: 25, f: .92, cy: .5, swayAmp: 9 }, spd: .38, diff: .9 });
+    cv.style.display = 'none';
+    if (!this.lobby) { el.classList.add('lobby'); this.game = Preloader.ensureDemo(); }
     const g = this.game;
-    if (g) {
-      g.on = (ev, d) => {
-        if (ev === 'point') later(() => !g.dead && g.serve(Math.random() < .5 ? 'p' : 'o'), 700);
-      };
-      later(() => g.serve('o'), 600);
-    }
-    // дорога лиги
-    later(() => { const i = el.querySelector('.road .bar i'); i && i.style.setProperty('--p', i.dataset.p); }, 400);
-    // таймеры: слоты сундуков + кулдаун подарка — оба живые, без застывших подписей
+    // таймеры: слоты сундуков + кулдаун подарка
     const timer = setInterval(() => {
       $$('[data-ends]', el).forEach((b) => (b.textContent = fmtLeft(+b.dataset.ends - Date.now())));
       const gft = el.querySelector('#freeT');
       if (gft) {
         const left = (S.freeAt || 0) - Date.now();
-        gft.textContent = left > 0 ? fmtLeft(left) : t('hub.gift');
-        const fab = gft.closest('.fab'); fab && fab.classList.toggle('free', left <= 0);
+        gft.textContent = giftStatus(left);
+        const btn = gft.closest('.modebtn'); if (btn) btn.classList.toggle('ready', left <= 0);
       }
       UI.refreshNotifications();
     }, 1000);
@@ -206,14 +205,28 @@ Router.def('hub', {
     const spark = (e) => { const p = FX.pt({ getBoundingClientRect: () => ({ left: e.clientX, top: e.clientY, width: 0, height: 0 }) }); FX.burst(p.x, p.y, { c: ['#2EE6FF', '#fff'], count: 12, speed: 6, size: .7 }); Sfx.paddle(1.2); };
     cv.addEventListener('pointerdown', spark);
     const lobby = this.lobby;
-    return () => { alive = false; timers.forEach(clearTimeout); clearInterval(timer); el.removeEventListener('click', click); cv.removeEventListener('pointerdown', spark); if (g) g.destroy(); this.game = null; this.el = null; if (lobby) GameHost.show(false); };
+    return () => { alive = false; timers.forEach(clearTimeout); clearInterval(timer); el.removeEventListener('click', click); cv.removeEventListener('pointerdown', spark); if (g) Preloader.releaseDemo(g); this.game = null; this.el = null; if (lobby) GameHost.show(false); };
   },
+  leave() { Preloader.cancel(); },
   refreshLocale(el) {
     UI.refreshHud(el); UI.localize(el);
-    const labels = { free: ['mode.free', 'hub.freeSub'], ranked: ['mode.ranked', 'mode.rankedSub'], practice: ['mode.practice', 'hub.practiceSub'], career: ['hub.career', 'hub.careerSub'] };
-    $$('[data-modebtn]', el).forEach((button) => { const keys = labels[button.dataset.modebtn]; button.querySelector('.mb-t b').textContent = t(keys[0]); button.querySelector('.mb-t small').textContent = t(keys[1]); });
-    const left = (S.freeAt || 0) - Date.now(), gift = el.querySelector('#freeT'); if (gift) gift.textContent = left > 0 ? fmtLeft(left) : t('hub.gift');
-    const online = el.querySelector('[data-online-count]'); if (online) online.textContent = t('hub.onlineCount', { n: Number(online.dataset.onlineCount) });
+    const labels = { free: ['mode.free', 'hub.freeSub'], ranked: ['mode.ranked', 'hub.rankedSub'], practice: ['mode.practice', 'hub.practiceSub'] };
+    $$('[data-modebtn]', el).forEach((button) => { const keys = labels[button.dataset.modebtn]; if (!keys) return; button.querySelector('.mb-t b').textContent = t(keys[0]); button.querySelector('.mb-t small').textContent = t(keys[1]); });
+    // Вторичные карточки живут на data-act, а не на data-modebtn, поэтому их
+    // заголовки переводим отдельно — иначе при смене языка они остаются старыми.
+    const qb = el.querySelector('[data-act="quests"] .mb-t b'), gb = el.querySelector('[data-act="gifts"] .mb-t b');
+    if (qb) qb.textContent = t('hub.quests');
+    if (gb) gb.textContent = t('hub.gift');
+    const left = (S.freeAt || 0) - Date.now(), gift = el.querySelector('#freeT');
+    if (gift) { gift.textContent = giftStatus(left); const btn = gift.closest('.modebtn'); if (btn) btn.classList.toggle('ready', left <= 0); }
+    const qr = questReady(), quest = el.querySelector('#questSub');
+    if (quest) quest.textContent = qr ? t('hub.questsReady', { n: qr }) : t('hub.questsSub');
+    const meta = el.querySelector('.zh-meta');
+    if (meta) {
+      const L = leagueOf(S.rating), text = `${leagueName(L)} · ${fmt(S.rating)}`;
+      meta.setAttribute('aria-label', `${text} — ${t('hub.career')}`);
+      const tspan = meta.querySelector('.zm-t'); if (tspan) tspan.textContent = text;
+    }
   },
   chestTap(i, btn) {
     const c = S.chests[i]; if (!c) return;

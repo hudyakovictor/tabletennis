@@ -52,7 +52,6 @@ Router.def('pass', {
       if (r.k === 'coins' || r.k === 'gems') Wallet.show(r.k, r.n, p);
       else if (r.k === 'chest') { Sfx.reveal(2); toast(t('chest.toSlot', { name: Art.chestName(r.kind) + ' ' + t('chest.word') }), 'gift'); }
       else { Sfx.reveal(2); toast(result.items.length ? itemName(Catalog.byId(result.items[0])) : t('shop.owned'), 'paddle'); }
-      Nav.dots();   // бадж считается из состояния, а не отнимается «на глаз»
     };
     el.addEventListener('click', click);
     return () => { clearTimeout(timer); el.removeEventListener('click', click); };
@@ -67,7 +66,7 @@ Router.def('pass', {
   buyPremium(btn, seasonN = globalThis.TTSeason.seasonNumber(), receipt = null) {
     if (receipt) {
       const result = Rewards.confirmPurchase('premium-pass', receipt);
-      if (result.ok) { Sfx.win(); haptic('success'); flash('#FFE680', .6); if (Router.cur === 'pass') Router.repaint(); Nav.dots(); }
+      if (result.ok) { Sfx.win(); haptic('success'); flash('#FFE680', .6); if (Router.cur === 'pass') Router.repaint(); }
       else if (result.why !== 'claimed') toast(t(result.why === 'season' ? 'season.over' : 'shop.starsUnconfirmed'), 'lock');
       return result;
     }

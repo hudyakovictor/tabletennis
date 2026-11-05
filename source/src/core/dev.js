@@ -1,13 +1,13 @@
 /* ---------- dev-панель (только десктоп) ---------- */
 const Dev = {
   list: [
-    ['splash', 'Загрузка'], ['hub', 'Арена (хаб)'], ['mm', 'Поиск соперника'], ['vs', 'VS-экран'], ['match', 'Матч (играбельный)'], ['train', 'Обучение'],
-    ['result', 'Победа'], ['result-lose', 'Поражение'], ['chest', 'Открытие сундука'], ['shop', 'Магазин'], ['pass', 'Сезонный пропуск'],
-    ['ranks', 'Рейтинг'], ['profile', 'Профиль']
+    ['splash', 'loader.loading'], ['hub', 'nav.hub'], ['mm', 'mm.searching'], ['vs', 'mm.found'], ['match', 'match.go'], ['train', 'train.title'],
+    ['result', 'result.win'], ['result-lose', 'result.lose'], ['chest', 'chest.openNow'], ['shop', 'shop.title'], ['pass', 'nav.pass'],
+    ['ranks', 'ranks.title'], ['profile', 'hud.profile']
   ],
   build() {
     const l = $('#dpList'); if (!l) return;
-    l.innerHTML = this.list.map(([id, t]) => `<button data-go="${id}">${t}</button>`).join('');
+    l.innerHTML = this.list.map(([id, key]) => `<button data-go="${id}">${t(key)}</button>`).join('');
     l.addEventListener('click', (e) => {
       const b = e.target.closest('button'); if (!b) return; const id = b.dataset.go;
       if (id === 'result') Router.go('result', { data: Demo.result(true) });

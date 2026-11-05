@@ -6,6 +6,7 @@ const windowHandlers = new Map();
 const lib = load(['10_math.js', '12_match_rules.js', '30_physics.js', '38_paddle_motion.js',
   '40_swipe.js', '42_shot_diagnostics.js', '56_rig.js', '57_camera.js', '70_game.js'],
   ['Game', 'SwipeTracker', 'PaddleStrokeMotion', 'isRealStroke', 'tapStrokeMetrics', 'ShotJournal', 'V3', 'PH', 'GS',
+    'STROKES', 'SERVE_STROKE_ALIAS',
     'rigViewProj', 'integrateBall', 'predict', 'M4'],
   { window: { addEventListener(type, handler) { windowHandlers.set(type, handler); } }, document: { addEventListener() {},
     body: { style: {}, classList: { toggle() {} } }, documentElement: { style: {} } } });
@@ -24,6 +25,7 @@ function inputGame(pointerType = 'touch', scale = 1) {
     prevPos: V3.new(.7, 1.04, 1.78), normal: V3.new(0, 0, -1), vel: V3.new(), roll: 0, lastHitT: -9 };
   g.ball = { p: V3.new(0, 1.05, 1.5), v: V3.new(0, -.1, 6), w: V3.new(), live: true, lastHitBy: -1 };
   g.isServeBall = false; g.rallyBounces = [1]; g.replayer = { on: false }; g.career = { active: false };
+  g.contactFlashes = []; g._contactFlashSeen = new Set();
   g.anticipation = { active: false, targetDir: V3.new(), visualOffset: V3.new(.05, .04, .08) };
   g.audio = { init() {}, resume() {}, ui() {}, whoosh() {}, hitRacket() {}, onRallyHit() {} };
   g.equip = { forSide: () => ({ e: PH.E_RACKET, mu: PH.MU_RACKET, et: PH.ET_RACKET, damp: 1, sweet: 1 }), vmagK: 1, sweetK: 1 };
@@ -438,4 +440,60 @@ test('normal game time ignores legacy pace and clamps any accelerated target; ex
     if (mode === 'normal') assert.equal(g.timeScale, 1);
     if (mode === 'slow') assert.ok(g.timeScale < 1);
   }
+});
+
+/* ---------------- контактная вспышка принятого удара (фаза 1) -------------- */
+
+function rgbOf(hex) {
+  const n = parseInt(hex.replace('#', ''), 16);
+  return [((n >> 16) & 255) / 255, ((n >> 8) & 255) / 255, (n & 255) / 255];
+}
+function paletteOf(id) { return rgbOf(lib.STROKES[lib.SERVE_STROKE_ALIAS[id] || id].col); }
+function sameRgb(a, b) { return Math.abs(a[0] - b[0]) < 1e-6 && Math.abs(a[1] - b[1]) < 1e-6 && Math.abs(a[2] - b[2]) < 1e-6; }
+
+test('a real mouse and touch contact flashes once in the colour of the accepted stroke', () => {
+  for (const type of ['mouse', 'touch']) {
+    const { g, send } = inputGame(type);
+    send('pointerdown'); send('pointerup');
+    assert.equal(g.stats.shots, 1, `${type}: the tap did not make contact`);
+    assert.equal(g.contactFlashes.length, 1, `${type}: one pulse per accepted contact`);
+    const f = g.contactFlashes[0];
+    assert.equal(f.side, 1, `${type}: the pulse belongs to the striking side`);
+    assert.ok(sameRgb([f.r, f.g, f.b], paletteOf(f.id)), `${type}/${f.id}: ${JSON.stringify([f.r, f.g, f.b])}`);
+    assert.ok(f.life >= 0.1 && f.life <= 0.15, `${type}: about 120 ms of match time, got ${f.life}`);
+    /* шлейф и его длина — отдельная настройка; вспышка от них не зависит */
+    const noTrail = inputGame(type); noTrail.g.settings.showTrail = false;
+    noTrail.g._calValues = { trailLen: 0 };
+    noTrail.send('pointerdown'); noTrail.send('pointerup');
+    assert.equal(noTrail.g.contactFlashes.length, 1, `${type}: turning the ribbon off cannot kill the contact flash`);
+  }
+});
+
+test('a served ball flashes the stroke the serve executes', () => {
+  const { g, send } = inputGame();
+  g.state = lib.GS.SERVE_TOSS; g.isServeBall = true; g.ball.lastHitBy = 0;
+  g.tossStartY = lib.PH.TABLE_Y + .14; g.tossApex = lib.PH.TABLE_Y + .40;
+  lib.V3.set(g.ball.p, 0, lib.PH.TABLE_Y + .30, 1.6); lib.V3.set(g.ball.v, 0, -1, -.02);
+  send('pointerdown'); send('pointerup');
+  assert.equal(g.shotJournal.latest.strokeId, 'SERVE_NO_SPIN');
+  assert.equal(g.contactFlashes.length, 1, 'the serve contact is an accepted contact');
+  const f = g.contactFlashes[0];
+  assert.equal(f.id, 'SERVE_NO_SPIN');
+  assert.ok(sameRgb([f.r, f.g, f.b], paletteOf('SERVE_NO_SPIN')), 'flat serve uses the serve palette');
+  assert.ok(!sameRgb([f.r, f.g, f.b], rgbOf(lib.STROKES.BLOCK.col)), 'flat serve is steel-blue, not the white of BLOCK');
+});
+
+test('volley, unreachable, paused and cancelled inputs never spawn a pulse', () => {
+  const volley = inputGame(); volley.g.rallyBounces = [];
+  volley.send('pointerdown'); volley.send('pointerup');
+  assert.equal(volley.g.contactFlashes.length, 0, 'a volley is not a contact');
+  const far = inputGame(); far.g.ball.p.z = 2.9;
+  far.send('pointerdown'); far.send('pointerup');
+  assert.equal(far.g.contactFlashes.length, 0, 'an unreachable ball is not a contact');
+  const paused = inputGame(); paused.g.paused = true;
+  paused.send('pointerdown'); paused.send('pointerup');
+  assert.equal(paused.g.contactFlashes.length, 0, 'a paused world must not paint new contacts');
+  const cancelled = inputGame();
+  cancelled.send('pointerdown'); cancelled.send('pointercancel'); cancelled.send('pointerup');
+  assert.equal(cancelled.g.contactFlashes.length, 0, 'a cancelled click is not a contact');
 });

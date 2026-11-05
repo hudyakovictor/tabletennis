@@ -13,7 +13,10 @@ const TT = (() => {
     constructor(canvas, opt = {}) {
       this.cv = canvas; this.ctx = canvas.getContext('2d');
       this.mode = opt.mode || 'demo';
-      this.cam = Object.assign({ y: -1.05, z: 1.75, pitch: 36, f: 1.02, cy: .43, yaw: 0, sway: 0 }, opt.cam || {});
+      this.lobby = this.mode === 'demo' && opt.lobby === true;
+      this.cam = Object.assign(this.lobby
+        ? { y: -3.2, z: 1.8, pitch: 28, f: 1, cy: .5, yaw: -40, sway: 0 }
+        : { y: -1.05, z: 1.75, pitch: 36, f: 1.02, cy: .43, yaw: 0, sway: 0 }, opt.cam || {});
       this.on = opt.on || (() => {});
       this.spd = opt.spd || .42; this.timeScale = 1; this.slowUntil = 0;
       this.diff = opt.diff || .6;
@@ -26,14 +29,18 @@ const TT = (() => {
       this.finger = { down: false, sx: 0, sy: 0, vx: 0, vy: 0, hist: [] };
       this.assist = opt.assist !== false;
       this.resize();
+      if (this.lobby) this.prepareLobby({ intro: true });
       this.loop = this.loop.bind(this); this.last = performance.now(); this.raf = requestAnimationFrame(this.loop);
       if (this.mode === 'play') this.bindInput();
     }
-    destroy() { cancelAnimationFrame(this.raf); this.dead = true; this.unbind && this.unbind(); }
+    destroy() {
+      cancelAnimationFrame(this.raf); this.dead = true; this.unbind && this.unbind();
+      if (this._lobby) this._lobby.onReady = this._lobby.onFrame = this._lobby.onHit = null;
+    }
     resize() {
       const r = this.cv.getBoundingClientRect(); this.dpr = Math.min(2, devicePixelRatio || 1) * (S.quality === 'low' ? .7 : 1);
       this.W = r.width; this.H = r.height; this.cv.width = Math.max(1, r.width * this.dpr); this.cv.height = Math.max(1, r.height * this.dpr);
-      this.F = this.W * this.cam.f;
+      this.F = (this.lobby ? Math.min(this.W, this.H * .62) : this.W) * this.cam.f;
     }
 
     /* ---------- камера ---------- */
@@ -46,7 +53,7 @@ const TT = (() => {
       const { sp, cp } = this.basis();
       const dx = x, dy = y - this.cam.y, dz = z - this.cam.z;
       const zc = dy * cp - dz * sp; const yc = dy * sp + dz * cp;
-      const s = this.F / Math.max(.05, zc);
+      const s = this.F / Math.max(this.lobby ? .001 : .05, zc);
       return { x: this.W / 2 + dx * s, y: this.H * this.cam.cy - yc * s, s };
     }
     unprojectPlaneY(sx, sy, Y) {
@@ -55,6 +62,141 @@ const TT = (() => {
       const dyy = sp * vy + cp, dzz = cp * vy - sp;
       const t = (Y - this.cam.y) / dyy;
       return { x: t * vx, z: this.cam.z + t * dzz };
+    }
+
+    /* Menu-only clock and arcs. No serves, match AI, points or ball replacement. */
+    prepareLobby({ requestId = 0, intro = true, onReady, onFrame, onHit } = {}) {
+      if (!this.lobby || this.dead) return false;
+      const old = this._lobby;
+      if (!intro && old && old.phase === 'rally') {
+        Object.assign(old, { requestId, ready: false, onReady, onFrame: null, onHit: null, handoff: true, framesDone: true });
+        return true;
+      }
+      if (intro && old && old.requestId === requestId && old.phase !== 'idle') return false;
+      const l = this._lobby = { requestId, onReady, onFrame: intro ? onFrame : null, onHit: intro ? onHit : null,
+        ready: false, phase: 'idle', handoff: !intro, framesDone: !intro, radius: VIS_BR, first: false, leg: null, hitPending: null };
+      this.state = 'idle'; this.rally = 0; this.netShake = 0; this.trail.length = this.marks.length = 0;
+      Object.assign(this.ball, { vx: 0, vy: 0, vz: 0, live: false, bounced: null, net: false });
+      for (const P of [this.pp, this.op]) Object.assign(P, { x: 0, z: .28, tx: 0, tz: .28, vx: 0, ang: 0,
+        flash: 0, bodyX: 0, lean: 0, windup: 0, hitAt: -100 });
+      l.left = this.project(this.pp.x, PY, this.pp.z).x <= this.project(this.op.x, OY, this.op.z).x ? 'p' : 'o';
+      if (!intro) {
+        Object.assign(this.ball, { x: 0, y: l.left === 'p' ? PY : OY, z: .28 });
+        l.first = true; this.lobbyContact(l.left);
+      }
+      return true;
+    }
+    lobbyCalm() {
+      return !!document.hidden || !!S.rm || (typeof effectiveReducedMotion === 'function' && effectiveReducedMotion());
+    }
+    launchLobby({ requestId = 0, x = .5, y = .48, diameter = .9 } = {}) {
+      const l = this._lobby;
+      if (!this.lobby || this.dead || !l.ready || l.requestId !== requestId || l.phase !== 'idle' ||
+          !this.W || !this.H || ![x, y, diameter].every(Number.isFinite) || diameter <= 0) return false;
+      if (this.lobbyCalm()) this.stageLobbyContact();
+      else {
+        // Invert the actual yaw/pitch projection at the depth set by visible diameter.
+        const depth = Math.max(.001, 2 * VIS_BR * this.F / (diameter * this.W));
+        l.radius = diameter * this.W * depth / (2 * this.F);
+        const dx = (x * this.W - this.W / 2) * depth / this.F;
+        const yc = -(y * this.H - this.H * this.cam.cy) * depth / this.F;
+        const { sp, cp } = this.basis(); const ry = this.cam.y + depth * cp + yc * sp - NY;
+        const yaw = (this.cam.yaw + this.cam.sway) * Math.PI / 180;
+        Object.assign(this.ball, { x: dx * Math.cos(yaw) + ry * Math.sin(yaw),
+          y: -dx * Math.sin(yaw) + ry * Math.cos(yaw) + NY, z: this.cam.z + yc * cp - depth * sp,
+          live: true, by: l.left === 'p' ? 'o' : 'p', bounced: null, net: false });
+        l.phase = 'flight'; this.state = 'rally'; this.lobbyLeg(l.left, true);
+      }
+      this.draw();
+      return true;
+    }
+    stageLobbyContact() {
+      const l = this._lobby;
+      Object.assign(this.ball, { x: 0, y: l.left === 'p' ? PY : OY, z: .28, vx: 0, vy: 0, vz: 0 });
+      l.handoff = true; this.lobbyContact(l.left);
+    }
+    lobbyLeg(side, incoming = false) {
+      const l = this._lobby, b = this.ball;
+      const to = { x: incoming ? 0 : Math.sin(this.rally * .85) * .33,
+        y: side === 'p' ? PY : OY, z: incoming ? .28 : .28 + Math.sin(this.rally * .65) * .035 };
+      const bounce = { x: lerp(incoming ? 0 : b.x, to.x, .78), y: side === 'p' ? .48 : L - .48, z: BR };
+      l.leg = { side, from: { x: b.x, y: b.y, z: b.z }, bounce, to, before: incoming ? .98 : .8,
+        after: incoming ? .32 : .36, height: incoming ? .58 : .42, elapsed: 0, bounced: false,
+        p: { x: this.pp.x, z: this.pp.z }, o: { x: this.op.x, z: this.op.z } };
+      const T = l.leg.before;
+      b.vx = (bounce.x - b.x) / T; b.vy = (bounce.y - b.y) / T; b.vz = (BR - b.z + 4 * l.leg.height) / T;
+    }
+    lobbyContact(side) {
+      const l = this._lobby, b = this.ball, P = side === 'p' ? this.pp : this.op;
+      const calm = this.lobbyCalm();
+      P.x = P.tx = b.x; P.z = P.tz = b.z; P.windup = 0; P.flash = calm ? 0 : 1;
+      P.hitAt = calm ? -100 : this.t; P.ang = calm ? 0 : (side === 'p' ? .25 : -.25);
+      b.live = true; b.by = side; b.bounced = null; b.net = false; this.state = l.phase = 'rally'; this.rally++;
+      if (!l.first) { l.first = true; l.hitPending = { type: 'lobbyHit', requestId: l.requestId, side, first: true }; }
+      l.leg = null;
+      if (!calm) this.lobbyLeg(side === 'p' ? 'o' : 'p');
+    }
+    stepLobby(dt) {
+      const l = this._lobby, b = this.ball;
+      if (this.lobbyCalm()) {
+        if (l.phase === 'flight') this.stageLobbyContact();
+        b.vx = b.vy = b.vz = 0; this.trail.length = this.marks.length = 0;
+        for (const P of [this.pp, this.op]) { P.vx = P.windup = P.flash = P.ang = 0; P.hitAt = -100; }
+        return;
+      }
+      if (l.phase === 'idle' || dt <= 0) return;
+      this.t += dt;
+      if (!l.leg) this.lobbyLeg(b.by === 'p' ? 'o' : 'p');
+      const leg = l.leg, total = leg.before + leg.after;
+      leg.elapsed = Math.min(total, leg.elapsed + dt);
+      const after = leg.elapsed >= leg.before;
+      const a = after ? leg.bounce : leg.from, end = after ? leg.to : leg.bounce;
+      const T = after ? leg.after : leg.before, u = clamp((leg.elapsed - (after ? leg.before : 0)) / T, 0, 1);
+      const height = after ? .12 : leg.height;
+      b.x = lerp(a.x, end.x, u); b.y = lerp(a.y, end.y, u); b.z = lerp(a.z, end.z, u) + 4 * height * u * (1 - u);
+      b.vx = (end.x - a.x) / T; b.vy = (end.y - a.y) / T; b.vz = (end.z - a.z + 4 * height * (1 - 2 * u)) / T;
+      if (after && !leg.bounced) {
+        leg.bounced = true; b.bounced = leg.side;
+        this.marks.push({ x: leg.bounce.x, y: leg.bounce.y, t: this.t });
+      }
+      const progress = leg.elapsed / total, ease = progress * progress * (3 - 2 * progress);
+      for (const side of ['p', 'o']) {
+        const P = side === 'p' ? this.pp : this.op, origin = leg[side], receiver = side === leg.side;
+        const previous = P.x;
+        P.tx = receiver ? leg.to.x : origin.x * .55; P.tz = receiver ? leg.to.z : .28;
+        P.x = lerp(origin.x, P.tx, ease); P.z = lerp(origin.z, P.tz, ease); P.vx = (P.x - previous) / dt;
+        P.bodyX = lerp(P.bodyX, clamp(P.x, -.2, .2), Math.min(1, dt * 4)); P.lean = clamp((P.x - P.bodyX) * .6, -.06, .06);
+        P.windup = receiver ? clamp((.28 - (total - leg.elapsed)) / .28, 0, 1) : 0;
+        const follow = clamp(1 - (this.t - P.hitAt) / .42, 0, 1);
+        P.ang = clamp(-P.vx * .12, -.15, .15) + (side === 'p' ? -1 : 1) * (.35 * P.windup - .25 * follow);
+        P.flash *= Math.pow(.004, dt);
+      }
+      // Render the exact contact before advancing the outgoing leg.
+      if (leg.elapsed >= total) this.lobbyContact(leg.side);
+      if (S.quality !== 'low' && l.handoff) {
+        this.trail.push({ x: b.x, y: b.y, z: b.z }); if (this.trail.length > 12) this.trail.shift();
+      }
+    }
+    lobbyDrawn() {
+      const l = this._lobby;
+      if (!l || this.dead || !this.W || !this.H) return;
+      if (!l.ready) {
+        l.ready = true; const cb = l.onReady; l.onReady = null;
+        if (typeof cb === 'function') cb({ type: 'lobbyReady', requestId: l.requestId });
+        return;
+      }
+      if (!l.framesDone && l.phase !== 'idle') {
+        const p = this.project(this.ball.x, this.ball.y, this.ball.z), cb = l.onFrame;
+        l.framesDone = l.handoff; if (l.handoff) l.onFrame = null;
+        if (typeof cb === 'function') cb({ type: 'lobbyFrame', requestId: l.requestId, x: p.x / this.W, y: p.y / this.H,
+          diameter: 2 * l.radius * p.s / this.W, phase: l.phase, handoff: l.handoff,
+          progress: l.phase === 'flight' ? l.leg.elapsed / (l.leg.before + l.leg.after) : 1 });
+      }
+      if (this._lobby !== l || this.dead) return;
+      if (l.hitPending) {
+        const hit = l.hitPending, cb = l.onHit; l.hitPending = null; l.onHit = null;
+        if (typeof cb === 'function') cb(hit);
+      }
     }
 
     /* ---------- ввод ---------- */
@@ -88,6 +230,7 @@ const TT = (() => {
       b.by = by; b.bounced = null; b.net = false; b.live = true; this.rally++;
     }
     serve(by) {
+      if (this.lobby) return;
       const b = this.ball; this.rally = 0; this.trail = [];
       if (by === 'p') { this.state = 'serve-p'; b.live = false; b.x = this.pp.x; b.y = PY; b.z = .3; }
       else {
@@ -135,6 +278,7 @@ const TT = (() => {
     loop(now) {
       if (this.dead) return; this.raf = requestAnimationFrame(this.loop);
       let dtR = Math.min(.05, (now - this.last) / 1000); this.last = now;
+      if (this.lobby) { if (!this.paused || this.lobbyCalm()) this.stepLobby(this.paused ? 0 : dtR); this.draw(); return; }
       if (this.paused) { this.draw(); return; }
       this.timeScale = now < this.slowUntil ? .22 : lerp(this.timeScale, 1, .15);
       this.t += dtR;
@@ -146,6 +290,7 @@ const TT = (() => {
       this.draw();
     }
     step(dt, dtR) {
+      if (this.lobby) { this.stepLobby(dtR); return; }
       const b = this.ball;
       // ракетка игрока
       if (this.mode === 'play') {
@@ -257,10 +402,19 @@ const TT = (() => {
     draw() {
       const c = this.ctx; const W = this.W, H = this.H; c.setTransform(this.dpr, 0, 0, this.dpr, 0, 0); c.clearRect(0, 0, W, H);
       const P = (x, y, z) => this.project(x, y, z);
+      const lobby = this._lobby;
+      const back = lobby && (P(this.pp.x, PY, this.pp.z).s < P(this.op.x, OY, this.op.z).s ? 'p' : 'o');
+      if (lobby && lobby.phase !== 'idle' && !lobby.handoff) {
+        const b = this.ball; if (2 * lobby.radius * P(b.x, b.y, b.z).s <= 12) lobby.handoff = true;
+      }
       // тень стола на полу
       const fc = P(0, NY, FLOOR); const fw = P(HW + .5, NY, FLOOR).x - fc.x;
       let g = c.createRadialGradient(fc.x, fc.y, 0, fc.x, fc.y, fw * 1.3); g.addColorStop(0, 'rgba(0,0,0,.6)'); g.addColorStop(1, 'rgba(0,0,0,0)');
       c.fillStyle = g; c.beginPath(); c.ellipse(fc.x, fc.y, fw * 1.4, fw * .55, 0, 0, 7); c.fill();
+      if (lobby) {
+        this.drawRobotShadow(this.pp, PY);
+        this.drawRobotShadow(this.op, OY);
+      }
       // ножки
       c.fillStyle = '#0A0D1E';
       for (const [lx, ly] of [[-HW + .12, .25], [HW - .12, .25], [-HW + .12, L - .25], [HW - .12, L - .25]]) {
@@ -301,6 +455,17 @@ const TT = (() => {
       c.shadowColor = this.colO; c.strokeStyle = this.colO; c.lineWidth = 2;
       c.beginPath(); c.moveTo(f1.x, f1.y - 1); c.lineTo(f2.x, f2.y - 1); c.stroke(); c.restore();
 
+      if (lobby) {
+        const b = this.ball, ballFar = P(b.x, b.y, b.z).s < P(0, NY, NET_H).s;
+        if (ballFar) this.drawBall();
+        this.drawNet();
+        // Robots stand behind their own paddle, so the near body covers the far one.
+        this.drawRobot(this.op, OY, this.colO, true);
+        this.drawRobot(this.pp, PY, this.colP, false);
+        if (!ballFar) this.drawBall();
+        this.lobbyDrawn(); return;
+      }
+
       const b = this.ball; const ballFar = b.y > NY;
       this.drawPaddle(this.op, OY, this.colO, true);
       if (ballFar) this.drawBall();
@@ -324,11 +489,13 @@ const TT = (() => {
     }
     drawBall() {
       const c = this.ctx; const b = this.ball; const P = (x, y, z) => this.project(x, y, z);
+      if (this.lobby && !this._lobby.handoff) return;
       if (!b.live && this.state !== 'serve-p' && this.state !== 'serve-o') return;
+      const radius = this.lobby ? this._lobby.radius : VIS_BR;
       // тень
       const overTable = Math.abs(b.x) <= HW && b.y >= 0 && b.y <= L;
       const sz = overTable ? 0 : FLOOR; const sp = P(b.x, b.y, sz); const hgt = Math.max(0, b.z - sz);
-      const sr = VIS_BR * sp.s * (1 + hgt * .8);
+      const sr = radius * sp.s * (1 + hgt * .8);
       c.fillStyle = `rgba(0,0,10,${clamp(.55 - hgt * .5, .12, .55)})`; c.beginPath(); c.ellipse(sp.x, sp.y, sr * 1.2, sr * .5, 0, 0, 7); c.fill();
       // след
       const col = b.by === 'p' ? this.colP : this.colO; const perfect = this.lastShot && this.lastShot.perfect && b.by === 'p';
@@ -337,16 +504,71 @@ const TT = (() => {
         for (let i = 1; i < this.trail.length; i++) {
           const p0 = P(this.trail[i - 1].x, this.trail[i - 1].y, this.trail[i - 1].z), p1 = P(this.trail[i].x, this.trail[i].y, this.trail[i].z);
           const k = i / this.trail.length; c.strokeStyle = perfect ? `rgba(255,200,60,${k * .9})` : hexA(col, k * .7);
-          c.lineWidth = VIS_BR * p1.s * 1.6 * k; c.beginPath(); c.moveTo(p0.x, p0.y); c.lineTo(p1.x, p1.y); c.stroke();
+          c.lineWidth = radius * p1.s * 1.6 * k; c.beginPath(); c.moveTo(p0.x, p0.y); c.lineTo(p1.x, p1.y); c.stroke();
         }
         c.restore();
       }
-      const p = P(b.x, b.y, b.z); const r = Math.max(3, VIS_BR * p.s);
+      const p = P(b.x, b.y, b.z); const r = this.lobby ? radius * p.s : Math.max(3, VIS_BR * p.s);
       const gl = c.createRadialGradient(p.x, p.y, 0, p.x, p.y, r * 3.2); gl.addColorStop(0, perfect ? 'rgba(255,210,80,.55)' : 'rgba(255,255,255,.35)'); gl.addColorStop(1, 'rgba(255,255,255,0)');
       c.fillStyle = gl; c.beginPath(); c.arc(p.x, p.y, r * 3.2, 0, 7); c.fill();
       const g = c.createRadialGradient(p.x - r * .35, p.y - r * .4, r * .1, p.x, p.y, r);
       g.addColorStop(0, '#FFFFFF'); g.addColorStop(.6, '#FFF3E0'); g.addColorStop(1, '#F2B880');
       c.fillStyle = g; c.beginPath(); c.arc(p.x, p.y, r, 0, 7); c.fill();
+    }
+    drawRobotShadow(Pd, planeY) {
+      const c = this.ctx, p = this.project(Pd.bodyX, planeY + (planeY === PY ? -.32 : .32), FLOOR);
+      c.fillStyle = 'rgba(0,0,12,.4)'; c.beginPath(); c.ellipse(p.x, p.y, p.s * .29, p.s * .11, 0, 0, 7); c.fill();
+    }
+    drawRobot(Pd, planeY, col, far) {
+      const c = this.ctx, inward = far ? -1 : 1, hand = far ? -1 : 1;
+      const bx = Pd.bodyX, by = planeY - inward * .32;
+      const follow = clamp(1 - (this.t - Pd.hitAt) / .42, 0, 1);
+      const tx = bx + Pd.lean, ty = by + inward * (.035 + follow * .07 - Pd.windup * .04);
+      const P = (x, y, z) => this.project(x, y, z);
+      const joint = (p, radius, fill) => { c.fillStyle = fill; c.beginPath(); c.arc(p.x, p.y, p.s * radius, 0, 7); c.fill(); };
+      const limb = (a, b, width) => {
+        c.strokeStyle = '#111A30'; c.lineWidth = (a.s + b.s) * width * .6;
+        c.beginPath(); c.moveTo(a.x, a.y); c.lineTo(b.x, b.y); c.stroke();
+        c.strokeStyle = '#A8B9D0'; c.lineWidth *= .65; c.stroke();
+      };
+      c.save(); c.lineCap = c.lineJoin = 'round';
+      const stride = clamp(Pd.vx * .055, -.055, .055);
+      for (const sign of [-1, 1]) {
+        const hip = P(bx + sign * .11, by, -.1), knee = P(bx + sign * .13, by + inward * .035, -.43 + Math.abs(stride) * .2);
+        const foot = P(bx + sign * .14 + sign * stride, by - inward * sign * stride, FLOOR + .035);
+        limb(hip, knee, .075); limb(knee, foot, .065); joint(knee, .047, '#526887');
+        c.fillStyle = '#D5DFEC'; c.beginPath(); c.ellipse(foot.x, foot.y, foot.s * .105, foot.s * .045, -.15 * sign, 0, 7); c.fill();
+      }
+      const freeShoulder = P(tx - hand * .19, ty, .53), freeElbow = P(tx - hand * .24, ty, .23), freeWrist = P(tx - hand * .18, ty + inward * .07, .03);
+      limb(freeShoulder, freeElbow, .075); limb(freeElbow, freeWrist, .06); joint(freeElbow, .045, '#526887'); joint(freeWrist, .045, '#D5DFEC');
+      this.quad([P(bx - .15, by, .04), P(bx + .15, by, .04), P(bx + .13, by, -.17), P(bx - .13, by, -.17)], '#384D70');
+      const chest = P(tx, ty, .35);
+      let g = c.createLinearGradient(chest.x, chest.y - .3 * chest.s, chest.x, chest.y + .3 * chest.s);
+      g.addColorStop(0, '#DBE4F0'); g.addColorStop(1, '#7085A5');
+      this.quad([P(tx - .19, ty, .57), P(tx + .19, ty, .57), P(bx + .14, by, .04), P(bx - .14, by, .04)], g);
+      c.strokeStyle = '#1B2A47'; c.lineWidth = Math.max(1, chest.s * .018); c.stroke();
+      this.quad([P(tx - .15, ty, .43), P(tx + .15, ty, .43), P(tx + .14, ty, .34), P(tx - .14, ty, .34)], col);
+      joint(P(tx, ty, .21), .046, '#162A47'); joint(P(tx, ty, .21), .023, lighten(col));
+      limb(P(tx, ty, .57), P(tx, ty, .72), .075);
+      const head = P(tx, ty, .83), w = head.s * .30, h = head.s * .27;
+      g = c.createLinearGradient(head.x - w / 2, head.y - h / 2, head.x + w / 2, head.y + h / 2);
+      g.addColorStop(0, '#F1F5FB'); g.addColorStop(1, '#8D9FB9');
+      roundRect(c, head.x - w / 2, head.y - h / 2, w, h, w * .18); c.fillStyle = g; c.fill();
+      c.strokeStyle = '#233650'; c.lineWidth = Math.max(1, head.s * .017); c.stroke();
+      roundRect(c, head.x - w * .4, head.y - h * .18, w * .8, h * .38, h * .12); c.fillStyle = '#101D34'; c.fill();
+      const target = P(this.ball.x, this.ball.y, this.ball.z), look = this._lobby.phase === 'idle' ? 0 : clamp((target.x - head.x) / this.W, -.12, .12) * w;
+      c.fillStyle = lighten(col);
+      for (const sign of [-1, 1]) { roundRect(c, head.x + look + sign * w * .19 - w * .1, head.y - h * .045, w * .2, h * .09, h * .025); c.fill(); }
+      c.fillStyle = '#566F92'; c.fillRect(head.x - w * .15, head.y + h * .3, w * .3, h * .035);
+      const shoulder = P(tx + hand * .19, ty, .53);
+      const elbow = P(tx + hand * .22 + (Pd.x - tx) * .25, planeY - inward * (.18 + Pd.windup * .1), Math.max(.18, Pd.z - .05));
+      const contact = P(Pd.x, planeY, Pd.z), r = (far ? .1 : .085) * contact.s * (far ? 1.25 : 1.05);
+      // The wrist grips the existing drawPaddle handle, including its screen rotation.
+      const hy = r * (far ? -1.35 : 1.3);
+      const wrist = { x: contact.x - Math.sin(Pd.ang) * hy, y: contact.y + Math.cos(Pd.ang) * hy, s: contact.s };
+      limb(shoulder, elbow, .075); limb(elbow, wrist, .06); joint(shoulder, .052, col); joint(elbow, .044, '#526887');
+      this.drawPaddle(Pd, planeY, col, far); joint(wrist, .035, '#D5DFEC');
+      c.restore();
     }
     drawPaddle(Pd, planeY, col, far) {
       const c = this.ctx; const p = this.project(Pd.x, planeY, Pd.z);

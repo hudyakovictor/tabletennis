@@ -1,0 +1,33 @@
+<div id="preloader" class="preloader" data-phase="boot" role="status" aria-live="polite">
+  <div class="pl-backdrop"></div>
+  <div class="pl-wordmark" aria-hidden="true"><b>TABLE TENNIS</b><span>ULTIMATE</span></div>
+  <div class="pl-stage" aria-hidden="true">
+    <svg class="pl-ring" viewBox="0 0 184 184">
+      <circle cx="92" cy="92" r="76" fill="none" stroke="rgba(255,255,255,.09)" stroke-width="7"/>
+      <circle class="pl-progress" cx="92" cy="92" r="76" fill="none" stroke="#FFC93A" stroke-width="7" stroke-linecap="round" stroke-dasharray="477.522" stroke-dashoffset="477.522"/>
+    </svg>
+    <img class="pl-paddle" alt=""/>
+    <img class="pl-burst" alt=""/>
+    <div class="pl-ball">
+      <div class="pl-sheet"></div>
+      <svg class="pl-fallback" viewBox="0 0 184 184">
+        <defs><radialGradient id="plBallLight" cx="32%" cy="25%" r="74%"><stop stop-color="#fff"/><stop offset=".65" stop-color="#f5f2e8"/><stop offset="1" stop-color="#a4a9b0"/></radialGradient></defs>
+        <circle cx="92" cy="98" r="58" fill="url(#plBallLight)" stroke="#171b22" stroke-width="3"/>
+        <path d="M44 81l91-14M50 78l7 21q13 10 26-4l5-18M94 76l5 19q14 8 27-7l4-18" fill="#0b0e14" stroke="#0b0e14" stroke-width="5" stroke-linecap="round"/>
+        <path d="M61 83l13-5M105 79l13-5" fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round"/>
+        <path d="M82 116q10 9 20-2" fill="none" stroke="#171b22" stroke-width="3" stroke-linecap="round"/>
+      </svg>
+    </div>
+  </div>
+  <svg class="pl-glass" viewBox="0 0 400 400" aria-hidden="true">
+    <defs><path id="plCracks" d="M164 166l-34-34-8-30-36-35m45 64l-34 3-16-13M220 155l26-49 23-12 20-43m-43 55l-5-26 14-23M248 184l49-12 21-24 40-7m-59 31l23 14 27-9M247 219l33 28 29 9 23 30m-50-38l-2 24 15 19M212 248l8 42-14 25 7 39m8-63l23 19 3 26M176 244l-34 32-8 35-24 17m33-52l-30-4-24 17M151 209l-48 10-19-12-37 15m57-3l-11 25-26 9M155 183l-38-19-23 6-40-21"/></defs>
+    <use href="#plCracks" fill="none" stroke="#071222" stroke-opacity=".6" stroke-width="4.5" stroke-linejoin="round"/>
+    <use href="#plCracks" fill="none" stroke="#e5f8ff" stroke-opacity=".85" stroke-width="1.3" stroke-linejoin="round"/>
+    <path d="M148 156a72 72 0 0 1 96-3M251 234a72 72 0 0 1-102 8" fill="none" stroke="#fff" stroke-opacity=".5" stroke-width="2" stroke-linecap="round"/>
+  </svg>
+  <div class="pl-readout" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+    <b class="pl-percent num">0<span>%</span></b>
+    <span class="pl-status" data-i18n="loader.loading">Арена выходит на смену</span>
+  </div>
+  <button class="pl-retry b3 dark sm" data-i18n="loader.retry" hidden>Повторить загрузку</button>
+</div>

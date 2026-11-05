@@ -41,7 +41,7 @@ const GameHost = {
   ensure() {
     if (this.frame) return;
     const f = document.createElement('iframe');
-    f.title = 'Table Tennis'; f.setAttribute('allow', 'autoplay; fullscreen');
+    f.title = t('hub.gameName'); f.setAttribute('allow', 'autoplay; fullscreen');
     f.srcdoc = this.doc();
     $('#gamelayer').appendChild(f); this.frame = f; this.ready = false;
     // слой ещё не показан (заставка, меню) — движок стартует спящим и не рендерит впустую
@@ -366,7 +366,7 @@ const ZoneStats = {
     const radius = capture && Number.isFinite(capture.radius) ? capture.radius : R.captureRadius;
     return [input === 'mouse' ? R.contactSideMousePx : R.contactSideTouchPx, R.contactBackPx, R.contactForwardPx, radius].map((v) => +(+v).toFixed(2)).join('/');
   },
-  sigLabel(sig) { if (!sig) return 'до записи настроек'; const [s, b, f, r] = sig.split('/'); return `бока ${s} · верх ${b} · низ ${f} · r ${r}`; },
+  sigLabel(sig) { if (!sig) return t('zone.sigMissing'); const [s, b, f, r] = sig.split('/'); return t('zone.sig', { s, b, f, r }); },
   compare(input) {
     const G = {};
     this.all().filter((a) => a.kind === 'rally' && (!input || a.input === input)).forEach((a) => { const k = a.sig || ''; (G[k] = G[k] || []).push(a); });
@@ -383,20 +383,20 @@ const ZoneStats = {
     const recs = [];
     const R = Object.assign({}, GameHost.rules || {}, GameHost.devRules());
     const side = (input === 'mouse' ? R.contactSideMousePx : R.contactSideTouchPx) || 48;
-    if (n < 15) recs.push(['info', `Мало данных: ${n} попыток. Для вывода нужно хотя бы 15 — сыграй ещё.`]);
+    if (n < 15) recs.push(['info', t('zone.needData', { n })]);
     else {
       if (out / n > 0.25) {
         const over = L.filter((a) => !a.accepted && Number.isFinite(a.dx)).map((a) => Math.max(0, Math.abs((this.norm(a, R) || a).dx) - side)).sort((a, b) => a - b);
         const med = over.length ? over[over.length >> 1] : 0;
-        recs.push(['warn', `${Math.round(out / n * 100)}% нажатий мимо зоны. Медианный промах — ${med} px за боковой границей: попробуй «бока» +${Math.min(30, Math.max(6, Math.round(med / 2) * 2))} px.`]);
+        recs.push(['warn', t('zone.outAdvice', { pct: Math.round(out / n * 100), med, add: Math.min(30, Math.max(6, Math.round(med / 2) * 2)) })]);
       }
-      if (late / n > 0.2) recs.push(['warn', `В ${Math.round(late / n * 100)}% попыток палец был в зоне, но ракетка прошла мимо мяча. Радиус захвата +0,02–0,04 м простит неточную линию свайпа.`]);
-      if (early / n > 0.15) recs.push(['warn', `В ${Math.round(early / n * 100)}% попыток свайп закончился до прилёта мяча — жмут слишком рано. Зону не трогай: включи «Подсказку удара» в настройках.`]);
+      if (late / n > 0.2) recs.push(['warn', t('zone.racketAdvice', { pct: Math.round(late / n * 100) })]);
+      if (early / n > 0.15) recs.push(['warn', t('zone.earlyAdvice', { pct: Math.round(early / n * 100) })]);
       const edge = L.filter((a) => a.accepted && Number.isFinite(a.dx) && Math.abs((this.norm(a, R) || a).dx) > side * 0.7);
       const edgeHit = edge.filter((a) => a.contact).length;
-      if (edge.length >= 5 && edgeHit / edge.length < 0.35) recs.push(['info', `Края зоны «пустые»: у боковых нажатий (дальше ${Math.round(side * 0.7)} px от центра) контакт только ${Math.round(edgeHit / edge.length * 100)}%. Зона обещает больше, чем достаёт ракетка: сузь бока до ~${Math.round(side * 0.8)} px или подними радиус захвата.`]);
-      if (hit / n > 0.85 && n >= 30) recs.push(['ok', `Попаданий ${Math.round(hit / n * 100)}% — слишком легко. Можно ужать радиус захвата на 0,02 м.`]);
-      if (!recs.length) recs.push(['ok', `Баланс в норме: ${Math.round(hit / n * 100)}% контакта, мимо зоны ${Math.round(out / n * 100)}%.`]);
+      if (edge.length >= 5 && edgeHit / edge.length < 0.35) recs.push(['info', t('zone.emptyEdges', { distance: Math.round(side * 0.7), pct: Math.round(edgeHit / edge.length * 100), side: Math.round(side * 0.8) })]);
+      if (hit / n > 0.85 && n >= 30) recs.push(['ok', t('zone.tooEasy', { pct: Math.round(hit / n * 100) })]);
+      if (!recs.length) recs.push(['ok', t('zone.balanced', { hit: Math.round(hit / n * 100), out: Math.round(out / n * 100) })]);
     }
     return { L, n, hit, out, late, early, recs, side, R };
   }
@@ -415,9 +415,9 @@ function zoneStatsSheet(scope = 'cur') {
   const nNow = (cmp.find((c) => c.sig === sigNow) || { n: 0 }).n, nAll = cmp.reduce((s, c) => s + c.n, 0);
   const r = ZoneStats.report(input, scope === 'cur' ? sigNow : undefined), R = r.R;
   const best = cmp.filter((c) => c.n >= 10).sort((a, b) => b.hit - a.hit)[0];
-  const cmpHtml = cmp.length > 1 ? `<div class="pnl zs-plot zs-cmp"><div class="cap" style="margin:2px 2px 8px">Сравнение настроек</div>
-      ${cmp.map((c) => `<div class="zc-row ${c.sig === sigNow ? 'now' : ''} ${best && c.sig === best.sig ? 'best' : ''}"><span>${ZoneStats.sigLabel(c.sig)}</span><b class="num">${c.hit}%</b><small class="num">мимо ${c.out}% · ${c.n}</small></div>`).join('')}
-      <p class="dim" style="margin:6px 2px 0;font-size:10.5px">Зелёная рамка — лучший контакт среди настроек с 10+ попытками, жёлтая точка — текущая.</p></div>` : '';
+  const cmpHtml = cmp.length > 1 ? `<div class="pnl zs-plot zs-cmp"><div class="cap" style="margin:2px 2px 8px">${t('zone.compareTitle')}</div>
+      ${cmp.map((c) => `<div class="zc-row ${c.sig === sigNow ? 'now' : ''} ${best && c.sig === best.sig ? 'best' : ''}"><span>${ZoneStats.sigLabel(c.sig)}</span><b class="num">${c.hit}%</b><small class="num">${t('zone.compareOut', { pct: c.out, n: c.n })}</small></div>`).join('')}
+      <p class="dim" style="margin:6px 2px 0;font-size:10.5px">${t('zone.compareLegend')}</p></div>` : '';
   const fwd = R.contactForwardPx || 150, back = R.contactBackPx || 120, side = r.side;
   const dots = r.L.slice(-120).map((a) => {
     const q = ZoneStats.norm(a, R); if (!q) return '';
@@ -431,22 +431,22 @@ function zoneStatsSheet(scope = 'cur') {
   const hist = bins.map((b, i) => { const h0 = b[0] / mx * 60, h1 = b[1] / mx * 60;
     return `<rect x="${i * 30 + 4}" y="${70 - h0}" width="22" height="${h0}" rx="3" fill="#3BF5A0"/><rect x="${i * 30 + 4}" y="${70 - h0 - h1}" width="22" height="${h1}" rx="3" fill="#FF5A4D" fill-opacity=".8"/><text x="${i * 30 + 15}" y="84" fill="#8C96C0" font-size="10" text-anchor="middle">${(i * 0.05).toFixed(2)}</text>`; }).join('');
   const pct = (a) => r.n ? Math.round(a / r.n * 100) + '%' : '—';
-  Sheet.open(`<div class="h1" style="margin:4px 4px 4px">Статистика зоны</div>
-    <p class="dim" style="margin:0 4px 8px;font-size:11.5px">${r.n} попыток в розыгрыше · ${input === 'mouse' ? 'мышь' : 'палец'} · ${ZoneStats.sigLabel(sigNow)}</p>
-    <div class="zs-scope"><button class="${scope === 'cur' ? 'on' : ''}" data-a="cur">Текущая зона · ${nNow}</button><button class="${scope === 'all' ? 'on' : ''}" data-a="all">Все настройки · ${nAll}</button></div>
-    <div class="zs-kpi"><div><b class="num">${pct(r.hit)}</b><span>контакт</span></div><div><b class="num">${pct(r.out)}</b><span>мимо зоны</span></div><div><b class="num">${pct(r.late)}</b><span>ракетка мимо</span></div><div><b class="num">${pct(r.early)}</b><span>рано</span></div></div>
+  Sheet.open(`<div class="h1" style="margin:4px 4px 4px">${t('zone.sheetTitle')}</div>
+    <p class="dim" style="margin:0 4px 8px;font-size:11.5px">${t('zone.summary', { n: r.n, input: t(input === 'mouse' ? 'common.mouse' : 'common.touch'), sig: ZoneStats.sigLabel(sigNow) })}</p>
+    <div class="zs-scope"><button class="${scope === 'cur' ? 'on' : ''}" data-a="cur">${t('zone.current', { n: nNow })}</button><button class="${scope === 'all' ? 'on' : ''}" data-a="all">${t('zone.all', { n: nAll })}</button></div>
+    <div class="zs-kpi"><div><b class="num">${pct(r.hit)}</b><span>${t('zone.contact')}</span></div><div><b class="num">${pct(r.out)}</b><span>${t('zone.outside')}</span></div><div><b class="num">${pct(r.late)}</b><span>${t('zone.racketMiss')}</span></div><div><b class="num">${pct(r.early)}</b><span>${t('zone.early')}</span></div></div>
     <div class="pnl zs-plot"><svg viewBox="-96 ${-back - 34} 192 ${back + fwd + 52}" width="100%" height="300">
       <line x1="-96" y1="0" x2="96" y2="0" stroke="rgba(255,255,255,.08)"/><line x1="0" y1="${-back - 20}" x2="0" y2="${fwd + 16}" stroke="rgba(255,255,255,.08)"/>
       <path d="${zone}" fill="rgba(53,198,244,.10)" stroke="#35C6F4" stroke-width="1.5" stroke-dasharray="5 4"/>
       <circle cx="0" cy="0" r="4.4" fill="#FFD54A"/>${dots}
-      <text x="0" y="${-back - 22}" fill="#8C96C0" font-size="10" text-anchor="middle">где лёг палец относительно точки встречи, px</text>
-      <text x="-90" y="${-back / 2}" fill="#8C96C0" font-size="9">подрезка ↓</text><text x="-90" y="${fwd / 2}" fill="#8C96C0" font-size="9">удар ↑</text>
+      <text x="0" y="${-back - 22}" fill="#8C96C0" font-size="10" text-anchor="middle">${t('zone.position')}</text>
+      <text x="-90" y="${-back / 2}" fill="#8C96C0" font-size="9">${t('zone.chop')} ↓</text><text x="-90" y="${fwd / 2}" fill="#8C96C0" font-size="9">${t('zone.drive')} ↑</text>
       <text x="${side + 3}" y="-3" fill="#35C6F4" font-size="10">${side}</text><text x="3" y="${fwd + 12}" fill="#35C6F4" font-size="10">${fwd}</text><text x="3" y="${-back - 4}" fill="#35C6F4" font-size="10">${back}</text></svg>
-      <div class="zs-leg"><i style="background:#3BF5A0"></i>контакт <i style="background:#FF5A4D"></i>в зоне, но мимо <i style="background:#7B86B0"></i>вне зоны <i style="background:#FFD54A"></i>точка встречи</div></div>
-    <div class="pnl zs-plot"><div class="cap" style="margin:2px 2px 6px">За сколько секунд до встречи нажимали</div><svg viewBox="0 0 244 90" width="100%" height="96">${hist}</svg></div>
+      <div class="zs-leg"><i style="background:#3BF5A0"></i>${t('zone.contact')} <i style="background:#FF5A4D"></i>${t('zone.inZoneMiss')} <i style="background:#7B86B0"></i>${t('zone.outside')} <i style="background:#FFD54A"></i>${t('zone.meeting')}</div></div>
+    <div class="pnl zs-plot"><div class="cap" style="margin:2px 2px 6px">${t('zone.pressTiming')}</div><svg viewBox="0 0 244 90" width="100%" height="96">${hist}</svg></div>
     <div class="zs-recs">${r.recs.map(([k, t]) => `<div class="zs-rec ${k}">${t}</div>`).join('')}</div>
     ${cmpHtml}
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:12px"><button class="b3 dark sm" data-a="clear">Очистить</button><button class="b3 dark sm" data-a="export">Экспорт JSON</button><button class="b3 green sm" style="grid-column:1/-1" data-a="zone">Настроить зону</button></div>`, {
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:12px"><button class="b3 dark sm" data-a="clear">${t('zone.clear')}</button><button class="b3 dark sm" data-a="export">${t('zone.export')}</button><button class="b3 green sm" style="grid-column:1/-1" data-a="zone">${t('zone.adjust')}</button></div>`, {
     onOpen: (w) => w.addEventListener('click', (e) => {
       const a = e.target.closest('[data-a]'); if (!a) return;
       if (a.dataset.a === 'clear') { ZoneStats.clear(); Sheet.close(true); zoneStatsSheet(scope); }
@@ -454,7 +454,7 @@ function zoneStatsSheet(scope = 'cur') {
       if (a.dataset.a === 'export') {
         const L = ZoneStats.all();
         const dump = JSON.stringify({ exported: new Date().toISOString(), ua: navigator.userAgent, screen: [screen.width, screen.height, devicePixelRatio], rules: R, attempts: L });
-        copyText(dump).then((ok) => toast(ok ? `Скопировано: ${L.length} попыток · вставь в чат разработчику` : 'Не удалось скопировать', ok ? 'check' : 'x'));
+        copyText(dump).then((ok) => toast(ok ? t('zone.copied', { n: L.length }) : t('zone.copyFailed'), ok ? 'check' : 'x'));
       }
       if (a.dataset.a === 'zone') { Sheet.close(true); devZoneSheet(); }
     })
@@ -482,10 +482,9 @@ const RulesLink = {
     try { const sp = TGX.w && TGX.w.initDataUnsafe && TGX.w.initDataUnsafe.start_param; if (!raw && sp && sp.startsWith('r_')) raw = sp.slice(2); } catch (e) {}
     if (!raw) return;
     const r = this.clean(this.dec(raw));
-    if (!r) { setTimeout(() => toast('Ссылка с настройкой зоны повреждена', 'x'), 1800); return; }
+    if (!r) { setTimeout(() => toast(t('zone.linkInvalid'), 'x'), 1800); return; }
     try { localStorage.setItem('ttu-rules-dev', JSON.stringify(r)); } catch (e) {}
-    const N = { contactSideTouchPx: 'бока', contactSideMousePx: 'бока (мышь)', contactBackPx: 'верх', contactForwardPx: 'низ', captureRadius: 'r', depthTolerance: 'глубина', serveCaptureRadius: 'r подачи', autoFootwork: 'авто-шаг' };
-    setTimeout(() => toast(`Зона из ссылки: ${Object.entries(r).map(([k, v]) => `${N[k]} ${v === true ? 'вкл' : v === false ? 'выкл' : v}`).join(' · ')}`, 'target'), 1800);
+    setTimeout(() => toast(t('zone.linkApplied', { values: Object.entries(r).map(([k, v]) => `${t('zone.field.' + k)} ${v === true ? t('common.on') : v === false ? t('common.off') : v}`).join(' · ') }), 'target'), 1800);
   }
 };
 RulesLink.boot();
