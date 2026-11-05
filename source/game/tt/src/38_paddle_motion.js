@@ -209,6 +209,32 @@ function keepPaddleAboveTable(pos, normal, roll, tableY, halfWidth, halfLength) 
   return lift;
 }
 
+/** The table-clearance guard, in ONE place and idempotent.
+ *
+ *  `paddleTableClearance` solves the exact mesh/tabletop intersection, and
+ *  for a pose it has just lifted it answers `0.0059999…` on roughly 42 % of
+ *  measured cases (floating point in the polygon clip). A caller that asks
+ *  "is it still below 6 mm?" and then reacts by moving the bat HORIZONTALLY
+ *  back to where it was turns that rounding into a visible one-frame freeze
+ *  with a bogus velocity — the player-side twin of the bot's paddle jump.
+ *  Only height is ever corrected, and the correction is repeated until the
+ *  measurement agrees (3 passes is beyond every measured case). */
+function enforcePaddleTableClearance(pos, normal, roll, minClearance = .006, tableY = PH.TABLE_Y,
+  halfWidth = PH.T_HALF_WID, halfLength = PH.T_HALF_LEN, quaternion) {
+  if (!pos || ![pos.x, pos.y, pos.z].every(Number.isFinite)) return 0;
+  const target = Number.isFinite(minClearance) ? Math.max(0, minClearance) : .006;
+  let lift = 0;
+  for (let pass = 0; pass < 3; pass++) {
+    const clearance = paddleTableClearance(pos, normal, roll, tableY, halfWidth, halfLength, quaternion);
+    if (!(clearance < target)) return lift;
+    const step = target - clearance;
+    if (!Number.isFinite(step) || step <= 0) return lift;
+    pos.y += step;
+    lift += step;
+  }
+  return lift;
+}
+
 // The same 44-sided blade, rubbers and box handle that Scene renders.
 const PADDLE_LOCAL_FACES = (() => {
   const faces = [];
