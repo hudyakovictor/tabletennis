@@ -126,7 +126,7 @@ Router.def('hub', {
     const later = (fn, ms) => { const id = setTimeout(() => { timers.delete(id); if (alive) fn(); }, ms); timers.add(id); };
     // живой стол: настоящий движок за интерфейсом (бот против бота, облёт камеры);
     // на «Эконом» — лёгкая 2D-заглушка
-    this.lobby = S.quality !== 'low';
+    this.lobby = true;
     if (this.lobby) {
       el.classList.add('lobby');
       GameHost.ensure(); GameHost.send('quiet', { on: true }); GameHost.send('lobby'); GameHost.show(true, 'lobby');

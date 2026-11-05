@@ -28,7 +28,7 @@ test('recognition alone is never a hit, spin or successful return', () => {
   j.expire(.36); assert.equal(j.latest.outcome, 'no_contact');
   /* no capture sample was ever seen → the report must still name the miss */
   assert.equal(j.latest.reason, 'TIMING_EARLY');
-  assert.match(lib.shotFeedbackView(j.latest).detail, /касания мяча не было/);
+  assert.match(lib.shotFeedbackView(j.latest).detail, /контакта нет/);
 });
 test('stationary click is rejected, not classified as a topspin', () => {
   const sw = new SwipeTracker(); sw.down(.5, .5, 0); sw.up(.5, .5, .1); const j = new ShotJournal();

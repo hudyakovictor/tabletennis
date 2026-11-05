@@ -41,7 +41,11 @@
 
   const start = () => {
     if (typeof ET !== 'undefined' && window.__TT_LOCALE) ET.set(window.__TT_LOCALE);   // язык от хоста
-    const applyStaticTexts = () => { const w = document.getElementById('tIWait'); if (w && typeof ET !== 'undefined') w.textContent = ET('ui.tapContinue'); };
+    const applyStaticTexts = () => {
+      const w = document.getElementById('tIWait'); if (w && typeof ET !== 'undefined') w.textContent = ET('ui.tapContinue');
+      const ui = window.__game && window.__game.ui;
+      if (ui) { ui.localize?.(); ui.updateInputCopy?.(); ui.syncFullscreen?.(); ui.syncSoundControls?.(); ui.syncPauseControl?.(); ui.syncSlowmoControl?.(); ui.syncScore?.(); }
+    };
     applyStaticTexts();
     const g = window.__game;
     if (!g) { post('error', { msg: 'game failed to boot' }); return; }
@@ -288,20 +292,20 @@
       // the gate this attempt was judged by (world-scaled per phone/camera), falling back to the rules
       const ext = a.ext || [MATCH_RULES[a.input === 'mouse' ? 'contactSideMousePx' : 'contactSideTouchPx'], MATCH_RULES.contactBackPx, MATCH_RULES.contactForwardPx];
       const side = ext[0], back = ext[1], fwd = ext[2];
-      const lr = a.dx > 0 ? 'правее' : 'левее';
+      const lr = ET(a.dx > 0 ? 'правее' : 'левее');
       if (a.reason === 'WRONG_DIRECTION' || a.zoneReason === 'WRONG_DIRECTION')
-        return a.dy < 0 ? 'Палец над мячом — веди вниз через мяч или начни под ним' : 'Палец под мячом — веди свайп вверх через мяч';
+        return ET(a.dy < 0 ? 'Палец над мячом. Веди вниз через мяч или начни под ним.' : 'Палец под мячом. Веди вверх через мяч.');
       if (!a.accepted) {
-        if (Number.isFinite(a.dx) && Math.abs(a.dx) > side * 0.8) return `Палец ${lr} мяча — ставь его на линию мяча`;
-        if (Number.isFinite(a.dy) && a.dy < -back * 0.8) return 'Слишком высоко — начинай ближе к мячу';
-        if (Number.isFinite(a.dy) && a.dy > fwd * 0.8) return 'Слишком низко — начинай ближе к мячу';
-        return 'Мимо зоны — ставь палец на линию мяча';
+        if (Number.isFinite(a.dx) && Math.abs(a.dx) > side * 0.8) return ET('Палец {side} мяча. Начни на линии мяча.', { side: lr });
+        if (Number.isFinite(a.dy) && a.dy < -back * 0.8) return ET('Старт слишком высоко. Начни ближе к мячу.');
+        if (Number.isFinite(a.dy) && a.dy > fwd * 0.8) return ET('Старт слишком низко. Начни ближе к мячу.');
+        return ET('Нажатие вне зоны. Начни на линии мяча: вход по адресу.');
       }
-      if (a.reason === 'TIMING_EARLY' || (Number.isFinite(a.lead) && a.lead > 0.2)) return 'Рано! Дождись, пока мяч подлетит к тебе';
-      if (a.reason === 'NO_FRESH_SWIPE') return 'Для каждого удара нужен новый тап или свайп';
-      if (a.reason === 'STATIC_CLICK') return 'Нажми коротко или проведи через мяч';
-      if (Number.isFinite(a.dx) && Math.abs(a.dx) > side * 0.55) return `Ракетка прошла ${lr} — веди свайп прямо через мяч`;
-      return 'Свайп быстрее и прямо через мяч';
+      if (a.reason === 'TIMING_EARLY' || (Number.isFinite(a.lead) && a.lead > 0.2)) return ET('Рано. Дождись мяча у ракетки: приём ещё закрыт.');
+      if (a.reason === 'NO_FRESH_SWIPE') return ET('Новому мячу нужен новый тап или свайп. Старую заявку не принимают.');
+      if (a.reason === 'STATIC_CLICK') return ET('Контакта нет. Нажми коротко или проведи через мяч.');
+      if (Number.isFinite(a.dx) && Math.abs(a.dx) > side * 0.55) return ET('Ракетка прошла {side} мяча. Веди прямо через него.', { side: lr });
+      return ET('Контакта нет. Веди быстрее и прямо через мяч.');
     };
     // 4.6 s: the point has to be replayed in your head AND the tip read;
 // 2.6 s vanished during the very recovery the advice was about.
@@ -314,7 +318,7 @@ const showTip = (text) => { if (text) tip = { text, until: g.time + 4.6 }; };
       if (++missStreak >= 3 && !g.hintContact && !g.training) {
         autoHint = true; autoHits = 0; g.hintContact = true; missStreak = 0;
         post('autoHint', { on: true });
-        return 'Включил кольцо: веди свайп через него';
+        return ET('Подсказка включена. Веди свайп через мяч.');
       }
       return null;
     };
@@ -412,7 +416,7 @@ const showTip = (text) => { if (text) tip = { text, until: g.time + 4.6 }; };
       const untouched = !att && who < 0 && !lobby && !this.demoMode && !this.training && this.state === GS.RALLY && this.ball && this.ball.lastHitBy === -1
         && Array.isArray(this.rallyBounces) && this.rallyBounces.some((sd) => sd > 0) && lastAttemptShot !== this.shotId;
       flush();
-      if (untouched) showTip(onMiss() || 'Мяч пропущен — свайпни снизу вверх через него');
+      if (untouched) showTip(onMiss() || ET('Мяч пропущен. Начни под ним и веди вверх.'));
       return orig(who, reason);
     });
 
@@ -608,7 +612,7 @@ const showTip = (text) => { if (text) tip = { text, until: g.time + 4.6 }; };
         if (g.sessionKind === 'online') g.sessionKind = 'free';
         refreshGameCalibrationPolicy(g, '_policy'); publishCalibration();
       });
-      net.on('error', (msg) => netSay('error', { msg: String(msg && msg.message ? msg.message : msg) }));
+      net.on('error', (msg) => netSay('error', { msg: ET(String(msg && msg.message ? msg.message : msg)) }));
     })();
 
     /* ---------------------------- commands -------------------------- */

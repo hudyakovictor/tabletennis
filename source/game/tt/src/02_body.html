@@ -1,4 +1,4 @@
-<div id="app" role="application" aria-label="TOPSPIN ARENA — настольный теннис">
+<div id="app" role="application" aria-label="TOPSPIN ARENA. Настольный теннис">
   <canvas id="gl" tabindex="0" aria-label="Игровое поле. Короткий клик или касание отбивает мяч, свайп задаёт направление и вращение. Клавиши 1, 2, 3 переключают вид камеры."></canvas>
   <canvas id="fx"></canvas>
 
@@ -7,7 +7,7 @@
     <div id="score" class="pe" role="status" aria-label="Счёт матча" aria-live="polite">
       <div class="sb-side" id="scoreSideA">
         <span class="serve-dot" id="servA" aria-hidden="true"></span>
-        <span class="sb-nm">ВЫ</span>
+        <span class="sb-nm">ТЫ</span>
         <span class="sb-pts" id="ptsA">0</span>
       </div>
       <div class="sb-mid"><b>ДО</b><span id="toWin">11</span></div>
@@ -27,7 +27,7 @@
       <div id="msgs" role="log" aria-live="polite" aria-atomic="false"></div>
       <!-- Latest attempt: recognition, real contact, measured spin and actual result. -->
       <div id="shot" role="status" aria-live="polite" aria-atomic="true"><b id="shotName">—</b><span id="shotStatus"></span><small id="shotMeta"></small></div>
-      <button id="btnDemoExit" class="tbt pe" style="display:none">ДЕМО · ВЕРНУТЬ УПРАВЛЕНИЕ</button>
+      <button id="btnDemoExit" class="tbt pe" style="display:none">ДЕМО · ИГРАТЬ САМОМУ</button>
       <div id="timingCue" role="status" aria-live="off"></div>
       <div id="gestureCue" aria-live="off"></div>
       <div id="playStatus" role="status" aria-live="polite"></div>
@@ -64,14 +64,14 @@
     <div id="topright">
       <button class="ic pe" id="btnFullscreen" title="Полный экран (F)" aria-label="Полный экран" aria-pressed="false"></button>
       <button class="ic pe" id="btnSound" title="Выключить звук" aria-label="Выключить звук" aria-pressed="true"></button>
-      <button class="ic pe" id="btnSlowmo" title="Слоу-мо: разобрать траекторию" aria-label="Замедление" aria-pressed="false"></button>
+      <button class="ic pe" id="btnSlowmo" title="Slow-Mo: разобрать полёт" aria-label="Замедление" aria-pressed="false"></button>
       <button class="ic pe" id="btnSettings" title="Настройки" aria-label="Настройки"></button>
       <button class="ic pe" id="btnMenu" title="Пауза" aria-label="Пауза"></button>
     </div>
 
     <div id="pauseInd" class="pe" role="dialog" aria-modal="true" aria-label="Пауза">
       <b>ПАУЗА</b>
-      <small>Нажмите, чтобы продолжить · P</small>
+      <small>Нажми или P, чтобы продолжить</small>
       <div class="pause-actions">
         <button id="pauseResume" class="tbt">ПРОДОЛЖИТЬ</button>
         <button id="pauseSettings" class="tbt"><span class="ui-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></span>НАСТРОЙКИ</button>
@@ -80,7 +80,7 @@
         <label class="capture-debug-toggle"><input type="checkbox" id="diagnosticRecordPause"> Подробная запись</label>
         <div class="diagnostic-pause">
           <p id="diagnosticStatus" role="status">Запись выключена</p>
-          <p>Включите запись, продолжите игру и повторите ошибку. Данные остаются на устройстве; отчёт содержит координаты и сведения об устройстве.</p>
+          <p>Включи запись, вернись в игру и повтори сбой. Отчёт содержит координаты и сведения об устройстве. Данные остаются на устройстве; передавать отчёт или нет, решаешь ты.</p>
           <button id="diagnosticReportPause" class="tbt">ПОДГОТОВИТЬ ОТЧЁТ JSON</button>
           <a id="diagnosticReportLink" class="tbt" download="topspin-diagnostics.json" hidden>СКАЧАТЬ ОТЧЁТ</a>
           <button id="diagnosticTextButton" class="tbt" hidden>ПОКАЗАТЬ ТЕКСТ</button>
@@ -88,7 +88,7 @@
           <div id="diagnosticPreview" hidden>
             <a id="diagnosticImageLink" class="tbt" download="topspin-frame.png">СКАЧАТЬ PNG</a>
             <img id="diagnosticImage" alt="Снимок игровой сцены"><p id="diagnosticFrameTime"></p>
-            <p>Только игровая сцена и зоны, без счёта и кнопок. Если скачивание не работает, удерживайте изображение.</p>
+            <p>На снимке только сцена и зоны, без счёта и кнопок. Если файл не скачивается, удерживай изображение.</p>
           </div>
         </div>
         <button id="shotLabPause" class="tbt">КАЛИБРОВКА ПОПАДАНИЯ</button>
@@ -113,7 +113,7 @@
     <div class="card">
       <div class="menu-brand">
         <div class="brand-menu"><img class="brand-logo" src="{{BRAND_LOGO}}" alt="Table Tennis Ultimate" width="556" height="422"></div>
-        <div class="sub">Настольный теннис · 3D-физика · управление свайпом</div>
+        <div class="sub">3D-физика · свайп · сетка с правом вето</div>
         <div class="menu-utility" role="group" aria-label="Быстрые настройки">
           <button class="ic" id="menuFullscreen" title="Полный экран (F)" aria-label="Полный экран" aria-pressed="false"></button>
           <button class="ic" id="menuSound" title="Выключить звук" aria-label="Выключить звук" aria-pressed="true"></button>
@@ -123,9 +123,9 @@
       <div class="menu-play">
         <h3 class="sec">Соперник</h3>
         <div class="row menu-difficulty" role="group" aria-label="Сложность соперника">
-          <button class="opt" data-diff="0" aria-pressed="false"><b>ЛЁГКИЙ</b><small>easy · раскатывает</small></button>
-          <button class="opt sel" data-diff="1" aria-pressed="true"><b>СРЕДНИЙ</b><small>medium · ровный</small></button>
-          <button class="opt" data-diff="2" aria-pressed="false"><b>СЛОЖНЫЙ</b><small>hard · атакует</small></button>
+          <button class="opt" data-diff="0" aria-pressed="false"><b>ЛЁГКИЙ</b><small>easy · без спешки</small></button>
+          <button class="opt sel" data-diff="1" aria-pressed="true"><b>СРЕДНИЙ</b><small>medium · держит темп</small></button>
+          <button class="opt" data-diff="2" aria-pressed="false"><b>СЛОЖНЫЙ</b><small>hard · идёт в атаку</small></button>
           <button class="opt wtf" data-diff="3" aria-pressed="false"><b>WTF</b><small>почти невозможно</small></button>
         </div>
         <button class="btn" id="play">НАЧАТЬ МАТЧ</button>
@@ -165,7 +165,7 @@
   <div class="screen" id="careerPerk" role="dialog" aria-modal="true" aria-label="Выбор перка">
     <div class="card">
       <div class="logo" style="font-size:20px">ВЫБЕРИ ПЕРК</div>
-      <div class="sub">Улучшение для следующих матчей</div>
+      <div class="sub">Улучшение для следующих матчей. Регламент карьеры разрешает.</div>
       <div class="row" id="crPerkList" style="margin-top:12px"></div>
     </div>
   </div>
@@ -187,7 +187,7 @@
       <div id="netRoomCode" style="font-family:var(--mono);font-size:28px;letter-spacing:.2em;color:var(--acc);text-align:center;margin:12px 0;display:none"></div>
       <button class="btn" id="netCreate">СОЗДАТЬ КОМНАТУ</button>
       <button class="btn ghost" id="netJoin" style="margin-top:8px">ПРИСОЕДИНИТЬСЯ ПО КОДУ</button>
-      <div class="note" id="netNote">Экспериментальный режим: синхронизация игрового процесса ещё не завершена. Для тестирования комнат укажите свой relay через ?net=wss://… в адресе страницы.</div>
+      <div class="note" id="netNote">Экспериментальный режим. Синхронизация игры ещё не завершена. Для теста комнат укажи свой relay через ?net=wss://… в адресе страницы. Сначала связь, потом протокол матча.</div>
       <button class="btn ghost" id="netClose" style="margin-top:12px">ЗАКРЫТЬ</button>
     </div>
   </div>
@@ -196,9 +196,9 @@
   <div class="screen" id="settings" role="dialog" aria-modal="true" aria-label="Настройки">
     <div class="card settings-card">
       <div class="logo" style="font-size:24px">НАСТРОЙКИ</div>
-      <div class="sub">Личные предпочтения · единые правила игры</div>
+      <div class="sub">Личные настройки. Общий регламент.</div>
 
-      <p class="note">Допуски попадания и помощь одинаковы для всех. Мышь или палец управляют ракеткой. Короткий клик или тап во время приёма — простой удар; свайп задаёт направление и вращение. На подаче первое нажатие подбрасывает мяч, а новый клик или тап по падающему мячу выполняет простой удар. Для вращения начни свайп заранее и проведи через падающий мяч. Скобки у мяча подсказывают время: пунктир — приближение, сплошные — окно удара. Сам по себе маркер мяч не отбивает.</p>
+      <p class="note">Допуски попадания и помощь одинаковы для всех. Мышь или палец двигают ракетку. При приёме короткий клик или тап даёт простой удар; свайп задаёт направление и вращение. На подаче первое нажатие подбрасывает мяч, новый клик или тап по падающему мячу даёт простой удар. Для вращения начни свайп заранее и проведи через падающий мяч. В обучении скобки показывают время: пунктир означает приближение, сплошная линия означает окно удара. В матче подведи ракетку к мячу заранее. Маркер уведомляет, не отбивает.</p>
 
       <h3 class="sec">ХВАТ И ВЕДУЩАЯ РУКА</h3>
       <div class="row" role="group" aria-label="Хват ракетки">
@@ -209,7 +209,7 @@
         <button class="opt" data-set="hand" data-val="right" aria-pressed="true"><b>ПРАВША</b></button>
         <button class="opt" data-set="hand" data-val="left" aria-pressed="false"><b>ЛЕВША</b></button>
       </div>
-      <p class="note">Shakehand: лёгкий наклон вперёд. Перо: почти вертикально, рукоятка вверх. Поза зеркалится; направление свайпа остаётся экранным.</p>
+      <p class="note">Shakehand: лёгкий наклон вперёд. Penhold: почти вертикально, рукоятка вверх. Ведущая рука зеркалит позу; направление свайпа остаётся экранным. Стол переучивать не надо.</p>
 
       <h3 class="sec">КАМЕРА</h3>
       <div class="row" id="cameraViews" role="group" aria-label="Вид камеры">
@@ -253,8 +253,7 @@
           <div class="snote" id="statNote"></div>
           <button class="btn" id="wsEquip">ПОСТАВИТЬ В ИГРУ</button>
           <button class="btn ghost" id="wsBuyCry" style="display:none">КУПИТЬ ЗА КРИСТАЛЛЫ</button>
-          <div class="snote">Характер определяет только профиль удара, а не силу: сумма четырёх параметров
-          у всех предметов одинаковая, и ни один не лучше другого во всём.</div>
+          <div class="snote">Меняется профиль удара, не общий запас силы. У всех предметов одинаковая сумма четырёх параметров; ни один не лучше по всем сразу. Прайс-лист столу не указ.</div>
         </div>
       </div>
 
@@ -266,7 +265,7 @@
         <div id="shopIapWrap">
           <h4 class="shopH">ПОДДЕРЖКА ИГРЫ</h4>
           <div class="sgrid" id="shopIap"></div>
-          <div class="snote">Покупки не дают преимущества на столе. Реклама — только по вашему вызову.</div>
+          <div class="snote">Покупки не дают преимущества на столе. Рекламу запускаешь только ты. Матч не продаётся.</div>
         </div>
         <h4 class="shopH">СЕЗОН</h4>
         <div class="season" id="seasonBox"></div>
@@ -276,7 +275,7 @@
         <div class="snote" id="dailyHead"></div>
         <div class="tlist" id="taskList"></div>
         <button class="btn ghost" id="adCoins">СМОТРЕТЬ РЕКЛАМУ · +120 МОНЕТ</button>
-        <div class="snote">Реклама всегда необязательна и никогда не прерывает матч.</div>
+        <div class="snote">Реклама необязательна и не прерывает матч. Сетка работает без рекламной паузы.</div>
       </div>
 
       <button class="btn ghost" id="wsClose">ЗАКРЫТЬ</button>
@@ -339,7 +338,7 @@
   <div class="screen" id="reels" role="dialog" aria-modal="true" aria-label="Лучшие моменты матча">
     <div class="card">
       <div class="logo" style="font-size:30px">ЛУЧШИЕ МОМЕНТЫ</div>
-      <div class="sub">Игра запоминает только то, что стоит пересматривать</div>
+      <div class="sub">Сохраняются лучшие розыгрыши. Архив не обязан хранить всю переписку.</div>
       <div id="momentList" class="mlist"></div>
       <button class="btn ghost" id="reelsClose">ЗАКРЫТЬ</button>
     </div>
@@ -350,12 +349,12 @@
       <h2 id="shotLabTitle">КАЛИБРОВКА ПОПАДАНИЯ</h2>
       <div class="lab-actions"><button class="tbt" id="shotLabExport">СКАЧАТЬ ИЗМЕРЕНИЯ</button><button class="tbt" id="shotLabClose">ЗАКРЫТЬ</button></div>
       <label class="capture-debug-toggle"><input type="checkbox" id="captureDebugLab"> Показывать зону у мяча</label>
-      <p class="lab-help">Овал показывает допустимое место начала нажатия. Снаружи удар блокируется. Внутри короткий клик или тап даёт простой удар, а направление свайпа задаёт его тип. Для контакта мяч должен оказаться у ракетки после отскока.</p>
-      <h3>Уменьшать ли зону?</h3>
-      <p class="lab-help">Ниже — сколько ваших реальных ударов отсекла бы меньшая зона. Точность и качество удара здесь не оцениваются.</p>
+      <p class="lab-help">Овал показывает, где можно начать нажатие. Снаружи удар блокируется. Внутри короткий клик или тап даёт простой удар, свайп задаёт тип. Для контакта при приёме мяч должен оказаться у ракетки после отскока. Допуск зоны ещё не подтверждает контакт.</p>
+      <h3>Меньше зона: что отсечётся</h3>
+      <p class="lab-help">Ниже указано, сколько записанных реальных ударов отсекла бы меньшая зона. Это не оценка точности или качества удара. Измерение, не аттестация.</p>
       <div id="captureCalibrationSummary"></div>
       <h3>Калибровка зоны по заданиям</h3>
-      <p class="lab-help">Пошаговый сбор данных для разработки: углы стола, неподвижный мяч, медленный и быстрый мяч, подача, сила и спин — сначала мышью, затем касанием. Данные не меняют общую зону и не создают личный профиль.</p>
+      <p class="lab-help">Сбор данных для разработки: углы стола, неподвижный мяч, медленный и быстрый мяч, подача, сила и спин. Сначала мышь, потом касание. Данные не меняют общую зону и не создают личный профиль. Регламент не торгуется.</p>
       <p class="lab-help" id="zoneCalStatus">Калибровка не начата.</p>
       <div class="lab-actions"><button class="tbt" id="zoneCalStart">НАЧАТЬ ЗАНОВО</button><button class="tbt" id="zoneCalImport">ЗАПИСАТЬ ПОПЫТКИ ИЗ ИГРЫ</button><button class="tbt" id="zoneCalExport">СКАЧАТЬ ДАННЫЕ КАЛИБРОВКИ</button></div>
       <div id="zoneCalSummary"></div>
@@ -367,9 +366,9 @@
   <div id="loading" role="status" aria-label="Загрузка Table Tennis Ultimate">
     <div class="splash-brand">
       <img src="{{BRAND_LOGO}}" alt="Table Tennis Ultimate" width="556" height="422" draggable="false">
-      <div class="splash-caption">ТВОЙ СТОЛ. ТВОЯ ИГРА.</div>
+      <div class="splash-caption">СТОЛ. МЯЧ. ПРАВО ВЕТО.</div>
       <div class="splash-progress" aria-hidden="true"><i></i></div>
-      <span class="splash-hint">Нажмите, чтобы начать</span>
+      <span class="splash-hint">Нажми, чтобы начать</span>
     </div>
   </div>
 </div>

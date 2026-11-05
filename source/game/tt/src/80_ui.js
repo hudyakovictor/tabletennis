@@ -59,6 +59,7 @@ class UI {
   }
   attach(game) {
     this.game = game;
+    this.localize();
     this.syncDialogFocus();
     this.pendingDiff = game.settings.difficulty;
     this.syncDiffMenu();
@@ -143,12 +144,32 @@ class UI {
     this.inputMode = mode; this.hasFinePointer = mode === 'mouse';
     this.updateInputCopy();
   }
+  localize() {
+    if (!this._staticTexts) {
+      this._staticTexts = []; this._staticAttributes = [];
+      const walker = document.createTreeWalker($('#app'), NodeFilter.SHOW_TEXT);
+      for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+        const key = node.nodeValue.trim();
+        if (key) this._staticTexts.push({ node, key, raw: node.nodeValue });
+      }
+      for (const node of $$('#app, #app [title], #app [aria-label], #app [alt], #app [placeholder]')) {
+        for (const attribute of ['title', 'aria-label', 'alt', 'placeholder']) {
+          const key = node.getAttribute(attribute);
+          if (key) this._staticAttributes.push({ node, attribute, key });
+        }
+      }
+    }
+    for (const { node, key, raw } of this._staticTexts) node.nodeValue = raw.replace(key, ET(key));
+    for (const { node, attribute, key } of this._staticAttributes) node.setAttribute(attribute, ET(key));
+    document.documentElement.lang = ET.lang();
+    document.documentElement.style.setProperty('--menu-scroll-copy', JSON.stringify(ET('ЛИСТАЙ ВНИЗ ↓')));
+  }
   updateInputCopy() {
     const touch = this.inputMode === 'touch';
-    $('#cameraHelp').textContent = this.inputMode === 'touch' ? 'Два пальца вверх или вниз — высота вида; разведите или сведите пальцы для приближения.' : 'ПКМ и движение вверх или вниз — высота вида; колесо — приближение.';
-    $('#gl').setAttribute('aria-label', touch
-      ? 'Игровое поле. Короткий тап отбивает мяч, свайп задаёт вращение. Вид камеры — в настройках.'
-      : 'Игровое поле. Короткий клик отбивает мяч, ЛКМ с движением задаёт вращение. Вид камеры — 1, 2, 3 или в настройках.');
+    $('#cameraHelp').textContent = ET(touch ? 'Два пальца вверх или вниз: высота вида. Разведи или сведи пальцы для приближения.' : 'ПКМ и движение вверх или вниз: высота вида. Колесо: приближение.');
+    $('#gl').setAttribute('aria-label', ET(touch
+      ? 'Игровое поле. Короткий тап отбивает мяч, свайп задаёт направление и вращение. Камера в настройках.'
+      : 'Игровое поле. Короткий клик отбивает мяч, движение с ЛКМ задаёт направление и вращение. Камера: 1, 2, 3 или настройки.'));
     if (this.game && this.game.training) this.trainSync(this.game.training);
   }
 
@@ -182,14 +203,14 @@ class UI {
       button.hidden = !supported;
       button.innerHTML = ICON.fullscreen;
       button.setAttribute('aria-pressed', String(on));
-      button.title = on ? 'Выйти из полного экрана (F)' : 'Полный экран (F)';
+      button.title = ET(on ? 'Выйти из полного экрана (F)' : 'Полный экран (F)');
       button.setAttribute('aria-label', button.title);
     }
   }
   syncSoundControls() {
     if (!this.game) return;
     const on = !!this.game.settings.sound;
-    const label = on ? 'Выключить звук' : 'Включить звук';
+    const label = ET(on ? 'Выключить звук' : 'Включить звук');
     for (const button of [$('#btnSound'), $('#menuSound')]) {
       if (!button) continue;
       button.innerHTML = on ? ICON.sound : ICON.mute;
@@ -207,24 +228,25 @@ class UI {
     if (!button.innerHTML) button.innerHTML = ICON.slowmo;
     if (!g) return;
     const on = !!g.inspectSlowmo;
-    if (button.dataset.slowmoOn !== String(on)) {
+    if (button.dataset.slowmoOn !== String(on) || button.dataset.slowmoLocale !== ET.lang()) {
       button.dataset.slowmoOn = String(on);
+      button.dataset.slowmoLocale = ET.lang();
       button.setAttribute('aria-pressed', String(on));
-      button.title = on ? 'Слоу-мо включено: обычная скорость' : 'Слоу-мо: разобрать траекторию';
+      button.title = ET(on ? 'Slow-Mo включено. Нажми для обычной скорости.' : 'Slow-Mo: разобрать полёт');
       button.setAttribute('aria-label', button.title);
     }
   }
   syncPauseControl() {
     const button = $('#btnMenu'), g = this.game;
     if (!button || !g) return;
-    const key = `${g.state}|${g.paused}|${!!g.debugRecording}`;
+    const key = `${g.state}|${g.paused}|${!!g.debugRecording}|${ET.lang()}`;
     if (button.dataset.syncState === key) return;
     const mark = $('#diagMark'); if (mark) mark.hidden = !g.debugRecording || g.paused || g.state === GS.MENU || g.state === GS.MATCH_END;
     const record = $('#diagnosticRecordPause'); if (record) record.checked = !!g.debugRecording;
     if (g.paused) this.refreshDiagnosticPause();
     button.dataset.syncState = key;
     const inPlay = g.state !== GS.MENU && g.state !== GS.MATCH_END;
-    const label = g.paused ? 'В главное меню' : 'Пауза';
+    const label = ET(g.paused ? 'В главное меню' : 'Пауза');
     button.innerHTML = g.paused ? ICON.menu : ICON.pause;
     button.setAttribute('aria-label', label);
     button.title = label;
@@ -435,10 +457,10 @@ class UI {
         const image = $('#diagnosticImage');
         if (image && typeof image.decode === 'function') image.decode().then(() => requestAnimationFrame(reveal)).catch(() => {});
         setTimeout(() => this.refreshDiagnosticPause(), 500);
-      } catch (err) { $('#diagnosticStatus').textContent = 'Не удалось сделать снимок: ' + (err && err.message || err); }
+      } catch (err) { $('#diagnosticStatus').textContent = ET('Снимок не создан. Повтори попытку. Техническая причина: {error}', { error: err && err.message || err }); }
     });
     $('#diagnosticReportPause').addEventListener('click', async e => {
-      e.target.disabled = true; $('#diagnosticStatus').textContent = 'Подготавливаем отчёт…';
+      e.target.disabled = true; $('#diagnosticStatus').textContent = ET('Готовим локальный отчёт...');
       try {
         const report = await this.game.diagnosticReport();
         // Keep the same evidence with a smaller export on memory-limited phones.
@@ -447,7 +469,7 @@ class UI {
         this._diagnosticReportUrl = URL.createObjectURL(new Blob([this._diagnosticReportText], { type: 'application/json' }));
         const link = $('#diagnosticReportLink'); link.href = this._diagnosticReportUrl; link.hidden = false;
         $('#diagnosticTextButton').hidden = false; this.refreshDiagnosticPause();
-      } catch (err) { $('#diagnosticStatus').textContent = 'Не удалось подготовить отчёт: ' + (err && err.message || err); }
+      } catch (err) { $('#diagnosticStatus').textContent = ET('Отчёт не подготовлен. Повтори попытку. Техническая причина: {error}', { error: err && err.message || err }); }
       finally { e.target.disabled = false; }
     });
     $('#diagnosticTextButton').addEventListener('click', () => {
@@ -520,8 +542,8 @@ class UI {
     const t = $('#mnToast');
     if (!t) return;
     const n = this.game.moments.kept.length;
-    t.textContent = idx === 0 && n > 1 ? 'ЛУЧШИЙ МОМЕНТ МАТЧА'
-      : 'В КОПИЛКУ МОМЕНТОВ · ' + m.shots + ' УДАРОВ';
+    t.textContent = idx === 0 && n > 1 ? ET('ЛУЧШИЙ МОМЕНТ МАТЧА')
+      : ET('В АРХИВ · {n} УДАРОВ', { n: m.shots });
     t.classList.add('on');
     clearTimeout(this._mnT);
     this._mnT = setTimeout(() => t.classList.remove('on'), 1700);
@@ -543,14 +565,14 @@ class UI {
     }
     if (!on || !moment) return;
     const names = { SMASH: 'СМЕШ', LOOP: 'ТОПСПИН', COUNTER: 'КОНТРАТАКА', DRIVE: 'НАКАТ',
-      FLICK: 'ФЛИК', LOB: 'СВЕЧА', CHOP: 'ПОДРЕЗКА', PUSH: 'ТОЛЧОК', BLOCK: 'БЛОК',
+      FLICK: 'ФЛИК', LOB: 'СВЕЧА', CHOP: ET('replay.chop'), PUSH: 'ТОЛЧОК', BLOCK: 'БЛОК',
       SIDE: 'БОКОВАЯ', HOOK: 'КРЮК', FADE: 'ФЕЙД', DROP: 'КОРОТКИЙ', SERVE_TOP: 'ПОДАЧА',
       SERVE_FAST: 'ПОДАЧА', SERVE_SIDE: 'ПОДАЧА', SERVE_BACK: 'ПОДАЧА' };
-    $('#reelTag').textContent = hero ? 'ЛУЧШИЙ МОМЕНТ МАТЧА' : 'МОМЕНТ МАТЧА';
-    $('#reelTitle').textContent = (names[moment.finish] || moment.finish || 'РОЗЫГРЫШ')
-      + (moment.winner > 0 ? ' \u00b7 ОЧКО ВАШЕ' : '');
-    $('#reelMeta').textContent = moment.shots + ' УДАРОВ \u00b7 ' + Math.round(moment.speed) + ' КМ/Ч \u00b7 '
-      + Math.round(moment.spin) + ' ОБ/С \u00b7 РЕПЛЕЙ 0.35\u00d7';
+    $('#reelTag').textContent = ET(hero ? 'ЛУЧШИЙ МОМЕНТ МАТЧА' : 'МОМЕНТ МАТЧА');
+    $('#reelTitle').textContent = ET(names[moment.finish] || moment.finish || 'РОЗЫГРЫШ')
+      + (moment.winner > 0 ? ET(' \u00b7 ТВОЁ ОЧКО') : '');
+    $('#reelMeta').textContent = ET('{shots} УДАРОВ · {speed} КМ/Ч · {spin} ОБ/С · ПОВТОР 0.35×', {
+      shots: moment.shots, speed: Math.round(moment.speed), spin: Math.round(moment.spin) });
   }
 
   /** The library: three best rallies of the match, newest score first. */
@@ -564,12 +586,12 @@ class UI {
       const st = Array.from({ length: 5 }, (_, k) => `<i class="${k < bars ? 'f' : ''}"></i>`).join('');
       const names = { SMASH: 'смеш', LOOP: 'топспин', COUNTER: 'контратака', DRIVE: 'накат', FLICK: 'флик',
         LOB: 'свеча', CHOP: 'подрезка', PUSH: 'толчок', BLOCK: 'блок', SIDE: 'боковая', HOOK: 'крюк', FADE: 'фейд', DROP: 'короткий' };
-      const why = [m.meta.matchPoint ? 'матчбол' : '', m.meta.deuce ? 'счёт 10-10' : '', m.meta.netClip ? 'по краю сетки' : '',
-        m.meta.deficit >= 2 ? 'отставал ' + m.meta.deficit + ':' + 0 : '', m.shots >= 12 ? 'долгий розыгрыш' : ''].filter(Boolean)[0] || 'чисто исполнено';
+      const why = [m.meta.matchPoint ? ET('матчбол') : '', m.meta.deuce ? ET('счёт 10-10') : '', m.meta.netClip ? ET('по краю сетки') : '',
+        m.meta.deficit >= 2 ? ET('отставание {n}:0', { n: m.meta.deficit }) : '', m.shots >= 12 ? ET('долгий розыгрыш') : ''].filter(Boolean)[0] || ET('чисто исполнено');
       return `<button class="mrow" data-i="${i}"><span class="num">${i + 1}</span>
-        <span class="d"><b>${(names[m.finish] || m.finish)} · ${m.shots} ударов</b>
-        <small>${Math.round(m.speed)} км/ч · ${Math.round(m.spin)} об/с · ${why}</small></span>
-        <span class="st">${st}</span><span class="go">СМОТРЕТЬ \u203a</span></button>`;
+        <span class="d"><b>${ET(names[m.finish] || m.finish)} · ${ET('{n} ударов', { n: m.shots })}</b>
+        <small>${ET('{speed} км/ч · {spin} об/с · {why}', { speed: Math.round(m.speed), spin: Math.round(m.spin), why })}</small></span>
+        <span class="st">${st}</span><span class="go">${ET('СМОТРЕТЬ')} \u203a</span></button>`;
     }).join('');
     Array.from(list.querySelectorAll('.mrow')).forEach((b) => b.addEventListener('click', () => {
       $('#reels').classList.remove('on');
@@ -613,7 +635,7 @@ class UI {
       const cry = !owned && it.crystals ? ` <em class="cry">${it.crystals} \u25c8</em>` : '';
       return `<button class="irow${it.id === current ? ' sel' : ''}${owned ? '' : ' locked'}" data-id="${it.id}">
         <span class="sw" style="background:${col}"></span>
-        <span class="d"><b>${it.name}</b><small>${it.ru}${owned ? '' : ' · не куплено'}</small></span>${cry}${price}</button>`;
+        <span class="d"><b>${it.name}</b><small>${ET(it.ru)}${owned ? '' : ET(' · не куплено')}</small></span>${cry}${price}</button>`;
     }).join('');
     Array.from(box.querySelectorAll('.irow')).forEach((b) => b.addEventListener('click', () => {
       const id = b.dataset.id, it = ITEMS[id];
@@ -624,8 +646,8 @@ class UI {
       const slot = it.kind === 'blade' ? 'blade' : (owner && owner.id === 'listBh' ? 'bh' : 'fh');
       if (!this.game.profile.owns(id)) {
         const ok = this.game.shop.buyRacket(id);
-        if (!ok) { this.toast('НЕ ХВАТАЕТ МОНЕТ · ' + it.price); this.game.audio.ui('deny'); return; }
-        this.toast('КУПЛЕНО · ' + it.name);
+        if (!ok) { this.toast(ET('НЕ ХВАТАЕТ МОНЕТ · НУЖНО {n}', { n: it.price })); this.game.audio.ui('deny'); return; }
+        this.toast(ET('КУПЛЕНО · {name}', { name: it.name }));
         this.game.audio.ui('buy');
         $('#wsBal').textContent = this.game.profile.data.coins;
         this.drawShop();
@@ -641,7 +663,7 @@ class UI {
     const cur = this.game.equip;
     const fitted = this.game.profile.data.equip;
     const dirty = this.pick.blade !== fitted.blade || this.pick.fh !== fitted.fh || this.pick.bh !== fitted.bh;
-    $('#wsEquip').textContent = dirty ? 'ПОСТАВИТЬ В ИГРУ' : 'ЭТА РАКЕТКА УЖЕ В ИГРЕ';
+    $('#wsEquip').textContent = ET(dirty ? 'ПОСТАВИТЬ В ИГРУ' : 'РАКЕТКА УЖЕ В ИГРЕ');
     $('#wsEquip').disabled = !dirty;
     const bladeItem = ITEMS[this.pick.blade];
     const buyCry = $('#wsBuyCry');
@@ -650,34 +672,32 @@ class UI {
       buyCry.style.display = show ? '' : 'none';
       /* keep a real name on the button even while it is hidden: an empty
          button is what screen readers announce as "button" */
-      buyCry.textContent = show ? '\u041a\u0423\u041f\u0418\u0422\u042c \u0417\u0410 ' + bladeItem.crystals + ' \u25c8'
-        : '\u041a\u0423\u041f\u0418\u0422\u042c \u0417\u0410 \u041a\u0420\u0418\u0421\u0422\u0410\u041b\u041b\u042b';
-      buyCry.setAttribute('aria-label', show ? '\u041a\u0443\u043f\u0438\u0442\u044c \u0437\u0430 ' + bladeItem.crystals + ' \u043a\u0440\u0438\u0441\u0442\u0430\u043b\u043b\u043e\u0432'
-        : '\u041a\u0443\u043f\u0438\u0442\u044c \u0440\u0430\u043a\u0435\u0442\u043a\u0443 \u0437\u0430 \u043a\u0440\u0438\u0441\u0442\u0430\u043b\u043b\u044b');
+      buyCry.textContent = show ? ET('КУПИТЬ ЗА {n} \u25c8', { n: bladeItem.crystals }) : ET('КУПИТЬ ЗА КРИСТАЛЛЫ');
+      buyCry.setAttribute('aria-label', show ? ET('Купить за {n} кристаллов', { n: bladeItem.crystals }) : ET('Купить ракетку за кристаллы'));
     }
     const rows = STAT_KEYS.map((k) => {
       const v = t[k];
       const d = v - cur.stats[k];
-      return `<div class="sbar"><small>${STAT_RU[k]}</small><span class="gr"><i style="width:${v}%"></i></span>
+      return `<div class="sbar"><small>${ET(STAT_RU[k])}</small><span class="gr"><i style="width:${v}%"></i></span>
         <b style="color:${d > 0 ? 'var(--good)' : d < 0 ? 'var(--bad)' : 'var(--dim2)'}">${v}${d ? (d > 0 ? ' ▲' : ' ▼') : ''}</b></div>`;
     }).join('');
     $('#statCard').innerHTML = rows;
     const sp = (eq.fhParams.e / PH.E_RACKET);
-    const describe = t.speed > 70 ? 'быстрая, требует короткого замаха' : t.control > 72 ? 'прощает промах по центру'
-      : t.spin > 70 ? 'собирает вращение с кисти' : 'ровная, предсказуемая';
+    const describe = ET(t.speed > 70 ? 'Быстрая: замах короче' : t.control > 72 ? 'Терпимее к контакту вне центра'
+      : t.spin > 70 ? 'Хорошо собирает вращение с кисти' : 'Ровная и предсказуемая');
     $('#statNote').innerHTML = `<b>${ITEMS[this.pick.blade].name} · ${ITEMS[this.pick.fh].name}</b><br>`
-      + `${describe}. Отскок ${(sp * 100).toFixed(0)}% от базы, пятно контакта ${(eq.sweetK * 100).toFixed(0)}%.`;
+      + ET('{profile}. Отскок {bounce}% от базы, пятно контакта {contact}%. Ракетка меняет профиль, не регламент.', { profile: describe, bounce: (sp * 100).toFixed(0), contact: (eq.sweetK * 100).toFixed(0) });
   }
 
   /** Buy the racket that is being tried on, with crystals. */
   buySelectionCrystals() {
     const p = this.game.profile, it = ITEMS[this.pick.blade];
-    if (p.owns(it.id)) { this.toast('УЖЕ КУПЛЕНО'); return; }
-    if (!it.crystals) { this.toast('ЭТУ РАКЕТКУ БЕРУТ МОНЕТАМИ'); return; }
+    if (p.owns(it.id)) { this.toast(ET('УЖЕ КУПЛЕНО')); return; }
+    if (!it.crystals) { this.toast(ET('ЭТА РАКЕТКА ПРОДАЁТСЯ ЗА МОНЕТЫ')); return; }
     if (!this.game.shop.buyRacket(it.id, 'crystals')) {
-      this.toast('НУЖНО ' + it.crystals + ' КРИСТАЛЛОВ'); this.game.audio.ui('deny'); return;
+      this.toast(ET('НУЖНО {n} КРИСТАЛЛОВ', { n: it.crystals })); this.game.audio.ui('deny'); return;
     }
-    this.toast('КУПЛЕНО ЗА ' + it.crystals + ' \u25c8 · ' + it.name);
+    this.toast(ET('КУПЛЕНО ЗА {n} \u25c8 · {name}', { n: it.crystals, name: it.name }));
     this.game.audio.ui('buy');
     $('#wsBal').textContent = p.data.coins;
     $('#wsCry').textContent = p.data.crystals;
@@ -687,9 +707,9 @@ class UI {
   equipSelection() {
     const p = this.game.profile;
     const k = this.pick;
-    if (!p.equipRacket(k.blade, k.fh, k.bh)) { this.toast('ЧТО-ТО НЕ КУПЛЕНО'); return; }
+    if (!p.equipRacket(k.blade, k.fh, k.bh)) { this.toast(ET('СНАЧАЛА КУПИ ВЫБРАННЫЕ ПРЕДМЕТЫ')); return; }
     this.game.applyEquipment();
-    this.toast('РАКЕТКА В ИГРЕ · ' + this.game.equip.name);
+    this.toast(ET('РАКЕТКА В ИГРЕ · {name}', { name: this.game.equip.name }));
     this.game.audio.ui('buy');
     this.drawStatCard();
     this.refreshMenuBits();
@@ -701,28 +721,28 @@ class UI {
     $('#shopRackets').innerHTML = rackets.length ? rackets.map((o) => {
       const it = o.item;
       const s = itemStats(it);
-      const line = STAT_KEYS.map((k) => `${STAT_RU[k].slice(0, 4)} ${Math.round(s[k])}`).join(' · ');
-      return `<div class="sitem"><b>${it.name} · ${it.ru}</b><small>${line}</small>
-        <span class="buy"><span class="price">${o.price} монет</span>
-        <button data-buy="${it.id}">КУПИТЬ</button></span></div>`;
-    }).join('') : '<div class="snote">Все ракетки открыты. Играйте.</div>';
+      const line = STAT_KEYS.map((k) => `${ET(STAT_RU[k]).slice(0, 4)} ${Math.round(s[k])}`).join(' · ');
+      return `<div class="sitem"><b>${it.name} · ${ET(it.ru)}</b><small>${line}</small>
+        <span class="buy"><span class="price">${ET('{n} монет', { n: o.price })}</span>
+        <button data-buy="${it.id}">${ET('КУПИТЬ')}</button></span></div>`;
+    }).join('') : `<div class="snote">${ET('Все ракетки открыты. Стол всё ещё требует попадания.')}</div>`;
     Array.from($('#shopRackets').querySelectorAll('button[data-buy]')).forEach((b) => b.addEventListener('click', () => {
-      if (g.shop.buyRacket(b.dataset.buy)) { this.game.audio.ui('buy'); this.toast('КУПЛЕНО'); }
-      else { this.game.audio.ui('deny'); this.toast('НЕ ХВАТАЕТ МОНЕТ'); }
+      if (g.shop.buyRacket(b.dataset.buy)) { this.game.audio.ui('buy'); this.toast(ET('КУПЛЕНО')); }
+      else { this.game.audio.ui('deny'); this.toast(ET('НЕ ХВАТАЕТ МОНЕТ')); }
       $('#wsBal').textContent = p.data.coins; this.drawShop(); this.refreshMenuBits();
     }));
 
     const cos = shop.cosmeticOffers();
     $('#shopCosmetics').innerHTML = cos.map((c) => {
-      const price = c.cur === 'coins' ? `${c.price} монет` : c.cur === 'crystals' ? `${c.price} кр.` : 'за карьеру';
-      return `<div class="sitem ${c.owned ? 'owned' : ''}"><b>${c.ru}</b>
-        <small>${c.owned ? 'открыто' : c.cur === 'career' ? 'награда за кубок мира' : 'косметика'}</small>
+      const price = c.cur === 'coins' ? ET('{n} монет', { n: c.price }) : c.cur === 'crystals' ? ET('{n} кр.', { n: c.price }) : ET('за карьеру');
+      return `<div class="sitem ${c.owned ? 'owned' : ''}"><b>${ET(c.ru)}</b>
+        <small>${ET(c.owned ? 'открыто' : c.cur === 'career' ? 'награда за кубок мира' : 'косметика')}</small>
         <span class="buy"><span class="price">${c.owned ? '—' : price}</span>
-        <button data-cos="${c.id}" ${c.owned ? 'disabled' : ''}>${c.owned ? 'ЕСТЬ' : 'КУПИТЬ'}</button></span></div>`;
+        <button data-cos="${c.id}" ${c.owned ? 'disabled' : ''}>${ET(c.owned ? 'ЕСТЬ' : 'КУПИТЬ')}</button></span></div>`;
     }).join('');
     Array.from($('#shopCosmetics').querySelectorAll('button[data-cos]')).forEach((b) => b.addEventListener('click', () => {
-      if (g.shop.buyCosmetic(b.dataset.cos)) { this.game.audio.ui('buy'); this.toast('КУПЛЕНО'); }
-      else { this.game.audio.ui('deny'); this.toast('НЕ ХВАТАЕТ КРИСТАЛЛОВ'); }
+      if (g.shop.buyCosmetic(b.dataset.cos)) { this.game.audio.ui('buy'); this.toast(ET('КУПЛЕНО')); }
+      else { this.game.audio.ui('deny'); this.toast(ET('НЕ ХВАТАЕТ КРИСТАЛЛОВ')); }
       $('#wsCry').textContent = p.data.crystals; this.drawShop();
     }));
 
@@ -731,15 +751,15 @@ class UI {
     const iap = shop.iapOffers();
     $('#shopIapWrap').style.display = iap.length ? 'block' : 'none';
     $('#shopIap').innerHTML = iap.map((b) => `<div class="sitem ${b.owned ? 'owned' : ''}">
-      <b>${b.ru}</b><small>${b.note || (b.crystals ? b.crystals + ' кристаллов' : '')}</small>
+      <b>${ET(b.ru)}</b><small>${b.note ? ET(b.note) : (b.crystals ? ET('{n} кристаллов', { n: b.crystals }) : '')}</small>
       <span class="buy"><span class="price">${b.price} €</span>
-      <button data-iap="${b.id}" ${b.owned && b.once ? 'disabled' : ''}>${b.owned && b.once ? 'КУПЛЕНО' : 'КУПИТЬ'}</button></span></div>`).join('');
+      <button data-iap="${b.id}" ${b.owned && b.once ? 'disabled' : ''}>${ET(b.owned && b.once ? 'КУПЛЕНО' : 'КУПИТЬ')}</button></span></div>`).join('');
     Array.from($('#shopIap').querySelectorAll('button[data-iap]')).forEach((b) => b.addEventListener('click', () => {
       /* The store call belongs to the mobile wrapper. Here we only take the
          entitlement, and say so honestly instead of pretending. */
       if (g.platform.canIAP && g.iap) { g.iap(b.dataset.iap); }
       else if (g.shop.grant(b.dataset.iap, false)) {
-        this.toast('ПОКУПКА ЗАЧТЕНА · ' + b.dataset.iap.toUpperCase());
+        this.toast(ET('НАБОР ВЫДАН · {id}. Это не платёж.', { id: b.dataset.iap.toUpperCase() }));
         $('#wsBal').textContent = p.data.coins; $('#wsCry').textContent = p.data.crystals;
         this.drawShop();
       }
@@ -747,26 +767,26 @@ class UI {
 
     const s = p.data.season;
     const lv = p.seasonLevel();
-    $('#seasonBox').innerHTML = `<div class="sl"><span>СЕЗОН ${s.n + 1} · УРОВЕНЬ ${lv}/60</span>
-      <span>${s.premium ? 'ПРОПУСК АКТИВЕН' : 'БЕСПЛАТНАЯ ДОРОЖКА'}</span></div>
+    $('#seasonBox').innerHTML = `<div class="sl"><span>${ET('СЕЗОН {season} · УРОВЕНЬ {level}/60', { season: s.n + 1, level: lv })}</span>
+      <span>${ET(s.premium ? 'ПРОПУСК АКТИВЕН' : 'БЕСПЛАТНАЯ ДОРОЖКА')}</span></div>
       <div class="track"><i style="width:${(p.seasonProgress() * 100).toFixed(0)}%"></i></div>
-      <div class="snote">Опыт сезона дают матчи и задания. Пропуск добавляет косметику, арены и 400 кристаллов.</div>`;
+      <div class="snote">${ET('Матчи и задания дают опыт сезона. Пропуск добавляет косметику, арены и 400 кристаллов. Стол платных поправок не принимает.')}</div>`;
   }
 
   drawDaily() {
     const p = this.game.profile;
     const d = p.data.daily;
-    $('#dailyHead').innerHTML = `Серия <b>${p.data.streak}</b> ${p.data.streak >= 7 ? '· +50% к награде'
-      : p.data.streak >= 3 ? '· +25% к награде' : '· три дня подряд дают +25%'}`;
+    $('#dailyHead').innerHTML = `${ET('Серия')} <b>${p.data.streak}</b> ${ET(p.data.streak >= 7 ? '· +50% к награде'
+      : p.data.streak >= 3 ? '· +25% к награде' : '· три дня подряд дают +25%')}`;
     $('#taskList').innerHTML = DAILY_TASKS.map((t) => {
       const cur = Math.min(d.tasks[t.id] || 0, t.need);
       const done = d.done.indexOf(t.id) >= 0, claimed = d.claimed.indexOf(t.id) >= 0;
-      return `<div class="trow"><span class="d"><b>${t.ru}</b><small>${cur}/${t.need} · ${t.coins} монет</small></span>
-        <button data-claim="${t.id}" ${done && !claimed ? '' : 'disabled'}>${claimed ? 'ПОЛУЧЕНО' : done ? 'ЗАБРАТЬ' : 'В ПРОЦЕССЕ'}</button></div>`;
+      return `<div class="trow"><span class="d"><b>${ET(t.ru)}</b><small>${cur}/${t.need} · ${ET('{n} монет', { n: t.coins })}</small></span>
+        <button data-claim="${t.id}" ${done && !claimed ? '' : 'disabled'}>${ET(claimed ? 'ПОЛУЧЕНО' : done ? 'ЗАБРАТЬ' : 'В ПРОЦЕССЕ')}</button></div>`;
     }).join('');
     Array.from($('#taskList').querySelectorAll('button[data-claim]')).forEach((b) => b.addEventListener('click', () => {
       const got = p.claimTask(b.dataset.claim);
-      if (got) { this.toast('+' + got + ' МОНЕТ'); this.game.audio.ui('buy'); }
+      if (got) { this.toast(ET('+{n} МОНЕТ', { n: got })); this.game.audio.ui('buy'); }
       $('#wsBal').textContent = p.data.coins;
       this.drawDaily(); this.drawShop(); this.refreshMenuBits();
     }));
@@ -774,21 +794,21 @@ class UI {
 
   watchAd() {
     const r = this.game.shop.rewardAd('dailyWheel');
-    if (r.ok) { this.toast('+' + r.coins + ' МОНЕТ · СПАСИБО'); this.game.audio.ui('buy'); }
-    else if (r.why === 'no-ads') this.toast('РЕКЛАМА ОТКЛЮЧЕНА');
-    else if (r.why === 'daily') this.toast('ЛИМИТ НА СЕГОДНЯ · ЗАВТРА ЕЩЁ ' + r.cap);
-    else this.toast('ПОДОЖДИТЕ ' + (r.left || 45) + ' С');
+    if (r.ok) { this.toast(ET('+{n} МОНЕТ · НАГРАДА ЗАЧТЕНА', { n: r.coins })); this.game.audio.ui('buy'); }
+    else if (r.why === 'no-ads') this.toast(ET('РЕКЛАМА ОТКЛЮЧЕНА'));
+    else if (r.why === 'daily') this.toast(ET('ЛИМИТ НА СЕГОДНЯ · ЗАВТРА ЕЩЁ {n}', { n: r.cap }));
+    else this.toast(ET('ПОВТОР ЧЕРЕЗ {n} С', { n: r.left || 45 }));
     const cap = this.game.shop.adsLeft;
     const btn = $('#adCoins');
-    if (btn) btn.textContent = cap > 0 ? 'СМОТРЕТЬ РЕКЛАМУ · +120 МОНЕТ · ОСТАЛОСЬ ' + cap : 'РЕКЛАМА · ЛИМИТ НА СЕГОДНЯ ИСЧЕРПАН';
+    if (btn) btn.textContent = cap > 0 ? ET('СМОТРЕТЬ РЕКЛАМУ · +120 МОНЕТ · ОСТАЛОСЬ {n}', { n: cap }) : ET('РЕКЛАМА · ЛИМИТ НА СЕГОДНЯ ИСЧЕРПАН');
     $('#wsBal').textContent = this.game.profile.data.coins;
     this.drawShop(); this.refreshMenuBits();
   }
 
   refreshMenuBits() {
     const p = this.game.profile; if (!p) return;
-    $('#wsCoins').textContent = p.data.coins + ' монет';
-    $('#wsStreak').textContent = 'серия ' + p.data.streak + ' · ' + p.data.daily.done.length + '/6';
+    $('#wsCoins').textContent = ET('{n} монет', { n: p.data.coins });
+    $('#wsStreak').textContent = ET('серия {n} · {done}/6', { n: p.data.streak, done: p.data.daily.done.length });
   }
 
   toast(text) {
@@ -845,7 +865,7 @@ class UI {
   syncSpinBias() {
     const g = this.game; if (!g) return;
     const el = $('#spinBias'), lab = $('#spinBiasVal');
-    if (lab) lab.textContent = 'НОРМА';
+    if (lab) lab.textContent = ET('НОРМА');
   }
 
   syncSettings() {
@@ -894,8 +914,8 @@ class UI {
     /* В игре с ботом показываем его уровень, в онлайн-матче — участников,
      * а не название уровня ИИ, который не является соперником. */
     const L = g.ai.L, online = !!(g.network && g.network.isInMatch);
-    $('#scoreSideA .sb-nm').textContent = online ? ET('hud.you') : 'ВЫ';
-    $('#oppName').textContent = online ? ET('hud.opponent') : (L.ru || L.name);
+    $('#scoreSideA .sb-nm').textContent = online ? ET('hud.you') : ET('ТЫ');
+    $('#oppName').textContent = online ? ET('hud.opponent') : ET(L.ru || L.name);
     if (online) {
       $('#score').setAttribute('aria-label', ET('hud.score'));
       [['#servA', 1], ['#servB', -1]].forEach(([selector, side]) => {
@@ -1013,9 +1033,10 @@ class UI {
     if (!status || !box) return;
     box.replaceChildren();
     const session = this.zoneCal;
-    if (!session) { status.textContent = 'Калибровка не начата. Нажмите «Начать заново», выполните задание в игре и вернитесь сюда.'; return; }
-    if (session.done) status.textContent = 'Готово: все шаги пройдены мышью и касанием. Скачайте данные калибровки.';
-    else status.textContent = `${session.pass === 'mouse' ? 'Мышь' : 'Касание'} · ${session.step.title}: ${session.count()}/${session.step.need}. ${session.step.instruction} Затем откройте эту панель и нажмите «Записать попытки из игры».`;
+    if (!session) { status.textContent = ET('Калибровка не начата. Нажми «Начать заново», выполни задание в игре и вернись сюда. Сначала данные, потом выводы.'); return; }
+    if (session.done) status.textContent = ET('Все шаги пройдены мышью и касанием. Скачай данные калибровки. Измерение завершено, регламент прежний.');
+    else status.textContent = ET('{input} · {title}: {n}/{total}. {instruction} Затем вернись сюда и нажми «Записать попытки из игры».', {
+      input: ET(session.pass === 'mouse' ? 'Мышь' : 'Касание'), title: ET(session.step.title), n: session.count(), total: session.step.need, instruction: ET(session.step.instruction) });
     const summaries = session.exportData().summaries.filter(x => x.count > 0);
     for (const item of summaries) {
       const p = document.createElement('p');
@@ -1024,7 +1045,7 @@ class UI {
     }
     if (session.lastSummary) {
       const p = document.createElement('p');
-      p.textContent = `Последний завершённый шаг: ${session.lastSummary.recommendation}`;
+      p.textContent = ET('Последний завершённый шаг: {result}', { result: session.summaryFor(session.lastSummary.stepId, session.lastSummary.pass).recommendation });
       box.append(p);
     }
   }
@@ -1042,9 +1063,9 @@ class UI {
       this._diagnosticRecoveryReady = archive;
       archive.ready.then(() => this.refreshDiagnosticPause());
     }
-    const storage = archive && archive.status === 'available' ? 'локальное восстановление доступно'
-      : archive && archive.status === 'opening' ? 'подключаем локальное хранилище' : 'восстановление после перезагрузки недоступно';
-    const frameStatus = this._diagnosticBookmark ? ' · ' + (archive && archive.frameStatus === 'saved' ? 'кадр в локальном резерве'
+    const storage = ET(archive && archive.status === 'available' ? 'локальное восстановление доступно'
+      : archive && archive.status === 'opening' ? 'подключаем локальное хранилище' : 'восстановление после перезагрузки недоступно');
+    const frameStatus = this._diagnosticBookmark ? ' · ' + ET(archive && archive.frameStatus === 'saved' ? 'кадр в локальном резерве'
       : archive && archive.frameStatus === 'pending' ? 'сохраняем кадр' : 'кадр только в памяти') : '';
     /* Сторож физики: сколько тикетов и живы ли его детекторы. Гейты
      * пересчитываются только когда меняется число тикетов — самопроверка
@@ -1070,11 +1091,12 @@ class UI {
         const [code, n] = Object.entries(gateCounts).filter(([, v]) => v > 0).sort((a, b) => b[1] - a[1])[0] || [];
         if (code) top = ` · ${code}${n > 1 ? ' ×' + n : ''}`;
       }
-      watchdogStatus = ` · сторож: ${engine}${top}` +
-        (explained ? ` · улетело по удару: ${explained}` : '') +
-        (gates ? (gates.status === 'green' ? ' · гейты зелёные' : ' · гейты КРАСНЫЕ') : '');
+      watchdogStatus = ET(' · сторож: {n}{code}', { n: engine, code: top }) +
+        (explained ? ET(' · улетело по удару: {n}', { n: explained }) : '') +
+        (gates ? ET(gates.status === 'green' ? ' · гейты зелёные' : ' · гейты КРАСНЫЕ') : '');
     }
-    status.textContent = `${g.debugRecording ? 'Запись включена' : 'Запись выключена'} · в памяти ${Math.round(stats.retainedWallSeconds)} с / ${stats.inWindow} событий · ${storage}${frameStatus}${watchdogStatus}`;
+    status.textContent = ET('{recording} · в памяти {seconds} с / {events} событий · {storage}{frame}{watchdog}', {
+      recording: ET(g.debugRecording ? 'Запись включена' : 'Запись выключена'), seconds: Math.round(stats.retainedWallSeconds), events: stats.inWindow, storage, frame: frameStatus, watchdog: watchdogStatus });
     if (!this._diagnosticBookmark && !this._diagnosticRestoreTried && g.debugArchive) {
       this._diagnosticRestoreTried = true;
       g.debugArchive.readFrame().then(saved => {
@@ -1084,7 +1106,7 @@ class UI {
     const frame = this._diagnosticBookmark || g._diagnosticFrame, box = $('#diagnosticPreview');
     if (frame && frame.dataUrl && box) {
       box.hidden = false;
-      $('#diagnosticFrameTime').textContent = frame.capturedAt ? 'Время снимка: ' + new Date(frame.capturedAt).toLocaleString() : '';
+      $('#diagnosticFrameTime').textContent = frame.capturedAt ? ET('Время снимка: {time}', { time: new Date(frame.capturedAt).toLocaleString(ET.lang()) }) : '';
       $('#diagnosticImage').src = frame.dataUrl; $('#diagnosticImageLink').href = frame.dataUrl;
     }
   }
@@ -1105,20 +1127,20 @@ class UI {
       const hits=attempts.filter(e=>e.contact), block=document.createElement('div');block.className='lab-entry';
       const add=text=>{const p=document.createElement('p');p.textContent=text;block.append(p);};
       const oval=MATCH_RULES.zoneShape==='oval';
-      const title=document.createElement('b');title.textContent=oval?`${serving?'Подача':'Приём'} · овал: скорость×${MATCH_RULES.ovalLeadSec} с + ${MATCH_RULES.ovalForwardPx} px вперёд, ${MATCH_RULES.ovalBackPx} px назад, ${MATCH_RULES.ovalSideMousePx}/${MATCH_RULES.ovalSideTouchPx} px поперёк`:`${serving?'Подача':'Приём'} · радиус ${MATCH_RULES.pressRadiusPx} px`;block.append(title);
-      add(`Нажатий: ${attempts.length} · вне зоны: ${attempts.filter(e=>!e.pressZone.accepted).length} · ударов: ${hits.length}`);
+      const title=document.createElement('b');title.textContent=oval?ET('{kind} · овал: скорость×{lead} с + {forward} px вперёд, {back} px назад, {mouse}/{touch} px поперёк', { kind: ET(serving?'Подача':'Приём'), lead: MATCH_RULES.ovalLeadSec, forward: MATCH_RULES.ovalForwardPx, back: MATCH_RULES.ovalBackPx, mouse: MATCH_RULES.ovalSideMousePx, touch: MATCH_RULES.ovalSideTouchPx }):ET('{kind} · радиус {radius} px', { kind: ET(serving?'Подача':'Приём'), radius: MATCH_RULES.pressRadiusPx });block.append(title);
+      add(ET('Нажатий: {presses} · вне зоны: {outside} · ударов: {hits}', { presses: attempts.length, outside: attempts.filter(e=>!e.pressZone.accepted).length, hits: hits.length }));
       if(oval){
         const rejected=attempts.filter(e=>!e.pressZone.accepted);
         const p90=(rows,key)=>{const xs=rows.map(e=>Math.abs(e.pressZone[key])).filter(Number.isFinite).sort((a,b)=>a-b);return xs.length?Math.round(xs[Math.ceil(xs.length*.9)-1]):'—';};
-        add(`Отклонённые: 90-й перцентиль along ${p90(rejected,'along')} px, across ${p90(rejected,'across')} px. Причины: ${[...new Set(rejected.map(e=>e.pressZone.reason||'OUTSIDE_ZONE'))].join(', ')||'—'}.`);
-        add(`Принятые удары: 90-й перцентиль along ${p90(hits,'along')} px, across ${p90(hits,'across')} px.`);
+        add(ET('Отклонённые: 90-й перцентиль along {along} px, across {across} px. Причины: {reasons}.', { along: p90(rejected,'along'), across: p90(rejected,'across'), reasons: [...new Set(rejected.map(e=>e.pressZone.reason||'OUTSIDE_ZONE'))].join(', ')||'—' }));
+        add(ET('Принятые удары: 90-й перцентиль along {along} px, across {across} px.', { along: p90(hits,'along'), across: p90(hits,'across') }));
       } else {
-        for(const scale of [.9,.8,.7]) add(`Радиус ${Math.round(MATCH_RULES.pressRadiusPx*scale)} px: заблокировал бы ${hits.filter(e=>e.pressZone.distancePx>e.pressZone.radius*scale).length} из ${hits.length} записанных ударов.`);
+        for(const scale of [.9,.8,.7]) add(ET('Радиус {radius} px: отсёк бы {blocked} из {total} записанных ударов.', { radius: Math.round(MATCH_RULES.pressRadiusPx*scale), blocked: hits.filter(e=>e.pressZone.distancePx>e.pressZone.radius*scale).length, total: hits.length }));
       }
       summary.append(block);
     }
     const entries = this.game.shotJournal.records.slice().reverse();
-    if (!entries.length) { root.textContent = 'Пока нет попыток. Сделайте свайп во время игры.'; return; }
+    if (!entries.length) { root.textContent = ET('Попыток пока нет. Сделай свайп в игре: отчёт не питается догадками.'); return; }
     for (const entry of entries) {
       const view = shotFeedbackView(entry), card = document.createElement('div'); card.className = 'lab-entry';
       const title = document.createElement('b'); title.textContent = `#${entry.id} · ${view.title} · ${view.status}`; card.append(title);
@@ -1126,8 +1148,8 @@ class UI {
       if (view.metrics) add(view.metrics);
 
       if (entry.pressZone) add(entry.pressZone.shape==='oval'||entry.pressZone.shape==='circle'&&Number.isFinite(entry.pressZone.along)
-        ? `Нажатие: ${entry.pressZone.accepted?'внутри':'снаружи'} · score ${Number.isFinite(entry.pressZone.score)?entry.pressZone.score.toFixed(2):'—'} · along ${Number.isFinite(entry.pressZone.along)?entry.pressZone.along.toFixed(0):'—'} px · across ${Number.isFinite(entry.pressZone.across)?entry.pressZone.across.toFixed(0):'—'} px${entry.pressZone.reason?` · ${entry.pressZone.reason}`:''}.`
-        : `Нажатие: ${entry.pressZone.accepted?'внутри':'снаружи'} · расстояние ${Number.isFinite(entry.pressZone.distancePx)?entry.pressZone.distancePx.toFixed(0):'не измерено'} px из ${entry.pressZone.radius} px.`);
+        ? ET('Нажатие: {state} · score {score} · along {along} px · across {across} px{reason}.', { state: ET(entry.pressZone.accepted?'внутри':'снаружи'), score: Number.isFinite(entry.pressZone.score)?entry.pressZone.score.toFixed(2):'—', along: Number.isFinite(entry.pressZone.along)?entry.pressZone.along.toFixed(0):'—', across: Number.isFinite(entry.pressZone.across)?entry.pressZone.across.toFixed(0):'—', reason: entry.pressZone.reason?` · ${entry.pressZone.reason}`:'' })
+        : ET('Нажатие: {state} · расстояние {distance} px из {radius} px.', { state: ET(entry.pressZone.accepted?'внутри':'снаружи'), distance: Number.isFinite(entry.pressZone.distancePx)?entry.pressZone.distancePx.toFixed(0):ET('не измерено'), radius: entry.pressZone.radius }));
       root.append(card);
     }
   }
@@ -1154,7 +1176,7 @@ class UI {
   showNote(note) {
     if (!note || !this.game || !this.game.settings.coach) return;
     const el = $('#note');
-    el.querySelector('span').textContent = note.text;
+    el.querySelector('span').textContent = ET(note.text);
     el.querySelector('i').style.background = note.col || 'var(--acc)';
     el.classList.add('on');
     this.noteTimer = note.text.length > 58 ? 3.4 : 2.6;
@@ -1247,17 +1269,17 @@ class UI {
     const g = this.game, s = g.stats;
     $('#over').classList.toggle('won', !!won);
     $('#over').classList.toggle('lost', !won);
-    $('#overTitle').textContent = won ? 'ПОБЕДА' : 'ПОРАЖЕНИЕ';
+    $('#overTitle').textContent = ET(won ? 'ПОБЕДА' : 'ПОРАЖЕНИЕ');
     $('#overTitle').style.color = won ? 'var(--good)' : 'var(--bad)';
     $('#overScore').textContent = g.score[0] + ' : ' + g.score[1];
     const avgSpin = s.shots ? (s.totalSpin / s.shots) : 0;
     $('#stShots').textContent = s.shots;
-    $('#stMaxSpeed').textContent = s.maxSpeed.toFixed(0) + ' км/ч';
-    $('#stMaxSpin').textContent = s.maxSpin.toFixed(0) + ' об/с';
-    $('#stAvgSpin').textContent = avgSpin.toFixed(0) + ' об/с';
+    $('#stMaxSpeed').textContent = s.maxSpeed.toFixed(0) + ' ' + ET('км/ч');
+    $('#stMaxSpin').textContent = s.maxSpin.toFixed(0) + ' ' + ET('об/с');
+    $('#stAvgSpin').textContent = avgSpin.toFixed(0) + ' ' + ET('об/с');
     $('#stRally').textContent = g.bestRally;
     const top = Object.entries(s.byStroke).sort((a, b) => b[1] - a[1])[0];
-    $('#stFav').textContent = top ? (STROKES[top[0]] ? STROKES[top[0]].short : top[0]) + ' ×' + top[1] : '—';
+    $('#stFav').textContent = top ? ET(STROKES[top[0]] ? STROKES[top[0]].short : top[0]) + ' ×' + top[1] : '—';
     // Results are immediate; normal best moments remain an explicit choice.
     const row = $('#overMoments');
     row.innerHTML = '';
@@ -1266,9 +1288,9 @@ class UI {
       const r = g.lastReward;
       const line = document.createElement('div');
       line.className = 'snote';
-      line.innerHTML = `+<b>${r.coins}</b> монет · +<b>${r.xp}</b> опыта`
-        + (r.seasonLevels ? ` · сезон +${r.seasonLevels}` : '')
-        + (g.moments.kept.length ? ` · моментов в копилке: ${g.moments.kept.length}` : '');
+      line.innerHTML = ET('+<b>{coins}</b> монет · +<b>{xp}</b> опыта', { coins: r.coins, xp: r.xp })
+        + (r.seasonLevels ? ET(' · сезон +{n}', { n: r.seasonLevels }) : '')
+        + (g.moments.kept.length ? ET(' · моментов в архиве: {n}', { n: g.moments.kept.length }) : '');
       row.appendChild(line);
       g.lastReward = null;
     }
@@ -1276,7 +1298,7 @@ class UI {
     if (kept.length) {
       const b = document.createElement('button');
       b.className = 'btn';
-      b.textContent = '\u25b6 ЛУЧШИЕ МОМЕНТЫ \u00b7 ' + kept.length;
+      b.textContent = ET('\u25b6 ЛУЧШИЕ МОМЕНТЫ \u00b7 {n}', { n: kept.length });
       b.addEventListener('click', () => this.showMoments());
       row.appendChild(b);
     }
@@ -1734,7 +1756,7 @@ class UI {
     const status = $('#playStatus');
     let statusText = '';
     if (g.state === GS.POINT && g.stateT < 0.95)
-      statusText = g.lastPoint ? (g.lastPoint.who > 0 ? 'Очко ваше' : 'Очко сопернику') : 'Переигровка';
+      statusText = g.lastPoint ? ET(g.lastPoint.who > 0 ? 'Твоё очко' : 'Очко сопернику') : ET('Переигровка');
 
     if (g.training || g.demoMode || g.paused) statusText = '';
     status.textContent = statusText;
@@ -1764,7 +1786,7 @@ class UI {
       const on = live && !g.training && (us || them);
       mpi.classList.toggle('on', on);
       mpi.classList.toggle('them', them && !us);
-      if (on) mpi.textContent = them && !us ? 'МАТЧБОЛ СОПЕРНИКА' : 'МАТЧБОЛ';
+      if (on) mpi.textContent = ET(them && !us ? 'МАТЧБОЛ СОПЕРНИКА' : 'МАТЧБОЛ');
     }
 
     // Adapt typography to the free space BELOW the table; no guessed pixels.
@@ -1787,7 +1809,7 @@ class UI {
     const rb = $('#rally');
     const showRally = !g.training && g.rally > 2;
     rb.classList.toggle('on', showRally);
-    if (showRally) rb.innerHTML = `РАЛЛИ <b>${g.rally}</b> · РЕКОРД <b>${Math.max(g.bestRally, g.rally)}</b>`;
+    if (showRally) rb.innerHTML = ET('РАЛЛИ <b>{rally}</b> · РЕКОРД <b>{best}</b>', { rally: g.rally, best: Math.max(g.bestRally, g.rally) });
 
     this.syncShotFeedback();
     if (this.noteTimer > 0) { this.noteTimer -= dt; if (this.noteTimer <= 0) this.hideNote(); }
@@ -1807,8 +1829,8 @@ class UI {
       };
       setG($('#gTop'), top, 160, 'var(--acc2)', 'var(--acc)');
       setG($('#gSide'), side, 140, 'var(--good)', 'var(--good)');
-      $('#gTopV').textContent = (top >= 0 ? '+' : '') + top.toFixed(0) + ' об/с';
-      $('#gSideV').textContent = (side >= 0 ? '+' : '') + side.toFixed(0) + ' об/с';
+      $('#gTopV').textContent = (top >= 0 ? '+' : '') + top.toFixed(0) + ' ' + ET('об/с');
+      $('#gSideV').textContent = (side >= 0 ? '+' : '') + side.toFixed(0) + ' ' + ET('об/с');
       $('#ballKmh').textContent = (V3.len(g.ball.v) * 3.6).toFixed(0);
     }
 
@@ -1873,10 +1895,10 @@ class UI {
     $$('.screen').forEach(s => s.classList.remove('on'));
     $('#crOppList').replaceChildren();
     $('#crReady').hidden = false;
-    $('#crTournName').textContent = t.name;
+    $('#crTournName').textContent = ET(t.name);
     $('#crTournMark').textContent = String(t.id + 1).padStart(2, '0');
-    $('#crTournPlace').textContent = t.place;
-    $('#crTournInfo').textContent = `Раундов: ${t.rounds} · ELO ${t.eloMin}–${t.eloMax} · Побед: ${career.totalWins}`;
+    $('#crTournPlace').textContent = ET(t.place);
+    $('#crTournInfo').textContent = ET('Раундов: {rounds} · ELO {min}-{max} · Побед: {wins}', { rounds: t.rounds, min: t.eloMin, max: t.eloMax, wins: career.totalWins });
     $('#careerIntro').classList.add('on');
   }
 
@@ -1884,7 +1906,7 @@ class UI {
     const g = this.game;
     $$('.screen').forEach(s => s.classList.remove('on'));
     const t = career.currentTournamentInfo;
-    $('#crTournName').textContent = t.name;
+    $('#crTournName').textContent = ET(t.name);
     $('#crTournMark').textContent = String(t.id + 1).padStart(2, '0');
     $('#crReady').hidden = true;
     const list = $('#crOppList');
@@ -1893,7 +1915,7 @@ class UI {
       const btn = document.createElement('button');
       btn.className = 'opt';
       const name = document.createElement('b'), detail = document.createElement('s');
-      name.textContent = opp.name; detail.textContent = `${opp.style} · ELO ${opp.elo}`;
+      name.textContent = ET(opp.name); detail.textContent = `${ET(opp.style)} · ELO ${opp.elo}`;
       btn.append(name, detail);
       btn.addEventListener('click', () => {
         g.audio.ui('click');
@@ -1904,7 +1926,7 @@ class UI {
     });
     const status = document.createElement('div');
     status.className = 'note';
-    status.textContent = `Раунд ${career.currentRound + 1} из ${career.currentTournamentInfo.rounds} · Перков: ${career.perks.length}`;
+    status.textContent = ET('Раунд {round} из {total} · Перков: {perks}', { round: career.currentRound + 1, total: career.currentTournamentInfo.rounds, perks: career.perks.length });
     status.style.marginTop = '10px';
     list.appendChild(status);
     $('#careerIntro').classList.add('on');
@@ -1920,7 +1942,7 @@ class UI {
       btn.className = 'opt';
       const colors = { green: '#4ee39a', blue: '#39c6ff', gold: '#ffd34d' };
       btn.style.borderColor = colors[perk.rarity] || '#39c6ff';
-      btn.innerHTML = `<b style="color:${colors[perk.rarity]}">${perk.name}</b><small>${perk.desc}</small>`;
+      btn.innerHTML = `<b style="color:${colors[perk.rarity]}">${ET(perk.name)}</b><small>${ET(perk.desc)}</small>`;
       btn.addEventListener('click', () => {
         g.audio.ui('click');
         career.selectPerk(i);
@@ -1934,7 +1956,7 @@ class UI {
 
   showCareerTournamentEnd(career) {
     const t = career.currentTournamentInfo;
-    this.showNote({ text: `${t.name} ПОБЕЖДЁН!`, col: '#ffd34d', code: 'win' });
+    this.showNote({ text: ET('Турнир пройден: {name}. Протокол закрыт.', { name: ET(t.name) }), col: '#ffd34d', code: 'win' });
     clearTimeout(this._careerTimer);
     this._careerTimer = setTimeout(() => {
       if (!career.active || career.state !== 'TOURNAMENT_END') return;
@@ -1951,18 +1973,18 @@ class UI {
     $$('.screen').forEach(s => s.classList.remove('on'));
     const t = TOURNAMENTS[Math.min(career.currentTournament, TOURNAMENTS.length - 1)] || TOURNAMENTS[0];
     const isVictory = career.currentTournament >= TOURNAMENTS.length;
-    $('#crEndTitle').textContent = isVictory ? 'ЧЕМПИОН МИРА!' : t.name;
+    $('#crEndTitle').textContent = ET(isVictory ? 'ЧЕМПИОН МИРА' : t.name);
     $('#careerEnd').classList.toggle('career-victory', isVictory);
     $('#crEndSub').textContent = isVictory
-      ? 'Вы прошли все 12 турниров. Легенда.'
-      : `Выбыли на турнире: ${t.name}`;
+      ? ET('Все 12 турниров пройдены. Регламент исчерпан, стол остаётся.')
+      : ET('Забег завершён на турнире: {name}. Новый старт открыт.', { name: ET(t.name) });
     const stats = $('#crEndStats');
     stats.innerHTML = `
       <div class="recap">
-        <div class="rc"><i style="background:#4ee39a"></i><b>${career.totalWins}</b><small>побед</small></div>
-        <div class="rc"><i style="background:#ff5d6e"></i><b>${career.totalLosses}</b><small>поражений</small></div>
-        <div class="rc"><i style="background:#39c6ff"></i><b>${career.perks.length}</b><small>перков</small></div>
-        <div class="rc"><i style="background:#ffd34d"></i><b>${Math.round(career.runStats.maxSpeed)}</b><small>км/ч макс</small></div>
+        <div class="rc"><i style="background:#4ee39a"></i><b>${career.totalWins}</b><small>${ET('побед')}</small></div>
+        <div class="rc"><i style="background:#ff5d6e"></i><b>${career.totalLosses}</b><small>${ET('поражений')}</small></div>
+        <div class="rc"><i style="background:#39c6ff"></i><b>${career.perks.length}</b><small>${ET('перков')}</small></div>
+        <div class="rc"><i style="background:#ffd34d"></i><b>${Math.round(career.runStats.maxSpeed)}</b><small>${ET('км/ч макс')}</small></div>
       </div>
     `;
     career.stop();
@@ -1980,21 +2002,21 @@ class UI {
       g.returnToMenu();
       g.audio.init(); g.audio.resume(); g.audio.ui('click');
       $$('.screen').forEach(s => s.classList.remove('on'));
-      $('#netStatus').textContent = 'Подключение...';
+      $('#netStatus').textContent = ET('Соединяемся... Сеть принимает заявку.');
       $('#netRoomCode').style.display = 'none';
       $('#onlineLobby').classList.add('on');
       net.connect();
     });
     net.on('connected', () => {
-      $('#netStatus').textContent = 'Подключено! Создайте комнату.';
+      $('#netStatus').textContent = ET('Связь есть. Создай комнату.');
       $('#netRoomCode').style.display = 'none';
     });
     net.on('assigned', (msg) => {
       $('#netRoomCode').textContent = msg.room;
       $('#netRoomCode').style.display = 'block';
-      $('#netStatus').textContent = msg.side === 1
-        ? 'Вы хост. Ждём соперника...'
-        : 'Подключены к комнате.';
+      $('#netStatus').textContent = ET(msg.side === 1
+        ? 'Ты хост. Ждём соперника.'
+        : 'Ты в комнате.');
     });
     net.on('matchStart', () => {
       $$('.screen').forEach(s => s.classList.remove('on'));
@@ -2002,14 +2024,14 @@ class UI {
     });
     net.on('disconnected', () => {
       this.showMainMenu();
-      this.toast('СОЕДИНЕНИЕ ПРЕРВАНО');
+      this.toast(ET('СВЯЗЬ ПРЕРВАНА'));
     });
     net.on('error', (msg) => {
-      $('#netStatus').textContent = `Ошибка: ${msg}`;
+      $('#netStatus').textContent = ET('Не удалось войти: {message}. Проверь сеть и код комнаты.', { message: ET(msg) });
     });
     net.on('peerLeft', () => {
       this.showMainMenu();
-      this.toast('СОПЕРНИК ВЫШЕЛ');
+      this.toast(ET('СОПЕРНИК ВЫШЕЛ'));
     });
     $('#netCreate').addEventListener('click', () => {
       g.audio.ui('click');
@@ -2017,7 +2039,7 @@ class UI {
     });
     $('#netJoin').addEventListener('click', () => {
       g.audio.ui('click');
-      const code = prompt('Введите код комнаты:');
+      const code = prompt(ET('Введи код комнаты:'));
       if (code) net.joinRoom(code.toUpperCase().trim());
     });
     $('#netClose').addEventListener('click', () => {

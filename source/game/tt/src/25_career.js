@@ -16,27 +16,27 @@
 // already drops unknown IDs; they cannot silently restore private rules.
 const PERKS = [
   // --- GREEN (common, always available) ---
-  { id: 'heavy_spin',    name: 'Тяжёлое вращение',     desc: 'Вращение +12% на всех ударах', rarity: 'green',
+  { id: 'heavy_spin',    name: 'Тяжёлое вращение',     desc: 'Вращение +12% на всех ударах. Мяч подаёт апелляцию.', rarity: 'green',
     apply(g) { g._careerSpinBoost = (g._careerSpinBoost || 1) * 1.12; } },
-  { id: 'fast_arms',     name: 'Быстрые руки',         desc: 'Макс. скорость замаха +15%',  rarity: 'green',
+  { id: 'fast_arms',     name: 'Быстрые руки',         desc: 'Макс. скорость замаха +15%. Срочное рассмотрение.',  rarity: 'green',
     apply(g) { g._careerSpeedBoost = (g._careerSpeedBoost || 1) * 1.15; } },
-  { id: 'iron_will',     name: 'Железная воля',        desc: 'Мощность +12% на решающих очках', rarity: 'green',
+  { id: 'iron_will',     name: 'Железная воля',        desc: 'Мощность +12% на решающих очках. Протокол нервничает.', rarity: 'green',
     apply(g) { g._careerDecisiveBoost = 0.12; } },
-  { id: 'deep_breath',   name: 'Глубокий вдох',        desc: 'Усталость -30%',              rarity: 'green',
+  { id: 'deep_breath',   name: 'Глубокий вдох',        desc: 'Усталость -30%. Перерыв согласован.',              rarity: 'green',
     apply(g) { g._careerFatigueReduce = 0.70; } },
   // --- BLUE (uncommon, unlock after tournament 3) ---
-  { id: 'topspin_master',name: 'Мастер топспина',      desc: 'Топспин +25%, бэкспин -10%',  rarity: 'blue',
+  { id: 'topspin_master',name: 'Мастер топспина',      desc: 'Топспин +25%, бэкспин -10%. Верх получил приоритет.',  rarity: 'blue',
     apply(g) { g._careerTopspinBoost = 1.25; g._careerBackspinPenalty = 0.90; } },
-  { id: 'smash_fury',    name: 'Ярость смеша',         desc: 'Смеш +30% скорости',          rarity: 'blue',
+  { id: 'smash_fury',    name: 'Ярость смеша',         desc: 'Смеш: скорость +30%. Закрытие дела ускорено.',          rarity: 'blue',
     apply(g) { g._careerSmashBoost = 1.30; } },
-  { id: 'counter_punch', name: 'Контр-удар',           desc: 'Контр-топспин +40% вращения', rarity: 'blue',
+  { id: 'counter_punch', name: 'Контр-удар',           desc: 'Контр-топспин: вращение +40%. Вернуть отправителю.', rarity: 'blue',
     apply(g) { g._careerCounterBoost = 1.40; } },
-  { id: 'chop_back',     name: 'Глубокая защита',      desc: 'Чоп +35% вращения, -20% скорость соперника', rarity: 'blue',
+  { id: 'chop_back',     name: 'Глубокая защита',      desc: 'Чоп: вращение +35%, скорость соперника -20%. Атака ждёт в очереди.', rarity: 'blue',
     apply(g) { g._careerChopBoost = 1.35; g._careerAISlowdown = 0.80; } },
-  { id: 'deception',     name: 'Обманный удар',        desc: 'Боковое вращение +50%',       rarity: 'blue',
+  { id: 'deception',     name: 'Обманный удар',        desc: 'Боковое вращение +50%. Прямую линию отменили.',       rarity: 'blue',
     apply(g) { g._careerSidespinBoost = 1.50; } },
   // --- GOLD (rare, unlock after tournament 7) ---
-  { id: 'time_master',   name: 'Повелитель времени',   desc: 'Замедление 0.3x при smash > 80 км/ч', rarity: 'gold',
+  { id: 'time_master',   name: 'Повелитель времени',   desc: 'Замедление 0.3x при smash > 80 км/ч. Срочность временно отменена.', rarity: 'gold',
     apply(g) { g._careerSlowmoThreshold = 80; g._careerSlowmoScale = 0.3; } },
 ];
 

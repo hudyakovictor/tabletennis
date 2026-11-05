@@ -121,11 +121,11 @@ class Analytics {
  * ------------------------------------------------------------------ */
 const DAILY_TASKS = [
   { id: 'win1', ru: 'ВЫИГРАЙ МАТЧ', need: 1, coins: 120 },
-  { id: 'rally8', ru: 'РОЗЫГРЫШ ИЗ 8 УДАРОВ', need: 1, coins: 100 },
-  { id: 'topspin', ru: '10 ТОПСПИНОВ', need: 10, coins: 90 },
-  { id: 'smash', ru: '3 СМЕША', need: 3, coins: 110 },
-  { id: 'serves', ru: '5 ЛЕГАЛЬНЫХ ПОДАЧ ПОДРЯД', need: 5, coins: 100 },
-  { id: 'replay', ru: 'ПОСМОТРИ ЛУЧШИЙ МОМЕНТ', need: 1, coins: 80 },
+  { id: 'rally8', ru: 'СОБЕРИ РАЛЛИ ИЗ 8 УДАРОВ', need: 1, coins: 100 },
+  { id: 'topspin', ru: 'СДЕЛАЙ 10 ТОПСПИНОВ', need: 10, coins: 90 },
+  { id: 'smash', ru: 'ВЫПОЛНИ 3 СМЕША', need: 3, coins: 110 },
+  { id: 'serves', ru: 'ПОДАЙ 5 РАЗ ПОДРЯД БЕЗ ФОЛА', need: 5, coins: 100 },
+  { id: 'replay', ru: 'ПОСМОТРИ ЛУЧШИЙ РОЗЫГРЫШ', need: 1, coins: 80 },
 ];
 
 class Profile {
@@ -441,12 +441,12 @@ const COSMETICS = [
 
 const SHOP_BUNDLES = [
   { id: 'starter', ru: 'СТАРТОВЫЙ НАБОР', crystals: 300, coins: 1500, price: '2.99', cur: 'eur', once: true,
-    note: 'основание LOOPER + 300 кристаллов' },
+    note: 'Основание LOOPER + 300 кристаллов. Состав набора, не право на победу.' },
   { id: 'crystals_120', ru: '120 КРИСТАЛЛОВ', crystals: 120, price: '1.19', cur: 'eur' },
   { id: 'crystals_650', ru: '650 КРИСТАЛЛОВ', crystals: 650, price: '4.99', cur: 'eur', best: true },
   { id: 'crystals_1500', ru: '1500 КРИСТАЛЛОВ', crystals: 1500, price: '9.99', cur: 'eur' },
   { id: 'pass', ru: 'СЕЗОННЫЙ ПРОПУСК', pass: true, price: '4.99', cur: 'eur',
-    note: '60 уровней, скины, арены, 400 кристаллов' },
+    note: '60 уровней, скины, арены, 400 кристаллов. Без бонуса к ударам.' },
   { id: 'noads', ru: 'БЕЗ РЕКЛАМЫ НАВСЕГДА', noads: true, price: '3.99', cur: 'eur' },
 ];
 

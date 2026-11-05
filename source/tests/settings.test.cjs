@@ -31,7 +31,7 @@ function hostFixture(raw = {}) {
   const context = vm.createContext({ window, document, localStorage: storage({ v: 8, ...raw }), sessionStorage: storage(null),
     structuredClone, URLSearchParams, console, clamp, setTimeout: () => 1, clearTimeout() {},
     location: { search: '', href: 'http://localhost/', origin: 'http://localhost', protocol: 'http:' },
-    I18n: { lang: 'ru' }, TGX: { w: null }, MODE: { id: 'ranked' }, Sfx: { sync() {} },
+    I18n: { lang: 'ru' }, t: (key) => key, TGX: { w: null }, MODE: { id: 'ranked' }, Sfx: { sync() {} },
     GAME_HTML: '<head></head>', $: selector => selector === '#gamelayer' ? layer : null,
     matchMedia: () => ({ matches: false, addEventListener() {} }) });
   vm.runInContext(stateSource + '\n' + calSource + '\n' + hostSource + '\n;globalThis.api = { S, GameHost, ZoneStats, applyGameCalibrations, calibrationState };', context);
@@ -328,7 +328,7 @@ test('settings reset sends all registry defaults in one packet and never resets 
   const after = plain(f.S); delete after.cal; assert.deepEqual(after, before);
   assert.equal(f.messages.length, 1); assert.equal(f.messages[0].type, 'cal'); assert.equal(Object.keys(f.messages[0].values).length, 17);
   for (const entry of f.CALIBRATION_REGISTRY) assert.equal(f.messages[0].values[entry.key], entry.default);
-  assert.match(f.view.querySelector('[data-calrow="camZoom"]').querySelector('[data-cal-effective]').textContent, /подтверждения/);
+  assert.match(f.view.querySelector('[data-calrow="camZoom"]').querySelector('[data-cal-effective]').textContent, /согласовывает/);
 });
 
 test('volume slider saves explicit zero, updates the old stored alias and synchronizes mute before host traffic', () => {
@@ -356,7 +356,7 @@ test('reopening settings retains a saved but unacknowledged slider position and 
   const f = settingsFixture(); f.host.ready = f.host.calibrationReady = true; f.openSettings();
   const input = f.view.querySelector('[data-calrow="camZoom"]').querySelector('input'); input.value = '0'; f.view.dispatch('input', input);
   f.openSettings(); const row = f.view.querySelector('[data-calrow="camZoom"]');
-  assert.equal(row.querySelector('input').value, '0'); assert.match(row.querySelector('[data-cal-effective]').textContent, /подтверждения/);
+  assert.equal(row.querySelector('input').value, '0'); assert.match(row.querySelector('[data-cal-effective]').textContent, /согласовывает/);
   f.host.calibration = f.applyGameCalibrations(f.g, f.S.cal); f.host.calibrationAckId = f.host.calibrationRequestId;
   f.refreshSettingsCalibration(f.view, { requestId: f.host.calibrationRequestId });
   assert.equal(row.querySelector('.cal-v').textContent, '0.60x'); assert.equal(row.querySelector('[data-cal-effective]').hidden, true);

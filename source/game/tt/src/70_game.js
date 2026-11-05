@@ -899,9 +899,9 @@ class Game {
     this._keepDemo = false;
     this.prepServe();
     if (this.demoMode) {
-      this.msg('РЕЖИМ НАБЛЮДЕНИЯ · БОТ ПРОТИВ БОТА', 3.0, '#39c6ff', true);
+      this.msg('НАБЛЮДЕНИЕ · БОТЫ ИГРАЮТ', 3.0, '#39c6ff', true);
     } else {
-      this.msg(this.server === 1 ? 'ВАША ПОДАЧА' : 'ПОДАЁТ СОПЕРНИК', 1.6, '#7fd4ff');
+      this.msg(this.server === 1 ? 'ТВОЯ ПОДАЧА' : 'ПОДАЁТ СОПЕРНИК', 1.6, '#7fd4ff');
     }
   }
   startDemo(diff = 2) {
@@ -1046,7 +1046,7 @@ class Game {
   }
 
   msg(text, dur = 1.4, col = '#fff', big = false) {
-    this.messages.push({ text, t: 0, dur, col, big });
+    this.messages.push({ text: ET(text), t: 0, dur, col, big });
     if (this.messages.length > 4) this.messages.shift();
   }
 
@@ -1361,14 +1361,14 @@ class Game {
     const matchPoint = (this.score[0] >= tgt - 1 && this.score[0] > this.score[1]) ||
                        (this.score[1] >= tgt - 1 && this.score[1] > this.score[0]);
     let tag = '';
-    if (matchPoint) tag = who > 0 ? ' · МАТЧБОЛ!' : ' · МАТЧБОЛ СОПЕРНИКА';
-    else if (deuce) tag = ' · ДЬЮС';
+    if (matchPoint) tag = ET(who > 0 ? ' · МАТЧБОЛ' : ' · МАТЧБОЛ СОПЕРНИКА');
+    else if (deuce) tag = ET(' · ДЬЮС');
     if (who > 0 && streak >= 3) {
-      tag += ` · СЕРИЯ ×${streak}`;
+      tag += ET(' · СЕРИЯ ×{n}', { n: streak });
       this.audio.applause(clamp(0.3 + (streak - 2) * 0.25, 0.3, 1.5));  // зал подхватывает серию
       this.audio.setCrowd(clamp(0.30 + streak * 0.10, 0, 0.9));
     }
-    this.msg(reason + tag, 1.5, who > 0 ? '#6ee7a8' : '#ff8a8a', true);
+    this.msg(ET(reason) + tag, 1.5, who > 0 ? '#6ee7a8' : '#ff8a8a', true);
     // the filter: keep this rally only if it is worth watching again
     this.lastMoment = this.moments.endRally(this.time, this, {
       winner: who, reason, score: this.score, target: this.settings.targetScore,
@@ -1536,7 +1536,7 @@ class Game {
         const grade = this.hitInputGrade(racket.contactInput && racket.contactInput.gesture);
         b_gradeAssign(this, grade);
         if (grade === 'green' && !this.training)
-          this.msg('ИДЕАЛЬНО!', 1.1, '#7CFF9E');
+          this.msg('ЧИСТЫЙ КОНТАКТ', 1.1, '#7CFF9E');
       }
     } else { b_gradeAssign(this, null); }
     function b_gradeAssign(g2, grade) {
@@ -2062,7 +2062,7 @@ class Game {
       if (nk === 2) {
         clipTape(b.p, b.v, b.w);
         this.audio.hitNet();
-        this.msg('СЕТКА — ШНУР!', 1.1, '#ffd34d');
+        this.msg('КАСАНИЕ ШНУРА', 1.1, '#ffd34d');
         this.emitParticles(nh.x, PH.NET_TOP, 0, 8, 1.1, 0.3, 0.014, 1, 0.9, 0.5);
         this.netTouched = true;
         if (b.lastHitBy === 1 && this.shotJournal) this.shotJournal.net();
@@ -2122,7 +2122,7 @@ class Game {
   /** net touch on a service: no point, the serve is simply taken again. */
   letServe() {
     if (this.training) { this.training.onLet(); return; }
-    this.msg('ПЕРЕИГРОВКА (LET)', 1.4, '#9fd0ff');
+    this.msg('ПЕРЕПОДАЧА (LET)', 1.4, '#9fd0ff');
     this.audio.ui();
     this.ball.live = false;
     this.lastPoint = null;
@@ -2593,7 +2593,7 @@ class Game {
     motion.contact(n, pad.roll || 0, 'BLOCK', this.settings.grip, this.settings.hand,
       gripped.forehand, this.settings.followThrough !== false);
     if (this.audio && this.audio.hitRacket) this.audio.hitRacket(V3.len(b.v) + 1.5, 0.5, true);
-    this.msg('СТЕНКА!', 0.7, '#9fd0ff');
+    this.msg('БЛОК', 0.7, '#9fd0ff');
     this.buzz([4, 12]);
     if (this.stats) {
       this.stats.blocks = (this.stats.blocks || 0) + 1;
@@ -3217,7 +3217,7 @@ class Game {
        * запись в статистику. Игрок должен ПОНЯТЬ, что произошло: он не
        * «промахнулся в никуда», а задел краем. */
       const edgeServe = this.state === GS.SERVE_TOSS;
-      this.msg(edgeServe ? 'СРЕЗАЛ КРАЕМ…' : 'КРАЙ РАКЕТКИ!', .9, '#ffd77a');
+      this.msg(edgeServe ? 'ПОДАЧА КРАЕМ' : 'КРАЙ РАКЕТКИ', .9, '#ffd77a');
       if (this.stats) this.stats.edgeHits = (this.stats.edgeHits || 0) + 1;
       if (this.shotJournal && typeof this.shotJournal.noteOutcome === 'function')
         this.shotJournal.noteOutcome(hit.captureKind === 'serve_edge' ? 'SERVE_EDGE' : 'EDGE', { q: quality });
@@ -3911,7 +3911,7 @@ class Game {
     this.settings.camera = mode;
     this.ui && this.ui.syncSettings && this.ui.syncSettings();
     this.audio.ui('click');
-    this.msg('КАМЕРА · ' + P.ru, 1.1, '#9fd0ff');
+    this.msg(ET('КАМЕРА · {view}', { view: ET(P.ru) }), 1.1, '#9fd0ff');
     this.saveSettings();
   }
   /** Lens zoom trim. 1 = the authored fit, >1 = closer. Quantised to whole
