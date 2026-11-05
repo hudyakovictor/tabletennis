@@ -12,15 +12,15 @@ function refreshSettingsCalibration(w, message) {
   const registry = GameHost.calibrationRegistry.filter(entry => visible.has(entry.key)), state = GameHost.calibration;
   const ready = GameHost.ready && GameHost.calibrationReady && registry.length && state;
   reset.disabled = !ready;
-  summary.textContent = registry.length ? t('set.calibOpen', { n: registry.length }) : settingsText('Калибровка: ожидаем движок', 'Calibration: waiting for the engine');
+  summary.textContent = registry.length ? t('set.calibOpen', { n: registry.length }) : settingsText('Калибровка ждёт движок', 'Calibration awaits the engine');
   const motion = w.querySelector('[data-motion-state]');
-  motion.textContent = effectiveReducedMotion() ? settingsText('Уменьшение движения действует (ОС или настройка).', 'Reduced motion is active (OS or preference).') : '';
+  motion.textContent = effectiveReducedMotion() ? settingsText('Меньше движения: распоряжение ОС или твоя настройка.', 'Reduced motion: ordered by your OS or your setting.') : '';
   const hint = w.querySelector('[data-hint-state]');
-  hint.textContent = ready && state.hint && !state.hint.allowed ? settingsText('В этом режиме действует регламентная помощь; личная настройка сохранена.', 'This mode uses regulation guidance; your preference is saved.') : '';
+  hint.textContent = ready && state.hint && !state.hint.allowed ? settingsText('Матч живёт по регламенту. Твоя настройка помощи сохранена.', 'The match follows regulation. Your guidance setting is saved.') : '';
   if (!ready) {
     list.replaceChildren(); delete list.dataset.keys;
     const waiting = document.createElement('p'); waiting.className = 'dim'; waiting.setAttribute('role', 'status');
-    waiting.textContent = settingsText('Значения появятся после подтверждения актуальных настроек движком.', 'Values appear after the engine confirms the current settings.');
+    waiting.textContent = settingsText('Движок ещё не подписал значения. Ждём подтверждения настроек.', 'Values await the engine signature. Waiting for settings confirmation.');
     list.appendChild(waiting); return;
   }
   if (list.dataset.keys !== registry.map(entry => entry.key).join('|')) {
@@ -50,17 +50,17 @@ function refreshSettingsCalibration(w, message) {
     const requested = calibrationLabel(entry, state.values.requested[entry.key]), effective = calibrationLabel(entry, state.values.effective[entry.key]);
     row.querySelector('.cal-v').textContent = reason === 'competitive' && entry.competitiveLocked ? effective : requested;
     let text = '';
-    if (pending) text = settingsText('Сохранено; ожидаем подтверждения движка.', 'Saved; waiting for engine confirmation.');
+    if (pending) text = settingsText('Сохранено. Движок ещё согласовывает.', 'Saved. Engine approval pending.');
     else if (reason === 'competitive') text = entry.competitiveLocked
-      ? settingsText(`Регламент: ${effective}. Личное значение ${requested} сохранено.`, `Regulation: ${effective}. Your ${requested} preference is saved.`)
-      : entry.scope === 'inspector' ? settingsText(`Инспектор недоступен в этом режиме; сохранено ${requested}.`, `The inspector is unavailable in this mode; ${requested} is saved.`)
-        : settingsText(`Учебные подсказки недоступны в этом режиме; сохранено ${requested}.`, `Training hints are unavailable in this mode; ${requested} is saved.`);
-    else if (reason === 'training-only') text = settingsText('Действует только в обучении; личное значение сохранено.', 'Only active in training; your preference is saved.');
-    else if (reason === 'hint-off') text = settingsText('Подсказки выключены; личное значение сохранено.', 'Hints are off; your preference is saved.');
-    else if (reason === 'inspector-off') text = settingsText('Инспектор выключен; включается отдельной кнопкой в игре.', 'The inspector is off; enable it with the separate in-game button.');
-    else if (reason === 'reduced-motion') text = settingsText('Эффект выключен уменьшением движения; личное значение сохранено.', 'Reduced motion disables this effect; your preference is saved.');
-    else if (reason === 'trail-off') text = settingsText('Отображение шлейфа выключено.', 'Trail rendering is off.');
-    else if (requested !== effective) text = settingsText(`Эффективно: ${effective}. Сохранено: ${requested}.`, `Effective: ${effective}. Saved: ${requested}.`);
+      ? settingsText(`По регламенту: ${effective}. Твои ${requested} сохранены.`, `Regulation value: ${effective}. Your ${requested} is saved.`)
+      : entry.scope === 'inspector' ? settingsText(`Инспектор сюда не допущен. Сохранено ${requested}.`, `Inspector not admitted in this mode. ${requested} is saved.`)
+        : settingsText(`Учебные подсказки сюда не допущены. Сохранено ${requested}.`, `Training hints not admitted in this mode. ${requested} is saved.`);
+    else if (reason === 'training-only') text = settingsText('Только для обучения. Настройка сохранена, в матче не действует.', 'Training only. Setting saved, inactive in matches.');
+    else if (reason === 'hint-off') text = settingsText('Подсказки выключены. Настройка осталась в памяти.', 'Hints off. The setting remains on file.');
+    else if (reason === 'inspector-off') text = settingsText('Инспектор ждёт вызова. Включи отдельной кнопкой в игре.', 'Inspector on standby. Enable it with the in-game button.');
+    else if (reason === 'reduced-motion') text = settingsText('Меньше движения: эффект выключен. Настройка сохранена.', 'Reduced motion: effect disabled. Setting saved.');
+    else if (reason === 'trail-off') text = settingsText('Шлейф выключен. Мяч летит без подписи.', 'Trail off. The ball flies unsigned.');
+    else if (requested !== effective) text = settingsText(`Действует: ${effective}. Сохранено: ${requested}.`, `Active: ${effective}. Saved: ${requested}.`);
     note.textContent = text; note.hidden = !text;
     input.setAttribute('aria-valuetext', text ? `${requested}. ${text}` : effective);
   }
@@ -119,7 +119,7 @@ function openSettings() {
       <div class="seg" id="dseg" role="group" aria-label="${t('set.diff')}"><span class="pill"></span>${DIFFS.map((d) => `<button data-v="${d.id}" class="${S.diff === d.id ? 'on' : ''}">${t(d.tk)}</button>`).join('')}</div>
       <div class="settings-diff-info" id="diffDescription">${t(diffOf(S.diff).sk)}</div>
     </div>
-    <div class="pnl sgroup">${row('sfx', t('set.sfx'), 'sound', t('set.sfxD'))}${row('vibro', t('set.vibro'), 'vibe', t('set.vibroD'))}${row('hint', t('set.hint'), 'target', settingsText('Учебные маркеры и ранний сигнал мяча; в соревновании помощь ограничена.', 'Training markers and early ball cues; competition restricts assistance.'))}${row('rm', t('set.rm'), 'motion', t('set.rmD'))}</div>
+    <div class="pnl sgroup">${row('sfx', t('set.sfx'), 'sound', t('set.sfxD'))}${row('vibro', t('set.vibro'), 'vibe', t('set.vibroD'))}${row('hint', t('set.hint'), 'target', settingsText('Маркеры и ранний сигнал мяча. В соревновании помощь выдаётся по регламенту.', 'Markers and early ball cues. Competition rations guidance by regulation.'))}${row('rm', t('set.rm'), 'motion', t('set.rmD'))}</div>
     <p class="dim" data-motion-state style="font-size:11px;margin:6px 4px"></p><p class="dim" data-hint-state style="font-size:11px;margin:6px 4px"></p>
     <div class="cap" style="margin:18px 4px 8px">${settingsText('Уровни звука', 'Audio levels')}</div>
     <div class="pnl calib"><div class="cal-list" style="padding-top:14px" data-audio-list>${audioRows}<p class="dim" data-audio-state style="font-size:11px;margin:0"></p></div></div>
@@ -132,7 +132,7 @@ function openSettings() {
     <details class="pnl calib" data-calibration><summary class="cal-sum">${Art.icon('target', { c: '#9BE8FF' })} <span data-cal-summary></span></summary><div class="cal-list" data-cal-list></div><div class="cal-foot"><button class="b3 dark sm block" data-a="calReset" disabled>${t('set.calibReset')}</button></div></details>
     <div class="cap" style="margin:18px 4px 8px">${t('set.missesTitle')} <small class="dim" style="text-transform:none;font-weight:400;font-size:11px">${t('set.missesHint')}</small></div>
     <div class="pnl sgroup miss-gallery">
-      ${row('debug', settingsText('Диагностическая запись', 'Diagnostic recording'), 'target', settingsText('Локальный журнал для разбора; по умолчанию выключен.', 'Local analysis journal; off by default.'), GameHost.debug)}
+      ${row('debug', settingsText('Диагностическая запись', 'Diagnostic recording'), 'target', settingsText('Улики для разбора остаются на устройстве. По умолчанию запись выключена.', 'Evidence for review stays on this device. Recording is off by default.'), GameHost.debug)}
       ${row('missShots', t('set.missesSave'), 'target', t('set.missesSaveD'))}
       <div class="srow"><span class="st"><b>${t('set.missesSize')}</b></span>
         <select data-miss-size aria-label="${t('set.missesSize')}">${MISS_SHOT_SIZES.map(n => `<option value="${n}" ${S.missShotHalf === n ? 'selected' : ''}>${t('set.missesSize' + n)}</option>`).join('')}</select></div>
@@ -147,9 +147,9 @@ function openSettings() {
       let displayedShots = [], clearTimer = 0;
       const refreshAudio = () => {
         const values = repairAudioLevels(S.audioLevels, S.volume);
-        w.querySelector('[data-audio-state]').textContent = S.sfx === false ? settingsText('Звук выключен; уровни сохранены.', 'Muted; your levels are saved.')
-          : values.master === 0 ? settingsText('Общая громкость 0%: звук не воспроизводится.', 'Master volume is 0%: no audio plays.')
-          : values.effects === 0 ? settingsText('Эффекты и звуки интерфейса выключены (0%).', 'Effects and interface sounds are off (0%).') : '';
+        w.querySelector('[data-audio-state]').textContent = S.sfx === false ? settingsText('Звук выключен. Уровни не пострадали.', 'Muted. Your levels survived.')
+          : values.master === 0 ? settingsText('Общая громкость 0%. Тишина в полном составе.', 'Master volume 0%. Silence at full strength.')
+          : values.effects === 0 ? settingsText('Эффекты и интерфейс выключены (0%). Без звуковых свидетелей.', 'Effects and interface sounds off (0%). No audible witnesses.') : '';
       };
       refreshAudio(); refreshSettingsCalibration(w);
       const off = GameHost.on(message => {

@@ -18,7 +18,13 @@ const UI = {
   localize(el) { $$('[data-l10n]', el).forEach((node) => { node.innerHTML = t(node.dataset.l10n); }); },
   refreshHud(el) {
     const me = el.querySelector('.hud-me');
-    if (me) { me.setAttribute('aria-label', t('hud.profile')); me.querySelector('.hud-name span').textContent = t('hud.level', { n: S.level }) + ' · ' + leagueName(leagueOf(S.rating)); }
+    if (me) {
+      me.setAttribute('aria-label', t('hud.profile'));
+      me.querySelector('.hud-name span').textContent = t('hud.level', { n: S.level }) + ' · ' + leagueName(leagueOf(S.rating));
+      const L = leagueOf(S.rating), N = nextLeague(S.rating);
+      const p = N ? (S.rating - L.min) / (N.min - L.min) : 1;
+      const bar = me.querySelector('.hud-bar i'); if (bar) bar.style.setProperty('--p', p);
+    }
     const notices = el.querySelector('.notice-button'); if (notices) { notices.setAttribute('aria-label', t('notices.title')); notices.title = t('notices.title'); }
     $$('[data-cur] .v', el).forEach((node) => { node.textContent = fmt(S[node.closest('[data-cur]').dataset.cur]); });
   },
@@ -72,17 +78,18 @@ const UI = {
     this.refreshNotifications();
   },
   hud({ back = false, title = '' } = {}) {
-    const L = leagueOf(S.rating);
+    const L = leagueOf(S.rating), N = nextLeague(S.rating);
+    const p = N ? (S.rating - L.min) / (N.min - L.min) : 1;
     const left = back
       ? `<button class="ib" data-act="back" aria-label="${t('common.back')}">${Art.icon('back', { c: '#fff' })}</button><div class="h2 hud-title">${title}</div>`
       : `<button class="hud-me" data-act="profile" aria-label="${t('hud.profile')}">
           <span class="hud-name"><b>${S.name.split(' ')[0]}</b><span>${t('hud.level', { n: S.level })} · ${leagueName(L)}</span></span>
+          <span class="hud-bar"><i style="--p:${p}"></i></span>
         </button>`;
-    /* Покупка валюты остаётся в магазине, а колокольчик показывает только
-       реальные доступные награды, без выдуманных сообщений. */
+    /* Компактный HUD: ник+прогресс слева, валюты справа, без отдельных бейджей */
     return `<div class="hud">${left}
-      <div class="cur" data-cur="coins"><span class="ci">${Art.coin(36)}</span><span class="v num">${fmt(S.coins)}</span></div>
-      <div class="cur" data-cur="gems"><span class="ci">${Art.gem(34)}</span><span class="v num">${fmt(S.gems)}</span></div>
+      <div class="cur" data-cur="coins"><span class="ci">${Art.coin(22)}</span><span class="v num">${fmt(S.coins)}</span></div>
+      <div class="cur" data-cur="gems"><span class="ci">${Art.gem(20)}</span><span class="v num">${fmt(S.gems)}</span></div>
       ${this.notificationButton()}
     </div>`;
   },

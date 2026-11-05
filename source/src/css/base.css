@@ -114,6 +114,8 @@ body.in-tg{--sat:0px;--sab:0px} /* внутри Telegram env() дублируе�
 .b3[disabled]{filter:grayscale(.9) brightness(.7);pointer-events:none}
 .b3 .ic{width:22px;height:22px}
 .b3.xl .ic{width:30px;height:30px}
+/* видимый keyboard focus на всех объёмных кнопках */
+.b3:focus-visible,.ib:focus-visible{outline:2px solid #9be8ff;outline-offset:3px}
 
 /* круглая иконка-кнопка */
 .ib{position:relative;width:44px;height:44px;border-radius:15px;display:grid;place-items:center;
@@ -145,23 +147,29 @@ body.in-tg{--sat:0px;--sab:0px} /* внутри Telegram env() дублируе�
 .bar .lbl{position:absolute;inset:0;display:grid;place-items:center;font:900 10px/1 var(--display);letter-spacing:.04em;color:#fff;text-shadow:0 1px 2px rgba(0,0,0,.8);z-index:2}
 
 /* ---------------- top HUD ---------------- */
-.hud{position:relative;z-index:5;display:flex;align-items:center;gap:8px;padding:calc(var(--sat) + var(--tgt) + 10px) 12px 6px}
-.hud-me{display:flex;align-items:center;flex:1;min-width:0;min-height:40px;text-align:left}
+.hud{position:relative;z-index:5;display:flex;align-items:center;gap:6px;padding:calc(var(--sat) + var(--tgt) + 8px) 10px 4px}
+.hud-me{position:relative;display:flex;align-items:center;flex:1;min-width:0;min-height:36px;text-align:left;gap:8px}
+/* касание: видимая строка 36 px, зона нажатия — 44 px (не растягивая HUD) */
+.hud-me::after{content:'';position:absolute;left:0;right:0;top:-4px;bottom:-4px}
 .hud-title{flex:1;min-width:0;margin-left:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.hud-name{min-width:0}
-.hud-name b{display:block;font:900 13px/1.1 var(--display);letter-spacing:-.01em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.hud-name span{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:10px;color:var(--ink2);margin-top:5px}
-.notice-button{position:relative;display:grid;place-items:center;flex:none;width:40px;height:40px;border-radius:13px;color:#e1f1fa;
-  background:rgba(10,17,30,.76);box-shadow:inset 0 0 0 1px rgba(192,227,245,.16),0 5px 16px rgba(0,0,0,.25)}
-.notice-button svg{width:21px;height:21px}
-.notice-count{position:absolute;top:-4px;right:-3px;min-width:16px;height:16px;padding:0 3px;border-radius:9px;background:#e8b75c;color:#172130;
-  font:900 9px/16px var(--display);text-align:center;box-shadow:0 0 0 2px #0b1420}
+.hud-name{min-width:0;flex:0 1 auto}
+.hud-name b{display:block;font:900 11px/1.1 var(--display);letter-spacing:-.01em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.hud-name span{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:9px;color:var(--ink2);margin-top:2px}
+.hud-bar{flex:1;min-width:30px;height:8px;border-radius:4px;background:rgba(255,255,255,.10);overflow:hidden;box-shadow:inset 0 1px 2px rgba(0,0,0,.4)}
+.hud-bar i{display:block;height:100%;width:calc(var(--p)*100%);border-radius:4px;background:linear-gradient(90deg,#FFD95C,#F5A623);transition:width .4s var(--spring)}
+.notice-button{position:relative;display:grid;place-items:center;flex:none;width:34px;height:34px;border-radius:11px;color:#e1f1fa;
+  background:rgba(10,17,30,.76);box-shadow:inset 0 0 0 1px rgba(192,227,245,.16),0 4px 12px rgba(0,0,0,.25)}
+/* касание: видимая иконка 34px, зона — 46px */
+.notice-button::after{content:'';position:absolute;inset:-6px}
+.notice-button svg{width:18px;height:18px}
+.notice-count{position:absolute;top:-3px;right:-2px;min-width:14px;height:14px;padding:0 3px;border-radius:7px;background:#e8b75c;color:#172130;
+  font:900 8px/14px var(--display);text-align:center;box-shadow:0 0 0 2px #0b1420}
 .notice-count[hidden]{display:none}
-@media(max-width:360px){.hud{gap:5px;padding-left:8px;padding-right:8px}.hud-name b{font-size:11px}.hud-name span{font-size:9px}.hud .cur{font-size:11px}}
-.cur{position:relative;display:flex;align-items:center;height:32px;padding:0 6px 0 30px;border-radius:12px;background:rgba(3,5,18,.7);box-shadow:inset 0 2px 4px rgba(0,0,0,.7),0 1px 0 rgba(255,255,255,.08);font:900 13px/1 var(--display);letter-spacing:-.01em}
-.cur .ci{position:absolute;left:-8px;top:50%;width:36px;height:36px;transform:translateY(-50%);filter:drop-shadow(0 3px 4px rgba(0,0,0,.5))}
-.cur .plus{position:relative;width:20px;height:20px;margin-left:7px;border-radius:7px;display:grid;place-items:center;background:linear-gradient(180deg,#5BF79A,#18B85F);box-shadow:0 2px 0 #07603A,inset 0 1px 0 rgba(255,255,255,.6);color:#fff;font:900 15px/1 var(--display)}
-.cur .v{min-width:34px;text-align:right}
+@media(max-width:360px){.hud{gap:4px;padding-left:8px;padding-right:8px}.hud-name b{font-size:10px}.hud-name span{font-size:8px}.hud .cur{font-size:10px}}
+.cur{position:relative;display:flex;align-items:center;height:26px;padding:0 5px 0 22px;border-radius:10px;background:rgba(3,5,18,.7);box-shadow:inset 0 2px 3px rgba(0,0,0,.7),0 1px 0 rgba(255,255,255,.08);font:900 11px/1 var(--display);letter-spacing:-.01em}
+.cur .ci{position:absolute;left:-4px;top:50%;width:22px;height:22px;transform:translateY(-50%);filter:drop-shadow(0 2px 3px rgba(0,0,0,.5))}
+.cur .plus{position:relative;width:16px;height:16px;margin-left:5px;border-radius:6px;display:grid;place-items:center;background:linear-gradient(180deg,#5BF79A,#18B85F);box-shadow:0 2px 0 #07603A,inset 0 1px 0 rgba(255,255,255,.6);color:#fff;font:900 12px/1 var(--display)}
+.cur .v{min-width:28px;text-align:right}
 .bump{animation:bump .42s var(--spring)}
 @keyframes bump{0%{transform:scale(1)}35%{transform:scale(1.28) translateY(-2px)}100%{transform:scale(1)}}
 .bump-ic{animation:bumpic .5s var(--spring)}
@@ -173,12 +181,14 @@ body.in-tg{--sat:0px;--sab:0px} /* внутри Telegram env() дублируе�
 #nav.hide{transform:translateY(130%)}
 #nav .navbg{position:absolute;left:10px;right:10px;bottom:calc(var(--sab) + var(--tgb) + 10px);height:60px;border-radius:19px;
   background:rgba(13,23,36,.96);box-shadow:inset 0 0 0 1px rgba(196,220,235,.13),0 10px 28px rgba(0,0,0,.42)}
-#nav .tab{position:relative;z-index:1;flex:1;height:60px;display:grid;place-items:center;color:#94a7b4;transition:color .2s}
+#nav .tab{position:relative;z-index:1;flex:1;height:60px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;color:#94a7b4;transition:color .2s}
 #nav .tab.on{color:#d9f6ff}
 #nav .tab .glow{position:absolute;inset:7px 10%;border-radius:13px;background:rgba(127,206,224,.13);opacity:0;transition:opacity .2s}
 #nav .tab.on .glow{opacity:1}
-#nav .tab .ti{position:relative;width:25px;height:25px}
-#nav .tab .dot{top:4px;right:calc(50% - 26px)}
+#nav .tab .ti{position:relative;width:22px;height:22px}
+#nav .tab .tl{position:relative;max-width:100%;padding:0 2px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;
+  font:800 8.5px/1 var(--body);letter-spacing:.04em;text-transform:uppercase;opacity:.66;transition:opacity .2s}
+#nav .tab.on .tl{opacity:1}
 #nav .tab:focus-visible,.notice-button:focus-visible,.hud-me:focus-visible{outline:2px solid #9be8ff;outline-offset:2px}
 
 /* The bell lists only currently available in-game rewards. */

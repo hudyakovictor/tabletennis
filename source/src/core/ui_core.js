@@ -206,7 +206,9 @@ const Wipe = {
 const Nav = {
   /* Четыре вкладки по запросу: Главная / Турниры / Магазин / Настройки.
    * «Настройки» — кнопка-ярлык, не маршрут: она открывает лист настроек
-   * поверх текущего экрана и не снимает подсветку с активной вкладки. */
+   * поверх текущего экрана и не снимает подсветку с активной вкладки.
+   * Баджей-уведомлений на вкладках больше нет: счётчик наград дублировал
+   * колокольчик в HUD и превращал навигацию в рассылку. */
   items: [
     { id: 'hub', k: 'nav.hub', i: 'home' },
     { id: 'pass', k: 'nav.pass', i: 'cup' },
@@ -217,7 +219,7 @@ const Nav = {
     const n = $('#nav'); if (!n) return;
     n.innerHTML = '<div class="navbg"></div>' + this.items.map((tb) => `
       <button class="tab" data-tab="${tb.id}" aria-label="${t(tb.k)}" title="${t(tb.k)}" data-silent>
-        <span class="glow"></span><span class="ti" aria-hidden="true">${Art.icon(tb.i, { c: 'currentColor', fill: 'none', sw: 1.9 })}</span>
+        <span class="glow"></span><span class="ti" aria-hidden="true">${Art.icon(tb.i, { c: 'currentColor', fill: 'none', sw: 1.9 })}</span><span class="tl" aria-hidden="true">${t(tb.k)}</span>
       </button>`).join('');
     if (!this.bound) n.addEventListener('click', (e) => {
       const b = e.target.closest('.tab'); if (!b) return;
@@ -230,22 +232,6 @@ const Nav = {
     });
     this.bound = true;
     this.set(this.items.some((tb) => tb.id === Router.cur && !tb.sheet) ? Router.cur : null);
-    this.dots();
-  },
-  /* бадж «Пропуска» = число реально доступных наград (не зашитая константа):
-     при открытии приложения и после каждого клейма пересчитывается */
-  dots() {
-    const season = globalThis.TTSeason;
-    if (!season) return;
-    let n = 0;
-    for (const r of season.seasonOver() || S.passSeason !== season.seasonNumber() ? [] : season.currentPass()) {
-      if (r.l <= S.passLvl && !Rewards.passClaimed(S.passSeason, 'f', r.l)) n++;
-      if (S.premium && r.l <= S.passLvl && !Rewards.passClaimed(S.passSeason, 'p', r.l)) n++;
-    }
-    const t = $('#nav .tab[data-tab=pass]'); if (!t) return;
-    let d = t.querySelector('.dot');
-    if (n > 0) { if (!d) { d = document.createElement('span'); d.className = 'dot'; t.appendChild(d); } d.textContent = String(n); }
-    else if (d) d.remove();
   },
   set(id) { $$('#nav .tab').forEach((el) => { const on = el.dataset.tab === id; el.classList.toggle('on', on); if (on) el.setAttribute('aria-current', 'page'); else el.removeAttribute('aria-current'); }); },
   show(on) { $('#nav').classList.toggle('hide', !on); }

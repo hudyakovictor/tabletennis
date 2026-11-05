@@ -124,7 +124,7 @@ function embedFixture() {
     startTraining(m) { this.training = { stage: 'practice', sessionId: 't1', revision: 0, options: m, snapshot() { return { stage: this.stage }; } }; },
     setPaused(v) { this.paused = v; }, syncAudioQuiet() {} };
   const window = { __TT_EMBED: true, __game: g, parent: { postMessage(m) { sent.push(plain(m)); } }, addEventListener(type, fn) { if (type === 'message') listeners.push(fn); } };
-  const document = { readyState: 'complete', visibilityState: 'visible', documentElement: { classList: classes() }, getElementById: () => null };
+  const document = { readyState: 'complete', visibilityState: 'visible', addEventListener() {}, documentElement: { classList: classes() }, getElementById: () => null };
   const ET = key => key; ET.lang = () => 'ru'; ET.set = () => {};
   const context = vm.createContext({ window, document, clamp, ET, setTimeout: () => 1, clearTimeout() {},
     PH: { TABLE_Y: .76 }, GS: { MENU: 0, SERVE_READY: 1, SERVE_TOSS: 2, RALLY: 3, POINT: 4 },
@@ -133,7 +133,7 @@ function embedFixture() {
     createMissShotCapture: () => ({ setEnabled() {}, setHalf() {}, getHalf: () => 350, request: () => null, cancel() {}, fail() {} }),
     V3: {}, TAU: Math.PI * 2 });
   vm.runInContext(calSource + '\napplyGameCalibrations(window.__game, {});\n' + embedSource, context);
-  const command = (type, data) => listeners.forEach(fn => fn({ data: { __tt: 1, type, ...data } }));
+  const command = (type, data) => listeners.forEach(fn => fn({ source: window.parent, data: { __tt: 1, type, ...data } }));
   return { g, ui, audio, sent, command, query: g.motionQuery, updates: () => updates, resizes: () => resizes, networkHandlers };
 }
 

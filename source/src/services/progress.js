@@ -112,7 +112,6 @@ const Progress = {
     const stamp = JSON.stringify([current, season.seasonOver(), season.seasonLeftText(), S.passSeason]);
     if (stamp !== this.seasonStamp) {
       this.seasonStamp = stamp;
-      Nav.dots();
       if (Router.cur === 'pass') Router.repaint();
       if (Router.cur === 'ranks') {
         const chip = document.querySelector('.screen.current [data-season-left]');

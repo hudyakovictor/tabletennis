@@ -167,7 +167,7 @@ class AudioEngine {
     if (this._eventIds.size > 128) this._eventIds.delete(this._eventIds.keys().next().value);
     return true;
   }
-  _playSample(event, level, pan = 0) {
+  _playSample(event, level, pan = 0, rate = 1) {
     const variants = TT_AUDIO_MANIFEST.filter(sample => sample.events.includes(event));
     for (const sample of variants) this._decodeSample(sample.key);
     const ready = variants.filter(sample => {
@@ -182,6 +182,7 @@ class AudioEngine {
     let source;
     try {
       source = c.createBufferSource(); source.buffer = buffer;
+      if (rate !== 1) source.playbackRate.value = rate;
       const gain = c.createGain(), nodes = [gain], volume = sample.gain * level;
       gain.gain.setValueAtTime(0, t);
       gain.gain.linearRampToValueAtTime(volume, t + 0.0004);
@@ -303,13 +304,15 @@ class AudioEngine {
     this._tone(820 + v * 340 + (this._random() * 2 - 1) * 40, 0.075, 0.30 * v, 'triangle', t, 0.55);
     this._tone(214 + (this._random() * 2 - 1) * 12, 0.15, 0.12 * v, 'sine', t, 0.6);
   }
-  /** Contact speed sets level; slip shapes only an unavailable-sample fallback. */
-  hitRacket(speed, slip, soft, eventId) {
+  /** Contact speed sets level; slip shapes only an unavailable-sample fallback.
+   *  boost > 0: higher playback rate and louder (strong clean hit). */
+  hitRacket(speed, slip, soft, eventId, boost = 0) {
     if (!this.canPlay() || !this._once('hitRacket', eventId)) return;
     const v = clamp((Number.isFinite(speed) ? Math.abs(speed) : 0) / 13, 0.1, 1.5), t = this.ctx.currentTime;
-    if (this._playSample('hitRacket', (0.45 + v * 0.5) * (soft ? 0.8 : 1))) return;
+    const rate = 1 + boost * 0.25; // up to 1.25× pitch for a clean power hit
+    if (this._playSample('hitRacket', (0.45 + v * 0.5) * (soft ? 0.8 : 1) * (1 + boost * 0.4), 0, rate)) return;
     const body = soft ? 0.55 : 1;
-    this._tone(300 + v * 240, 0.085, 0.34 * v * body, 'triangle', t, 0.42);
+    this._tone(300 + v * 240, 0.085, 0.34 * v * body * (1 + boost * 0.3), 'triangle', t, 0.42);
     this._noise(0.05, 0.16 * v * body, 'bandpass', 1300 + v * 1200, 1.4, t);
     const sl = clamp((Number.isFinite(slip) ? slip : 0) / 16, 0, 1);
     if (sl > 0.05) this._noise(0.10 + sl * 0.09, 0.14 * sl, 'bandpass', 3600 + sl * 3800, 0.9, t);

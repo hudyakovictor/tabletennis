@@ -12,6 +12,7 @@ SOURCE_DIR = pathlib.Path(__file__).resolve().parent
 REPO = SOURCE_DIR.parent
 root = SOURCE_DIR / 'src'
 html = (root/'index.tpl.html').read_text()
+html = html.replace('<!--__PRELOADER__-->', (root/'ui'/'preloader.html').read_text())
 def b64(p): return 'data:font/woff2;base64,' + base64.b64encode((root/p).read_bytes()).decode()
 CSS_ORDER = ['css/base.css','css/screens_hub.css','css/screens_battle.css','css/screens_meta.css','css/screens_misc.css']
 css = '\n'.join((root/f).read_text() for f in CSS_ORDER)
@@ -31,7 +32,7 @@ order = ['core/util.js','core/i18n.js','locales/ru.js','locales/en.js','core/sta
          'ui/ui.js','services/miss_shots.js','services/game_host.js','services/diagnostics.js','services/career.js',
          'screens/hub.js','screens/settings.js','screens/matchmaking.js','screens/online.js','screens/battle_common.js',
          'screens/match.js','screens/training.js','screens/result.js',
-         'ui/item_art.js','data/catalog.js','screens/shop.js','data/season.js','screens/pass.js','screens/ranks.js','screens/profile.js','main.js']
+          'ui/item_art.js','data/catalog.js','screens/shop.js','data/season.js','screens/pass.js','screens/ranks.js','screens/profile.js','ui/preloader.js','main.js']
 # --- настоящий движок: собираем game/ и встраиваем как строку для iframe srcdoc ---
 import subprocess, tempfile, os
 gtmp = tempfile.mktemp(suffix='.html')

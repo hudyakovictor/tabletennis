@@ -229,13 +229,18 @@ class Scene {
      * until it has decoded (also used when TT_NO_ARENA or an image fails). */
     this.hasPanorama = false;
     const A = (typeof window !== 'undefined' && window.__TT_ARENA) || {};
-    if (A.stands) arenaImageTex(R, A.stands, 2048, 256, (tx) => { this.tex.stands = tx; if (this.mat.stands) this.mat.stands.tex = tx; });
+    this.standsSettled = !A.stands;
+    this.panoramaSettled = !A.panorama;
+    this.asphaltSettled = !A.asphalt;
+    if (A.stands) arenaImageTex(R, A.stands, 2048, 256, (tx) => {
+      this.tex.stands = tx; if (this.mat.stands) this.mat.stands.tex = tx;
+    }, () => { this.standsSettled = true; });
     if (A.panorama) arenaImageTex(R, A.panorama, 2048, 1024, (tx) => {
       this.tex.panorama = tx; this.mat.panorama.tex = tx; this.mat.courtGround.tex = tx; this.hasPanorama = true;
-    });
+    }, () => { this.panoramaSettled = true; });
     if (A.asphalt) arenaImageTex(R, A.asphalt, 512, 512, (tx) => {
       this.tex.asphalt = tx; this.mat.courtGround.asphalt = tx;
-    });
+    }, () => { this.asphaltSettled = true; });
 
     /* ---- meshes ---- */
     this.mesh = {
