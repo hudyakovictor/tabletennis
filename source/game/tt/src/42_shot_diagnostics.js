@@ -2,9 +2,9 @@
  * Stores bounded numeric events, never video frames or miss replays. */
 'use strict';
 const SHOT_DIAGNOSTICS_VERSION = 1;
-const SHOT_OUTCOMES = Object.freeze({ outside: 'Вне зоны нажатия', pending: 'Ждём отскок', table: 'На стол', net: 'В сетку',
-  out: 'Аут', own_half: 'На своей половине', serve_fault: 'Ошибка подачи', let: 'Переподача',
-  no_contact: 'Нет контакта', rejected: 'Жест слишком короткий', no_swipe: 'Мяч пропущен — нет нового удара' });
+const SHOT_OUTCOMES = Object.freeze({ outside: 'Вне зоны', pending: 'Ждём отскок', table: 'На стол', net: 'Сетка',
+  out: 'Аут', own_half: 'На своей половине', serve_fault: 'Сбой подачи', let: 'Переподача',
+  no_contact: 'Нет контакта', rejected: 'Короткий жест', no_swipe: 'Мяч пропущен. Нового удара нет.' });
 const shotVec = v => v && [v.x, v.y, v.z].every(Number.isFinite) ? { x: v.x, y: v.y, z: v.z } : null;
 function measureShotSpin(w, velocity) {
   const omega = shotVec(w) || { x: 0, y: 0, z: 0 };
@@ -16,31 +16,33 @@ function measureShotSpin(w, velocity) {
     sideRps: omega.y / TAU, corkRps: (omega.x * fx + omega.z * fz) / TAU };
 }
 function shotSpinText(spin) {
-  if (!spin || spin.totalRps < 1) return 'Практически без вращения';
+  if (!spin || spin.totalRps < 1) return ET('Почти без вращения');
   const parts = [];
-  if (Math.abs(spin.topRps) >= 1) parts.push(`${spin.topRps > 0 ? 'Верхнее' : 'Нижнее'} ${Math.abs(spin.topRps).toFixed(1)} об/с`);
-  if (Math.abs(spin.sideRps) >= 1) parts.push(`боковое ${Math.abs(spin.sideRps).toFixed(1)} об/с`);
-  if (Math.abs(spin.corkRps) >= 1) parts.push(`продольное ${Math.abs(spin.corkRps).toFixed(1)} об/с`);
-  return parts.join(' · ') || `Суммарно ${spin.totalRps.toFixed(1)} об/с`;
+  if (Math.abs(spin.topRps) >= 1) parts.push(ET('{spin} {value} об/с', { spin: ET(spin.topRps > 0 ? 'Верхнее' : 'Нижнее'), value: Math.abs(spin.topRps).toFixed(1) }));
+  if (Math.abs(spin.sideRps) >= 1) parts.push(ET('боковое {value} об/с', { value: Math.abs(spin.sideRps).toFixed(1) }));
+  if (Math.abs(spin.corkRps) >= 1) parts.push(ET('продольное {value} об/с', { value: Math.abs(spin.corkRps).toFixed(1) }));
+  return parts.join(' · ') || ET('Суммарно {value} об/с', { value: spin.totalRps.toFixed(1) });
 }
 function shotFeedbackView(entry) {
   if (!entry) return null;
-  if (entry.outcome === 'no_swipe') return { title: 'НОВОГО УДАРА НЕ БЫЛО', status: 'Мяч пропущен', metrics: '', detail: '', tone: 'neutral' };
+  if (entry.outcome === 'no_swipe') return { title: ET('НЕТ НОВОГО УДАРА'), status: ET('Мяч пропущен'), metrics: '', detail: ET('Для следующего мяча начни новый тап или свайп.'), tone: 'neutral' };
   const stroke = STROKES[entry.strokeId];
-  const name = stroke ? stroke.name : 'ЖЕСТ';
-  if (!entry.contact) return { title: entry.valid ? `Жест: ${name.toLowerCase()}` : 'Жест не распознан',
-    status: entry.outcome === 'pending' ? 'Ищем контакт' : SHOT_OUTCOMES[entry.outcome] || 'Нет контакта',
-    metrics: '', detail: entry.outcome === 'no_contact' ? 'Нажатие было, касания мяча не было' : '', tone: 'neutral' };
-  return { title: `Жест: ${name.toLowerCase()}`, status: entry.outcome === 'pending' ? 'Контакт есть · ждём отскок' : SHOT_OUTCOMES[entry.outcome] || entry.outcome,
-    metrics: `${entry.contact.speedKmh.toFixed(0)} км/ч · ${shotSpinText(entry.contact.spin)}`,
-    detail: `Оценка контакта ${Math.round(entry.contact.quality * 100)}% · вращение измерено после удара`,
+  const name = ET(stroke ? stroke.name : 'ЖЕСТ');
+  if (!entry.contact) return { title: entry.valid ? ET('Жест: {name}', { name: name.toLowerCase() }) : ET('Жест не распознан'),
+    status: ET(entry.outcome === 'pending' ? 'Ищем контакт' : SHOT_OUTCOMES[entry.outcome] || 'Нет контакта'),
+    metrics: '', detail: entry.outcome === 'no_contact' ? ET('Нажатие есть, контакта нет. Веди ракетку через мяч.')
+      : entry.outcome === 'outside' ? ET('Нажатие вне зоны. Начни на линии мяча и проведи через него.')
+      : entry.outcome === 'rejected' ? ET('Жест слишком короткий. Проведи через мяч заметным движением.') : '', tone: 'neutral' };
+  return { title: ET('Жест: {name}', { name: name.toLowerCase() }), status: ET(entry.outcome === 'pending' ? 'Контакт есть · ждём отскок' : SHOT_OUTCOMES[entry.outcome] || entry.outcome),
+    metrics: ET('{speed} км/ч · {spin}', { speed: entry.contact.speedKmh.toFixed(0), spin: shotSpinText(entry.contact.spin) }),
+    detail: ET('Контакт {quality}% · вращение измерено после удара, не обещано жестом', { quality: Math.round(entry.contact.quality * 100) }),
     tone: entry.outcome === 'table' ? 'good' : ['net', 'out', 'own_half', 'serve_fault'].includes(entry.outcome) ? 'bad' : 'neutral' };
 }
 // Live HUD is deliberately brief; the pause journal retains the full report.
 function shotHudView(entry) {
   if (!entry || (!entry.contact && entry.outcome === 'pending')) return null;
   const full = shotFeedbackView(entry);
-  if (!entry.contact) return { ...full, title: '', status: entry.outcome === 'no_swipe' ? 'Мяч пропущен' : entry.outcome === 'rejected' ? 'Нет удара' : full.status, metrics: '' };
+  if (!entry.contact) return { ...full, title: '', status: entry.outcome === 'no_swipe' ? ET('Мяч пропущен') : entry.outcome === 'rejected' ? ET('Нет удара') : full.status, metrics: '' };
   const spin = entry.contact.spin;
   const total = Number.isFinite(spin.totalRps) ? spin.totalRps : 0;
   const components = [ ['Верхнее', spin.topRps], ['Боковое', spin.sideRps], ['Продольное', spin.corkRps] ];
@@ -48,9 +50,9 @@ function shotHudView(entry) {
   let [label, value] = components[0];
   if (label === 'Верхнее' && value < 0) label = 'Нижнее';
   const strokeName = (STROKES[entry.strokeId] || {}).short || (STROKES[entry.strokeId] || {}).name || '';
-  return { ...full, title: strokeName,
-    status: entry.outcome === 'pending' ? 'Контакт' : full.status,
-    metrics: total < 1 ? '0 об/с' : `${label} ${Math.round(Math.abs(value))} об/с`, tone: 'hit' };
+  return { ...full, title: ET(strokeName),
+    status: entry.outcome === 'pending' ? ET('Контакт') : full.status,
+    metrics: total < 1 ? ET('0 об/с') : ET('{spin} {value} об/с', { spin: ET(label), value: Math.round(Math.abs(value)) }), tone: 'hit' };
 }
 
 class ShotJournal {
@@ -209,17 +211,17 @@ class ShotJournal {
  * Steps run mouse first, then touch (step 7 of the brief is the repeat). */
 const ZONE_CALIBRATION_STEPS = Object.freeze([
   Object.freeze({ id: 'corners', title: 'Углы стола', need: 4,
-    instruction: 'Нажимайте точно в углы стола по очереди: ближний левый, ближний правый, дальний правый, дальний левый.' }),
+    instruction: 'Нажми углы по очереди: ближний левый, ближний правый, дальний правый, дальний левый. Границы требуют точного адреса.' }),
   Object.freeze({ id: 'stationary', title: 'Неподвижный мяч', need: 30,
-    instruction: 'По 10 ударов: начинайте замах перед мячом, сбоку и сзади. Мяч — в готовности к подаче.' }),
+    instruction: 'По 10 ударов с началом замаха перед мячом, сбоку и сзади. Мяч готов к подаче. Проверяем старт, не репутацию.' }),
   Object.freeze({ id: 'slow', title: 'Медленный мяч', need: 20,
-    instruction: '20 приёмов медленного мяча в обучении или матче. Начинайте замах там, где удобно.' }),
+    instruction: 'Прими 20 медленных мячей в обучении или матче. Начинай замах там, где удобно: данные нужны настоящие.' }),
   Object.freeze({ id: 'fast', title: 'Быстрый мяч', need: 20,
-    instruction: '20 приёмов быстрого мяча (упражнение «Тайминг» или подача соперника).' }),
+    instruction: 'Прими 20 быстрых мячей в упражнении «Тайминг» или на подаче соперника. Измеряем срочную доставку.' }),
   Object.freeze({ id: 'serve', title: 'Своя подача', need: 15,
-    instruction: '15 подбросов и подач. Пишутся высота, старт пальца и длина свайпа.' }),
+    instruction: 'Выполни 15 подбросов и подач. Записываются высота, старт пальца и длина свайпа. Только факты полёта.' }),
   Object.freeze({ id: 'power', title: 'Сила и спин', need: 8,
-    instruction: 'По 2 удара: самый слабый, самый сильный, топспин, подрезка. Нужен контакт.' }),
+    instruction: 'По 2 удара: самый слабый, самый сильный, топспин, подрезка. Нужен контакт: намерения в отчёт не идут.' }),
 ]);
 const ZONE_CALIBRATION_PASSES = Object.freeze(['mouse', 'touch']);
 
@@ -286,10 +288,10 @@ class ZoneCalibrationSession {
     const byLabel = {};
     for (const r of rows) byLabel[r.label || stepId] = (byLabel[r.label || stepId] || 0) + 1;
     let recommendation;
-    if (stepId === 'corners') recommendation = `90-й перцентиль ошибки по углам: ${p90error === null ? '—' : Math.round(p90error)} px.`;
-    else if (stepId === 'serve') recommendation = `90-й перцентиль замаха на подаче: ${p90along === null ? '—' : Math.round(p90along)} px по оси падения, ${p90across === null ? '—' : Math.round(p90across)} px поперёк.`;
-    else if (stepId === 'power') recommendation = 'Таблица «жест → скорость и спин мяча» — в экспорте (samples шага power).';
-    else recommendation = `90-й перцентиль замаха: ${p90along === null ? '—' : Math.round(p90along)} px вперёд, ${p90across === null ? '—' : Math.round(p90across)} px поперёк.`;
+    if (stepId === 'corners') recommendation = ET('90-й перцентиль ошибки по углам: {error} px.', { error: p90error === null ? '—' : Math.round(p90error) });
+    else if (stepId === 'serve') recommendation = ET('90-й перцентиль замаха на подаче: {along} px по оси падения, {across} px поперёк.', { along: p90along === null ? '—' : Math.round(p90along), across: p90across === null ? '—' : Math.round(p90across) });
+    else if (stepId === 'power') recommendation = ET('Таблица «жест → скорость и спин мяча» находится в экспорте: samples шага power.');
+    else recommendation = ET('90-й перцентиль замаха: {along} px вперёд, {across} px поперёк.', { along: p90along === null ? '—' : Math.round(p90along), across: p90across === null ? '—' : Math.round(p90across) });
     return { stepId, pass, count: rows.length, byLabel, p90along, p90across, p90error, recommendation };
   }
   compareSlowFast(pass) {

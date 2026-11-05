@@ -3,11 +3,11 @@
 'use strict';
 
 const TRAINING_PREVIEW_TEXT = {
-  title: ['3D reference', '3D-\u044d\u0442\u0430\u043b\u043e\u043d'],
+  title: ['3D shot review', '3D-\u0440\u0430\u0437\u0431\u043e\u0440 \u0443\u0434\u0430\u0440\u0430'],
   close: ['Return to lesson', '\u0412\u0435\u0440\u043d\u0443\u0442\u044c\u0441\u044f \u043a \u0443\u0440\u043e\u043a\u0443'],
   play: ['Play', '\u0412\u043e\u0441\u043f\u0440\u043e\u0438\u0437\u0432\u0435\u0441\u0442\u0438'], pause: ['Pause', '\u041f\u0430\u0443\u0437\u0430'],
-  seek: ['Timeline', '\u041f\u043e\u0437\u0438\u0446\u0438\u044f'], rate: ['Playback rate', '\u0422\u0435\u043c\u043f \u043f\u0440\u043e\u0441\u043c\u043e\u0442\u0440\u0430'],
-  camera: ['View', '\u0412\u0438\u0434'], player: ['Player', '\u0418\u0433\u0440\u043e\u043a'], side: ['Side', '\u0421\u0431\u043e\u043a\u0443'],
+  seek: ['Timeline', '\u0428\u043a\u0430\u043b\u0430 \u0432\u0440\u0435\u043c\u0435\u043d\u0438'], rate: ['Playback speed', '\u0421\u043a\u043e\u0440\u043e\u0441\u0442\u044c \u043f\u0440\u043e\u0441\u043c\u043e\u0442\u0440\u0430'],
+  camera: ['Camera view', '\u0420\u0430\u043a\u0443\u0440\u0441'], player: ['Player view', '\u0412\u0438\u0434 \u0438\u0433\u0440\u043e\u043a\u0430'], side: ['Side', '\u0421\u0431\u043e\u043a\u0443'],
   top: ['Top', '\u0421\u0432\u0435\u0440\u0445\u0443'], contact: ['Contact frame', '\u041a\u0430\u0434\u0440 \u043a\u043e\u043d\u0442\u0430\u043a\u0442\u0430'],
   grip: ['Grip', '\u0425\u0432\u0430\u0442'], hand: ['Hand', '\u0420\u0443\u043a\u0430'],
   shakehand: ['Shakehand', '\u0415\u0432\u0440\u043e\u043f\u0435\u0439\u0441\u043a\u0438\u0439'], penhold: ['Penhold', '\u041f\u0435\u0440\u044c\u0435\u0432\u043e\u0439'],
@@ -17,15 +17,15 @@ const TRAINING_PREVIEW_TEXT = {
   tableguide: ['Table guide', '\u0421\u0445\u0435\u043c\u0430 \u043d\u0430 \u0441\u0442\u043e\u043b\u0435'],
   gesture: ['Touch gesture', '\u0416\u0435\u0441\u0442 \u043f\u0430\u043b\u044c\u0446\u0430'],
   normal: ['Rubber normal', '\u041d\u043e\u0440\u043c\u0430\u043b\u044c \u043d\u0430\u043a\u043b\u0430\u0434\u043a\u0438'],
-  head: ['Blade head', '\u0413\u043e\u043b\u043e\u0432\u0430 \u043a\u043b\u0438\u043d\u043a\u0430'],
+  head: ['Blade head', '\u0413\u043e\u043b\u043e\u0432\u0430 \u0440\u0430\u043a\u0435\u0442\u043a\u0438'],
   red: ['Red rubber', '\u041a\u0440\u0430\u0441\u043d\u0430\u044f \u043d\u0430\u043a\u043b\u0430\u0434\u043a\u0430'],
   black: ['Black rubber', '\u0427\u0451\u0440\u043d\u0430\u044f \u043d\u0430\u043a\u043b\u0430\u0434\u043a\u0430'],
-  rps: ['rps', '\u043e\u0431/\u0441'], ready: ['Ready', '\u0413\u043e\u0442\u043e\u0432\u043d\u043e\u0441\u0442\u044c'],
+  rps: ['rps', '\u043e\u0431/\u0441'], ready: ['Ready position', '\u0418\u0441\u0445\u043e\u0434\u043d\u043e\u0435 \u043f\u043e\u043b\u043e\u0436\u0435\u043d\u0438\u0435'],
   backswing: ['Backswing', '\u0417\u0430\u043c\u0430\u0445'], swing: ['Swing', '\u0423\u0434\u0430\u0440'],
-  follow: ['Follow-through', '\u041f\u0440\u043e\u0432\u043e\u0434\u043a\u0430'], recover: ['Recovery', '\u0412\u043e\u0437\u0432\u0440\u0430\u0442'],
-  orbit: ['Drag to orbit. Pinch or wheel to zoom.', '\u041f\u043e\u0432\u043e\u0440\u043e\u0442: \u043f\u0435\u0440\u0435\u0442\u0430\u0441\u043a\u0438\u0432\u0430\u043d\u0438\u0435. \u041c\u0430\u0441\u0448\u0442\u0430\u0431: \u0434\u0432\u0430 \u043f\u0430\u043b\u044c\u0446\u0430 \u0438\u043b\u0438 \u043a\u043e\u043b\u0435\u0441\u043e.'],
-  isolated: ['Silent reference. No attempts or progress are recorded.', '\u042d\u0442\u0430\u043b\u043e\u043d \u0431\u0435\u0437 \u0437\u0432\u0443\u043a\u0430. \u041f\u043e\u043f\u044b\u0442\u043a\u0438 \u0438 \u043f\u0440\u043e\u0433\u0440\u0435\u0441\u0441 \u043d\u0435 \u0437\u0430\u043f\u0438\u0441\u044b\u0432\u0430\u044e\u0442\u0441\u044f.'],
-  reduced: ['Reduced motion: inspect with the timeline.', '\u041c\u0435\u043d\u044c\u0448\u0435 \u0434\u0432\u0438\u0436\u0435\u043d\u0438\u044f: \u0438\u0441\u043f\u043e\u043b\u044c\u0437\u0443\u0439 \u043f\u043e\u043b\u0437\u0443\u043d\u043e\u043a.'],
+  follow: ['Follow-through', '\u041f\u0440\u043e\u0432\u043e\u0434\u043a\u0430'], recover: ['Return to ready', '\u0412\u043e\u0437\u0432\u0440\u0430\u0442 \u0432 \u0433\u043e\u0442\u043e\u0432\u043d\u043e\u0441\u0442\u044c'],
+  orbit: ['Drag to rotate. Pinch with two fingers or use the wheel to zoom.', '\u041f\u0435\u0440\u0435\u0442\u0430\u0441\u043a\u0438\u0432\u0430\u0439 \u0434\u043b\u044f \u043f\u043e\u0432\u043e\u0440\u043e\u0442\u0430. \u0421\u0432\u0435\u0434\u0438 \u0438\u043b\u0438 \u0440\u0430\u0437\u0432\u0435\u0434\u0438 \u0434\u0432\u0430 \u043f\u0430\u043b\u044c\u0446\u0430, \u043b\u0438\u0431\u043e \u043a\u0440\u0443\u0442\u0438 \u043a\u043e\u043b\u0435\u0441\u043e \u0434\u043b\u044f \u043c\u0430\u0441\u0448\u0442\u0430\u0431\u0430.'],
+  isolated: ['Silent. No attempts or progress are recorded. The report is off duty.', '\u0411\u0435\u0437 \u0437\u0432\u0443\u043a\u0430. \u041f\u043e\u043f\u044b\u0442\u043a\u0438 \u0438 \u043f\u0440\u043e\u0433\u0440\u0435\u0441\u0441 \u043d\u0435 \u0437\u0430\u043f\u0438\u0441\u044b\u0432\u0430\u044e\u0442\u0441\u044f. \u041f\u0440\u043e\u0442\u043e\u043a\u043e\u043b \u043e\u0442\u0434\u044b\u0445\u0430\u0435\u0442.'],
+  reduced: ['Reduced motion. Use the timeline to inspect the stroke.', '\u0414\u0432\u0438\u0436\u0435\u043d\u0438\u0435 \u043e\u0433\u0440\u0430\u043d\u0438\u0447\u0435\u043d\u043e. \u0420\u0430\u0437\u0431\u0438\u0440\u0430\u0439 \u0443\u0434\u0430\u0440 \u043f\u043e\u043b\u0437\u0443\u043d\u043a\u043e\u043c.'],
 };
 
 class TrainingPreview {
@@ -479,7 +479,7 @@ class TrainingPreview {
       <button type="button" class="tbt" data-preview="close" data-preview-text="close"></button></header>
       <div class="tt-preview-stage" data-preview-orbit><span class="tt-preview-orbit" data-preview-text="orbit"></span>
         <div class="tt-preview-labels" aria-hidden="true"></div><div class="tt-preview-contact-label"></div></div>
-      <aside class="tt-preview-details"><div class="tt-preview-inset" aria-label="3D contact"><b data-preview-text="contact"></b>
+      <aside class="tt-preview-details"><div class="tt-preview-inset" aria-label="${this._text('contact')}"><b data-preview-text="contact"></b>
         <div class="tt-preview-inset-window"></div><span class="tt-preview-face"></span>
         <small><i class="tt-preview-normal-key"></i><span data-preview-text="normal"></span> / <i class="tt-preview-head-key"></i><span data-preview-text="head"></span></small></div>
         <div class="tt-preview-gesture"><b data-preview-text="gesture"></b><svg viewBox="0 0 240 132" role="img">
@@ -609,8 +609,7 @@ class TrainingPreview {
     this.root.querySelector('.tt-preview-face').textContent = this._text(p.forehand ? 'red' : 'black');
     this.root.querySelector('.tt-preview-inset').setAttribute('aria-label', this._text('contact'));
     this.root.querySelector('.tt-preview-status').textContent = this._text(this.reducedMotion ? 'reduced' : 'isolated');
-    const family = { SERVE_TOP: 'TOPSPIN SERVE', SERVE_BACK: 'BACKSPIN SERVE', SERVE_SIDE: 'SIDE SERVE',
-      SERVE_FAST: 'FAST SERVE', SERVE_NO_SPIN: 'NO-SPIN SERVE', CHOP_BLOCK: 'CHOP BLOCK' }[p.strokeId] || p.strokeId;
+    const family = ET(TRAIN_GUIDES[p.technique].title);
     this.root.querySelector('.tt-preview-contact-label').textContent = family + ' ' + Math.round(this.clip.spin.totalRps) + ' ' + this._text('rps');
     this.root.querySelector('.tt-preview-gesture svg').setAttribute('aria-label', view.controls.touch);
     this.root.toggleAttribute('data-preview-reduced', this.reducedMotion);

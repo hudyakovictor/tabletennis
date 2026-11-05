@@ -5,6 +5,7 @@
 
 (function boot() {
   const start = () => {
+    if (window.__TT_LOCALE) ET.set(window.__TT_LOCALE);
     const canvas = document.getElementById('gl');
     let ui, game;
     try {

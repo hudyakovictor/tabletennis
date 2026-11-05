@@ -148,7 +148,7 @@ class EmotionalSystem {
     if (g.state === GS.RALLY && !g.training && !g.demoMode) {
       if ((g.rally === 8 || g.rally === 14 || g.rally === 20) && this._seenRallyCallout !== g.rally) {
         this._seenRallyCallout = g.rally;
-        g.msg(`РОЗЫГРЫШ ×${g.rally}!`, 1.0, '#7fd4ff', false);
+        g.msg(ET('РАЛЛИ ×{n}', { n: g.rally }), 1.0, '#7fd4ff', false);
       }
     } else if (g.state !== GS.RALLY) {
       this._seenRallyCallout = 0;
@@ -209,7 +209,7 @@ class EmotionalSystem {
    */
   _onNetCord(g) {
     if (!g.reducedMotion) g.hitFlash = Math.min(1, g.hitFlash + 0.18);
-    if (!g.training) g.msg('ТРОС!', 0.9, '#ffd34d', false);
+    if (!g.training) g.msg('КАСАНИЕ ТРОСА', 0.9, '#ffd34d', false);
     if (g.buzz) g.buzz([10, 20, 10]);
   }
 

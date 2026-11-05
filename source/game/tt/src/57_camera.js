@@ -31,11 +31,11 @@
 /* Stable front-facing views. Legacy IDs keep existing saves compatible. */
 const CAMERA_PRESETS = {
   BROADCAST: { id: 'BROADCAST', ru: 'ИГРОВАЯ', short: 'ИГРА',
-    desc: 'Весь стол и обе половины', pitch: 24, vfov: 48, nearY: 0.620, topMin: 0.155 },
+    desc: 'Весь стол и обе половины. Полный протокол розыгрыша.', pitch: 24, vfov: 48, nearY: 0.620, topMin: 0.155 },
   DYNAMIC: { id: 'DYNAMIC', ru: 'ОБЗОР', short: 'ОБЗОР',
-    desc: 'Выше: легче читать отскок', pitch: 30, vfov: 52, nearY: 0.625, topMin: 0.150 },
+    desc: 'Выше: легче читать отскок. Наблюдение без лишних догадок.', pitch: 30, vfov: 52, nearY: 0.625, topMin: 0.150 },
   LOW: { id: 'LOW', ru: 'БЛИЖЕ', short: 'БЛИЖЕ',
-    desc: 'Низкий и близкий — взгляд почти с уровня сетки', pitch: 15, vfov: 52, nearY: 0.560, topMin: 0.130 },
+    desc: 'Низко и близко: почти уровень сетки. Инспекция с переднего ряда.', pitch: 15, vfov: 52, nearY: 0.560, topMin: 0.130 },
 };
 const CAMERA_ORDER = ['BROADCAST', 'DYNAMIC', 'LOW'];
 
