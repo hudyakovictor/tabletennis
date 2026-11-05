@@ -69,9 +69,16 @@ function playerWristPose(pos, vel, hand, phase = {}) {
   const HOME_Y = 1.18;
   const hy = Number.isFinite(phase.contactY) ? phase.contactY
     : Number.isFinite(pos.y) ? pos.y : HOME_Y;
-  /* Stretched arm cannot close as hard as a compact smash in front. */
+  /* Stretched arm cannot close as hard as a compact smash in front.
+   * The height->pitch map is a cubic ease, not a straight ramp: it flattens
+   * near both extremes, so raising the bat rotates the face ALONG AN ARC and
+   * eases off before the global clamp wall — the old linear map slammed into
+   * the -0.90 rad stop, which read as "first it goes up, then at one point it
+   * sharply tips all the way toward the net". Sign and endpoint values are
+   * unchanged (eased(+-1) = +-0.65), so every coaching assertion still holds. */
   const reachLimit = 1 - 0.32 * stance;
-  const heightPitch = -clamp((hy - HOME_Y) / 0.55, -1, 1) * 0.22 * reachLimit;
+  const hs = clamp((hy - HOME_Y) / 0.55, -1, 1);
+  const heightPitch = -(hs - 0.35 * hs * hs * hs) * 0.22 * reachLimit;
 
   /* Depth. Over the table you get under the ball (open); off the end you
      close for a loop. Velocity still tips the blade into a lunge. */

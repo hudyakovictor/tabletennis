@@ -621,6 +621,10 @@ function deriveStroke(m, ctx) {
     mu: (eq.mu ?? base.mu ?? PH.MU_RACKET) * spinGain,
     et: (eq.et ?? base.et ?? PH.ET_RACKET) * (A.soft !== undefined ? S.rubberSoftWeights[0] + S.rubberSoftWeights[1] * A.soft : 1) * (S.rubberGainWeights[0] + S.rubberGainWeights[1] * spinGain),
     damp: eq.damp ?? base.damp ?? 1,
+    /* Per-stroke spin ceiling: the backspin family in a rally is capped so a
+     * top-to-down swipe cannot manufacture a 120 rps chop that bounces back
+     * off the table like a rubber band. Serves keep the global cap. */
+    cap: (!ctx.isServe && A.back && Number.isFinite(S.rallyBackCap)) ? Math.min(S.rallyBackCap, S.cap) : S.cap,
   };
 
   const racket = {
@@ -753,7 +757,11 @@ function strokeBrushVelocity(racket, velocity, normal) {
   } else if (brush && Math.abs(normal.z) > 1e-6) {
     // n x (ballV - racketV) has zero x torque for a horizontal brush.
     // Match incoming vertical motion instead of manufacturing top/back brush.
-    const neutralY = incoming.y + (velocity.z - incoming.z) * normal.y / normal.z;
+    // The face-tilt term (vz * ny/nz) is physical, but with the lateral face
+    // turn (latTurn) it used to reach -4.6 m/s on a pure horizontal swipe —
+    // the ball was driven straight into the player's own half, so "side-spin
+    // shot" was unplayable. Cap the manufactured vertical component at 1.5 m/s.
+    const neutralY = incoming.y + clamp((velocity.z - incoming.z) * normal.y / normal.z, -1.5, 1.5);
     velocity.y = lerp(velocity.y, neutralY, brush);
   }
   const speed = V3.len(velocity);

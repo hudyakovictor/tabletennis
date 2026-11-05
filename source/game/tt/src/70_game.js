@@ -1146,14 +1146,41 @@ class Game {
   promotePendingServeZone() {
     const sw = this.swipe;
     const pz = sw && sw.pressZone;
-    if (!pz || pz.accepted || !pz.pendingServeDrop) return false;
+    if (!pz || pz.accepted) return false;
     if (this.state !== GS.SERVE_TOSS || this.server !== 1 || !this.ball || this.ball.lastHitBy !== 0) return false;
     const rise = this.tossRiseNow();
     if (!(this.ball.v && this.ball.v.y < 0 && rise >= MATCH_RULES.serveTossMinRise - 1e-6)) return false;
-    pz.accepted = true;
-    pz.reason = null;
-    pz.pendingServeDrop = false;
-    pz.tossRise = rise;
+    if (pz.pendingServeDrop) {
+      pz.accepted = true;
+      pz.reason = null;
+      pz.pendingServeDrop = false;
+      pz.tossRise = rise;
+      if (this.shotJournal && typeof this.shotJournal.promotePress === 'function') {
+        this.shotJournal.promotePress(sw.gestureId, pz);
+      }
+      return true;
+    }
+    /* The serve press zone used to be evaluated ONLY at pointerdown. A press
+     * that landed outside the oval while the toss was still rising (or simply
+     * not aligned with the early-swipe window) was rejected once and never
+     * re-checked — from that position/timing the serve was impossible until
+     * the next point. Now that the ball is legally falling, re-evaluate the
+     * serve zone at the CURRENT pointer position and admit the gesture if the
+     * finger is inside it now. */
+    if (!pz.serving || !this.pointer) return false;
+    const rect = this.canvas ? this.canvas.getBoundingClientRect() : { width: pz.vw || 390, height: pz.vh || 844 };
+    const z = pressZoneForBall(this.ball, this.pointer, rect.width, rect.height, {
+      project: point => this.project(point, {}),
+      pointerType: pz.pointerType || 'touch',
+      referenceWorld: this.player && this.player.pos,
+      kind: 'serve', tossApex: this.tossApex, tossStartY: this.tossStartY, tableY: PH.TABLE_Y,
+    });
+    if (!z || !z.accepted) return false;
+    const keep = { pressX: pz.pressX, pressY: pz.pressY, vw: pz.vw, vh: pz.vh,
+      pointerId: pz.pointerId, pointerType: pz.pointerType, pressT: pz.pressT,
+      pressContactable: pz.pressContactable, shotId: pz.shotId, serving: pz.serving,
+      tapAtPress: pz.tapAtPress, domTimestamp: pz.domTimestamp };
+    Object.assign(pz, z, keep, { accepted: true, reason: null, tossRise: rise });
     if (this.shotJournal && typeof this.shotJournal.promotePress === 'function') {
       this.shotJournal.promotePress(sw.gestureId, pz);
     }
@@ -3788,7 +3815,14 @@ class Game {
     const clearance = paddleTableClearance(pad.pos, pad.normal, pad.roll, PH.TABLE_Y, PH.T_HALF_WID, PH.T_HALF_LEN, pad.q);
     const lifted = clearance < .006 ? .006 - clearance : 0;
     if (lifted) pad.pos.y += lifted;
-    stepPaddlePosition(pad.prevPos, pad.pos, Infinity, dt, maxSpeed, pad.pos);
+    /* prevPos must stay the position the bat had at the START of this frame:
+     * the swept-capture CCD (bladePlaneCapture / measureCaptureAllowance) and
+     * the frame velocity below both diff pos against it. The old line copied
+     * pos into prevPos here, which made the final velocity identically zero
+     * every frame — the velocity drivers of the wrist pose (vel.x/y/z terms in
+     * playerWristPose) were dead, and right after a stroke (when the template
+     * moved pad.pos once more) the pose saw a stale zero velocity while the
+     * bat had visibly moved: the "chaotically twitching racket after a hit". */
     const finalClearance = paddleTableClearance(pad.pos, pad.normal, pad.roll, PH.TABLE_Y, PH.T_HALF_WID, PH.T_HALF_LEN, pad.q);
     if (finalClearance < .006) {
       // Lift before advancing across the edge, rather than buying table
