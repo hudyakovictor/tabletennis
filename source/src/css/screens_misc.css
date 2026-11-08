@@ -1,31 +1,16 @@
-/* ---------- PRELOADER: loading -> strike -> glass -> scene ball ---------- */
-.preloader{position:absolute;inset:0;z-index:80;overflow:hidden;isolation:isolate}
-.preloader[hidden]{display:none}
-.pl-backdrop{position:absolute;inset:0;background:url("preloaderr.png") center/cover no-repeat #04050b;transition:opacity .22s var(--out)}
-.pl-wordmark{position:absolute;top:calc(18% + var(--sat) + var(--tgt));left:0;right:0;text-align:center;transition:opacity .2s var(--out)}
-.pl-wordmark b{display:block;font:900 clamp(16px,4.5vw,22px)/1.2 var(--display);letter-spacing:-.045em;color:#fff}
-.pl-wordmark span{display:block;margin-top:10px;font:800 9px/1 var(--body);letter-spacing:.48em;color:var(--gold);padding-left:.48em}
-.pl-stage{position:absolute;left:50%;bottom:100px;width:clamp(74px,24vw,92px);aspect-ratio:1;transform:translate(-50%,50%)}
-.pl-ring{position:absolute;inset:0;width:100%;height:100%;transform:rotate(-90deg);transition:opacity .16s var(--out)}
+/* ---------- PRELOADER: loading -> complete -> fade ---------- */
+#preloader{position:fixed;inset:0;z-index:80;overflow:hidden;isolation:isolate}
+#preloader[hidden]{display:none}
+#preloader[data-phase=fade]{pointer-events:none}
+.pl-backdrop{position:absolute;inset:0;background:url("preloaderr.png") center/cover no-repeat #04050b}
+.pl-readout{position:absolute;left:50%;bottom:100px;width:clamp(74px,24vw,92px);aspect-ratio:1;display:grid;place-items:center;transform:translateX(-50%)}
+.pl-ring{position:absolute;inset:0;width:100%;height:100%;transform:rotate(-90deg)}
 .pl-progress{transition:none}
-.pl-ball{display:none}
-.pl-sheet,.pl-fallback{position:absolute;inset:0;width:100%;height:100%}
-.pl-sheet{background-repeat:no-repeat;opacity:0}
-.has-sprites .pl-sheet{opacity:1}.has-sprites .pl-fallback{opacity:0}
-.pl-paddle{position:absolute;width:93.24%;height:121.62%;left:3.38%;top:-10.81%;object-fit:contain;opacity:0}
-.pl-burst{position:absolute;width:155%;height:155%;left:-27.5%;top:-27.5%;object-fit:contain;opacity:0;mix-blend-mode:screen;pointer-events:none}
-.pl-glass{position:absolute;left:50%;top:48%;width:min(125%,500px);height:auto;transform:translate(-50%,-50%);opacity:0;pointer-events:none}
-.pl-readout{position:absolute;left:50%;bottom:100px;display:flex;flex-direction:column;align-items:center;gap:4px;transform:translate(-50%,50%);transition:opacity .16s var(--out)}
 .pl-percent{font:800 23px/1 var(--body);color:#fff;letter-spacing:-.04em}.pl-percent span{font-size:12px;margin-left:3px;color:var(--gold)}
 .pl-status{display:none}
-.pl-retry{position:absolute;left:50%;bottom:calc(12% + var(--sab) + var(--tgb));transform:translateX(-50%);white-space:nowrap}.pl-retry[hidden]{display:none}
+.pl-retry{position:absolute;left:50%;bottom:36px;transform:translateX(-50%);white-space:nowrap}.pl-retry[hidden]{display:none}
 .pl-retry:active,.pl-retry.pressed{transform:translate(-50%,3px)}
-.preloader.launched .pl-wordmark,.preloader.launched .pl-ring,.preloader.launched .pl-readout{opacity:0}
-.preloader.revealed{pointer-events:none}.preloader.revealed .pl-backdrop{opacity:0}
 .screen.intro-entry .rise,.screen.intro-entry .pop{animation:none;opacity:1;transform:none}
-@keyframes plArrive{from{opacity:0;transform:translateY(10px) scale(.95)}to{opacity:1;transform:none}}
-body.rm .pl-ball{animation:none}
-@media(prefers-reduced-motion:reduce){.pl-ball{animation:none}.pl-backdrop,.pl-wordmark,.pl-readout,.pl-ring{transition:opacity .18s linear}.pl-progress{transition:none}}
 
 /* =====================================================================
    НАСТОЯЩИЙ ДВИЖОК — слой iframe + кинематографичные интро/аутро

@@ -6,9 +6,8 @@
  * видит в момент контакта (мяч может закрысть квад своим силуэтом).
  * Запуск: CHROME_BIN=... node tools/flash-render-probe.cjs */
 const path = require('node:path');
-const { pathToFileURL } = require('node:url');
 const puppeteer = require('puppeteer-core');
-const { enginePage } = require('../tests/helpers.cjs');
+const { appFrame } = require('../tests/helpers.cjs');
 
 function hexToRgb(h) { const s = h.replace('#', ''); return [parseInt(s.slice(0, 2), 16), parseInt(s.slice(2, 4), 16), parseInt(s.slice(4, 6), 16)].map((v) => v / 255); }
 function hue(rgb) {
@@ -78,17 +77,15 @@ async function run(browser, width, height, mobile, dpr, ids, ages, modes, shots)
   const errs = [];
   page.on('pageerror', (e) => errs.push(e.message));
   await page.setViewport({ width, height, isMobile: mobile, hasTouch: mobile, deviceScaleFactor: dpr });
-  await page.goto(pathToFileURL(enginePage()).href);
-  await page.waitForFunction(() => window.__game && window.__game.R.drawCalls > 0);
-  await page.evaluate(() => {
+  const frame = await appFrame(page);
+  await frame.evaluate(() => {
     const g = window.__game;
-    document.querySelectorAll('.screen.on').forEach((el) => el.classList.remove('on'));
     g.startMatch(2); g.setState(GS.RALLY); g.ball.live = true;
     g.updateCamera(4); g.updateCamera(0); g.paused = true;
   });
   const rows = [];
   for (const mode of modes) for (const id of ids) for (const age of ages) {
-    const r = await page.evaluate(`${PROBE}(${JSON.stringify(id)}, ${age}, ${JSON.stringify(mode)})`);
+    const r = await frame.evaluate(`${PROBE}(${JSON.stringify(id)}, ${age}, ${JSON.stringify(mode)})`);
     const addHue = r.px ? hue(r.px.added.map((v) => v / 255)) : -1;
     rows.push({
       vp: `${width}x${height}`, mode, id, age: age.toFixed(2), hex: r.hex,
@@ -100,8 +97,9 @@ async function run(browser, width, height, mobile, dpr, ids, ages, modes, shots)
       ringR: r.ringR, ballPx: r.ballPx,
     });
   }
+  const bounds = await (await page.$('#gamelayer iframe')).boundingBox();
   for (const [tag, age] of shots) {
-    const box = await page.evaluate(`(() => { const g = window.__game; g.contactFlashes.length = 0;
+    const box = await frame.evaluate(`(() => { const g = window.__game; g.contactFlashes.length = 0;
       if (${age} >= 0) { function hx(h){const s=h.replace('#','');return [parseInt(s.slice(0,2),16)/255,parseInt(s.slice(2,4),16)/255,parseInt(s.slice(4,6),16)/255];}
         const c = hx(STROKES['LOOP'].col);
         g.contactFlashes.push({ side: 1, id: 'LOOP', p: V3.clone(g.ball.p), r: c[0], g: c[1], b: c[2],
@@ -111,7 +109,7 @@ async function run(browser, width, height, mobile, dpr, ids, ages, modes, shots)
       return { left: r.left + pr.x * r.width, top: r.top + pr.y * r.height };
     })()`);
     await page.screenshot({ path: path.join(__dirname, `flash-${tag}-${width}.png`),
-      clip: { x: Math.round(box.left - 40), y: Math.round(box.top - 40), width: 80, height: 80 } });
+      clip: { x: Math.round(bounds.x + box.left - 40), y: Math.round(bounds.y + box.top - 40), width: 80, height: 80 } });
   }
   if (shots.length) console.log('  zoom-кадры:', shots.map(([t]) => `flash-${t}-${width}.png`).join(', '));
   if (errs.length) console.error('PAGE ERRORS', width, errs);

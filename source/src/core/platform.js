@@ -104,8 +104,9 @@ const TGX = {
   toggleFullscreen() {
     if (this.inTG) { this.fullscreen(true); return; }
     try {
-      if (document.fullscreenElement) document.exitFullscreen();
-      else document.documentElement.requestFullscreen && document.documentElement.requestFullscreen();
+      const request = document.fullscreenElement ? document.exitFullscreen()
+        : document.documentElement.requestFullscreen?.();
+      request?.catch(() => {});
     } catch (e) {}
   },
   /* защита от случайного закрытия во время матча/обучения (Bot API 7.10+) */

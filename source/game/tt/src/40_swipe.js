@@ -236,7 +236,8 @@ const ARCH = STROKE_CONFIG.archetypes;
 /** All effort ceilings use pre-absorption arm speed, never outgoing ball speed. */
 function racketEffortCap(racket) {
   let cap = racket.isServe ? STROKE_CONFIG.serve.vmax
-    : racket.stroke?.id === 'SIDE' ? STROKE_CONFIG.spin.sideVmax : STROKE_CONFIG.racket.vmax;
+    : racket.stroke?.id === 'SIDE' ? (racket.playerControlled ? STROKE_CONFIG.racket.placement.player.sideVmax : STROKE_CONFIG.spin.sideVmax)
+      : STROKE_CONFIG.racket.vmax;
   if (Number.isFinite(racket.vmagCap)) cap = Math.min(cap, Math.max(0, racket.vmagCap));
   if (Number.isFinite(racket.effortBudget?.vmagCap)) cap = Math.min(cap, Math.max(0, racket.effortBudget.vmagCap));
   return cap;
@@ -458,6 +459,7 @@ function classifyStroke(m, ctx = {}, sp01) {
  * ------------------------------------------------------------------ */
 function deriveStroke(m, ctx) {
   const R = STROKE_CONFIG.racket, S = STROKE_CONFIG.spin;
+  const playerControlled = !!ctx.playerControlled && (!m.tap || m.compactFlick);
   const side = ctx.side || 1;
   const fwd = -side;
 
@@ -599,7 +601,7 @@ function deriveStroke(m, ctx) {
    * улетал за конец стола, и ни одна ступень ассиста (0.85 → 1.0 → мягкий
    * темп) не оставляла его на столе. При 6.5 м/с тот же жест даёт ~50 км/ч и
    * законный полёт: закрутка остаётся, исчезает только пуля. */
-  if (pureSide) vmag = Math.min(vmag, S.sideVmax);
+  if (pureSide) vmag = Math.min(vmag, playerControlled ? R.placement.player.sideVmax : S.sideVmax);
   if (!Number.isFinite(vmag)) vmag = R.speed.fallback;
 
   /* The explicit spin dial (the chip in the top button row). The gesture
@@ -656,10 +658,21 @@ function deriveStroke(m, ctx) {
   const placement = R.placement, bxRaw = (m.x - 0.5) * 2;
   const bx = Math.abs(bxRaw) <= placement.deadZone ? 0
     : (bxRaw - Math.sign(bxRaw) * placement.deadZone) / (1 - placement.deadZone);
-  const aimX = clamp(bx + r * placement.gestureK, -1, 1) * (PH.T_HALF_WID * placement.widthK);
+  let aimX = clamp(bx + r * placement.gestureK, -1, 1) * (PH.T_HALF_WID * placement.widthK);
   const depth = placement.depth[st.id];
-  const depth01 = depth ? depth[0] + sp01 * depth[1]
+  let depth01 = depth ? depth[0] + sp01 * depth[1]
     : clamp(placement.defaultDepth[0] + sp01 * placement.defaultDepth[1] + m.dist * placement.defaultDepth[2], ...placement.depthRange);
+  if (playerControlled) {
+    // Direction is relative to contact, not to the cursor's screen position.
+    // The same fast cross-court swipe must work from either corner. Do not
+    // clamp the requested landing to the court: excess power can miss it.
+    const control = placement.player;
+    const direction = clamp(r, -1, 1);
+    const edge = Math.sign(direction) * PH.T_HALF_WID * (control.lateralBase + control.lateralPower * sp01);
+    aimX = lerp(Number.isFinite(b.x) ? b.x : 0, edge, Math.abs(direction));
+    depth01 = (depth ? depth[0] : placement.defaultDepth[0]) * control.depthBaseK
+      + sp01 * control.depthPower + m.dist * control.pathDepthK;
+  }
   const aimZ = -side * lerp(placement.netMargin, PH.T_HALF_LEN - placement.endMargin, depth01);
 
   /* ---- 7. execution quality --------------------------------------- */
@@ -686,7 +699,7 @@ function deriveStroke(m, ctx) {
 
   const racket = {
     stroke: st, arch: A, vR, normal, vmag, faceEnvelope: faceRange, grip: ctx.grip, forehand: ctx.forehand !== false, aim: { x: aimX, z: aimZ },
-    requestedVmag, effortBudget: ctx.effortBudget,
+    requestedVmag, effortBudget: ctx.effortBudget, playerControlled,
     power: sp01, quality, elev, contact, azSwing, azFace, faceElev: phi, spinIntent, rubber,
     swipe: m, side, isServe: !!ctx.isServe, ballVelocity: ctx.ballVelocity && V3.clone(ctx.ballVelocity),
     verticalBrush: st.id === 'SERVE_SIDE' ? clamp(ctx.verticalBrush ?? u / Math.max(1e-6, Math.hypot(r, u)), -1, 1) : null,
@@ -915,11 +928,13 @@ function serveWarmKey(side, racket) {
   return side + '|' + (racket.grip || 'legacy') + '|' + (racket.forehand !== false ? 'fh' : 'bh') + '|' + (st.id || '?') + '|' +
     Math.round((racket.verticalBrush || 0) * 10) + '|' + Math.sign(racket.swipe && racket.swipe.right || 0) + '|' +
     Math.round((aim.z || 0) / STROKE_CONFIG.serve.solver.warmGrid) + '|' + Math.round((aim.x || 0) / STROKE_CONFIG.serve.solver.warmGrid) +
-    (racket.effortBudget ? '|effort:' + racketEffortCap(racket) : '');
+    (racket.effortBudget ? '|effort:' + racketEffortCap(racket) : '') + (racket.playerControlled ? '|player' : '');
 }
-function ownFor(aim, side) {
+function ownFor(aim, side, from) {
   const own = STROKE_CONFIG.serve.solver.ownBounce;
-  return { x: aim.x * own.lateralK, z: side * (own.depth + Math.abs(aim.z) * own.aimDepthK) };
+  const z = side * (own.depth + Math.abs(aim.z) * own.aimDepthK);
+  const k = from ? clamp((z - from.z) / (aim.z - from.z), 0, 1) : 0;
+  return { x: from ? lerp(from.x, aim.x, k) : aim.x * own.lateralK, z };
 }
 
 function solveServeStroke(ballP, racket, evalStroke, side, assist) {
@@ -971,7 +986,7 @@ function solveServeStroke(ballP, racket, evalStroke, side, assist) {
   let flights = 0;
   /* Metres past the net a serve's second bounce must reach to be worth
    * playing (the bat's step-in limit is 0.86 m from the centre line). */
-  const SERVE_MIN_PAST_NET = solver.minPastNet;
+  const SERVE_MIN_PAST_NET = racket.playerControlled ? .10 : solver.minPastNet;
   /* Pace is charged against the swing the SERVER asked for — but a short
    * serve is soft by construction, and the old flat 0.85 per e-fold made it
    * strictly cheaper to ignore a short aim than to hit it (a serve at
@@ -1009,6 +1024,10 @@ function solveServeStroke(ballP, racket, evalStroke, side, assist) {
     if (Math.sign(r.landed.z) !== side) { why = 'wrongside'; return costs.wrongSide + Math.abs(r.landed.z - own.z) + pc0; }
     const d1 = Math.hypot(r.landed.x - own.x, r.landed.z - own.z);
     if (r.hitNet) { why = 'net'; return costs.net + d1 * costs.netOwnK + Math.max(0, PH.NET_TOP + PH.R - (r.netCross ? r.netCross.y : 0)) * costs.netHeightK + pc0; }
+    if (racket.intentionalOut && r.secondPlaneCross && Math.sign(r.secondPlaneCross.z) === -side) {
+      legal = true; why = 'ok';
+      return Math.hypot(r.secondPlaneCross.x - aim.x, r.secondPlaneCross.z - aim.z) * 3 + d1 * costs.ownK + pc0;
+    }
     if (!r.b2) {                                              // flew past the table
       why = 'long';
       const pc = r.floor || r.planeCross;
@@ -1050,7 +1069,8 @@ function solveServeStroke(ballP, racket, evalStroke, side, assist) {
     const aimDeep = clamp((Math.abs(aim.z) - SERVE_MIN_PAST_NET) / solver.depthSpan, 0, 1);
     const dead = (pastNet < SERVE_MIN_PAST_NET && aimDeep > 0)
       ? (SERVE_MIN_PAST_NET - pastNet) * solver.deadZoneWeight * aimDeep : 0;
-    return Math.hypot(r.b2.x - aim.x, r.b2.z - aim.z) + d1 * costs.ownK + pc0 + dead + spinCost;
+    return Math.hypot(r.b2.x - aim.x, r.b2.z - aim.z) * (racket.playerControlled ? 3 : 1)
+      + d1 * costs.ownK + pc0 + dead + spinCost;
   };
 
   const DMP = solver.damping;
@@ -1061,7 +1081,7 @@ function solveServeStroke(ballP, racket, evalStroke, side, assist) {
   const warm = racket.preview ? null : SERVE_WARM.get(warmKey);
   if (warm) {
     const aimW = { x: aimReq.x, z: aimReq.z };
-    const ownW = ownFor(aimW, side);
+    const ownW = ownFor(aimW, side, racket.playerControlled ? ballP : null);
     const sv = score(ownW, aimW, warm.dE, warm.dA, warm.sc, warm.dmp, true);
     /* A cached serve is only an answer to THIS aim. The old test asked only
      * "legal and not dead behind the net", so a serve solved for a far
@@ -1086,7 +1106,7 @@ function solveServeStroke(ballP, racket, evalStroke, side, assist) {
   // small steps. The old jump straight to 0.70 was what turned a slightly
   // mistossed serve into a ball that died behind the net and could not be
   // reached at all.
-  for (const depthF of solver.depthFactors) {
+  for (const depthF of racket.playerControlled ? [1] : solver.depthFactors) {
     const aim = { x: aimBase.x, z: aimBase.z * depthF };
     /* Where the FIRST bounce is wanted. It used to be 0.40 m in front of the
      * net, i.e. ~0.9 m away from the server's own end line — a loopy ball
@@ -1095,7 +1115,7 @@ function solveServeStroke(ballP, racket, evalStroke, side, assist) {
      * and drive it through; 0.78 + a little of the requested depth does that
      * and, measured, lifts the median second bounce from 0.44 m to ~1.1 m
      * past the net. */
-    const own = ownFor(aim, side);
+    const own = ownFor(aim, side, racket.playerControlled ? ballP : null);
 
     // stage 1 — how far must the swing direction be pulled back to centre?
     let aBest = 0, aBestV = Infinity;
@@ -1279,7 +1299,7 @@ function solveServeStroke(ballP, racket, evalStroke, side, assist) {
    * grid: the second bounce depth was the same for every near-net cell
    * (mean dz -0.24..-0.35 m), so no short cell could ever be hit even though
    * witnesses for them exist. */
-  if (solvedLegal && Math.abs(bAim.z) >= SERVE_MIN_PAST_NET) {
+  if (solvedLegal && !racket.playerControlled && Math.abs(bAim.z) >= SERVE_MIN_PAST_NET) {
     score(bOwn, bAim, bE, bA, bS, bD, true);
     let bz = _svRep.b2 ? Math.abs(_svRep.b2.z) : 0;
     if (bz < SERVE_MIN_PAST_NET) {
@@ -1303,7 +1323,7 @@ function solveServeStroke(ballP, racket, evalStroke, side, assist) {
   // (a wild flick, a ball caught on the way up), play a plain, safe serve
   // instead of handing them a fault they cannot see coming. Losing a point
   // to the solver is the one thing a serve must never do.
-  if (!solvedLegal) {
+  if (!solvedLegal && !racket.playerControlled) {
     const own = { x: 0, z: side * solver.safeOwnDepth };
     const aim = { x: 0, z: -side * solver.safeAimDepth };
     let sB = 0.8, dB = 1, eB = 0.0, aB = 0.0, svBest = Infinity;
@@ -1350,7 +1370,19 @@ function solveServeStroke(ballP, racket, evalStroke, side, assist) {
 
   // A weaker player keeps part of their own error — but never to the point
   // of an illegal serve, which is simply not fun.
-  const k = clamp(solver.assistWeights[0] + solver.assistWeights[1] * assist, 0, 1);
+  if (racket.playerControlled && bOwn) {
+    // Fine placement after finding the serve's bounce sequence. Do not stop
+    // merely because a central serve happens to be legal.
+    bV = score(bOwn, bAim, bE, bA, bS, bD, true);
+    for (const step of [.10, .06, .03, .015]) {
+      for (const [de, da, ds] of [[0, step, 1], [0, -step, 1], [step, 0, 1], [-step, 0, 1], [0, 0, 1 + step], [0, 0, 1 - step]]) {
+        const sc = Math.min(speedCap / Math.max(.5, racket.vmag), bS * ds);
+        const cost = score(bOwn, bAim, bE + de, bA + da, sc, bD, true);
+        if (cost < bV) { bV = cost; bE += de; bA += da; bS = sc; }
+      }
+    }
+  }
+  const k = racket.playerControlled ? 1 : clamp(solver.assistWeights[0] + solver.assistWeights[1] * assist, 0, 1);
   const fE = bE * k, fA = bA * k, fS = 1 + (bS - 1) * k, fD = 1 + (bD - 1) * k;
   score(bOwn, bAim, fE, fA, fS, fD, true);
   /* ...and never to the point of a ball that dies behind the net. The
@@ -1450,6 +1482,9 @@ function resolvedRacketFrame(racket, normal, swing, extra) {
 function refineRacket(ballP, ballV, ballW, racket, assist, quality) {
   if (racket.isServe || racket.stroke?.id === 'SIDE') racket = { ...racket, ballVelocity: V3.clone(ballV) };
   racket = enforceRacketEffort(racket);
+  const intentionalOut = !!racket.playerControlled &&
+    (Math.abs(racket.aim.x) > PH.T_HALF_WID || Math.abs(racket.aim.z) > PH.T_HALF_LEN);
+  if (racket.playerControlled) racket = { ...racket, intentionalOut };
   const fwd = -racket.side;
   const rubber = Object.assign({}, racket.rubber || {});
   const materialDamp = rubber.damp ?? STROKE_CONFIG.racket.rubber?.damp ?? 1;
@@ -1477,7 +1512,7 @@ function refineRacket(ballP, ballV, ballW, racket, assist, quality) {
     return resolvedRacketFrame(racket, _rn, _rs, {
       rubber,
       dElev: srv.dE, dAz: srv.dA, scale: srv.sc, damp: srv.dmp,
-      solved: true, valid: srv.ok, target: srv.target,
+      solved: true, valid: srv.ok && !intentionalOut, target: srv.target,
     });
   }
 
@@ -1501,7 +1536,7 @@ function refineRacket(ballP, ballV, ballW, racket, assist, quality) {
   rawX = clamp(rawX, -2.2, 2.2); rawZ = clamp(rawZ, -3.2, 3.2);
 
   /* ---- 2. the assisted target is a blend of mistake and intent ---- */
-  const target = {
+  const target = racket.playerControlled ? { ...racket.aim } : {
     x: lerp(rawX, racket.aim.x, assist),
     z: lerp(rawZ, racket.aim.z, assist),
   };
@@ -1535,6 +1570,7 @@ function refineRacket(ballP, ballV, ballW, racket, assist, quality) {
       speed: V3.len(_rv),
       netClear: racket.netClear,
       speedForgive: 0,                       // power is the player's business
+      allowOut: intentionalOut,
     });
     if (!sol) break;
     // if even the flattest trajectory overshoots, soften the hands
@@ -1585,7 +1621,7 @@ function refineRacket(ballP, ballV, ballW, racket, assist, quality) {
    * nothing between 0.1 and 1.0. The correction is a rotation of the
    * player's own stroke, so scaling it is physically meaningful — it is
    * the difference between a trained arm and an untrained one.         */
-  const polish = Math.pow(clamp(assist, 0, 1), 1.18);
+  const polish = racket.playerControlled ? 1 : Math.pow(clamp(assist, 0, 1), 1.18);
   dE *= polish; dA *= polish;
   sc = 1 + (sc - 1) * polish;
   dmp = 1 + (dmp - 1) * polish;
@@ -1606,6 +1642,7 @@ function refineRacket(ballP, ballV, ballW, racket, assist, quality) {
       { dt: fine ? PH.SIM_DT : 1 / 150, maxT: 2.6, stopOnFirstBounce: true, out: chk });
     if (chk.hitNet) return -1;
     if (fine && chk.netCross && chk.clear < 0.004) return -1;
+    if (intentionalOut && chk.planeCross && Math.sign(chk.planeCross.z) === -side) return 0;
     if (!chk.landed) {
       // Missing the table is not necessarily a long ball. A low return can
       // fall behind the hitter's end line before it ever reaches the court;
@@ -1679,7 +1716,8 @@ function refineRacket(ballP, ballV, ballW, racket, assist, quality) {
           const de = arm * DEG - racket.elev * DEG;
           wristCorrection = face * DEG - (racket.faceElev + de);
           if (validate(de, aimAz, scale, 1, false) !== 0) continue;
-          const distance = Math.hypot(chk.landed.x - target.x, chk.landed.z - target.z);
+          const point = chk.landed || chk.planeCross;
+          const distance = Math.hypot(point.x - target.x, point.z - target.z);
           const cost = distance + Math.abs(de) * .08 + Math.abs(wristCorrection) * .08 + Math.abs(1 - scale) * .1;
           candidates.push({ de, da: aimAz, scale, wrist: wristCorrection, cost });
         }
@@ -1695,6 +1733,33 @@ function refineRacket(ballP, ballV, ballW, racket, assist, quality) {
     }
   }
 
+  if (racket.playerControlled) {
+    // A legal return is not necessarily the requested placement. Refine the
+    // physical frame against the landing, not the first safe central ball.
+    const placementCost = (e, a, scale, wrist) => {
+      const savedWrist = wristCorrection;
+      wristCorrection = wrist;
+      validate(e, a, scale, dmp, true);
+      wristCorrection = savedWrist;
+      const point = chk.landed || chk.planeCross;
+      if (chk.diverged || _rv.z * side >= 0 || !point) return 1e4;
+      const error = Math.hypot(point.x - target.x, point.z - target.z);
+      if (chk.hitNet || !chk.netCross || chk.clear < .004) return 1000 + error;
+      if (side * point.z >= 0 || !intentionalOut && !chk.landed) return 100 + error;
+      return error;
+    };
+    let cost = placementCost(dE, dA, sc, wristCorrection);
+    for (const step of [.16, .08, .04, .02]) {
+      for (const [de, da, ds, dw] of [[0, step, 1, 0], [0, -step, 1, 0], [step, 0, 1, 0], [-step, 0, 1, 0],
+        [0, 0, 1 + step, 0], [0, 0, 1 - step, 0], [0, 0, 1, step], [0, 0, 1, -step]]) {
+        const scale = clamp(sc * ds, .10, Math.min(1.5 * softHeadroom, scCeil));
+        const next = placementCost(dE + de, dA + da, scale, wristCorrection + dw);
+        if (next < cost) { cost = next; dE += de; dA += da; sc = scale; wristCorrection += dw; }
+      }
+    }
+    verdict = validate(dE, dA, sc, dmp, true);
+  }
+
   /* Final safety clamp: every pass above (the convergence loop, the guard
    * and the face envelope) can raise `sc`, and `resolvedRacketFrame` turns
    * `vmag * sc` into the final bat speed. The cap therefore has to be
@@ -1706,7 +1771,7 @@ function refineRacket(ballP, ballV, ballW, racket, assist, quality) {
   const swing = V3.new(), normal = V3.new();
   strokeFrame(racket, dE, dA, sc, swing, normal, wristCorrection);
   rubber.damp = materialDamp * dmp;
-  return resolvedRacketFrame(racket, normal, swing, { rubber, dElev: dE, dAz: dA, dWrist: wristCorrection, scale: sc, damp: dmp, solved: sol, target, valid: verdict === 0 });
+  return resolvedRacketFrame(racket, normal, swing, { rubber, dElev: dE, dAz: dA, dWrist: wristCorrection, scale: sc, damp: dmp, solved: sol, target, valid: verdict === 0 && !intentionalOut });
 }
 
 /** Cheap post-hoc report of where a struck ball will actually go. */

@@ -1,23 +1,19 @@
-const fs = require('node:fs');
 const path = require('node:path');
-const zlib = require('node:zlib');
-const { pathToFileURL } = require('node:url');
 const puppeteer = require('puppeteer-core');
-const { enginePage } = require('./helpers.cjs');
-const chromium = require('@sparticuz/chromium');
+const { appFrame } = require('./helpers.cjs');
+const chromium = process.env.CHROME_BIN ? null : require('@sparticuz/chromium');
 (async () => {
   const libs = '/tmp/topspin-browser-libs';
-  const browser = await puppeteer.launch({ executablePath: await chromium.executablePath(),
-    args: chromium.args, headless: true,
+  const browser = await puppeteer.launch({ executablePath: process.env.CHROME_BIN || await chromium.executablePath(),
+    args: process.env.CHROME_BIN ? ['--no-sandbox', '--use-angle=swiftshader', '--enable-unsafe-swiftshader'] : chromium.args, headless: true,
     env: { ...process.env, LD_LIBRARY_PATH: [path.join(libs, 'lib'), process.env.LD_LIBRARY_PATH].filter(Boolean).join(':') } });
   const page = await browser.newPage();
   await page.setViewport({ width: 1280, height: 760 });
 
   page.on('pageerror', e => console.log('PAGEERR', e.message));
-  await page.goto(pathToFileURL(enginePage()).href);
-  await page.waitForFunction(() => window.__game && window.__game.R.drawCalls > 0, { timeout: 15000 });
-  await page.waitForFunction(() => window.__game.music._initialized);
-  const r = await page.evaluate(() => {
+  const frame = await appFrame(page);
+  await frame.waitForFunction(() => window.__game.music._initialized);
+  const r = await frame.evaluate(() => {
     const g = window.__game;
     g.paused = true;
     const incomingBall = () => {

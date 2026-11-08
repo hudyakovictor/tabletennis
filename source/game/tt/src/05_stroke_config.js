@@ -191,6 +191,7 @@ const STROKE_CONFIG = {
       softening: [[0.30, 4.2], [0.45, 4.8], [0.62, 5.6], [0.18, 3.6]],
     },
     placement: {
+      player: { sideVmax: 11.5, lateralBase: .80, lateralPower: .40, depthPower: .80, depthBaseK: .35, pathDepthK: .10 },
       deadZone: 0.14, gestureK: 0.50, widthK: 0.86, netMargin: 0.16, endMargin: 0.07,
       depth: { DROP: [0.13, 0], PUSH: [0.46, 0.30], FLICK: [0.55, 0], BANANA: [.55, 0], CHOP_BLOCK: [.45, .15], BLOCK: [0.45, 0.30], LOB: [0.90, 0], SMASH: [0.72, 0], CHOP: [0.58, 0] },
       defaultDepth: [0.34, 0.44, 0.26], depthRange: [0.2, 0.96],

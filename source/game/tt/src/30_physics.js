@@ -503,7 +503,7 @@ function predict(p0, v0, w0, opts = {}) {
   sanitizeV(_pp, 40); sanitizeV(_pv); sanitizeV(_pw, STROKE_CONFIG.spin.cap * 2);
   const out = opts.out || {};
   out.bounces = 0; out.hitNet = false; out.landed = null; out.b2 = null; out.b3 = null; out.apex = -1; out.cross = null;
-  out.planeCross = null; out.netCross = null; out.floor = null;
+  out.planeCross = null; out.secondPlaneCross = null; out.netCross = null; out.floor = null;
   out.reachT = -1; out.reach = null; out.path = opts.path || null;
   // Callers reuse result objects across predictions; collision evidence is per flight.
   out.diverged = false; out.edge = 0; out.edgeBounce = null; out.netKind = null;
@@ -536,10 +536,12 @@ function predict(p0, v0, w0, opts = {}) {
     }
     /* Where the ball crosses the table's horizontal plane, interpolated
      * inside the step. Also the point where a miss overshoots. */
-    if (!out.planeCross && _pv.y < 0 && _pp.y - PH.R <= PH.TABLE_Y && prevY - PH.R > PH.TABLE_Y) {
+    if (_pv.y < 0 && _pp.y - PH.R <= PH.TABLE_Y && prevY - PH.R > PH.TABLE_Y) {
       const a = (prevY - (PH.TABLE_Y + PH.R)) / Math.max(prevY - _pp.y, 1e-9);
       const k = a < 0 ? 0 : a > 1 ? 1 : a;
-      out.planeCross = { x: lerp(prevX, _pp.x, k), z: lerp(prevZ, _pp.z, k), t };
+      const crossing = { x: lerp(prevX, _pp.x, k), z: lerp(prevZ, _pp.z, k), t };
+      if (!out.planeCross) out.planeCross = crossing;
+      else if (out.bounces === 1 && !out.secondPlaneCross) out.secondPlaneCross = crossing;
     }
     // table: only from above, and at the interpolated contact point
     if (_pv.y < 0) {
@@ -610,7 +612,7 @@ function _tryLaunch(from, spin, speed, ux, uz, elev, netClear, out, dt) {
   V3.copy(_iw, spin);
   predict(_ip, _iv, _iw, { dt: dt || 1 / 260, maxT: 2.4, stopOnFirstBounce: true, out });
   const clear = (out.netCross ? out.netCross.y : 99) - PH.NET_TOP - PH.R;
-  return { clear, landed: out.landed, hitNet: out.hitNet, vx: _iv.x, vy: _iv.y, vz: _iv.z };
+  return { clear, landed: out.landed, planeCross: out.planeCross, hitNet: out.hitNet, vx: _iv.x, vy: _iv.y, vz: _iv.z };
 }
 
 /**
@@ -643,6 +645,10 @@ function solveLaunch(from, target, spin, opts = {}) {
   const o = _predOut;
   const scoreOf = (t) => {
     if (t.hitNet) return 50 + Math.max(0, -t.clear) * 20;
+    if (opts.allowOut && t.planeCross) {
+      return Math.hypot(t.planeCross.x - target.x, t.planeCross.z - target.z)
+        + Math.max(0, netClear - t.clear) * 7;
+    }
     if (!t.landed) {                                           // flew off the end
       const pc = o.planeCross || o.floor;
       const over = pc ? Math.hypot(pc.x - target.x, pc.z - target.z) : 9;
@@ -692,8 +698,9 @@ function solveLaunch(from, target, spin, opts = {}) {
 
   // 3. sidespin bends the flight: rotate the aim azimuth analytically and
   //    re-check the same elevation, instead of rescanning the whole grid
-  if (best.landed) {
-    const errLat = (best.landed.x - target.x) * (-uz) + (best.landed.z - target.z) * (ux);
+  const landing = best.landed || (opts.allowOut && best.planeCross);
+  if (landing) {
+    const errLat = (landing.x - target.x) * (-uz) + (landing.z - target.z) * (ux);
     if (Math.abs(errLat) > 0.03) {
       const corr = -Math.atan2(errLat, horiz) * 0.95;
       const c = Math.cos(corr), sN = Math.sin(corr);

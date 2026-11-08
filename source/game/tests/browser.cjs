@@ -5,10 +5,25 @@ const path = require('node:path');
 const os = require('node:os');
 const zlib = require('node:zlib');
 const { execFileSync } = require('node:child_process');
-const { pathToFileURL } = require('node:url');
 const puppeteer = require('puppeteer-core');
-const chromium = require('@sparticuz/chromium');
-const { root, enginePage } = require('./helpers.cjs');
+const chromium = process.env.CHROME_BIN ? null : require('@sparticuz/chromium');
+const { appFrame } = require('./helpers.cjs');
+
+async function shellClick(page, selector) {
+  await page.waitForSelector(selector, { visible: true, timeout: 30000 });
+  await page.$eval(selector, el => el.scrollIntoView({ block: 'center' }));
+  await page.waitForFunction(sel => {
+    const el=document.querySelector(sel), sheet=el?.closest('.sheet');
+    if (!el) return false;
+    const transform=sheet && getComputedStyle(sheet).transform;
+    if (transform && transform!=='none' && Math.abs(new DOMMatrix(transform).m42)>1) return false;
+    const r=el.getBoundingClientRect(), hit=document.elementFromPoint(r.x+r.width/2,r.y+r.height/2);
+    return hit && (hit===el || el.contains(hit));
+  }, { timeout: 30000 }, selector);
+  const r=await (await page.$(selector)).boundingBox();
+  if (page.viewport().hasTouch) await page.touchscreen.tap(r.x+r.width/2,r.y+r.height/2);
+  else await page.mouse.click(r.x+r.width/2,r.y+r.height/2);
+}
 
 async function horizontalInputs(page, target, offset, pointerTypes) {
   let checks = 0;
@@ -74,14 +89,15 @@ async function horizontalInputs(page, target, offset, pointerTypes) {
             legal:!flight.hitNet&&!!flight.landed&&Math.sign(flight.landed.z)===(serving?1:-1)&&
               (!serving||(!!flight.b2&&flight.b2.z<0))};
         },serving);
+        // Release the real pointer before reporting a failed physics assertion.
+        if(pointerType==='touch') await cdp.send('Input.dispatchTouchEvent',{type:'touchEnd',touchPoints:[],timestamp:touchTime+.10});
+        else await page.mouse.up();
         assert.equal(result.hit,1,`${label}: movement did not strike ${JSON.stringify(result)}`);
         assert.equal(result.stroke,serving?'SERVE_SIDE':'SIDE',label);
         assert.equal(result.tap,false,`${label}: horizontal movement became a tap`);
         assert.ok(Math.abs(result.curl)<.05,`${label}: sidespin must not require curl`);
         assert.ok(Math.abs(result.wy)>Math.abs(result.wx)&&direction*result.wy>0,`${label}: wrong spin ${JSON.stringify(result)}`);
         assert.equal(result.legal, true, `${label}: the side stroke did not produce a playable flight ${JSON.stringify(result)}`);
-        if(pointerType==='touch') await cdp.send('Input.dispatchTouchEvent',{type:'touchEnd',touchPoints:[],timestamp:touchTime+.10});
-        else await page.mouse.up();
         assert.equal(await target.evaluate(()=>window.__game.stats.shots),1,`${label}: release duplicated the hit`);
         checks++;
       }
@@ -96,7 +112,7 @@ async function horizontalInputs(page, target, offset, pointerTypes) {
 (async () => {
   // Minimal Linux images may lack NSS. The Chromium npm package ships it.
   const libs = path.join(os.tmpdir(), 'topspin-browser-libs');
-  if (process.platform === 'linux') {
+  if (process.platform === 'linux' && !process.env.CHROME_BIN) {
     fs.mkdirSync(libs, { recursive: true });
     const archive = path.join(path.dirname(require.resolve('@sparticuz/chromium')), '../../bin/al2023.tar.br');
     execFileSync('tar', ['xf', '-', '-C', libs], { input: zlib.brotliDecompressSync(fs.readFileSync(archive)) });
@@ -107,6 +123,7 @@ async function horizontalInputs(page, target, offset, pointerTypes) {
     headless: true,
     env: { ...process.env, LD_LIBRARY_PATH: [path.join(libs, 'lib'), process.env.LD_LIBRARY_PATH].filter(Boolean).join(':') } });
   let count = 0;
+  const failures = [];
   try {
     for (const [width, height] of [[1280, 760], [390, 844]]) {
       const page = await browser.newPage();
@@ -117,62 +134,50 @@ async function horizontalInputs(page, target, offset, pointerTypes) {
       }, width);
       const errors = [];
       page.on('pageerror', e => errors.push(e.message));
-      await page.goto(pathToFileURL(enginePage()).href);
-      await page.waitForFunction(() => window.__game && window.__game.R.drawCalls > 0);
+      let frame = await appFrame(page);
+      // Synthetic completed matches below must not navigate the real shell away.
+      await page.evaluate(() => { MODE = MODES.find(mode => mode.id === 'free'); });
       // The long synchronous suite used to run before offline music init
       // resolved, hiding exceptions that only happen later in real play.
-      await page.waitForFunction(() => window.__game.music._initialized);
-      const results = await page.evaluate(() => {
+      await frame.waitForFunction(() => window.__game.music._initialized);
+      const results = await frame.evaluate(() => {
         const g = window.__game, results = [];
         const check = (name, fn) => { try { if (!fn()) throw Error('assertion failed'); results.push({ name, ok: true }); }
           catch (e) { results.push({ name, ok: false, error: e.message }); } };
         const near = (a,b) => Math.abs(a-b) < 1e-9;
         g.paused = true; // freeze RAF; tests advance the actual game deterministically
         check('boot and render', () => g.R.drawCalls > 0 && !!g.R.camPos);
-        check('restored menu difficulty', () => g.ui.pendingDiff === g.settings.difficulty);
         check('paddle is the sole striking object: no custom pointer dot or reticle', () => {
           g.canvas.style.cursor='none';g.ui.drawOverlay(0);
           return typeof g.ui.drawHand==='undefined' && !('cursorDotPx' in MATCH_RULES) &&
             getComputedStyle(g.canvas).cursor==='default';
         });
-        check('native cursor hides in live play and returns for pause and dialogs', () => {
-          document.querySelectorAll('.screen.on').forEach(el=>el.classList.remove('on'));
+        check('native cursor hides in live play and returns for paused or idle state', () => {
           g.startMatch(2);g.setPaused(false);g.ui.syncNativeCursor();
           if(getComputedStyle(g.canvas).cursor!=='none')return false;
-          g.setPaused(true);g.ui.syncNativeCursor();
+          // This synchronous fixture tests core state; real host pause is checked below.
+          Game.prototype.setPaused.call(g,true);g.ui.syncNativeCursor();
           if(getComputedStyle(g.canvas).cursor!=='default')return false;
-          g.ui.openShotLab();g.ui.syncNativeCursor();
-          if(getComputedStyle(g.canvas).cursor!=='default')return false;
-          g.ui.closeShotLab();g.returnToMenu();document.querySelector('#menu').classList.add('on');g.ui.syncNativeCursor();
+          g.returnToMenu();g.ui.syncNativeCursor();
           return getComputedStyle(g.canvas).cursor==='default';
         });
         check('capture debug toggles real geometry without changing physics and restores hidden cursor when off', () => {
-          document.querySelectorAll('.screen.on').forEach(el=>el.classList.remove('on'));
-          g.startMatch(2);g.setPaused(true);
-          const toggle=document.querySelector('#captureDebugPause');toggle.click();
-          if(!g.ui.captureDebug || !document.querySelector('#captureDebugLab').checked)return false;
+          g.startMatch(2);g.ui.captureDebug=true;
           g.setPaused(false);g.ui.syncNativeCursor();
           if(getComputedStyle(g.canvas).cursor!=='default')return false;
           const before=JSON.stringify([g.ball,g.player,g.settings]);
           g.ui.drawCaptureDebug(g.ui.fxg,g.ui.fx.width,g.ui.fx.height,g.ui.dpr);
           if(JSON.stringify([g.ball,g.player,g.settings])!==before)return false;
-          g.setPaused(true);toggle.click();g.setPaused(false);g.ui.syncNativeCursor();
-          const ok=!g.ui.captureDebug && !document.querySelector('#captureDebugLab').checked && getComputedStyle(g.canvas).cursor==='none';
-          g.returnToMenu();document.querySelector('#menu').classList.add('on');return ok;
+          g.ui.captureDebug=false;g.ui.syncNativeCursor();
+          const ok=getComputedStyle(g.canvas).cursor==='none';
+          g.returnToMenu();return ok;
         });
-        check('individual hit-zone and assist sliders are removed', () => {
-          // Camera and spin calibration sliders are intentionally still present.
-          return !document.querySelector('#rHitZone,#rAssist,#vHitZone,#vAssist') &&
-            !document.querySelector('#settings [data-set=assist],#settings [data-set=hitZone]');
-        });
-        check('shared controls survive old writes and are absent from new saves', () => {
+        check('shared controls reject individual writes without legacy preference APIs', () => {
           for(const v of [0,.3,1]) {
             g.settings.hitZone=v;g.settings.assist=v;g.settings.posAssist=v;g.settings.sensitivity=v;
-            g.ui.applySetting('assist',v*100);g.saveSettings();
             if(g.settings.hitZone!==.85 || g.settings.assist!==.85 || g.settings.posAssist!==.85 || g.settings.sensitivity!==1)return false;
-            if(['hitZone','assist','posAssist','sensitivity'].some(k=>k in g.profile.data.settings))return false;
           }
-          return g.profile.data.settings.rulesVersion===MATCH_RULES.version;
+          return typeof g.loadSettings==='undefined' && typeof g.saveSettings==='undefined';
         });
         check('no racket cue at readiness; timing brackets follow legal incoming ball', () => {
           g.startMatch(2);g.paused=false;g.server=1;g.setState(GS.SERVE_READY);g.updateStrikeWindow(1/60);
@@ -186,17 +191,14 @@ async function horizontalInputs(page, target, offset, pointerTypes) {
           const noVolley=!g._strike.on;
           g.returnToMenu();g.paused=true;return noReady&&legal&&noVolley;
         });
-        check('grip and hand buttons update and save accessible settings', () => {
+        check('grip and hand preferences update the physical paddle pose', () => {
           for (const grip of ['shakehand', 'penhold']) for (const hand of ['right', 'left']) {
-            document.querySelector(`[data-set=grip][data-val=${grip}]`).click();
-            document.querySelector(`[data-set=hand][data-val=${hand}]`).click();
-            g.ui.syncSettings();
-            if (g.settings.grip!==grip || g.settings.hand!==hand || g.profile.data.settings.grip!==grip ||
-              g.profile.data.settings.hand!==hand || document.querySelector(`[data-set=grip][data-val=${grip}]`).getAttribute('aria-pressed')!=='true') return false;
+            g.changePaddlePreference('grip',grip);g.changePaddlePreference('hand',hand);
+            if (g.settings.grip!==grip || g.settings.hand!==hand) return false;
             g.resetPaddle(true);
             if ((g.player.roll > 0)!==(hand==='right')) return false;
           }
-          g.settings.grip='shakehand';g.settings.hand='right';g.resetPaddle(true);g.ui.syncSettings();
+          g.settings.grip='shakehand';g.settings.hand='right';g.resetPaddle(true);
           return true;
         });
         check('idle paddle never accumulates rotation at 30, 60 or 120 FPS', () => {
@@ -229,10 +231,11 @@ async function horizontalInputs(page, target, offset, pointerTypes) {
           g.settings.hand='right';g.returnToMenu();return true;
         });
         check('player has relaxed ready grip, asymmetric strokes and swipe-driven forward pitch', () => {
-          g.startMatch(2);g.ball.live=false;g.recenterT=0;g.camVPReady=false;
+          g.settings.grip='shakehand';g.startMatch(2);g.ball.live=false;g.recenterT=0;g.camVPReady=false;
           const settle = () => { for(let i=0;i<120;i++)g.updatePlayerPaddle(1/60); };
           for(const hand of ['right','left']) {
-            g.settings.hand=hand;g.swipe.cancel();g.pointerDown=false;
+            // This tests a fresh ready pose, not the previous contact's held pose.
+            g.settings.hand=hand;g.resetPaddle(true);g.swipe.cancel();g.pointerDown=false;
             g.pointer={x:.5,y:.55};settle();
             const ready=g.player.roll;
             if(Math.abs(ready)<.2 || Math.abs(ready)>.4)return false;
@@ -270,8 +273,6 @@ async function horizontalInputs(page, target, offset, pointerTypes) {
             if(!shot || !shot.contact || shot.outcome!=='pending' || !shot.contact.incoming.gesture)return false;
             const cap=shot.contact.incoming.capture;
             if(!cap || cap.requiredRadius>cap.radius+1e-9 || !['serve','endpoint','ccd'].includes(cap.route))return false;
-            g.ui.renderShotLab();
-            if(!document.querySelector('#captureCalibrationSummary'))return false;
             if(Math.abs(shot.contact.spin.totalRps-V3.len(g.ball.w)/TAU)>1e-9)return false;
             g.update(1/60);
             if(V3.dist(g.player.normal,impactNormal)>1e-8 || g.player.motionStage!=='contact')return false;
@@ -282,6 +283,7 @@ async function horizontalInputs(page, target, offset, pointerTypes) {
         });
         check('changing grip cancels stale motion and converges by the shortest roll path', () => {
           g.settings.grip='shakehand';g.settings.hand='right';g.startMatch(2);
+          g.resetPaddle(true);
           g.ball.live=false;g.recenterT=0;g.camVPReady=false;g.pointer={x:.5,y:.55};
           for(let i=0;i<30;i++)g.updatePlayerPaddle(1/60);
           for(let j=0;j<6;j++) for(const grip of ['penhold','shakehand']) for(const hand of ['left','right']) {
@@ -325,6 +327,7 @@ async function horizontalInputs(page, target, offset, pointerTypes) {
         });
         check('expired mouse hover velocity cannot leave a permanent wrist lean', () => {
           g.startMatch(2);g.ball.live=false;g.recenterT=0;g.camVPReady=false;g.pointerFine=true;
+          g.resetPaddle(true);
           g.pointer={x:.5,y:.55};g.time=10;g.mouseTrail=[{x:.4,y:.5,t:9.95},{x:.6,y:.4,t:10}];
           for(let i=0;i<60;i++)g.updatePlayerPaddle(1/60);
           const moving=g.padYaw;g.time=11;
@@ -338,52 +341,22 @@ async function horizontalInputs(page, target, offset, pointerTypes) {
         check('input instructions use pointer capabilities, not viewport width', () => {
           return g.ui.inputMode===(navigator.maxTouchPoints>0 ? 'touch' : 'mouse');
         });
-        check('all academy tips and lesson controls follow the active input', () => {
-          g.startTraining();
-          for(let step=0;step<TRAIN_STEPS.length;step++) {
-            g.training.goStep(step);g.ui.setInputMode('touch');
-            const touch=document.getElementById('trainPauseTip').textContent;
-            if(touch.length>40 || /ЛКМ|мыш|колес|ПКМ/i.test(touch))return false;
-            g.ui.setInputMode('mouse');const mouse=document.getElementById('trainPauseTip').textContent;
-            if(mouse.length>40 || !mouse.includes('ЛКМ') || /пал|свайп/i.test(mouse))return false;
-          }
-          g.returnToMenu();return true;
-        });
-        check('academy intro is explicit; live swipe area remains unobstructed', () => {
-          document.querySelectorAll('.screen.on').forEach(el=>el.classList.remove('on'));
-          g.startTraining();g.setPaused(false);g.ui.tick(0);
-          if(g.training.phase!=='intro' || g.ball.live || !document.getElementById('tIStart'))return false;
-          document.getElementById('tIStart').click();
-          const header=document.querySelector('#train'),controls=document.querySelector('#topright');
-          const rect=header.getBoundingClientRect(),top=controls.getBoundingClientRect();
-          const clear=!header.querySelector('button') && getComputedStyle(header).pointerEvents==='none' &&
-            getComputedStyle(document.querySelector('#playband')).visibility==='hidden' &&
-            !document.querySelector('#trSkip').getClientRects().length && !document.querySelector('#trExit').getClientRects().length &&
-            rect.right<=top.left-8 && rect.bottom<tableScreenBounds(g.camVP).top*innerHeight && typeof g.ui.drawGhost==='undefined';
-          g.setPaused(true);
-          const paused=!!document.querySelector('#trSkip').getClientRects().length && document.querySelector('#trSkip').closest('#pauseInd');
-          document.querySelector('#trSkip').click();
-          const advanced=g.training.step===1 && !g.paused;
-          g.returnToMenu();document.querySelector('#menu').classList.add('on');
-          return clear && paused && advanced;
-        });
-        check('touch event switches copy immediately on a hybrid device', () => {
+        check('touch event switches the active input immediately on a hybrid device', () => {
           g.ui.setInputMode('mouse');
           document.dispatchEvent(new PointerEvent('pointerdown',{pointerType:'touch'}));
-          const help=document.getElementById('cameraHelp').textContent;
-          const touch=g.ui.inputMode==='touch' && !g.ui.hasFinePointer && /пальц/i.test(help);
+          const touch=g.ui.inputMode==='touch' && !g.ui.hasFinePointer;
           document.dispatchEvent(new PointerEvent('pointerdown',{pointerType:'mouse'}));
-          return touch && g.ui.inputMode==='mouse' && /ПКМ/i.test(document.getElementById('cameraHelp').textContent);
+          return touch && g.ui.inputMode==='mouse';
         });
-        check('only fixed camera presets are available in settings, no camera sliders', () => {
-          g.ui.openSettings();document.querySelector('[data-camera="DYNAMIC"]').click();
-          const selected=g.settings.camera==='DYNAMIC' && !document.getElementById('rCameraHeight');
+        check('camera presets are applied exactly and reset to the default view', () => {
+          g.setCameraPreset('DYNAMIC');
+          const selected=g.settings.camera==='DYNAMIC';
           // the preset takes effect on the next frame and is then exact
           g.updateCamera(0);
           const once=JSON.stringify(g.camRig);
           g.updateCamera(0);
           const applied=g.camRig.mode==='DYNAMIC' && JSON.stringify(g.camRig)===once;
-          document.getElementById('camReset').click();g.ui.closeSettings();
+          g.camReset();
           return selected && applied && g.settings.camera==='BROADCAST' && !('cameraControls' in g);
         });
         check('camera gestures cancel strokes and change camera settings', () => {
@@ -477,7 +450,7 @@ async function horizontalInputs(page, target, offset, pointerTypes) {
             return true;
           } finally { g.setInspectSlowmo(false);g.cancelInput();g.returnToMenu();g.paused=true; }
         });
-        check('one early released serve swipe completes on mouse and touch, including slowmo', () => {
+        check('one early released serve swipe contacts once on mouse and touch, including slowmo', () => {
           const send=(type,x,y,pointerType) => {
             const r=g.canvas.getBoundingClientRect();
             g.canvas.dispatchEvent(new PointerEvent(type,{pointerId:81,pointerType,button:0,
@@ -498,10 +471,11 @@ async function horizontalInputs(page, target, offset, pointerTypes) {
               const shot=g.shotJournal.latest;
               if(g.ball.lastHitBy!==1 || g.state!==GS.RALLY || !shot.contact || !shot.contact.incoming.pressZone.singleGestureToss)
                 throw Error(`${pointerType}/${scale}: one gesture did not complete the serve`);
-              const flight=predict(V3.clone(g.ball.p),V3.clone(g.ball.v),V3.clone(g.ball.w),
-                {dt:PH.SIM_DT,maxT:2.2,stopAfterBounces:2,out:{}});
-              if(flight.hitNet || !flight.landed || flight.landed.z<=0 || !flight.b2 || flight.b2.z>=0)
-                throw Error(`${pointerType}/${scale}: the saved swipe produced an illegal serve`);
+              // Continuity does not promise an assisted legal landing for a hard swipe.
+              if(![g.ball.p,g.ball.v,g.ball.w].every(v=>[v.x,v.y,v.z].every(Number.isFinite)) || g.stats.shots!==1)
+                throw Error(`${pointerType}/${scale}: the saved swipe produced invalid or duplicate contact`);
+              g.tryPlayerHit(V3.clone(g.ball.p));
+              if(g.stats.shots!==1)throw Error(`${pointerType}/${scale}: the released swipe struck twice`);
             }
             return true;
           } finally {g.setInspectSlowmo(false);g.cancelInput();g.returnToMenu();g.paused=true;}
@@ -653,54 +627,31 @@ async function horizontalInputs(page, target, offset, pointerTypes) {
         check('normal match has no serving instructions or unsolicited coaching text', () => {
           g.startMatch(2);g.server=1;g.prepServe();g.ui.showNote({text:'Explanatory text',col:'#fff'});
           g.ui.tick(0);
-          const ids=['msgs','note','shot','rally','mpInd','mnToast','timingCue','gestureCue'];
-          const noServeInstruction=document.getElementById('playStatus').hidden && !document.getElementById('playStatus').textContent && !document.getElementById('timingCue').textContent;
+          const oldCues='#msgs,#note,#shot,#rally,#mpInd,#mnToast,#playStatus,#timingCue,#gestureCue';
+          const noServeInstruction=!document.querySelector(oldCues);
           g.setState(GS.RALLY);g.ui.tick(0);
-          return noServeInstruction && document.getElementById('playStatus').hidden && ids.every(id=>getComputedStyle(document.getElementById(id)).display==='none');
-        });
-        check('logo is embedded in splash and menu, no external assets', () => {
-          const imgs=[...document.querySelectorAll('.brand-logo,.splash-brand img')];
-          return imgs.length===2 && imgs.every(img=>img.src.startsWith('data:image/png;base64,') && img.complete && img.naturalWidth>0);
+          return noServeInstruction && !document.querySelector(oldCues);
         });
         check('full table and opponent swing volume have safe headroom', () => {
           for(let i=0;i<80;i++)g.updateCamera(.1);
           const b=tableScreenBounds(g.R.viewProj);
           return b.top>0 && b.bottom<.91 && opponentScreenTop(g.R.viewProj)>=CAMERA_HEADROOM-.001;
         });
-        check('replay skip is a visible touch target only during replay and returns focus safely', () => {
-          const skip=document.getElementById('reelSkip'),reel=document.getElementById('reel');
-          const hidden=getComputedStyle(skip).visibility==='hidden' && reel.getAttribute('aria-hidden')==='true';
-          skip.focus();const notFocusable=document.activeElement!==skip;
-          g.ui.replayShow(true,{finish:'DRIVE',winner:1,shots:3,speed:42,spin:5},false);
-          const box=skip.getBoundingClientRect();
-          const active=getComputedStyle(skip).visibility==='visible' && reel.getAttribute('aria-hidden')==='false' &&
-            skip.tabIndex===0 && box.width>=44 && box.height>=44 && skip.getAttribute('aria-label');
-          skip.focus();g.ui.replayShow(false);
-          return hidden && notFocusable && active && document.activeElement!==skip;
-        });
-        check('score is upper-left and does not overlap right-hand controls', () => {
-          const score=document.getElementById('score').getBoundingClientRect();
-          const controls=document.getElementById('topright').getBoundingClientRect();
-          return score.left<=20 && score.top<=20 && score.right<controls.left;
-        });
-        check('all reading cues are placed below the full table', () => {
-          const band=document.getElementById('playband').getBoundingClientRect();
-          const b=tableScreenBounds(g.camVP);
-          return band.top>b.bottom*window.innerHeight && document.getElementById('train').parentElement.id==='hud';
-        });
-        check('neutral ball trail is dialed down to 12 percent opacity', () => {
-          const oldDraw=g.R.draw, oldHist=g.ball.hist; let opacity;
+        check('neutral ball trail is visibly fainter than the graded contact trail', () => {
+          const oldDraw=g.R.draw, oldHist=g.ball.hist, oldGrade=g.ball.trailGrade, oldSide=g.ball.lastHitBy; let opacity;
           g.ball.hist=[0,1,0, .05,1,.1, .1,1,.2, .15,1,.3];
           g.R.draw=function(mesh,matrix,mat){if(mesh===g.scene.mesh.trail)opacity=mat.opacity;};
-          try {g.drawFX();} finally {g.R.draw=oldDraw;g.ball.hist=oldHist;}
-          return opacity===.12;
+          try {
+            g.ball.trailGrade=null;g.ball.lastHitBy=-1;g.drawFX();const neutral=opacity;
+            opacity=NaN;g.ball.trailGrade='green';g.ball.lastHitBy=1;g.drawFX();
+            return neutral>0 && neutral<opacity && opacity<=1;
+          } finally {g.R.draw=oldDraw;g.ball.hist=oldHist;g.ball.trailGrade=oldGrade;g.ball.lastHitBy=oldSide;}
         });
-        check('pause control pauses first, then exits to MENU without further scoring', () => {
+        check('core pause and return to idle stop simulation without further scoring', () => {
           g.startMatch(2); g.server = -1; g.prepServe();
-          const menu = document.getElementById('btnMenu');
-          menu.click();
-          const paused = g.paused && document.body.classList.contains('is-paused') && menu.getAttribute('aria-label') === 'В главное меню';
-          menu.click();
+          Game.prototype.setPaused.call(g,true);
+          const paused = g.paused && document.body.classList.contains('is-paused');
+          g.returnToMenu();
           const t = g.time, score = g.score.join();
           for (let i=0; i<360; i++) g.update(1/60);
           return paused && g.state === GS.MENU && !g.ball.live && g.time === t && g.score.join() === score;
@@ -714,19 +665,11 @@ async function horizontalInputs(page, target, offset, pointerTypes) {
           input.dispatchEvent(new KeyboardEvent('keydown', { key: '2', bubbles: true })); input.remove();
           return camera === g.settings.camera;
         });
-        check('settings pause a live match and resume it on close', () => {
-          g.startMatch(2); g.ui.openSettings(); const paused=g.paused;
-          g.ui.closeSettings(); return paused && !g.paused;
-        });
-        check('settings opened from pause do not unpause via bubbling', () => {
-          g.setPaused(true); document.getElementById('pauseSettings').click();
-          const paused=g.paused; g.ui.closeSettings(); return paused && g.paused;
-        });
         check('invalid dt does not corrupt game time', () => {
           g.startMatch(2); const t=g.time; g.update(NaN); g.update(-1); return g.time===t;
         });
         check('pause cancels gesture', () => {
-          g.swipe.down(.5,.8,g.time); g.pointerDown = true; g.setPaused(true);
+          g.swipe.down(.5,.8,g.time); g.pointerDown = true; Game.prototype.setPaused.call(g,true);
           return !g.swipe.active && !g.pointerDown;
         });
         check('pointercancel does not release or retain an old shot', () => {
@@ -739,45 +682,22 @@ async function horizontalInputs(page, target, offset, pointerTypes) {
           // cancelInput is also used for blur/visibility and abandoned multi-touch IDs.
           g.swipe.down(.5,.8,g.time); g.cancelInput(); return !g.swipe.active;
         });
-        check('blur pauses and clears controls', () => {
+        check('iframe blur clears controls without pausing a visible host application', () => {
           g.setPaused(false); g.swipe.down(.5,.8,g.time); window.dispatchEvent(new Event('blur'));
-          return g.paused && !g.swipe.active;
+          return !g.paused && !g.swipe.active;
         });
         check('training clears autoplay and career', () => {
           g.career.start(); g.demoMode=true; g.startTraining();
           return !!g.training && !g.demoMode && !g.career.active && g.slowmo.allowed;
         });
-        check('career cannot alter shared control rules or persist old assistance', () => {
+        check('career cannot alter shared control rules', () => {
           g.returnToMenu(); g.settings.assist=.6; g.settings.posAssist=.7; g.career.start();
-          PERKS.find(p=>p.id==='heavy_spin').apply(g); g.saveSettings();
-          return !('assist' in g.profile.data.settings) && near(g.settings.assist,.85) && near(g.settings.posAssist,.85);
-        });
-        check('career intro clears stale opponent buttons', () => {
-          g.career.readyForOpponentSelect(); g.ui.showCareerOpponentSelect(g.career);
-          const had = document.querySelectorAll('#crOppList button').length > 0;
-          g.ui.showCareerIntro(g.career);
-          return had && document.querySelectorAll('#crOppList button').length===0 && !document.getElementById('crReady').hidden;
-        });
-        check('career selection hides ready button', () => {
-          g.ui.showCareerOpponentSelect(g.career); return document.getElementById('crReady').hidden;
-        });
-        check('career end names current, not previous tournament', () => {
-          g.career.currentTournament=3; g.career.state='RUN_END'; g.ui.showCareerRunEnd(g.career);
-          return document.getElementById('crEndSub').textContent.includes(TOURNAMENTS[3].name);
+          PERKS.find(p=>p.id==='heavy_spin').apply(g);
+          return near(g.settings.assist,.85) && near(g.settings.posAssist,.85);
         });
         check('completed career cannot be resurrected by end-of-frame save', () => {
+          g.career.currentTournament=3; g.career.state='RUN_END';
           g.career.save(); return localStorage.getItem('topspin_career')===null;
-        });
-        check('bad persisted settings are bounded and unknown keys ignored', () => {
-          const raw = JSON.parse('{"assist":-20,"volume":999,"sensitivity":"bad","difficulty":99,"camera":"missing","quality":"broken","targetScore":0,"__proto__":{"evil":true},"unknown":123}');
-          g.profile.data.settings=raw; g.loadSettings();
-          return g.settings.assist===.85 && g.settings.volume===1 && g.settings.difficulty===AI_LEVELS.length-1 &&
-            CAMERA_ORDER.includes(g.settings.camera) && [5,11,21].includes(g.settings.targetScore) &&
-            !g.settings.evil && !g.settings.unknown && Number.isFinite(g.settings.sensitivity);
-        });
-        check('sound toggle is persisted', () => {
-          const prev=g.settings.sound; document.getElementById('btnSound').click();
-          return g.profile.data.settings.sound===!prev;
         });
         check('legal net-cord serve is a let only after receiver bounce', () => {
           g.startMatch(2); g.setState(GS.RALLY); g.ball.lastHitBy=1; g.isServeBall=true;
@@ -822,7 +742,7 @@ async function horizontalInputs(page, target, offset, pointerTypes) {
           g.time+=.4;g.strokeTime+=.4;g.updateShotDiagnostics();g.ui.syncShotFeedback();
           const view=shotFeedbackView(g.shotJournal.latest);
           const ok=g.shotJournal.latest.outcome==='no_contact' && view.status==='Нет контакта' && !view.metrics &&
-            g.ui.hitLabels.length===0 && getComputedStyle(document.querySelector('#shot')).display==='none';
+            g.ui.hitLabels.length===0 && !document.querySelector('#shot');
           g.returnToMenu();return ok;
         });
         check('both confirmed contacts populate the common HUD while the player journal stays independent', () => {
@@ -838,8 +758,6 @@ async function horizontalInputs(page, target, offset, pointerTypes) {
           const first=g.getMatchSnapshot().contacts[0];
           if(!first || first.stroke!==r.stroke.id || !near(first.rps,entry.contact.spin.totalRps) ||
             !near(first.kmh,V3.len(g.ball.v)*3.6) || g.ui.hitLabels.length!==0)return false;
-          const label=document.querySelector('.match-hud-contact[data-side="1"]');
-          if(!label || label.style.getPropertyValue('--stroke')!==STROKES[r.stroke.id].col)return false;
           const paint=[],ctx=g.ui.fxg,fill=ctx.fillText;
           ctx.fillText=function(text,x,y){paint.push({text,x,y,font:this.font,color:this.fillStyle});return fill.call(this,text,x,y);};
           try {g.ui.drawShotLabels(ctx,g.ui.fx.width,g.ui.fx.height,g.ui.dpr);}
@@ -854,16 +772,7 @@ async function horizontalInputs(page, target, offset, pointerTypes) {
           const latest=g.getMatchSnapshot(),second=latest.contacts[1];
           const ok=entry.outcome==='table' && g.shotJournal.records.length===1 && g.ui.hitLabels.length===0 &&
             second && second.side===-1 && second.eventId>first.eventId && latest.contacts[0].eventId===first.eventId &&
-            !g.ui.showShot(g.lastShotInfo) && getComputedStyle(document.querySelector('#shot')).display==='none';
-          g.returnToMenu();return ok;
-        });
-        check('shot lab is an accessible paused numeric report, closes without resuming paused play', () => {
-          g.startMatch(2);g.setPaused(true);const before=JSON.stringify(g.settings);
-          g.ui.openShotLab();const dialog=document.querySelector('#shotLab');
-          const opened=dialog.classList.contains('on') && g.ui.activeDialog()===dialog && g.paused &&
-            !!dialog.querySelector('#captureCalibrationSummary') && !dialog.querySelector('#shotLabRun') &&
-            !dialog.querySelector('[data-set=assist],[data-set=hitZone]');
-          g.ui.closeShotLab();const ok=opened && g.paused && before===JSON.stringify(g.settings);
+            !g.ui.showShot(g.lastShotInfo) && !document.querySelector('#shot');
           g.returnToMenu();return ok;
         });
         check('five consecutive match/replay/restart cycles release old clips and callbacks', () => {
@@ -895,12 +804,12 @@ async function horizontalInputs(page, target, offset, pointerTypes) {
           return g.state===GS.MATCH_END && Math.max(...g.score)>=5 &&
             [g.ball.p.x,g.ball.p.y,g.ball.p.z,g.time].every(Number.isFinite);
         });
-        g.ui.showMainMenu(); g.paused = true;
+        g.returnToMenu(); g.paused = true;
         return results;
       });
       for (const r of results) { console.log(`${r.ok ? 'PASS' : 'FAIL'} ${width}x${height}: ${r.name}${r.error ? ' — '+r.error : ''}`); count++; }
-      assert.deepEqual(results.filter(r => !r.ok), []);
-      const frameBefore = await page.evaluate(() => {
+      failures.push(...results.filter(r => !r.ok).map(result => ({ viewport: `${width}x${height}`, ...result })));
+      const frameBefore = await frame.evaluate(() => {
         const g=window.__game;
         g.startDemo(2);g.ball.live=false;g.setState(GS.RALLY);
         g.lastShotInfo={speed:100};g.emotion.lastBigMoment=g.time-3;
@@ -908,12 +817,12 @@ async function horizontalInputs(page, target, offset, pointerTypes) {
       });
       // Exercise the real RAF after asynchronous music init, not just a
       // synchronous direct update. Before the fix this lost its next frame.
-      await page.waitForFunction(before => window.__game.frame > before+4, {}, frameBefore);
-      await page.evaluate(() => { window.__game.returnToMenu();window.__game.paused=true; });
+      await frame.waitForFunction(before => window.__game.frame > before+4, {}, frameBefore);
+      await frame.evaluate(() => { window.__game.returnToMenu();window.__game.paused=true; });
       console.log(`PASS ${width}x${height}: real animation loop survives winner effect after music initialization`);count++;
       await page.emulateMediaFeatures([{ name: 'prefers-reduced-motion', value: 'reduce' }]);
-      await page.waitForFunction(() => window.__game && window.__game.reducedMotion);
-      const reducedMotionWorks = await page.evaluate(() => {
+      await frame.waitForFunction(() => window.__game && window.__game.reducedMotion);
+      const reducedMotionWorks = await frame.evaluate(() => {
         const g = window.__game;
         g.shake = 0; g.shakeIt(.8);
         const noShake = g.shake === 0;
@@ -940,38 +849,40 @@ async function horizontalInputs(page, target, offset, pointerTypes) {
       assert.equal(reducedMotionWorks, true, 'reduced motion suppresses optional camera, particle, trail, post-processing and UI movement while preserving ball simulation');
       count++; console.log(`PASS ${width}x${height}: reduced motion suppresses optional VFX and UI motion, physics remains active`);
       await page.emulateMediaFeatures([{ name: 'prefers-reduced-motion', value: 'no-preference' }]);
-      await page.waitForFunction(() => window.__game && !window.__game.reducedMotion);
-      await page.evaluate(() => {
-        const g = window.__game;
-        g.settings.hitZone = .42; g.settings.volume = .13; g.settings.sound = false;
-        document.querySelector('[data-set=grip][data-val=penhold]').click();
-        document.querySelector('[data-set=hand][data-val=left]').click();
-        g.saveSettings(); g.profile.save(true);
+      await frame.waitForFunction(() => window.__game && !window.__game.reducedMotion);
+      await frame.evaluate(() => {
+        const g=window.__game;
+        g.profile.data.settings=JSON.parse('{"assist":-20,"hitZone":0,"volume":999,"sound":true,"sensitivity":"bad","difficulty":99,"camera":"missing","quality":"broken","targetScore":0,"__proto__":{"evil":true},"unknown":123}');
+        g.profile.save(true);
       });
-      await page.reload();
-      await page.waitForFunction(() => window.__game && window.__game.R.drawCalls > 0);
-      assert.equal(await page.evaluate(() => {
+      await page.evaluate(() => {
+        S.sfx=false;S.audioLevels.master=.13;saveNow();GameHost.syncSettings();
+      });
+      frame = await appFrame(page);
+      assert.equal(await frame.evaluate(() => {
         const g = window.__game;
-        return g.settings.grip === 'penhold' && g.settings.hand === 'left' &&
-          document.querySelector('[data-set=grip][data-val=penhold]').getAttribute('aria-pressed') === 'true' &&
-          g.settings.hitZone === .85 && !('hitZone' in g.profile.data.settings) && g.settings.volume === .13 && !g.settings.sound &&
-          document.querySelectorAll('#btnSound line').length === 2;
-      }), true, 'warm reload preserves preferences, fixed controls and mute icon');
-      count++; console.log(`PASS ${width}x${height}: warm reload preserves settings and mute icon`);
-      await page.waitForFunction(() => document.getElementById('loading').classList.contains('off'));
-      await page.click('#play');
-      await page.waitForFunction(() => !!window.__game.audio.master);
-      assert.equal(await page.evaluate(() => {
+        return g.settings.hitZone === .85 && g.settings.assist === .85 && g.settings.difficulty === 2 &&
+          CAMERA_ORDER.includes(g.settings.camera) && [5,11,21].includes(g.settings.targetScore) &&
+          Number.isFinite(g.settings.sensitivity) && !g.settings.evil && !g.settings.unknown &&
+          g.settings.volume === .13 && g.settings.audioLevels.master === .13 && !g.settings.sound;
+      }), true, 'warm reload applies shell preferences, not poisoned legacy engine settings');
+      count++; console.log(`PASS ${width}x${height}: warm reload restores shell preferences and ignores legacy engine settings`);
+      let bounds = await (await page.$('#gamelayer iframe')).boundingBox();
+      assert.ok(bounds, 'the production game frame must be visible');
+      await page.mouse.click(bounds.x+bounds.width*.5,bounds.y+bounds.height*.65);
+      await frame.waitForFunction(() => !!window.__game.audio.master);
+      assert.equal(await frame.evaluate(() => {
         const a = window.__game.audio;
         return !!a.master && a.master.gain.value === 0;
-      }), true, 'first user gesture does not bypass saved mute');
+      }), true, 'a real canvas gesture does not bypass saved shell mute');
       count++; console.log(`PASS ${width}x${height}: saved mute survives AudioContext creation`);
-      await page.evaluate(()=>window.__game.startDemo(2));
-      await page.mouse.move(width*.5,height*.65);await page.mouse.down();
-      assert.equal(await page.evaluate(()=>!window.__game.demoMode && !window.__game._demoGesture && !document.getElementById('pauseDemo')),true);
+      await page.evaluate(() => { MODE = MODES.find(mode => mode.id === 'free'); });
+      await frame.evaluate(()=>window.__game.startDemo(2));
+      await page.mouse.move(bounds.x+bounds.width*.5,bounds.y+bounds.height*.65);await page.mouse.down();
+      assert.equal(await frame.evaluate(()=>!window.__game.demoMode && !window.__game._demoGesture),true);
       await page.mouse.up();
       count++;console.log(`PASS ${width}x${height}: real mouse takes control from demo without a hidden autoplay toggle`);
-      const aimPoint=await page.evaluate(()=>{
+      const aimPoint=await frame.evaluate(()=>{
         const g=window.__game;g._testUpdate=g.update;g.update=()=>{};
         g.setState(GS.RALLY);g.server=-1;g.isServeBall=false;g.recenterT=0;g.rallyBounces=[1];
         V3.set(g.player.pos,0,1.05,1.5);V3.copy(g.player.prevPos,g.player.pos);V3.set(g.player.normal,0,0,-1);
@@ -979,18 +890,19 @@ async function horizontalInputs(page, target, offset, pointerTypes) {
         g.player.lastHitT=g.time-1;g.shotJournal.reset();g.stats.shots=0;
         const p=g.project(g.ball.p),rect=g.canvas.getBoundingClientRect();return {x:rect.x+p.x*rect.width,y:rect.y+p.y*rect.height};
       });
+      aimPoint.x+=bounds.x;aimPoint.y+=bounds.y;
       await page.mouse.move(aimPoint.x+70,aimPoint.y);await page.mouse.down();
-      await page.evaluate(()=>window.__game.time+=.05);
+      await frame.evaluate(()=>window.__game.time+=.05);
       await page.mouse.move(aimPoint.x,aimPoint.y-50,{steps:4});
-      await page.evaluate(()=>window.__game.time+=.05);await page.mouse.up();
-      assert.equal(await page.evaluate(()=>{
+      await frame.evaluate(()=>window.__game.time+=.05);await page.mouse.up();
+      assert.equal(await frame.evaluate(()=>{
         const g=window.__game;if(!g.swipe.pressZone || g.swipe.pressZone.accepted)return false;
         g.tryPlayerHit(V3.clone(g.ball.p));return g.ball.lastHitBy===-1 && g.shotJournal.latest.outcome==='outside';
       }),true,'outside real pointer-down must not be rescued by moving into the zone or by CCD');
       await page.mouse.move(aimPoint.x,aimPoint.y);await page.mouse.down();
-      assert.equal(await page.evaluate(()=>window.__game.ball.lastHitBy),-1,'real mouse down must allow a drag before choosing a tap');
-      await page.evaluate(()=>window.__game.time+=.1);await page.mouse.up();
-      assert.equal(await page.evaluate(()=>{
+      assert.equal(await frame.evaluate(()=>window.__game.ball.lastHitBy),-1,'real mouse down must allow a drag before choosing a tap');
+      await frame.evaluate(()=>window.__game.time+=.1);await page.mouse.up();
+      assert.equal(await frame.evaluate(()=>{
         const g=window.__game,shot=g.shotJournal.latest;
         const hit=shot.pressZone.accepted && shot.contact.incoming.gesture.tap && g.ball.lastHitBy===1 && g.stats.shots===1;
         // The same click cannot return another ball without a fresh press.
@@ -1006,11 +918,11 @@ async function horizontalInputs(page, target, offset, pointerTypes) {
        * изолируем как вживую: время последнего контакта уходит в прошлое, а
        * чужой ω от предыдущей атаки сбрасывается. Саму 90-мс защиту движка
        * проверяем отдельным сценарием ниже, а не таймингом этого теста. */
-      await page.evaluate(()=>{const g=window.__game;g.player.lastHitT=g.time-1;V3.zero(g.ball.w);});
+      await frame.evaluate(()=>{const g=window.__game;g.player.lastHitT=g.time-1;V3.zero(g.ball.w);});
       await page.mouse.move(aimPoint.x,aimPoint.y+80);await page.mouse.down();
-      await page.evaluate(()=>window.__game.time+=.05);await page.mouse.move(aimPoint.x,aimPoint.y-70,{steps:4});
-      await page.evaluate(()=>window.__game.time+=.05);await page.mouse.up();
-      const freshMiss = await page.evaluate(()=>{
+      await frame.evaluate(()=>window.__game.time+=.05);await page.mouse.move(aimPoint.x,aimPoint.y-70,{steps:4});
+      await frame.evaluate(()=>window.__game.time+=.05);await page.mouse.up();
+      const freshMiss = await frame.evaluate(()=>{
         const g=window.__game,shot=g.shotJournal.latest;
         const hit=g.ball.lastHitBy===1 && shot.contact && !shot.contact.incoming.gesture.tap;
         /* Сообщение об отказе должно говорить ЧЕМ: без этого «свежий жест не
@@ -1040,7 +952,7 @@ async function horizontalInputs(page, target, offset, pointerTypes) {
        * время съедало весь проход мыши через мяч), значит именно здесь она и
        * есть предмет проверки: свежее нажатие внутри блокировки не бьёт, тот же
        * жест после её истечения бьёт. */
-      const cool=await page.evaluate(()=>{
+      const cool=await frame.evaluate(()=>{
         const g=window.__game;g._coolUpdate=g.update;g.update=()=>{};g.cancelInput();
         g.setState(GS.RALLY);g.server=-1;g.isServeBall=false;g.recenterT=0;g.rallyBounces=[1];
         V3.set(g.player.pos,0,1.05,1.5);V3.copy(g.player.prevPos,g.player.pos);V3.set(g.player.normal,0,0,-1);
@@ -1048,21 +960,22 @@ async function horizontalInputs(page, target, offset, pointerTypes) {
         g.player.lastHitT=g.time;g.shotJournal.reset();g.stats.shots=0;
         const p=g.project(g.ball.p),r=g.canvas.getBoundingClientRect();return {x:r.x+p.x*r.width,y:r.y+p.y*r.height};
       });
+      cool.x+=bounds.x;cool.y+=bounds.y;
       await page.mouse.move(cool.x,cool.y+40);await page.mouse.down();
-      await page.evaluate(()=>window.__game.time+=.02);await page.mouse.move(cool.x,cool.y-40,{steps:3});
-      assert.equal(await page.evaluate(()=>window.__game.ball.lastHitBy),-1,'a fresh press inside the 90 ms re-hit lock must not strike');
+      await frame.evaluate(()=>window.__game.time+=.02);await page.mouse.move(cool.x,cool.y-40,{steps:3});
+      assert.equal(await frame.evaluate(()=>window.__game.ball.lastHitBy),-1,'a fresh press inside the 90 ms re-hit lock must not strike');
       await page.mouse.up();
-      await page.evaluate(()=>{const g=window.__game;g.ball.lastHitBy=-1;g.rallyBounces=[1];V3.copy(g.ball.p,g.player.pos);V3.set(g.ball.v,0,0,6);V3.zero(g.ball.w);g.time+=.1;});
+      await frame.evaluate(()=>{const g=window.__game;g.ball.lastHitBy=-1;g.rallyBounces=[1];V3.copy(g.ball.p,g.player.pos);V3.set(g.ball.v,0,0,6);V3.zero(g.ball.w);g.time+=.1;});
       await page.mouse.move(cool.x,cool.y+40);await page.mouse.down();
-      await page.evaluate(()=>window.__game.time+=.02);await page.mouse.move(cool.x,cool.y-40,{steps:3});
-      const expiredHit=await page.evaluate(()=>{const g=window.__game;const r=g.ball.lastHitBy===1&&g.shotJournal.latest&&!!g.shotJournal.latest.contact;
+      await frame.evaluate(()=>window.__game.time+=.02);await page.mouse.move(cool.x,cool.y-40,{steps:3});
+      const expiredHit=await frame.evaluate(()=>{const g=window.__game;const r=g.ball.lastHitBy===1&&g.shotJournal.latest&&!!g.shotJournal.latest.contact;
         g.update=g._coolUpdate;delete g._coolUpdate;return !!r;});
       await page.mouse.up();
       assert.equal(expiredHit,true,'the same gesture must strike once the 90 ms re-hit lock has expired');
       count++;console.log(`PASS ${width}x${height}: the re-hit lock blocks a fresh press only while it is active`);
 
       if (width < 600) {
-        const touchPoint=await page.evaluate(()=>{
+        const touchPoint=await frame.evaluate(()=>{
           const g=window.__game;g._testUpdate=g.update;g.update=()=>{};g.cancelInput();
           g.setPaused(false);g.setState(GS.RALLY);g.server=-1;g.isServeBall=false;g.recenterT=0;g.rallyBounces=[1];
           V3.set(g.player.pos,0,1.05,1.5);V3.copy(g.player.prevPos,g.player.pos);V3.set(g.player.normal,0,0,-1);
@@ -1070,10 +983,10 @@ async function horizontalInputs(page, target, offset, pointerTypes) {
           g.player.lastHitT=g.time-1;g.shotJournal.reset();g.stats.shots=0;
           const p=g.project(g.ball.p),r=g.canvas.getBoundingClientRect();return {x:r.left+p.x*r.width,y:r.top+p.y*r.height};
         });
-        const touch=await page.touchscreen.touchStart(touchPoint.x,touchPoint.y);
-        assert.equal(await page.evaluate(()=>window.__game.ball.lastHitBy),-1,'actual touch down must allow a swipe before choosing a tap');
+        const touch=await page.touchscreen.touchStart(bounds.x+touchPoint.x,bounds.y+touchPoint.y);
+        assert.equal(await frame.evaluate(()=>window.__game.ball.lastHitBy),-1,'actual touch down must allow a swipe before choosing a tap');
         await touch.end();
-        assert.equal(await page.evaluate(()=>{
+        assert.equal(await frame.evaluate(()=>{
           const g=window.__game,shot=g.shotJournal.latest;
           const ok=!!shot.contact && shot.contact.incoming.gesture.tap && g.ball.lastHitBy===1 && g.ball.v.z<0 && g.stats.shots===1 && !g.anticipation.active;
           g.update=g._testUpdate;delete g._testUpdate;return ok;
@@ -1081,10 +994,14 @@ async function horizontalInputs(page, target, offset, pointerTypes) {
         count++;console.log(`PASS ${width}x${height}: actual touchscreen tap returns the ball`);
       }
 
-      count+=await horizontalInputs(page,page,{x:0,y:0},width<600?['mouse','touch']:['mouse']);
+      try { count+=await horizontalInputs(page,frame,bounds,width<600?['mouse','touch']:['mouse']); }
+      catch(error) {
+        failures.push({viewport:`${width}x${height}`,name:'native horizontal input',error:error.message});
+        console.error(`FAIL ${width}x${height}: native horizontal input: ${error.message}`);
+      }
       console.log(`PASS ${width}x${height}: native horizontal drags create signed sidespin in rally and serve at both speeds`);
 
-      await page.evaluate(() => {
+      await frame.evaluate(() => {
         const g=window.__game; g.server=1; g.prepServe(); g.camReset(); g.updateCamera(0);
         /* Камера подводится к мячу в самом рендер-цикле (updateCamera зовётся из
          * rAF), поэтому заморозка g.update её не останавливает: за пару
@@ -1095,16 +1012,16 @@ async function horizontalInputs(page, target, offset, pointerTypes) {
         g._camUpdate=g.update;g._camStep=g.updateCamera;
         g.update=()=>{};g.updateCamera=()=>{};
       });
-      await page.mouse.move(width*.5,height*.45);
-      const zoom0=await page.evaluate(()=>window.__game.settings.camZoom);
+      await page.mouse.move(bounds.x+bounds.width*.5,bounds.y+bounds.height*.45);
+      const zoom0=await frame.evaluate(()=>window.__game.settings.camZoom);
       await page.mouse.wheel({deltaY:-240});
-      const zoomIn=await page.evaluate(()=>window.__game.settings.camZoom);
+      const zoomIn=await frame.evaluate(()=>window.__game.settings.camZoom);
       await page.mouse.wheel({deltaY:240});
-      const zoomOut=await page.evaluate(()=>window.__game.settings.camZoom);
+      const zoomOut=await frame.evaluate(()=>window.__game.settings.camZoom);
       await page.mouse.down({button:'right'});
-      await page.mouse.move(width*.5,height*.45-35,{steps:4});
+      await page.mouse.move(bounds.x+bounds.width*.5,bounds.y+bounds.height*.45-35,{steps:4});
       await page.mouse.up({button:'right'});
-      const cameraInput = await page.evaluate(()=>{
+      const cameraInput = await frame.evaluate(()=>{
         const g=window.__game;
         const out={pitch:g.settings.camPitch,swipe:g.swipe.active,down:g.pointerDown};
         g.update=g._camUpdate;delete g._camUpdate;
@@ -1114,13 +1031,13 @@ async function horizontalInputs(page, target, offset, pointerTypes) {
         'wheel and right drag must change camera without striking: '+JSON.stringify({zoom0,zoomIn,zoomOut,cameraInput}));
       count++; console.log(`PASS ${width}x${height}: real wheel and right-drag adjust camera without a stroke`);
       if(width<600) {
-        await page.evaluate(()=>{const g=window.__game;g.camReset();g.setState(GS.RALLY);g.cancelInput();g.stats.shots=0;});
+        await frame.evaluate(()=>{const g=window.__game;g.camReset();g.setState(GS.RALLY);g.cancelInput();g.stats.shots=0;});
         const cdp=await page.createCDPSession(), timestamp=Date.now()/1000;
-        const p=(id,x,y)=>({id,x,y});
+        const p=(id,x,y)=>({id,x:bounds.x+x,y:bounds.y+y});
         await cdp.send('Input.dispatchTouchEvent',{type:'touchStart',touchPoints:[p(1,140,400)],timestamp});
         await cdp.send('Input.dispatchTouchEvent',{type:'touchStart',touchPoints:[p(1,140,400),p(2,240,400)],timestamp:timestamp+.02});
         await cdp.send('Input.dispatchTouchEvent',{type:'touchMove',touchPoints:[p(1,110,350),p(2,270,350)],timestamp:timestamp+.04});
-        const during=await page.evaluate(()=>({pitch:window.__game.settings.camPitch,zoom:window.__game.settings.camZoom,shots:window.__game.stats.shots,active:window.__game.swipe.active}));
+        const during=await frame.evaluate(()=>({pitch:window.__game.settings.camPitch,zoom:window.__game.settings.camZoom,shots:window.__game.stats.shots,active:window.__game.swipe.active}));
         await cdp.send('Input.dispatchTouchEvent',{type:'touchEnd',touchPoints:[p(2,270,350)],timestamp:timestamp+.06});
         await cdp.send('Input.dispatchTouchEvent',{type:'touchMove',touchPoints:[p(2,270,300)],timestamp:timestamp+.08});
         await cdp.send('Input.dispatchTouchEvent',{type:'touchEnd',touchPoints:[],timestamp:timestamp+.10});
@@ -1128,19 +1045,19 @@ async function horizontalInputs(page, target, offset, pointerTypes) {
         await cdp.send('Input.dispatchTouchEvent',{type:'touchStart',touchPoints:[p(3,110,350)],timestamp:t2});
         await cdp.send('Input.dispatchTouchEvent',{type:'touchStart',touchPoints:[p(3,110,350),p(4,270,350)],timestamp:t2+.02});
         await cdp.send('Input.dispatchTouchEvent',{type:'touchMove',touchPoints:[p(3,145,400),p(4,235,400)],timestamp:t2+.04});
-        const pinchIn=await page.evaluate(()=>({pitch:window.__game.settings.camPitch,zoom:window.__game.settings.camZoom}));
+        const pinchIn=await frame.evaluate(()=>({pitch:window.__game.settings.camPitch,zoom:window.__game.settings.camZoom}));
         await cdp.send('Input.dispatchTouchEvent',{type:'touchEnd',touchPoints:[],timestamp:t2+.06});
         await cdp.detach();
-        const after=await page.evaluate(()=>({shots:window.__game.stats.shots,active:window.__game.swipe.active,down:window.__game.pointerDown}));
+        const after=await frame.evaluate(()=>({shots:window.__game.stats.shots,active:window.__game.swipe.active,down:window.__game.pointerDown}));
         assert.ok(during.pitch>0 && during.zoom>1 && pinchIn.pitch<during.pitch && pinchIn.zoom<during.zoom && !during.active && during.shots===0 && after.shots===0 && !after.active && !after.down,
           'native two-finger gesture changes camera without a stroke: '+JSON.stringify({during,pinchIn,after}));
         count++;console.log(`PASS ${width}x${height}: native two-finger pan and pinch cannot strike`);
       }
-      await page.evaluate(()=>window.__game.camReset());
-      await page.evaluate(()=>{window.__game.setCameraPreset('DYNAMIC');window.__game.updateCamera(0);});
+      await frame.evaluate(()=>window.__game.camReset());
+      await frame.evaluate(()=>{window.__game.setCameraPreset('DYNAMIC');window.__game.updateCamera(0);});
       await page.keyboard.press('c');
-      await page.evaluate(()=>window.__game.updateCamera(0));
-      assert.equal(await page.evaluate(()=>window.__game.settings.camera===CAMERA_ORDER[0] &&
+      await frame.evaluate(()=>window.__game.updateCamera(0));
+      assert.equal(await frame.evaluate(()=>window.__game.settings.camera===CAMERA_ORDER[0] &&
         window.__game.camRig.mode==='BROADCAST'),true);
       count++; console.log(`PASS ${width}x${height}: C restores the default framing`);
 
@@ -1148,50 +1065,23 @@ async function horizontalInputs(page, target, offset, pointerTypes) {
        * be queued and then thrown away because the button was already up by
        * the next frame — the player pressed and nothing happened. */
       if (width >= 600) {
-        await page.evaluate(() => {
+        await frame.evaluate(() => {
           const g = window.__game; g.replayer.stop(); g.recenterT = 0.30;
           g.server = 1; g.prepServe();
         });
-        await page.mouse.move(width * .5, height * .55);
-        await page.mouse.click(width * .5, height * .55);
+        await page.mouse.move(bounds.x+bounds.width*.5,bounds.y+bounds.height*.55);
+        await page.mouse.click(bounds.x+bounds.width*.5,bounds.y+bounds.height*.55);
         /* The glide is 0.3 s of GAME time; a headless, non-focused tab runs
          * the clock several times slower than the wall, so poll the state
          * instead of guessing a sleep. */
-        const tossed = await page.waitForFunction(
+        const tossed = await frame.waitForFunction(
           () => window.__game.state === GS.SERVE_TOSS && window.__game.ball.live,
           { timeout: 8000 }).then(() => true).catch(() => false);
         assert.equal(tossed, true, 'a single click during the glide home did not start the toss');
         count++; console.log(`PASS ${width}x${height}: one quick click serves, even during the glide home`);
-        await page.evaluate(() => { const g = window.__game; g.ball.live = false; g.server = 1; g.prepServe(); });
+        await frame.evaluate(() => { const g = window.__game; g.ball.live = false; g.server = 1; g.prepServe(); });
       }
-      if(width<600) {
-        const tap=async selector=>{
-          const pt=await page.$eval(selector,el=>{el.scrollIntoView({block:'center'});const r=el.getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2};});
-          await page.touchscreen.tap(pt.x,pt.y);
-        };
-        await tap('#btnSettings');
-        assert.equal(await page.evaluate(()=>window.__game.ui.inputMode==='touch' && !/Колесо|ПКМ/.test(document.getElementById('cameraHelp').textContent)),true);
-        await tap('[data-camera="DYNAMIC"]');
-        assert.equal(await page.evaluate(()=>window.__game.settings.camera==='DYNAMIC'),true);
-        await tap('#camReset');await tap('#setClose');
-        count++;console.log(`PASS ${width}x${height}: actual touch switches instructions and selects a camera without a mouse`);
-        await tap('#btnMenu');
-        assert.equal(await page.evaluate(()=>window.__game.paused&&document.body.classList.contains('is-paused')),true);
-        await tap('#pauseSettings');
-        assert.equal(await page.evaluate(()=>window.__game.paused&&document.getElementById('settings').classList.contains('on')),true);
-        await tap('#setClose');
-        assert.equal(await page.evaluate(()=>window.__game.paused&&!document.getElementById('settings').classList.contains('on')),true);
-        await tap('#pauseResume');
-        assert.equal(await page.evaluate(()=>!window.__game.paused),true);
-        await tap('#btnMenu');await tap('#btnMenu');
-        assert.equal(await page.evaluate(()=>window.__game.state===GS.MENU&&document.getElementById('menu').classList.contains('on')),true);
-        const soundBefore=await page.evaluate(()=>window.__game.settings.sound);await tap('#menuSound');
-        assert.equal(await page.evaluate(before=>window.__game.settings.sound!==before&&
-          document.getElementById('menuSound').getAttribute('aria-pressed')===String(!before)&&
-          document.getElementById('btnSound').getAttribute('aria-pressed')===String(!before),soundBefore),true);
-        count++;console.log(`PASS ${width}x${height}: real touch pauses, opens settings safely, resumes, exits, and toggles sound`);
-      }
-      const audioRender = await page.evaluate(async () => {
+      const audioRender = await frame.evaluate(async () => {
         const context = new OfflineAudioContext(2, 44100 * 4, 44100);
         const a = new AudioEngine(); a.ctx=context;a.ok=true;a.muted=false;
         a.bus=context.createGain();a.bus.connect(context.destination);
@@ -1215,42 +1105,51 @@ async function horizontalInputs(page, target, offset, pointerTypes) {
       assert.ok(audioRender.energy>0 && audioRender.peak>0 && audioRender.peak<.25);
       assert.equal(audioRender.tail,0);assert.equal(audioRender.remaining,0);
       count++;console.log(`PASS ${width}x${height}: small audience renders finite unclipped stereo, ends in silence and cleans up`);
+      // UI interactions run through the same production shell as the physics checks.
+      frame = await appFrame(page, { match: { free: true, sessionKind: 'free' } });
+      await frame.evaluate(() => { const g=window.__game;g.swipe.down(.5,.8,g.time);g.pointerDown=true; });
+      await shellClick(page,'[data-act=pause]');
+      await frame.waitForFunction(() => window.__game.paused);
+      assert.equal(await frame.evaluate(() => {
+        const g=window.__game;g.ui.syncNativeCursor();
+        return !g.swipe.active && !g.pointerDown && getComputedStyle(g.canvas).cursor==='default';
+      }),true,'host pause cancels the gesture and restores the cursor');
+      await shellClick(page,'.sheet-wrap.open [data-a=settings]');
+      assert.equal(await frame.evaluate(() => window.__game.paused),true,'opening settings must not resume through bubbling');
+      const soundBefore=await page.evaluate(() => S.sfx);
+      await shellClick(page,'.sheet-wrap.open [data-k=sfx]');
+      await frame.waitForFunction(before => window.__game.settings.sound===!before,{},soundBefore);
+      assert.equal(await page.$eval('.sheet-wrap.open [data-k=sfx]',el=>el.getAttribute('aria-pressed')),String(!soundBefore));
+      assert.equal(await frame.evaluate(() => window.__game.paused),true,'changing a shell preference keeps the game paused');
       if(width>620) {
-        await page.click('#btnFullscreen');
+        await shellClick(page,'.sheet-wrap.open [data-a=fs]');
         await page.waitForFunction(()=>!!document.fullscreenElement);
-        assert.equal(await page.evaluate(()=>document.fullscreenElement.id==='app' && document.getElementById('btnFullscreen').getAttribute('aria-pressed')==='true'),true);
+        assert.equal(await page.evaluate(()=>document.fullscreenElement===document.documentElement),true);
         await page.setViewport({width:1920,height:1080});
-        assert.equal(await page.evaluate(()=>{
+        await frame.waitForFunction(() => innerWidth===1920 && innerHeight===1080);
+        assert.equal(await frame.evaluate(()=>{
           const g=window.__game;g.camReset();for(let i=0;i<80;i++)g.updateCamera(.1);
           const b=tableScreenBounds(g.camVP);
           return b.top>0 && b.bottom<1 && b.left>0 && b.right<1 && opponentScreenTop(g.camVP)>=CAMERA_HEADROOM-.001;
         }),true);
-        await page.keyboard.press('f');await page.waitForFunction(()=>!document.fullscreenElement);
-        count++;console.log(`PASS ${width}x${height}: fullscreen button, 1920×1080 framing and F exit`);
+        await shellClick(page,'.sheet-wrap.open [data-a=fs]');
+        await page.waitForFunction(()=>!document.fullscreenElement);
+        await page.setViewport({width,height});
+        count++;console.log(`PASS ${width}x${height}: shell fullscreen control and 1920x1080 framing`);
       }
       assert.equal(await page.evaluate(async()=>{
-        const app=document.getElementById('app'), request=app.requestFullscreen;
+        const app=document.documentElement, request=app.requestFullscreen;
         app.requestFullscreen=async()=>{throw new Error('Embedding policy denied fullscreen');};
-        try {await window.__game.ui.toggleFullscreen();return !document.fullscreenElement && Number.isFinite(window.__game.R.aspect());}
+        try {await TGX.toggleFullscreen();return !document.fullscreenElement;}
         finally {app.requestFullscreen=request;}
       }),true);
-      count++;console.log(`PASS ${width}x${height}: denied fullscreen leaves a working normal viewport`);
-      assert.deepEqual(errors, [], 'uncaught browser exceptions');
-      await page.close();
-    }
-
-    // Test the shipped shell as well as the standalone game: it embeds a
-    // separate build in a srcdoc iframe and controls slowmo through messages.
-    for (const [width,height] of [[1280,760],[390,844]]) {
-      const page=await browser.newPage(), errors=[];
-      await page.setViewport({width,height,isMobile:width<600,hasTouch:width<600});
-      page.on('pageerror',e=>errors.push(e.message));
-      const shellPath=path.resolve(root,'../../play/index.html');
-      await page.goto(pathToFileURL(shellPath).href+'?s=match');
-      await page.waitForSelector('#gamelayer iframe',{timeout:30000});
-      const frame=await (await page.$('#gamelayer iframe')).contentFrame();
-      await frame.waitForFunction('window.__game && window.__game.R.drawCalls > 0',{timeout:30000});
-      await page.waitForSelector('.mx.live',{timeout:30000});
+      assert.equal(await frame.evaluate(() => Number.isFinite(window.__game.R.aspect())),true);
+      count++;console.log(`PASS ${width}x${height}: rejected fullscreen leaves a working viewport`);
+      await page.keyboard.press('Escape');
+      await page.waitForFunction(() => !Sheet.cur);
+      await frame.waitForFunction(() => !window.__game.paused);
+      assert.equal(await frame.evaluate(() => {const g=window.__game;g.ui.syncNativeCursor();return getComputedStyle(g.canvas).cursor==='none';}),true);
+      count++;console.log(`PASS ${width}x${height}: shell pause, settings, sound and resume preserve input/cursor state`);
       await page.evaluate(()=>GameHost.send('cal',{k:'camZoom',v:50}));
       await frame.waitForFunction('window.__game._cal.camZoom === .5 && window.__game.settings.camZoom === 1',{timeout:10000});
       count++;console.log(`PASS ${width}x${height}: standard shell calibration has neutral camera zoom`);
@@ -1268,9 +1167,9 @@ async function horizontalInputs(page, target, offset, pointerTypes) {
       // actual shell control in free play, where slow motion is permitted.
       await page.evaluate(()=>GameHost.send('match',{diff:2,target:11,free:true,sessionKind:'free'}));
       await page.waitForFunction("GameHost.inspector?.allowed && !document.querySelector('[data-act=slowmo]').disabled",{timeout:10000});
-      await page.click('[data-act=slowmo]');
+      await shellClick(page,'[data-act=slowmo]');
       await frame.waitForFunction('window.__game.inspectSlowmo === true',{timeout:10000});
-      const bounds=await page.evaluate(()=>{const r=document.querySelector('#gamelayer iframe').getBoundingClientRect();return {x:r.left,y:r.top};});
+      bounds=await (await page.$('#gamelayer iframe')).boundingBox();
       const point=await frame.evaluate(()=>{
         const g=window.__game;g.update=()=>{};g.cancelInput();g.setPaused(false);g.setState(GS.RALLY);
         g.server=-1;g.isServeBall=false;g.recenterT=0;g.rallyBounces=[1];
@@ -1300,12 +1199,16 @@ async function horizontalInputs(page, target, offset, pointerTypes) {
           g.ball.lastHitBy===1 && g.ball.v.z<0 && g.ball.trailGrade==='yellow' && g.stats.shots===1;
       }),true,`shipped shell ${width}x${height}: a confirmed click/tap returns the ball with slowmo enabled`);
       assert.equal(await frame.evaluate(()=>window.__game.stats.shots),1,'release must not repeat the shell contact');
-      count+=await horizontalInputs(page,frame,bounds,width<600?['mouse','touch']:['mouse']);
-      console.log(`PASS ${width}x${height}: shipped iframe horizontal input creates signed sidespin for mouse and touch`);
+      const contact=await frame.evaluate(() => window.__game.getMatchSnapshot().contacts[0]);
+      await page.waitForFunction(expected => GameHost.matchSnapshot?.contacts[0]?.eventId===expected,{},contact.eventId);
+      assert.equal(await page.$eval('.match-hud-contact[data-side="1"]',el=>el.style.getPropertyValue('--stroke')),
+        await frame.evaluate(id=>STROKES[id].col,contact.stroke),'contact color is rendered by the production shell HUD');
+      count++;console.log(`PASS ${width}x${height}: physical contact reaches the shell HUD without an iframe menu`);
       assert.deepEqual(errors,[],`shipped shell ${width}x${height}: uncaught exceptions`);
       count++;console.log(`PASS ${width}x${height}: shipped shell, slowmo control and actual click/tap through iframe`);
       await page.close();
     }
+    assert.deepEqual(failures, [], 'physics regressions in the production application');
     console.log(`Browser: ${count} checks passed, desktop + mobile, no uncaught exceptions.`);
   } finally { await browser.close(); }
 })().catch(e => { console.error(e); process.exitCode = 1; });

@@ -359,7 +359,7 @@ class NetworkManager {
       if (Number.isFinite(this._lastStateClock) && msg.t <= this._lastStateClock) return;
       this._lastStateClock = msg.t;
     }
-    const g = this.game, beforeServer = g.server, beforeA = g.score[0], beforeB = g.score[1];
+    const g = this.game, beforeServer = g.server, beforeA = g.score[0], beforeB = g.score[1], beforeState = g.state;
     this._interpBuf.push({ ...msg, receivedAt: Date.now() });
     if (this._interpBuf.length > 30) this._interpBuf.shift();
     // apply ball immediately (prediction handles smoothing)
@@ -402,7 +402,7 @@ class NetworkManager {
       this.game.state = msg.state;
       this.game.stateT = 0;
     }
-    if ((g.server !== beforeServer || g.score[0] !== beforeA || g.score[1] !== beforeB) &&
+    if ((g.server !== beforeServer || g.score[0] !== beforeA || g.score[1] !== beforeB || g.state !== beforeState) &&
         g.ui && typeof g.ui.syncScore === 'function') g.ui.syncScore();
   }
 

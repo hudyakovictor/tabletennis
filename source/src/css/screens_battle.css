@@ -239,8 +239,9 @@
 .net-relay{display:flex;gap:8px;align-items:flex-start;margin:0 14px;font-size:11px;line-height:1.45;color:var(--ink3)}
 .net-relay span:first-child{width:16px;height:16px;flex:0 0 16px}
 .net-relay b{color:var(--ink2);overflow-wrap:anywhere}
-/* In a network match the engine owns the left-side score; room status and
-   exit stay in a separate, compact island on the right. */
+/* Online uses the same app HUD; the engine has no independent scoreboard. */
+.net-hud-slot{position:absolute;inset:0;pointer-events:none}
+.screen[data-id=online].net-playing{pointer-events:none;background:transparent}
 .screen[data-id=online].net-playing .hud{display:none}
 .net-live{position:absolute;right:12px;top:calc(var(--sat) + var(--tgt) + 10px);z-index:6;display:flex;align-items:center;gap:6px;pointer-events:auto}
 .net-live *{pointer-events:auto}

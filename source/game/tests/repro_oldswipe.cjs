@@ -1,24 +1,20 @@
 /* Which branch lets an old held swipe hit a later ball? */
 const puppeteer = require('puppeteer-core');
-const chromium = require('@sparticuz/chromium');
-const fs = require('fs');
-const path = require('path');
-const { enginePage } = require('./helpers.cjs');
+const chromium = process.env.CHROME_BIN ? null : require('@sparticuz/chromium');
+const { appFrame } = require('./helpers.cjs');
 
 (async () => {
-  const html = 'file://' + enginePage();
   const browser = await puppeteer.launch({
-    executablePath: await chromium.executablePath(),
-    args: [...chromium.args, '--no-sandbox'],
+    executablePath: process.env.CHROME_BIN || await chromium.executablePath(),
+    args: process.env.CHROME_BIN ? ['--no-sandbox', '--use-angle=swiftshader', '--enable-unsafe-swiftshader'] : chromium.args,
     headless: 'shell',
     env: { ...process.env, LD_LIBRARY_PATH: '/tmp/topspin-browser-libs/lib' }
   });
   const page = await browser.newPage();
   await page.setViewport({ width: 1280, height: 760 });
   page.on('pageerror', e => console.log('PAGEERR', e.message));
-  await page.goto(html, { waitUntil: 'load' });
-  await page.waitForFunction('window.__game && window.__game.R && window.__game.R.drawCalls > 0', { timeout: 30000 });
-  const out = await page.evaluate(() => {
+  const frame = await appFrame(page);
+  const out = await frame.evaluate(() => {
     const g = window.__game;
     const log = [];
     const incomingBall = () => {

@@ -12,6 +12,7 @@ async function launchBrowser() {
 }
 
 async function pageFixture(t, browser, screens = [], { width = 390, height = 844, main = false, matchHUD = false } = {}) {
+  matchHUD = matchHUD || screens.includes('online');
   const page = await browser.newPage(); t.after(() => page.close());
   await page.setViewport({ width, height });
   await page.setRequestInterception(true); page.on('request', (request) => request.abort());
@@ -25,12 +26,13 @@ async function pageFixture(t, browser, screens = [], { width = 390, height = 844
     const FX = new Proxy({ pt: (el) => { if (!el) throw Error('missing FX anchor'); return {x:0,y:0}; }, fly: () => Promise.resolve(), init() {}, resize() {} }, { get: (obj, key) => obj[key] || (() => trace.fx.push(key)) });
     const TGX = { inTG: false, w: null, init() {}, load: () => Promise.resolve(false), dispose() {}, back() {}, fullscreen() {}, guard() {} };
     const haptic = () => {}, setQuality = () => {}, openSettings = () => {};
+    const effectiveReducedMotion = () => S.rm === true || matchMedia('(prefers-reduced-motion: reduce)').matches;
     const BG = { init() {}, resize() {}, mood() {} }, Dev = { mark() {}, build() {} };
     const ILL = ${JSON.stringify(main ? Object.fromEntries(['preloader-ball-intro', 'preloader-ball-spin', 'preloader-paddle', 'preloader-burst'].map(key => [key, 'data:image/webp;base64,' + fs.readFileSync(path.join(__dirname, '../src/ill', key + '.webp')).toString('base64')])) : {})}, ItemArt = { of: (it) => Art.rubber(it.col) };
     const Daily = { ready: () => 0, items: () => [] };
     const Api = { enabled: false };
     const Progress = { board: null, boardSubs: [], reconcileSeason() {}, watchSeason() {}, boot() {}, leaderboard: async () => null, onBoard(fn) { this.boardSubs.push(fn); return () => { this.boardSubs = this.boardSubs.filter((x) => x !== fn); }; } };
-    const GameHost = { ready: true, subs: new Set(), ensure: () => trace.host.push('ensure'), reload: () => trace.host.push('reload'), send(cmd, data) { trace.host.push(cmd); trace.messages.push({ type: cmd, ...data }); }, show: (on) => trace.host.push(on ? 'show' : 'hide'), on(fn) { this.subs.add(fn); return () => this.subs.delete(fn); } };
+    const GameHost = { ready: true, subs: new Set(), relayUrl: () => '', ensure: () => trace.host.push('ensure'), reload: () => trace.host.push('reload'), send(cmd, data) { trace.host.push(cmd); trace.messages.push({ type: cmd, ...data }); }, show: (on) => trace.host.push(on ? 'show' : 'hide'), on(fn) { this.subs.add(fn); return () => this.subs.delete(fn); } };
     const PEOPLE = [{n:'One Player',s:'One Player',r:1200,club:'Club',wr:50,c:['#fff','#ccc']}, {n:'Two Player',s:'Two Player',r:1100,club:'Club',wr:50,c:['#fff','#ccc']}, {n:'Three Player',s:'Three Player',r:1050,club:'Club',wr:50,c:['#fff','#ccc']}, {n:'Four Player',s:'Four Player',r:950,club:'Club',wr:50,c:['#fff','#ccc']}, {n:'Five Player',s:'Five Player',r:900,club:'Club',wr:50,c:['#fff','#ccc']}, {n:'Six Player',s:'Six Player',r:850,club:'Club',wr:50,c:['#fff','#ccc']}];
     const leagueOf = () => ({id:'bronze',min:0}), nextLeague = () => null, leagueName = () => 'Bronze';
     const MM_POOL = { bronze: [0] }; let BATTLE = {opp:0};

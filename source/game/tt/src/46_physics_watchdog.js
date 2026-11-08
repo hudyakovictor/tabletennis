@@ -626,8 +626,10 @@ class PhysicsWatchdog {
     const vmax = cfg && Number.isFinite(cfg.vmax) ? cfg.vmax : 19.5;
     const timingK = cfg && cfg.contact && Number.isFinite(cfg.contact.speedBonus) ? cfg.contact.speedBonus : 1.05;
     let limit = vmax * R.equipK * timingK * (1 + R.speedTol);
-    if (st && st.strokeId === 'SIDE' && sc && sc.spin && Number.isFinite(sc.spin.sideVmax))
-      limit = Math.min(limit, sc.spin.sideVmax * (1 + R.speedTol));
+    if (st && st.strokeId === 'SIDE' && sc && sc.spin && Number.isFinite(sc.spin.sideVmax)) {
+      const sideCap = st.side === 1 && st.playerControlled ? cfg.placement.player.sideVmax : sc.spin.sideVmax;
+      limit = Math.min(limit, sideCap * (1 + R.speedTol));
+    }
     if (st && st.side === -1) {
       const L = wdAiLevel(st.aiLevel);
       if (L && Number.isFinite(L.vmagMax))

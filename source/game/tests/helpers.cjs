@@ -1,6 +1,8 @@
 const fs = require('node:fs');
 const path = require('node:path');
+const os = require('node:os');
 const vm = require('node:vm');
+const { pathToFileURL } = require('node:url');
 const { execFileSync } = require('node:child_process');
 const root = path.resolve(__dirname, '..');
 function load(files, names, extra = {}) {
@@ -59,35 +61,37 @@ function load(files, names, extra = {}) {
   vm.runInContext(source + '\n;globalThis.api = {' + names.join(',') + '};', context);
   return { ...context.api, context, saved };
 }
-/* The repository keeps exactly ONE built HTML: <repo>/play/index.html (the
- * shell build). The standalone engine page it used to ship alongside is a dev
- * artifact now: it is built on demand into <repo>/build/engine.html (git-
- * ignored) and rebuilt whenever a source file is newer than it. Browser tests
- * ask for it here instead of hard-coding a path that no longer exists. */
+// Tests use the same complete application as play/index.html, freshly built
+// in a temporary directory without overwriting the published artifact.
 const repo = path.resolve(root, '../..');
-const ENGINE_BUILD = path.join(repo, 'build', 'engine.html');
-function newestSourceTime(dir) {
-  let newest = 0;
-  for (const name of fs.readdirSync(dir)) {
-    const p = path.join(dir, name), st = fs.statSync(p);
-    newest = Math.max(newest, st.isDirectory() ? newestSourceTime(p) : st.mtimeMs);
-  }
-  return newest;
+let builtApp;
+function appPage() {
+  if (builtApp) return builtApp;
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'topspin-app-'));
+  process.once('exit', () => fs.rmSync(dir, { recursive: true, force: true }));
+  const out = path.join(dir, 'index.html');
+  execFileSync('python3', [path.join(repo, 'source/build.py'), out],
+    { stdio: 'pipe', env: { ...process.env, TT_API_BASE: '' } });
+  return (builtApp = out);
 }
-let engineBuilt = null;
-function enginePage() {
-  if (engineBuilt) return engineBuilt;
-  const ttDir = path.join(root, 'tt');
-  const newest = Math.max(newestSourceTime(path.join(ttDir, 'src')),
-    newestSourceTime(path.join(ttDir, 'assets')), fs.statSync(path.join(ttDir, 'build.py')).mtimeMs,
-    ...['ui/match_hud.js', 'ui/stroke_icons.js', 'css/match_hud.css', 'locales/ru.js', 'locales/en.js',
-      'unb900.woff2', 'unb600.woff2', 'man600.woff2', 'man800.woff2']
-      .map(file => fs.statSync(path.join(repo, 'source', 'src', file)).mtimeMs));
-  const fresh = fs.existsSync(ENGINE_BUILD) && fs.statSync(ENGINE_BUILD).mtimeMs >= newest;
-  if (!fresh) {
-    execFileSync('python3', [path.join(root, 'tt', 'build.py'), ENGINE_BUILD],
-      { stdio: 'inherit' });
-  }
-  return (engineBuilt = ENGINE_BUILD);
+async function appFrame(page, { appPath = appPage(), match = {} } = {}) {
+  await page.goto(pathToFileURL(appPath).href + '?s=match', { waitUntil: 'domcontentloaded' });
+  await page.waitForFunction(() => typeof GameHost !== 'undefined', { timeout: 45000 });
+  await page.evaluate(() => GameHost.ensure());
+  await page.waitForFunction(() => GameHost.ready, { timeout: 45000 });
+  // Let the real screen finish its intro before it can restart a test fixture.
+  await page.waitForSelector('.mx.live', { timeout: 45000 });
+  await page.evaluate(options => {
+    GameHost.send('match', { diff: 2, target: 11, free: false, sessionKind: 'practice', ...options });
+    GameHost.show(true);
+    // startMatch() alone does not leave the bridge's cinematic lobby camera.
+    GameHost.send('live');
+  }, match);
+  await page.waitForFunction(() => GameHost.matchSnapshot && GameHost.calibrationReady, { timeout: 45000 });
+  const frame = await (await page.$('#gamelayer iframe')).contentFrame();
+  await frame.waitForFunction(() => window.__game && window.__game.state !== GS.MENU &&
+    !window.__game.lobbyScene?.active && window.__game.R.drawCalls > 0, { timeout: 45000 });
+  await frame.evaluate(() => { window.__game.updateCamera(4); window.__game.updateCamera(0); });
+  return frame;
 }
-module.exports = { load, root, repo, enginePage, ENGINE_BUILD };
+module.exports = { load, root, repo, appPage, appFrame };

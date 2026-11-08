@@ -7,22 +7,23 @@ const zlib = require('node:zlib');
 const { execFileSync } = require('node:child_process');
 const { pathToFileURL } = require('node:url');
 const puppeteer = require('puppeteer-core');
-const chromium = require('@sparticuz/chromium');
-const { root, enginePage } = require('./helpers.cjs');
+const chromium = process.env.CHROME_BIN ? null : require('@sparticuz/chromium');
+const { repo, appPage, appFrame } = require('./helpers.cjs');
 
 (async () => {
   const libs = path.join(os.tmpdir(), 'topspin-browser-libs');
-  if (process.platform === 'linux') {
+  if (process.platform === 'linux' && !process.env.CHROME_BIN) {
     fs.mkdirSync(libs, { recursive: true });
     const archive = path.join(path.dirname(require.resolve('@sparticuz/chromium')), '../../bin/al2023.tar.br');
     execFileSync('tar', ['xf', '-', '-C', libs], { input: zlib.brotliDecompressSync(fs.readFileSync(archive)) });
   }
   const browser = await puppeteer.launch({ executablePath: process.env.CHROME_BIN || await chromium.executablePath(),
-    args: process.platform === 'linux' ? chromium.args : ['--use-angle=swiftshader', '--enable-unsafe-swiftshader'], headless: true,
+    args: process.env.CHROME_BIN ? ['--no-sandbox', '--use-angle=swiftshader', '--enable-unsafe-swiftshader',
+      '--autoplay-policy=no-user-gesture-required'] : chromium.args, headless: true,
     env: { ...process.env, LD_LIBRARY_PATH: [path.join(libs, 'lib'), process.env.LD_LIBRARY_PATH].filter(Boolean).join(':') } });
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'topspin-panorama-'));
   try {
-    const pageUrl = pathToFileURL(enginePage()).href;
+    const pageUrl = pathToFileURL(appPage()).href;
     for (const [width, height, gl1] of [[640, 480, false], [390, 844, true]]) {
       const page = await browser.newPage();
       const errors = [], external = [];
@@ -35,10 +36,10 @@ const { root, enginePage } = require('./helpers.cjs');
           return type === 'webgl2' ? null : getContext.call(this, type, ...args);
         };
       });
-      await page.goto(pageUrl);
-      await page.waitForFunction(() => window.__game && window.__game.scene.hasPanorama &&
+      const frame = await appFrame(page);
+      await frame.waitForFunction(() => window.__game && window.__game.scene.hasPanorama &&
         window.__game.scene.mat.courtGround.asphalt, { timeout: 45000 });
-      const result = await page.evaluate(() => {
+      const result = await frame.evaluate(() => {
         const g = window.__game, R = g.R, gl = R.gl, scene = g.scene;
         g.paused = true; g.reducedMotion = true;
         Object.assign(R.post, { grain: 0, ca: 0, bloom: 0, vignette: 0, radial: 0, flash: 0 });
@@ -78,80 +79,74 @@ const { root, enginePage } = require('./helpers.cjs');
       for (const [index, v] of result.views.entries()) {
         assert.ok(v.darkened > 30 && v.total > 0, `visible table shadow at angle ${index}: ${JSON.stringify(v)}`);
       }
-      assert.deepEqual(external, [], 'standalone engine must work offline');
+      assert.deepEqual(external, [], 'the complete application must work offline');
       assert.deepEqual(errors, [], `page errors: ${errors.join('; ')}`);
       console.log(`ok: ${width}x${height}, ${gl1 ? 'WebGL1' : 'WebGL2'}, four orbit angles and visible shadows`);
       await page.close();
     }
 
-    // Real parent -> iframe messages, projected sprite transfer and MENU-only robots.
-    const hostPath = path.join(tmp, 'lobby-host.html');
-    fs.writeFileSync(hostPath, `<!doctype html><style>html,body{margin:0;width:100%;height:100%}iframe{border:0;width:100%;height:100%}</style>
-      <iframe id="engine" src="${pageUrl}"></iframe><script>window.lobbyMessages=[];addEventListener('message',e=>{
-        if(e.source===document.getElementById('engine').contentWindow&&e.data?.__tt===1)lobbyMessages.push(e.data);
-      });</script>`);
+    // The real hub owns readiness, the paddle-only exhibition and match transition.
     for (const [width, height, dpr] of [[640, 480, 1], [390, 844, 3]]) {
       const lobby = await browser.newPage(), errors = [];
       lobby.on('pageerror', e => errors.push(e.message));
       await lobby.setViewport({ width, height, deviceScaleFactor: dpr, isMobile: width < 500, hasTouch: width < 500 });
-      await lobby.evaluateOnNewDocument(() => { if (window.parent !== window) window.__TT_EMBED = 1; });
-      await lobby.goto(pathToFileURL(hostPath).href);
-      await lobby.waitForFunction(() => window.lobbyMessages.some(m => m.type === 'ready'), { timeout: 45000 });
-      const arena = lobby.frames().find(f => f.parentFrame());
+      await lobby.goto(pageUrl + '?s=hub');
+      await lobby.waitForFunction(() => typeof GameHost !== 'undefined' && GameHost.ready, { timeout: 45000 });
+      const arena = await (await lobby.$('#gamelayer iframe')).contentFrame();
+      await arena.waitForFunction(() => window.__game?.lobbyScene?.active, { timeout: 45000 });
+      await lobby.evaluate(() => {
+        window.lobbyMessages=[];GameHost.on(m=>window.lobbyMessages.push(m));
+        GameHost.send('attract');GameHost.send('lobby',{intro:true,requestId:101});
+      });
+      await lobby.waitForFunction(() => window.lobbyMessages.some(m => m.type === 'lobbyReady' && m.requestId === 101), { timeout: 45000 });
       await arena.evaluate(() => {
         const g = window.__game, draw = g.R.draw.bind(g.R), render = g.render.bind(g);
-        window.lobbyBall = g.ball; window.lobbyRenders = [];
+        g.paused=true;window.lobbyBall = g.ball; window.lobbyRenders = [];
         window.beforeLobby = JSON.stringify([g.time, g.strokeTime, g.frame, g.score, g.rally, g.stats, g.player, g.aiPaddle]);
-        let balls = 0, robotParts = 0;
+        let balls = 0, robotParts = 0, paddles = 0;
         g.R.draw = (mesh, matrix, mat) => {
           if (mesh === g.scene.mesh.ball) balls++;
           if (mesh === g.scene.mesh.sphere || mesh === g.scene.mesh.capsule) robotParts++;
+          if (mesh === g.scene.mesh.blade) paddles++;
           return draw(mesh, matrix, mat);
         };
         g.render = () => {
-          balls = robotParts = 0; render();
+          balls = robotParts = paddles = 0; render();
           if (g.lobbyScene?.active) window.lobbyRenders.push({ phase: g.lobbyScene.phase,
-            handoff: g.lobbyScene.handoff, clock: g.lobbyScene.clock, balls, robotParts,
+            clock: g.lobbyScene.clock, balls, robotParts, paddles,
             camera: Array.from(g.R.viewProj), x: g.project(g.ball.p, {}).x, y: g.project(g.ball.p, {}).y });
         };
       });
-      const command = (type, data = {}) => lobby.evaluate(m => document.getElementById('engine').contentWindow.postMessage(m, '*'),
-        { __tt: 1, type, ...data });
-      await command('lobby', { intro: true, requestId: 101 });
-      await lobby.waitForFunction(() => window.lobbyMessages.some(m => m.type === 'lobbyReady' && m.requestId === 101), { timeout: 45000 });
+      const command = (type, data = {}) => lobby.evaluate(({ type, data }) => GameHost.send(type, data), { type, data });
       const waiting = await arena.evaluate(() => {
         const g = window.__game, c = g.lobbyScene;
         g.render();
         return { phase: c.phase, hits: c.hits, ready: c.readySent,
           settled: g.scene.panoramaSettled && g.scene.asphaltSettled && g.scene.standsSettled,
-          robots: c.bots.map(b => g.project({ x: b.x, y: 1.47, z: b.side * 2.04 }, {})),
-          firstSide: c.firstSide, error: g.R.gl.getError(), render: window.lobbyRenders.at(-1) };
+          error: g.R.gl.getError(), render: window.lobbyRenders.at(-1) };
       });
       assert.equal(waiting.phase, 'waiting'); assert.equal(waiting.hits, 0);
       assert.equal(waiting.ready && waiting.settled, true); assert.equal(waiting.error, 0);
-      assert.ok(waiting.robots.every(s => s.ok && s.x > 0.06 && s.x < 0.94 && s.y > 0.12 && s.y < 0.68));
-      assert.equal(waiting.render.balls, 0); assert.ok(waiting.render.robotParts >= 20);
-      await command('lobby'); // The hub reveals at impact, before launch.
-      assert.equal(await arena.evaluate(() => window.__game.lobbyScene.phase), 'waiting');
-      await command('lobbyLaunch', { requestId: 101, x: 0.5, y: 0.48, diameter: 0.9 });
-      await lobby.waitForFunction(() => window.lobbyMessages.some(m => m.type === 'lobbyHit'), { timeout: 20000 });
-      const transfer = await lobby.evaluate(() => window.lobbyMessages.filter(m => ['lobbyFrame', 'lobbyHit'].includes(m.type)));
-      const first = transfer[0], handoff = transfer.find(m => m.type === 'lobbyFrame' && m.handoff);
-      assert.equal(first.type, 'lobbyFrame'); assert.equal(first.progress, 0); assert.equal(first.handoff, false);
-      assert.ok(Math.abs(first.x - 0.5) * width < 0.5 && Math.abs(first.y - 0.48) * height < 0.5, JSON.stringify(first));
-      assert.ok(Math.abs(first.diameter - 0.9) * width < 0.5, JSON.stringify(first));
-      assert.ok(handoff && handoff.diameter * width <= 12.1);
-      assert.equal(transfer.filter(m => m.type === 'lobbyHit').length, 1);
-      assert.equal(transfer.at(-1).side, waiting.firstSide);
+      assert.equal(waiting.render.balls, 0); assert.equal(waiting.render.robotParts, 0);
+      assert.equal(waiting.render.paddles, 2);
+      // Readiness is not a sprite launch: the shell leaves waiting and starts the hub rally.
+      await command('attract'); await command('lobby');
+      await arena.waitForFunction(() => window.__game.lobbyScene.phase === 'rally');
+      await arena.evaluate(() => {
+        const g=window.__game;window.lobbyRenders=[];
+        for(let i=0;i<40;i++){g.lobbyScene.update(.1);g.updateCamera(0);g.render();}
+      });
       const rendered = await arena.evaluate(() => ({ frames: window.lobbyRenders,
         identity: window.__game.ball === window.lobbyBall,
         unchanged: window.beforeLobby === JSON.stringify([window.__game.time, window.__game.strokeTime, window.__game.frame,
           window.__game.score, window.__game.rally, window.__game.stats, window.__game.player, window.__game.aiPaddle]) }));
       assert.equal(rendered.identity && rendered.unchanged, true, 'MENU animation must not mutate live-game state');
-      for (const frame of rendered.frames) assert.equal(frame.balls, frame.handoff ? 1 : 0, 'one visible owner of the ball');
-      const flightFrames = rendered.frames.filter(f => f.phase === 'flight');
-      assert.ok(flightFrames.length > 2);
-      for (const frame of flightFrames) assert.deepEqual(frame.camera, flightFrames[0].camera, 'intro camera stays fixed through first hit');
+      assert.ok(rendered.frames.length >= 40);
+      for (const frame of rendered.frames) {
+        assert.equal(frame.balls, 1, 'one visible ball');
+        assert.equal(frame.paddles, 2, 'the same two paddles on desktop and mobile');
+        assert.equal(frame.robotParts, 0, 'no lobby characters');
+      }
       const orbit = await arena.evaluate(() => {
         const g = window.__game; g.paused = true; const positions = [];
         for (let i = 0; i < 4; i++) {
@@ -165,7 +160,9 @@ const { root, enginePage } = require('./helpers.cjs');
       for (const p of orbit.positions) assert.equal(p.error, 0);
       assert.ok(Math.hypot(orbit.positions[0].eye.x - orbit.positions[1].eye.x, orbit.positions[0].eye.z - orbit.positions[1].eye.z) > 2);
       assert.equal(orbit.frozen, true, 'reduced motion stops camera orbit');
-      await command('match', { diff: 1, free: true });
+      await lobby.evaluate(() => Router.go('match', { mode: 'instant' }));
+      await lobby.waitForSelector('.mx.live', { timeout: 45000 });
+      await command('match', { diff: 1, free: true }); await command('live');
       await arena.waitForFunction(() => window.__game.state !== 'MENU', { timeout: 10000 });
       const match = await arena.evaluate(() => {
         const g = window.__game; g.updateCamera(2); g.render();
@@ -174,19 +171,18 @@ const { root, enginePage } = require('./helpers.cjs');
       });
       assert.deepEqual(match, { panorama: true, asphalt: true, shadow: true, lobby: false, error: 0 });
       assert.deepEqual(errors, []);
-      console.log(`ok: ${width}x${height} DPR${dpr}, real iframe readiness/ball handoff/robots/RM/match isolation`);
+      console.log(`ok: ${width}x${height} DPR${dpr}, production hub readiness/paddles/orbit/RM/match isolation`);
       await lobby.close();
     }
 
     // The no-image build must still have a playable scene and table shade.
     const fallbackPath = path.join(tmp, 'no-arena.html');
-    execFileSync('python3', [path.join(root, 'tt/build.py'), fallbackPath],
-      { env: { ...process.env, TT_NO_ARENA: '1', TT_NO_LOGO: '1' }, stdio: 'pipe' });
+    execFileSync('python3', [path.join(repo, 'source/build.py'), fallbackPath],
+      { env: { ...process.env, TT_API_BASE: '', TT_NO_ARENA: '1' }, stdio: 'pipe' });
     const fallback = await browser.newPage();
     await fallback.setViewport({ width: 640, height: 480 });
-    await fallback.goto(pathToFileURL(fallbackPath).href);
-    await fallback.waitForFunction(() => window.__game && window.__game.R.drawCalls > 0, { timeout: 45000 });
-    const state = await fallback.evaluate(() => {
+    const fallbackFrame = await appFrame(fallback, { appPath: fallbackPath });
+    const state = await fallbackFrame.evaluate(() => {
       const g = window.__game; g.render();
       return { hasPanorama: g.scene.hasPanorama, shadow: !!g.scene.tex.tableGroundShadow, error: g.R.gl.getError() };
     });

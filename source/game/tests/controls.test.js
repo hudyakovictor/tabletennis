@@ -52,30 +52,29 @@ test('strict-mode legacy writes cannot change controls and do not crash gameplay
   }
 });
 
-test('old saved gameplay sliders are ignored while hand and grip still restore', () => {
+test('the engine has no private settings loader that can override the application', () => {
   const g = fixture();
   g.profile.data.settings = { assist: 0, posAssist: 1, hitZone: .3, sensitivity: 1.8, showZone: false,
     hand: 'left', grip: 'penhold' };
-  g.loadSettings();
+  assert.equal(typeof g.loadSettings, 'undefined');
   assert.equal(g.settings.assist, .85); assert.equal(g.settings.posAssist, .85);
   assert.equal(g.settings.hitZone, .85); assert.equal(g.settings.sensitivity, 1);
-  assert.equal(g.settings.showZone, true); assert.equal(g.settings.hand, 'left');
-  assert.equal(g.settings.grip, 'penhold');
+  assert.equal(g.settings.showZone, true); assert.equal(g.settings.hand, 'right');
+  assert.equal(g.settings.grip, 'shakehand');
 });
 
-test('new saves never resurrect assistance through career base settings', () => {
+test('engine difficulty changes do not create another settings store', () => {
   const g = fixture();
   g.career = { active: true, _baseSettings: { difficulty: 1, assist: .1, posAssist: .2 } };
-  g.saveSettings();
-  assert.equal(g.profile.data.settings.rulesVersion, rules.version);
-  assert.equal(g.profile.data.settings.difficulty, 1);
-  for (const key of ['assist', 'posAssist', 'hitZone', 'sensitivity', 'showZone'])
-    assert.equal(key in g.profile.data.settings, false);
+  g.setDifficulty(3);
+  assert.equal(typeof g.saveSettings, 'undefined');
+  assert.equal(g.profile.data.settings, undefined);
+  assert.equal(g.settings.difficulty, 3);
 });
 
-test('removed slider API is a no-op, not just hidden HTML', () => {
+test('the retired settings UI API is removed, not hidden', () => {
   const u = Object.create(lib.UI.prototype), g = fixture(); u.game = g;
-  for (const key of ['hitZone', 'assist', 'posAssist', 'sens', 'zone']) u.applySetting(key, 0);
+  assert.equal(typeof u.applySetting, 'undefined');
   assert.equal(g.settings.assist, rules.trajectoryAssist);
   assert.equal(g.settings.posAssist, rules.positionAssist);
   assert.equal(g.settings.sensitivity, rules.sensitivity);
@@ -289,29 +288,18 @@ test('outside press blocks all physical capture and CCD before assistance can re
   g.tryPlayerHit(V3.new());assert.equal(JSON.stringify(g.ball),before);
 });
 
-test('camera trim persists, quantises and clamps back into its band', () => {
+test('camera trim quantises and clamps without a second persistent settings profile', () => {
   const g = fixture();
   g.setCamZoom(1.456); g.setCamPitch(7.31);
   assert.equal(g.settings.camZoom, 1.46);          // quantised to whole percents
   assert.equal(g.settings.camPitch, 7.5);          // quantised to half degrees
-  g.saveSettings();
-  assert.equal(g.profile.data.settings.camZoom, 1.46);
-  assert.equal(g.profile.data.settings.camPitch, 7.5);
-  // a hostile or stale save is clamped on load, never trusted
-  const g2 = fixture();
-  g2.profile.data.settings = { camZoom: 99, camPitch: -99 };
-  g2.loadSettings();
-  assert.equal(g2.settings.camZoom, 1.8);
-  assert.equal(g2.settings.camPitch, -16);
-  // and a neutral trim survives the round trip unchanged
-  const g3 = fixture();
-  g3.settings.camZoom = 1; g3.settings.camPitch = 0;
-  g3.saveSettings();
-  const g4 = fixture();
-  g4.profile.data.settings = g3.profile.data.settings;
-  g4.loadSettings();
-  assert.equal(g4.settings.camZoom, 1);
-  assert.equal(g4.settings.camPitch, 0);
+  g.setCamZoom(99); g.setCamPitch(-99);
+  assert.equal(g.settings.camZoom, 1.8);
+  assert.equal(g.settings.camPitch, -16);
+  g.setCamZoom(1); g.setCamPitch(0);
+  assert.equal(g.settings.camZoom, 1);
+  assert.equal(g.settings.camPitch, 0);
+  assert.equal(g.profile.data.settings, undefined);
 });
 
 test('meeting-point assist fades with difficulty: heavy vs rookie, nearly none vs WTF', () => {
@@ -322,14 +310,14 @@ test('meeting-point assist fades with difficulty: heavy vs rookie, nearly none v
   for (const v of M) assert.ok(v >= 0 && v <= 1);
 });
 
-test('setDifficulty drives the bot, persists to the profile and ignores garbage', () => {
+test('setDifficulty drives the bot and ignores garbage without persisting private settings', () => {
   const g = fixture();
   g.settings = lib.installUnifiedControls({ difficulty: 1 });
   const seen = [];
   g.ai = { setLevel(i) { seen.push(i); this.levelIndex = i; }, reset() {} };
   assert.equal(g.setDifficulty(3), 3);
   assert.equal(g.ai.levelIndex, 3, 'движок переключил бота, а не только надпись');
-  assert.equal(g.profile.data.settings.difficulty, 3, 'уровень уехал в профиль');
+  assert.equal(g.profile.data.settings, undefined, 'the shell remains the settings owner');
   assert.equal(g.setDifficulty('0'), 0, 'строка из UI тоже принимается');
   assert.equal(g.setDifficulty(99), 3, 'индекс клампится сверху');
   assert.equal(g.setDifficulty(-5), 0, 'и снизу');
@@ -392,23 +380,7 @@ test('match overlay draws no capture ellipse, no grace dash, no contact dot', ()
 });
 
 test('spin chevrons and spin crumbs stay out of matches', () => {
-  const spinFx = (freePlay) => {
-    const { g, u, c, ops } = canvasFixture();
-    g.training = null; g.freePlay = freePlay;
-    g.settings.showSpinIndicator = true;
-    g.spinIndicator = { color: [1, 0.52, 0.12] };
-    g.R = { camPos: V3.new(0, 1.4, 2.4) }; g.camPos = g.R.camPos;
-    g.ball.w = V3.new(0, 0, 120); g._cal = {};
-    u.dpr = 2; u.reducedMotion = false;
-    g.project = (p, out) => {
-      const o = out || {};
-      o.x = 0.5 + p.x * 0.5; o.y = 0.5 - p.y * 0.5; o.ok = true; return o;
-    };
-    u.drawSpinMark(c, 800, 600, 2, 1 / 60);
-    return ops.length;
-  };
-  assert.equal(spinFx(false), 0, 'в матче шевронов поверх мяча нет');
-  assert.ok(spinFx(true) > 0, 'в свободном полёте закрутка по-прежнему видна');
+  assert.equal(typeof lib.UI.prototype.drawSpinMark, 'undefined', 'unused legacy chevron renderer stays removed');
 
   const crumbs = (freePlay) => {
     const g = canvasFixture().g;
