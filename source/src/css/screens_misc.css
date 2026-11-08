@@ -7,7 +7,7 @@
 .pl-wordmark span{display:block;margin-top:10px;font:800 9px/1 var(--body);letter-spacing:.48em;color:var(--gold);padding-left:.48em}
 .pl-stage{position:absolute;left:50%;bottom:100px;width:clamp(74px,24vw,92px);aspect-ratio:1;transform:translate(-50%,50%)}
 .pl-ring{position:absolute;inset:0;width:100%;height:100%;transform:rotate(-90deg);transition:opacity .16s var(--out)}
-.pl-progress{transition:stroke-dashoffset .16s linear}
+.pl-progress{transition:stroke-dashoffset 1s linear}
 .pl-ball{display:none}
 .pl-sheet,.pl-fallback{position:absolute;inset:0;width:100%;height:100%}
 .pl-sheet{background-repeat:no-repeat;opacity:0}
