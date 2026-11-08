@@ -309,7 +309,7 @@ test('WTF ошибается редко: ≤ 2.5 % на обычном мяче'
   assert.equal(ai.stats.errors, errs, 'счётчик ошибок совпадает с наблюдением');
 });
 
-test('ошибки делятся примерно 50/50: сетка и длинные', () => {
+test('ошибки делятся с перекосом от сетки: сетка реже длинных', () => {
   const ai = new lib.OpponentAI(0);
   ai.rng = lcg(5);
   const g = fixtureGame();
@@ -318,7 +318,7 @@ test('ошибки делятся примерно 50/50: сетка и длин
   assert.ok(s.errors > 500, `нужна статистика: ошибок ${s.errors}`);
   assert.equal(s.net + s.long, s.errors, 'каждая ошибка посчитана ровно один раз');
   const netShare = s.net / s.errors;
-  assert.ok(netShare > 0.42 && netShare < 0.58, `доля сетки ${(netShare * 100).toFixed(1)}%`);
+  assert.ok(netShare > 0.26 && netShare < 0.44, `доля сетки ${(netShare * 100).toFixed(1)}%`);
 });
 
 test('ошибка растёт под давлением, на быстром и коротком мяче, после серии агрессии', () => {

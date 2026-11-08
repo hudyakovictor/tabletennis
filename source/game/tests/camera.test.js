@@ -341,7 +341,7 @@ test('lifting the pointer is one smooth arc: up first, then gradually forward, n
     let prev = lib.pointerBladeSolve(rig, aspect, .5, .86, {});
     for (let py = .859; py >= .05; py -= .001) {
       const t = lib.pointerBladeSolve(rig, aspect, .5, py, {});
-      assert.ok(Math.abs(t.tz - prev.tz) <= .01, `${mode} ${w}x${h} py=${py.toFixed(3)}: depth step ${prev.tz} -> ${t.tz}`);
+      assert.ok(Math.abs(t.tz - prev.tz) <= .015, `${mode} ${w}x${h} py=${py.toFixed(3)}: depth step ${prev.tz} -> ${t.tz}`);
       assert.ok(Math.abs(t.ty - prev.ty) <= .01, `${mode} ${w}x${h} py=${py.toFixed(3)}: height step ${prev.ty} -> ${t.ty}`);
       assert.ok(t.ty >= prev.ty - 1e-9, `${mode} ${w}x${h} py=${py.toFixed(3)}: lifting the pointer lowered the bat`);
       assert.ok(t.tz <= prev.tz + 1e-9, `${mode} ${w}x${h} py=${py.toFixed(3)}: lifting the pointer moved the bat back`);
@@ -349,6 +349,22 @@ test('lifting the pointer is one smooth arc: up first, then gradually forward, n
         `${mode} ${w}x${h} py=${py.toFixed(3)}: pointer alone lunged to z=${t.tz}`);
       prev = t;
     }
+  }
+});
+
+test('pushing the pointer down steps the bat back and drops it instead of parking at the floor', () => {
+  /* Playtest regression: the bat stopped at the soft floor while the
+   * finger kept travelling, so downward control felt dead. Below the
+   * floor the arm steps back behind the end line, where the blade may
+   * sink below tabletop height — continuously (checked in the arc sweep
+   * above), and deep enough to read as a real drop on every preset. */
+  for (const [w, h] of [[1280, 760], [390, 844]]) for (const mode of lib.CAMERA_ORDER) {
+    const aspect = w / h, rig = lib.cameraRigFor(mode, null, aspect);
+    const mid = lib.pointerBladeSolve(rig, aspect, .5, .55, {});
+    const low = lib.pointerBladeSolve(rig, aspect, .5, .86, {});
+    assert.ok(low.tz > lib.PADDLE_STANCE_Z + .05, `${mode} ${w}x${h}: no step back, z=${low.tz}`);
+    assert.ok(low.ty < mid.ty - .15, `${mode} ${w}x${h}: drop too small, ${mid.ty} -> ${low.ty}`);
+    assert.ok(low.ty >= lib.PH.TABLE_Y - .31, `${mode} ${w}x${h}: bat buried at ${low.ty}`);
   }
 });
 

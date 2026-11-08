@@ -133,7 +133,7 @@ const STROKE_CONFIG = {
       coarseDt: 1 / 170, maxT: 2.2, flightBudget: 70,
       paceWeights: [0.85, 0.17], spinWeight: 7, minPastNet: 0.70,
       depthSpan: 0.50, deadZoneWeight: 5, paceScaleRange: [0.16, 4.5],
-      ownBounce: { lateralK: 0.35, depth: 0.78, aimDepthK: 0.16 },
+      ownBounce: { lateralK: 0.35, depth: 0.64, aimDepthK: 0.16 },
       warmGrid: 0.09, warmErrorMax: 0.16, warmLimit: 96,
       depthFactors: [1.0, 0.92, 0.84], damping: [1, 0.58],
       azimuthIndices: [-3, 3], azimuthStep: 0.26, initialScale: 0.65,

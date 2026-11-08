@@ -350,6 +350,22 @@ class UI {
     if (!this.captureDebug && !g.reducedMotion && !this.reducedMotion && sw.active && sw.samples.length > 1) {
       const pts = sw.samples;
       const n = pts.length;
+      /* The ribbon is drawn FROM THE BLADE, not from the raw finger: in
+       * the saturated parts of the pointer map (high arc, low drop) the
+       * blade legitimately sits away from the fingertip, and a ribbon
+       * glued to the finger showed the stroke happening in empty space
+       * next to the bat. Shifting the whole path by (blade projection -
+       * last sample) keeps the gesture's shape and puts its head, where
+       * the eye reads "now", exactly on the blade. Absurd offsets (blade
+       * clamped to the frustum edge, replay scrubs) fall back to raw. */
+      let offX = 0, offY = 0;
+      if (g.player && g.player.pos && typeof g.project === 'function') {
+        const bp = g.project(g.player.pos, {});
+        if (bp && bp.ok) {
+          const candX = (bp.x - pts[n - 1].x) * W, candY = (bp.y - pts[n - 1].y) * H;
+          if (Math.hypot(candX, candY) < Math.max(W, H) * 0.6) { offX = candX; offY = candY; }
+        }
+      }
       c.lineCap = 'round'; c.lineJoin = 'round';
       for (let i = 1; i < n; i++) {
         const t = i / (n - 1);
@@ -357,12 +373,12 @@ class UI {
         c.globalAlpha = Math.min(1, (0.07 + t * 0.5) * trailK);
         c.lineWidth = (1.5 + t * 11) * d * trailK;
         c.beginPath();
-        c.moveTo(pts[i - 1].x * W, pts[i - 1].y * H);
-        c.lineTo(pts[i].x * W, pts[i].y * H);
+        c.moveTo(pts[i - 1].x * W + offX, pts[i - 1].y * H + offY);
+        c.lineTo(pts[i].x * W + offX, pts[i].y * H + offY);
         c.stroke();
       }
       c.globalAlpha = Math.min(1, trailK);
-      const hx = pts[n - 1].x * W, hy = pts[n - 1].y * H;
+      const hx = pts[n - 1].x * W + offX, hy = pts[n - 1].y * H + offY;
       const rg = c.createRadialGradient(hx, hy, 0, hx, hy, 34 * d);
       rg.addColorStop(0, 'rgba(255,255,255,.55)'); rg.addColorStop(1, 'rgba(255,255,255,0)');
       c.fillStyle = rg; c.beginPath(); c.arc(hx, hy, 34 * d, 0, TAU); c.fill();
@@ -371,6 +387,7 @@ class UI {
         pts: sw.samples.map((p) => ({ x: p.x, y: p.y })),
         col: '#ffffff',
         fade: 1.0,
+        offX, offY,
       };
     } else if (this._lastRibbon) {
       if (this.reducedMotion) this._lastRibbon = null;
@@ -382,18 +399,19 @@ class UI {
         if (n > 1) {
           c.save();
           c.lineCap = 'round'; c.lineJoin = 'round';
+          const rbOffX = rb.offX || 0, rbOffY = rb.offY || 0;
           for (let i = 1; i < n; i++) {
             const t = i / (n - 1);
             c.strokeStyle = rb.col;
             c.globalAlpha = Math.min(1, (0.07 + t * 0.5) * rb.fade * trailK);
             c.lineWidth = (1.5 + t * 11) * d * trailK;
             c.beginPath();
-            c.moveTo(pts[i - 1].x * W, pts[i - 1].y * H);
-            c.lineTo(pts[i].x * W, pts[i].y * H);
+            c.moveTo(pts[i - 1].x * W + rbOffX, pts[i - 1].y * H + rbOffY);
+            c.lineTo(pts[i].x * W + rbOffX, pts[i].y * H + rbOffY);
             c.stroke();
           }
           c.globalAlpha = Math.min(1, rb.fade * trailK);
-          const hx = pts[n - 1].x * W, hy = pts[n - 1].y * H;
+          const hx = pts[n - 1].x * W + rbOffX, hy = pts[n - 1].y * H + rbOffY;
           const rg = c.createRadialGradient(hx, hy, 0, hx, hy, 34 * d);
           rg.addColorStop(0, rb.col + 'cc'); rg.addColorStop(1, rb.col + '00');
           c.fillStyle = rg; c.beginPath(); c.arc(hx, hy, 34 * d, 0, TAU); c.fill();

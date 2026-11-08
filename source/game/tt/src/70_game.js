@@ -3395,8 +3395,21 @@ class Game {
       quality = clamp(racket.quality * (contactCfg.sweetWeights[0] + contactCfg.sweetWeights[1] * sweet)
         * (contactCfg.timingWeights[0] + contactCfg.timingWeights[1] * timing) * tq, ...contactCfg.qualityRange);
       racket.quality = quality;
-      // One authored trajectory assist level, shared by every player.
-      const assistLvl = MATCH_RULES.trajectoryAssist;
+      /* Graded contact, not binary in/out. The trajectory assist is the
+       * thing that turns a captured ball into a good return, so it scales
+       * with how centrally the blade met the ball: centre (sweet -> 1)
+       * keeps the full authored assist, the rim of the capture zone
+       * (sweet -> 0) keeps only 30 % of it — an edge contact still returns,
+       * but crooked, weak or overhit by the raw gesture's own error, and
+       * the rescue ladder below no longer irons it out for free. Serves
+       * keep the full level: their capture contract is separate. */
+      /* Lateral archetypes are exempt: for SIDE/HOOK/FADE the solver's
+       * brush conversion IS the stroke (a horizontal drag has no vertical
+       * brush until refine builds one), so scaling its assist by contact
+       * centrality quietly turned sidespin back into topspin. */
+      const lateralStroke = ['SIDE', 'HOOK', 'FADE', 'BANANA'].includes(racket.stroke && racket.stroke.id);
+      const assistLvl = isServeStroke || lateralStroke ? MATCH_RULES.trajectoryAssist
+        : MATCH_RULES.trajectoryAssist * (0.30 + 0.70 * sweet);
       const rawSwing = V3.new(), rawNormal = V3.new();
       strokeFrame(racket, 0, 0, 1, rawSwing, rawNormal);
       const rawShotFrame = { normal: shotVec(rawNormal), vR: shotVec(rawSwing),
@@ -3404,7 +3417,8 @@ class Game {
         faceAzimuth: racket.azFace, speed: racket.vmag, rubber: { ...racket.rubber } };
       racket = enforceRacketEffort({ ...racket, normal: rawNormal, vR: rawSwing }, effortBudget);
       racket = refineRacket(contact, b.v, b.w, racket, assistLvl, quality);
-      if (racket.valid === false && !racket.intentionalOut && clamp(assistLvl, 0, 1) < 0.999) {
+      if (racket.valid === false && !racket.intentionalOut && clamp(assistLvl, 0, 1) < 0.999 &&
+          (isServeStroke || lateralStroke || sweet >= 0.5)) {
         /* Не только подача: в розыгрыше ассист 0.85 тоже мог не найти лега —
          * и игрок получал «мусорный» удар: в свою половину, в сетку с места,
          * или вообще не поперёк свайпа. Пере(решаем) с полным ассистом — он
@@ -3412,6 +3426,7 @@ class Game {
         racket = refineRacket(contact, b.v, b.w, racket, 1, quality);
       }
       if (racket && !racket.intentionalOut && clamp(assistLvl, 0, 1) < 0.999 &&
+          (isServeStroke || lateralStroke || sweet >= 0.5) &&
           !this._playerFlightLegal(contact, racket, isServeStroke)) {
         /* Пост-верификация: решатель «без повторной проверки» формально
          * valid, но мяч уходит в свою половину/в сетку — для игрока это
@@ -3985,7 +4000,11 @@ class Game {
 
     const lim = paddleLimitsFor(clamp(tz, PADDLE_LIMITS.zStepIn, PADDLE_LIMITS.zFar));
     tx = clamp(clamp(tx, -REACH_SHELL.xHard, REACH_SHELL.xHard), -lim.x, lim.x);
-    ty = clamp(clamp(ty, PH.TABLE_Y + REACH_SHELL.yLoHard, PH.TABLE_Y + REACH_SHELL.yHiHard),
+    /* The low bound is the depth-aware envelope, not the flat shell floor:
+     * over the table lim.yLo keeps the blade off the surface, behind the
+     * end line it opens downward so a low pointer can drop the bat below
+     * tabletop height (the solver's mirrored arc) instead of parking it. */
+    ty = clamp(clamp(ty, PH.TABLE_Y + lim.yLo, PH.TABLE_Y + REACH_SHELL.yHiHard),
       PH.TABLE_Y + lim.yLo, PH.TABLE_Y + lim.yHi);
     tz = clamp(tz, PADDLE_LIMITS.zStepIn, PADDLE_LIMITS.zFar);
     if (held) {
@@ -5056,12 +5075,18 @@ class Game {
     if ((b.live || this.state === GS.SERVE_READY) && onTable(b.p.x, b.p.z) && b.p.y > TY - 0.02) {
       S.blob(R, b.p.x, b.p.y, b.p.z, TY, 0.085, 0.40, 1);
     }
-    /* Ракетки: одно пятно, только когда ракетка над столом. Тень за его
-     * пределами игроку ничего не сообщает, а кадр заливает. */
-    const pp = this.player.pos;
-    if (onTable(pp.x, pp.z)) S.blob(R, pp.x, pp.y, pp.z, TY, 0.16, 0.33, 1.1);
-    const ap = this.aiPaddle.pos;
-    if (onTable(ap.x, ap.z)) S.blob(R, ap.x, ap.y, ap.z, TY, 0.15, 0.27, 1.15);
+    /* Ракетки: пятно на столе, когда ракетка над ним, и пятно на полу за
+     * его пределами. Раньше за краем стола тени не было вовсе — а это
+     * ровно та фаза (вынос вперёд от стойки и возврат), где высота ракетки
+     * глазами не читается и тень нужнее всего. У пола своё, более пологое
+     * затухание: с высоты ~1 м табличный экспоненциальный спад давал
+     * невидимые 4 % альфы. */
+    const paddleShadow = (pos, radius, strength, stretch) => {
+      if (onTable(pos.x, pos.z)) S.blob(R, pos.x, pos.y, pos.z, TY, radius, strength, stretch);
+      else S.blob(R, pos.x, pos.y, pos.z, 0, radius * 1.5, strength, stretch, 1.05);
+    };
+    paddleShadow(this.player.pos, 0.16, 0.33, 1.1);
+    paddleShadow(this.aiPaddle.pos, 0.15, 0.27, 1.15);
   }
 
   /** Short haptic pulse on touch devices. Silent no-op everywhere else. */

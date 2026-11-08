@@ -231,6 +231,19 @@ function pointerBladeSolve(rig, aspect, px, py, opts) {
   const arcT = smoothstep(0, 0.35, excess);
   let z = stance - rs.arcMaxFwd * arcT;
   let exact = ySt >= loSoft - 1e-9 && ySt <= hiSoft + 1e-9;
+  /* The same arc, mirrored, below the floor — added after playtesting
+   * showed the bat simply STOPPED at the soft floor while the finger (and
+   * its drawn ribbon) kept going: a dead zone reads as broken input.
+   * Below the floor the arm steps BACK and drops: behind the end line the
+   * blade may legally sink below tabletop height (nothing to hit there),
+   * down to 30 cm under the surface at the far stance. The descent is a
+   * smoothstep too, so there is no second kink at the join either. */
+  const dropExcess = Math.max(0, loSoft - ySt);
+  const dropT = smoothstep(0, 0.50, dropExcess);
+  if (dropT > 0) {
+    z = stance + (PADDLE_LIMITS.zFar - stance) * dropT;
+    exact = false;
+  }
   const w2 = _pbsW4 || (_pbsW4 = {});
   unprojectToPlane(rig, aspect, px, py, z, w2);
   /* Height comes from the STANCE ray, not the forwarded plane: at a nearer
@@ -239,7 +252,9 @@ function pointerBladeSolve(rig, aspect, px, py, opts) {
    * never lower the bat. Laterally the blade stays on the ray at its new
    * depth (w2.x); vertically it is already in the saturated zone, where
    * the pointer contract is "as high as the arm reaches", not pixel-exact. */
-  o.ty = softSat(ySt, loSoft, hiSoft, loHard, hiHard);
+  o.ty = dropT > 0
+    ? Math.max(PH.TABLE_Y - 0.30, lerp(loSoft, PH.TABLE_Y - 0.30, dropT) - dropExcess * 0.10)
+    : softSat(ySt, loSoft, hiSoft, loHard, hiHard);
   if (!Number.isFinite(o.ty)) o.ty = PADDLE_HOME.y;
   o.exact = exact;
   o.tx = softSat(w2.x, -rs.xSoft, rs.xSoft, -rs.xHard, rs.xHard);

@@ -403,11 +403,17 @@ class OpponentAI {
      * У WTF errPress — АБСОЛЮТНЫЙ процент под давлением (1.7 % → 1.9 %),
      * иначе шкала уехала бы в 3.6 % и «почти идеальный» перестал бы им быть. */
     const inSpeed = V3.len(game.ball.v);
-    const fastAdd = clamp((inSpeed - 14) / 6, 0, 1) * 0.05;
+    /* Earned pressure: a fast, low or wide incoming ball is harder to
+     * return than a soft central one, and the bot's error rate should say
+     * so — a clean player shot must be able to FORCE a fault, not just
+     * wait for the level's flat coin to come up. */
+    const fastAdd = clamp((inSpeed - 10) / 8, 0, 1) * 0.06;
+    const lowAdd = clamp((PH.TABLE_Y + 0.30 - game.ball.p.y) / 0.30, 0, 1) * 0.04;
+    const wideAdd = clamp((Math.abs(game.ball.p.x) - 0.45) / 0.30, 0, 1) * 0.04;
     const shortAdd = this._lastShort ? 0.02 : 0;
     const streakAdd = clamp((this.aggrStreak - 2) * 0.015, 0, 0.04);
     const base = L.errPressAbs ? lerp(L.errBase, L.errPress, pressure) : L.errBase + L.errPress * pressure;
-    const rate = clamp((base + fastAdd + shortAdd + streakAdd) / Math.max(this.handicap, 0.70), 0, 0.85);
+    const rate = clamp((base + fastAdd + lowAdd + wideAdd + shortAdd + streakAdd) / Math.max(this.handicap, 0.70), 0, 0.85);
     if (this._rand() >= rate) return racket;
     const b = game.ball;
     const isFault = (rk) => {
@@ -419,8 +425,10 @@ class OpponentAI {
       return o.hitNet || !o.landed || o.landed.z * rk.side > 0 ||
         Math.abs(o.landed.z) > PH.T_HALF_LEN + 0.005 || Math.abs(o.landed.x) > PH.T_HALF_WID + 0.005;
     };
-    /* Честная монетка: половина ошибок — в сетку, половина — длинные. */
-    const kind = this._rand() < 0.50 ? 'net' : 'long';
+    /* Не честная монетка: сетка — самая «пустая» ошибка (розыгрыш просто
+     * обрывается), поэтому её доля ниже половины; чаще бот перебивает
+     * длинно, где мяч хотя бы летит через стол. */
+    const kind = this._rand() < 0.35 ? 'net' : 'long';
     for (let step = 1; step <= 5; step++) {
       let bad = Object.assign({}, racket);
       if (kind === 'net') {
