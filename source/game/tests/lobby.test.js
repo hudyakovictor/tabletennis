@@ -76,6 +76,23 @@ function fixture(width = 390, height = 844, dpr = 2) {
   return { ...lib, g, R, scene, canvas, window, document, events, images, messages, draws, presented, controller, prepare, launch, step, gameplay };
 }
 
+test('player paddle on touch: hidden by default, visible only by explicit opt-in', () => {
+  const f = fixture(), g = f.g;
+  g.state = f.GS.RALLY;
+  g.ui.inputMode = 'touch';
+  assert.equal(g.settings.showTouchPaddle, undefined);
+  assert.equal(g.playerPaddleVisible, false, 'touch default hides the bat so it cannot cover the court');
+  g.settings.showTouchPaddle = true;
+  assert.equal(g.playerPaddleVisible, true, 'the settings opt-in shows it again');
+  g.settings.showTouchPaddle = false;
+  g.ui.inputMode = 'mouse';
+  assert.equal(g.playerPaddleVisible, true, 'desktop is unchanged');
+  g.state = f.GS.MENU; g.ui.inputMode = 'touch';
+  assert.equal(g.playerPaddleVisible, true, 'the menu still shows the bat');
+  g.settings.showPlayerPaddle = false; g.state = f.GS.RALLY; g.ui.inputMode = 'mouse';
+  assert.equal(g.playerPaddleVisible, false, 'the master switch still wins');
+});
+
 test('lobbyReady requires settled textures and a presented prepared scene; waiting bots cannot rally', () => {
   const f = fixture(), identity = f.g.ball, before = f.gameplay();
   f.scene.panoramaSettled = f.scene.asphaltSettled = false;

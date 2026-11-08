@@ -119,6 +119,7 @@ class Game {
       adaptive: true,
       showDebug: false,
       showPlayerPaddle: true,
+      showTouchPaddle: false,   // mobile: bat hidden unless the player opts in (settings)
       slowmoOnBigShots: false,          // slow-mo в момент удара деформирует твой же тайминг; ручной режим — в настройках
       targetScore: 11,
       spinBias: 'norm',
@@ -1223,8 +1224,17 @@ class Game {
 
   /* --------------------------- training ---------------------------- */
   get playerPaddleVisible() {
-    return this.settings.showPlayerPaddle !== false &&
-      (this.state === GS.MENU || (this.ui ? this.ui.inputMode !== 'touch' : this.pointerFine !== false));
+    /* On touch the bat is hidden by default: it sits low over the player's
+     * own end and covers exactly the court the finger is reading. It stays
+     * an opt-in (settings -> showTouchPaddle, host toggle "Ракетка на
+     * телефоне"), never a forced presence and never a forced absence.
+     * Physics, capture and the ribbon do not depend on this flag: the
+     * invisible bat still plays, and its contact shadow stays drawn as
+     * the one positional cue. Desktop (fine pointer) is unchanged. */
+    if (this.settings.showPlayerPaddle === false) return false;
+    if (this.state === GS.MENU) return true;
+    if (this.settings.showTouchPaddle === true) return true;
+    return this.ui ? this.ui.inputMode !== 'touch' : this.pointerFine !== false;
   }
   startTraining(options = {}) {
     this.lobbyScene?.stop();

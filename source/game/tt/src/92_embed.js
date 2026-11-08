@@ -549,6 +549,7 @@ const showTip = (text) => { if (text) tip = { text, until: g.time + 4.6 }; };
         if (Number.isFinite(levels.master)) g.settings.volume = levels.master;
       }
       if (typeof m.haptics === 'boolean') g.settings.haptics = m.haptics;
+      if (typeof m.showPaddle === 'boolean') g.settings.showTouchPaddle = m.showPaddle;
       if (typeof m.hint === 'boolean') { autoHint = false; g.hintRequested = m.hint; }
       if (typeof m.motionOff === 'boolean') g.motionOff = m.motionOff;
       g.reducedMotion = !!g.motionOff || !!(g.motionQuery && g.motionQuery.matches);

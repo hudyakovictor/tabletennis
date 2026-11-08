@@ -71,6 +71,7 @@ const GameHost = {
     if (typeof Sfx !== 'undefined') Sfx.sync();
     this.send('settings', { quality: this._recoveryQuality || S.quality, motionOff: !!S.rm,
       sound: S.sfx !== false, haptics: S.vibro !== false, hint: S.hint !== false, debug: this.debug,
+      showPaddle: S.showPaddle === true,
       audioLevels: repairAudioLevels(S.audioLevels, S.volume), calibrations: Object.fromEntries(Object.entries(repairCalibrationPreferences(S.cal)).filter(([key]) =>
         ['camHeight', 'camZoom', 'camSway', 'fingerTrail', 'ballSize', 'trailLen', 'tableGlow', 'hintRadius', 'hintGlow', 'slowmoDepth'].includes(key))),
       missShots: { on: S.missShots === true, half: S.missShotHalf } });
