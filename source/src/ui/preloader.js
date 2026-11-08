@@ -33,21 +33,17 @@ const Preloader = {
     if (typeof GameHost.on === 'function') s.cleanups.push(GameHost.on(m => this.message(s, m)));
     const retryLoad = () => { GameHost.reload(); this.mount(); };
     retry.addEventListener('click', retryLoad); s.cleanups.push(() => retry.removeEventListener('click', retryLoad));
-    const ready = () => { if (!s.alive) return; s.loaded++; this.progress(s, Math.min(99, Math.floor(s.loaded / s.total * 100))); this.maybeStart(s); };
+    const ready = () => { if (!s.alive) return; s.loaded++; this.maybeStart(s); };
     const keys = ['preloader-ball-intro', 'preloader-ball-spin', 'preloader-paddle', 'preloader-burst'];
-    (async () => {
-      for (const key of keys) {
-        if (!s.alive) return;
-        const image = new Image(); image.src = ILL[key] || '';
-        try { await image.decode(); } catch (e) { this.error(s); return; }
-        if (!s.alive) return;
-        ready();
-        await new Promise(resolve => setTimeout(resolve, 140));
-      }
+    Promise.all(keys.map(key => {
+      const image = new Image(); image.src = ILL[key] || '';
+      return image.decode().then(() => { ready(); return image; });
+    })).then(() => {
       if (!s.alive) return;
       s.paddle.src = ILL['preloader-paddle']; s.burst.src = ILL['preloader-burst'];
       root.classList.add('has-sprites');
-    })().catch(() => this.error(s));
+    }).catch(() => this.error(s));
+    this.animateProgress(s, 99, 1200);
     document.fonts.ready.then(ready, () => this.error(s));
     this.later(s, () => { s.minElapsed = true; this.maybeStart(s); }, 900);
     // Let the CSS arrival paint before parsing/compiling the embedded engine.
@@ -84,6 +80,21 @@ const Preloader = {
     s.sheet.dataset.frame = `${sheet}:${index}`;
     s.sheet.style.backgroundPosition = `${index % cols * 100 / (cols - 1)}% ${Math.floor(index / cols) * 100 / 3}%`;
   },
+  animateProgress(s, target, duration) {
+    const start = s.displayedProgress || 0, begin = performance.now();
+    const tick = (now) => {
+      if (!s.alive) return;
+      const p = Math.min(1, (now - begin) / duration);
+      const eased = 1 - (1 - p) * (1 - p);
+      s.displayedProgress = start + (target - start) * eased;
+      s.arc.style.strokeDashoffset = `${477.522 * (1 - s.displayedProgress / 100)}`;
+      s.pct.innerHTML = `${Math.round(s.displayedProgress)}<span>%</span>`;
+      s.readout.setAttribute('aria-valuenow', String(Math.round(s.displayedProgress)));
+      if (p < 1) requestAnimationFrame(tick);
+      else s.displayedProgress = target;
+    };
+    requestAnimationFrame(tick);
+  },
   progress(s, value) {
     s.arc.style.strokeDashoffset = `${477.522 * (1 - value / 100)}`;
     s.pct.innerHTML = `${value}<span>%</span>`; s.readout.setAttribute('aria-valuenow', String(value));
@@ -98,7 +109,7 @@ const Preloader = {
   maybeStart(s) {
     if (!s.alive || s.phase !== 'loading' || !s.minElapsed || s.loaded < s.total || !s.sceneReady || document.hidden) return;
     if (Router.busy) { this.later(s, () => this.maybeStart(s), 60); return; }
-    this.progress(s, 100);
+    s.displayedProgress = 100; this.progress(s, 100);
     if (document.body.classList.contains('rm')) this.reveal(s, true);
     else this.strike(s);
   },
