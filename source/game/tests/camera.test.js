@@ -328,6 +328,30 @@ test('lifting across the height boundary does not abruptly jump the blade toward
   }
 });
 
+test('lifting the pointer is one smooth arc: up first, then gradually forward, never a depth jump', () => {
+  /* Regression for the player's complaint: the bat rose vertically, then at
+   * one pointer row lurched toward the net (measured 0.10-0.14 m of depth
+   * for a 0.001 screen step on the LOW preset, where the camera ray is
+   * almost parallel to the depth planes). The map must be continuous in
+   * both axes, and the pointer ALONE may spend at most the authored arc —
+   * stepping in to the net is the ball-driven footwork's job, not the top
+   * of the screen's. */
+  for (const [w, h] of VIEWPORTS) for (const mode of lib.CAMERA_ORDER) {
+    const aspect = w / h, rig = lib.cameraRigFor(mode, null, aspect);
+    let prev = lib.pointerBladeSolve(rig, aspect, .5, .86, {});
+    for (let py = .859; py >= .05; py -= .001) {
+      const t = lib.pointerBladeSolve(rig, aspect, .5, py, {});
+      assert.ok(Math.abs(t.tz - prev.tz) <= .01, `${mode} ${w}x${h} py=${py.toFixed(3)}: depth step ${prev.tz} -> ${t.tz}`);
+      assert.ok(Math.abs(t.ty - prev.ty) <= .01, `${mode} ${w}x${h} py=${py.toFixed(3)}: height step ${prev.ty} -> ${t.ty}`);
+      assert.ok(t.ty >= prev.ty - 1e-9, `${mode} ${w}x${h} py=${py.toFixed(3)}: lifting the pointer lowered the bat`);
+      assert.ok(t.tz <= prev.tz + 1e-9, `${mode} ${w}x${h} py=${py.toFixed(3)}: lifting the pointer moved the bat back`);
+      assert.ok(t.tz >= lib.PADDLE_STANCE_Z - lib.REACH_SHELL.arcMaxFwd - 1e-9,
+        `${mode} ${w}x${h} py=${py.toFixed(3)}: pointer alone lunged to z=${t.tz}`);
+      prev = t;
+    }
+  }
+});
+
 test('reusing the pointer solve buffer does not retain a previous forced depth or pinned side', () => {
   const aspect = 1280 / 760, rig = lib.cameraRigFor('BROADCAST', null, aspect), out = {};
   lib.pointerBladeSolve(rig, aspect, .99, .5, { out, forceZ: 1.1 });

@@ -308,25 +308,54 @@ function paddleContactPose(ballP, racket, options = {}) {
   const requestedRoll = Number.isFinite(options.roll) ? options.roll :
     (options.hand === 'left' ? -1 : 1) * (options.grip === 'penhold' ? Math.PI - .08 : .28);
   const point = V3.addScaled(V3.new(), ballP, normal, -PH.R);
-  let best = null, bestCost = Infinity;
-  for (const roll of [requestedRoll, Math.PI / 2, -Math.PI / 2]) {
+  /* Roll candidates stay NEAR the wrist the game is actually drawing
+   * (±0.7 rad). The old fallback list [requested, +90°, −90°] rescued
+   * table clearance by rotating the blade a quarter turn — the handle
+   * pointed sideways and the bat read as "edge-on" (торцом) for a frame —
+   * and when even that failed the pose came back null and tryPlayerHit
+   * threw away a contact the CCD had already made (measured: 8 % of a
+   * low-ball grid null, 43 % quarter-turned). A small roll adjustment plus
+   * a denser rubber grid finds a legal pose in almost every such case;
+   * what remains is lifted millimetres, never rejected (see below). */
+  const rollOffsets = [0, -.35, .35, -.7, .7];
+  const localXs = [-.068, -.034, 0, .034, .068];
+  const localYs = [.07, .035, .012, -.03, -.07];
+  let best = null, bestCost = Infinity, leastBad = null, leastBadClearance = -Infinity;
+  for (const rollOffset of rollOffsets) {
+    const roll = paddleAngleDelta(0, requestedRoll + rollOffset);
     const face = V3.mul(V3.new(), normal, activeFace), q = paddlePoseQuaternion(face, roll);
     const matrix = M4.compose(M4.create(), { x: 0, y: 0, z: 0 }, q, { x: 1, y: 1, z: 1 });
-    for (const [x, y] of [[0, .012], [0, -.07], [0, .07], [-.068, 0], [.068, 0]]) {
+    for (const x of localXs) for (const y of localYs) {
       const localPoint = { x, y, z: activeFace * .010 };
       const offset = V3.new(matrix[0] * x + matrix[4] * y + matrix[8] * localPoint.z,
         matrix[1] * x + matrix[5] * y + matrix[9] * localPoint.z,
         matrix[2] * x + matrix[6] * y + matrix[10] * localPoint.z);
       const pos = V3.sub(V3.new(), point, offset);
       const clearance = paddleTableClearance(pos, normal, roll, PH.TABLE_Y, PH.T_HALF_WID, PH.T_HALF_LEN, q);
+      const candidate = { pos, normal: V3.clone(normal), q, roll, point, localPoint, activeFace, clearance };
+      if (clearance > leastBadClearance) { leastBadClearance = clearance; leastBad = candidate; }
       if (clearance < -.001 - 1e-9) continue;
-      const cost = Math.abs(paddleAngleDelta(requestedRoll, roll)) * .04 + Math.hypot(x, y - .012);
+      /* Roll is expensive in the cost: a quarter-turn rescue must never
+       * beat a slightly off-centre contact with the wrist intact. */
+      const cost = Math.abs(paddleAngleDelta(requestedRoll, roll)) * .30 + Math.hypot(x, y - .012);
       if (cost >= bestCost) continue;
       bestCost = cost;
-      best = { pos, normal: V3.clone(normal), q, roll, point, localPoint, activeFace, clearance };
+      best = candidate;
     }
   }
-  return best;
+  if (best) return best;
+  if (!leastBad) return null;
+  /* No candidate clears the tabletop: lift the least-bad pose straight up
+   * until it does (bounded, and reported via `lifted`). The rubber point
+   * leaves the ball centre by that lift — millimetres to ~2 cm at the
+   * extreme — which is still a contact on the drawn blade, while returning
+   * null made the whole stroke vanish after the capture had fired. */
+  const lift = clamp(-.001 - leastBadClearance, 0, .05);
+  leastBad.pos.y += lift;
+  leastBad.clearance = paddleTableClearance(leastBad.pos, leastBad.normal, leastBad.roll,
+    PH.TABLE_Y, PH.T_HALF_WID, PH.T_HALF_LEN, leastBad.q);
+  leastBad.lifted = lift;
+  return leastBad;
 }
 
 /** Time-based tactical reads. frame % 4 would read at only 7.5 Hz on a

@@ -107,7 +107,13 @@ function quantizeDepth(z) {
  * blade the same physical volume.
  */
 function paddleLimitsFor(z) {
-  const zq = quantizeDepth(z);
+  /* Continuous, not quantised: this envelope clamps the blade target every
+   * frame, so centimetre steps in the box became centimetre steps in the
+   * reachable height while the blade drifted forward — a staircase the
+   * player could feel. Callers that need a named plane (depth search)
+   * quantise explicitly; the envelope itself is a smooth function of z. */
+  const zq = clamp(Number.isFinite(z) ? z : PADDLE_STANCE_Z,
+    PADDLE_LIMITS.zStepIn, PADDLE_LIMITS.zFar);
   const t = clamp((PADDLE_STANCE_Z - zq) / (PADDLE_STANCE_Z - PADDLE_LIMITS.zStepIn), 0, 1);
   const openLo = PADDLE_LIMITS.yLo - 0.14 * t;
   /* The blade may not pass through the playing surface — but only while it
@@ -188,13 +194,28 @@ function pointerBladeSolve(rig, aspect, px, py, opts) {
     o.reachFwd = 0; o.exact = true; o.zByPointer = false; return o;
   }
   const stanceLimits = limFor(stance);
-  // Meet the boundary continuously. Switching to an already-saturated
-  // height here made a one-pixel lift jump the depth by several centimetres.
-  const boundaryY = clamp(_pbsW.y, PH.TABLE_Y + Math.max(rs.yLoHard, stanceLimits.yLo),
-    PH.TABLE_Y + Math.min(rs.yHiHard, stanceLimits.yHi));
-  /* (3) bisection: найти z, где луч даёт высоту, допустимую на ЭТОЙ глубине
-   * (лимита низа над столом/за краем и потолка руки). y(z) монотонно растёт
-   * с z (глубже стоишь — выше на экране та же точка). */
+  /* (3) Высота и глубина — ОДНА гладкая дуга, а не две жёсткие границы.
+   *
+   * Прежняя схема держала ракетку на плоскости стойки, пока луч не упирался
+   * в потолок руки, а дальше биссекцией искала глубину, где тот же луч снова
+   * даёт допустимую высоту. На низкой камере луч почти параллелен плоскостям
+   * глубины (dy/dz ≈ 0.015–0.25 м на метр), поэтому поиск был плохо обусловлен:
+   * замер на LOW/портрете дал скачок глубины 0.10 м за шаг указателя 0.001
+   * высоты экрана, а за пределом диапазона ракетка «парковалась» сразу у сетки
+   * (zStepIn). Игрок видел ровно то, на что жаловался: сначала ракетка просто
+   * поднимается, потом в одной точке резко уходит вперёд.
+   *
+   * Теперь: внутри рабочей зоны карта точная (та же точка на плоскости
+   * стойки); выше мягкого потолка высота плавно насыщается к жёсткому
+   * (softSat), а ИЗБЫТОК подъёма над мягким потолком гладкой smoothstep-дугой
+   * превращает в вынос вперёд — не более arcMaxFwd от указателя одного.
+   * Дальше к сетке ракетку ведут только мяч (шаговый ассист/forceZ ниже),
+   * а не верх экрана. Производные непрерывны: нет точки, где «вверх»
+   * выключается и «вперёд» включается. */
+  const loSoft = PH.TABLE_Y + Math.max(rs.yLoSoft, stanceLimits.yLo);
+  const loHard = PH.TABLE_Y + Math.max(rs.yLoHard, stanceLimits.yLo);
+  const hiSoft = PH.TABLE_Y + Math.min(rs.yHiSoft, stanceLimits.yHi);
+  const hiHard = PH.TABLE_Y + Math.min(rs.yHiHard, stanceLimits.yHi);
   const yAt = (z) => { const w = _pbsW2 || (_pbsW2 = {}); return unprojectToPlane(rig, aspect, px, py, z, w) ? w.y : NaN; };
   const inShell = (z, y) => {
     const lim = limFor(z);
@@ -202,44 +223,25 @@ function pointerBladeSolve(rig, aspect, px, py, opts) {
     const hi = Math.min(PH.TABLE_Y + rs.yHiHard, PH.TABLE_Y + lim.yHi);
     return y >= lo - 1e-6 && y <= hi + 1e-6;
   };
-  let z = stance, exact = true;
-  const ySt = yAt(stance);
-  o.exact = true;
-  if (!inShell(stance, ySt)) {
-    /* биссекция по z: y монотонно растёт с z */
-    let a = PADDLE_LIMITS.zStepIn, b = PADDLE_LIMITS.zFar;
-    const ya = yAt(a), yb = yAt(b);
-    const wantY = clamp(boundaryY, Math.min(ya, yb), Math.max(ya, yb));
-    for (let i = 0; i < 24; i++) {
-      const mid = 0.5 * (a + b), ym = yAt(mid);
-      if (ym > wantY) b = mid; else a = mid;
-    }
-    z = 0.5 * (a + b);
-    const yZ = yAt(z), limZ = limFor(z);
-    const lo = PH.TABLE_Y + Math.max(rs.yLoHard, limZ.yLo);
-    const hi = Math.min(PH.TABLE_Y + rs.yHiHard, PH.TABLE_Y + limZ.yHi);
-    exact = yZ >= lo - 5e-3 && yZ <= hi + 5e-3;
-    if (!exact) {
-      /* луч не проходит оболочку нигде — парковка на ближайшей физической
-       * точке: потолок/пол при максимально возможной глубине */
-      const over = yZ > hi;
-      z = over ? PADDLE_LIMITS.zStepIn : PADDLE_LIMITS.zFar;
-      const limP = limFor(z);
-      const yP = yAt(z);
-      const loP = PH.TABLE_Y + Math.max(rs.yLoHard, limP.yLo);
-      const hiP = Math.min(PH.TABLE_Y + rs.yHiHard, PH.TABLE_Y + limP.yHi);
-      o.ty = clamp(yP, loP, hiP);
-      o.exact = false;
-    }
-  }
-  if (exact) {
-    /* точка на выбранной глубине */
-    const w = _pbsW3 || (_pbsW3 = {});
-    unprojectToPlane(rig, aspect, px, py, z, w);
-    o.ty = w.y;
-  }
+  const ySt = _pbsW.y;
+  const excess = Math.max(0, ySt - hiSoft);
+  /* 0.35 m of extra ray height spends the whole authored arc; the first
+   * centimetres above the soft cap cost almost no depth (smoothstep slope
+   * is 0 at the join), so ordinary high balls stay a pure lift. */
+  const arcT = smoothstep(0, 0.35, excess);
+  let z = stance - rs.arcMaxFwd * arcT;
+  let exact = ySt >= loSoft - 1e-9 && ySt <= hiSoft + 1e-9;
   const w2 = _pbsW4 || (_pbsW4 = {});
   unprojectToPlane(rig, aspect, px, py, z, w2);
+  /* Height comes from the STANCE ray, not the forwarded plane: at a nearer
+   * plane the same ray sits lower, so taking ty there made the bat dip by
+   * millimetres exactly where the arc begins — lifting the pointer must
+   * never lower the bat. Laterally the blade stays on the ray at its new
+   * depth (w2.x); vertically it is already in the saturated zone, where
+   * the pointer contract is "as high as the arm reaches", not pixel-exact. */
+  o.ty = softSat(ySt, loSoft, hiSoft, loHard, hiHard);
+  if (!Number.isFinite(o.ty)) o.ty = PADDLE_HOME.y;
+  o.exact = exact;
   o.tx = softSat(w2.x, -rs.xSoft, rs.xSoft, -rs.xHard, rs.xHard);
   /* край по x — зажим руки: курсор ушёл за плечо, клинок на пределе пиннится.
    * Это честная граница, а не расхождение — помечаем как пин-зону. */

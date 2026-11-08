@@ -3853,13 +3853,16 @@ class Game {
     this._footZ = expSmooth(Number.isFinite(this._footZ) ? this._footZ : PADDLE_STANCE_Z,
       wantFootZ, pressFoot ? 24 : shortBall ? 14 : 11, dt);
 
+    /* _footZ is already an expSmooth-ed continuous value; quantising it to
+     * centimetres here reintroduced a staircase target (30 Hz prediction
+     * reads x 1 cm steps) under a tracker that faithfully follows steps. */
     const zFootArg = (pressFoot || shortBall ||
       (MATCH_RULES.autoFootwork && canReachShort && this._footZ < PADDLE_STANCE_Z - 0.02))
-      ? quantizeDepth(this._footZ) : undefined;
+      ? this._footZ : undefined;
     /* Forcing the depth is only safe for a ball this press was stamped for:
      * the point stays on the pointer ray (under the finger), only Z follows
      * the physical ball instead of the camera's hand-box. */
-    const forceZ = pressFoot && Number.isFinite(this._footZ) ? quantizeDepth(this._footZ) : undefined;
+    const forceZ = pressFoot && Number.isFinite(this._footZ) ? this._footZ : undefined;
     /* The solver's 5th argument is an OPTIONS object (`out`, `zHint`, `zFoot`),
      * not a result buffer: the old six-argument call passed `_ptTarget` as
      * `opts` and `zFoot` as an ignored 6th argument, so auto-footwork never
@@ -3894,8 +3897,15 @@ class Game {
     // Keep the dedicated serve animation: one pull-back during ascent and
     // one forward stroke during descent. Both sides of the apex have the
     // same offset; contact ends this path, with no animated return afterwards.
+    /* One owner of the blade at a time: while the player's own hand is down
+     * and drawing the serve stroke, the scripted toss animation (ball
+     * tracking + pull-back) must not ALSO drive the target - two drivers
+     * summed into one target read as the bat making the movement twice,
+     * once on its own and once under the finger. The animation owns the
+     * idle toss; the hand owns the stroke. */
     const serveSlide = this.state === GS.SERVE_TOSS && this.server === 1 &&
-      this.ball.lastHitBy === 0 && this.recenterT <= 0;
+      this.ball.lastHitBy === 0 && this.recenterT <= 0 &&
+      !(this.pointerDown && this.swipe && this.swipe.active);
     if (serveSlide) {
       const b = this.ball, windup = STROKE_CONFIG.serve.windup, tracking = STROKE_CONFIG.serve.tracking;
       const startY = this.tossStartY || PH.TABLE_Y + STROKE_CONFIG.serve.toss.height;
@@ -4036,7 +4046,19 @@ class Game {
       arcSens: this.settings.arcSens ?? 1,
     }, clamp(Math.max(intent.releaseSpeed, intent.peakSpeed * cfg.speed.peakK) / cfg.speed.inputScale, 0, cfg.speed.powerMax)).id : null;
     if (intent && this.followThrough) this.followThrough.active = false;
-    const wrist = playerWristPose(pad.pos, pad.vel, this.settings.hand, {
+    /* The wrist pose reads blade velocity, but raw per-frame velocity is
+     * (displacement / dt): one clearance lift, one depth step or one short
+     * frame turns into a one-frame velocity spike, and the pose drivers
+     * (vz->pitch, vx->roll) faithfully twitch the face with it. A ~50 ms
+     * low-pass keeps genuine swing velocity (a real stroke lasts 150+ ms)
+     * and drops single-frame spikes. Physics keeps the unsmoothed pad.vel;
+     * only the pose drivers are filtered. */
+    const wv = this._wristVel || (this._wristVel = V3.new());
+    const vk = 1 - Math.exp(-20 * Math.max(dt, 1e-4));
+    wv.x += (clamp(pad.vel.x || 0, -7, 7) - wv.x) * vk;
+    wv.y += (clamp(pad.vel.y || 0, -4, 4) - wv.y) * vk;
+    wv.z += (clamp(pad.vel.z || 0, -5, 5) - wv.z) * vk;
+    const wrist = playerWristPose(pad.pos, wv, this.settings.hand, {
       grip: this.settings.grip,
       forehand: pad.forehand,
       stroke: intentType || 'DRIVE',

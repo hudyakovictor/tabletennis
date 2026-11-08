@@ -62,6 +62,25 @@ for (const grip of ['shakehand', 'penhold']) for (const hand of ['right', 'left'
   });
 }
 
+test('a low contact over the table is never rejected and never quarter-turns the blade', () => {
+  /* Regression grid: the old candidate list [roll, +90 deg, -90 deg] came
+   * back null for 8 % of these poses (tryPlayerHit then discarded a contact
+   * the capture had already made — "the bat just misses") and rotated the
+   * blade a quarter turn for 43 % of them ("the bat turns edge-on"). */
+  for (const ny of [-.8, -.4, 0, .4, .8]) for (const dy of [.01, .03, .06, .1])
+    for (const z of [.35, .6, .9, 1.2, 1.37]) for (const x of [-.7, 0, .7])
+      for (const roll of [.28, Math.PI - .08]) {
+        const ball = V3.new(x, lib.PH.TABLE_Y + dy, z);
+        const normal = V3.norm(V3.new(), V3.new(.1, ny, -1));
+        const pose = lib.paddleContactPose(ball, { normal }, { grip: 'shakehand', hand: 'right', forehand: true, roll });
+        assert.ok(pose, `no pose for ny=${ny} y=${dy} z=${z} x=${x} roll=${roll}`);
+        const turned = Math.abs(Math.atan2(Math.sin(pose.roll - roll), Math.cos(pose.roll - roll)));
+        assert.ok(turned <= .71, `blade turned ${turned} rad for ny=${ny} y=${dy} z=${z}`);
+        assert.ok(pose.clearance >= -.0011, `pose still under the table: ${pose.clearance}`);
+        if (pose.lifted) assert.ok(pose.lifted <= .05, `lift ${pose.lifted} is not a millimetre fix`);
+      }
+});
+
 test('motion at equal timestamps is identical at 30, 60, 120 and 144 FPS', () => {
   for (const grip of ['shakehand', 'penhold']) for (const stroke of ['LOOP', 'CHOP', 'BLOCK']) {
     const ready = { yaw: .1, pitch: -.15, roll: .28 };
