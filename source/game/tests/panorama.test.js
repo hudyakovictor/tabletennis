@@ -5,11 +5,11 @@ const { load } = require('./helpers.cjs');
 const {
   STREET_COURT, streetCourtEdgeRadius, streetCourtGroundUV,
   makeStreetCourtFloor, makeStreetCourtShell, makeStreetCourtMarking,
-  TABLE_GROUND_SHADOW, tableGroundShadowAlpha, PH, Scene,
+  TABLE_GROUND_SHADOW, tableGroundShadowAlpha, PH, Scene, M4, V3, Q,
 } = load(['10_math.js', '20_gl.js', '30_physics.js', '60_scene.js'], [
   'STREET_COURT', 'streetCourtEdgeRadius', 'streetCourtGroundUV',
   'makeStreetCourtFloor', 'makeStreetCourtShell', 'makeStreetCourtMarking',
-  'TABLE_GROUND_SHADOW', 'tableGroundShadowAlpha', 'PH', 'Scene',
+  'TABLE_GROUND_SHADOW', 'tableGroundShadowAlpha', 'PH', 'Scene', 'M4', 'V3', 'Q',
 ]);
 const near = (a, b, tolerance = 1e-5) => assert.ok(Math.abs(a - b) < tolerance, `${a} != ${b}`);
 
@@ -81,6 +81,27 @@ test('table shade has a broad tabletop silhouette, four contact patches and soft
   }
   assert.ok(shadow(1.2, 0) < shadow(0.7, 0), 'penumbra falls away from the table');
   assert.ok(shadow(s.width / 2, s.depth / 2) < 0.01, 'transparent at texture edge');
+});
+
+test('paddle contact shadow stays readable at playing heights and shrinks as the bat drops', () => {
+  /* Playtest regression: a bat over the table showed no shadow at all,
+   * so its height was unreadable. Scene.blob must keep a clearly visible
+   * opacity for the paddle gauge parameters at contact height and at
+   * full lift, and the low blob must be the smaller, darker one. */
+  const s = Object.create(Scene.prototype);
+  s.mesh = { quad: 'quad' };
+  s._shadowMat = {};
+  s._sm = M4.create(); s._sp = V3.new(); s._sq = Q.new(); s._ss = V3.new();
+  const draws = [];
+  const R = { draw: (mesh, matrix, mat) => draws.push({ mesh, opacity: mat.opacity, sx: s._ss.x }) };
+  const TY = 0.76;
+  s.blob(R, 0, TY + 0.20, 0, TY, 0.15, 0.55, 1.1, 0.9, 0.9);   // contact height
+  s.blob(R, 0, TY + 0.70, 0, TY, 0.15, 0.55, 1.1, 0.9, 0.9);   // full lift
+  assert.equal(draws.length, 2, 'both heights draw a shadow');
+  assert.ok(draws[0].opacity > 0.35, `contact-height shadow too faint: ${draws[0].opacity}`);
+  assert.ok(draws[1].opacity > 0.20, `lifted shadow too faint: ${draws[1].opacity}`);
+  assert.ok(draws[1].opacity < draws[0].opacity, 'higher bat, fainter shadow');
+  assert.ok(draws[1].sx > draws[0].sx, 'higher bat, wider shadow');
 });
 
 test('panorama, table and shadow use the same scene; fallback and shadow pass remain safe', () => {

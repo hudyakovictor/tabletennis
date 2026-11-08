@@ -5102,17 +5102,19 @@ class Game {
      * глазами не читается и тень нужнее всего. У пола своё, более пологое
      * затухание: с высоты ~1 м табличный экспоненциальный спад давал
      * невидимые 4 % альфы. */
-    /* A lifted bat needs its shadow MORE, not less: with the default
-     * decay (2.1) a bat 70 cm over the table kept ~7 % alpha spread over a
-     * tripled radius — invisible, so height above the table was unreadable
-     * exactly during the lift. Paddle blobs decay gently (1.15 over the
-     * table, 0.75 to the floor). */
+    /* The paddle shadow is the height gauge, so it must stay READABLE at
+     * playing heights, not physically faint: playtesting showed a bat over
+     * the table with no visible shadow at all. Compared with the ball's
+     * blob it is denser (0.55), decays gently (0.9) and spreads slowly
+     * (growK 0.9): low over the table it is a compact dark disc, at full
+     * lift a wide soft one — size and darkness together read as height.
+     * The ball keeps its subtle physical blob; only the bats are gauges. */
     const paddleShadow = (pos, radius, strength, stretch) => {
-      if (onTable(pos.x, pos.z)) S.blob(R, pos.x, pos.y, pos.z, TY, radius, strength, stretch, 1.15);
-      else S.blob(R, pos.x, pos.y, pos.z, 0, radius * 1.5, strength, stretch, 0.75);
+      if (onTable(pos.x, pos.z)) S.blob(R, pos.x, pos.y, pos.z, TY, radius, strength, stretch, 0.9, 0.9);
+      else S.blob(R, pos.x, pos.y, pos.z, 0, radius * 1.5, strength, stretch, 0.6, 0.9);
     };
-    paddleShadow(this.player.pos, 0.16, 0.33, 1.1);
-    paddleShadow(this.aiPaddle.pos, 0.15, 0.27, 1.15);
+    paddleShadow(this.player.pos, 0.15, 0.55, 1.1);
+    paddleShadow(this.aiPaddle.pos, 0.14, 0.45, 1.15);
   }
 
   /** Short haptic pulse on touch devices. Silent no-op everywhere else. */

@@ -382,9 +382,9 @@ class Scene {
    * Height above the surface widens and fades it, exactly like a real
    * penumbra, and it costs one quad.
    */
-  blob(R, x, y, z, surfaceY, radius, strength, stretch, decay = 2.1) {
+  blob(R, x, y, z, surfaceY, radius, strength, stretch, decay = 2.1, growK = 1.5) {
     const h = Math.max(0, y - surfaceY);
-    const grow = 1 + h * 1.5;
+    const grow = 1 + h * growK;
     const a = strength * Math.exp(-h * decay);
     if (a < 0.012) return;
     const r = radius * grow;
