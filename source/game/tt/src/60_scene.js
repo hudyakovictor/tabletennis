@@ -375,6 +375,7 @@ class Scene {
     this._sm = M4.create(); this._sp = V3.new(); this._sq = Q.new(); this._ss = V3.new();
     this._shadowMat = { color: [0, 0, 0], tex: this.tex.shadow, unlit: true, emissive: [0, 0, 0], blend: true, doubleSided: true, rough: 1, opacity: 1 };
     this._shadowMat0 = { color: [0, 0, 0], tex: this.tex.tableGroundShadow, unlit: true, emissive: [0, 0, 0], blend: true, doubleSided: true, rough: 1, opacity: 1 };
+    this._puckMat = { color: [0, 0, 0], unlit: true, emissive: [0, 0, 0], blend: true, rough: 1, opacity: 0.85 };
   }
 
   /**
@@ -393,6 +394,25 @@ class Scene {
       V3.set(this._ss, r, r * (stretch || 1), 1));
     this._shadowMat.opacity = Math.min(a, 0.85);
     R.draw(this.mesh.quad, this._sm, this._shadowMat);
+  }
+
+  /* The PLAYER's shadow: a thin solid puck, not a gradient blob. Playtest
+   * verdict on the blob, twice: invisible. The player's bat spends half its
+   * life over the dark floor (black gradient on black floor = nothing) and
+   * the rest foreshortened by the low camera, while the AI's blob reads
+   * fine because it always hangs over the bright blue table. A squashed
+   * sphere keeps a silhouette from a grazing camera, and near-opaque black
+   * reads on both surfaces. Height still shows: the puck widens and pales
+   * as the bat rises, and surfaceY is interpolated by the caller so the
+   * puck slides across the table edge instead of switching planes. */
+  shadowPuck(R, x, y, z, surfaceY, radius, strength) {
+    const h = Math.max(0, y - surfaceY);
+    const r = radius * (1 + h * 0.55);
+    this._puckMat.opacity = Math.min(0.88, Math.max(0.40, strength * Math.exp(-h * 0.5)));
+    M4.compose(this._sm, V3.set(this._sp, x, surfaceY + 0.006, z),
+      Q.identity(this._sq),
+      V3.set(this._ss, r, 0.016, r * 1.25));
+    R.draw(this.mesh.sphere, this._sm, this._puckMat);
   }
 
   /* Глянцевое размазывание блика по столу (бывший gloss) удалено: светлое

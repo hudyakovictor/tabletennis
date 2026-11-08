@@ -103,6 +103,18 @@ test('paddle contact shadow stays readable at playing heights and shrinks as the
   assert.ok(draws[1].opacity < draws[0].opacity, 'higher bat, fainter shadow');
   assert.ok(draws[1].sx > draws[0].sx, 'higher bat, wider shadow');
 
+  // The player's puck: an opaque sphere disc exactly under the bat whose
+  // opacity survives playing heights (that is the whole point of it).
+  s.mesh = { quad: 'quad', sphere: 'SPHERE' };
+  s._puckMat = {};
+  draws.length = 0;
+  const RP = { draw: (mesh, matrix, mat) => draws.push({ mesh, opacity: mat.opacity, m: [...matrix] }) };
+  s.shadowPuck(RP, 0.2, TY + 0.65, 0.9, TY, 0.14, 0.88);
+  assert.equal(draws.length, 1);
+  assert.equal(draws[0].mesh, 'SPHERE');
+  assert.ok(draws[0].opacity > 0.55, `puck too faint at lift: ${draws[0].opacity}`);
+  near(draws[0].m[12], 0.2); near(draws[0].m[13], TY + 0.006); near(draws[0].m[14], 0.9);
+
   // No single-frame jump at the table edge: the crossfade weight used by
   // drawContactShadows must move continuously across the 16 cm band.
   let prev = 1 - smoothstep(-0.08, 0.08, -0.20);

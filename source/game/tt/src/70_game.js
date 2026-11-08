@@ -3220,6 +3220,14 @@ class Game {
        * press-зона, tapContactRadiusPx, обязательный отскок на своей
        * половину, лимиты подачи REACH_SHELL и ползунок «Зона приёма». */
       { forceZ: quantizeDepth(b.p.z) });
+    /* The phantom's depth comes from the BALL's plane, which is exactly
+     * how a click used to teleport the bat: ball still a metre away, one
+     * click, and the phantom stood at the ball's z and "returned" it.
+     * A single input may step the bat at most half a metre forward (and
+     * 0.3 back) from where it actually is; reaching deeper balls is the
+     * footwork system's job over several frames, not one click's. */
+    const maxStepFwd = m.tap === true ? 0.50 : 1.45;
+    target.tz = clamp(target.tz, pad.pos.z - maxStepFwd, pad.pos.z + 0.30);
     if (this.camVPReady) clampPaddleToFrustum(this.camVP, target, .012);
     const lim = paddleLimitsFor(target.tz);
     const pos = V3.new(clamp(target.tx, -Math.min(REACH_SHELL.xHard, lim.x), Math.min(REACH_SHELL.xHard, lim.x)),
@@ -3428,7 +3436,7 @@ class Game {
        * centrality quietly turned sidespin back into topspin. */
       const lateralStroke = ['SIDE', 'HOOK', 'FADE', 'BANANA'].includes(racket.stroke && racket.stroke.id);
       const assistLvl = isServeStroke || lateralStroke ? MATCH_RULES.trajectoryAssist
-        : MATCH_RULES.trajectoryAssist * (0.30 + 0.70 * sweet);
+        : MATCH_RULES.trajectoryAssist * (0.45 + 0.55 * sweet);
       const rawSwing = V3.new(), rawNormal = V3.new();
       strokeFrame(racket, 0, 0, 1, rawSwing, rawNormal);
       const rawShotFrame = { normal: shotVec(rawNormal), vR: shotVec(rawSwing),
@@ -3437,7 +3445,7 @@ class Game {
       racket = enforceRacketEffort({ ...racket, normal: rawNormal, vR: rawSwing }, effortBudget);
       racket = refineRacket(contact, b.v, b.w, racket, assistLvl, quality);
       if (racket.valid === false && !racket.intentionalOut && clamp(assistLvl, 0, 1) < 0.999 &&
-          (isServeStroke || lateralStroke || sweet >= 0.5)) {
+          (isServeStroke || lateralStroke || sweet >= 0.35)) {
         /* Не только подача: в розыгрыше ассист 0.85 тоже мог не найти лега —
          * и игрок получал «мусорный» удар: в свою половину, в сетку с места,
          * или вообще не поперёк свайпа. Пере(решаем) с полным ассистом — он
@@ -3445,7 +3453,7 @@ class Game {
         racket = refineRacket(contact, b.v, b.w, racket, 1, quality);
       }
       if (racket && !racket.intentionalOut && clamp(assistLvl, 0, 1) < 0.999 &&
-          (isServeStroke || lateralStroke || sweet >= 0.5) &&
+          (isServeStroke || lateralStroke || sweet >= 0.35) &&
           !this._playerFlightLegal(contact, racket, isServeStroke)) {
         /* Пост-верификация: решатель «без повторной проверки» формально
          * valid, но мяч уходит в свою половину/в сетку — для игрока это
@@ -5123,7 +5131,17 @@ class Game {
       if (wTable > 0.01) S.blob(R, pos.x, pos.y, pos.z, TY, radius, strength * wTable, stretch, 0.9, 0.9);
       if (wTable < 0.99) S.blob(R, pos.x, pos.y, pos.z, 0, radius * 1.5, strength * (1 - wTable), stretch, 0.6, 0.9);
     };
-    paddleShadow(this.player.pos, 0.15, 0.55, 1.35);
+    /* The player gets the solid puck on a CONTINUOUS surface: surfY slides
+     * table->floor across the same crossfade band, so the puck the debug
+     * build proved readable now replaces the blob for good — no plane
+     * switch, no jump, visible on the dark floor and from a low camera.
+     * The AI keeps the blob: over the bright table it already reads. */
+    {
+      const pos = this.player.pos;
+      const outside = Math.max(Math.abs(pos.x) - HW, Math.abs(pos.z) - HL);
+      const wTable = 1 - smoothstep(-0.08, 0.08, outside);
+      S.shadowPuck(R, pos.x, pos.y, pos.z, TY * wTable, 0.14 * (1 + (1 - wTable) * 0.4), 0.88);
+    }
     paddleShadow(this.aiPaddle.pos, 0.14, 0.45, 1.15);
   }
 

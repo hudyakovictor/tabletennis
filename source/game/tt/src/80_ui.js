@@ -347,7 +347,19 @@ class UI {
     const sw = g.swipe;
     const trailK = (g._cal && Number.isFinite(g._cal.fingerTrail))
       ? lerp(0.35, 1.25, clamp(g._cal.fingerTrail, 0, 1)) : 1;
-    if (!this.captureDebug && !g.reducedMotion && !this.reducedMotion && sw.active && sw.samples.length > 1) {
+    /* The ribbon used to be a third actor on screen: ball in one place,
+     * pointer trail in another, bat in a third — worst on a plain click,
+     * where the "trail" is a dot with a glow pretending to be a stroke.
+     * Now the ribbon exists only while the gesture is actually engaged
+     * with the ball (blade head near the ball on screen); a click far
+     * from the ball draws nothing. */
+    let ribbonNearBall = true;
+    if (g.ball && g.ball.live && g.player && g.player.pos && typeof g.project === 'function') {
+      const bp = g.project(g.ball.p, {}), hp = g.project(g.player.pos, {});
+      if (bp && bp.ok && hp && hp.ok)
+        ribbonNearBall = Math.hypot((bp.x - hp.x) * W, (bp.y - hp.y) * H) < Math.min(W, H) * 0.30;
+    }
+    if (!this.captureDebug && !g.reducedMotion && !this.reducedMotion && sw.active && sw.samples.length > 1 && ribbonNearBall) {
       const pts = sw.samples;
       const n = pts.length;
       /* The ribbon is drawn FROM THE BLADE, not from the raw finger: in
@@ -389,7 +401,7 @@ class UI {
         fade: 1.0,
         offX, offY,
       };
-    } else if (this._lastRibbon) {
+    } else if (this._lastRibbon && ribbonNearBall) {
       if (this.reducedMotion) this._lastRibbon = null;
       else if ((this._lastRibbon.fade -= dt * 2.2) <= 0) {
         this._lastRibbon = null;
