@@ -148,6 +148,7 @@ const PADDLE_HOME = { x: 0, y: PH.TABLE_Y + 0.28, z: PADDLE_STANCE_Z };
  * Значения в метрах относительно поверхности стола. */
 const REACH_SHELL = Object.freeze({
   xSoft: 0.62, xHard: 0.90,        // бока: точно внутри 62 см, потолок ~90 см
+  arcStartY: 0.35,                 // подъём выше этой высоты уже идёт по дуге вперёд
   yLoSoft: 0.06, yLoHard: 0.025,   // низ: никогда под плитой стола (над ней)
   /* Аудит №3 показал: луч камеры в портрете даёт сырые цели 0.26..2.2 м при
    * потолке руки — отсюда «ракетка висит наверху». Потолок снижен до роста
@@ -224,13 +225,18 @@ function pointerBladeSolve(rig, aspect, px, py, opts) {
     return y >= lo - 1e-6 && y <= hi + 1e-6;
   };
   const ySt = _pbsW.y;
-  const excess = Math.max(0, ySt - hiSoft);
-  /* 0.35 m of extra ray height spends the whole authored arc; the first
-   * centimetres above the soft cap cost almost no depth (smoothstep slope
-   * is 0 at the join), so ordinary high balls stay a pure lift. */
-  const arcT = smoothstep(0, 0.35, excess);
+  /* The arc starts at ready height (arcStartY), not at the height ceiling:
+   * playtesting still felt a "point" where up stopped and forward began,
+   * because forward used to switch on only above the soft cap, in the top
+   * few centimetres of travel. Now any lift above a ready bat leans
+   * gradually forward over a half-metre band (smoothstep: zero slope at
+   * the join), so the whole lift is one arc — up and forward are never
+   * separate phases with a seam between them. Height itself still
+   * saturates softly at hiSoft/hiHard below. */
+  const excess = Math.max(0, ySt - (PH.TABLE_Y + rs.arcStartY));
+  const arcT = smoothstep(0, 0.50, excess);
   let z = stance - rs.arcMaxFwd * arcT;
-  let exact = ySt >= loSoft - 1e-9 && ySt <= hiSoft + 1e-9;
+  let exact = arcT === 0 && ySt >= loSoft - 1e-9 && ySt <= hiSoft + 1e-9;
   /* The same arc, mirrored, below the floor — added after playtesting
    * showed the bat simply STOPPED at the soft floor while the finger (and
    * its drawn ribbon) kept going: a dead zone reads as broken input.
@@ -246,15 +252,17 @@ function pointerBladeSolve(rig, aspect, px, py, opts) {
   }
   const w2 = _pbsW4 || (_pbsW4 = {});
   unprojectToPlane(rig, aspect, px, py, z, w2);
-  /* Height comes from the STANCE ray, not the forwarded plane: at a nearer
-   * plane the same ray sits lower, so taking ty there made the bat dip by
-   * millimetres exactly where the arc begins — lifting the pointer must
-   * never lower the bat. Laterally the blade stays on the ray at its new
-   * depth (w2.x); vertically it is already in the saturated zone, where
-   * the pointer contract is "as high as the arm reaches", not pixel-exact. */
+  /* Height is read on the FORWARDED plane (w2.y = the pointer ray at the
+   * new depth), so the blade stays under the cursor while it arcs: screen
+   * motion is then exactly the pointer's, and the forward lean is pure
+   * depth. (Reading height on the stance plane instead projected the bat
+   * up to 82 px away from the cursor once the arc engaged.) The old "dip"
+   * objection does not apply anymore: the arc now starts at ready height
+   * with zero smoothstep slope, so w2.y joins continuously, not at a
+   * ceiling kink. Above the soft cap the saturation still applies. */
   o.ty = dropT > 0
     ? Math.max(PH.TABLE_Y - 0.30, lerp(loSoft, PH.TABLE_Y - 0.30, dropT) - dropExcess * 0.10)
-    : softSat(ySt, loSoft, hiSoft, loHard, hiHard);
+    : softSat(w2.y, loSoft, hiSoft, loHard, hiHard);
   if (!Number.isFinite(o.ty)) o.ty = PADDLE_HOME.y;
   o.exact = exact;
   o.tx = softSat(w2.x, -rs.xSoft, rs.xSoft, -rs.xHard, rs.xHard);

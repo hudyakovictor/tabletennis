@@ -338,12 +338,18 @@ test('lifting the pointer is one smooth arc: up first, then gradually forward, n
    * of the screen's. */
   for (const [w, h] of VIEWPORTS) for (const mode of lib.CAMERA_ORDER) {
     const aspect = w / h, rig = lib.cameraRigFor(mode, null, aspect);
+    const vp = lib.rigViewProj(rig, aspect);
     let prev = lib.pointerBladeSolve(rig, aspect, .5, .86, {});
+    let prevScreen = lib.projectPoint(vp, { x: prev.tx, y: prev.ty, z: prev.tz }, {});
     for (let py = .859; py >= .05; py -= .001) {
       const t = lib.pointerBladeSolve(rig, aspect, .5, py, {});
       assert.ok(Math.abs(t.tz - prev.tz) <= .015, `${mode} ${w}x${h} py=${py.toFixed(3)}: depth step ${prev.tz} -> ${t.tz}`);
       assert.ok(Math.abs(t.ty - prev.ty) <= .01, `${mode} ${w}x${h} py=${py.toFixed(3)}: height step ${prev.ty} -> ${t.ty}`);
-      assert.ok(t.ty >= prev.ty - 1e-9, `${mode} ${w}x${h} py=${py.toFixed(3)}: lifting the pointer lowered the bat`);
+      /* Monotonicity lives on SCREEN: lifting the pointer must lift the
+       * drawn bat (world height may trade against depth along the ray). */
+      const screen = lib.projectPoint(vp, { x: t.tx, y: t.ty, z: t.tz }, {});
+      assert.ok(screen.y <= prevScreen.y + 1e-9, `${mode} ${w}x${h} py=${py.toFixed(3)}: lifting the pointer lowered the drawn bat`);
+      prevScreen = screen;
       assert.ok(t.tz <= prev.tz + 1e-9, `${mode} ${w}x${h} py=${py.toFixed(3)}: lifting the pointer moved the bat back`);
       assert.ok(t.tz >= lib.PADDLE_STANCE_Z - lib.REACH_SHELL.arcMaxFwd - 1e-9,
         `${mode} ${w}x${h} py=${py.toFixed(3)}: pointer alone lunged to z=${t.tz}`);

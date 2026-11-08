@@ -1915,8 +1915,17 @@ class Game {
      * NORMAL  = everything else → plain ball impact */
     const softHit = !!(racket.arch && racket.arch.soft) || (side > 0 && this.lastSweet !== undefined && this.lastSweet < 0.38);
     const sweet = side > 0 ? (this.lastSweet !== undefined ? this.lastSweet : 1) : 1;
-    const isStrongHit = speed > 7.5 && (quality ?? 0.8) > 0.70 && sweet > 0.50;
-    const isFastSloppy = !isStrongHit && speed > 7.5 && (sweet < 0.50 || (quality ?? 0.8) < 0.70);
+    /* Whoosh is the sound of a genuinely fast BAT, not of any contact:
+     * at the old 7.5 m/s ball-speed gate an ordinary click serve and a
+     * gentle push both "swung through the air". Now the air only speaks
+     * when the bat itself moved fast AND the ball left fast (43+ km/h),
+     * and a serve must be truly driven (47+ km/h) to earn it. The racket
+     * impact sound is untouched — quiet contacts still click. */
+    const batSpeed = racket.vR ? V3.len(racket.vR) : (Number.isFinite(racket.vmag) ? racket.vmag : 0);
+    const serveStroke = /^SERVE_/.test(racket.stroke ? racket.stroke.id : '');
+    const whooshFloor = serveStroke ? 13 : 11;
+    const isStrongHit = speed > whooshFloor && batSpeed > 8 && (quality ?? 0.8) > 0.70 && sweet > 0.50;
+    const isFastSloppy = !isStrongHit && speed > whooshFloor + 1.5 && batSpeed > 9.5 && (sweet < 0.50 || (quality ?? 0.8) < 0.70);
     if (isStrongHit) {
       this.audio.hitRacket(speed, info ? info.contactSlip : 0, false, side + '/' + this.shotId, 1);
       this.audio.whoosh(clamp(speed / 10, 0.6, 1.4), 'hit/' + this.shotId);
@@ -3922,15 +3931,17 @@ class Game {
     // Keep the dedicated serve animation: one pull-back during ascent and
     // one forward stroke during descent. Both sides of the apex have the
     // same offset; contact ends this path, with no animated return afterwards.
-    /* One owner of the blade at a time: while the player's own hand is down
-     * and drawing the serve stroke, the scripted toss animation (ball
-     * tracking + pull-back) must not ALSO drive the target - two drivers
-     * summed into one target read as the bat making the movement twice,
-     * once on its own and once under the finger. The animation owns the
-     * idle toss; the hand owns the stroke. */
+    /* The toss is BALL-ANCHORED, and that is the single driver here: the
+     * paddle tracks the tossed ball (with its one pull-back), while the
+     * pointer only classifies the stroke gesture. An earlier change let
+     * the drawing hand take the paddle over mid-toss — the ball kept
+     * falling at the toss point, the paddle chased the cursor, and the
+     * ribbon sat somewhere between: three objects in three places on the
+     * one shot that must be glued together. The native cursor is hidden
+     * in play, and the ribbon is drawn from the blade, so the player's
+     * gesture still reads exactly where the bat is. */
     const serveSlide = this.state === GS.SERVE_TOSS && this.server === 1 &&
-      this.ball.lastHitBy === 0 && this.recenterT <= 0 &&
-      !(this.pointerDown && this.swipe && this.swipe.active);
+      this.ball.lastHitBy === 0 && this.recenterT <= 0;
     if (serveSlide) {
       const b = this.ball, windup = STROKE_CONFIG.serve.windup, tracking = STROKE_CONFIG.serve.tracking;
       const startY = this.tossStartY || PH.TABLE_Y + STROKE_CONFIG.serve.toss.height;
@@ -5091,9 +5102,14 @@ class Game {
      * глазами не читается и тень нужнее всего. У пола своё, более пологое
      * затухание: с высоты ~1 м табличный экспоненциальный спад давал
      * невидимые 4 % альфы. */
+    /* A lifted bat needs its shadow MORE, not less: with the default
+     * decay (2.1) a bat 70 cm over the table kept ~7 % alpha spread over a
+     * tripled radius — invisible, so height above the table was unreadable
+     * exactly during the lift. Paddle blobs decay gently (1.15 over the
+     * table, 0.75 to the floor). */
     const paddleShadow = (pos, radius, strength, stretch) => {
-      if (onTable(pos.x, pos.z)) S.blob(R, pos.x, pos.y, pos.z, TY, radius, strength, stretch);
-      else S.blob(R, pos.x, pos.y, pos.z, 0, radius * 1.5, strength, stretch, 1.05);
+      if (onTable(pos.x, pos.z)) S.blob(R, pos.x, pos.y, pos.z, TY, radius, strength, stretch, 1.15);
+      else S.blob(R, pos.x, pos.y, pos.z, 0, radius * 1.5, strength, stretch, 0.75);
     };
     paddleShadow(this.player.pos, 0.16, 0.33, 1.1);
     paddleShadow(this.aiPaddle.pos, 0.15, 0.27, 1.15);
