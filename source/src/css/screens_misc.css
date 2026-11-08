@@ -17,7 +17,7 @@
 .pl-glass{position:absolute;left:50%;top:48%;width:min(125%,500px);height:auto;transform:translate(-50%,-50%);opacity:0;pointer-events:none}
 .pl-readout{position:absolute;bottom:100px;left:0;right:0;display:flex;flex-direction:column;align-items:center;gap:10px;transition:opacity .16s var(--out)}
 .pl-percent{font:800 23px/1 var(--body);color:#fff;letter-spacing:-.04em}.pl-percent span{font-size:12px;margin-left:3px;color:var(--gold)}
-.pl-status{font-size:11px;color:var(--ink3);letter-spacing:.02em}
+.pl-status{display:none}
 .pl-retry{position:absolute;left:50%;bottom:calc(12% + var(--sab) + var(--tgb));transform:translateX(-50%);white-space:nowrap}.pl-retry[hidden]{display:none}
 .pl-retry:active,.pl-retry.pressed{transform:translate(-50%,3px)}
 .preloader.launched .pl-wordmark,.preloader.launched .pl-ring,.preloader.launched .pl-readout{opacity:0}
