@@ -33,16 +33,21 @@ const Preloader = {
     if (typeof GameHost.on === 'function') s.cleanups.push(GameHost.on(m => this.message(s, m)));
     const retryLoad = () => { GameHost.reload(); this.mount(); };
     retry.addEventListener('click', retryLoad); s.cleanups.push(() => retry.removeEventListener('click', retryLoad));
-    const ready = () => { if (!s.alive) return; s.loaded++; const value = Math.min(99, Math.floor(s.loaded / s.total * 100)); this.later(s, () => { if (s.alive) this.progress(s, value); }, s.loaded * 120); this.later(s, () => { if (s.alive) this.maybeStart(s); }, s.loaded * 120 + 80); };
+    const ready = () => { if (!s.alive) return; s.loaded++; this.progress(s, Math.min(99, Math.floor(s.loaded / s.total * 100))); this.maybeStart(s); };
     const keys = ['preloader-ball-intro', 'preloader-ball-spin', 'preloader-paddle', 'preloader-burst'];
-    Promise.all(keys.map(key => {
-      const image = new Image(); image.src = ILL[key] || '';
-      return image.decode().then(() => { ready(); return image; });
-    })).then(() => {
+    (async () => {
+      for (const key of keys) {
+        if (!s.alive) return;
+        const image = new Image(); image.src = ILL[key] || '';
+        try { await image.decode(); } catch (e) { this.error(s); return; }
+        if (!s.alive) return;
+        ready();
+        await new Promise(resolve => setTimeout(resolve, 140));
+      }
       if (!s.alive) return;
       s.paddle.src = ILL['preloader-paddle']; s.burst.src = ILL['preloader-burst'];
       root.classList.add('has-sprites');
-    }).catch(() => this.error(s));
+    })().catch(() => this.error(s));
     document.fonts.ready.then(ready, () => this.error(s));
     this.later(s, () => { s.minElapsed = true; this.maybeStart(s); }, 900);
     // Let the CSS arrival paint before parsing/compiling the embedded engine.
