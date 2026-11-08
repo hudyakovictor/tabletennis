@@ -85,21 +85,8 @@ const Preloader = {
     s.sheet.style.backgroundPosition = `${index % cols * 100 / (cols - 1)}% ${Math.floor(index / cols) * 100 / 3}%`;
   },
   progress(s, value) {
-    s.targetProgress = Math.max(s.targetProgress || 0, value);
-    if (s.progressRaf) return;
-    const start = s.displayedProgress || 0, end = s.targetProgress, duration = 1000, begin = performance.now();
-    const tick = (now) => {
-      if (!s.alive) { s.progressRaf = 0; return; }
-      const p = Math.min(1, (now - begin) / duration);
-      const eased = 1 - (1 - p) * (1 - p);
-      s.displayedProgress = start + (end - start) * eased;
-      s.arc.style.strokeDashoffset = `${477.522 * (1 - s.displayedProgress / 100)}`;
-      s.pct.innerHTML = `${Math.round(s.displayedProgress)}<span>%</span>`;
-      s.readout.setAttribute('aria-valuenow', String(Math.round(s.displayedProgress)));
-      if (p < 1) s.progressRaf = requestAnimationFrame(tick);
-      else { s.displayedProgress = end; s.progressRaf = 0; if (s.targetProgress > end) this.progress(s, s.targetProgress); }
-    };
-    s.progressRaf = requestAnimationFrame(tick);
+    s.arc.style.strokeDashoffset = `${477.522 * (1 - value / 100)}`;
+    s.pct.innerHTML = `${value}<span>%</span>`; s.readout.setAttribute('aria-valuenow', String(value));
   },
   error(s) {
     if (!s.alive || s.revealed) return;
