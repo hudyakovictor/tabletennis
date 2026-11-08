@@ -49,6 +49,7 @@ class SwipeTracker {
     this.evictedCurl = 0; this.evictedSegment = null;
     // Gesture speed uses real time, but its opportunity to meet the ball
     // must age in the same (possibly slowed) time as the ball's physics.
+    this.startSimTime = Number.isFinite(simTime) ? simTime : null;
     this.sampleSimTime = Number.isFinite(simTime) ? simTime : null;
     this.releaseSimTime = null;
     this.samples.length = 0;
@@ -80,7 +81,7 @@ class SwipeTracker {
     this.pressZone = null;
     this.active = false;
     this.realGestureId = -1; this.realAt = 0; this.realAtSim = null;
-    this.sampleSimTime = null; this.releaseSimTime = null;
+    this.startSimTime = null; this.sampleSimTime = null; this.releaseSimTime = null;
     this.evictedPathLen = 0;
     this.evictedCurl = 0; this.evictedSegment = null;
     this.samples.length = 0;
@@ -1605,7 +1606,13 @@ function refineRacket(ballP, ballV, ballW, racket, assist, quality) {
       { dt: fine ? PH.SIM_DT : 1 / 150, maxT: 2.6, stopOnFirstBounce: true, out: chk });
     if (chk.hitNet) return -1;
     if (fine && chk.netCross && chk.clear < 0.004) return -1;
-    if (!chk.landed) return 1;
+    if (!chk.landed) {
+      // Missing the table is not necessarily a long ball. A low return can
+      // fall behind the hitter's end line before it ever reaches the court;
+      // lowering that stroke again sends it into the floor (or back at them).
+      const crossing = chk.planeCross || chk.floor;
+      return side * _rv.z >= 0 || (crossing && side * crossing.z > 0) ? -1 : 1;
+    }
     if (Math.sign(chk.landed.z) === side) return -1;
     if (racket.effortBudget && (Math.abs(chk.landed.x) > PH.T_HALF_WID + .005 ||
         Math.abs(chk.landed.z) > PH.T_HALF_LEN + .005)) return 1;
@@ -1663,8 +1670,12 @@ function refineRacket(ballP, ballV, ballW, racket, assist, quality) {
     const aimAz = clamp(Math.atan2(target.x - ballP.x, fwd * (target.z - ballP.z)) - racket.azFace, -1, 1);
     const maxScale = Math.min(1.35 * softHeadroom, strokeCap / Math.max(STROKE_CONFIG.racket.vmin, racket.vmag));
     for (const face of [envelope[1], (envelope[0] + envelope[1]) * .5, envelope[0]]) {
-      for (const arm of [35, 50, 20, 65]) {
-        for (const scale of [Math.min(1, maxScale), Math.min(.75, maxScale), maxScale]) {
+      // At a closed loop face the launch is non-monotone in arm elevation:
+      // 50 degrees can die short while 65 grazes/separates. The intermediate
+      // wrist paths and a moderate speed step recover low baseline balls
+      // without opening outside the grip envelope or exceeding the effort cap.
+      for (const arm of [35, 50, 20, 65, 55, 60]) {
+        for (const scale of [Math.min(1, maxScale), Math.min(.75, maxScale), Math.min(1.15, maxScale), maxScale]) {
           const de = arm * DEG - racket.elev * DEG;
           wristCorrection = face * DEG - (racket.faceElev + de);
           if (validate(de, aimAz, scale, 1, false) !== 0) continue;
