@@ -6,7 +6,7 @@ const windowHandlers = new Map();
 const lib = load(['10_math.js', '12_match_rules.js', '30_physics.js', '38_paddle_motion.js',
   '40_swipe.js', '42_shot_diagnostics.js', '56_rig.js', '57_camera.js', '70_game.js'],
   ['Game', 'SwipeTracker', 'PaddleStrokeMotion', 'isRealStroke', 'tapStrokeMetrics', 'ShotJournal', 'V3', 'PH', 'GS',
-    'STROKES', 'SERVE_STROKE_ALIAS',
+    'STROKES', 'SERVE_STROKE_ALIAS', 'STROKE_CONFIG',
     'rigViewProj', 'integrateBall', 'predict', 'M4'],
   { window: { addEventListener(type, handler) { windowHandlers.set(type, handler); } }, document: { addEventListener() {},
     body: { style: {}, classList: { toggle() {} } }, documentElement: { style: {} } } });
@@ -262,6 +262,86 @@ test('a released single-motion serve swipe survives until the toss falls; a toss
   }
 });
 
+test('one stationary mouse hold serves once on the falling toss at any slowmo scale', () => {
+  for (const [initialScale, nextScale] of [[1, 1], [.3, .3], [1, .3], [.3, 1]]) {
+    const { g, send } = inputGame('mouse', initialScale), { V3, PH, GS } = lib;
+    g.state = GS.SERVE_READY; g.isServeBall = true; g.ball.live = false; g.ball.lastHitBy = 0;
+    V3.set(g.player.pos, 0, PH.TABLE_Y + .28, 1.78);
+    V3.set(g.ball.p, 0, PH.TABLE_Y + .14, 1.74); V3.zero(g.ball.v);
+    send('pointerdown');
+    const gestureId = g.swipe.gestureId;
+    for (let simT = 0; simT < .7 && g.ball.lastHitBy === 0; simT += PH.SIM_DT) {
+      const scale = simT < .1 ? initialScale : nextScale;
+      g.timeScale = scale; g.time += PH.SIM_DT / scale; g.strokeTime += PH.SIM_DT;
+      const before = V3.clone(g.ball.p);
+      lib.integrateBall(g.ball.p, g.ball.v, g.ball.w, PH.SIM_DT);
+      g.tossApex = Math.max(g.tossApex, g.ball.p.y);
+      const rising = g.ball.v.y >= 0;
+      g.tryPlayerHit(before);
+      if (rising) assert.equal(g.stats.shots, 0, 'hold cannot serve the rising toss');
+    }
+    const label = `${initialScale}->${nextScale}`;
+    assert.equal(g.stats.shots, 1, `${label}: a single stationary hold did not serve`);
+    assert.equal(g.ball.lastHitBy, 1, label);
+    assert.equal(g.shotJournal.latest.strokeId, 'SERVE_NO_SPIN', label);
+    assert.equal(g.swipe.consumedGestureId, gestureId, 'the held press must be consumed');
+    g.ball.lastHitBy = -1; g.rallyBounces = [1]; g.pointerDown = true;
+    V3.copy(g.ball.p, g.player.pos); V3.set(g.ball.v, 0, 0, 6);
+    g.tryPlayerHit(V3.clone(g.ball.p));
+    assert.equal(g.ball.lastHitBy, -1, 'keeping the same mouse button down cannot return the next ball');
+  }
+});
+
+test('a falling mouse hold has a brief swipe window but needs no release to serve', () => {
+  for (const scale of [1, .3]) {
+    const { g, send } = inputGame('mouse', scale), { V3, PH, GS } = lib;
+    g.state = GS.SERVE_TOSS; g.isServeBall = true; g.ball.lastHitBy = 0;
+    g.tossStartY = PH.TABLE_Y + .14; g.tossApex = PH.TABLE_Y + .40;
+    V3.set(g.ball.p, 0, PH.TABLE_Y + .30, 1.6); V3.set(g.ball.v, 0, -1, 0);
+    V3.copy(g.player.pos, g.ball.p); g.player.pos.y -= .02;
+    send('pointerdown');
+    g.time += .025; g.strokeTime += .025 * scale;
+    g.tryPlayerHit(V3.clone(g.ball.p));
+    assert.equal(g.stats.shots, 0, 'down must still leave room for a directional swipe');
+    g.time += .05; g.strokeTime += .05 * scale;
+    g.tryPlayerHit(V3.clone(g.ball.p));
+    assert.equal(g.stats.shots, 1, `${scale}: falling hold required a second click or release`);
+  }
+});
+
+test('a short toss click or cancelled mouse hold cannot later serve itself', () => {
+  for (const scale of [1, .3]) for (const ending of ['pointerup', 'pointercancel', 'lostpointercapture']) {
+    const { g, send } = inputGame('mouse', scale), { V3, PH, GS } = lib;
+    g.state = GS.SERVE_READY; g.isServeBall = true; g.ball.live = false; g.ball.lastHitBy = 0;
+    V3.set(g.player.pos, 0, PH.TABLE_Y + .28, 1.78);
+    V3.set(g.ball.p, 0, PH.TABLE_Y + .14, 1.74); V3.zero(g.ball.v);
+    send('pointerdown');
+    g.time += .02; g.strokeTime += .02 * scale;
+    send(ending, g.project(g.ball.p, {}), 1020);
+    for (let simT = 0; simT < .6; simT += PH.SIM_DT) {
+      g.time += PH.SIM_DT / scale; g.strokeTime += PH.SIM_DT;
+      const before = V3.clone(g.ball.p);
+      lib.integrateBall(g.ball.p, g.ball.v, g.ball.w, PH.SIM_DT);
+      g.tossApex = Math.max(g.tossApex, g.ball.p.y);
+      g.tryPlayerHit(before);
+    }
+    assert.equal(g.stats.shots, 0, `${scale}/${ending}: abandoned press served automatically`);
+  }
+});
+
+test('a stationary serve click ages in ball time on release, not in slowmo wall time', () => {
+  for (const scale of [1, .3]) {
+    const { g, send } = inputGame('mouse', scale), { V3, PH, GS } = lib;
+    g.state = GS.SERVE_TOSS; g.isServeBall = true; g.ball.lastHitBy = 0;
+    g.tossStartY = PH.TABLE_Y + .14; g.tossApex = PH.TABLE_Y + .40;
+    V3.set(g.ball.p, 0, PH.TABLE_Y + .30, 1.6); V3.set(g.ball.v, 0, -1, 0);
+    send('pointerdown');
+    g.time += .12 / scale; g.strokeTime += .12;
+    send('pointerup', g.project(g.ball.p, {}), 1000 + .12 / scale * 1000);
+    assert.equal(g.stats.shots, 1, `${scale}: the same ball-time click expired on release`);
+  }
+});
+
 test('fast drags delivered in the same animation frame keep their start point', () => {
   const sw = new lib.SwipeTracker();
   sw.down(.5, .75, 1, 1);
@@ -346,6 +426,110 @@ test('post-contact recovery remains bounded after the gesture has been released'
       g.updatePlayerPaddle(1 / fps);
       assert.ok(lib.V3.dist(start, g.player.pos) * fps <= 6 + 1e-6, `${fps} Hz: released recovery exceeded 6 m/s`);
     }
+  }
+});
+
+test('a new point preserves the pointer and paddle instead of travelling home and back', () => {
+  const { g } = inputGame('mouse');
+  g.ball.live = false; g._calValues = { captureK: 1 };
+  g.pointer = g.project(lib.V3.new(.35, 1.15, 1.78), {});
+  const pointer = { ...g.pointer }, position = lib.V3.clone(g.player.pos);
+  g.resetPaddle();
+  assert.deepEqual(g.pointer, pointer);
+  for (let i = 0; i < 60; i++) {
+    g.time += 1 / 60;
+    g.updatePlayerPaddle(1 / 60);
+    g.clampPaddleVolume();
+    assert.ok(lib.V3.dist(position, g.player.pos) < 1e-8, 'a new round moved the paddle without input');
+  }
+  g.pointer.x += .002;
+  for (let i = 0; i < 30; i++) g.updatePlayerPaddle(1 / 60);
+  const screen = g.project(g.player.pos, {});
+  assert.ok(Math.hypot(screen.x - g.pointer.x, screen.y - g.pointer.y) < 1e-4,
+    'the first new movement must restore absolute cursor binding, not keep the round-start offset');
+});
+
+test('a real strike never replays a second positional stroke or returns the paddle without input', () => {
+  for (const scale of [1, .3]) for (const fps of [30, 60, 144]) {
+    const { g, send } = inputGame('mouse', scale);
+    g.settings.followThrough = true; g._calValues = { captureK: 1 };
+    g.followThrough = { active: false, t: 0, swingDir: lib.V3.new() };
+    const p = g.project(g.ball.p, {});
+    send('pointerdown', { x: p.x, y: p.y + .08 }, 1000);
+    send('pointermove', p, 1040);
+    send('pointerup', p, 1080);
+    assert.equal(g.stats.shots, 1);
+    const position = lib.V3.clone(g.player.pos), normal = lib.V3.clone(g.player.normal);
+    g.ball.live = false;
+    for (let i = 0; i < fps; i++) {
+      g.time += 1 / fps; g.strokeTime += scale / fps;
+      g.updatePlayerPaddle(1 / fps, scale / fps);
+      g.keepPaddleOnScreen(); g.clampPaddleVolume();
+      assert.ok(lib.V3.dist(position, g.player.pos) < 1e-8, `${scale}/${fps}: animation moved the paddle after contact`);
+      assert.ok(lib.V3.dist(normal, g.player.normal) < 1e-8, `${scale}/${fps}: animation replayed the racket face`);
+    }
+    assert.equal(g.paddleMotion.templateMotion, null, 'the complete authored motion must not replay after a live hit');
+    g.pointer.x += .002;
+    for (let i = 0; i < fps / 2; i++) g.updatePlayerPaddle(1 / fps, scale / fps);
+    const screen = g.project(g.player.pos, {});
+    assert.ok(Math.hypot(screen.x - g.pointer.x, screen.y - g.pointer.y) < 1e-4,
+      `${scale}/${fps}: the contact-to-cursor offset survived new input`);
+    assert.equal(g.stats.shots, 1, 'manual recovery cannot create another strike');
+  }
+});
+
+test('mouse movement and release after impact use absolute cursor coordinates without a retained offset', () => {
+  for (const scale of [1, .3]) {
+    const { g, send, width, height } = inputGame('mouse', scale), { V3 } = lib;
+    g._calValues = { captureK: 1 };
+    const contact = g.project(g.ball.p, {});
+    send('pointerdown', { x: contact.x, y: contact.y + .08 }, 1000);
+    send('pointermove', contact, 1040);
+    assert.equal(g.stats.shots, 1);
+    g.ball.live = false;
+    for (const [type, x, y, time] of [['pointermove', .35, 1.3, 1080], ['pointerup', -.25, 1.26, 1120],
+      ['pointermove', .1, 1.34, 1160]]) {
+      const cursor = g.project(V3.new(x, y, 1.78), {});
+      assert.ok(cursor.x > 0 && cursor.x < 1 && cursor.y > 0 && cursor.y < 1, 'fixture cursor must stay on screen');
+      send(type, cursor, time);
+      for (let i = 0; i < 30; i++) {
+        g.time += 1 / 60; g.strokeTime += scale / 60;
+        g.updatePlayerPaddle(1 / 60, scale / 60);
+        g.keepPaddleOnScreen(); g.clampPaddleVolume();
+      }
+      const blade = g.project(g.player.pos, {});
+      const errorPx = Math.hypot((blade.x - cursor.x) * width, (blade.y - cursor.y) * height);
+      assert.ok(errorPx < 1, `${scale}/${type}: racket remains ${errorPx.toFixed(1)} px from the cursor ` +
+        JSON.stringify({ cursor, pointer: g.pointer, blade, pos: g.player.pos, target: g._padTarget }));
+      assert.equal(g.stats.shots, 1, 'continuing the same physical stroke must not hit a second time');
+    }
+  }
+});
+
+test('the serve keeps one continuous backswing and forward animation until contact', () => {
+  for (const x of [-.6, 0, .6]) for (const scale of [1, .3]) {
+    const { g } = inputGame('mouse', scale), { V3, PH, GS } = lib;
+    g.state = GS.SERVE_TOSS; g.server = 1; g.ball.lastHitBy = 0; g.isServeBall = true;
+    g._calValues = { captureK: 1 }; g.tossStartY = .9; g.tossApex = 1.2;
+    V3.set(g.player.pos, x, 1.04, 1.78);
+    g.pointer = g.project(g.player.pos, {});
+    V3.set(g.ball.p, x, 1.2, 1.5); V3.set(g.ball.v, 0, .00001, 0);
+    g.updatePlayerPaddle(1 / 60, scale / 60);
+    const rising = { ...g._padTarget };
+    g.ball.v.y = -.00001;
+    g.updatePlayerPaddle(1 / 60, scale / 60);
+    const apex = { ...g._padTarget };
+    assert.ok(Math.abs(rising.tz - apex.tz) < 1e-6 && Math.abs(rising.ty - apex.ty) < 1e-6,
+      'changing toss direction must not reverse the racket target');
+    const contactY = PH.TABLE_Y + lib.STROKE_CONFIG.serve.windup.contactY;
+    g.ball.p.y = (1.2 + contactY) / 2;
+    g.updatePlayerPaddle(1 / 60, scale / 60);
+    const forward = { ...g._padTarget };
+    g.ball.p.y = contactY;
+    g.updatePlayerPaddle(1 / 60, scale / 60);
+    const finish = { ...g._padTarget };
+    assert.ok(apex.tz - finish.tz > .45, 'the dedicated serve backswing was removed');
+    assert.ok(apex.tz > forward.tz && forward.tz > finish.tz, 'the forward serve path doubled back');
   }
 });
 

@@ -688,6 +688,7 @@ class Game {
       }
       if (!this.swipe.active) {
         const n = norm(e), tEv = evTime(e);
+        this.pointer = { x: n.x, y: n.y };
         this._samplePlayerWork(n.rawX, n.rawY, tEv, evSimTime(tEv), true);
         activeStrokePointerId = null;
         if (this.debugRecording) this.logInput('pointer_ignored', { dom: domEvent(e), outcome: { reason: 'RELEASE_WITHOUT_ACTIVE_PRESS' } });
@@ -709,13 +710,14 @@ class Game {
       }
       this.pointerDown = false;
       this.swipeReleasedAt = tEv;
-      const tapAge = tEv - sw.startT;
       const tapSlop = zone && zone.pointerType === 'mouse' ? 10 : 14;
       const flickMax = CONTACT_CORRIDOR_RULES.compactFlickMaxPx;
       const rallyTap = this.state === GS.RALLY && this.ball.live && this.ball.lastHitBy === -1;
       const serveTap = zone && zone.serving && !zone.singleGestureToss &&
         this.state === GS.SERVE_TOSS && this.server === 1 && this.ball.live && this.ball.lastHitBy === 0 &&
         this.ball.v.y < 0 && this.tossRiseNow() >= MATCH_RULES.serveTossMinRise - 1e-6;
+      const tapAge = serveTap && Number.isFinite(simEv) && Number.isFinite(sw.startSimTime)
+        ? simEv - sw.startSimTime : tEv - sw.startT;
       if (zone && zone.shotId === this.shotId && (rallyTap || serveTap) &&
           tapAge >= 0 && tapAge <= CONTACT_CORRIDOR_RULES.compactFlickMaxSec &&
           !isRealStroke(sw.lastReleased, !!serveTap)) {
@@ -1408,8 +1410,7 @@ class Game {
     this.isServeBall = true;
     this._footZ = PADDLE_STANCE_Z;
     this.clearCordCaptureBoost();
-    /* Every point begins from the same known state: bat back in the centre,
-     * cursor binding re-anchored, no stale intercept from the last rally. */
+    // Clear the last gesture, not the player's position or pointer binding.
     this.resetPaddle();
     if (s > 0) parkServeBall(b.p, this.player, this.settings.hand);
     this.setState(GS.SERVE_READY);
@@ -1426,14 +1427,10 @@ class Game {
     this._syncMatchHud(true, 'serve', this.server);
   }
   startToss() {
-    /* Not while the bat is still gliding home. The requirement is that every
-     * new point starts from the centre, and a toss struck mid-glide is struck
-     * from wherever the last rally happened to leave the bat — which is how
-     * "the racket drifts off and stays there" survived the reset. The click is
-     * NOT swallowed: it is queued and fired the instant the reset finishes, so
-     * serving immediately costs a third of a second of the intermission. */
+    // A queued toss waits for an explicitly requested reset, never starts one.
     if (this.recenterT > 0) { this.tossQueued = true; this.tossQueuedAt = this.time; return; }
     this.tossQueued = false;
+    this._paddleHold = null;
     const b = this.ball;
     const pad = this.player;
     const toss = STROKE_CONFIG.serve.toss;
@@ -3076,8 +3073,21 @@ class Game {
     const fresh = sw.active && lastSample && sampleAge >= 0 && sampleAge < liveWin;
     const m = fresh || held ? sw.m
       : !sw.active && releasedAge >= 0 && releasedAge < deadWin ? sw.lastReleased : null;
-    if (!isRealStroke(m, serving)) return null;
-    return m;
+    if (isRealStroke(m, serving)) return m;
+    // An owned mouse hold is a serve request, not a synthetic swipe. Wait for
+    // the legal falling toss to reach the actual blade; never move the bat or
+    // give this stationary press any strike rights in the subsequent rally.
+    const zone = sw.pressZone, cfg = STROKE_CONFIG.serve;
+    if (serving && !this.paused && this.state === GS.SERVE_TOSS && this.server === 1 &&
+        this.ball.live && this.ball.lastHitBy === 0 && this.ball.v.y < 0 &&
+        this.tossRiseNow() >= MATCH_RULES.serveTossMinRise - 1e-6 &&
+        sw.active && this.pointerDown && zone?.pointerType === 'mouse' && zone.serving &&
+        zone.shotId === this.shotId && zone.accepted && !this.pressConsumed() &&
+        this.time - sw.startT >= cfg.mouseHoldDelay && (sw.tapMaxMovePx || 0) <= 10 &&
+        V3.dist(this.ball.p, this.player.pos) <= cfg.mouseHoldRadius) {
+      return tapStrokeMetrics(sw.m, zone.pressX, zone.pressY, true);
+    }
+    return null;
   }
 
   /** The press gate is the oval/circle stamped at pointerdown (see
@@ -3620,20 +3630,11 @@ class Game {
     pad.swing = 1;
     const motion = this.paddleMotion || (this.paddleMotion = new PaddleStrokeMotion());
     motion.contact(racket.normal, pad.roll, racket.stroke.id, this.settings.grip,
-      this.settings.hand, forehand, this.settings.followThrough !== false,
-      contactPose ? { pose: contactPose, racket, side: 1 } : undefined);
+      this.settings.hand, forehand, this.settings.followThrough !== false);
     const impactAngles = paddleFaceAngles(racket.normal);
     pad.pitch = impactAngles.pitch; pad.yaw = impactAngles.yaw; pad.motionStage = 'contact';
-    if (this.settings.followThrough && racket.vR) {
-      const ft = this.followThrough;
-      ft.active = true;
-      ft.t = 0;
-      ft.duration = motion.profile.hold + motion.profile.followTime + motion.profile.recoverTime * .5;
-      ft.amplitude = (motion.profile.family === 'BLOCK' ? .025 : motion.profile.family === 'PUSH' ? .055 : .14)
-        * (this.settings.grip === 'penhold' ? .85 : 1);
-      const spd = V3.len(racket.vR) || 1;
-      V3.set(ft.swingDir, racket.vR.x / spd, racket.vR.y / spd, racket.vR.z / spd);
-    }
+    if (this.followThrough) this.followThrough.active = false;
+    this.holdPaddlePose();
 
     // Multi-sensory hit feedback (99-level)
     if (this.hitFeedback) {
@@ -3733,17 +3734,25 @@ class Game {
   }
 
   /* ------------------------- paddle driving ------------------------ */
-  /**
-   * Every new point starts from a known state. The bat glides back to the
-   * centre, the cursor binding is re-anchored, and any intercept the
-   * previous rally left behind is thrown away — so the assist can never
-   * carry a stale target into the next point and strand the bat somewhere
-   * the cursor is not.
-   */
+  /** Preserve the actual blade pose until the next pointer input. */
+  holdPaddlePose() {
+    const pad = this.player, pt = this.pointer || { x: .5, y: .55 };
+    const activeFace = pad.activeFace || 1, roll = pad.roll || 0;
+    this._paddleHold = { x: pt.x, y: pt.y, gestureId: this.swipe?.gestureId,
+      pos: V3.clone(pad.pos), normal: V3.clone(pad.normal), roll, activeFace,
+      minY: pad.pos.y,
+      q: pad.q ? Q.copy(Q.new(), pad.q) : paddlePoseQuaternion(V3.mul(V3.new(), pad.normal, activeFace), roll) };
+  }
+
   resetPaddle(hard) {
     const pad = this.player;
-    this.pointer = { x: 0.5, y: 0.55 };
-    this.pointerInside = true;
+    const poseRoll = pad.roll;
+    const broken = ![pad.pos.x, pad.pos.y, pad.pos.z].every(Number.isFinite);
+    const resetPosition = hard || broken;
+    if (resetPosition || !this.pointer || !Number.isFinite(this.pointer.x) || !Number.isFinite(this.pointer.y)) {
+      this.pointer = { x: 0.5, y: 0.55 };
+      this.pointerInside = true;
+    }
     this.pointerDown = false;
     this.padYaw = 0;
     this.padRoll = (this.settings.hand === 'left' ? -1 : 1)
@@ -3753,7 +3762,8 @@ class Game {
     if (this.paddleReadClock) this.paddleReadClock.reset();
     if (this.strikeReadClock) this.strikeReadClock.reset();
     if (this._strike) { this._strike.on = false; this._strike.k = 0; }
-    pad.forehand = true; pad.motionStage = 'ready';
+    if (resetPosition) pad.forehand = true;
+    pad.motionStage = 'ready';
     this.liveStroke = null;
     this._prep = 0;
     this._settlePaddleFace = false;
@@ -3776,19 +3786,28 @@ class Game {
     if (this._paddlePred) this._paddlePred.reach = null;
     if (this._strikePred) this._strikePred.reach = null;
     if (this._volleyPred) this._volleyPred.reach = null;
-    const broken = ![pad.pos.x, pad.pos.y, pad.pos.z].every(Number.isFinite);
-    if (hard || broken) {
+    if (resetPosition) {
       V3.set(pad.pos, PADDLE_HOME.x, PADDLE_HOME.y, PADDLE_HOME.z);
       V3.copy(pad.prevPos, pad.pos);
       V3.copy(pad.prev, pad.pos);
       V3.zero(pad.vel);
     }
-    V3.set(pad.normal, 0, Math.sin(this.padPitch), -Math.cos(this.padPitch));
+    if (resetPosition) {
+      V3.set(pad.normal, 0, Math.sin(this.padPitch), -Math.cos(this.padPitch));
+      paddlePoseQuaternion(pad.normal, pad.roll, pad.q || (pad.q = Q.new()));
+      pad.activeFace = 1; pad.poseReady = true;
+    } else {
+      const face = paddleFaceAngles(pad.normal);
+      this.padYaw = pad.yaw = face.yaw; this.padPitch = pad.pitch = face.pitch;
+      this.padRoll = pad.roll = Number.isFinite(poseRoll) ? poseRoll : this.padRoll;
+    }
     pad.swing = 0;
-    this._ptTarget = { tx: PADDLE_HOME.x, ty: PADDLE_HOME.y, tz: PADDLE_HOME.z };
+    this._ptTarget = { tx: pad.pos.x, ty: pad.pos.y, tz: pad.pos.z };
+    this._paddleHold = null;
+    if (!resetPosition) this.holdPaddlePose();
   }
 
-  updatePlayerPaddle(dt) {
+  updatePlayerPaddle(dt, strokeDt = dt) {
     const cfg = STROKE_CONFIG.racket;
     const pad = this.player;
     V3.copy(pad.prev, pad.pos);
@@ -3819,6 +3838,12 @@ class Game {
     if (!Number.isFinite(pt.x) || !Number.isFinite(pt.y)) {
       pt = { x: 0.5, y: 0.55 };
       this.pointer = pt;                 // self-heal: never stay broken
+    }
+    let held = this._paddleHold;
+    if (held && (this.swipe?.gestureId !== held.gestureId || pt.x !== held.x || pt.y !== held.y)) {
+      this._paddleHold = held = null;
+      this.paddleMotion?.reset();
+      this._settlePaddleFace = true;
     }
     /* A ball that dies short is a real table-tennis problem: with a bat
      * plane fixed 1.78 m back, a ball that dies at 0.4 m cannot be reached.
@@ -3931,7 +3956,8 @@ class Game {
       this.R.aspect(),
       px,
       py,
-      { out: this._ptTarget || (this._ptTarget = { tx: 0, ty: 0, tz: 0 }), zFoot: zFootArg, forceZ }
+      { out: this._ptTarget || (this._ptTarget = { tx: 0, ty: 0, tz: 0 }),
+        zFoot: held ? undefined : zFootArg, forceZ: held ? undefined : forceZ }
     );
     let tx = t.tx;
     let ty = t.ty;
@@ -3943,19 +3969,6 @@ class Game {
       tz = clamp(this._footZ, PADDLE_LIMITS.zStepIn, PADDLE_LIMITS.zFar);
     }
 
-    // Position follow-through uses the SAME smoothed/clamped target path.
-    const ft = this.followThrough;
-    if (ft && ft.active) {
-      if (this.playerStrokeIntent(this.state === GS.SERVE_TOSS)) ft.active = false;
-      else {
-        const progress = clamp(ft.t / ft.duration, 0, 1);
-        const reach = (ft.amplitude || .14) * Math.sin(progress * Math.PI) ** 2;
-        tx += ft.swingDir.x * reach;
-        ty += ft.swingDir.y * reach;
-        tz += ft.swingDir.z * reach;
-      }
-    }
-
     if (this.recenterT > 0) {
       const kHome = 1;
       tx = lerp(tx, PADDLE_HOME.x, kHome);
@@ -3963,37 +3976,30 @@ class Game {
       tz = lerp(tz, PADDLE_HOME.z, kHome);
     }
 
-    /* Serve wind-up: visual pull-back only, ball hit works as before.
-     * ASCENT  → racket tracks ball + small +z offset (ease-out, decelerating).
-     * DESCENT → offset fades with ease-in, racket converges on ball for hit.
-     * The ball never inherits paddle displacement — physics owns its path. */
+    // Keep the dedicated serve animation: one pull-back during ascent and
+    // one forward stroke during descent. Both sides of the apex have the
+    // same offset; contact ends this path, with no animated return afterwards.
     const serveSlide = this.state === GS.SERVE_TOSS && this.server === 1 &&
       this.ball.lastHitBy === 0 && this.recenterT <= 0;
     if (serveSlide) {
-      const windup = STROKE_CONFIG.serve.windup;
-      const b = this.ball;
-      const tracking = STROKE_CONFIG.serve.tracking;
-      const startY = this.tossStartY || (PH.TABLE_Y + STROKE_CONFIG.serve.toss.height);
-      const predictedApex = b.p.y + (b.v.y > 0 ? (b.v.y * b.v.y) / (2 * PH.G) : 0);
-      const apexY = Math.max(predictedApex, this.tossApex || startY, startY + 0.01);
-      // Base: track the ball (hit detection works as before)
+      const b = this.ball, windup = STROKE_CONFIG.serve.windup, tracking = STROKE_CONFIG.serve.tracking;
+      const startY = this.tossStartY || PH.TABLE_Y + STROKE_CONFIG.serve.toss.height;
+      const predictedApex = b.p.y + (b.v.y > 0 ? b.v.y * b.v.y / (2 * PH.G) : 0);
+      const apexY = Math.max(predictedApex, this.tossApex || startY, startY + .01);
       const k = tracking.weights[0] + tracking.weights[1] * A;
       tx = lerp(tx, b.p.x, k);
-      tz = lerp(tz, b.p.z + tracking.zOffset, k);
       ty = lerp(ty, b.p.y - tracking.underBall, k);
-      // Wind-up offset: +z during ascent (ease-out), removed during descent (ease-in)
+      tz = lerp(tz, b.p.z + tracking.zOffset, k);
+      let offset;
       if (b.v.y > 0) {
         const rise = clamp((b.p.y - startY) / (apexY - startY), 0, 1);
-        const easeOut = 1 - (1 - rise) * (1 - rise); // quadratic ease-out
-        tz += windup.amplitude * easeOut;
-        ty -= windup.yDrop * easeOut;
+        offset = 1 - (1 - rise) * (1 - rise);
       } else {
-        const targetY = PH.TABLE_Y + windup.contactY;
-        const fall = clamp((apexY - b.p.y) / Math.max(0.01, apexY - targetY), 0, 1);
-        const easeIn = fall * fall; // quadratic ease-in (accelerating)
-        // Pull the windup offset back toward zero as the racket swings forward
-        tz -= windup.amplitude * (1 - easeIn);
+        const fall = clamp((apexY - b.p.y) / Math.max(.01, apexY - PH.TABLE_Y - windup.contactY), 0, 1);
+        offset = 1 - fall * fall;
       }
+      tz += windup.amplitude * offset;
+      ty -= windup.yDrop * offset;
     }
 
     /* Rally stroke contact anchor: once an admitted gesture is actively
@@ -4001,7 +4007,7 @@ class Game {
      * the ball's post-bounce 3D intercept while the finger draws the stroke's
      * direction & spin vector across the screen. Never engages during hover,
      * stationary hold prior to release, or un-admitted presses. */
-    const rallyStrokeActive = !serveSlide && this.recenterT <= 0 &&
+    const rallyStrokeActive = this.recenterT <= 0 &&
       this.state === GS.RALLY && this.ball.live && this.ball.lastHitBy === -1 &&
       !(this.isServeBall && this.ball.lastHitBy === -1) &&
       this.pressAdmitsBall();
@@ -4041,7 +4047,12 @@ class Game {
       }
     }
 
-    if (this.camVPReady) {
+    // Keep the contact pose only until new input. Movement always uses the
+    // absolute pointer projection above, never a retained contact offset.
+    if (held) {
+      tx = held.pos.x; ty = held.pos.y; tz = held.pos.z;
+    }
+    if (this.camVPReady && !held) {
       t.tx = tx; t.ty = ty; t.tz = tz;
       clampPaddleToFrustum(this.camVP, t, 0.012);
       tx = t.tx; ty = t.ty; tz = t.tz;
@@ -4052,6 +4063,9 @@ class Game {
     ty = clamp(clamp(ty, PH.TABLE_Y + REACH_SHELL.yLoHard, PH.TABLE_Y + REACH_SHELL.yHiHard),
       PH.TABLE_Y + lim.yLo, PH.TABLE_Y + lim.yHi);
     tz = clamp(tz, PADDLE_LIMITS.zStepIn, PADDLE_LIMITS.zFar);
+    if (held) {
+      tx = held.pos.x; ty = held.pos.y; tz = held.pos.z;
+    }
 
     /* Ползунок калибровки «Зона приёма»: читается каждый кадр, применяется на
      * лету — как padSpeed/padSmooth. 0 → жёсткий приём (0.85×), 50 → честный
@@ -4182,25 +4196,32 @@ class Game {
       V3.copy(pad.normal, rest);
     }
     const motion = this.paddleMotion || (this.paddleMotion = new PaddleStrokeMotion());
-    const strokePose = motion.sample(dt, { yaw: this.padYaw, pitch: this.padPitch, roll: this.padRoll }, !!intent);
+    const strokePose = motion.sample(strokeDt, { yaw: this.padYaw, pitch: this.padPitch, roll: this.padRoll }, !!intent);
     if (strokePose) {
       if (strokePose.q) {
-        V3.copy(pad.pos, strokePose.p); V3.copy(pad.normal, strokePose.normal);
+        V3.copy(pad.normal, strokePose.normal);
         Q.copy(pad.q, strokePose.q); pad.activeFace = strokePose.activeFace;
       } else faceFromWrist(pad.normal, strokePose.yaw, strokePose.pitch, 1);
       pad.roll = paddleAngleDelta(0, strokePose.roll);
       this.padRoll = pad.roll;
     }
+    if (held) {
+      V3.copy(pad.normal, held.normal); Q.copy(pad.q || (pad.q = Q.new()), held.q);
+      pad.roll = held.roll; pad.activeFace = held.activeFace;
+    }
     const face = paddleFaceAngles(pad.normal);
     pad.pitch = face.pitch; pad.yaw = face.yaw;
+    if (held) {
+      this.padPitch = face.pitch; this.padYaw = face.yaw; this.padRoll = pad.roll;
+    }
     pad.motionStage = strokePose ? strokePose.stage : intent ? 'swing' : this._prep > .02 ? 'prepare' : 'ready';
-    if (!strokePose?.q) {
+    if (!strokePose?.q && !held) {
       pad.activeFace = 1;
       paddlePoseQuaternion(V3.mul(this._bladeFace || (this._bladeFace = V3.new()), pad.normal, pad.activeFace),
         pad.roll, pad.q || (pad.q = Q.new()));
     }
     /* One shared, idempotent guard: height only, never horizontal. */
-    enforcePaddleTableClearance(pad.pos, pad.normal, pad.roll, .006, PH.TABLE_Y, PH.T_HALF_WID, PH.T_HALF_LEN, pad.q);
+    if (!held) enforcePaddleTableClearance(pad.pos, pad.normal, pad.roll, .006, PH.TABLE_Y, PH.T_HALF_WID, PH.T_HALF_LEN, pad.q);
     /* prevPos must stay the position the bat had at the START of this frame:
      * the swept-capture CCD (bladePlaneCapture / measureCaptureAllowance) and
      * the frame velocity below both diff pos against it. The old line copied
@@ -4215,7 +4236,7 @@ class Game {
      * rewound to `prevPos` (that rewind froze the bat for a frame and fed the
      * CCD and `pad.vel` a teleport — the "AI paddle jump" on the player's
      * side, seen as a stutter along the table edge). */
-    enforcePaddleTableClearance(pad.pos, pad.normal, pad.roll, .006, PH.TABLE_Y, PH.T_HALF_WID, PH.T_HALF_LEN, pad.q);
+    if (!held) enforcePaddleTableClearance(pad.pos, pad.normal, pad.roll, .006, PH.TABLE_Y, PH.T_HALF_WID, PH.T_HALF_LEN, pad.q);
     V3.mul(pad.vel, V3.sub(pad.vel, pad.pos, pad.prevPos), 1 / Math.max(dt, 1e-4));
     pad.poseReady = true;
     pad.swing = Math.max(0, pad.swing - dt * 4.5);
@@ -4324,7 +4345,7 @@ class Game {
    * frozen in POINT and REPLAY. One cheap re-check against the matrix this
    * frame will actually be drawn with closes it. */
   keepPaddleOnScreen() {
-    if (!this.camVPReady) return;
+    if (!this.camVPReady || this._paddleHold) return;
     const pad = this.player;
     const s = projectPoint(this.camVP, pad.pos, this._kosS || (this._kosS = {}));
     const m = 0.05;
@@ -4351,27 +4372,24 @@ class Game {
     pad.pos.z = clamp(pad.pos.z, PADDLE_LIMITS.zStepIn, PADDLE_LIMITS.zFar);
     const lim = paddleLimitsFor(clamp(pad.pos.z, PADDLE_LIMITS.zStepIn, PADDLE_STANCE_Z));
     pad.pos.x = clamp(pad.pos.x, -lim.x, lim.x);
-    pad.pos.y = clamp(pad.pos.y, PH.TABLE_Y + lim.yLo, PH.TABLE_Y + lim.yHi);
+    // The depth-only ready-height rule is deliberately conservative, but a
+    // contact pose already cleared the actual blade/rubbers/handle against
+    // the table. Raising it afterwards moves the rubber away from the ball.
+    let minY = PH.TABLE_Y + lim.yLo;
+    if (this._paddleHold) minY = Math.min(minY, this._paddleHold.minY);
+    else if (pad.motionStage === 'contact' && pad.contactPose) minY = Math.min(minY, pad.contactPose.pos.y);
+    pad.pos.y = clamp(pad.pos.y, minY, PH.TABLE_Y + lim.yHi);
   }
 
   updateOpponentPose(dt) {
     const ai = this.ai, pad = this.aiPaddle;
     if (!ai || !pad || this._idleStill) return;
     const old = V3.copy(pad.prevPos || (pad.prevPos = V3.new()), pad.pos);
-    /* A ball is on its way to the bot right now. The previous stroke's
-     * template may still be playing (hold + follow + recover ≈ 0.3–0.5 s),
-     * and it owns a position — the OLD contact point. Letting it write
-     * `pad.pos` there every frame also wrote it into `ai.pos`, so the new
-     * intercept computed by AI.think() was thrown away: measured 0.65 m of
-     * travel lost over 0.4 s, i.e. a bot that cannot reach a cross-court
-     * return hit at normal rally tempo (tryAiHit refuses beyond 0.42 m).
-     * Recovery still owns the FACE (the follow-through must be visible);
-     * the intercept owns the POSITION. */
-    const intercepting = !!(this.ball && this.ball.live && this.ball.lastHitBy === 1);
+    // AI movement owns position on both flights; an old stroke template
+    // must not replay another swing or overwrite the next interception.
     const pose = this.aiPaddleMotion && this.aiPaddleMotion.sample(dt, { yaw: 0, pitch: -15 * DEG, roll: .28 });
     if (pose?.q) {
-      if (intercepting) V3.copy(pad.pos, ai.pos);
-      else V3.copy(pad.pos, pose.p);
+      V3.copy(pad.pos, ai.pos);
       V3.copy(pad.normal, pose.normal);
       Q.copy(pad.q, pose.q); pad.roll = pose.roll; pad.activeFace = pose.activeFace;
     } else {
@@ -4793,7 +4811,7 @@ class Game {
      * against the previous frame's pose (the paddle was updated after the
      * substeps), so a bat that had visibly arrived was still a frame behind
      * for the contact — 0.1-0.2 m at a normal swipe speed. */
-    this.updatePlayerPaddle(dtReal);
+    this.updatePlayerPaddle(dtReal, dt);
     this.watchdogArmFrame();
 
     // physics substeps

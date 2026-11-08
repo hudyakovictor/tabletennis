@@ -104,6 +104,7 @@ const STROKE_CONFIG = {
     sideBrushLateralExp: 1.2, // how much of that brush survives a diagonal swipe
     mixedBrushK: .72,
     tossMinRise: 0.16, captureRadius: 0.55, qualityRadiusK: 0.40,
+    mouseHoldDelay: 0.05, mouseHoldRadius: 0.12,
     vmin: 1.2, vmax: 12.5, ballMax: 17.5, contactAngleRange: [14, 80], azSwingK: 0.30,
     toss: {
       height: 0.14, lateralOffset: 0, paddleZOffset: 0.04, endLineMargin: 0.04, farZ: 2.0,

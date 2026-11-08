@@ -15,7 +15,7 @@ const { load } = require('./helpers.cjs');
 
 const CORE = load(['10_math.js', '12_match_rules.js', '30_physics.js', '38_paddle_motion.js', '40_swipe.js'],
   ['PH', 'V3', 'clamp', 'lerp', 'predict', 'impactRacket', 'deriveStroke', 'refineRacket', 'strokeFrame',
-    'MATCH_RULES', 'GRACE_RULES', 'playerInCaptureRange', 'playerGraceRange', 'pressHitZoneOval']);
+    'resolveRacketLaunch', 'MATCH_RULES', 'GRACE_RULES', 'playerInCaptureRange', 'playerGraceRange', 'pressHitZoneOval']);
 
 const mkBall = (x, y, z, vx, vy, vz, wx = 0) => ({ p: CORE.V3.new(x, y, z), v: CORE.V3.new(vx, vy, vz), w: CORE.V3.new(wx, 0, 0) });
 const flightFrom = (ball, racket, maxT = 2.4) => {
@@ -159,6 +159,26 @@ test('solver never flips the sworn side under assist', () => {
   }
 });
 
+test('a low loop behind the end line is lifted toward the receiver, not driven into the floor', () => {
+  for (const y of [.88, .94]) for (const z of [1.85, 2.25]) {
+    const ball = mkBall(0, y, z, 0, -1.8, 5, 150);
+    const metrics = { x: .5, y: .45, sx: .5, sy: .65, samples: 10, smooth: .95, straightness: 1,
+      dist: .2, pathLen: .2, up: 1, right: 0, curl: 0, speed: 2.4, peakSpeed: 2.4, releaseSpeed: 2.4 };
+    const raw = CORE.deriveStroke(metrics, { side: 1, grip: 'shakehand', forehand: true,
+      ball: ball.p, ballVelocity: ball.v, ballSpin: ball.w, ballSpeed: CORE.V3.len(ball.v), movePitch: -.15 });
+    const racket = CORE.refineRacket(ball.p, ball.v, ball.w, raw, CORE.MATCH_RULES.trajectoryAssist, .85);
+    const launch = CORE.resolveRacketLaunch(ball, racket);
+    const label = `loop y=${y} z=${z}`;
+    assert.ok(launch, `${label}: the face must close on the ball`);
+    assert.ok(launch.v.y > 0, `${label}: low return went down (${launch.v.y})`);
+    assert.ok(launch.v.z < 0, `${label}: low return went back toward the hitter (${launch.v.z})`);
+    const flight = CORE.predict(launch.p, launch.v, launch.w,
+      { dt: CORE.PH.SIM_DT, maxT: 2.6, stopOnFirstBounce: true, out: {} });
+    assert.ok(racket.valid && !flight.hitNet && flight.landed && flight.landed.z < 0,
+      `${label}: no legal receiver bounce ${JSON.stringify({ valid: racket.valid, net: flight.hitNet, land: flight.landed, cross: flight.planeCross })}`);
+  }
+});
+
 /* Дикий curl на подаче усмиряется ассистом ДО удара: после дрейфа x0.3
  * решатель находит легальную подачу там, где полный curl её нет. */
 test('extreme curl serves are tamed by the assist ladder', () => {
@@ -269,6 +289,41 @@ function mkGameStub() {
     vel: V3.new(0, 0, 0), normal: V3.new(0, 0.15, -1), roll: 0, forehand: true, lastHitT: 0, swing: 0 };
   return g;
 }
+
+test('Game never executes the failed downward frame as the fallback for a late upward swipe', () => {
+  const { SwipeTracker } = load(['10_math.js', '30_physics.js', '40_swipe.js'], ['SwipeTracker']);
+  const { V3, PH, ShotJournal } = GAME_LIB;
+  for (const y of [.88, .94]) for (const pitch of [-.35, -.50]) {
+    const g = mkGameStub();
+    g.time = 1; g.strokeTime = 1; g._rallyId = 1;
+    g.padPitch = pitch; g.padYaw = 0; g.settings.followThrough = false;
+    g.staminaEnabled = () => true;
+    g.equip = { vmagK: .9988, sweetK: 1.0058,
+      forSide: () => ({ e: .7945, mu: 1.0395, et: .5918, damp: .9971, sweet: 1.0058 }) };
+    g.anticipation = { active: false, visualOffset: V3.new() };
+    g.shotJournal = new ShotJournal(); g.swipe = new SwipeTracker();
+    V3.set(g.ball.p, 0, y, 2.25); V3.set(g.ball.v, 0, -1.8, 5); V3.set(g.ball.w, 150, 0, 0);
+    V3.copy(g.player.pos, g.ball.p); V3.copy(g.player.prevPos, g.ball.p); V3.copy(g.player.prev, g.ball.p);
+    g.swipe.down(.5, .65, .9, .9); g.swipe.move(.5, .55, .95, .95); g.swipe.up(.5, .45, 1, 1);
+    g.swipeReleasedAt = 1;
+    const metrics = { ...g.swipe.lastReleased, speed: 2.4, peakSpeed: 2.4, releaseSpeed: 2.4 };
+    g.applyHit = (side, racket) => {
+      g.ball.lastHitBy = side;
+      g.shotJournal.capture(g.swipe.gestureId, g.time, racket, g.ball);
+    };
+    g.tryPlayerHit(V3.clone(g.ball.p), metrics,
+      { pos: V3.clone(g.ball.p), prevPos: V3.clone(g.ball.p), normal: V3.new(0, 0, -1) });
+    const label = `late swipe y=${y} pitch=${pitch}`;
+    assert.equal(g.ball.lastHitBy, 1, `${label}: a reachable low ball must still be struck`);
+    assert.ok(g.ball.v.y > 0 && g.ball.v.z < 0,
+      `${label}: fallback sent the ball down/back ${JSON.stringify(g.ball.v)}`);
+    const flight = CORE.predict(g.ball.p, g.ball.v, g.ball.w,
+      { dt: PH.SIM_DT, maxT: 2.6, stopOnFirstBounce: true, out: {} });
+    assert.ok(!flight.hitNet && flight.landed && flight.landed.z < 0,
+      `${label}: fallback must land on the receiver court`);
+    assert.equal(g.shotJournal.latest.strokeId, 'LOOP', `${label}: the assist must preserve the upward stroke`);
+  }
+});
 
 test('edge ball hops OFF the line and the effect does not crackle', () => {
   const { V3, PH } = GAME_LIB;
