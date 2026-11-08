@@ -5113,7 +5113,13 @@ class Game {
       if (onTable(pos.x, pos.z)) S.blob(R, pos.x, pos.y, pos.z, TY, radius, strength, stretch, 0.9, 0.9);
       else S.blob(R, pos.x, pos.y, pos.z, 0, radius * 1.5, strength, stretch, 0.6, 0.9);
     };
-    paddleShadow(this.player.pos, 0.15, 0.55, 1.1);
+    /* TEMP DEBUG (shadow hunt): the player's subtle blob is replaced by a
+     * fat opaque black puck (r = 0.30 m) so we can SEE where the shadow is
+     * actually projected — on the table when over it, on the floor beyond
+     * the far edge. The AI bat keeps the normal blob for comparison.
+     * Remove once the projection is confirmed on device. */
+    if (onTable(this.player.pos.x, this.player.pos.z)) S.debugDisc(R, this.player.pos.x, this.player.pos.z, TY, 0.30);
+    else S.debugDisc(R, this.player.pos.x, this.player.pos.z, 0, 0.38);
     paddleShadow(this.aiPaddle.pos, 0.14, 0.45, 1.15);
   }
 
