@@ -5,11 +5,11 @@ const { load } = require('./helpers.cjs');
 const {
   STREET_COURT, streetCourtEdgeRadius, streetCourtGroundUV,
   makeStreetCourtFloor, makeStreetCourtShell, makeStreetCourtMarking,
-  TABLE_GROUND_SHADOW, tableGroundShadowAlpha, PH, Scene, M4, V3, Q,
+  TABLE_GROUND_SHADOW, tableGroundShadowAlpha, PH, Scene, M4, V3, Q, smoothstep,
 } = load(['10_math.js', '20_gl.js', '30_physics.js', '60_scene.js'], [
   'STREET_COURT', 'streetCourtEdgeRadius', 'streetCourtGroundUV',
   'makeStreetCourtFloor', 'makeStreetCourtShell', 'makeStreetCourtMarking',
-  'TABLE_GROUND_SHADOW', 'tableGroundShadowAlpha', 'PH', 'Scene', 'M4', 'V3', 'Q',
+  'TABLE_GROUND_SHADOW', 'tableGroundShadowAlpha', 'PH', 'Scene', 'M4', 'V3', 'Q', 'smoothstep',
 ]);
 const near = (a, b, tolerance = 1e-5) => assert.ok(Math.abs(a - b) < tolerance, `${a} != ${b}`);
 
@@ -103,17 +103,14 @@ test('paddle contact shadow stays readable at playing heights and shrinks as the
   assert.ok(draws[1].opacity < draws[0].opacity, 'higher bat, fainter shadow');
   assert.ok(draws[1].sx > draws[0].sx, 'higher bat, wider shadow');
 
-  // TEMP DEBUG marker: an opaque sphere puck exactly under the bat, so the
-  // projection point can be verified on screen with zero alpha involved.
-  s.mesh = { quad: 'quad', sphere: 'SPHERE' };
-  s._debugDiscMat = { opacity: 1 };
-  draws.length = 0;
-  const RD = { draw: (mesh, matrix, mat) => draws.push({ mesh, m: [...matrix] }) };
-  s.debugDisc(RD, 0.3, -0.8, TY, 0.30);
-  assert.equal(draws.length, 1);
-  assert.equal(draws[0].mesh, 'SPHERE');
-  near(draws[0].m[12], 0.3); near(draws[0].m[13], TY + 0.02); near(draws[0].m[14], -0.8);
-  near(draws[0].m[0], 0.30); // fat: 60 cm across
+  // No single-frame jump at the table edge: the crossfade weight used by
+  // drawContactShadows must move continuously across the 16 cm band.
+  let prev = 1 - smoothstep(-0.08, 0.08, -0.20);
+  for (let d = -0.19; d <= 0.20; d += 0.01) {
+    const w = 1 - smoothstep(-0.08, 0.08, d);
+    assert.ok(Math.abs(w - prev) <= 0.10, `shadow weight jumps at outside=${d.toFixed(2)}: ${prev} -> ${w}`);
+    prev = w;
+  }
 });
 
 test('panorama, table and shadow use the same scene; fallback and shadow pass remain safe', () => {

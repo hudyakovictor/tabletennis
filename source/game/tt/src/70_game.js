@@ -5109,17 +5109,21 @@ class Game {
      * (growK 0.9): low over the table it is a compact dark disc, at full
      * lift a wide soft one — size and darkness together read as height.
      * The ball keeps its subtle physical blob; only the bats are gauges. */
+    /* Table↔floor WITHOUT the jump: the debug puck proved the projection
+     * point is right (directly under the blade), but the old binary
+     * onTable branch switched surface, radius and decay in a single frame
+     * at the table edge — the shadow visibly teleported. Now both blobs
+     * are drawn across a 16 cm band around the edge with crossfaded
+     * weights, so the floor blob fades in as the table blob fades out and
+     * nothing ever pops. The weight is a pure function of position, so
+     * the same smoothing covers the side edges too. */
     const paddleShadow = (pos, radius, strength, stretch) => {
-      if (onTable(pos.x, pos.z)) S.blob(R, pos.x, pos.y, pos.z, TY, radius, strength, stretch, 0.9, 0.9);
-      else S.blob(R, pos.x, pos.y, pos.z, 0, radius * 1.5, strength, stretch, 0.6, 0.9);
+      const outside = Math.max(Math.abs(pos.x) - HW, Math.abs(pos.z) - HL);
+      const wTable = 1 - smoothstep(-0.08, 0.08, outside);
+      if (wTable > 0.01) S.blob(R, pos.x, pos.y, pos.z, TY, radius, strength * wTable, stretch, 0.9, 0.9);
+      if (wTable < 0.99) S.blob(R, pos.x, pos.y, pos.z, 0, radius * 1.5, strength * (1 - wTable), stretch, 0.6, 0.9);
     };
-    /* TEMP DEBUG (shadow hunt): the player's subtle blob is replaced by a
-     * fat opaque black puck (r = 0.30 m) so we can SEE where the shadow is
-     * actually projected — on the table when over it, on the floor beyond
-     * the far edge. The AI bat keeps the normal blob for comparison.
-     * Remove once the projection is confirmed on device. */
-    if (onTable(this.player.pos.x, this.player.pos.z)) S.debugDisc(R, this.player.pos.x, this.player.pos.z, TY, 0.30);
-    else S.debugDisc(R, this.player.pos.x, this.player.pos.z, 0, 0.38);
+    paddleShadow(this.player.pos, 0.15, 0.55, 1.35);
     paddleShadow(this.aiPaddle.pos, 0.14, 0.45, 1.15);
   }
 

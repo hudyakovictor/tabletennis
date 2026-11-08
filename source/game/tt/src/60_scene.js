@@ -375,11 +375,6 @@ class Scene {
     this._sm = M4.create(); this._sp = V3.new(); this._sq = Q.new(); this._ss = V3.new();
     this._shadowMat = { color: [0, 0, 0], tex: this.tex.shadow, unlit: true, emissive: [0, 0, 0], blend: true, doubleSided: true, rough: 1, opacity: 1 };
     this._shadowMat0 = { color: [0, 0, 0], tex: this.tex.tableGroundShadow, unlit: true, emissive: [0, 0, 0], blend: true, doubleSided: true, rough: 1, opacity: 1 };
-    /* TEMP DEBUG (shadow hunt): fully opaque black material for debugDisc —
-     * no texture, no blending, no transparency, so a marker drawn with it
-     * cannot "fade away": if it is not on screen, it was never drawn or it
-     * is somewhere else entirely. Remove together with debugDisc. */
-    this._debugDiscMat = { color: [0, 0, 0], unlit: true, emissive: [0, 0, 0], rough: 1, opacity: 1 };
   }
 
   /**
@@ -398,17 +393,6 @@ class Scene {
       V3.set(this._ss, r, r * (stretch || 1), 1));
     this._shadowMat.opacity = Math.min(a, 0.85);
     R.draw(this.mesh.quad, this._sm, this._shadowMat);
-  }
-
-  /* TEMP DEBUG (shadow hunt): a fat opaque black puck dropped straight
-   * down from (x, z) onto the surface. Unlike the horizontal blob quad it
-   * keeps a visible silhouette even from a grazing low camera, and unlike
-   * the gradient blob it has no alpha to lose. Radius is in metres. */
-  debugDisc(R, x, z, surfaceY, radius) {
-    M4.compose(this._sm, V3.set(this._sp, x, surfaceY + 0.02, z),
-      Q.identity(this._sq),
-      V3.set(this._ss, radius, 0.045, radius));
-    R.draw(this.mesh.sphere, this._sm, this._debugDiscMat);
   }
 
   /* Глянцевое размазывание блика по столу (бывший gloss) удалено: светлое
