@@ -33,7 +33,7 @@ const Preloader = {
     if (typeof GameHost.on === 'function') s.cleanups.push(GameHost.on(m => this.message(s, m)));
     const retryLoad = () => { GameHost.reload(); this.mount(); };
     retry.addEventListener('click', retryLoad); s.cleanups.push(() => retry.removeEventListener('click', retryLoad));
-    const ready = () => { if (!s.alive) return; s.loaded++; this.progress(s, Math.min(99, Math.floor(s.loaded / s.total * 100))); this.maybeStart(s); };
+    const ready = () => { if (!s.alive) return; s.loaded++; const value = Math.min(99, Math.floor(s.loaded / s.total * 100)); this.later(s, () => { if (s.alive) this.progress(s, value); }, s.loaded * 120); this.later(s, () => { if (s.alive) this.maybeStart(s); }, s.loaded * 120 + 80); };
     const keys = ['preloader-ball-intro', 'preloader-ball-spin', 'preloader-paddle', 'preloader-burst'];
     Promise.all(keys.map(key => {
       const image = new Image(); image.src = ILL[key] || '';
