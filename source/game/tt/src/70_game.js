@@ -132,36 +132,10 @@ class Game {
       momentumBar: true,
       replaySlowmo: true,
     };
-    /* Saved settings are applied AFTER the defaults exist. It used to run
-     * 60 lines earlier, while this.settings was still undefined, so
-     * Object.assign threw — and because boot() catches everything, a player
-     * who had EVER changed a setting got the "WebGL недоступен" screen on
-     * every following visit. A first visit worked (profile.data.settings is
-     * null then), which is why it survived to here. Found by the headless
-     * smoke suite: 2 of 3 matches failed to boot once localStorage was warm. */
+    // The application owns preferences. Never import a second settings or
+    // calibration profile from the retired standalone interface.
     installUnifiedControls(this.settings);
-    const saved = this.profile.data.settings || {}, rawCal = saved.cal && typeof saved.cal === 'object' && !Array.isArray(saved.cal) ? saved.cal : {};
     this.savedCalibrationPreferences = {};
-    const normalizedCal = normalizeCalibrations(rawCal);
-    const savedVisualCal = new Set(['camHeight', 'camZoom', 'camSway', 'fingerTrail', 'ballSize', 'trailLen', 'tableGlow', 'hintRadius', 'hintGlow', 'slowmoDepth']);
-    for (const entry of CALIBRATION_REGISTRY) {
-      if (savedVisualCal.has(entry.key) && Object.prototype.hasOwnProperty.call(rawCal, entry.key) && Number.isFinite(calibrationNumber(rawCal[entry.key], NaN)))
-        this.savedCalibrationPreferences[entry.key] = normalizedCal[entry.key] === entry.default / 100 ? entry.default : normalizedCal[entry.key] * 100;
-    }
-    // Import shipped scalar preferences only when no raw calibration was saved.
-    const legacyCal = {
-      spinGain: Number.isFinite(saved.spinGain) ? (saved.spinGain - .5) / 1.1 * 100 : NaN,
-      arcSens: Number.isFinite(saved.arcSens) ? (saved.arcSens - .6) / 1.2 * 100 : NaN,
-      camZoom: Number.isFinite(saved.camZoom) ? saved.camZoom <= 1
-        ? (saved.camZoom - CAM_ADJUST.zoomMin) / (1 - CAM_ADJUST.zoomMin) * 50
-        : 50 + (saved.camZoom - 1) / (CAM_ADJUST.zoomMax - 1) * 50 : NaN,
-      camHeight: Number.isFinite(saved.camPitch) ? saved.camPitch <= 0
-        ? 50 - saved.camPitch / CAM_ADJUST.pitchMin * 50 : 50 + saved.camPitch / CAM_ADJUST.pitchMax * 50 : NaN,
-    };
-    for (const [key, value] of Object.entries(legacyCal))
-      if (savedVisualCal.has(key) && !Object.prototype.hasOwnProperty.call(this.savedCalibrationPreferences, key) && Number.isFinite(value))
-        this.savedCalibrationPreferences[key] = clamp(value, 0, 100);
-    this.loadSettings();
     // Legacy hidden spin-bias is no longer a player-facing physics dial.
     this.settings.spinBias = 'norm';
     this.ai.setLevel(this.settings.difficulty);
@@ -423,7 +397,6 @@ class Game {
           : 50 + 50 * (zoom - 1) / (CAM_ADJUST.zoomMax - 1);
         applyGameCalibration(this, 'camZoom', values.camZoom);
       }
-      this.saveSettings();
       if (this.onCameraCalibrationChange) this.onCameraCalibrationChange(values);
     };
     const domEvent = e => ({ type: e.type, pointerId: e.pointerId, pointerType: e.pointerType || null,
@@ -767,7 +740,7 @@ class Game {
     window.addEventListener('pagehide', (e) => {
       if (this.debugRecording) this.logInput('pagehide', { outcome: { persisted: !!e.persisted } });
       if (this.debugArchive) this.debugArchive.flush();
-      this.saveSettings(); this.profile.save(true); this.career.save();
+      this.profile.save(true); this.career.save();
     });
     c.addEventListener('wheel', (e) => {
       if (this.preview?.active || this.paused) return;
@@ -787,10 +760,6 @@ class Game {
     } catch (e) { console.debug('Telegram swipe behavior unavailable', e); }
     document.addEventListener('touchmove', (e) => {
       if (this.preview?.active) return;
-      // The pause actions are a real scroll area on small phones. Do not
-      // swallow its touch scroll while preventing rubber-banding during play.
-      const scroll = e.target && e.target.closest && e.target.closest('.pause-actions');
-      if (this.paused && scroll) return;
       if (e.cancelable) e.preventDefault();
     }, { passive: false });
     /* Prevent iOS rubber-banding / pull-to-refresh on the body. */
@@ -799,7 +768,6 @@ class Game {
 
     window.addEventListener('keydown', (e) => {
       if (this.preview?.active) return;
-      if (document.getElementById('settings').classList.contains('on') || document.getElementById('shotLab').classList.contains('on')) return;
       if (e.repeat || e.ctrlKey || e.metaKey || e.altKey ||
           (e.target && (e.target.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName)))) return;
       if (e.key === 'r' || e.key === 'R' || e.key === 'к' || e.key === 'К') this.restart();
@@ -897,7 +865,7 @@ class Game {
   }
 
   _playerEffortContext(serving) {
-    return { side: 1, isServe: serving, grip: this.settings?.grip, hand: this.settings?.hand,
+    return { side: 1, isServe: serving, playerControlled: !this.demoMode, grip: this.settings?.grip, hand: this.settings?.hand,
       forehand: paddleForehand(this.player?.pos?.x ?? 0, this.settings?.hand, this.player?.forehand),
       ball: V3.clone(this.ball.p), ballSpin: V3.clone(this.ball.w), ballVelocity: V3.clone(this.ball.v),
       ballSpeed: V3.len(this.ball.v), equip: this.equip?.forSide(1) || {},
@@ -1250,7 +1218,7 @@ class Game {
     this.setSlowmoAllowed(true);
     this.slowmo.on = false; this.slowmo.active = false;
     this.timeScale = this.targetTimeScale = 1; this.slowmoUntil = 0;
-    this.saveSettings(); this.profile.save(true);
+    this.profile.save(true);
   }
 
   /* --------------------------- training ---------------------------- */
@@ -2110,52 +2078,6 @@ class Game {
     return true;
   }
 
-  /** Save personal preferences, never private versions of control rules. */
-  saveSettings() {
-    if (!this.profile) return;
-    const s = this.settings;
-    this.profile.data.settings = {
-      rulesVersion: MATCH_RULES.version, difficulty: s.difficulty, quality: s.quality,
-      sound: s.sound, volume: s.volume, camera: s.camera, camZoom: s.camZoom, camPitch: s.camPitch,
-      hand: s.hand, grip: s.grip,
-      showTrail: s.showTrail, showPredict: s.showPredict,
-      showTele: s.showTele, haptics: s.haptics, coach: s.coach, adaptive: s.adaptive,
-      targetScore: s.targetScore,
-      spinBias: s.spinBias, spinGain: s.spinGain, arcSens: s.arcSens,
-      cal: typeof calibrationState === 'function' ? calibrationState(this).raw : undefined,
-      audioLevels: this.audio.levels ? { ...this.audio.levels } : undefined,
-    };
-    if (this.career && this.career.active && this.career._baseSettings)
-      this.profile.data.settings.difficulty = this.career._baseSettings.difficulty;
-    this.profile.touch();
-  }
-
-  loadSettings() {
-    if (!this.settings || !this.profile || !this.profile.data.settings) return false;
-    const raw = this.profile.data.settings, s = this.settings;
-    // Only known keys cross the save boundary. Never merge arbitrary keys/prototypes.
-    for (const k of Object.keys(s)) {
-      if (typeof s[k] === 'boolean' && typeof raw[k] === 'boolean') s[k] = raw[k];
-    }
-    // camZoom/camPitch mirror CAM_ADJUST.zoomMin..Max / pitchMin..Max — keep in sync.
-    const ranges = { difficulty: [0, 3], volume: [0, 1], camZoom: [0.6, 1.8], camPitch: [-16, 16], spinGain: [0.5, 1.6], arcSens: [0.6, 1.8] };
-    for (const [k, [lo, hi]] of Object.entries(ranges)) {
-      if (Number.isFinite(raw[k])) s[k] = clamp(raw[k], lo, hi);
-    }
-    s.difficulty = Math.round(s.difficulty);
-    for (const [k, values] of Object.entries({ quality: ['low', 'medium', 'high'],
-      camera: CAMERA_ORDER, hand: ['left', 'right'], grip: ['shakehand', 'penhold'], spinBias: ['low', 'norm', 'high'], targetScore: [5, 11, 21] })) {
-      if (values.includes(raw[k])) s[k] = raw[k];
-    }
-    if (this.settings.volume !== undefined) this.audio.setVolume(this.settings.volume);
-    if (this.settings.sound === false) this.audio.setMuted(true);
-    if (this.settings.difficulty !== undefined) this.ai.setLevel(this.settings.difficulty);
-    if (this.settings.quality) this.R.quality = this.settings.quality;
-    if (raw.rulesVersion !== MATCH_RULES.version || ['hitZone', 'assist', 'posAssist', 'sensitivity', 'showZone'].some(k => Object.prototype.hasOwnProperty.call(raw, k)))
-      this.saveSettings(); // one-way migration: never re-persist private control rules
-    return true;
-  }
-
   setDifficulty(idx) {
     /* Уровень приходит из UI и оболочки — иногда строкой; мусор не должен
      * записать в профиль NaN и оставить бота без уровня. */
@@ -2164,7 +2086,6 @@ class Game {
       ? clamp(n, 0, AI_LEVELS.length - 1)
       : this.settings.difficulty;
     this.ai.setLevel(this.settings.difficulty);
-    this.saveSettings();
     return this.settings.difficulty;
   }
 
@@ -2236,7 +2157,6 @@ class Game {
     this.setState(GS.REPLAY);
     if (typeof document !== 'undefined') {
       document.body.classList.add('is-reel');
-      document.querySelectorAll('.screen').forEach((s) => s.classList.remove('on'));
     }
     this.ui && this.ui.replayShow(true, moment, !!hero);
     this.audio.applause(hero ? 1.4 : 0.6);
@@ -2485,7 +2405,7 @@ class Game {
     if (!m || m.samples < 2) return;
     const serving = this.state === GS.SERVE_TOSS || this.state === GS.SERVE_READY;
     const forehand = (this.player.pos.x * (this.settings.hand === 'left' ? -1 : 1)) >= -.05;
-    const ctx = { side: 1, isServe: serving, ball: this.ball.p, ballSpin: this.ball.w,
+    const ctx = { side: 1, playerControlled: !this.demoMode, isServe: serving, ball: this.ball.p, ballSpin: this.ball.w,
       grip: this.settings.grip, forehand, ballSpeed: this.ball.speed || V3.len(this.ball.v), movePitch: -.15,
       spinGain: this.settings.spinGain ?? 1, arcSens: this.settings.arcSens ?? 1 };
     const r = isRealStroke(m, serving) ? deriveStroke(m, ctx) : null;
@@ -3224,6 +3144,7 @@ class Game {
       aiLevel: side === -1 && this.ai ? this.ai.levelIndex : null,
       tactic: side === -1 && this.ai ? this.ai.tactic : null,
       strokeId: (racket.stroke && racket.stroke.id) || null,
+      playerControlled: !!racket.playerControlled,
       vmag: Number.isFinite(racket.vmag) ? racket.vmag : null,
       vR: racket.vR || null, quality, contact: contactP,
       /* Поза клинка в момент удара: к этому месту игра уже поставила её в
@@ -3439,7 +3360,7 @@ class Game {
       const tq = contactCfg.timingQuality[timingIndex];
       this.lastTiming = tband;
       const ctx = {
-        side: 1, grip: this.settings?.grip, hand: this.settings?.hand, forehand, isServe: isServeStroke,
+        side: 1, playerControlled: !this.demoMode, grip: this.settings?.grip, hand: this.settings?.hand, forehand, isServe: isServeStroke,
         ball: { x: contact.x, y: contact.y, z: contact.z },
         ballSpin: b.w, ballSpeed: V3.len(b.v), ballVelocity: b.v,
         powerScale: 1,
@@ -3467,16 +3388,10 @@ class Game {
         racket.azSwing = clamp(racket.azSwing + offLat * contactCfg.missAzimuthK * (1 - sweet), ...STROKE_CONFIG.racket.azSwingRange);
         racket.elev = clamp(racket.elev - offVer * contactCfg.missElevationK * (1 - sweet), ...contactCfg.missElevationRange);
       }
-      /* Потолок темпа чистого бокового удара. deriveStroke ограничивает vmag
-       * ДО того, как здесь поработают множители (экипировка, бонус за точный
-       * контакт, штраф за промах), и быстрый свайп снова улетал за потолок:
-       * на мобильном вьюпорте 31 пиксель свайпа давали 11.6 м/с замаха,
-       * 86 км/ч и 36 об/с бока — мяч уводило за боковую линию, и ни одна
-       * ступень лестницы ассиста не возвращала его в игру (e2e
-       * mouse/1/rally). Потолок про физику удара, а не про щедрость формулы,
-       * поэтому применяется ПОСЛЕ множителей. */
+      // Apply the player's physical effort ceiling after equipment/timing,
+      // not the lower feeder cap chosen to guarantee safe central returns.
       if (!isServeStroke && racket.stroke && racket.stroke.id === 'SIDE')
-        racket.vmag = Math.min(racket.vmag, STROKE_CONFIG.spin.sideVmax);
+        racket.vmag = Math.min(racket.vmag, racketEffortCap(racket));
       quality = clamp(racket.quality * (contactCfg.sweetWeights[0] + contactCfg.sweetWeights[1] * sweet)
         * (contactCfg.timingWeights[0] + contactCfg.timingWeights[1] * timing) * tq, ...contactCfg.qualityRange);
       racket.quality = quality;
@@ -3489,14 +3404,14 @@ class Game {
         faceAzimuth: racket.azFace, speed: racket.vmag, rubber: { ...racket.rubber } };
       racket = enforceRacketEffort({ ...racket, normal: rawNormal, vR: rawSwing }, effortBudget);
       racket = refineRacket(contact, b.v, b.w, racket, assistLvl, quality);
-      if (racket.valid === false && clamp(assistLvl, 0, 1) < 0.999) {
+      if (racket.valid === false && !racket.intentionalOut && clamp(assistLvl, 0, 1) < 0.999) {
         /* Не только подача: в розыгрыше ассист 0.85 тоже мог не найти лега —
          * и игрок получал «мусорный» удар: в свою половину, в сетку с места,
          * или вообще не поперёк свайпа. Пере(решаем) с полным ассистом — он
          * находит легал почти всегда. */
         racket = refineRacket(contact, b.v, b.w, racket, 1, quality);
       }
-      if (racket && clamp(assistLvl, 0, 1) < 0.999 &&
+      if (racket && !racket.intentionalOut && clamp(assistLvl, 0, 1) < 0.999 &&
           !this._playerFlightLegal(contact, racket, isServeStroke)) {
         /* Пост-верификация: решатель «без повторной проверки» формально
          * valid, но мяч уходит в свою половину/в сетку — для игрока это
@@ -4168,7 +4083,7 @@ class Game {
     faceFromWrist(rest, this.padYaw, this.padPitch, 1);
     if (m) {
       const ctx = {
-        side: 1, grip: this.settings?.grip, hand: this.settings?.hand, forehand: pad.forehand, isServe: servingNow,
+        side: 1, playerControlled: !this.demoMode, grip: this.settings?.grip, hand: this.settings?.hand, forehand: pad.forehand, isServe: servingNow,
         ball: { x: pad.pos.x, y: pad.pos.y, z: pad.pos.z },
         ballSpin: this.ball.w, ballSpeed: V3.len(this.ball.v), ballVelocity: this.ball.v, moveYaw: this.padYaw, movePitch: this.padPitch,
       };
@@ -4305,7 +4220,6 @@ class Game {
     this.ui && this.ui.syncSettings && this.ui.syncSettings();
     this.audio.ui('click');
     this.msg(ET('КАМЕРА · {view}', { view: ET(P.ru) }), 1.1, '#9fd0ff');
-    this.saveSettings();
   }
   /** Lens zoom trim. 1 = the authored fit, >1 = closer. Quantised to whole
    *  percents so the fit and reach caches see steps, not a continuum. */
@@ -4314,7 +4228,6 @@ class Game {
     const v = clamp(Math.round((Number.isFinite(z) ? z : 1) * 100) / 100, CAM_ADJUST.zoomMin, CAM_ADJUST.zoomMax);
     if (v === s.camZoom) return;
     s.camZoom = v;
-    this.saveSettings();
     if (this.ui && this.ui.syncCameraControls) this.ui.syncCameraControls();
   }
   /** Pitch trim in degrees on top of the preset, quantised to 0.5°.
@@ -4324,7 +4237,6 @@ class Game {
     const v = clamp(Math.round((Number.isFinite(p) ? p : 0) * 2) / 2, CAM_ADJUST.pitchMin, CAM_ADJUST.pitchMax);
     if (v === s.camPitch) return;
     s.camPitch = v;
-    this.saveSettings();
     if (this.ui && this.ui.syncCameraControls) this.ui.syncCameraControls();
   }
   /** Reset the view: the authored preset AND a clean trim. */
@@ -4332,7 +4244,6 @@ class Game {
     applyGameCalibration(this, 'camZoom', 50);
     applyGameCalibration(this, 'camHeight', 50);
     this.setCameraPreset(CAMERA_ORDER[0]);
-    this.saveSettings();
     if (this.onCameraCalibrationChange) this.onCameraCalibrationChange({ camZoom: 50, camHeight: 50 });
   }
 
@@ -4793,12 +4704,6 @@ class Game {
           // career progression over the results screen
           if (this.career.active) {
             this.career.onMatchEnd(this.matchWinner);
-            if (this.career.state === 'RUN_END') this.ui && this.ui.showCareerRunEnd(this.career);
-            else if (this.career.state === 'TOURNAMENT_END') this.ui && this.ui.showCareerTournamentEnd(this.career);
-            else if (this.career.state === 'PERK_SELECT') this.ui && this.ui.showCareerPerks(this.career);
-            // a win with no perk on offer still needs a way forward: PR #1
-            // left this branch with no screen and the run silently stalled
-            else if (this.career.state === 'OPPONENT_SELECT') this.ui && this.ui.showCareerOpponentSelect(this.career);
             this.career.save();
           }
         } else if (this.stateT > 1.35) {
@@ -4970,13 +4875,6 @@ class Game {
       this.emotion.update(this);
     }
 
-    // Update UI animations
-    if (this.ui && this.ui.uiAnim) {
-      this.ui.uiAnim.update(performance.now());
-    }
-    if (this.ui && this.ui.hudAnim) {
-      this.ui.hudAnim.update(performance.now());
-    }
   }
 
   /* ------------------------------ render --------------------------- */

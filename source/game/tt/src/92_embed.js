@@ -1,5 +1,5 @@
 /* =====================================================================
- *  EMBED BRIDGE — runs only when the host page set window.__TT_EMBED.
+ *  APPLICATION BRIDGE — the canvas frame is owned by the single app shell.
  *
  *  Host → game  (postMessage {__tt:1, type, ...}):
  *    lobby {intro?,requestId?}   exhibition; intro waits with the ball hidden
@@ -33,7 +33,7 @@
 'use strict';
 
 (function embedBridge() {
-  if (typeof window === 'undefined' || !window.__TT_EMBED) return;
+  if (typeof window === 'undefined' || !window.__TT_EMBED || window.parent === window) return;
   const post = (type, data) => {
     try { window.parent.postMessage(Object.assign({ __tt: 1, type }, data || {}), '*'); } catch (e) { /* host gone */ }
   };
@@ -42,17 +42,14 @@
   const start = () => {
     if (typeof ET !== 'undefined' && window.__TT_LOCALE) ET.set(window.__TT_LOCALE);   // язык от хоста
     const applyStaticTexts = () => {
-      const w = document.getElementById('tIWait'); if (w && typeof ET !== 'undefined') w.textContent = ET('ui.tapContinue');
       const ui = window.__game && window.__game.ui;
-      if (ui) { ui.localize?.(); ui.updateInputCopy?.(); ui.syncFullscreen?.(); ui.syncSoundControls?.(); ui.syncPauseControl?.(); ui.syncSlowmoControl?.(); ui.syncScore?.(); }
+      if (ui) { ui.localize?.(); ui.syncScore?.(); }
     };
     applyStaticTexts();
     const g = window.__game;
     if (!g) { post('error', { msg: 'game failed to boot' }); return; }
     const ui = g.ui;
     document.documentElement.classList.add('tt-embed');
-    const splash = document.getElementById('loading');
-    if (splash) splash.classList.add('off');
     g.settings.haptics = false;             // the host owns haptics (Telegram API)
     if (typeof g.hintRequested !== 'boolean') g.hintRequested = g.hintContact !== false;
     refreshGameCalibrationPolicy(g);
@@ -156,9 +153,18 @@
       obj[name] = function (...args) { return fn.call(this, orig.bind(this), ...args); };
     };
     const stateName = (s) => Object.keys(GS).find((k) => GS[k] === s) || String(s);
-    let hudRequestId = 0, lastHudHit = '';
+    let hudRequestId = 0, lastHudHit = '', onlineHudSeq = 0;
+    const publishOnlineHud = () => {
+      if (!g.network?.isInMatch) return;
+      const snapshot = g.getMatchSnapshot();
+      // Presentation only. Enabling Game.matchHudVisible for network play
+      // would also enable stamina/effort and change the network physics.
+      post('onlineHud', { snapshot: { ...snapshot, seq: ++onlineHudSeq, visible: true, free: false,
+        staminaEnabled: false, contacts: [null, null], whiffs: [null, null], event: null, result: null } });
+    };
     g.onMatchHud = snapshot => {
       if (lobby) return;
+      if (g.network?.isInMatch) { publishOnlineHud(); return; }
       post('hud', { snapshot, hudRequestId });
       const event = snapshot.event;
       if (!snapshot.visible || event?.type !== 'hit') return;
@@ -236,6 +242,8 @@
     wrap(g, 'endReplay', function (orig, complete) { const was = this.replayer && this.replayer.on; const r = orig(complete); if (was) post('replayEnd', {}); return r; });
     wrap(g, 'buzz', function (orig, ms) { post('haptic', { kind: Array.isArray(ms) ? 'success' : ms >= 30 ? 'heavy' : 'light' }); });
     if (ui) {
+      ui.syncScore = publishOnlineHud;
+      ui.showNote = note => { if (!lobby && note) post('coachNote', { note }); };
       ui.showMatchEnd = function (won) {
         if (lobby) return;
         const s = g.stats;
@@ -561,17 +569,10 @@ const showTip = (text) => { if (text) tip = { text, until: g.time + 4.6 }; };
         quality: g.settings.quality });
     };
 
-    /* ---------------------------- online ----------------------------
-     * В embed-режиме оболочка прячет все экраны движка, поэтому его онлайн-
-     * лобби недоступно: управление сетью пришло командами net {}, а статусы
-     * уходят хосту одним сообщением 'net' {st, room, side, latency, msg}.
-     * Табло движка (#score, #rally) в embed тоже скрыто — на время онлайн-
-     * матча включаем классом tt-online, иначе игрок играет вслепую.
-     * */
+    /* Online menus and scoreboards belong to the same application UI. */
     let netPending = null;                       // код комнаты, ждущий connect
     let netTried = false;                         // игрок хотя бы раз жал «создать/войти»
     const netSay = (st, extra) => post('net', Object.assign({ st }, extra || {}));
-    const onlineHud = (on) => { try { document.documentElement.classList.toggle('tt-online', !!on); } catch (e) {} };
     function netStart(intent) {                   // '' — создать, иначе — войти по коду
       const net = g.network;
       netPending = intent; netTried = true;
@@ -592,7 +593,7 @@ const showTip = (text) => { if (text) tip = { text, until: g.time + 4.6 }; };
                  { room: net.room, side: net.side, latency: net.latency });
           break;
         case 'leave':
-          netPending = null; netTried = false; onlineHud(false); net.leaveRoom(); net.disconnect(); netSay('closed');
+          netPending = null; netTried = false; net.leaveRoom(); net.disconnect(); netSay('closed');
           if (g.sessionKind === 'online') g.sessionKind = 'free';
           refreshGameCalibrationPolicy(g, '_policy'); publishCalibration();
           break;
@@ -619,12 +620,11 @@ const showTip = (text) => { if (text) tip = { text, until: g.time + 4.6 }; };
         refreshGameCalibrationPolicy(g); publishCalibration();
         if (net.isHost) g.server = 1;        // хост всегда первый подаёт
         if (g.ui) g.ui.syncScore(); // names, zero score and the first server immediately
-        onlineHud(true);
         netSay('match', { side: net.side });
       });
-      net.on('peerLeft', () => { onlineHud(false); netSay('peerleft'); g.returnToMenu(); g.sessionKind = 'free'; refreshGameCalibrationPolicy(g, '_policy'); publishCalibration(); });
+      net.on('peerLeft', () => { netSay('peerleft'); g.returnToMenu(); g.sessionKind = 'free'; refreshGameCalibrationPolicy(g, '_policy'); publishCalibration(); });
       net.on('disconnected', () => {
-        onlineHud(false); netSay(netTried ? 'closed' : 'idle');
+        netSay(netTried ? 'closed' : 'idle');
         if (g.sessionKind === 'online') g.sessionKind = 'free';
         refreshGameCalibrationPolicy(g, '_policy'); publishCalibration();
       });

@@ -4,7 +4,7 @@
  *  Run: node tt/tools/audit.cjs [--json]
  *
  *  Every analysis returns { id, group, name, ok, detail? }. Groups:
- *    S  static syntax per source file + both bundles,
+ *    S  static syntax per source file + application and embedded scripts,
  *    H  host contract (routing/messaging/data invariants),
  *    C  camera contract on the viewport grid,
  *    F  physics flight fuzz,
@@ -18,11 +18,11 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const { execFileSync } = require('node:child_process');
-const { load } = require('../../tests/helpers.cjs');
+const { load, appPage } = require('../../tests/helpers.cjs');
 
 const ROOT = path.resolve(__dirname, '..', '..');          // game/
 const SRC = path.join(ROOT, 'tt', 'src');
-const HOST = path.resolve(ROOT, '..');                     // ttu-v2/
+const HOST = path.resolve(ROOT, '..');                     // source/
 const HOST_SRC = path.join(HOST, 'src');
 
 const out = [];
@@ -55,29 +55,22 @@ for (const f of hostJs) {
   catch (e) { ok = false; detail = e.message.split('\n').slice(0, 3).join(' '); }
   rec(id++, 'S', `host file parses: ${f}`, ok, detail);
 }
-/* the two known-last-mile bundles: the extracted in-page game script and the
- * host's main inline script — both must be one well-formed script */
-try {
-  const src = fs.readFileSync(path.join(HOST, 'uploads', '../game_build.html'), 'utf8');
-  void src.length;
-} catch { /* game_build may be absent; bundles re-checked from sources below */ }
-rec(id++, 'S', 'build.py (host) runs clean', (() => {
-  try { execFileSync('python3', ['build.py'], { cwd: HOST, stdio: 'pipe' }); return true; }
-  catch (e) { return false; }
-})(), 'host build failed');
-rec(id++, 'S', 'tt/build.py (game) runs clean', (() => {
-  try { execFileSync('python3', ['tt/build.py', '../game_build.html'], { cwd: ROOT, stdio: 'pipe' }); return true; }
-  catch (e) { return false; }
-})(), 'game build failed');
-if (out[out.length - 1].ok) {
-  const html = fs.readFileSync(path.join(HOST, 'game_build.html'), 'utf8');
-  const m = [...html.matchAll(/<script(?![^>]*src)[^>]*>([\s\S]*?)<\/script>/g)].sort((a, b) => b[1].length - a[1].length);
+// Inspect the canonical application without writing a second engine page.
+let app = null, buildError = '';
+try { app = fs.readFileSync(appPage(), 'utf8'); }
+catch (e) { buildError = e.message; }
+rec(id++, 'S', 'source/build.py builds the full application', !!app, buildError);
+for (const name of ['application', 'embedded frame']) {
   let ok = true, detail = '';
-  try { new (require('vm').Script)(m[0][1]); } catch (e) { ok = false; detail = e.message; }
-  rec(id++, 'S', 'bundled game script is well-formed', ok, detail);
-  out[out.length - 1].id = --id; id++;
-  fs.rmSync(path.join(HOST, 'game_build.html'), { force: true });
-} else { rec(id++, 'S', 'bundled game script is well-formed (skipped: build failed)', true); }
+  try {
+    if (!app) throw new Error('canonical application build failed');
+    const html = name === 'application' ? app : JSON.parse(app.match(/^const GAME_HTML = (".*");$/m)?.[1]);
+    const scripts = [...html.matchAll(/<script(?![^>]*src)[^>]*>([\s\S]*?)<\/script>/g)];
+    if (!scripts.length) throw new Error('inline scripts missing');
+    for (const [, source] of scripts) new (require('node:vm').Script)(source);
+  } catch (e) { ok = false; detail = e.message; }
+  rec(id++, 'S', `${name} scripts are well-formed`, ok, detail);
+}
 
 /* ------------------------------------------------------------------ *
  *  H: host contract                                                  *

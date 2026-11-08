@@ -6,7 +6,7 @@
 
 В папке source/ лежат только исходники; готовый HTML живёт только в play/.
 """
-import base64, re, pathlib, hashlib, sys
+import base64, re, pathlib, hashlib, sys, shutil
 
 SOURCE_DIR = pathlib.Path(__file__).resolve().parent
 REPO = SOURCE_DIR.parent
@@ -34,10 +34,9 @@ order = ['core/util.js','core/i18n.js','locales/ru.js','locales/en.js','core/sta
          'screens/match.js','screens/training.js','screens/result.js',
           'ui/item_art.js','data/catalog.js','screens/shop.js','data/season.js','screens/pass.js','screens/ranks.js','screens/profile.js','ui/preloader.js','main.js']
 # --- настоящий движок: собираем game/ и встраиваем как строку для iframe srcdoc ---
-import subprocess, tempfile, os
-gtmp = tempfile.mktemp(suffix='.html')
-subprocess.run(['python3', str(SOURCE_DIR/'game'/'tt'/'build.py'), gtmp], check=True, env=dict(os.environ, TT_NO_LOGO='1'))
-ghtml = open(gtmp, encoding='utf-8').read(); os.remove(gtmp)
+import os
+from game.tt._bundle import build_frame
+ghtml = build_frame()
 gamejs = 'const GAME_HTML = ' + json.dumps(ghtml, ensure_ascii=False).replace('<', '\\u003c') + ';\n'
 # Адрес API вшивается в бандл: клиент — статический файл, переменные окружения
 # на хостинге ему недоступны. Пустое значение — штатный режим «только локально».
@@ -50,4 +49,5 @@ html = html.replace('/*__CSS__*/', css).replace('/*__JS__*/', js)
 out = pathlib.Path(sys.argv[1]).resolve() if len(sys.argv) > 1 else REPO/'play'/'index.html'
 out.parent.mkdir(parents=True, exist_ok=True)
 out.write_text(html)
+shutil.copyfile(root/'preloaderr.png', out.parent/'preloaderr.png')
 print('built', out, len(html)//1024, 'KB')

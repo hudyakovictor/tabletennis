@@ -1,26 +1,21 @@
 /* Screenshot during a rally: visible ball + paddle blob shadows on the table. */
 const puppeteer = require('puppeteer-core');
-const chromium = require('@sparticuz/chromium');
-const path = require('path');
-const { enginePage } = require('./helpers.cjs');
-const { pathToFileURL } = require('url');
+const chromium = process.env.CHROME_BIN ? null : require('@sparticuz/chromium');
+const { appFrame } = require('./helpers.cjs');
 
 (async () => {
   const browser = await puppeteer.launch({
-    executablePath: await chromium.executablePath(),
-    args: chromium.args, headless: true,
+    executablePath: process.env.CHROME_BIN || await chromium.executablePath(),
+    args: process.env.CHROME_BIN ? ['--no-sandbox', '--use-angle=swiftshader', '--enable-unsafe-swiftshader'] : chromium.args, headless: true,
     env: { ...process.env, LD_LIBRARY_PATH: '/tmp/topspin-browser-libs/lib' }
   });
   const page = await browser.newPage();
   page.on('pageerror', e => console.log('PAGEERR', e.message));
   await page.setViewport({ width: 1280, height: 760 });
-  await page.goto(pathToFileURL(enginePage()).href);
-  await page.waitForFunction(() => window.__game && window.__game.R.drawCalls > 0, { timeout: 30000 });
-  await page.evaluate(() => {
+  const frame = await appFrame(page);
+  await frame.evaluate(() => {
     const g = window.__game;
     g.startMatch(2); g.paused = false;
-    // screenshots only the 3D view: hide DOM overlays (screens, HUD), keep canvas sizing intact
-    document.querySelectorAll('.screen, #loading, #menu, #hud, #playband, #topright, #msghud, #fx').forEach(el => { el.style.display = 'none'; });
     g.setState(GS.RALLY);
     g.ball.live = true; g.ball.lastHitBy = -1; g.rallyBounces = [1];
     // hover the blade above the table through the normal pointer path

@@ -353,6 +353,33 @@ test('fast drags delivered in the same animation frame keep their start point', 
   assert.equal(lib.isRealStroke(sw.lastReleased, false), true);
 });
 
+test('a fast cross-court mouse stroke is not re-centred or softened back onto the table by Game', () => {
+  for (const scale of [1, .3]) for (const serving of [false, true]) for (const x of [-.55, .55]) {
+    const { g, send } = inputGame('mouse', scale), { V3, PH, GS } = lib;
+    V3.set(g.ball.p, x, 1.10, 1.6); V3.set(g.ball.v, 0, -1, serving ? 0 : 5);
+    V3.copy(g.player.pos, g.ball.p); V3.copy(g.player.prevPos, g.player.pos); V3.copy(g.player.prev, g.player.pos);
+    if (serving) {
+      g.state = GS.SERVE_TOSS; g.isServeBall = true; g.ball.lastHitBy = 0;
+      g.tossStartY = .9; g.tossApex = 1.3;
+    }
+    const point = g.project(g.ball.p, {}), direction = -Math.sign(x), originalApply = g.applyHit;
+    let accepted;
+    g.applyHit = function (side, racket, ...args) { accepted = racket; return originalApply.call(this, side, racket, ...args); };
+    send('pointerdown', point, 1000);
+    send('pointermove', { x: point.x + direction * .07, y: point.y }, 1012);
+    const label = `${scale}/${serving ? 'serve' : 'return'}/${x}`;
+    assert.equal(g.stats.shots, 1, `${label}: the swipe must make contact`);
+    assert.equal(accepted.playerControlled, true, label);
+    assert.equal(accepted.intentionalOut, true, label);
+    assert.equal(!!accepted.softened, false, `${label}: the safety ladder overruled the player's power`);
+    const flight = lib.predict(g.ball.p, g.ball.v, g.ball.w,
+      { dt: PH.SIM_DT, maxT: 3, stopAfterBounces: serving ? 2 : 1, out: {} });
+    const landing = serving ? flight.b2 || flight.secondPlaneCross : flight.landed || flight.planeCross;
+    assert.ok(landing && landing.x * direction > PH.T_HALF_WID,
+      `${label}: the hard swipe was re-aimed to the centre: ${JSON.stringify(landing)}`);
+  }
+});
+
 test('hardware gesture timing survives a stalled render clock without collapsing later samples', () => {
   const { g, send } = inputGame();
   g.tryInputHit = () => {};

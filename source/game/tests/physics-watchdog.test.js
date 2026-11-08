@@ -731,6 +731,8 @@ test('speed ceiling is the physical bat limit, not the archetype multiplier', ()
     * (1 + WATCHDOG_RULES.speedTol);
   assert.ok(Math.abs(w.speedLimit({ side: 1, strokeId: 'SIDE' })
     - STROKE_CONFIG.spin.sideVmax * (1 + WATCHDOG_RULES.speedTol)) < 1e-9, 'SIDE стоит на sideVmax');
+  assert.equal(w.speedLimit({ side: 1, strokeId: 'SIDE', playerControlled: true }),
+    cfg.placement.player.sideVmax * (1 + WATCHDOG_RULES.speedTol), 'manual sidespin uses the player effort ceiling');
   /* archetypes[].speed — множитель жеста (40_swipe.js:492), а не потолок:
    * пока лимит умножался на него, честный PUSH с 14.47 м/с получал тикет
    * «выше потолка 12.05». */

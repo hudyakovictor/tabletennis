@@ -141,7 +141,7 @@ const ET = (() => {
     'Длинный быстрый свайп: быстрая подача со слабым вращением. Экспресс без украшений.': 'Long, fast swipe: a fast serve with little spin. Plain express delivery.',
     'Клик по мячу на подаче: плоский полёт без вращения. Спин в заявке отсутствует.': 'Click the ball on serve: flat flight with no spin. None declared on the form.',
     /* Static standalone UI, including accessible labels. */
-    'TOPSPIN ARENA. Настольный теннис': 'TOPSPIN ARENA. Table tennis',
+    'Игровая сцена': 'Game scene',
     'Игровое поле. Короткий клик или касание отбивает мяч, свайп задаёт направление и вращение. Клавиши 1, 2, 3 переключают вид камеры.': 'Playing field. A brief click or tap returns the ball; a swipe sets direction and spin. Keys 1, 2, 3 switch camera views.',
     'Счёт матча': 'Match score',
     'ТЫ': 'YOU', 'ДО': 'TO', 'ЛЁГКИЙ': 'EASY', 'СРЕДНИЙ': 'MEDIUM', 'СЛОЖНЫЙ': 'HARD',
@@ -216,7 +216,7 @@ const ET = (() => {
     'Сбор данных для разработки: углы стола, неподвижный мяч, медленный и быстрый мяч, подача, сила и спин. Сначала мышь, потом касание. Данные не меняют общую зону и не создают личный профиль. Регламент не торгуется.': 'Development data collection: table corners, stationary ball, slow and fast ball, serving, power and spin. Mouse first, then touch. The data does not change the shared zone or create a personal profile. Regulations are not negotiable.',
     'Калибровка не начата.': 'Calibration not started.',
     'ЗАПИСАТЬ ПОПЫТКИ ИЗ ИГРЫ': 'IMPORT GAME ATTEMPTS', 'СКАЧАТЬ ДАННЫЕ КАЛИБРОВКИ': 'DOWNLOAD CALIBRATION DATA',
-    'Последние попытки': 'Recent attempts', 'Загрузка Table Tennis Ultimate': 'Loading Table Tennis Ultimate',
+    'Последние попытки': 'Recent attempts',
     'СТОЛ. МЯЧ. ПРАВО ВЕТО.': 'TABLE. BALL. VETO POWER.', 'Нажми, чтобы начать': 'Click or tap to start',
     'ЛИСТАЙ ВНИЗ ↓': 'MORE BELOW ↓',
     /* Runtime feedback and measured UI templates. */

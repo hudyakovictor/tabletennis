@@ -4,7 +4,7 @@
    Адрес реле берётся из адреса страницы (GameHost.relayUrl), поэтому ссылка
    для друга — просто адрес игры + ?room=КОД.
    ===================================================================== */
-const Net = { st: 'idle', room: '', side: 0, ping: 0, err: '', code: '', over: null };
+const Net = { st: 'idle', room: '', side: 0, ping: 0, err: '', code: '', over: null, hud: null };
 /* Код комнаты — строго 5 символов A-Z0-9 (так валидирует реле). Пропускать
  * в разметку что-то другое нельзя: ссылка ?room= приходит извне. */
 const netCode = (v) => {
@@ -23,6 +23,7 @@ Router.def('online', {
     this.el = el; this.alive = true;
     this.off = GameHost.on((m) => {
       if (m.type === 'net') this.onNet(m);
+      else if (m.type === 'onlineHud') this.onHud(m.snapshot);
       else if (m.type === 'matchEnd' && Net.st === 'match') this.onOver(m);
     });
     GameHost.ensure();
@@ -34,15 +35,15 @@ Router.def('online', {
       const b = e.target.closest('[data-act]'); if (!b) return;
       const k = b.dataset.act;
       haptic('medium'); Sfx.soft();
-      if (k === 'create') { Net.st = 'connecting'; Net.err = ''; this.paint(); GameHost.send('net', { cmd: 'create' }); }
+      if (k === 'create') { Net.st = 'connecting'; Net.err = ''; Net.hud = null; this.paint(); GameHost.send('net', { cmd: 'create' }); }
       if (k === 'join') {
         const code = netCode((el.querySelector('#netIn') || {}).value);
         if (!code) { Net.err = t('net.badCode'); this.paint(); return; }
-        Net.st = 'connecting'; Net.code = code; this.paint(); GameHost.send('net', { cmd: 'join', code });
+        Net.st = 'connecting'; Net.code = code; Net.hud = null; this.paint(); GameHost.send('net', { cmd: 'join', code });
       }
       if (k === 'invite') this.invite(b);
-      if (k === 'again') { Net.over = null; Net.st = 'idle'; Net.room = ''; Net.code = ''; GameHost.send('net', { cmd: 'leave' }); this.paint(); }
-      if (k === 'leave') { Net.st = 'idle'; Net.room = ''; Net.code = ''; Net.err = ''; GameHost.send('net', { cmd: 'leave' }); this.paint(); }
+      if (k === 'again') { Net.over = null; Net.hud = null; Net.st = 'idle'; Net.room = ''; Net.code = ''; GameHost.send('net', { cmd: 'leave' }); this.paint(); }
+      if (k === 'leave') { Net.st = 'idle'; Net.room = ''; Net.code = ''; Net.err = ''; Net.hud = null; GameHost.send('net', { cmd: 'leave' }); this.paint(); }
       if (k === 'exit') this.quitMatch();
     });
     /* глубокая ссылка с кодом: друг не должен вводить его руками */
@@ -69,12 +70,20 @@ Router.def('online', {
     GameHost.send('outro'); GameHost.show(false); TGX.guard(false);
     this.el.classList.remove('net-playing'); this.paint();
   },
+  onHud(snapshot) {
+    if (!this.alive || Net.over || !snapshot || snapshot.schema !== 1 || !snapshot.matchId ||
+        !Array.isArray(snapshot.score) || snapshot.score.length !== 2 ||
+        !snapshot.score.every(n => Number.isSafeInteger(n) && n >= 0) || !Number.isSafeInteger(snapshot.seq)) return;
+    if (Net.hud?.matchId === snapshot.matchId && Net.hud.seq >= snapshot.seq) return;
+    Net.hud = snapshot;
+    if (Net.st === 'match') this.paint();
+  },
   quitMatch() {
     GameHost.send('net', { cmd: 'leave' });
     GameHost.send('attract');
     GameHost.show(false);
     TGX.guard(false);
-    Net.st = 'idle'; Net.room = ''; Net.code = ''; Net.over = null;
+    Net.st = 'idle'; Net.room = ''; Net.code = ''; Net.over = null; Net.hud = null;
     Router.go('hub');
   },
   invite(btn) {
@@ -91,12 +100,18 @@ Router.def('online', {
     const head = (chip) => `<div class="pg-head rise" style="--d:0"><div class="h1">${t('net.title')}</div>${chip}</div>`;
 
     if (Net.st === 'match') {
-      body.innerHTML = `<div class="net-live">
-        <span class="net-meta">${t('net.roomCap')} ${Net.code} · ${t(Net.side === 1 ? 'net.host' : 'net.guest')}</span>
-        <span class="net-ping num">${Net.ping || '—'} ${t('net.ms')}</span>
-        <button class="net-exit pe" data-act="exit" aria-label="${t('common.exit')}" title="${t('common.exit')}">${Art.icon('x', { c: 'currentColor', fill: 'none', sw: 2.2 })}</button></div>`;
+      if (!this.hud) {
+        body.innerHTML = `<div class="match-hud-slot net-hud-slot"></div><div class="net-live">
+          <span class="net-meta"></span><span class="net-ping num"></span>
+          <button class="net-exit pe" data-act="exit" aria-label="${t('common.exit')}" title="${t('common.exit')}">${Art.icon('x', { c: 'currentColor', fill: 'none', sw: 2.2 })}</button></div>`;
+        this.hud = MatchHUD.mount(body.querySelector('.net-hud-slot'));
+      }
+      body.querySelector('.net-meta').textContent = `${t('net.roomCap')} ${Net.code} · ${t(Net.side === 1 ? 'net.host' : 'net.guest')}`;
+      body.querySelector('.net-ping').textContent = `${Net.ping || '—'} ${t('net.ms')}`;
+      if (Net.hud) this.hud.update(Net.hud, { t, names: [S.name, t('hud.far')], reducedMotion: effectiveReducedMotion() });
       return;
     }
+    if (this.hud) { this.hud.dispose(); this.hud = null; }
     if (Net.over) {
       body.innerHTML = head(`<span class="chip">${t('net.score')} <b class="num">${Net.over.score}</b></span>`) +
         `<div class="pnl net-card rise" style="--d:1">
@@ -123,7 +138,7 @@ Router.def('online', {
       <div class="pnl inset net-relay rise" style="--d:2"><span>${Art.icon('info', { c: '#9BE8FF' })}</span>
         <p>${t('net.relay')} <b class="num">${netEsc(relay ? relay.replace(/^wss?:\/\//, '') : t('net.relayNone'))}</b></p></div>`;
   },
-  leave() { this.alive = false; clearInterval(this.iv); if (this.off) this.off(); GameHost.show(false); TGX.guard(false); },
+  leave() { this.alive = false; clearInterval(this.iv); if (this.off) this.off(); this.hud?.dispose(); this.hud = null; GameHost.show(false); TGX.guard(false); },
   onBack() {
     if (Net.st === 'match') this.quitMatch();
     else { GameHost.send('net', { cmd: 'leave' }); Router.go('hub'); }

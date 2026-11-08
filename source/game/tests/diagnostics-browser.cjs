@@ -1,4 +1,4 @@
-/* End-to-end diagnostics in the actual standalone and shipped shell. Chromium
+/* End-to-end diagnostics in the canonical application and its game frame. Chromium
  * mobile emulation is not a substitute for a physical phone/Telegram test. */
 'use strict';
 const assert = require('node:assert/strict');
@@ -9,9 +9,8 @@ const zlib = require('node:zlib');
 const { execFileSync } = require('node:child_process');
 const { pathToFileURL } = require('node:url');
 const puppeteer = require('puppeteer-core');
-const chromium = require('@sparticuz/chromium');
-const { root, enginePage } = require('./helpers.cjs');
-const repo = path.resolve(root, '../..');
+const chromium = process.env.CHROME_BIN ? null : require('@sparticuz/chromium');
+const { appPage, appFrame } = require('./helpers.cjs');
 const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
 async function download(pathname) {
   for (let i = 0; i < 40; i++) {
@@ -35,7 +34,7 @@ async function settled(page, selector, mobile = false) {
   await page.$eval(selector, el => {
     let parent = el.parentElement;
     while (parent && parent.id !== 'device') {
-      if (parent.matches('.sbody,.pause-actions') && parent.scrollHeight > parent.clientHeight) {
+      if (parent.matches('.sbody') && parent.scrollHeight > parent.clientHeight) {
         const p = parent.getBoundingClientRect(), r = el.getBoundingClientRect();
         parent.scrollTop += r.top - p.top - Math.max(0, (p.height - r.height) / 2);
       }
@@ -99,44 +98,31 @@ async function assertPngIsNotBlank(page, imageSelector) {
 }
 (async () => {
   const libs = path.join(os.tmpdir(), 'topspin-browser-libs');
-  fs.mkdirSync(libs, { recursive: true });
-  const archive = path.join(path.dirname(require.resolve('@sparticuz/chromium')), '../../bin/al2023.tar.br');
-  execFileSync('tar', ['xf', '-', '-C', libs], { input: zlib.brotliDecompressSync(fs.readFileSync(archive)) });
+  if (process.platform === 'linux' && !process.env.CHROME_BIN) {
+    fs.mkdirSync(libs, { recursive: true });
+    const archive = path.join(path.dirname(require.resolve('@sparticuz/chromium')), '../../bin/al2023.tar.br');
+    execFileSync('tar', ['xf', '-', '-C', libs], { input: zlib.brotliDecompressSync(fs.readFileSync(archive)) });
+  }
   const browser = await puppeteer.launch({ executablePath: process.env.CHROME_BIN || await chromium.executablePath(),
-    args: chromium.args, headless: true,
+    args: process.env.CHROME_BIN ? ['--no-sandbox', '--enable-unsafe-swiftshader',
+      '--use-gl=angle', '--use-angle=swiftshader', '--autoplay-policy=no-user-gesture-required'] : chromium.args,
+    headless: true,
     env: { ...process.env, LD_LIBRARY_PATH: [path.join(libs, 'lib'), process.env.LD_LIBRARY_PATH].filter(Boolean).join(':') } });
   let checks = 0;
+  const downloadDirs = [];
   const check = name => { checks++; console.log('ok', checks, name); };
   try {
-    // Standalone: actual controls, detailed snapshot, download, and failure fallback.
-    const standalone = await browser.newPage(), standaloneErrors = [];
-    standalone.on('pageerror', e => standaloneErrors.push(e.message));
-    await standalone.setViewport({ width: 960, height: 720 });
-    const standaloneDir = fs.mkdtempSync(path.join(os.tmpdir(), 'topspin-standalone-diag-'));
-    const cd = await standalone.createCDPSession();
-    await cd.send('Browser.setDownloadBehavior', { behavior: 'allow', downloadPath: standaloneDir });
-    await standalone.goto(pathToFileURL(enginePage()).href);
-    await standalone.waitForFunction('window.__game && window.__game.R.drawCalls > 0', { timeout: 30000 });
-    await standalone.evaluate(() => {
-      document.querySelectorAll('.screen.on').forEach(e => e.classList.remove('on'));
-      document.querySelector('#loading').classList.add('off');
-      __game.startMatch(0); __game.setPaused(true);
-    });
-    await settled(standalone, '#diagnosticShotPause');
-    await standalone.waitForSelector('#diagnosticPreview:not([hidden])');
-    await assertPngIsNotBlank(standalone, '#diagnosticImage');
-    await pause(200);
-    await assertVisibleInScroll(standalone, '.pause-actions', '#diagnosticImageLink');
-    assert.equal(await standalone.evaluate(() => !!__game.debugRecording), false);
-    check('standalone pause shows an accessible screenshot and download without enabling recording');
-    await settled(standalone, '#diagnosticRecordPause');
-    await standalone.waitForFunction('__game.debugRecording === true');
-    assert.equal(await standalone.$eval('#diagnosticRecordPause', e => e.checked), true);
-    check('standalone pause enables detailed recording');
-    await settled(standalone, '#pauseResume');
-    const point = await setupIncoming(standalone.mainFrame());
-    await standalone.mouse.click(point.x, point.y);
-    const tap = await standalone.evaluate(() => {
+    // Preserve mouse/physics evidence checks without any legacy pause menu.
+    const mouse = await browser.newPage(), mouseErrors = [];
+    mouse.on('pageerror', e => mouseErrors.push(e.message));
+    await mouse.setViewport({ width: 960, height: 720 });
+    const mouseFrame = await appFrame(mouse, { match: { diff: 0 } });
+    await mouse.evaluate(() => GameHost.setDebug(true));
+    await mouseFrame.waitForFunction('__game.debugRecording === true');
+    const point = await setupIncoming(mouseFrame);
+    const mouseBounds = await (await mouse.$('#gamelayer iframe')).boundingBox();
+    await mouse.mouse.click(mouseBounds.x + point.x, mouseBounds.y + point.y);
+    const tap = await mouseFrame.evaluate(() => {
       const g = __game; g.tryPlayerHit(V3.clone(g.ball.p));
       return g.inputLog.events(g.time).filter(e => e.type === 'pointerup').at(-1);
     });
@@ -148,7 +134,7 @@ async function assertPngIsNotBlank(page, imageSelector) {
     // press, rather than a stationary ball placed directly on the paddle.
     // Whether it hits is NOT locked in as a contract: if it misses, the report
     // must explain the held-through-window path so a future fix can change it.
-    const moving = await standalone.evaluate(() => {
+    const moving = await mouseFrame.evaluate(() => {
       const g = __game, update = g._diagnosticsTestUpdate.bind(g), startSeq = g.inputLog.sequence;
       g.startMatch(0); g.setPaused(false); g.setState(GS.RALLY); g.server = -1; g.isServeBall = false;
       g.rallyBounces = [1]; g.recenterT = 0; g.inspectSlowmo = true; g.timeScale = g.targetTimeScale = .3;
@@ -183,86 +169,18 @@ async function assertPngIsNotBlank(page, imageSelector) {
       assert.equal(moving.anomaly, true); assert.ok(moving.stages.includes('no_stroke_intent'));
     }
     check('moving-ball slow-mo press records the held-window decision path (return observed: ' + moving.returned + ')');
-    await standalone.evaluate(() => { __game.update = __game._diagnosticsTestUpdate; __game.setPaused(true); });
-    await settled(standalone, '#diagnosticReportPause');
-    await standalone.waitForSelector('#diagnosticReportLink:not([hidden])', { visible: true });
-    await settled(standalone, '#diagnosticReportLink');
-    const standaloneText = (await download(path.join(standaloneDir, 'topspin-diagnostics.json'))).toString('utf8');
-    const standaloneJson = JSON.parse(standaloneText);
-    assert.ok(!standaloneText.includes('\n'), 'report should remain compact for phone memory');
-    assert.equal(standaloneJson.format, 'topspin-diagnostics');
-    assert.ok(standaloneJson.events.some(e => e.type === 'pointerdown' && e.debug));
-    assert.ok(standaloneJson.events.some(e => e.type === 'physics_gate'));
-    assert.ok(standaloneJson.environment.webgl.renderer);
-    assert.match(standaloneJson.environment.build, /[a-f0-9]{12}$/);
-    check('standalone JSON download contains input, physics gates, device, renderer and build fingerprint');
-    await standalone.waitForSelector('#diagnosticPreview:not([hidden])');
-    await assertPngIsNotBlank(standalone, '#diagnosticImage');
-    await settled(standalone, '#diagnosticImageLink');
-    const standalonePng = await download(path.join(standaloneDir, 'topspin-frame.png'));
-    assert.equal(standalonePng.subarray(0, 8).toString('hex'), '89504e470d0a1a0a');
-    check('standalone screenshot is a nonblank downloadable PNG with an image fallback');
-    const soloMarker = 'standalone-before-stop-' + Date.now();
-    await standalone.evaluate(async marker => {
-      __game.logInput('test_checkpoint', { outcome: { marker } });
-      await __game.debugArchive.flush();
-    }, soloMarker);
-    await settled(standalone, '#diagnosticShotPause');
-    await standalone.waitForFunction('__game.debugArchive.frameStatus === "saved"');
-    const soloFrameTime = await standalone.evaluate(() => __game.ui._diagnosticBookmark.capturedAt);
-    await settled(standalone, '#diagnosticRecordPause');
-    await standalone.waitForFunction('__game.debugRecording === false');
-    await standalone.evaluate(async () => __game.debugArchive.flush());
-    await standalone.reload({ waitUntil: 'domcontentloaded' });
-    await standalone.waitForFunction('window.__game && window.__game.R.drawCalls > 0', { timeout: 30000 });
-    await standalone.evaluate(() => {
-      document.querySelectorAll('.screen.on').forEach(e => e.classList.remove('on'));
-      document.querySelector('#loading').classList.add('off');
-      __game.startMatch(0); __game.setPaused(true); __game.ui.syncPauseControl();
+    const mouseReport = await mouseFrame.evaluate(async () => {
+      __game.update = __game._diagnosticsTestUpdate;
+      return __game.diagnosticReport();
     });
-    await standalone.waitForFunction(expected => __game.ui._diagnosticBookmark && __game.ui._diagnosticBookmark.capturedAt === expected, { timeout: 10000 }, soloFrameTime);
-    await standalone.waitForSelector('#diagnosticPreview:not([hidden])');
-    assert.match(await standalone.$eval('#diagnosticFrameTime', e => e.textContent), /Время снимка:/);
-    assert.equal(await standalone.$eval('#diagnosticRecordPause', e => e.checked), false);
-    await settled(standalone, '#diagnosticReportPause');
-    await standalone.waitForSelector('#diagnosticReportLink:not([hidden])');
-    const soloRecovery = JSON.parse(await standalone.evaluate(() => __game.ui._diagnosticReportText));
-    assert.equal(soloRecovery.recording.enabled, false);
-    assert.equal(soloRecovery.recording.recovery.status, 'available');
-    assert.ok(soloRecovery.events.some(e => e.type === 'test_checkpoint' && e.outcome.marker === soloMarker));
-    check('standalone restores a stopped session and its marked frame without restarting recording');
-    assert.deepEqual(standaloneErrors, []);
-    await standalone.close();
-
-    // The standalone pause has a scrollable diagnostics panel on a phone;
-    // a document-wide touchmove preventDefault must not trap its controls.
-    const small = await browser.newPage();
-    await small.setViewport({ width: 390, height: 844, isMobile: true, hasTouch: true });
-    await small.goto(pathToFileURL(enginePage()).href);
-    await small.waitForFunction('window.__game && window.__game.R.drawCalls > 0', { timeout: 30000 });
-    await small.evaluate(() => {
-      document.querySelectorAll('.screen.on').forEach(e => e.classList.remove('on'));
-      document.querySelector('#loading').classList.add('off');
-      __game.startMatch(0); __game.setDiagnosticMode(true); __game.setPaused(true); __game.ui.syncPauseControl();
-    });
-    await small.waitForSelector('#diagnosticPreview:not([hidden])');
-    await small.$eval('#diagnosticImage', img => img.decode());
-    const scrollRect = await small.evaluate(() => {
-      const el = document.querySelector('.pause-actions'), r = el.getBoundingClientRect(); el.scrollTop = 0;
-      return { x: r.left + r.width / 2, top: r.top, bottom: r.bottom, height: el.clientHeight, content: el.scrollHeight };
-    });
-    assert.ok(scrollRect.content > scrollRect.height, JSON.stringify(scrollRect));
-    const touch = await small.createCDPSession();
-    const startY = scrollRect.bottom - 30, endY = scrollRect.top + 30;
-    await touch.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: scrollRect.x, y: startY, id: 1 }] });
-    for (let i = 1; i <= 8; i++) {
-      await touch.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: scrollRect.x, y: startY + (endY - startY) * i / 8, id: 1 }] });
-    }
-    await touch.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
-    await pause(500);
-    assert.ok(await small.$eval('.pause-actions', el => el.scrollTop) > 20, 'standalone phone pause should scroll with touch');
-    check('standalone mobile pause panel scrolls to diagnostics with touch');
-    await small.close();
+    assert.equal(mouseReport.format, 'topspin-diagnostics');
+    assert.ok(mouseReport.events.some(e => e.type === 'pointerdown' && e.debug));
+    assert.ok(mouseReport.events.some(e => e.type === 'physics_gate'));
+    assert.ok(mouseReport.environment.webgl.renderer);
+    assert.match(mouseReport.environment.build, /[a-f0-9]{12}$/);
+    check('application frame report contains input, physics gates, device, renderer and build fingerprint');
+    assert.deepEqual(mouseErrors, []);
+    await mouse.close();
 
     // Shipped shell, mobile touchscreen, screenshot bookmark, downloaded report,
     // host/iframe events, error capture and reload recovery.
@@ -270,13 +188,10 @@ async function assertPngIsNotBlank(page, imageSelector) {
     mobile.on('pageerror', e => mobileErrors.push(e.message));
     await mobile.setViewport({ width: 390, height: 844, isMobile: true, hasTouch: true });
     const mobileDir = fs.mkdtempSync(path.join(os.tmpdir(), 'topspin-mobile-diag-'));
+    downloadDirs.push(mobileDir);
     const md = await mobile.createCDPSession();
     await md.send('Browser.setDownloadBehavior', { behavior: 'allow', downloadPath: mobileDir });
-    await mobile.goto(pathToFileURL(path.join(repo, 'play/index.html')).href + '?s=match');
-    await mobile.waitForSelector('#gamelayer iframe', { timeout: 30000 });
-    let frame = await (await mobile.$('#gamelayer iframe')).contentFrame();
-    await frame.waitForFunction('window.__game && window.__game.R.drawCalls > 0', { timeout: 30000 });
-    await mobile.waitForSelector('.mx.live', { timeout: 30000 });
+    let frame = await appFrame(mobile, { match: { free: true, sessionKind: 'free' } });
     await settled(mobile, '[data-act=pause]', true);
     await mobile.waitForSelector('.sheet-wrap.open [data-a=screenshot]', { visible: true });
     await pause(700);
@@ -312,7 +227,9 @@ async function assertPngIsNotBlank(page, imageSelector) {
       return { down: rows.filter(e => e.type === 'pointerdown').at(-1), up: rows.filter(e => e.type === 'pointerup').at(-1),
         gates: rows.filter(e => e.type === 'physics_gate').length };
     });
-    assert.equal(input.down.dom.pointerType, 'touch'); assert.equal(input.up.outcome.recognized, 'tap');
+    assert.equal(input.down.dom.pointerType, 'touch');
+    assert.equal(input.up.outcome.recognized, 'tap', JSON.stringify({
+      outcome: input.up.outcome, down: input.down.dom, up: input.up.dom }));
     assert.equal(input.up.outcome.reason, null); assert.ok(input.gates > 0);
     check('emulated touch, slow motion and substep decisions are recorded inside the iframe');
     const cancel = await frame.evaluate(() => {
@@ -424,32 +341,37 @@ async function assertPngIsNotBlank(page, imageSelector) {
     assert.deepEqual(mobileErrors, []);
     await mobile.close();
 
-    // Training has its own diagnostics entry point. Exercise its actual
-    // touchscreen target so overlap with the skip button cannot regress.
+    // Enter an actual academy lesson before checking its pause/diagnostics controls.
     const training = await browser.newPage(), trainingErrors = [];
     training.on('pageerror', e => trainingErrors.push(e.message));
     await training.setViewport({ width: 390, height: 844, isMobile: true, hasTouch: true });
-    await training.goto(pathToFileURL(path.join(repo, 'play/index.html')).href + '?s=train');
-    await training.waitForSelector('.tx.live', { timeout: 30000 });
-    await training.waitForSelector('#gamelayer iframe', { timeout: 30000 });
+    await training.goto(pathToFileURL(appPage()).href + '?s=train');
+    await training.waitForFunction(() => typeof GameHost !== 'undefined' && GameHost.trainingCatalog, { timeout: 30000 });
+    const lessonId = await training.evaluate(() => GameHost.trainingCatalog.lessons.find(lesson => lesson.gesture?.kind === 'tap').id);
+    await settled(training, `.academy-menu [data-choice="${lessonId}"]`, true);
+    await settled(training, '.academy-overlay [data-act=start]', true);
+    await training.waitForSelector('.academy-live:not([hidden])', { visible: true, timeout: 30000 });
     const trainFrame = await (await training.$('#gamelayer iframe')).contentFrame();
     await trainFrame.waitForFunction('window.__game && window.__game.R.drawCalls > 0', { timeout: 30000 });
+    await settled(training, '.academy-tools [data-act=pause]', true);
     const hitTargets = await training.evaluate(() => ['diagnostics', 'skip'].map(action => {
-      const button = document.querySelector(`[data-act=${action}]`), r = button.getBoundingClientRect();
+      const button = document.querySelector(`.academy-overlay [data-act=${action}]`), r = button.getBoundingClientRect();
       const hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
       return { action, hit: hit && hit.closest('[data-act]') && hit.closest('[data-act]').dataset.act };
     }));
     assert.deepEqual(hitTargets.map(x => x.hit), ['diagnostics', 'skip']);
-    await settled(training, '[data-act=diagnostics]', true);
+    await settled(training, '.academy-overlay [data-act=diagnostics]', true);
     await trainFrame.waitForFunction('__game.paused === true', { timeout: 10000 });
     await settled(training, '[data-d=toggle]', true);
     await trainFrame.waitForFunction('__game.debugRecording === true', { timeout: 10000 });
     await settled(training, '[data-d=done]', true);
     await training.waitForFunction('!Sheet.cur', { timeout: 10000 });
+    assert.equal(await trainFrame.evaluate(() => __game.paused), true, 'closing diagnostics must keep the academy pause underneath');
+    await settled(training, '.academy-overlay [data-act=resume]', true);
     await trainFrame.waitForFunction('__game.paused === false', { timeout: 10000 });
-    await settled(training, '[data-act=diag-mark]', true);
+    await settled(training, '.academy-live [data-act=diag-mark]', true);
     await training.waitForFunction('HostDiagnostics.bookmark && HostDiagnostics.bookmark.dataUrl.length > 1000');
-    await settled(training, '[data-act=diagnostics]', true);
+    await settled(training, '.academy-live [data-act=diagnostics]', true);
     await training.waitForSelector('[data-d-preview]:not([hidden])');
     await assertPngIsNotBlank(training, '[data-d-image]');
     await settled(training, '[data-d=report]', true);
@@ -457,17 +379,17 @@ async function assertPngIsNotBlank(page, imageSelector) {
     const trainReport = JSON.parse(await training.evaluate(() => HostDiagnostics.reportText));
     assert.equal(trainReport.recording.enabled, true);
     assert.deepEqual(trainingErrors, []);
-    check('training diagnostics and skip have separate touch targets; recording, pause, frame and report work');
+    check('academy pause diagnostics and skip have separate touch targets; recording, resume, frame and report work');
     await training.close();
 
     const desktop = await browser.newPage(), desktopErrors = [];
     desktop.on('pageerror', e => desktopErrors.push(e.message));
     await desktop.setViewport({ width: 1280, height: 760 });
     const desktopDir = fs.mkdtempSync(path.join(os.tmpdir(), 'topspin-desktop-shell-diag-'));
+    downloadDirs.push(desktopDir);
     const dd = await desktop.createCDPSession();
     await dd.send('Browser.setDownloadBehavior', { behavior: 'allow', downloadPath: desktopDir });
-    await desktop.goto(pathToFileURL(path.join(repo, 'play/index.html')).href + '?s=match');
-    await desktop.waitForSelector('.mx.live', { timeout: 30000 });
+    await appFrame(desktop);
     await settled(desktop, '[data-act=pause]');
     await settled(desktop, '.sheet-wrap.open [data-a=diagnostics]');
     await settled(desktop, '.sheet-wrap.open [data-d=toggle]');
@@ -489,8 +411,7 @@ async function assertPngIsNotBlank(page, imageSelector) {
     const compact = await browser.newPage(), compactErrors = [];
     compact.on('pageerror', e => compactErrors.push(e.message));
     await compact.setViewport({ width: 360, height: 640, isMobile: true, hasTouch: true });
-    await compact.goto(pathToFileURL(path.join(repo, 'play/index.html')).href + '?s=match');
-    await compact.waitForSelector('.mx.live', { timeout: 30000 });
+    await appFrame(compact);
     await settled(compact, '[data-act=pause]', true);
     await compact.waitForSelector('.sheet-wrap.open [data-a=screenshot]', { visible: true });
     await pause(700);
@@ -507,10 +428,10 @@ async function assertPngIsNotBlank(page, imageSelector) {
     // Storage denial must not break recording, export or gameplay.
     const denied = await browser.newPage();
     await denied.evaluateOnNewDocument(() => Object.defineProperty(window, 'indexedDB', { configurable: true, get() { throw new Error('storage denied'); } }));
-    await denied.goto(pathToFileURL(enginePage()).href);
-    await denied.waitForFunction('window.__game && window.__game.R.drawCalls > 0', { timeout: 30000 });
-    const fallback = await denied.evaluate(async () => {
-      __game.startMatch(0); __game.setDiagnosticMode(true);
+    const deniedFrame = await appFrame(denied, { match: { diff: 0 } });
+    await denied.evaluate(() => GameHost.setDebug(true));
+    await deniedFrame.waitForFunction(() => window.__game.debugRecording);
+    const fallback = await deniedFrame.evaluate(async () => {
       __game.logInput('test_storage_fallback', { outcome: { ok: true } });
       const report = await __game.diagnosticReport();
       return { storage: report.recording.recovery.status, rows: report.events.filter(e => e.type === 'test_storage_fallback').length,
@@ -520,5 +441,8 @@ async function assertPngIsNotBlank(page, imageSelector) {
     check('denied IndexedDB is reported; live report and screenshot still work');
     await denied.close();
     console.log(`diagnostics browser checks passed: ${checks}`);
-  } finally { await browser.close(); }
+  } finally {
+    await browser.close();
+    for (const dir of downloadDirs) fs.rmSync(dir, { recursive: true, force: true });
+  }
 })().catch(err => { console.error(err); process.exitCode = 1; });

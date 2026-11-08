@@ -1,6 +1,6 @@
 # Table Tennis Ultimate — v2 (game-grade redesign)
 
-**Результат:** `index.html` — один самодостаточный файл (~1.7 МБ: оболочка + встроенный WebGL-движок). Без CDN, без внешних шрифтов и картинок. Работает офлайн, в Telegram и в превью-iframe.
+**Результат:** `play/index.html` в корне репозитория: один самодостаточный файл с современным интерфейсом и встроенной WebGL-сценой. Без CDN, без внешних шрифтов и картинок. Работает офлайн и в Telegram. Отдельного приложения со старым интерфейсом движка нет.
 
 ## Структура
 
@@ -8,7 +8,7 @@
 
 ```
 source/
-  build.py            → собирает src/* в index.html (инлайнит шрифты/аватары/CSS/JS + GAME_HTML движка)
+  build.py            → собирает всё приложение в ../play/index.html (шрифты/аватары/CSS/JS + GAME_HTML сцены)
   src/index.tpl.html  каркас + #device
   src/core/           util · i18n · state (сейвы v2) · platform (Telegram) · audio · ui_core (роутер/шиты) · dev
   src/locales/        словари ru.js / en.js — весь видимый текст только через t('key')
@@ -18,9 +18,9 @@ source/
   src/screens/        один файл = один экран: hub · matchmaking · match · training · result · shop · pass · ranks · profile · settings
   src/css/            base.css + screens_{hub,battle,meta,misc}.css
   src/main.js         сплэш + загрузка (последний в порядке сборки)
-  game/               WebGL-движок (свой build: game/tt/build.py, тесты: npm test в game/ и в source/)
+  game/               WebGL-движок (tt/_bundle.py: внутренний build_frame(), без HTML-выхода и CLI; тесты: npm test)
 ```
-Пересборка: `python3 build.py`. Открыть экран напрямую: `index.html?s=shop` (`hub, mm, vs, match, result, chest, shop, pass, ranks, profile`).
+Пересборка из корня репозитория: `python3 source/build.py`; из `source/game/`: `npm run build`. Обе команды собирают только `play/index.html`. Открыть экран напрямую: `play/index.html?s=shop` (`hub, mm, vs, match, result, chest, shop, pass, ranks, profile`).
 
 **Связь с сервером (необязательна).** Адрес Game API вшивается при сборке, потому что бандл статический: `TT_API_BASE=https://api.example python3 build.py`. Без переменной клиент работает полностью локально — это штатный режим, а не ошибка. Для отладки адрес можно перекрыть ссылкой: `index.html?api=http://localhost:4100`.
 
@@ -73,10 +73,11 @@ source/
 ## Фаза 2 — настоящий движок, интро/аутро, новое обучение, зона удара
 
 **Движок.** Игрушечный матч заменён настоящей игрой из `hudyakovictor/tabletennis` (TOPSPIN ARENA, WebGL).
-Исходники лежат в `game/` (тесты: `cd game && node --test`). `build.py` сам собирает игру и встраивает её
-в `index.html` как строку для `iframe srcdoc`: остаётся один файл, внешних зависимостей нет.
-Мост `game/tt/src/92_embed.js` + `06_embed.css` включаются только при `window.__TT_EMBED`; в таком режиме
-счёт, баннеры, пауза и итог рисует v2. Если открыть игру отдельно, она работает как раньше.
+Исходники лежат в `game/` (тесты: `npm test` из `source/game/`). Канонический `source/build.py` вызывает
+внутренний `game/tt/_bundle.py:build_frame()` и встраивает сцену в `play/index.html` строкой для `iframe srcdoc`.
+Мост `game/tt/src/92_embed.js` работает внутри iframe, созданного `GameHost` современного приложения.
+Счёт, меню, настройки, паузу и итог рисует `source/src/`; `80_ui.js` оставляет только игровой canvas-overlay.
+Самостоятельный запуск сцены запрещён, старый `game/tt/build.py` удалён.
 
 Протокол postMessage: хост → игра: `attract · prematch · match · train · pause · resume · quit · outro · replay ·
 skipReplay · skipStep · hint · debug · mute · quiet`; игра → хост: `ready · state · serve · hit · point · matchEnd ·
@@ -141,7 +142,7 @@ train · trainDone · paused · replayEnd · haptic`.
 * Также в `tools/e2e`:
   * `thub.py`: лобби хаба с ботами;
   * `tfrz.py`: стоп-кадр обучения и касание для подачи;
-  * `tdemo.py`: демо «бот против бота». Ему нужна отдельная сборка игры: `cd game && python3 tt/build.py ../game_build.html`.
+  * Старый `tdemo.py` для автономной страницы больше не является поддерживаемым запуском. Актуальные проверки ботов и физики: `npm run test:browser` из `source/game/`, через iframe современного приложения.
 
 ## Советы после промаха, награда за обучение, «Меньше движения»
 

@@ -3,39 +3,68 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const { execFileSync } = require('node:child_process');
+const { spawnSync } = require('node:child_process');
 const crypto = require('node:crypto');
-const { root } = require('./helpers.cjs');
-const repo = path.resolve(root, '../..');
+const vm = require('node:vm');
+const { root, repo, appPage } = require('./helpers.cjs');
 
-/* В новой версии игра не публикуется отдельным файлом: её собирает
- * ttu-v2/build.py и вшивает в мини-приложение. Поэтому проверяем свежую
- * сборку из исходников, а не закоммиченные копии. */
-function freshBuild() {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'topspin-build-'));
-  const out = path.join(dir, 'game.html');
-  execFileSync('python3', [path.join(root, 'tt/build.py'), out], { stdio: 'pipe' });
-  const html = fs.readFileSync(out, 'utf8');
-  fs.rmSync(dir, { recursive: true, force: true });
-  return html;
+const freshApp = () => fs.readFileSync(appPage(), 'utf8');
+function embeddedFrame(html) {
+  const declaration = html.match(/^const GAME_HTML = (".*");$/m);
+  assert.ok(declaration, 'the full application must contain its canvas frame');
+  return JSON.parse(declaration[1]);
 }
 
-test('fresh source build is self-contained (no template placeholders left)', () => {
-  const html = freshBuild();
+test('canonical build contains the modern application and its self-contained canvas frame', () => {
+  const html = freshApp(), frame = embeddedFrame(html);
   assert.ok(html.length > 200000);
   assert.doesNotMatch(html, /\{\{[A-Z_]+\}\}/);
-  assert.match(html, /id="gl"/);
+  assert.doesNotMatch(html, /\/\*__(?:CSS|JS)__\*\/|<!--__PRELOADER__-->/);
+  assert.match(html, /id="device"/);
+  assert.match(html, /id="gamelayer"/);
+  assert.match(html, /const GameHost =/);
+  assert.match(frame, /<canvas\b[^>]*id="gl"/);
+  assert.match(frame, /<canvas\b[^>]*id="fx"/);
+  const markup = frame.slice(0, frame.indexOf('<script>'));
+  const body = markup.match(/<body>([\s\S]*)/)?.[1];
+  assert.ok(body, 'embedded frame body missing');
+  assert.deepEqual([...body.matchAll(/\bid=["']([^"']+)["']/g)].map(match => match[1]).sort(), ['app', 'fx', 'gl']);
+  assert.doesNotMatch(markup, /id=["'](?:menu|settings|loading|hud|playband|topright|shotLab|pauseInd|career|online)["']/);
+  assert.doesNotMatch(markup, /brand-logo|splash-brand|TOPSPIN\s+ARENA/i);
 });
 
-test('standalone bundle parses as a browser script (no duplicate declarations or broken class methods)', () => {
-  const vm = require('node:vm');
-  const html = freshBuild();
-  const firstModule = html.indexOf('/* ====== ');
-  assert.ok(firstModule > 0);
-  assert.equal(html.indexOf('/* ====== shared ui/stroke_icons.js ====== */'), firstModule);
-  const scripts = [...html.matchAll(/<script\b[^>]*>([\s\S]*?)<\/script>/g)];
-  assert.ok(scripts.length > 0);
-  for (const [, source] of scripts) assert.doesNotThrow(() => new vm.Script(source, { filename: 'game.html' }));
+test('application and embedded frame scripts parse without duplicate declarations', () => {
+  const html = freshApp();
+  for (const [name, document] of [['application', html], ['frame', embeddedFrame(html)]]) {
+    const scripts = [...document.matchAll(/<script\b[^>]*>([\s\S]*?)<\/script>/g)];
+    assert.ok(scripts.length > 0, `${name} scripts missing`);
+    for (const [, source] of scripts) assert.doesNotThrow(() => new vm.Script(source, { filename: name }));
+  }
+});
+
+test('the embedded frame has exactly one copy of each physics configuration', () => {
+  const frame = embeddedFrame(freshApp());
+  for (const symbol of ['STROKE_CONFIG', 'MATCH_RULES', 'PH']) {
+    assert.equal([...frame.matchAll(new RegExp(`\\bconst ${symbol}\\s*=`, 'g'))].length, 1, symbol);
+  }
+});
+
+test('old and internal CLIs cannot produce a standalone engine artifact', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'topspin-no-engine-'));
+  try {
+    for (const script of ['tt/build.py', 'tt/_bundle.py']) {
+      const artifact = path.join(dir, 'engine.html');
+      const result = spawnSync('python3', [path.join(root, script), artifact], { cwd: dir, encoding: 'utf8' });
+      assert.ifError(result.error);
+      assert.notEqual(result.status, 0, `${script} must reject standalone builds`);
+      assert.equal(fs.existsSync(artifact), false, `${script} wrote a standalone page`);
+    }
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('npm build invokes only the canonical application builder', () => {
+  const pkg = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'));
+  assert.equal(pkg.scripts.build, 'python3 ../build.py');
 });
 
 /* ------------------------------------------------------------------ *
@@ -51,16 +80,6 @@ const COMMITTED = path.join(repo, 'play/index.html');
 /* TT_API_BASE вшивается на деплое: при сверке нормализуем его, иначе тест
  * падал бы от одной переменной окружения. Всё остальное — побайтово. */
 const normalize = (html) => html.replace(/const TT_API_BASE = [^\n]*;/, 'const TT_API_BASE = "";');
-
-function freshApp() {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'topspin-app-'));
-  const out = path.join(dir, 'index.html');
-  execFileSync('python3', [path.join(repo, 'source/build.py'), out],
-    { stdio: 'pipe', env: { ...process.env, TT_API_BASE: '' } });
-  const html = fs.readFileSync(out, 'utf8');
-  fs.rmSync(dir, { recursive: true, force: true });
-  return html;
-}
 
 const fingerprint = (html) => {
   const m = html.match(/const SHELL_BUILD = "([^"]+)"/);
@@ -87,8 +106,8 @@ test('the shell fingerprint in the committed bundle matches the sources', () => 
   assert.equal(a, b, 'SHELL_BUILD differs: the committed bundle was built from other sources');
 });
 
-test('every engine stylesheet, including technique preview, is bundled in the fresh game', () => {
-  const html = freshBuild();
+test('every canvas-frame stylesheet, including technique preview, is in the application', () => {
+  const html = embeddedFrame(freshApp());
   const css = html.match(/<style>([\s\S]*?)<\/style>/)?.[1];
   assert.ok(css, 'engine style block is missing');
   const src = path.join(root, 'tt/src');

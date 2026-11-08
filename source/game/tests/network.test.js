@@ -162,6 +162,10 @@ test('guest refreshes its visible score and server when host data changes', () =
   assert.equal(shown.length, 1, 'unchanged network frames do not replay score animations');
   net._applyRemotePoint({score: [2, 4], server: 1});
   assert.deepEqual(shown[1], {score: [2, 4], server: 1});
+  game.state = 'SERVE_READY';
+  net._applyRemoteState({ball: null, score: [2, 4], state: 'RALLY'});
+  assert.equal(game.state, 'RALLY');
+  assert.equal(shown.length, 3, 'the shared HUD must leave the serve phase even when the score did not change');
 });
 test('guest takes the score from the host point packet, not from its own physics', () => {
   const { net, game } = fixture(); net.isHost=false; net.state='IN_MATCH';
