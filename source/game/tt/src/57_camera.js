@@ -278,6 +278,10 @@ function pointerBladeSolve(rig, aspect, px, py, opts) {
       unprojectToPlane(rig, aspect, px, py, opts.zFoot, wF);
       o.tx = softSat(wF.x, -rs.xSoft, rs.xSoft, -rs.xHard, rs.xHard);
       o.ty = wF.y; o.tz = opts.zFoot;
+      // The step-in changes the ray intersection: metadata must describe
+      // this final depth, not the discarded stance-plane intersection.
+      o.pinned = Math.abs(wF.x) > rs.xSoft + 1e-9 ? Math.sign(wF.x) : 0;
+      o.exact = !o.pinned;
     } else {
       /* указатель важнее ассиста: глубже плоскость не ставим — см. комментарий
        * у depthForPointer («никогда не игнорируй указатель»). */

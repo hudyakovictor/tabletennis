@@ -69,7 +69,9 @@ class EmotionalSystem {
    * Detect match point situation.
    */
   _detectMatchPoint(g) {
-    if (!g.score) return false;
+    // Practice drills, attract mode and free play have no scored match point;
+    // a score retained from a previous match must not trigger its cue.
+    if (!g.score || g.training || g.demoMode || g.freePlay) return false;
     const target = g.settings?.targetScore || 11;
     const [pScore, aiScore] = g.score;
 

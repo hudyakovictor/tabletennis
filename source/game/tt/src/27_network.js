@@ -360,6 +360,13 @@ class NetworkManager {
       this._lastStateClock = msg.t;
     }
     const g = this.game, beforeServer = g.server, beforeA = g.score[0], beforeB = g.score[1], beforeState = g.state;
+    // The host stops transmitting a live ball at the end of a point. Preserve
+    // the guest's last predicted pose before applying that null packet, and
+    // animate it locally without granting it any scoring or hitting rights.
+    if (msg.state === 'POINT' && beforeState !== 'POINT' &&
+        (beforeState === 'RALLY' || beforeState === 'SERVE_TOSS') &&
+        typeof g.capturePointBall === 'function') g.capturePointBall();
+    if (msg.state && msg.state !== 'POINT' && beforeState === 'POINT') g._pointBall = null;
     this._interpBuf.push({ ...msg, receivedAt: Date.now() });
     if (this._interpBuf.length > 30) this._interpBuf.shift();
     // apply ball immediately (prediction handles smoothing)

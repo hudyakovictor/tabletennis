@@ -110,7 +110,9 @@ const GameHost = {
           player.energy < 0 || player.energy > player.capacity) return false;
       if (contact && (contact.side !== side || contact.matchId !== snapshot.matchId || contact.rallyId !== snapshot.rallyId ||
           !Number.isSafeInteger(contact.eventId) || contact.eventId < 1 || typeof contact.stroke !== 'string' ||
-          !Number.isFinite(contact.kmh) || contact.kmh < 0 || !Number.isFinite(contact.rps) || contact.rps < 0)) return false;
+          !Number.isFinite(contact.kmh) || contact.kmh < 0 || !Number.isFinite(contact.rps) || contact.rps < 0 ||
+          !['velocity', 'angularVelocity'].every(k => contact[k] == null ||
+            ['x', 'y', 'z'].every(axis => Number.isFinite(contact[k][axis]))))) return false;
     }
     this.matchSnapshot = structuredClone(snapshot);
     return true;

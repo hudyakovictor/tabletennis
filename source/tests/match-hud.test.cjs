@@ -70,28 +70,36 @@ async function setup(t, { width = 390, height = 844, reducedMotion = true } = {}
   return fixture;
 }
 
-test('all real STROKES have authored, monochrome-distinct 24px silhouettes; auxiliary icons stay separate', async (t) => {
+test('all strokes share a readable ball, one spin arc and independent flight at 24px', async (t) => {
   const { page, errors } = await setup(t);
   const result = await page.evaluate(async () => {
-    const raster = [], geometry = [], bounds = [];
+    const raster = [], geometry = [], bounds = [], parts = [];
     for (const id of StrokeIcons.ids) {
       const svg = StrokeIcons.create(id); svg.setAttribute('width', '24'); svg.setAttribute('height', '24');
       svg.style.cssText = 'color:#fff;--hud-ball:#fff';
       const paths = [...svg.querySelectorAll('path,circle')].map(el => [el.tagName, ...['d', 'cx', 'cy', 'r'].map(k => el.getAttribute(k))]);
       geometry.push(JSON.stringify(paths)); bounds.push(svg.getAttribute('viewBox'));
-      const image = new Image(); image.src = 'data:image/svg+xml;base64,' + btoa(new XMLSerializer().serializeToString(svg)); await image.decode();
-      const canvas = document.createElement('canvas'); canvas.width = canvas.height = 24;
-      const ctx = canvas.getContext('2d'); ctx.drawImage(image, 0, 0, 24, 24);
-      const pixels = ctx.getImageData(0, 0, 24, 24).data;
-      raster.push({ signature: canvas.toDataURL(), ink: [...pixels].filter((n, i) => i % 4 === 3 && n > 40).length });
+      parts.push({ball: svg.querySelectorAll('.stroke-icon-ball').length, spin: svg.querySelectorAll('.stroke-icon-spin').length, flight: svg.querySelectorAll('.stroke-icon-flight').length, toss: svg.querySelectorAll('.stroke-icon-toss').length, id});
+      svg.querySelectorAll('.stroke-icon-spin,.stroke-icon-flight').forEach(el => el.setAttribute('stroke', '#fff'));
+      for (const size of [24, 32]) {
+        svg.setAttribute('width', String(size)); svg.setAttribute('height', String(size));
+        const image = new Image(); image.src = 'data:image/svg+xml;base64,' + btoa(new XMLSerializer().serializeToString(svg)); await image.decode();
+        const canvas = document.createElement('canvas'); canvas.width = canvas.height = size;
+        const ctx = canvas.getContext('2d'); ctx.drawImage(image, 0, 0, size, size);
+        const pixels = ctx.getImageData(0, 0, size, size).data;
+        raster.push({ size, signature: canvas.toDataURL(), ink: [...pixels].filter((n, i) => i % 4 === 3 && n > 40).length });
+      }
     }
-    return { ids: StrokeIcons.ids, auxiliary: StrokeIcons.auxiliaryIds, geometry, bounds,
+    return { ids: StrokeIcons.ids, auxiliary: StrokeIcons.auxiliaryIds, geometry, bounds, parts,
       raster, unknown: ['NEXT_STROKE', '__proto__', 'constructor'].map(id => StrokeIcons.create(id).dataset.icon),
       motion: StrokeIcons.ids.map(id => StrokeIcons.motion(id).duration) };
   });
   assert.deepEqual(result.ids.slice().sort(), Object.keys(strokes).sort()); assert.equal(result.ids.length, 20);
-  assert.equal(new Set(result.geometry).size, 20); assert.equal(new Set(result.raster.map(r => r.signature)).size, 20);
-  assert.ok(result.raster.every(r => r.ink > 35 && r.ink < 310), 'every silhouette paints a readable, bounded amount of ink at 24px');
+  assert.ok(new Set(result.geometry).size < 20, 'physically similar strokes may share a diagram');
+  assert.ok(result.parts.every(p => p.ball === 1 && p.spin <= 1 && p.flight === 1 && p.toss === 0));
+  assert.equal(result.parts.find(p => p.id === 'SERVE_NO_SPIN').spin, 0);
+  assert.ok(result.raster.every(r => r.ink > (r.size === 24 ? 35 : 60) && r.ink < r.size * r.size * .6),
+    'every monochrome diagram paints a readable, bounded amount of ink at 24px and 32px');
   assert.ok(result.bounds.every(box => box === '0 0 32 32'));
   assert.deepEqual(result.auxiliary, ['energy', 'whiff', 'net', 'out', 'point', 'matchPoint']);
   assert.ok(result.auxiliary.every(id => !result.ids.includes(id)));
@@ -139,14 +147,14 @@ test('both confirmed contacts use the external palette, literal safe text and re
   assert.equal(result.target, '\u0414\u043e 21'); assert.equal(result.rally, '\u00d79');
   for (const [i, id] of ['DRIVE', 'CHOP'].entries()) {
     assert.equal(result.contacts[i].icon, id); assert.equal(result.contacts[i].color, rgb(strokes[id].col));
-    assert.equal(result.contacts[i].iconColor, rgb(strokes[id].col));
+    assert.equal(result.contacts[i].iconColor, 'rgb(185, 203, 216)');
     assert.equal(result.contacts[i].metrics, '58 \u043a\u043c/\u044734 \u043e\u0431/\u0441');
   }
   assert.equal(Number(result.contacts[0].opacity), .62); assert.equal(Number(result.contacts[1].opacity), 1);
   assert.equal(result.liveCount, 1); assert.deepEqual(errors, []);
 });
 
-test('serve-family compositions stay distinct and HOOK/FADE are never side-mirrored', async (t) => {
+test('serve diagrams omit tosses and HOOK/FADE are never side-mirrored', async (t) => {
   const { page, errors } = await setup(t);
   const result = await page.evaluate(() => {
     fixture.hit(1, 2, 'HOOK'); fixture.hit(-1, 3, 'HOOK'); fixture.finish();
@@ -160,8 +168,64 @@ test('serve-family compositions stay distinct and HOOK/FADE are never side-mirro
   });
   assert.equal(result.hooks[0].geometry, result.hooks[1].geometry);
   assert.ok(result.hooks.every(icon => icon.transform === 'none')); assert.notEqual(result.fade, result.hooks[0].geometry);
-  assert.equal(result.serves.length, 5); assert.ok(result.serves.every(s => s.toss));
-  assert.equal(new Set(result.serves.map(s => s.geometry)).size, 5); assert.deepEqual(errors, []);
+  assert.equal(result.serves.length, 5); assert.ok(result.serves.every(s => !s.toss));
+  assert.deepEqual(errors, []);
+});
+
+test('measured spin and flight are independent, shot-relative, and frozen at contact', async (t) => {
+  const { page, errors } = await setup(t);
+  const result = await page.evaluate(() => {
+    const profile = (velocity, angularVelocity, id = 'SIDE') => StrokeIcons.profile(id, { velocity, angularVelocity });
+    const v = { x: 0, y: 0, z: -5 };
+    const top = profile(v, { x: -10, y: 0, z: 0 });
+    const back = profile(v, { x: 10, y: 0, z: 0 });
+    const sideA = profile(v, { x: 0, y: 10, z: 0 });
+    const sideB = profile(v, { x: 0, y: -10, z: 0 });
+    const oppositePlayer = profile({ x: 0, y: 0, z: 5 }, { x: 10, y: 0, z: 0 });
+    const up = profile({ x: 0, y: 3, z: -5 }, { x: 0, y: -10, z: 0 });
+    const down = profile({ x: 0, y: -3, z: -5 }, { x: 0, y: -10, z: 0 });
+    const mixed = profile(v, { x: -10, y: 10, z: 0 });
+    const cork = profile(v, { x: 0, y: 0, z: -10 });
+    const zero = profile(v, { x: 0, y: 0, z: 0 }, 'BLOCK');
+    const actualFlat = profile(v, { x: -10, y: 0, z: 0 }, 'SERVE_NO_SPIN');
+    const missing = profile(v, null, 'BLOCK');
+    const fallback = StrokeIcons.profile('BLOCK');
+    const c = fixture.contact(1, 2, 'SIDE', { velocity: { ...v }, angularVelocity: { x: 0, y: 10, z: 0 } });
+    fixture.send({ phase: 'RALLY', contacts: [c, null], event: { id: 2, type: 'contact', side: 1 } });
+    const svg = () => fixture.hud.element.querySelector('.match-hud-technique-icon svg');
+    const before = svg().outerHTML;
+    c.angularVelocity.y = -10; c.velocity.y = 4;
+    fixture.energy(45); // no new contact: mutations/energy ticks cannot alter the icon
+    const frozen = svg().outerHTML === before;
+    const c2 = fixture.contact(1, 3, 'SIDE', { velocity: { ...v }, angularVelocity: { x: 0, y: -10, z: 0 } });
+    fixture.send({ phase: 'RALLY', contacts: [c2, null], event: { id: 3, type: 'contact', side: 1 } });
+    const updated = svg().dataset.direction;
+    const missingContact = fixture.contact(1, 4, 'SERVE_NO_SPIN');
+    fixture.send({ phase: 'RALLY', contacts: [missingContact, null], event: { id: 4, type: 'contact', side: 1 } });
+    const missingLabel = fixture.hud.element.querySelector('.match-hud-contact[data-side="1"] .match-hud-spin').textContent;
+    const zeroContact = fixture.contact(1, 5, 'BLOCK', { velocity: v, angularVelocity: { x: 0, y: 0, z: 0 } });
+    fixture.send({ phase: 'RALLY', contacts: [zeroContact, null], event: { id: 5, type: 'contact', side: 1 } });
+    const zeroLabel = fixture.hud.element.querySelector('.match-hud-contact[data-side="1"] .match-hud-spin').textContent;
+    const mixedSVG = StrokeIcons.create('BANANA', document, { velocity: v, angularVelocity: { x: -10, y: 10, z: 0 } });
+    const withCork = StrokeIcons.create('BANANA', document, { velocity: v, angularVelocity: { x: -10, y: 10, z: -8 } });
+    return { top, back, sideA, sideB, oppositePlayer, up, down, mixed, cork, zero, actualFlat, missing, fallback,
+      frozen, updated, missingLabel, zeroLabel, arcs: mixedSVG.querySelectorAll('.stroke-icon-spin').length,
+      corkChangesPlane: mixedSVG.querySelector('.stroke-icon-spin').getAttribute('d') !== withCork.querySelector('.stroke-icon-spin').getAttribute('d') };
+  });
+  assert.equal(result.top.plane, 'top'); assert.equal(result.top.direction, 1);
+  assert.equal(result.back.plane, 'top'); assert.equal(result.back.direction, -1);
+  assert.deepEqual(result.oppositePlayer, result.top);
+  assert.equal(result.sideA.plane, 'side'); assert.equal(result.sideA.direction, 1);
+  assert.equal(result.sideB.plane, 'side'); assert.equal(result.sideB.direction, -1);
+  assert.equal(result.up.flight, 'up'); assert.equal(result.down.flight, 'down');
+  assert.equal(result.up.direction, result.down.direction, 'flight angle does not choose sidespin');
+  assert.equal(result.mixed.plane, 'mixed'); assert.equal(result.arcs, 1);
+  assert.equal(result.corkChangesPlane, true, 'mixed diagrams include the longitudinal component');
+  assert.equal(result.cork.plane, 'cork'); assert.equal(result.zero.plane, 'none');
+  assert.equal(result.actualFlat.plane, 'top', 'measured spin overrides static serve label');
+  assert.equal(result.missing.plane, 'unknown'); assert.equal(result.fallback.plane, 'unknown');
+  assert.equal(result.missingLabel, 'Нет данных'); assert.equal(result.zeroLabel, 'Без вращения');
+  assert.equal(result.frozen, true); assert.equal(result.updated, '-1'); assert.deepEqual(errors, []);
 });
 
 test('energy ticks keep the mounted DOM and never replay hits, schedule work or force layout', async (t) => {
@@ -367,9 +431,9 @@ for (const [width, height] of [[320, 480], [320, 568], [360, 640], [390, 844], [
           cells: [...el.querySelectorAll('.match-hud-contact')].map(rect), hasLevel: !!el.querySelector('.match-hud-level') };
       }, lang);
       assert.equal(layout.hud.x, 12); assert.equal(layout.hud.y, 12);
-      assert.equal(layout.hud.width, Math.min(352, width - 84)); assert.ok(layout.hud.height >= 60 && layout.hud.height <= 66);
+      assert.equal(layout.hud.width, Math.min(352, width - 84)); assert.ok(layout.hud.height >= 60 && layout.hud.height <= 74);
       const previousArea = Math.min(400, width - 76) * (width <= 520 || height <= 640 ? 108 : 135);
-      assert.ok(layout.hud.width * layout.hud.height <= previousArea * .6, 'only the upper-left score/energy/contact footprint is roughly halved');
+      assert.ok(layout.hud.width * layout.hud.height <= previousArea * .7, 'only the upper-left score/energy/contact footprint is roughly halved');
       if (lang === 'en') t.diagnostic(`Measured HUD ${layout.hud.width}x${layout.hud.height}px with ${layout.buttons[0].width}x${layout.buttons[0].height}px actions`);
       assert.equal(layout.fonts, true, 'test measures the real local typefaces, not generic fallbacks'); assert.equal(layout.overflow, false);
       assert.ok(layout.buttons.every(b => b.width >= 44 && b.height >= 44));
@@ -384,7 +448,7 @@ for (const [width, height] of [[320, 480], [320, 568], [360, 640], [390, 844], [
       assert.ok(layout.scores.every(s => s.text.width <= s.window.width), 'two-digit scores must not clip inside their recessed windows');
       assert.equal(layout.through, 'hud-input-surface');
       assert.equal(layout.metrics, 'flex'); assert.equal(layout.cells.length, 2); assert.equal(layout.hasLevel, false);
-      assert.ok(layout.cells.every(c => c.height >= 24 && c.height <= 28 && c.right <= layout.hud.right && c.bottom <= layout.hud.bottom));
+      assert.ok(layout.cells.every(c => c.height >= 24 && c.height <= 34 && c.right <= layout.hud.right && c.bottom <= layout.hud.bottom));
       if (width <= 620) assert.ok(layout.buttons.every(b => b.x === layout.buttons[0].x));
       else assert.ok(layout.buttons.every(b => b.y === layout.buttons[0].y));
       if (lang === 'en') {
@@ -411,7 +475,7 @@ test('safe-area and Telegram offsets stay aligned with actions without counting 
     return { ordinary, telegram: top(), height: fixture.hud.element.getBoundingClientRect().height };
   });
   assert.deepEqual(result.ordinary, { hud: 32, actions: 32 }); assert.deepEqual(result.telegram, { hud: 62, actions: 62 });
-  assert.ok(result.height <= 66); assert.deepEqual(errors, []);
+  assert.ok(result.height <= 74); assert.deepEqual(errors, []);
 });
 
 test('WAAPI is bounded, interruptible and inspectable mid-exchange at normal and quarter speed', async (t) => {
@@ -441,11 +505,11 @@ test('WAAPI is bounded, interruptible and inspectable mid-exchange at normal and
       last: fixture.hud.element.dataset.activeSide, records: fixture.hud.element.querySelectorAll('.match-hud-contact').length,
       duration: first.timing.duration, shift: Math.abs(new DOMMatrix(middle).m42) };
   });
-  assert.notEqual(result.middle, 'none'); assert.equal(result.unchanged, true); assert.equal(result.canceled, true);
+  assert.equal(result.middle, 'none'); assert.equal(result.unchanged, true); assert.equal(result.canceled, true);
   assert.ok(result.advancement > 0 && result.advancement <= result.elapsed * .5 + 10, `quarter-speed advance: ${result.advancement}ms over ${result.elapsed}ms`);
   assert.ok(result.transitionCount >= 2); assert.ok(result.crossfade.every(n => n > .62 && n < 1), JSON.stringify(result.crossfade));
   assert.ok(result.running <= 4); assert.equal(result.perNode, true); assert.equal(result.records, 2);
-  assert.equal(result.last, '1'); assert.equal(result.duration, 210); assert.ok(result.shift <= 4); assert.deepEqual(errors, []);
+  assert.equal(result.last, '1'); assert.equal(result.duration, 150); assert.equal(result.shift, 0); assert.deepEqual(errors, []);
 });
 
 test('reduced-motion switches cancel movement/trails immediately; dispose removes media listeners and every animation', async (t) => {
@@ -453,14 +517,18 @@ test('reduced-motion switches cancel movement/trails immediately; dispose remove
   const toggled = await page.evaluate(() => {
     fixture.finish(); fixture.hit(1, 2, 'SMASH'); fixture.energy(45); fixture.hud.update(fixture.latest, { reducedMotion: true });
     const el = fixture.hud.element, stopped = fixture.animations.every(r => r.animation.playState === 'finished' || r.animation.playState === 'idle');
+    const iconAnimations = fixture.animations.filter(r => r.node.classList.contains('stroke-icon-motion')).length;
     fixture.hit(-1, 3, 'HOOK');
     const last = fixture.animations.findLast(r => r.node.classList.contains('stroke-icon-motion'));
     return { stopped, reduced: el.classList.contains('is-reduced'), onlyOpacity: last.frames.every(f => !f.transform), duration: last.timing.duration,
+      staticIcon: fixture.animations.filter(r => r.node.classList.contains('stroke-icon-motion')).length === iconAnimations,
+      iconTransition: getComputedStyle(el.querySelector('.match-hud-technique-icon')).transitionDuration,
       trail: getComputedStyle(el.querySelector('.match-hud-energy-trail')).display,
       fillTransition: getComputedStyle(el.querySelector('.match-hud-energy-fill')).transitionDuration,
       mediaCount: fixture.listenerCount(fixture.media[0], 'change') };
   });
-  assert.deepEqual(toggled, { stopped: true, reduced: true, onlyOpacity: true, duration: 80, trail: 'none', fillTransition: '0s', mediaCount: 1 });
+  assert.deepEqual(toggled, { stopped: true, reduced: true, onlyOpacity: true, duration: 150, staticIcon: true,
+    iconTransition: '0s', trail: 'none', fillTransition: '0s', mediaCount: 1 });
   await page.evaluate(() => fixture.hud.update(fixture.latest, { reducedMotion: false }));
   await page.emulateMediaFeatures([{ name: 'prefers-reduced-motion', value: 'reduce' }]);
   await page.waitForFunction(() => fixture.hud.element.classList.contains('is-reduced'));
@@ -610,6 +678,8 @@ for (const [width, height] of [[320, 480], [320, 568], [360, 640], [390, 844], [
         const buttons = [...footer.querySelectorAll('button')]; buttons[0].focus();
         return { device: rect(document.querySelector('#device')), report: rect(report), scroll: rect(scroll), footer: rect(footer), buttons: buttons.map(rect),
           scrollRegions: document.querySelectorAll('.res .scroll').length, strokes: document.querySelectorAll('.res-strokes tbody tr').length,
+          flatStatus: document.querySelector('[data-stroke="SERVE_NO_SPIN"] .res-spin-status')?.textContent,
+          blockStatus: document.querySelector('[data-stroke="BLOCK"] .res-spin-status')?.textContent,
           names: [...document.querySelectorAll('.res-score .rs-p b')].map(n => n.textContent), score: document.querySelector('.rs-n').textContent,
           average: document.querySelector('[data-metric="speed-avg"]').textContent, zero: document.querySelector('[data-metric="spin-avg"]').textContent,
           focused: document.activeElement === buttons[0], hitTargets: buttons.map(button => { const r = button.getBoundingClientRect(); return document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2)?.closest('button') === button; }),
@@ -618,7 +688,10 @@ for (const [width, height] of [[320, 480], [320, 568], [360, 640], [390, 844], [
           overflow: document.documentElement.scrollWidth > innerWidth || scroll.scrollWidth > scroll.clientWidth };
       }, lang);
       assert.equal(layout.column, 'column'); assert.equal(layout.reportMax, '460px'); assert.equal(layout.scrollRegions, 1);
-      assert.equal(layout.strokes, 20); assert.deepEqual(layout.names, ['Очень длинное имя <Player> With A Long Surname', 'An Entire Opponent Identity С Фамилией']);
+      assert.equal(layout.strokes, 20);
+      assert.match(layout.flatStatus, lang === 'ru' ? /Без вращения/ : /No spin/);
+      assert.match(layout.blockStatus, lang === 'ru' ? /Нет данных/ : /No data/);
+      assert.deepEqual(layout.names, ['Очень длинное имя <Player> With A Long Surname', 'An Entire Opponent Identity С Фамилией']);
       assert.equal(layout.score, '22:20'); assert.equal(layout.average, lang === 'ru' ? '40,5' : '40.5'); assert.equal(layout.zero, '0');
       assert.equal(layout.outcome, lang === 'ru' ? 'Победа' : 'Victory'); assert.equal(layout.unchanged, true); assert.equal(layout.overflow, false);
       assert.equal(layout.focused, true); assert.ok(layout.hitTargets.every(Boolean)); assert.ok(layout.buttons.every(b => b.width >= 44 && b.height >= 48));

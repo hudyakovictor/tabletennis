@@ -30,6 +30,22 @@ test('remote updates refresh ball spin and stop a dead ball', () => {
   const { net, game } = fixture(); net._applyRemoteState({ ball: { p:[1,2,3],v:[1,2,3],w:[9,8,7] } });
   assert.equal(game.ball.w.x,9); net._applyRemoteState({ball:null}); assert.equal(game.ball.live,false);
 });
+test('guest retains one visual ball when the host ends a point and clears it on the next serve', () => {
+  const { net, game } = fixture();
+  game.state = 'RALLY'; game.ball.p.y = 1.2; game.ball.v.y = -2;
+  let captures = 0;
+  game.capturePointBall = function () {
+    captures++; this._pointBall = { p: { ...this.ball.p }, v: { ...this.ball.v } };
+  };
+  net._applyRemoteState({ ball: null, state: 'POINT', score: [1, 0] });
+  assert.equal(game.ball.live, false);
+  assert.equal(game._pointBall.p.y, 1.2);
+  assert.equal(game._pointBall.v.y, -2);
+  net._applyRemoteState({ ball: null, state: 'POINT', score: [1, 0] });
+  assert.equal(captures, 1);
+  net._applyRemoteState({ ball: null, state: 'SERVE_READY', score: [1, 0] });
+  assert.equal(game._pointBall, null);
+});
 test('invalid remote packet cannot partially corrupt ball or racket', () => {
   const { net, game } = fixture(); const before=JSON.stringify(game);
   net._applyRemoteState({ball:{p:[1,2,3],v:[1,2,3],w:[0,null,0]}});

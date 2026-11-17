@@ -121,7 +121,7 @@
 .res-table thead th{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px;color:#acc4d8;font-weight:600}
 .res-table td{font-size:15px;font-weight:800}.res-table tbody th{overflow-wrap:anywhere}.res-table th small{color:#9eb8cc;font-size:10px;white-space:nowrap}
 .res-table abbr{text-decoration:none;border-bottom:1px dotted #8eafc8}.res-missing{color:#9eb8cc;font-weight:600}
-.res-stroke-name{display:flex;align-items:center;gap:7px}.res-stroke-name .stroke-icon{width:24px;height:24px;flex:none;color:#c8ddec}.res-stroke-name .stroke-icon-ball{fill:#fff;stroke:none}
+.res-stroke-name{display:flex;align-items:center;gap:7px}.res-stroke-name .stroke-icon{width:24px;height:24px;flex:none;color:#c8ddec}.res-stroke-name .stroke-icon-ball{fill:#fff}
 .res-reward>div{display:flex;align-items:center;gap:8px;margin-top:9px;font-size:12px}.res-reward>div svg{flex:none}.res-reward b{font-size:16px;color:#ffe28a}
 .res-quests>p{font-size:12px;line-height:1.5;margin:9px 0}.res-quests small{display:block;color:#9cffd0;font-size:11px}
 .res-analysis{border-top:1px solid rgba(177,208,232,.18);padding:4px 0 10px}
@@ -219,3 +219,4 @@
 .net-exit{width:42px;height:42px;border-radius:13px;background:rgba(7,14,25,.78);color:#e1f1fa;display:grid;place-items:center;
   box-shadow:inset 0 0 0 1px rgba(207,231,245,.16),0 6px 20px rgba(0,0,0,.25)}
 .net-exit svg{width:20px;height:20px}
+.res-spin-status{color:#c0cbd7;font-size:10px;font-weight:500}
