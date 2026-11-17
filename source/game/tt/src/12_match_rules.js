@@ -815,16 +815,18 @@ function canArmEarlyServeSwipe(projected, pointer, width, height, pointerType = 
   const bx = vw > edge * 2 ? clamp(projected.x * vw, edge, vw - edge) : projected.x * vw;
   const by = vh > edge * 2 ? clamp(projected.y * vh, edge, vh - edge) : projected.y * vh;
   const px = pointer.x * vw, py = pointer.y * vh;
-  const maxSide = pointerType === 'mouse'
-    ? CONTACT_CORRIDOR_RULES.serveEarlyAlignMousePx
-    : CONTACT_CORRIDOR_RULES.serveEarlyAlignTouchPx;
-  const dx = Math.abs(px - bx);
   const dy = py - by;
-  /* Vertical window widened (was -140..240 px): a serve gesture started well
-   * below a still-rising toss ball on a tall phone screen used to fall outside
-   * the window, never armed `pendingServeDrop`, and the serve was impossible
-   * from that press position. */
-  return dx <= maxSide && dy >= -160 && dy <= 330;
+  /* A serve press does not have to land on the toss ball. The ball is in the
+   * player's own hand, the blade is animated onto it, and a real server may
+   * start the gesture from either corner of the table. The old horizontal
+   * window (74 px mouse / 96 px touch) made a serve from anywhere but the
+   * toss column impossible: the press was rejected as OUTSIDE_ZONE and
+   * `pendingServeDrop` was never armed, so the gesture did nothing at all
+   * (measured: 12/21 mobile and 18/21 desktop corner serves lost the point).
+   * Keep only a generous vertical sanity window — a press far above the toss
+   * has no screen left to swing — and let the release determine intent. */
+  const dyMax = Math.max(360, vh * 0.86);
+  return dy >= -240 && dy <= dyMax;
 }
 
 function evaluateStrokeDirection(zone, m) {
@@ -844,7 +846,14 @@ function evaluateStrokeDirection(zone, m) {
   if (zone.anchor === 'contact') {
     const toAnchorX = zone.x - zone.pointerX;
     if (Math.abs(toAnchorX) <= 54) return true;
-    if (dyNorm < -0.05 && Math.abs(sdy) >= Math.abs(sdx) * 0.65) return true;
+    /* On a contact-anchored zone (the serve toss) the press is a *position*
+     * and the swipe is a *stroke*: a predominantly vertical flick is a legal
+     * serve motion on either side of the toss column, and demanding that its
+     * horizontal component point at the ball rejected a straight upward serve
+     * (measured: WRONG_DIRECTION on 4/24 serves started mid-screen). The
+     * direction gate exists to reject a swipe that sweeps away from the ball,
+     * which is still caught below. */
+    if (Math.abs(sdy) >= Math.abs(sdx) * 0.35) return true;
     return toAnchorX * sdx >= 0;
   }
 

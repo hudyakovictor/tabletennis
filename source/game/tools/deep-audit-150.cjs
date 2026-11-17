@@ -525,10 +525,12 @@ C('E10 evaluateContactZone picks an anchor zone', () => {
 C('E11 canArmEarlyServeSwipe window (new bounds)', () => {
   const proj = { ok: true, x: .5, y: .3 };
   ok(L.canArmEarlyServeSwipe(proj, { x: .5, y: .3 + 240 / 600 }, 800, 600, 'touch'), 'old bound still inside');
-  ok(L.canArmEarlyServeSwipe(proj, { x: .5, y: .3 + 329 / 600 }, 800, 600, 'touch'), 'new bound inside');
-  ok(!L.canArmEarlyServeSwipe(proj, { x: .5, y: .3 + 340 / 600 }, 800, 600, 'touch'), 'beyond new bound rejected');
-  ok(!L.canArmEarlyServeSwipe(proj, { x: .5 + 100 / 800, y: .3 }, 800, 600, 'touch'), 'side alignment enforced');
-  ok(!L.canArmEarlyServeSwipe(proj, { x: .5, y: .3 - 170 / 600 }, 800, 600, 'touch'), 'too far above rejected');
+  ok(L.canArmEarlyServeSwipe(proj, { x: .5, y: .3 + 500 / 600 }, 800, 600, 'touch'), 'tall-phone bound inside');
+  ok(!L.canArmEarlyServeSwipe(proj, { x: .5, y: .3 + 560 / 600 }, 800, 600, 'touch'), 'below the screen rejected');
+  /* A serve may start from either corner: the ball is in the server's hand and
+   * the blade is animated onto it, so horizontal alignment is not a gate. */
+  ok(L.canArmEarlyServeSwipe(proj, { x: .5 + 300 / 800, y: .3 }, 800, 600, 'touch'), 'off-column press admitted');
+  ok(!L.canArmEarlyServeSwipe(proj, { x: .5, y: .3 - 260 / 600 }, 800, 600, 'touch'), 'too far above rejected');
 });
 C('E12 evaluateStrokeDirection admits toward-anchor swipe', () => {
   const zone = { accepted: true, x: 200, y: 200, pointerX: 100, pointerY: 200, anchor: 'contact', vw: 800, vh: 600 };

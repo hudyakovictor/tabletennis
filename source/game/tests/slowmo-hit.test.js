@@ -882,14 +882,27 @@ test('the serve keeps one continuous backswing and forward animation until conta
     g._calValues = { captureK: 1 }; g.tossStartY = .9; g.tossApex = 1.2;
     V3.set(g.player.pos, x, 1.04, 1.78);
     g.pointer = g.project(g.player.pos, {});
-    V3.set(g.ball.p, x, 1.2, 1.5); V3.set(g.ball.v, 0, .00001, 0);
+    /* The backswing lives on the ASCENT. A serve may only be struck while the
+     * ball is falling, so the bat has to be at the toss for the whole legal
+     * contact window; the old animation still held a 0.55 m pull-back at the
+     * apex and released it at the table, which snapped the blade forward in
+     * one frame on every serve. */
+    V3.set(g.ball.p, x, .91, 1.5); V3.set(g.ball.v, 0, .00001, 0);
     g.updatePlayerPaddle(1 / 60, scale / 60);
-    const rising = { ...g._padTarget };
-    g.ball.v.y = -.00001;
+    const start = { ...g._padTarget };
+    g.ball.p.y = 1.05;
+    g.updatePlayerPaddle(1 / 60, scale / 60);
+    const midRise = { ...g._padTarget };
+    g.ball.p.y = 1.2;
     g.updatePlayerPaddle(1 / 60, scale / 60);
     const apex = { ...g._padTarget };
-    assert.ok(Math.abs(rising.tz - apex.tz) < 1e-6 && Math.abs(rising.ty - apex.ty) < 1e-6,
+    g.ball.v.y = -.00001;
+    g.updatePlayerPaddle(1 / 60, scale / 60);
+    const apexFalling = { ...g._padTarget };
+    assert.ok(Math.abs(apexFalling.tz - apex.tz) < 1e-6 && Math.abs(apexFalling.ty - apex.ty) < 1e-6,
       'changing toss direction must not reverse the racket target');
+    assert.ok(Math.abs(start.tz - apex.tz) < .08, 'the windup must start and end at the ball');
+    assert.ok(midRise.tz - apex.tz > .35, 'the serve lost its backswing');
     const contactY = PH.TABLE_Y + lib.STROKE_CONFIG.serve.windup.contactY;
     g.ball.p.y = (1.2 + contactY) / 2;
     g.updatePlayerPaddle(1 / 60, scale / 60);
@@ -897,8 +910,9 @@ test('the serve keeps one continuous backswing and forward animation until conta
     g.ball.p.y = contactY;
     g.updatePlayerPaddle(1 / 60, scale / 60);
     const finish = { ...g._padTarget };
-    assert.ok(apex.tz - finish.tz > .45, 'the dedicated serve backswing was removed');
-    assert.ok(apex.tz > forward.tz && forward.tz > finish.tz, 'the forward serve path doubled back');
+    assert.ok(Math.abs(forward.tz - apex.tz) < 1e-6 && Math.abs(finish.tz - apex.tz) < 1e-6,
+      'the bat must stay on the ball through the entire falling contact window');
+    assert.ok(midRise.tz > forward.tz, 'the backswing only exists while the ball rises');
   }
 });
 

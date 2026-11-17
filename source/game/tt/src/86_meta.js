@@ -28,6 +28,7 @@ const SAVE_VERSION = 3;
 const MAX_COINS = 9999999;
 const MAX_CRYSTALS = 999999;
 const MAX_XP = 1e9;
+const MAX_LEVEL = 200;
 const MAX_ADS_PER_DAY = 5;
 
 /** Merge an untrusted object into a fresh one, skipping the keys that can
@@ -69,7 +70,10 @@ class Platform {
     this.gamedist = /gamedistribution/i.test(host);
     this.portal = this.poki || this.crazy || this.y8 || this.gamedist;
     this.itch = /itch\.io/i.test(host);
-    this.touch = 'ontouchstart' in (navi && navi.maxTouchPoints ? navi : {}) || (navi.maxTouchPoints || 0) > 0;
+    /* Some browsers report maxTouchPoints = 0 on a touch device, so the
+     * event-handler property is the second, independent signal. The old
+     * expression only looked for it when maxTouchPoints was already non-zero. */
+    this.touch = (navi.maxTouchPoints || 0) > 0 || 'ontouchstart' in navi;
   }
 
   /* Poki: ads only, no IAP at all. CrazyGames: ads + IAP through them.
@@ -216,11 +220,11 @@ class Profile {
     d.coins = int(d.coins, b.coins, 0, MAX_COINS);
     d.crystals = int(d.crystals, 0, 0, MAX_CRYSTALS);
     d.xp = int(d.xp, 0, 0, MAX_XP);
-    d.level = int(d.level, 1, 1, 200);
+    d.level = int(d.level, 1, 1, MAX_LEVEL);
     d.streak = int(d.streak, 0, 0, 100000);
     d.days = strList(d.days, (x) => /^\d{1,4}-\d{1,2}-\d{1,2}$/.test(x), 60);
     /* inventory: only real catalogue ids, always including the starter kit */
-    d.owned = strList(d.owned, (id) => !!ITEMS[id], 400);
+    d.owned = [...new Set(strList(d.owned, (id) => !!ITEMS[id], 400))];
     for (const id of ['b_base', 'r_base']) if (d.owned.indexOf(id) < 0) d.owned.push(id);
     /* equipment: right kind for the right slot, and owned */
     const pick = (id, kind, fallback) => {
@@ -268,7 +272,8 @@ class Profile {
     d.ads.today = int(d.ads.today, 0, 0, MAX_ADS_PER_DAY);
     /* purchases: history of what was actually paid for */
     d.purchases = Array.isArray(d.purchases)
-      ? d.purchases.filter((x) => x && typeof x === 'object' && typeof x.id === 'string').slice(-200) : [];
+      ? d.purchases.filter((x) => x && typeof x === 'object' && typeof x.id === 'string' &&
+        x.id.length <= 64).slice(-200) : [];
     /* career (used by the tournament ladder) */
     if (!d.career || typeof d.career !== 'object') d.career = {};
     d.career.div = int(d.career.div, 0, 0, 99);
@@ -276,7 +281,8 @@ class Profile {
     d.career.points = int(d.career.points, 0, 0, 1e9);
     d.career.cups = int(d.career.cups, 0, 0, 9999);
     d.career.seen = int(d.career.seen, 0, 0, 1e9);
-    d.career.trophies = strList(d.career.trophies, () => true, 100);
+    // A hand-edited save could carry 100 multi-megabyte trophy strings.
+    d.career.trophies = [...new Set(strList(d.career.trophies, (x) => x.length <= 80, 100))];
     /* settings: the game applies ranges on top, but it must be an object */
     if (d.settings !== null && (typeof d.settings !== 'object' || Array.isArray(d.settings))) d.settings = null;
     return d;
@@ -340,7 +346,15 @@ class Profile {
     if (!Number.isFinite(n) || n < 0) n = 0;
     d.xp = clamp(d.xp + n, 0, MAX_XP);
     const need = (lv) => 400 + lv * 260;
-    while (d.xp >= need(d.level)) { d.xp -= need(d.level); d.level++; if (this.onLevel) this.onLevel(d.level); }
+    /* The level is capped by sanitize(); the old loop had no stop, so a single
+     * addXP(1e9) walked 2 772 levels (and ~2M iterations) before it ran out of
+     * XP. Stop at the ceiling and keep the remainder as progress, not as a
+     * multi-second freeze on a corrupted save. */
+    while (d.xp >= need(d.level)) {
+      if (d.level >= MAX_LEVEL) { d.xp = Math.min(d.xp, need(MAX_LEVEL) - 1); break; }
+      d.xp -= need(d.level); d.level++;
+      if (this.onLevel) this.onLevel(d.level);
+    }
     this.touch();
     return d.level;
   }

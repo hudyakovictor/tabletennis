@@ -611,7 +611,13 @@ function deriveStroke(m, ctx) {
    * you SEE is the face that strikes. Without it the bat visibly banks one
    * way while the ball comes off a square face — a mismatch the eye reads
    * as the game cheating. */
-  const moveYaw = Number.isFinite(ctx.moveYaw) ? clamp(ctx.moveYaw, ...R.moveYawRange) : 0;
+  /* A serve is struck from a planted stance: the body (and therefore the
+   * wrist-follow yaw) must not rotate the face. A small upward serve swipe
+   * inherited a 60-70 deg step yaw from the paddle tracker, and the solver
+   * could not find a legal serve with that face — it returned valid:false and
+   * the game applied a sideways fault (measured: 12/12 serves from a swiped
+   * press with a stale yaw). The gesture, not the stance, owns the serve. */
+  const moveYaw = !ctx.isServe && Number.isFinite(ctx.moveYaw) ? clamp(ctx.moveYaw, ...R.moveYawRange) : 0;
   if (moveYaw) azFace = clamp(azFace + moveYaw * R.moveYawK, ...R.lateralFaceRange);
 
   /* Power still tracks gesture speed end to end: the floor is high enough
@@ -663,7 +669,7 @@ function deriveStroke(m, ctx) {
 
   // face normal: rotate away from the swing by the contact angle
   const vertContact = contact * DEG * (1 - S.verticalContactLateralK * latMix);
-  const movePitch = Number.isFinite(ctx.movePitch) ? clamp(ctx.movePitch, ...R.movePitchRange) : 0;
+  const movePitch = !ctx.isServe && Number.isFinite(ctx.movePitch) ? clamp(ctx.movePitch, ...R.movePitchRange) : 0;
   let phi = clamp((A.back ? eR + vertContact : eR - vertContact) + movePitch, ...R.faceElevRangeRad);
   /* Attack lean: a drive/loop/smash tips the blade INTO the ball (closed
      face, head toward the net). Without this, elev ≈ contact left every
@@ -1374,7 +1380,7 @@ function solveServeStroke(ballP, racket, evalStroke, side, assist) {
   // (a wild flick, a ball caught on the way up), play a plain, safe serve
   // instead of handing them a fault they cannot see coming. Losing a point
   // to the solver is the one thing a serve must never do.
-  if (!solvedLegal && !racket.playerControlled) {
+  if (!solvedLegal) {
     const own = { x: 0, z: side * solver.safeOwnDepth };
     const aim = { x: 0, z: -side * solver.safeAimDepth };
     let sB = 0.8, dB = 1, eB = 0.0, aB = 0.0, svBest = Infinity;
@@ -1446,35 +1452,68 @@ function solveServeStroke(ballP, racket, evalStroke, side, assist) {
         [-step, step, 1], [-step, -step, 1]]) {
         const sc = Math.min(speedCap / Math.max(.5, racket.vmag), bS * ds);
         const cost = score(bOwn, bAim, bE + de, bA + da, sc, bD, true);
-        if (cost < bV) { bV = cost; bE += de; bA += da; bS = sc; }
+        /* The retained error may only be applied to a candidate that is still
+         * a LEGAL serve. The old check accepted any lower cost, so a 0.10 rad
+         * polish step could walk the winning serve off the table: the solver
+         * returned valid:false and the game applied a sideways fault — the
+         * "подача-рыба в сетку" / ОШИБКА ПОДАЧИ that started this audit
+         * (measured: 1 of 5 ordinary upward serve swipes, all 12 of a
+         * stale-yaw batch). A serve is never a place to gamble on error. */
+        if (legal && cost < bV) { bV = cost; bE += de; bA += da; bS = sc; }
       }
     }
   }
   const k = racket.playerControlled ? 1 : clamp(solver.assistWeights[0] + solver.assistWeights[1] * assist, 0, 1);
   const fE = bE * k, fA = bA * k, fS = 1 + (bS - 1) * k, fD = 1 + (bD - 1) * k;
   score(bOwn, bAim, fE, fA, fS, fD, true);
-  /* ...and never to the point of a ball that dies behind the net. The
-   * retained error is applied AFTER the search, so the search cannot see it:
-   * a weak server could ask for 1.05 m, solve it, then keep enough of its own
-   * wobble to drop the second bounce 25 cm past the net — legal, and
-   * unreturnable at pace. Inaccuracy should cost the opponent placement, not
-   * the receiver the point. Measured before this guard: 32.5 % of a beginner's
-   * serves landed shorter than 0.62 m; the solve itself was already deep. */
-  const deepEnough = legal && _svRep.b2 && Math.abs(_svRep.b2.z) >= SERVE_MIN_PAST_NET;
-  if (globalThis.__svDbg) globalThis.__svDbg.push({ tag: 'final', legal, deepEnough,
+  /* A serve is legal only if the flight that will actually be played has a
+   * SECOND bounce on the receiver's court. The search's own candidate is not
+   * enough: a reused candidate could be certified legal at the cheap step and
+   * then fly long at the production step (measured live: first bounce on the
+   * server's side at z 0.85 m, then over the receiver's end line — the
+   * recurrence behind "ОШИБКА ПОДАЧИ" on 20/24 ordinary serves). Verify the
+   * final frame itself and, if it fails, fall back to the safe serve ladder
+   * instead of handing the player a fault. */
+  const intentionalMiss = !!racket.intentionalOut;
+  const serveFlightOk = () => legal && (intentionalMiss || (!!_svRep.b2 &&
+    Math.sign(_svRep.b2.z) === -side &&
+    Math.abs(_svRep.b2.z) <= PH.T_HALF_LEN + PH.R * 1.5 &&
+    Math.abs(_svRep.b2.x) <= PH.T_HALF_WID + PH.R * 1.5));
+  let finalOk = serveFlightOk();
+  /* ...and never to the point of a ball that dies behind the net. The retained
+   * error is applied AFTER the search, so the search cannot see it: a weak
+   * server could ask for 1.05 m, solve it, then keep enough of its own wobble
+   * to drop the serve 25 cm past the net. Inaccuracy should cost placement,
+   * not the receiver the point. */
+  const deepEnough = finalOk && !!_svRep.b2 && Math.abs(_svRep.b2.z) >= SERVE_MIN_PAST_NET;
+  if (!finalOk && !intentionalMiss) {
+    const own = { x: 0, z: side * solver.safeOwnDepth };
+    const aim = { x: 0, z: -side * solver.safeAimDepth };
+    let rescued = false;
+    for (const dE of solver.safeElevations) {
+      for (const sc of solver.safeScales) {
+        for (const dA of solver.safeAzimuths) {
+          score(own, aim, dE, dA, sc, 1, true);
+          if (serveFlightOk()) { bE = dE; bA = dA; bS = sc; bD = 1; bAim = aim; bOwn = own; rescued = true; break; }
+        }
+        if (rescued) break;
+      }
+      if (rescued) break;
+    }
+    finalOk = rescued && serveFlightOk();
+  }
+  if (globalThis.__svDbg) globalThis.__svDbg.push({ tag: 'final', legal, deepEnough, finalOk,
     f: [fE, fA, fS, fD], b: [bE, bA, bS, bD], aim: bAim && { x: bAim.x, z: bAim.z },
     own: bOwn && { x: bOwn.x, z: bOwn.z }, b2: _svRep.b2 && { x: _svRep.b2.x, z: _svRep.b2.z },
     landed: _svRep.landed && { x: _svRep.landed.x, z: _svRep.landed.z } });
-  if (deepEnough) {
+  if (finalOk) {
     if (!racket.preview) rememberServeFrame(warmKey, { dE: bE, dA: bA, sc: bS, dmp: bD });
-    return { dE: fE, dA: fA, sc: fS, dmp: fD, ok: true, target: bAim };
+    return { dE: bE, dA: bA, sc: bS, dmp: bD, ok: true, target: bAim };
   }
-  // The player's own error would have produced an illegal serve: give them
-  // the solved one instead. Only a truly absurd gesture can fail here.
-  score(bOwn, bAim, bE, bA, bS, bD, true);
-  if (!racket.preview && legal && _svRep.b2)
-    rememberServeFrame(warmKey, { dE: bE, dA: bA, sc: bS, dmp: bD });
-  return { dE: bE, dA: bA, sc: bS, dmp: bD, ok: legal, target: bAim };
+  // Nothing in the ladder produced a legal two-bounce serve: report the
+  // failure instead of applying it. tryPlayerHit then uses the safe frame or
+  // softens the stroke, but a fault is no longer manufactured silently.
+  return { dE: bE, dA: bA, sc: bS, dmp: bD, ok: false, target: bAim };
 }
 
 /** Recover (face elevation, azimuth) from a world-space face normal, in the
@@ -1509,23 +1548,36 @@ function anglesFromNormal(n, side) {
  * @returns {{normal:object, liftDeg:number, hitNet:boolean}}
  */
 const _blkV = V3.new(), _blkW = V3.new(), _blkRep = {};
-const BLOCK_LIFTS = [0, 4, 8, 13, 20];
-function solveBlockNormal(ballP, ballV, ballW, face, vR, quality, rubber, out) {
+/* Signed lift ladder. A block against heavy topspin is CLOSED, not opened;
+ * the previous ladder only had 0..+20 and accepted the first face that
+ * cleared the tape, so a ball with 300 rad/s of topspin sailed 12 m/s upward
+ * and landed 4.8 m wide. The assist now searches both directions and only
+ * accepts a face whose first bounce is actually on the opponent's court. */
+const BLOCK_LIFTS = [0, -4, -8, -13, -20, 4, 8, 13, 20];
+function solveBlockNormal(ballP, ballV, ballW, face, vR, quality, rubber, out, side) {
   const o = out || {};
   const up = { x: 0, y: 1, z: 0 };
-  let chosen = null, chosenLift = 0, clears = false;
+  const dir = side === undefined ? (Math.sign(-vR.z) || -1) : side;
+  let chosen = null, chosenLift = 0, clears = false, best = null, bestCost = Infinity;
   for (let i = 0; i < BLOCK_LIFTS.length; i++) {
     const lift = BLOCK_LIFTS[i];
     const nl = V3.norm(V3.new(),
       V3.addScaled(V3.new(), face, up, Math.tan(lift * DEG) * V3.len(face)));
     V3.copy(_blkV, ballV); V3.copy(_blkW, ballW);
     impactRacket(_blkV, _blkW, nl, vR, quality, rubber || {});
-    predict(V3.clone(ballP), V3.clone(_blkV), V3.clone(_blkW),
-      { dt: PH.SIM_DT, maxT: 1.4, stopOnFirstBounce: true, out: _blkRep });
-    if (!chosen) { chosen = nl; chosenLift = lift; }
-    if (!_blkRep.hitNet) { chosen = nl; chosenLift = lift; clears = true; break; }
+    predict(V3.clone(launchPoint(ballP, nl)), V3.clone(_blkV), V3.clone(_blkW),
+      { dt: PH.SIM_DT, maxT: 1.8, stopOnFirstBounce: true, out: _blkRep });
+    const L = _blkRep.landed;
+    if (!_blkRep.hitNet && L && Math.sign(L.z) === -dir &&
+        Math.abs(L.z) <= PH.T_HALF_LEN + 0.05 && Math.abs(L.x) <= PH.T_HALF_WID + 0.05) {
+      chosen = nl; chosenLift = lift; clears = true; break;
+    }
+    if (L) {
+      const cost = Math.abs(L.z - (-dir) * PH.T_HALF_LEN * 0.7) + Math.abs(L.x) * 0.5;
+      if (cost < bestCost) { bestCost = cost; best = nl; chosenLift = lift; }
+    }
   }
-  o.normal = chosen || V3.clone(face);
+  o.normal = chosen || best || V3.clone(face);
   o.liftDeg = chosenLift;
   o.hitNet = !clears;
   return o;
@@ -1554,8 +1606,15 @@ function refineRacket(ballP, ballV, ballW, racket, assist, quality) {
   racket = { ...racket, quality, incomingVelocity: V3.clone(ballV), incomingSpin: V3.clone(ballW) };
   if (racket.isServe || racket.stroke?.id === 'SIDE') racket = { ...racket, ballVelocity: V3.clone(ballV) };
   racket = enforceRacketEffort(racket);
+  /* For a SERVE the aim's z is the SECOND-BOUNCE DEPTH, not a rally landing:
+   * a deep serve aimed at 1.64 m was therefore classified as a deliberate
+   * miss (`intentionalOut`), which let the solver certify a serve that flew
+   * past the receiver's end line as "intentional" — the live ОШИБКА ПОДАЧИ.
+   * Only a lateral miss (aim beyond the sideline) is an intentional serve
+   * miss; the depth target is legal until it is actually hit. */
   const intentionalOut = !!racket.playerControlled &&
-    (Math.abs(racket.aim.x) > PH.T_HALF_WID || Math.abs(racket.aim.z) > PH.T_HALF_LEN);
+    (Math.abs(racket.aim.x) > PH.T_HALF_WID ||
+     (!racket.isServe && Math.abs(racket.aim.z) > PH.T_HALF_LEN));
   if (racket.playerControlled) racket = { ...racket, intentionalOut };
   const fwd = -racket.side;
   const rubber = Object.assign({}, racket.rubber || {});
@@ -1586,6 +1645,36 @@ function refineRacket(ballP, ballV, ballW, racket, assist, quality) {
       dElev: srv.dE, dAz: srv.dA, scale: srv.sc, damp: srv.dmp,
       solved: true, valid: srv.ok && !intentionalOut, target: srv.target,
     });
+  }
+
+  /* A block against heavy topspin can be pushed past the point where the
+   * general solver is useful: it chases an aim the dead rubber cannot reach,
+   * opens the face until the ball clears the net, and pops it almost straight
+   * up. The demo's own blocks left the table at vy up to 12 m/s and landed
+   * 4.8 m wide (one attract match: 17 floor-outs, 10 from BLOCK). Rescue only
+   * that pathological flight by keeping the face the player holds and trying
+   * the signed lift ladder. A normal block still goes through the general
+   * solver, so the face/technique/quality contracts are unchanged. */
+  if (assist > 0.001 && (racket.stroke?.id === 'BLOCK' || racket.stroke?.id === 'CHOP_BLOCK')) {
+    evalStroke(0, 0, 1, 1, _rv, _rw);
+    const rawBlock = {};
+    predict(V3.clone(launchPoint(ballP, _rn)), V3.clone(_rv), V3.clone(_rw),
+      { dt: 1 / 280, maxT: 2, stopOnFirstBounce: true, out: rawBlock });
+    const wildBlock = rawBlock.apex > 1.8 ||
+      (!!rawBlock.landed && (Math.abs(rawBlock.landed.x) > 1.2 || Math.abs(rawBlock.landed.z) > 2.2));
+    if (wildBlock) {
+      const rep = solveBlockNormal(ballP, ballV, ballW, _rn, _rs, q, rubber, null, side);
+      if (!rep.hitNet) {
+        /* Re-express the chosen face as a ROTATION the frame can reproduce,
+         * so a second refine sees exactly the same bat (the roundtrip used to
+         * drift by the lift angle). */
+        const faceElev = Math.asin(clamp(rep.normal.y, -1, 1));
+        strokeFrame(racket, faceElev - racket.faceElev, 0, 1, _rs, _rn);
+        return resolvedRacketFrame(racket, _rn, _rs, {
+          rubber, solved: true, valid: true, blockLiftDeg: rep.liftDeg, target: racket.aim,
+        });
+      }
+    }
   }
 
   /* ---- 1. what does the untouched gesture physically do? ---------- */

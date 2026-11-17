@@ -530,8 +530,11 @@ class Game {
       // toss is still rising towards its apex, arm `pendingServeDrop` when the
       // press is horizontally aligned with the toss column.
       if ((servePress || serveReadyPress) && !this.swipe.pressZone.accepted) {
-        const rising = serveReadyPress || (this.ball && this.ball.v && this.ball.v.y >= -0.05);
-        if (rising && canArmEarlyServeSwipe(this.project(this.ball.p, {}), n, rect.width, rect.height, pointerType)) {
+        /* Late or off-column presses arm the same deferred serve: the zone is
+         * re-evaluated once the toss is actually falling (promotePendingServe-
+         * Zone), so the player never loses a point because the finger was not
+         * exactly on the ball when they started the motion. */
+        if (canArmEarlyServeSwipe(this.project(this.ball.p, {}), n, rect.width, rect.height, pointerType)) {
           this.swipe.pressZone.pendingServeDrop = true;
           this.swipe.pressZone.singleGestureToss = serveReadyPress;
         }
@@ -2878,11 +2881,28 @@ class Game {
     // розыгрыш: срезанный возврат с приоритетом «через сетку, мягко»
     const n = mkNormal();
     const vR = V3.new(lat * 0.9, carry * 0.62 + 0.6, -carry);
-    b.w.x += rand() * R.scatterSpin * .5;
-    b.w.z += rand() * R.scatterSpin;   // боковое битое вращение — фирменный признак края
+    /* Keep the edge's deliberately messy spin with the candidate impact. The
+     * live ball must not change until impactRacket confirms a non-separating
+     * contact; otherwise a missed edge leaves phantom sidespin behind. */
+    const glanceSpin = { x: rand() * R.scatterSpin * .5, y: 0, z: rand() * R.scatterSpin };
     return enforceRacketEffort({ side: 1, isServe, normal: n, vR, vmag: V3.len(vR), quality: R.quality, valid: true,
-      stroke: strokeRef, rubber: { ...rubber }, sweet: 0, timing: .5, glance: true,
+      stroke: strokeRef, rubber: { ...rubber }, sweet: 0, timing: .5, glance: true, glanceSpin,
       azSwing: lat * .3, azFace: lat * .3, elev: 30, faceElev: 30 }, budget);
+  }
+
+  /** Apply a candidate player impact transactionally. Edge-glance spin is
+   * included in the candidate physics, but committed only if the face is
+   * closing and impactRacket returns a real impulse. */
+  resolvePlayerRacketImpact(racket, quality) {
+    const b = this.ball;
+    if (!racket || !racket.glanceSpin) return impactRacket(b.v, b.w,
+      racket.normal, racket.vR, quality, racket.rubber || {});
+    const v = V3.clone(b.v), w = V3.clone(b.w);
+    V3.add(w, w, racket.glanceSpin);
+    const info = impactRacket(v, w, racket.normal, racket.vR, quality, racket.rubber || {});
+    if (!info) return null;
+    V3.copy(b.v, v); V3.copy(b.w, w);
+    return info;
   }
 
   /* ==== Видимость вращения: крошка-шлейф раскрашивает дугу ================
@@ -3328,6 +3348,13 @@ class Game {
 
   tryPlayerHit(p0, inputMetrics = null, inputPad = null) {
     const pad = this.player, b = this.ball;
+    const visualStartQ = pad.q
+      ? Q.copy(this._contactStartPaddleQ || (this._contactStartPaddleQ = Q.new()), pad.q) : null;
+    /* Preserve the rendered end-of-frame position. A CCD collision can be
+     * found earlier along the previous->current paddle sweep; rewinding the
+     * visible blade to that substep contact point created a large backward
+     * snap even though the sweep itself was valid. */
+    const frameEndPos = V3.clone(pad.pos);
     if (!b.live) return;
     /* The point is over. A ball still in the air during the point-end pause
      * is scenery: striking it used to change lastHitBy, consume the gesture
@@ -3387,6 +3414,18 @@ class Game {
     if (serveCtx && (b.v.y >= 0 || !(this.tossRiseNow() >= MATCH_RULES.serveTossMinRise - 1e-6))) {
       this.debugRecording && this.diagnosticPhysicsGate('serve_not_legal', { tossRise: this.tossRiseNow(), capture: captureSample });
       if (b.v.y < 0) this.logPressRejection('SERVE_TOSS_LOW', { tossRise: this.tossRiseNow() });
+      return;
+    }
+    /* ITTF 2.06.5: the ball must be above the playing surface when struck.
+     * A late toss eventually falls past the table behind the end line; the
+     * player could still reach it there and the engine happily fired a
+     * 6.6 m/s serve DOWN into the floor (measured on the 0.42 s late tap),
+     * which looked like a broken shot and scored as a fault. Reject the
+     * contact instead: the toss is dead and the normal dead-ball rule ends
+     * the point, visibly and honestly. */
+    if (serveCtx && b.p.y < PH.TABLE_Y + PH.R) {
+      this.debugRecording && this.diagnosticPhysicsGate('serve_below_table', { ballY: b.p.y });
+      this.logPressRejection('SERVE_BELOW_TABLE', { ballY: b.p.y });
       return;
     }
     let hit = null, gateDetail = null;
@@ -3595,7 +3634,7 @@ class Game {
       context: { grip: this.settings?.grip, hand: this.settings?.hand, forehand, isServe: isServeStroke,
         equip: { ...sideParams }, vmagK: this.equip.vmagK, moveYaw: this.padYaw || 0, movePitch: this.padPitch || 0 } };
     this._preHit = { v: V3.clone(b.v), w: V3.clone(b.w) };
-    const info = impactRacket(b.v, b.w, racket.normal, racket.vR, quality, racket.rubber || {});
+    const info = this.resolvePlayerRacketImpact(racket, quality);
     /* A separating face returns null and leaves the ball untouched. Consuming
      * the gesture (and the 90 ms hit cooldown, and the paddle's position) on a
      * null impact is how a ball that never touched the rubber still counted as
@@ -3636,11 +3675,13 @@ class Game {
      * full capture radius away and launched the ball from a point it visibly
      * never reached; the AI already snaps its paddle to the contact. prevPos is
      * moved too, so the next frame does not read the snap as 20 m/s of bat. */
-    V3.copy(pad.pos, contactPose ? contactPose.pos : contact);
-    if (contactPose) {
-      pad.q = Q.copy(pad.q || Q.new(), contactPose.q); pad.roll = contactPose.roll;
-      pad.activeFace = contactPose.activeFace; pad.contactPose = contactPose; pad.poseReady = true;
-    }
+    /* The ball is resolved at the swept collision point above. Keep the blade
+     * at the rendered end of its frame-long stroke: placing it back at an
+     * earlier CCD substep rewinds the animation and visibly jerks the racket.
+     * The contact face is still set to the solved impact face below. */
+    const instantTap = m && m.tap === true;
+    this.setPlayerContactPose(contactPose, instantTap && contactPose ? contactPose.pos : frameEndPos,
+      visualStartQ, this._lastPaddlePoseDt || 1 / 60, !instantTap);
     pad.forehand = forehand;
     V3.copy(pad.prevPos, pad.pos);
     V3.copy(pad.prev, pad.pos);
@@ -3661,7 +3702,9 @@ class Game {
     const motion = this.paddleMotion || (this.paddleMotion = new PaddleStrokeMotion());
     motion.contact(racket.normal, pad.roll, racket.stroke.id, this.settings.grip,
       this.settings.hand, forehand, this.settings.followThrough !== false);
-    const impactAngles = paddleFaceAngles(racket.normal);
+    /* Keep the rate-limited visual normal; the physical stroke already used
+     * racket.normal in impactRacket above. */
+    const impactAngles = paddleFaceAngles(pad.normal);
     pad.pitch = impactAngles.pitch; pad.yaw = impactAngles.yaw; pad.motionStage = 'contact';
     if (this.followThrough) this.followThrough.active = false;
     this.holdPaddlePose();
@@ -3767,6 +3810,42 @@ class Game {
       (this.state === GS.POINT || this.state === GS.SERVE_READY && (this.server === 1 || !!this.freePlay));
   }
   cancelPaddleTrick() { this.paddleTrick?.cancel(); }
+  setPlayerContactPose(contactPose, frameEndPos, fromQ, dt, limitTurn = true) {
+    const pad = this.player;
+    // Keep the end of the real swept stroke visible, rather than rewinding to
+    // the substep where CCD found the ball.
+    if (frameEndPos) V3.copy(pad.pos, frameEndPos);
+    if (!contactPose) return 1;
+    const fromRoll = Number.isFinite(pad.roll) ? pad.roll : 0;
+    V3.copy(pad.normal, contactPose.normal);
+    pad.q = Q.copy(pad.q || Q.new(), contactPose.q);
+    pad.roll = contactPose.roll;
+    pad.activeFace = contactPose.activeFace;
+    pad.contactPose = contactPose;
+    pad.poseReady = true;
+    if (!limitTurn) return 1;
+    return this.limitPlayerPaddleTurn(fromQ, dt, fromRoll);
+  }
+  limitPlayerPaddleTurn(fromQ, dt, fromRoll) {
+    const pad = this.player, q = pad && pad.q;
+    if (!fromQ || !q) return 1;
+    const dot = Math.abs(fromQ.x * q.x + fromQ.y * q.y + fromQ.z * q.z + fromQ.w * q.w);
+    const angle = 2 * Math.acos(clamp(dot, -1, 1));
+    const maxAngle = 18 * clamp(Number.isFinite(dt) ? dt : 1 / 60, 0, 0.05);
+    if (!(angle > maxAngle) || angle < 1e-7) return 1;
+    const fraction = maxAngle / angle;
+    Q.slerp(q, fromQ, q, fraction);
+    if (Number.isFinite(fromRoll) && Number.isFinite(pad.roll))
+      pad.roll = fromRoll + paddleAngleDelta(fromRoll, pad.roll) * fraction;
+    // paddlePoseQuaternion points local +Z along the blade normal; recover
+    // that axis after limiting the rendered quaternion, keeping CCD in sync.
+    V3.set(pad.normal, 2 * (q.x * q.z + q.w * q.y),
+      2 * (q.y * q.z - q.w * q.x), 1 - 2 * (q.x * q.x + q.y * q.y));
+    const face = paddleFaceAngles(pad.normal);
+    pad.yaw = face.yaw; pad.pitch = face.pitch;
+    this.padYaw = face.yaw; this.padPitch = face.pitch; this.padRoll = pad.roll;
+    return fraction;
+  }
   syncPlayerPaddleFace() {
     const pad = this.player, face = this.playerActiveFace;
     if (!pad || pad.activeFace === face) return;
@@ -4049,14 +4128,18 @@ class Game {
       tx = lerp(tx, b.p.x, k);
       ty = lerp(ty, b.p.y - tracking.underBall, k);
       tz = lerp(tz, b.p.z + tracking.zOffset, k);
-      let offset;
-      if (b.v.y > 0) {
-        const rise = clamp((b.p.y - startY) / (apexY - startY), 0, 1);
-        offset = 1 - (1 - rise) * (1 - rise);
-      } else {
-        const fall = clamp((apexY - b.p.y) / Math.max(.01, apexY - PH.TABLE_Y - windup.contactY), 0, 1);
-        offset = 1 - fall * fall;
-      }
+      /* One visible windup, over by the apex. The old curve kept the 0.55 m
+       * pull-back through the whole descent and released it only at the
+       * table, so a legal strike just after the apex met a bat half a metre
+       * behind the ball; the contact then snapped the bat forward in a single
+       * frame (serve-motion probe: 0.17-0.77 m delta on every serve — the
+       * "ракетка дёргается на подаче" complaint). A serve may only be struck
+       * while the ball is FALLING, so the whole legal contact window now has
+       * the bat at the toss, and the pull-back lives on the ascent where it
+       * cannot displace the contact. sin() keeps the motion continuous at both
+       * ends (0 at release, 0 at the apex, peak mid-rise). */
+      const rise = b.v.y > 0 ? clamp((b.p.y - startY) / Math.max(.01, apexY - startY), 0, 1) : 1;
+      const offset = b.v.y > 0 ? Math.sin(Math.PI * rise) : 0;
       tz += windup.amplitude * offset;
       ty -= windup.yDrop * offset;
     }
@@ -4160,7 +4243,10 @@ class Game {
     this._prep = servingNow ? expSmooth(this._prep || 0, (this.pointerDown && !intent) ? 1 : 0, 14, dt) : 0;
 
     let aimYaw = 0, aimPitch = 0;
-    if (fine && !intent) {
+    /* The serve face is owned by the toss, not by a pointer that is nearly
+     * stationary while the player waits for the ball. Aiming it from the ball
+     * here made the blade rotate on its own during the toss. */
+    if (fine && !intent && !servingNow) {
       const trail = this.mouseTrail;
       if (trail && trail.length >= 2 && this.time - trail[trail.length - 1].t < .18) {
         const a = trail[Math.max(0, trail.length - 6)], b = trail[trail.length - 1];
@@ -4225,7 +4311,12 @@ class Game {
     let want = this._wantN || (this._wantN = V3.new(0, -0.05, -1));
     const rest = this._restN || (this._restN = V3.new());
     faceFromWrist(rest, this.padYaw, this.padPitch, 1);
-    if (m) {
+    /* Keep a still, readable face through the whole serve toss. Deriving a
+     * stroke face from the pointer every frame made the blade flip up to 84°
+     * between frames (serve-motion probe) and then snap to the solved contact
+     * pose: the "ракетка странно дёргается на подаче" complaint. The solved
+     * face is applied at contact; until then the serve shows the ready face. */
+    if (m && (!servingNow || isRealStroke(m, true))) {
       const ctx = {
         side: 1, playerControlled: !this.demoMode, grip: this.settings?.grip, hand: this.settings?.hand, forehand: pad.forehand, isServe: servingNow,
         ball: { x: pad.pos.x, y: pad.pos.y, z: pad.pos.z },
@@ -4679,6 +4770,11 @@ class Game {
     this.swipe.pressZone = { accepted: true, via: 'demo', shape: MATCH_RULES.zoneShape,
       score: 0, along: 0, across: 0, reason: null, pointerType: 'demo',
       radius: MATCH_RULES.pressRadiusPx,
+      /* The demo bypasses pointerdown, but every admission gate still checks
+       * that the zone belongs to the CURRENT shot. Without shotId the attract
+       * bot could never hit: it served into the void and lost 0-11 with
+       * `stats.shots === 0` on every run. */
+      shotId: this.shotId,
       pressX: x0, pressY: y0, vw: rectD ? rectD.width : 1, vh: rectD ? rectD.height : 1 };
     this._demoGesture = {
       x0, y0, x1, y1,
