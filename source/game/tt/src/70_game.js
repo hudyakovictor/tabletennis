@@ -2881,11 +2881,28 @@ class Game {
     // розыгрыш: срезанный возврат с приоритетом «через сетку, мягко»
     const n = mkNormal();
     const vR = V3.new(lat * 0.9, carry * 0.62 + 0.6, -carry);
-    b.w.x += rand() * R.scatterSpin * .5;
-    b.w.z += rand() * R.scatterSpin;   // боковое битое вращение — фирменный признак края
+    /* Keep the edge's deliberately messy spin with the candidate impact. The
+     * live ball must not change until impactRacket confirms a non-separating
+     * contact; otherwise a missed edge leaves phantom sidespin behind. */
+    const glanceSpin = { x: rand() * R.scatterSpin * .5, y: 0, z: rand() * R.scatterSpin };
     return enforceRacketEffort({ side: 1, isServe, normal: n, vR, vmag: V3.len(vR), quality: R.quality, valid: true,
-      stroke: strokeRef, rubber: { ...rubber }, sweet: 0, timing: .5, glance: true,
+      stroke: strokeRef, rubber: { ...rubber }, sweet: 0, timing: .5, glance: true, glanceSpin,
       azSwing: lat * .3, azFace: lat * .3, elev: 30, faceElev: 30 }, budget);
+  }
+
+  /** Apply a candidate player impact transactionally. Edge-glance spin is
+   * included in the candidate physics, but committed only if the face is
+   * closing and impactRacket returns a real impulse. */
+  resolvePlayerRacketImpact(racket, quality) {
+    const b = this.ball;
+    if (!racket || !racket.glanceSpin) return impactRacket(b.v, b.w,
+      racket.normal, racket.vR, quality, racket.rubber || {});
+    const v = V3.clone(b.v), w = V3.clone(b.w);
+    V3.add(w, w, racket.glanceSpin);
+    const info = impactRacket(v, w, racket.normal, racket.vR, quality, racket.rubber || {});
+    if (!info) return null;
+    V3.copy(b.v, v); V3.copy(b.w, w);
+    return info;
   }
 
   /* ==== Видимость вращения: крошка-шлейф раскрашивает дугу ================
@@ -3331,6 +3348,13 @@ class Game {
 
   tryPlayerHit(p0, inputMetrics = null, inputPad = null) {
     const pad = this.player, b = this.ball;
+    const visualStartQ = pad.q
+      ? Q.copy(this._contactStartPaddleQ || (this._contactStartPaddleQ = Q.new()), pad.q) : null;
+    /* Preserve the rendered end-of-frame position. A CCD collision can be
+     * found earlier along the previous->current paddle sweep; rewinding the
+     * visible blade to that substep contact point created a large backward
+     * snap even though the sweep itself was valid. */
+    const frameEndPos = V3.clone(pad.pos);
     if (!b.live) return;
     /* The point is over. A ball still in the air during the point-end pause
      * is scenery: striking it used to change lastHitBy, consume the gesture
@@ -3610,7 +3634,7 @@ class Game {
       context: { grip: this.settings?.grip, hand: this.settings?.hand, forehand, isServe: isServeStroke,
         equip: { ...sideParams }, vmagK: this.equip.vmagK, moveYaw: this.padYaw || 0, movePitch: this.padPitch || 0 } };
     this._preHit = { v: V3.clone(b.v), w: V3.clone(b.w) };
-    const info = impactRacket(b.v, b.w, racket.normal, racket.vR, quality, racket.rubber || {});
+    const info = this.resolvePlayerRacketImpact(racket, quality);
     /* A separating face returns null and leaves the ball untouched. Consuming
      * the gesture (and the 90 ms hit cooldown, and the paddle's position) on a
      * null impact is how a ball that never touched the rubber still counted as
@@ -3651,11 +3675,13 @@ class Game {
      * full capture radius away and launched the ball from a point it visibly
      * never reached; the AI already snaps its paddle to the contact. prevPos is
      * moved too, so the next frame does not read the snap as 20 m/s of bat. */
-    V3.copy(pad.pos, contactPose ? contactPose.pos : contact);
-    if (contactPose) {
-      pad.q = Q.copy(pad.q || Q.new(), contactPose.q); pad.roll = contactPose.roll;
-      pad.activeFace = contactPose.activeFace; pad.contactPose = contactPose; pad.poseReady = true;
-    }
+    /* The ball is resolved at the swept collision point above. Keep the blade
+     * at the rendered end of its frame-long stroke: placing it back at an
+     * earlier CCD substep rewinds the animation and visibly jerks the racket.
+     * The contact face is still set to the solved impact face below. */
+    const instantTap = m && m.tap === true;
+    this.setPlayerContactPose(contactPose, instantTap && contactPose ? contactPose.pos : frameEndPos,
+      visualStartQ, this._lastPaddlePoseDt || 1 / 60, !instantTap);
     pad.forehand = forehand;
     V3.copy(pad.prevPos, pad.pos);
     V3.copy(pad.prev, pad.pos);
@@ -3676,7 +3702,9 @@ class Game {
     const motion = this.paddleMotion || (this.paddleMotion = new PaddleStrokeMotion());
     motion.contact(racket.normal, pad.roll, racket.stroke.id, this.settings.grip,
       this.settings.hand, forehand, this.settings.followThrough !== false);
-    const impactAngles = paddleFaceAngles(racket.normal);
+    /* Keep the rate-limited visual normal; the physical stroke already used
+     * racket.normal in impactRacket above. */
+    const impactAngles = paddleFaceAngles(pad.normal);
     pad.pitch = impactAngles.pitch; pad.yaw = impactAngles.yaw; pad.motionStage = 'contact';
     if (this.followThrough) this.followThrough.active = false;
     this.holdPaddlePose();
@@ -3782,6 +3810,42 @@ class Game {
       (this.state === GS.POINT || this.state === GS.SERVE_READY && (this.server === 1 || !!this.freePlay));
   }
   cancelPaddleTrick() { this.paddleTrick?.cancel(); }
+  setPlayerContactPose(contactPose, frameEndPos, fromQ, dt, limitTurn = true) {
+    const pad = this.player;
+    // Keep the end of the real swept stroke visible, rather than rewinding to
+    // the substep where CCD found the ball.
+    if (frameEndPos) V3.copy(pad.pos, frameEndPos);
+    if (!contactPose) return 1;
+    const fromRoll = Number.isFinite(pad.roll) ? pad.roll : 0;
+    V3.copy(pad.normal, contactPose.normal);
+    pad.q = Q.copy(pad.q || Q.new(), contactPose.q);
+    pad.roll = contactPose.roll;
+    pad.activeFace = contactPose.activeFace;
+    pad.contactPose = contactPose;
+    pad.poseReady = true;
+    if (!limitTurn) return 1;
+    return this.limitPlayerPaddleTurn(fromQ, dt, fromRoll);
+  }
+  limitPlayerPaddleTurn(fromQ, dt, fromRoll) {
+    const pad = this.player, q = pad && pad.q;
+    if (!fromQ || !q) return 1;
+    const dot = Math.abs(fromQ.x * q.x + fromQ.y * q.y + fromQ.z * q.z + fromQ.w * q.w);
+    const angle = 2 * Math.acos(clamp(dot, -1, 1));
+    const maxAngle = 18 * clamp(Number.isFinite(dt) ? dt : 1 / 60, 0, 0.05);
+    if (!(angle > maxAngle) || angle < 1e-7) return 1;
+    const fraction = maxAngle / angle;
+    Q.slerp(q, fromQ, q, fraction);
+    if (Number.isFinite(fromRoll) && Number.isFinite(pad.roll))
+      pad.roll = fromRoll + paddleAngleDelta(fromRoll, pad.roll) * fraction;
+    // paddlePoseQuaternion points local +Z along the blade normal; recover
+    // that axis after limiting the rendered quaternion, keeping CCD in sync.
+    V3.set(pad.normal, 2 * (q.x * q.z + q.w * q.y),
+      2 * (q.y * q.z - q.w * q.x), 1 - 2 * (q.x * q.x + q.y * q.y));
+    const face = paddleFaceAngles(pad.normal);
+    pad.yaw = face.yaw; pad.pitch = face.pitch;
+    this.padYaw = face.yaw; this.padPitch = face.pitch; this.padRoll = pad.roll;
+    return fraction;
+  }
   syncPlayerPaddleFace() {
     const pad = this.player, face = this.playerActiveFace;
     if (!pad || pad.activeFace === face) return;
