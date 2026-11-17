@@ -207,7 +207,7 @@ class LobbyExhibition {
     const intro = options.intro === true;
     if (intro && !Number.isSafeInteger(options.requestId)) return false;
     // Hub repaints and retries of the same request are not a new entrance.
-    if (this.active && (!intro || this.requestId === options.requestId)) return true;
+    if (this.active && (!intro || this.requestId === options.requestId)) { this.paused = false; return true; }
     this.stop(); this.active = true; this.phase = intro ? 'waiting' : 'rally';
     this.requestId = intro ? options.requestId : null; this.readySent = false;
     this.clock = 0; this.elapsed = 0; this.hits = 0; this.firstHitAt = 0; this.paused = false;

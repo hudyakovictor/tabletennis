@@ -6,7 +6,7 @@
 
 В папке source/ лежат только исходники; готовый HTML живёт только в play/.
 """
-import base64, re, pathlib, hashlib, sys, shutil
+import base64, re, pathlib, hashlib, sys, glob
 
 SOURCE_DIR = pathlib.Path(__file__).resolve().parent
 REPO = SOURCE_DIR.parent
@@ -49,5 +49,4 @@ html = html.replace('/*__CSS__*/', css).replace('/*__JS__*/', js)
 out = pathlib.Path(sys.argv[1]).resolve() if len(sys.argv) > 1 else REPO/'play'/'index.html'
 out.parent.mkdir(parents=True, exist_ok=True)
 out.write_text(html)
-shutil.copyfile(root/'preloaderr.png', out.parent/'preloaderr.png')
 print('built', out, len(html)//1024, 'KB')

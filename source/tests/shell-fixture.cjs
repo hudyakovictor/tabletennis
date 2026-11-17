@@ -43,7 +43,7 @@ async function pageFixture(t, browser, screens = [], { width = 390, height = 844
     const haptic = () => {}, setQuality = () => {}, openSettings = () => {};
     ${persisted ? '' : "const effectiveReducedMotion = () => S.rm === true || matchMedia('(prefers-reduced-motion: reduce)').matches;"}
     const BG = { init() {}, resize() {}, mood() {} }, Dev = { mark() {}, build() {} };
-    const ILL = ${JSON.stringify(main ? Object.fromEntries(['preloader-ball-intro', 'preloader-ball-spin', 'preloader-paddle', 'preloader-burst'].map(key => [key, 'data:image/webp;base64,' + fs.readFileSync(path.join(__dirname, '../src/ill', key + '.webp')).toString('base64')])) : {})}, ItemArt = { of: (it) => '<span aria-hidden="true" data-art="racket" data-item-art="' + it.id + '"></span>' };
+    const ILL = {}, ItemArt = { of: (it) => '<span aria-hidden="true" data-art="racket" data-item-art="' + it.id + '"></span>' };
     const Daily = { ready: () => 0, items: () => [] };
     const Api = { enabled: false };
     const Progress = { board: null, boardSubs: [], reconcileSeason() {}, watchSeason() {}, boot() {}, leaderboard: async () => null, onBoard(fn) { this.boardSubs.push(fn); return () => { this.boardSubs = this.boardSubs.filter((x) => x !== fn); }; } };

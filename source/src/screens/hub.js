@@ -16,8 +16,6 @@ let MODE = MODES[0];
    можно было переоткрывать и бесконечно фармить ту же награду. */
 const questReady = () => Daily.ready();
 const FREE_MS = 4 * 3600 * 1000;           // подарок раз в 4 часа
-/* Подарок: название всегда «Подарок», а состояние живёт отдельной строкой
-   (таймер / «готово»), поэтому текст не прыгает между заголовком и подписью. */
 const giftStatus = (left) => (left > 0 ? t('hub.giftInShort', { time: fmtLeft(left) }) : t('hub.giftReadyShort'));
 const UNLOCK_MS = { wood: 30 * 60 * 1000, silver: 3 * 3600 * 1000, gold: 8 * 3600 * 1000, epic: 12 * 3600 * 1000 };
 
@@ -25,33 +23,18 @@ Router.def('hub', {
   mood: 'arena',
   render() {
     const qr = questReady();
-    const freeLeft = (S.freeAt || 0) - Date.now();
-    const L = leagueOf(S.rating);
     return `${UI.hud()}
     <div class="hub-content scroll">
-    <div class="hero">
-      <span class="hero-mark" aria-hidden="true">SIGNAL · ARENA</span>
-    </div>
+    <div class="hero"></div>
     <div class="playzone">
-      <div class="zone-head">
-        <span class="zh-dot" aria-hidden="true"></span><b data-l10n="hub.modesKicker">${t('hub.modesKicker')}</b>
-        <span class="zh-line" aria-hidden="true"></span>
-        <button class="zh-meta" type="button" data-modebtn="career" aria-label="${leagueName(L)} · ${fmt(S.rating)} — ${t('hub.career')}"><span class="zm-badge" aria-hidden="true">${Art.badge(L, 18)}</span><span class="zm-t num">${leagueName(L)} · ${fmt(S.rating)}</span><span class="zm-go" aria-hidden="true">›</span></button>
-      </div>
-      <!-- Иконки — стикеры из iconideas/ (webp в src/ill, ключи ic-*): крупнее в
-           три раза, поэтому карточки режимов стали вертикальными плашками:
-           сверху стикер, снизу заголовок из двух слов без описания.
-           Нижний ряд — те же заголовки, но стикер слева и описание справа.
-           Верхний ряд (режимы игры) и нижний (награды) красятся в два цвета
-           из той же гаммы — см. .modebtn / .modebtn.sec в screens_hub.css. -->
       <div class="play-grid">
         <button class="b3 modebtn mode-free rise" style="--d:2" data-modebtn="free" data-press><span class="mb-i" aria-hidden="true"><img src="${ILL['ic-free']}" alt="" width="120" height="120"></span><span class="mb-t"><b>${t('mode.free')}</b></span></button>
         <button class="b3 modebtn mode-ranked rise" style="--d:3" data-modebtn="ranked" data-press><span class="mb-i" aria-hidden="true"><img src="${ILL['ic-ranked']}" alt="" width="120" height="120"></span><span class="mb-t"><b>${t('mode.ranked')}</b></span></button>
         <button class="b3 modebtn mode-practice rise" style="--d:4" data-modebtn="practice" data-press><span class="mb-i" aria-hidden="true"><img src="${ILL['ic-practice']}" alt="" width="120" height="120"></span><span class="mb-t"><b>${t('mode.practice')}</b></span></button>
       </div>
       <div class="grid-row2">
-        <button class="b3 modebtn mode-quest sec rise" style="--d:5" data-act="quests" data-press>${qr ? `<span class="dot">${qr}</span>` : ''}<span class="mb-i" aria-hidden="true"><img src="${ILL['ic-quests']}" alt="" width="120" height="120"></span><span class="mb-t"><b>${t('hub.quests')}</b><small id="questSub" class="num">${qr ? t('hub.questsReady', { n: qr }) : t('hub.questsSub')}</small></span></button>
-        <button class="b3 modebtn mode-gift sec rise ${freeLeft <= 0 ? 'ready' : ''}" style="--d:6" data-act="gifts" data-press><span class="mb-i" aria-hidden="true"><img src="${ILL['ic-gift']}" alt="" width="120" height="120"></span><span class="mb-t"><b>${t('hub.gift')}</b><small id="freeT" class="num">${giftStatus(freeLeft)}</small></span></button>
+        <button class="b3 modebtn mode-quest sec rise" style="--d:5" data-act="quests" data-press>${qr ? `<span class="dot">${qr}</span>` : ''}<span class="mb-i" aria-hidden="true"><img src="${ILL['ic-quests']}" alt="" width="120" height="120"></span><span class="mb-t"><b>${t('hub.quests')}</b></span></button>
+        <button class="b3 modebtn mode-gift sec rise ${(S.freeAt || 0) <= Date.now() ? 'ready' : ''}" style="--d:6" data-act="gifts" data-press data-gift-status="${giftStatus((S.freeAt || 0) - Date.now())}"><span class="mb-i" aria-hidden="true"><img src="${ILL['ic-gift']}" alt="" width="120" height="120"></span><span class="mb-t"><b>${t('hub.gift')}</b></span></button>
       </div>
     </div>
     </div>`;
@@ -132,11 +115,11 @@ Router.def('hub', {
     // таймеры: слоты сундуков + кулдаун подарка
     const timer = setInterval(() => {
       $$('[data-ends]', el).forEach((b) => (b.textContent = fmtLeft(+b.dataset.ends - Date.now())));
-      const gft = el.querySelector('#freeT');
-      if (gft) {
+      const giftBtn = el.querySelector('[data-gift-status]');
+      if (giftBtn) {
         const left = (S.freeAt || 0) - Date.now();
-        gft.textContent = giftStatus(left);
-        const btn = gft.closest('.modebtn'); if (btn) btn.classList.toggle('ready', left <= 0);
+        giftBtn.classList.toggle('ready', left <= 0);
+        giftBtn.dataset.giftStatus = giftStatus(left);
       }
       UI.refreshNotifications();
     }, 1000);

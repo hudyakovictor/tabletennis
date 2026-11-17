@@ -195,7 +195,7 @@ test('one viewport-anchored CSS group centers percentage inside the small ring, 
   assert.match(rule('.pl-readout'), /display:grid;place-items:center;transform:translateX\(-50%\)/);
   assert.match(rule('.pl-ring'), /position:absolute;inset:0;width:100%;height:100%/);
   assert.doesNotMatch(rule('.pl-percent'), /position:|transform:|bottom:|top:/);
-  assert.match(rule('.pl-backdrop'), /url\("preloaderr\.png"\) center\/cover/);
+  assert.doesNotMatch(rule('.pl-backdrop'), /url\(/);
   assert.doesNotMatch(html + source + css, /pl-(?:paddle|burst|ball|sheet|glass|fallback|stage|wordmark)|preloader-ball|has-sprites|plArrive/);
   assert.doesNotMatch(source, /Sfx\.|haptic\(|new Image|\.animate\(|send\('lobbyLaunch'/);
   const f = fixture(), s = f.mount(); assert.equal(f.root.parentElement, f.body); f.preloader.cancel(); disposed(f, s);

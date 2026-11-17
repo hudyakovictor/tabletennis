@@ -664,6 +664,7 @@ const showTip = (text) => { if (text) tip = { text, until: g.time + 4.6 }; };
           stageIdleArena(); break;
         case 'lobby':
           lobby = true; g.audio.setMuted(true); resetAssist();
+          hostPause(false);
           if (g.preview?.active) g.preview.close();
           if (g.state !== GS.MENU) g.returnToMenu();
           g.sessionKind = 'free'; g.inspectSlowmoRequested = false;

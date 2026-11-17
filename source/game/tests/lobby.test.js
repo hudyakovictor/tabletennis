@@ -201,6 +201,17 @@ test('plain lobby and repeated intro/launch commands preserve waiting, incoming 
   }
 });
 
+test('re-entering an active lobby clears a stale pause', () => {
+  const f = fixture(); f.prepare(false);
+  const c = f.controller();
+  c.paused = true;
+  assert.equal(c.prepare({}), true);
+  assert.equal(c.paused, false);
+  const before = c.clock;
+  f.step(0.1, false);
+  assert.ok(c.clock > before, 'the exhibition clock resumes after re-entry');
+});
+
 test('hidden, sleeping and paused lobbies suspend their own clock without a resume catch-up', () => {
   const f = fixture(); f.prepare(false); f.step(); const c = f.controller();
   for (const reason of ['hidden', 'sleep', 'pause']) {

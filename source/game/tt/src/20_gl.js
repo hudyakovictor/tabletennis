@@ -497,6 +497,10 @@ class Renderer {
   constructor(canvas, opts = {}) {
     this.canvas = canvas;
     const attribs = { alpha: false, antialias: false, depth: true, stencil: false, powerPreference: 'high-performance', preserveDrawingBuffer: false, desynchronized: true };
+    const probeCanvas = document.createElement('canvas');
+    const probe = probeCanvas.getContext('webgl2', attribs);
+    this.maxSamples = probe && probe.getParameter(probe.MAX_SAMPLES) || 0;
+    if (probe) probe.getExtension('WEBGL_lose_context')?.loseContext();
     let gl = canvas.getContext('webgl2', attribs);
     this.isGL2 = !!gl;
     if (!gl) gl = canvas.getContext('webgl', attribs) || canvas.getContext('experimental-webgl', attribs);
@@ -541,6 +545,7 @@ class Renderer {
     this.shadowFBO = null;
     this.rtScene = null; this.rtA = null; this.rtB = null;
     this._w = 0; this._h = 0;
+    this.samples = 0; this.msaaColor = null; this.msaaDepth = null;
 
     // matrices
     this.view = M4.create(); this.proj = M4.create(); this.viewProj = M4.create();
@@ -682,7 +687,7 @@ class Renderer {
     return ok ? { fbo, depth, size } : null;
   }
 
-  makeRT(w, h, hdr) {
+  makeRT(w, h, hdr, depth = true) {
     const gl = this.gl;
     const fbo = gl.createFramebuffer(), tex = gl.createTexture();
     gl.bindTexture(gl.TEXTURE_2D, tex);
@@ -696,8 +701,47 @@ class Renderer {
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
     gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
     gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, tex, 0);
+    if (hdr && this.isGL2 && this.maxSamples > 0 && hdr !== 'nodepth') {
+      const samples = Math.min(4, this.maxSamples);
+      const msaaFormat = this.extCBF ? gl.RGBA16F : gl.RGBA;
+      this.samples = samples;
+      this.msaaColor = gl.createRenderbuffer();
+      gl.bindRenderbuffer(gl.RENDERBUFFER, this.msaaColor);
+      gl.renderbufferStorageMultisample(gl.RENDERBUFFER, samples, msaaFormat, w, h);
+      gl.framebufferRenderbuffer(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.RENDERBUFFER, this.msaaColor);
+      this.msaaDepth = gl.createRenderbuffer();
+      gl.bindRenderbuffer(gl.RENDERBUFFER, this.msaaDepth);
+      gl.renderbufferStorageMultisample(gl.RENDERBUFFER, samples, gl.DEPTH_COMPONENT24, w, h);
+      gl.framebufferRenderbuffer(gl.FRAMEBUFFER, gl.DEPTH_ATTACHMENT, gl.RENDERBUFFER, this.msaaDepth);
+      ok = gl.checkFramebufferStatus(gl.FRAMEBUFFER) === gl.FRAMEBUFFER_COMPLETE;
+      if (ok) {
+        const resolveFbo = gl.createFramebuffer();
+        gl.bindFramebuffer(gl.FRAMEBUFFER, resolveFbo);
+        gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, tex, 0);
+        const resolved = gl.checkFramebufferStatus(gl.FRAMEBUFFER) === gl.FRAMEBUFFER_COMPLETE;
+        gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+        if (!resolved) {
+          gl.deleteFramebuffer(resolveFbo);
+          gl.deleteFramebuffer(fbo);
+          gl.deleteRenderbuffer(this.msaaColor);
+          gl.deleteRenderbuffer(this.msaaDepth);
+          this.msaaColor = null;
+          this.msaaDepth = null;
+          this.samples = 0;
+          return this.makeRT(w, h, false, depth);
+        }
+        return { fbo, resolveFbo, tex, rb: null, msaaColor: this.msaaColor, msaaDepth: this.msaaDepth, samples, w, h };
+      }
+      gl.deleteRenderbuffer(this.msaaColor);
+      gl.deleteRenderbuffer(this.msaaDepth);
+      this.msaaColor = null;
+      this.msaaDepth = null;
+      this.samples = 0;
+      gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, tex, 0);
+      gl.framebufferRenderbuffer(gl.FRAMEBUFFER, gl.DEPTH_ATTACHMENT, gl.RENDERBUFFER, null);
+    }
     let rb = null;
-    if (hdr !== 'nodepth') {
+    if (hdr !== 'nodepth' && depth) {
       rb = gl.createRenderbuffer();
       gl.bindRenderbuffer(gl.RENDERBUFFER, rb);
       gl.renderbufferStorage(gl.RENDERBUFFER, gl.DEPTH_COMPONENT16, w, h);
@@ -711,16 +755,24 @@ class Renderer {
 
   resize(w, h, dpr) {
     const gl = this.gl;
-    const sc = this.quality === 'low' ? 0.72 : this.quality === 'medium' ? 0.88 : 1;
-    const pw = Math.max(2, Math.round(w * dpr * sc)), ph = Math.max(2, Math.round(h * dpr * sc));
+    const pw = Math.max(2, Math.round(w * dpr)), ph = Math.max(2, Math.round(h * dpr));
     if (pw === this._w && ph === this._h) return;
     this._w = pw; this._h = ph;
     this.canvas.width = pw; this.canvas.height = ph;
-    const del = (rt) => { if (rt) { gl.deleteFramebuffer(rt.fbo); gl.deleteTexture(rt.tex); if (rt.rb) gl.deleteRenderbuffer(rt.rb); } };
+    const del = (rt) => {
+      if (!rt) return;
+      gl.deleteFramebuffer(rt.fbo);
+      if (rt.resolveFbo) gl.deleteFramebuffer(rt.resolveFbo);
+      gl.deleteTexture(rt.tex);
+      if (rt.rb) gl.deleteRenderbuffer(rt.rb);
+      if (rt.msaaColor) gl.deleteRenderbuffer(rt.msaaColor);
+      if (rt.msaaDepth) gl.deleteRenderbuffer(rt.msaaDepth);
+    };
     del(this.rtScene); del(this.rtA); del(this.rtB);
+    this.samples = 0; this.msaaColor = null; this.msaaDepth = null;
     this.rtScene = this.makeRT(pw, ph, true);
     const bw = Math.max(2, pw >> 2), bh = Math.max(2, ph >> 2);
-    this.rtA = this.makeRT(bw, bh, 'nodepth'); this.rtB = this.makeRT(bw, bh, 'nodepth');
+    this.rtA = this.makeRT(bw, bh, 'nodepth', false); this.rtB = this.makeRT(bw, bh, 'nodepth', false);
     this.bw = bw; this.bh = bh;
   }
 
@@ -864,6 +916,12 @@ class Renderer {
 
   present(time) {
     const gl = this.gl, P = this.post;
+    if (this.rtScene.samples) {
+      gl.bindFramebuffer(gl.READ_FRAMEBUFFER, this.rtScene.fbo);
+      gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, this.rtScene.resolveFbo);
+      gl.blitFramebuffer(0, 0, this._w, this._h, 0, 0, this.rtScene.w, this.rtScene.h, gl.COLOR_BUFFER_BIT, gl.NEAREST);
+      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    }
     const doBloom = this.quality !== 'low' && P.bloom > 0.001;
     if (doBloom) {
       this.blit(this.progBright, (u) => {

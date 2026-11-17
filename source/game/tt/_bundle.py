@@ -142,7 +142,7 @@ def build_frame():
 
     arena = {}
     if not os.environ.get('TT_NO_ARENA'):
-        for key, filename in {'panorama': 'street-court.jpg', 'asphalt': 'asphalt-tile.jpg', 'stands': 'stands.jpg'}.items():
+        for key, filename in {'panorama': 'street-court.jpg', 'asphalt': 'asphalt-tile.jpg'}.items():
             path = SRC.parent / 'assets' / filename
             if path.exists():
                 arena[key] = 'data:image/jpeg;base64,' + base64.b64encode(path.read_bytes()).decode('ascii')

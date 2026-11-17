@@ -178,8 +178,7 @@ class Game {
     this._matchContacts = [null, null]; this._matchWhiffs = [null, null];
     this._pendingCredit = null; this._creditedRally = -1;
     this._playerWork = this._aiWork = null;
-    /* Внутренний масштаб рендера: 1 — как выбрал игрок в quality, ниже —
-     * движок сам экономит пиксели на слабом телефоне (решает PerfMonitor). */
+    /* Adaptive post-processing cost; geometry resolution stays full. */
     this.renderScale = 1;
     this.strokeTime = 0;                // same scaled clock as the ball, for input freshness
     this.score = [0, 0];                 // [player, ai]
@@ -813,8 +812,8 @@ class Game {
   }
 
   resize() {
-    // renderScale — авто-экономия пикселей поверх выбранного качества
-    const dpr = Math.min(window.devicePixelRatio || 1, this.settings.quality === 'low' ? 1.25 : 2) * (this.renderScale || 1);
+    // Geometry resolution stays full; adaptive quality only trims post cost.
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
     const w = this.canvas.clientWidth || window.innerWidth;
     const h = this.canvas.clientHeight || window.innerHeight;
     const prevW = this.vw, prevH = this.vh;
@@ -840,14 +839,13 @@ class Game {
     if (this.camRig && this.settings && !this.preview?.active) this.updateCamera(0);
   }
 
-  /** Авто-масштаб рендера (0.6…1) от PerfMonitor: качество (quality) остаётся
-   *  выбором игрока, мы меняем только реальное число пикселей за кадром. */
+  // Adaptive quality only scales post-processing cost, never geometry edges.
   setRenderScale(k) {
     const n = Number(k);
     const v = Number.isFinite(n) ? clamp(n, 0.6, 1) : 1;
     if (Math.abs(v - (this.renderScale || 1)) < 0.001) return this.renderScale;
     this.renderScale = v;
-    this.resize();
+    if (this.R.post) this.R.post.bloom = (this.settings.quality === 'low' ? 0.08 : 0.16) * v;
     return v;
   }
 

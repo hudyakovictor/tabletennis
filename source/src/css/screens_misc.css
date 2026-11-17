@@ -2,7 +2,7 @@
 #preloader{position:fixed;inset:0;z-index:80;overflow:hidden;isolation:isolate}
 #preloader[hidden]{display:none}
 #preloader[data-phase=fade]{pointer-events:none}
-.pl-backdrop{position:absolute;inset:0;background:url("preloaderr.png") center/cover no-repeat #04050b}
+.pl-backdrop{position:absolute;inset:0;background:#04050b}
 .pl-readout{position:absolute;left:50%;bottom:100px;width:clamp(74px,24vw,92px);aspect-ratio:1;display:grid;place-items:center;transform:translateX(-50%)}
 .pl-ring{position:absolute;inset:0;width:100%;height:100%;transform:rotate(-90deg)}
 .pl-progress{transition:none}
@@ -157,11 +157,7 @@ body.in-lobby #bg{visibility:hidden}
     radial-gradient(120% 55% at 6% 100%,rgba(26,190,172,.20) 0%,transparent 68%),
     radial-gradient(100% 50% at 104% 90%,rgba(255,90,70,.14) 0%,transparent 72%),
     linear-gradient(180deg,rgba(4,6,16,.88) 0%,rgba(4,6,16,.30) 24%,rgba(4,6,16,0) 42%,rgba(4,6,16,0) 54%,rgba(4,6,16,.62) 70%,rgba(4,6,16,.94) 100%)}
-.screen[data-id=hub].lobby::after{content:"";position:absolute;inset:0;z-index:-1;pointer-events:none;opacity:.55;
-  background-image:radial-gradient(circle at 1px 1px,rgba(126,220,214,.16) 1px,transparent 1.3px);background-size:18px 18px;
-  -webkit-mask-image:linear-gradient(180deg,#000 0%,transparent 28%,transparent 60%,#000 100%);
-  mask-image:linear-gradient(180deg,#000 0%,transparent 28%,transparent 60%,#000 100%)}
-body.q-low .screen[data-id=hub].lobby::after{display:none}
+
 
 .zs-kpi{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:10px}
 .zs-kpi div{padding:10px 6px;border-radius:14px;background:rgba(255,255,255,.05);text-align:center}

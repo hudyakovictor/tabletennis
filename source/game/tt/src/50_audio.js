@@ -342,8 +342,11 @@ class AudioEngine {
   hitFloor(speed, eventId) {
     if (!this.canPlay() || !this._once('hitFloor', eventId)) return;
     const v = clamp((Number.isFinite(speed) ? Math.abs(speed) : 0) / 6, 0.05, 1);
-    this._tone(150 + v * 90, 0.1, 0.16 * v, 'sine', 0, 0.5);
-    this._noise(0.06, 0.08 * v, 'lowpass', 900, 0.6);
+    // A hollow 40 mm ball on a hard floor is a short, bright tick. Keep the
+    // low body out of this voice: a 150-240 Hz thump reads as a much larger
+    // tennis ball rather than a table tennis ball bouncing out of play.
+    this._tone(880 + v * 260, 0.045, 0.12 * v, 'triangle', 0, 0.62);
+    this._noise(0.03, 0.065 * v, 'highpass', 2100 + v * 900, 0.7);
   }
   whoosh(power, swingId) {
     if (!this.canPlay() || !this._once('whoosh', swingId)) return;

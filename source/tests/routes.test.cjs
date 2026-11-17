@@ -20,7 +20,7 @@ for (const width of [390, 1280]) test(`free/ranked routes and locale refresh pre
     return { visits, refreshed, cur: Router.cur, shows: fixture.trace.host.filter(x => x === 'show').length, hides: fixture.trace.host.filter(x => x === 'hide').length };
   });
   assert.deepEqual(result.visits, [['match', 'free', 0], ['mm', 'ranked', 0]]);
-  assert.deepEqual(result.refreshed, { sameRoot: true, sameState: true, sameStack: true, title: 'League rating' });
+  assert.deepEqual(result.refreshed, { sameRoot: true, sameState: true, sameStack: true, title: 'Quick match' });
   assert.equal(result.cur, 'mm'); assert.equal(result.shows, result.hides); assert.deepEqual(errors, []);
 });
 

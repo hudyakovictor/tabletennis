@@ -283,6 +283,19 @@ test('legacy whoosh and edge throttles work at audio time zero', async () => {
   a.hitEdge(); a.hitEdge(); assert.equal(f.sources().length, 3);
   a.ctx.currentTime = .1; a.whoosh(1); assert.equal(f.effects().length, 2);
 });
+test('a floor bounce is a short bright tick, not a low tennis-ball thud', async () => {
+  const f = fixture(), a = await ready(f);
+  a.hitFloor(4);
+  const voices = f.sources();
+  const tone = voices.find(source => source.kind === 'oscillator');
+  const noise = voices.find(source => source.kind === 'source');
+  assert.ok(tone && noise);
+  assert.ok(tone.frequency.events[0][1] >= 880, 'floor tone must stay above a low thump');
+  assert.equal(noise.connections[0].kind, 'filter');
+  assert.equal(noise.connections[0].type, 'highpass');
+  assert.ok(noise.connections[0].frequency.value >= 2100, 'floor tick needs high-frequency contact');
+  assert.ok(peakGain(tone) < .15, 'floor tick must stay quiet and short');
+});
 test('contact speed changes only bounded gain, independent of simulation tempo', async () => {
   const slow = fixture(), fast = fixture(), soft = fixture();
   await ready(slow); await ready(fast); await ready(soft);
