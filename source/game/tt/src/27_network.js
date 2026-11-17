@@ -212,8 +212,10 @@ class NetworkManager {
       case 'point': {
         /* очки считает хост: для гостя это единственный источник счёта,
          * иначе его собственная физика разыгрывает розыгрыш сама, и счёт
-         * расходится уже на первой подаче */
-        const m = netMirrorState(msg);
+         * расходится уже на первой подаче. Для хоста сообщение уже в его
+         * кадре — зеркалить нельзя, иначе его собственный point придёт с
+         * чужим who и перевёрнутым счётом. */
+        const m = this._pointMessage(msg);
         if (!this.isHost) this._applyRemotePoint(m);
         this._emit('point', m);
         break;
@@ -235,10 +237,7 @@ class NetworkManager {
          * the host could hit the same flight a second time (two contacts,
          * one physical episode). The guest stamps every strike with a
          * monotone `hitId`; the host accepts each id exactly once. */
-        if (Number.isFinite(msg.hitId)) {
-          if (msg.hitId <= this._lastGuestHitId) break;
-          this._lastGuestHitId = msg.hitId;
-        }
+        if (!this._acceptGuestHit(msg)) break;
         const mv = Array.isArray(msg.v) ? netFlipZ(msg.v) : null;
         const mw = Array.isArray(msg.w) ? netFlipAxial(msg.w) : null;
         if (mv) V3.set(b.v, mv[0], mv[1], mv[2]);
@@ -255,6 +254,22 @@ class NetworkManager {
         this._emit('error', msg.message || 'Server error');
         break;
     }
+  }
+
+  /** The host owns the frame; a mirrored point would swap its own who/score.
+   *  The guest sees the relay in host coordinates and needs the mirror. */
+  _pointMessage(msg) {
+    return this.isHost ? Object.assign({}, msg) : netMirrorState(msg);
+  }
+
+  /** Guest strikes are stamped with a monotone id. Apply each id once; a
+   *  retransmitted guestHit must not re-arm a ball the host already returned.
+   *  Messages without an id keep the old behaviour (accepted). */
+  _acceptGuestHit(msg) {
+    if (!msg || !Number.isFinite(msg.hitId)) return true;
+    if (msg.hitId <= this._lastGuestHitId) return false;
+    this._lastGuestHitId = msg.hitId;
+    return true;
   }
 
   _send(obj) {

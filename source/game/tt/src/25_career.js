@@ -50,9 +50,22 @@ function getAvailablePerks(career) {
 });
 }
 
+/* The AI has exactly AI_LEVELS levels; a career opponent above the last index
+ * used to set difficulty 4 and ask ai.setLevel(4), which clamped silently to
+ * the top level while the settings/UI kept a difficulty that does not exist.
+ * Keep one explicit ceiling here; the audit checks it against AI_LEVELS. */
+const CAREER_MAX_AI_LEVEL = 3;
+const CAREER_MAX_LEGACY_LEVEL = 4;   // saves written before the ceiling clamp
+
 function pickThreePerks(career) {
   const pool = getAvailablePerks(career);
-  const shuffled = pool.slice().sort(() => Math.random() - 0.5);
+  // Fisher-Yates: sort(() => random - .5) is a biased shuffle and made the
+  // first three slots favour some perks over a full run.
+  const shuffled = pool.slice();
+  for (let i = shuffled.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+  }
   return shuffled.slice(0, Math.min(3, shuffled.length));
 }
 
@@ -89,8 +102,9 @@ function generateOpponent(eloMin, eloMax) {
   const style = OPP_STYLE[Math.floor(Math.random() * OPP_STYLE.length)];
   // map ELO to AI level (0-4) approximately
   let level = 0;
-  if (elo >= 2500) level = 4; else if (elo >= 2000) level = 3;
-  else if (elo >= 1400) level = 2; else if (elo >= 1000) level = 1;
+  if (elo >= 2000) level = 3; else if (elo >= 1400) level = 2;
+  else if (elo >= 1000) level = 1;
+  level = Math.min(level, CAREER_MAX_AI_LEVEL);
   return { name, elo, style, level, id: Math.random().toString(36).slice(2, 8) };
 }
 
@@ -172,14 +186,15 @@ class Career {
     this.selectedOpponent = this.opponents[idx];
     const g = this.game;
     // apply opponent
-    g.settings.difficulty = this.selectedOpponent.level;
-    g.ai.setLevel(this.selectedOpponent.level);
+    const level = Math.min(this.selectedOpponent.level, CAREER_MAX_AI_LEVEL);
+    g.settings.difficulty = level;
+    g.ai.setLevel(level);
     g.ai.reset();
     // reset career decisive boost flag
     if (g._careerDecisiveBoost) g._careerDecisiveActive = false;
     this.state = 'MATCH';
     this.save();
-    g.startMatch(this.selectedOpponent.level);
+    g.startMatch(level);
   }
 
   /** Called by Game when a match ends */
@@ -201,7 +216,9 @@ class Career {
       score: [...this.game.score],
     });
     this.runStats.totalPoints += this.game.score[0];
-    this.runStats.maxSpeed = Math.max(this.runStats.maxSpeed, this.game.stats.maxSpeed);
+    this.runStats.totalRallies += this.game.stats?.rallies || 0;
+    this.runStats.longestRally = Math.max(this.runStats.longestRally, this.game.bestRally || 0);
+    this.runStats.maxSpeed = Math.max(this.runStats.maxSpeed, this.game.stats?.maxSpeed || 0);
 
     if (!won) {
       this.state = 'RUN_END';
@@ -287,7 +304,7 @@ class Career {
       if (data.v === 2 && (!Array.isArray(data.opponents) || data.opponents.length !== rounds - data.currentRound ||
           !data.opponents.every(o => o && typeof o.name === 'string' && o.name.length < 80 &&
             typeof o.style === 'string' && o.style.length < 80 && Number.isFinite(o.elo) &&
-            Number.isInteger(o.level) && o.level >= 0 && o.level <= 4))) return false;
+            Number.isInteger(o.level) && o.level >= 0 && o.level <= CAREER_MAX_LEGACY_LEVEL))) return false;
     } catch(e) { return false; }
     this.stop();
     this._baseSettings = { difficulty: this.game.settings.difficulty };
@@ -296,6 +313,9 @@ class Career {
     this.enterTournament();
     this.currentRound = data.currentRound;
     this.opponents = data.v === 2 ? data.opponents : this.opponents.slice(this.currentRound);
+    // A checkpoint from before CAREER_MAX_AI_LEVEL may carry a level 4; keep
+    // the run loadable but never hand a phantom difficulty to the AI.
+    for (const o of this.opponents) o.level = Math.min(o.level, CAREER_MAX_AI_LEVEL);
     const count = v => Number.isInteger(v) && v >= 0 && v <= 10000 ? v : 0;
     this.totalWins = count(data.totalWins);
     this.totalLosses = 0;
