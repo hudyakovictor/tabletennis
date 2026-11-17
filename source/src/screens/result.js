@@ -1,6 +1,15 @@
+/* =====================================================================
+   TTU v3 — Экраны результата и сундука. Глобальный rework.
+   Фундаментальный rework: чёткая иерархия, минимальная цель касания 48px,
+   WCAG AA контраст, никаких инлайн-стилей, никаких декоративных эффектов.
+   ===================================================================== */
+
 function confirmSheet(title, text, ok, fn) {
-  Sheet.open(`<div class="h1" style="margin:4px 4px 6px">${title}</div><p class="dim" style="margin:0 4px 16px;font-size:12.5px">${text}</p>
-    <div style="display:grid;gap:12px"><button class="b3 coral block" data-a="ok">${ok}</button><button class="b3 dark block sm" data-a="no">${t('common.stay')}</button></div>`, {
+  Sheet.open(`<div class="confirm">
+    <header class="confirm-head"><h2 class="body-lg">${title}</h2></header>
+    <p class="confirm-text caption">${text}</p>
+    <div class="confirm-actions"><button class="btn btn-ghost btn-block" data-a="ok">${ok}</button><button class="btn btn-ghost btn-block sm" data-a="no">${t('common.stay')}</button></div>
+  </div>`, {
     onOpen: (w) => w.addEventListener('click', (e) => { const a = e.target.closest('[data-a]'); if (!a) return; Sheet.close(true); if (a.dataset.a === 'ok') fn(); })
   });
 }
@@ -14,13 +23,15 @@ function devZoneSheet() {
     ['contactBackPx', 0, 200, 2], ['contactSideTouchPx', 20, 90, 2],
     ['contactSideMousePx', 16, 80, 2]
   ];
-  const row = ([k, a, b, s]) => `<label class="dz-row"><span>${t('zone.field.' + k)}</span><input type="range" min="${a}" max="${b}" step="${s}" value="${R[k] ?? a}" data-k="${k}"><b class="num" data-v="${k}">${R[k] ?? a}</b></label>`;
-  Sheet.open(`<div class="h1" style="margin:4px 4px 4px">${t('zone.title')}</div><p class="dim" style="margin:0 4px 12px;font-size:11.5px">${t('zone.notice')}</p>
+  const row = ([k, a, b, s]) => `<div class="dz-row"><label class="dz-label">${t('zone.field.' + k)}</label><input type="range" min="${a}" max="${b}" step="${s}" value="${R[k] ?? a}" data-k="${k}"><b class="dz-val num" data-v="${k}">${R[k] ?? a}</b></div>`;
+  Sheet.open(`<div class="devzone scroll">
+    <header class="devzone-head"><h2 class="body-lg">${t('zone.title')}</h2></header>
+    <p class="devzone-notice caption">${t('zone.notice')}</p>
     <div class="pnl dz">${F.map(row).join('')}
-    <label class="dz-row"><span>${t('zone.show')}</span><button class="tgl ${GameHost.debug ? 'on' : ''}" data-t="debug"></button></label>
-    <label class="dz-row"><span>${t('zone.auto')}</span><button class="tgl ${R.autoFootwork !== false ? 'on' : ''}" data-t="autoFootwork"></button></label></div>
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:14px"><button class="b3 dark sm" data-a="reset">${t('zone.reset')}</button><button class="b3 green sm" data-a="apply">${t('zone.apply')}</button></div>
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:10px"><button class="b3 dark sm" data-a="stats">${t('zone.stats', { n: ZoneStats.all().length })}</button><button class="b3 dark sm" data-a="link">${t('zone.link')}</button></div>`, {
+    <div class="dz-row"><label class="dz-label">${t('zone.show')}</label><button class="tgl ${GameHost.debug ? 'on' : ''}" data-t="debug"></button></div>
+    <div class="dz-row"><label class="dz-label">${t('zone.auto')}</label><button class="tgl ${R.autoFootwork !== false ? 'on' : ''}" data-t="autoFootwork"></button></div></div>
+    <div class="dz-actions"><div class="dz-action-half"><button class="btn btn-ghost btn-block sm" data-a="reset">${t('zone.reset')}</button><button class="btn btn-ghost btn-block sm" data-a="apply">${t('zone.apply')}</button></div><div class="dz-action-half"><button class="btn btn-ghost btn-block sm" data-a="stats">${t('zone.stats', { n: ZoneStats.all().length })}</button><button class="btn btn-ghost btn-block sm" data-a="link">${t('zone.link')}</button></div></div>
+  </div>`, {
     onOpen: (w) => {
       const draft = Object.assign({}, GameHost.devRules());
       w.addEventListener('input', (e) => { const i = e.target.closest('input[data-k]'); if (!i) return; draft[i.dataset.k] = +i.value; w.querySelector(`[data-v="${i.dataset.k}"]`).textContent = i.value; });
@@ -48,14 +59,14 @@ function analysisSheet(d) {
   if (!dots.length) return '';
   const { side, fwd, back } = c;
   return `<details class="res-analysis">
-    <summary>${t('result.analysis')}<span class="num">${Math.round(c.hit / c.n * 100)}%</span></summary>
-    <p class="res-note">${t('result.analysisSample', { n: c.n })}</p>
+    <summary class="res-analysis-sum">${t('result.analysis')}<span class="num">${Math.round(c.hit / c.n * 100)}%</span></summary>
+    <p class="res-analysis-note caption">${t('result.analysisSample', { n: c.n })}</p>
     <svg class="rs-map" viewBox="-104 ${-back - 30} 208 ${back + fwd + 60}" role="img" aria-label="${t('analysis.mapTitle')}">
       <path d="M ${-side} 0 A ${side} ${back} 0 0 1 ${side} 0 A ${side} ${fwd} 0 0 1 ${-side} 0 Z" fill="rgba(53,198,244,.10)" stroke="#35C6F4" stroke-width="2" stroke-dasharray="9 7"/>
       ${dots.map(a => `<circle cx="${clamp(a.dx, -92, 92)}" cy="${clamp(a.dy, -back - 12, fwd + 12)}" r="6.5" fill="${a.contact ? '#3BF5A0' : a.accepted ? '#FF5A4D' : '#8E98C4'}" stroke="#0B0E22" stroke-width="2"/>`).join('')}
       <circle r="5" fill="#FFD54A"/>
     </svg>
-    <div class="rs-legend"><span><i style="background:#3BF5A0"></i>${t('analysis.lgHit')}</span><span><i style="background:#FF5A4D"></i>${t('analysis.lgZone')}</span><span><i style="background:#8E98C4"></i>${t('analysis.lgOut')}</span></div>
+    <div class="rs-legend"><span class="rs-legend-item"><i class="rs-legend-dot" style="--dot:#3BF5A0"></i>${t('analysis.lgHit')}</span><span class="rs-legend-item"><i class="rs-legend-dot" style="--dot:#FF5A4D"></i>${t('analysis.lgZone')}</span><span class="rs-legend-item"><i class="rs-legend-dot" style="--dot:#8E98C4"></i>${t('analysis.lgOut')}</span></div>
   </details>`;
 }
 
@@ -76,7 +87,7 @@ Router.def('result', {
       this.reports.set(d, report);
     }
     this.report = report;
-    const esc = n => String(n ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+    const esc = n => String(n ?? '').replace(/[&<>\"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
     const names = report.names.map((n, i) => String(n ?? t(i ? 'hud.far' : 'hud.near')));
     const score = n => Number.isSafeInteger(n) && n >= 0 ? String(n) : t('result.missing');
     const summary = d.presentation || MatchHUD.createSummary().freeze();
@@ -96,38 +107,45 @@ Router.def('result', {
     return `<div class="res ${outcome}" data-outcome="${outcome}">
       <div class="res-scroll scroll" role="region" tabindex="0" aria-label="${t('result.summary')}"><div class="res-report">
         <header class="res-header">
-          <h1 class="res-title h-display">${t('result.' + outcome)}</h1>
-          ${d.quit ? `<p class="res-context">${t('result.surrender')}</p>` : ''}
-          <div class="res-score" aria-label="${t('match.score')}">
-            <div class="rs-p ${d.win === true ? 'w' : ''}"><b title="${esc(names[0])}">${esc(names[0])}</b></div>
-            <div class="rs-n num"><span>${score(d.me)}</span><i>:</i><span>${score(d.op)}</span></div>
-            <div class="rs-p ${d.win === false ? 'w' : ''}"><b title="${esc(names[1])}">${esc(names[1])}</b></div>
+          <div class="res-outcome-badge flex items-center justify-center gap-3 mb-4">
+            <span class="chip ${d.win === true ? 'gold' : d.win === false ? 'coral' : 'violet'}">
+              ${d.win === true ? t('result.winShort') : d.win === false ? t('result.loseShort') : t('result.finishedShort')}
+            </span>
+          </div>
+          <h1 class="res-title body-lg text-center mb-2">${t('result.' + outcome)}</h1>
+          ${d.quit ? `<p class="res-context caption text-center mb-6">${t('result.surrender')}</p>` : ''}
+          <div class="res-score pnl mt-4 mb-6" aria-label="${t('match.score')}">
+            <div class="rs-p ${d.win === true ? 'w' : ''}"><b title="${esc(names[0])}" class="body">${esc(names[0])}</b></div>
+            <div class="rs-n flex flex-col items-center justify-center gap-1">
+              <span class="h1">${score(d.me)}</span><span class="h1">${score(d.op)}</span>
+            </div>
+            <div class="rs-p ${d.win === false ? 'w' : ''}"><b title="${esc(names[1])}" class="body">${esc(names[1])}</b></div>
           </div>
         </header>
-        <section class="res-progress" aria-label="${t('result.progress')}">
-          <div class="res-progress-row"><span>${t('result.rating')} · ${esc(leagueName(L))}</span><b class="num" id="rRating">${fmt(report.rating)}</b>${report.delta !== null ? `<em class="${report.delta >= 0 ? 'up' : 'dn'} num">${report.delta > 0 ? '+' : ''}${report.delta}</em>` : ''}</div>
-          <div class="bar gold"><i id="rBar" style="--p:${N ? clamp((report.rating - L.min) / (N.min - L.min), 0, 1) : 1}"></i></div>
-          <div class="res-progress-row"><span>${t('result.xp', { n: report.level })}</span><b class="num" id="rXp">${fmt(report.xp)}</b><small class="num">/ ${fmt(report.xpMax)}</small>${report.xpGain !== null ? `<em class="up num">+${report.xpGain} XP</em>` : ''}</div>
-          <div class="bar"><i id="rXpBar" style="--p:${clamp(report.xp / report.xpMax, 0, 1)}"></i></div>
-          ${report.levelUp ? `<button class="res-level-up" data-act="level-up" ${report.levelUpShown ? 'disabled' : ''}>${t('result.levelUpReward', { n: report.level })}</button>` : ''}
+        <section class="res-section mt-6" aria-label="${t('result.progress')}">
+          <div class="res-progress-row mt-3"><span>${t('result.rating')} · ${esc(leagueName(L))}</span><b class="num" id="rRating">${fmt(report.rating)}</b>${report.delta !== null ? `<em class="${report.delta >= 0 ? 'up' : 'dn'} num">${report.delta > 0 ? '+' : ''}${report.delta}</em>` : ''}</div>
+          <div class="bar gold mt-3"><i id="rBar" style="--p:${N ? clamp((report.rating - L.min) / (N.min - L.min), 0, 1) : 1}"></i></div>
+          <div class="res-progress-row mt-4"><span>${t('result.xp', { n: report.level })}</span><b class="num" id="rXp">${fmt(report.xp)}</b><small class="num">/ ${fmt(report.xpMax)}</small>${report.xpGain !== null ? `<em class="up num">+${report.xpGain} XP</em>` : ''}</div>
+          <div class="bar mt-3"><i id="rXpBar" style="--p:${clamp(report.xp / report.xpMax, 0, 1)}"></i></div>
+          ${report.levelUp ? `<button class="btn btn-success btn-block mt-4" data-act="level-up" ${report.levelUpShown ? 'disabled' : ''}>${t('result.levelUpReward', { n: report.level })}</button>` : ''}
         </section>
-        <section class="res-section" data-coverage="${summary.coverage}">
-          <h2>${t('result.summary')}</h2><p class="res-note">${t('result.coverage.' + summary.coverage)}</p>
+        <section class="res-section mt-6" data-coverage="${summary.coverage}">
+          <h2 class="h3 mb-3">${t('result.summary')}</h2><p class="res-note caption mb-3">${t('result.coverage.' + summary.coverage)}</p>
           <table class="res-table">${head('result.metric')}<tbody>
             <tr><th scope="row">${t('result.hits')}</th>${players.map(p => `<td class="num" data-stat="hits" data-coverage="${p.coverage}">${data(p.hits, p.coverage)}</td>`).join('')}</tr>
             <tr><th scope="row">${t('result.bestRally')}</th><td colspan="2" class="num" data-stat="best-rally" data-coverage="${summary.bestRallyCoverage}">${data(summary.bestRally, summary.bestRallyCoverage)}</td></tr>
           </tbody></table>
         </section>
-        <section class="res-section">
-          <h2>${t('result.strokes')}</h2>
-          ${strokes.length ? `<table class="res-table res-strokes">${head('result.stroke')}<tbody>${strokes.map(id => `<tr data-stroke="${esc(id)}"><th scope="row"><span class="res-stroke-name">${globalThis.StrokeIcons?.create(id).outerHTML || ''}<span>${t(strokeIds.includes(id) ? 'hud.stroke.' + id : 'hud.unknown')}${['none','unknown'].includes(globalThis.StrokeIcons?.profile(id).plane) ? ` <small class="res-spin-status">· ${t(globalThis.StrokeIcons.profile(id).plane === 'none' ? 'hud.noSpin' : 'hud.noSpinDataShort')}</small>` : ''}</span></span></th>${players.map(p => `<td class="num" data-coverage="${p.strokeCoverage}">${data(p.byStroke[id] ?? (p.strokeCoverage === 'complete' ? 0 : null), p.strokeCoverage)}</td>`).join('')}</tr>`).join('')}</tbody></table>` : `<p class="res-note">${t(summary.coverage === 'complete' ? 'result.noStrokes' : 'result.noStrokeData')}</p>`}
+        <section class="res-section mt-6">
+          <h2 class="h3 mb-3">${t('result.strokes')}</h2>
+          ${strokes.length ? `<table class="res-table res-strokes">${head('result.stroke')}<tbody>${strokes.map(id => `<tr data-stroke="${esc(id)}"><th scope="row"><span class="res-stroke-name">${globalThis.StrokeIcons?.create(id).outerHTML || ''}<span>${t(strokeIds.includes(id) ? 'hud.stroke.' + id : 'hud.unknown')}${['none','unknown'].includes(globalThis.StrokeIcons?.profile(id).plane) ? ` <small class="res-spin-status caption">· ${t(globalThis.StrokeIcons.profile(id).plane === 'none' ? 'hud.noSpin' : 'hud.noSpinDataShort')}</small>` : ''}</span></span></th>${players.map(p => `<td class="num" data-coverage="${p.strokeCoverage}">${data(p.byStroke[id] ?? (p.strokeCoverage === 'complete' ? 0 : null), p.strokeCoverage)}</td>`).join('')}</tr>`).join('')}</tbody></table>` : `<p class="res-note caption">${t(summary.coverage === 'complete' ? 'result.noStrokes' : 'result.noStrokeData')}</p>`}
         </section>
-        ${metrics.length ? `<section class="res-section"><h2>${t('result.ballMetrics')}</h2><p class="res-note">${t('result.metricSample')}</p><table class="res-table">${head('result.metric')}<tbody>${metrics.map(([key, stat, label]) => `<tr><th scope="row">${t(label)} <small>${t(key === 'speed' ? 'unit.kmh' : 'hud.spinUnit')}</small></th>${players.map(p => `<td class="num" data-metric="${key}-${stat}" data-coverage="${p[key].coverage}">${data(p[key][stat], p[key].coverage, true)}</td>`).join('')}</tr>`).join('')}</tbody></table></section>` : ''}
-        ${report.loot ? `<section class="res-section res-reward"><h2>${t('result.reward')}</h2><div>${Art.coin(24)}<b class="num">+${report.loot.coins}</b><span>${t('result.rewardCoins')}</span></div>${report.loot.chest ? `<div>${Art.chest('silver', 32)}<span>${Art.chestName('silver')} ${t('chest.word')}</span></div><p class="res-note">${t('result.chestSent')}</p>` : ''}</section>` : ''}
-        ${d.quests?.length ? `<section class="res-section res-quests"><h2>${t('result.questDone')}</h2>${d.quests.map(q => `<p>${esc(q.id && I18n._lookup('mission.' + q.id) ? t('mission.' + q.id) : q.t)} <small>${t(q.claimed ? 'result.questClaimed' : 'result.questReady')}</small></p>`).join('')}<p class="res-note">${t('result.questReward')}</p></section>` : ''}
+        ${metrics.length ? `<section class="res-section mt-6"><h2 class="h3 mb-3">${t('result.ballMetrics')}</h2><p class="res-note caption mb-3">${t('result.metricSample')}</p><table class="res-table">${head('result.metric')}<tbody>${metrics.map(([key, stat, label]) => `<tr><th scope="row">${t(label)} <small class="caption">${t(key === 'speed' ? 'unit.kmh' : 'hud.spinUnit')}</small></th>${players.map(p => `<td class="num" data-metric="${key}-${stat}" data-coverage="${p[key].coverage}">${data(p[key][stat], p[key].coverage, true)}</td>`).join('')}</tr>`).join('')}</tbody></table></section>` : ''}
+        ${report.loot ? `<section class="res-section mt-6 res-reward"><h2 class="h3 mb-3">${t('result.reward')}</h2><div class="flex items-center gap-4 mb-3">${Art.coin(24)}<b class="num body-lg">+${report.loot.coins}</b><span class="caption">${t('result.rewardCoins')}</span></div>${report.loot.chest ? `<div class="flex items-center gap-3">${Art.chest('silver', 32)}<span class="body">${Art.chestName('silver')} ${t('chest.word')}</span></div><p class="res-note caption mt-2">${t('result.chestSent')}</p>` : ''}</section>` : ''}
+        ${d.quests?.length ? `<section class="res-section mt-6 res-quests"><h2 class="h3 mb-3">${t('result.questDone')}</h2>${d.quests.map(q => `<p class="mb-2">${esc(q.id && I18n._lookup('mission.' + q.id) ? t('mission.' + q.id) : q.t)} <small class="caption">${t(q.claimed ? 'result.questClaimed' : 'result.questReady')}</small></p>`).join('')}<p class="res-note caption">${t('result.questReward')}</p></section>` : ''}
         ${analysisSheet(d)}
       </div></div>
-      <footer class="res-btns"><button class="b3 dark" data-act="again">${Art.icon('refresh', { c: '#fff' })}${t('result.rematch')}</button><button class="b3 ${d.win ? '' : 'cyan'}" data-act="next">${t('common.next')}</button></footer>
+      <footer class="res-btns"><button class="btn btn-ghost btn-block mt-3" data-act="again">${Art.icon('refresh', { c: '#fff', sw: 2.5 })}<span>${t('result.rematch')}</span></button><button class="btn btn-primary btn-block mt-3" data-act="next">${t('common.next')}</button></footer>
     </div>`;
   },
   refreshLocale(el) { I18n.localizeDOM(el, this.render(this.d), '.rs-n'); return true; },
@@ -135,7 +153,6 @@ Router.def('result', {
     const d = this.d, report = this.report;
     this.alive = true; this.navigating = false; this.el = el; const token = this.token = {};
     this.animations = [];
-    // Commit before presentation or navigation, retaining the result object's identity.
     if (!d.applied && typeof d.win === 'boolean') {
       d.applied = true;
       const before = S.rating;
@@ -161,7 +178,6 @@ Router.def('result', {
           oppRating: o.r, oppName: o.s, bestRally: d.stats?.maxRally });
         if (report.levelUp) Progress.level({ level: S.level, durationMs: d.durationMs, xp: S.xp });
       }
-      // The report shows the actual slot assignment and post-rollover XP immediately.
       el.innerHTML = this.render(d);
     }
     BG.mood(typeof d.win === 'boolean' ? d.win ? 'gold' : 'lose' : 'arena');
@@ -238,15 +254,13 @@ Router.def('chest', {
     const root = el.querySelector('.cho');
     ch.addEventListener('click', () => {
       if (this.phase !== 'taps') return;
-      this.phase = 'wait';                       // one tap is all it takes
+      this.phase = 'wait';
       el.querySelectorAll('.cho-taps i').forEach(d => d.classList.add('on'));
       ch.classList.remove('hit'); void ch.offsetWidth; ch.classList.add('hit');
       glow.style.opacity = 1; Sfx.impact(); haptic('heavy'); FX.shake(6, 240);
       const p = FX.pt(ch); FX.burst(p.x, p.y + 10, { c: ['#D3B5FF', '#FFC93A', '#fff'], count: 20, speed: 8, size: 1 });
       setTimeout(() => this.open(el, root, ch), 420);
     });
-    /* during the reveal a tap anywhere fast-forwards to the summary;
-       on the summary a tap anywhere closes — never a hunt for a button */
     root.addEventListener('click', (e) => {
       if (e.target.closest('.cho-chest') || e.target.closest('button')) return;
       if (this.phase === 'cards') { clearTimeout(this._t); this.summary(el); }
@@ -279,7 +293,6 @@ Router.def('chest', {
       const p = FX.pt(lc); const col = { common: ['#C9D6F5', '#fff'], rare: ['#33B6FF', '#fff'], epic: ['#B061FF', '#fff', '#FF7AD9'], leg: ['#FFB21E', '#FFF6C8', '#fff'] }[it.r];
       setTimeout(() => { FX.burst(p.x, p.y, { c: col, count: it.r === 'leg' ? 60 : 30, speed: it.r === 'leg' ? 16 : 10, size: it.r === 'leg' ? 1.6 : 1 }); if (it.r === 'leg') { FX.rain(60); flash('#FFE680', .6); FX.shake(10, 400); } FX.twinkles(p.x, p.y, 90, 10); }, 220);
       this.busy = false;
-      // the next loot card deals itself — no tapping required
       if (this.phase === 'cards') this._t = setTimeout(() => { this._t = null; if (this.phase === 'cards') this.next(el); }, 1000);
     }, 420);
   },
@@ -291,20 +304,18 @@ Router.def('chest', {
     const sum = el.querySelector('.cho-sum');
     sum.innerHTML = `<div class="sum-grid">${this.loot.map((it, i) => `<div class="sg rar ${it.r === 'common' ? '' : it.r}" style="--d:${i}"><div class="sga">${it.art}</div><b class="num">${it.k === 'card' ? 'NEW' : '×' + it.n}</b></div>`).join('')}</div>`;
     sum.classList.add('on');
-    // balance fills itself — no «Забрать» step: the loot is already yours
     haptic('success');
     const c = this.loot.find((x) => x.k === 'coins'), g = this.loot.find((x) => x.k === 'gems');
     const cells = $$('.sg', sum);
     await Promise.all([c && Wallet.add('coins', c.n, FX.pt(cells[0])), sleep(220).then(() => g && Wallet.add('gems', g.n, FX.pt(cells[1])))]);
     if (this.d.slot !== undefined) { S.chests[this.d.slot] = null; save(); }
-    // Grant only the cards shown, once per owned item.
     for (const it of this.loot) {
       if (it.k === 'card' && it.item && Catalog.byId(it.item) && !S.owned.includes(it.item)) S.owned.push(it.item);
     }
     save();
     if (this.phase === 'sum') {
       this.phase = 'done'; $('#choT', el).textContent = t('chest.inBalance')
-      sum.insertAdjacentHTML('beforeend', `<button class="b3 green" data-act="done"><span class="shine"></span>${t('common.done')}</button>`);
+      sum.insertAdjacentHTML('beforeend', `<button class="btn btn-success btn-block" data-act="done">${t('common.done')}</button>`);
       sum.querySelector('[data-act=done]').addEventListener('click', () => this.close());
       if (this.phase === 'done') this._doneT = setTimeout(() => { if (this.phase === 'done') this.close(); }, 2600);
     }

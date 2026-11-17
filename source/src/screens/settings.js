@@ -1,3 +1,9 @@
+/* =====================================================================
+   TTU v3 — Экран настроек. Глобальный rework.
+   Фундаментальный rework: чёткая иерархия, минимальная цель касания 48px,
+   WCAG AA контраст, никаких инлайн-стилей, никаких декоративных эффектов.
+   ===================================================================== */
+
 const MISS_SHOT_SIZES = [350, 300, 400, 100, 20];
 const settingsText = (ru, en) => I18n.lang === 'ru' ? ru : en;
 function calibrationLabel(entry, value) {
@@ -19,7 +25,7 @@ function refreshSettingsCalibration(w, message) {
   hint.textContent = ready && state.hint && !state.hint.allowed ? settingsText('Матч живёт по регламенту. Твоя настройка помощи сохранена.', 'The match follows regulation. Your guidance setting is saved.') : '';
   if (!ready) {
     list.replaceChildren(); delete list.dataset.keys;
-    const waiting = document.createElement('p'); waiting.className = 'dim'; waiting.setAttribute('role', 'status');
+    const waiting = document.createElement('p'); waiting.className = 'caption empty-note'; waiting.setAttribute('role', 'status');
     waiting.textContent = settingsText('Движок ещё не подписал значения. Ждём подтверждения настроек.', 'Values await the engine signature. Waiting for settings confirmation.');
     list.appendChild(waiting); return;
   }
@@ -40,7 +46,7 @@ function refreshSettingsCalibration(w, message) {
     list.dataset.keys = registry.map(entry => entry.key).join('|');
   }
   for (const entry of registry) {
-    const row = list.querySelector(`[data-calrow="${entry.key}"]`), input = row.querySelector('input'), note = row.querySelector('[data-cal-effective]');
+    const row = list.querySelector(`[data-calrow=\"${entry.key}\"]`), input = row.querySelector('input'), note = row.querySelector('[data-cal-effective]');
     if (message && Number.isFinite(message.requestId) && message.requestId === GameHost.calibrationRequestId && +input.dataset.pending <= message.requestId) delete input.dataset.pending;
     const wanted = S.cal && S.cal[entry.key];
     const pending = !!input.dataset.pending || GameHost.calibrationRequestId > GameHost.calibrationAckId && Number.isFinite(wanted) && Math.abs(wanted - state.raw[entry.key]) > 1e-9;
@@ -66,8 +72,6 @@ function refreshSettingsCalibration(w, message) {
   }
 }
 
-/* The original gallery uses ttu-miss-shots. Display legacy and new records
- * with DOM text setters rather than interpreting stored data as markup. */
 function missShotTime(ts) {
   const date = new Date(ts);
   return Number.isFinite(date.getTime()) ? date.toLocaleString(I18n.lang) : '—';
@@ -86,8 +90,8 @@ function zoomMissShot(w, s, previousFocus) {
   const ov = document.createElement('div'); ov.className = 'miss-zoom'; ov.setAttribute('role', 'dialog');
   ov.setAttribute('aria-modal', 'true'); ov.setAttribute('aria-label', t('set.missesTitle'));
   ov.innerHTML = `<div class="miss-zoom-body"><img alt="${t('set.missesTitle')}"><div class="mz-meta"></div>
-    <p class="mz-legend">${t('set.missesZoom')}</p><a class="b3 green block" data-miss-download download>${t('set.missesDownload')}</a>
-    <p class="mz-legend">${t('set.missesDownloadHint')}</p><button class="b3 dark block" data-miss-close>${t('set.missesClose')}</button></div>`;
+    <p class="mz-legend">${t('set.missesZoom')}</p><a class="btn btn-ghost btn-block sm" data-miss-download download>${t('set.missesDownload')}</a>
+    <p class="mz-legend">${t('set.missesDownloadHint')}</p><button class="btn btn-ghost btn-block sm" data-miss-close>${t('set.missesClose')}</button></div>`;
   const url = 'data:image/jpeg;base64,' + s.img;
   ov.querySelector('img').src = url;
   ov.querySelector('.mz-meta').textContent = missShotSummary(s);
@@ -99,57 +103,92 @@ function zoomMissShot(w, s, previousFocus) {
   w.appendChild(ov); ov.querySelector('[data-miss-close]').focus({ preventScroll: true });
 }
 
+function toggleRow(k, title, icon, desc, value = S[k]) {
+  return `<div class="toggle-row"><span class="toggle-icon">${Art.icon(icon, { c: '#9BE8FF' })}</span><span class="toggle-label"><b class="body">${title}</b><small class="caption">${desc}</small></span><button class="tgl ${value ? 'on' : ''}" data-k="${k}" aria-label="${title}" aria-pressed="${!!value}"></button></div>`;
+}
+
 function openSettings() {
-  // Дефолт — только для нового сейва: раньше эта строка включала галерею
-  // обратно при каждом открытии настроек, и выключить её было невозможно.
   if (S.missShots === undefined) S.missShots = false;
   S.missShotHalf = MISS_SHOT_SIZES.includes(+S.missShotHalf) ? +S.missShotHalf : 350;
-  const row = (k, title, i, d, value = S[k]) => `<div class="srow"><span class="si">${Art.icon(i, { c: '#9BE8FF' })}</span><span class="st"><b>${title}</b><small>${d}</small></span><button class="tgl ${value ? 'on' : ''}" data-k="${k}" aria-label="${title}" aria-pressed="${!!value}"></button></div>`;
   S.cal = repairCalibrationPreferences(S.cal);
   const levels = repairAudioLevels(S.audioLevels, S.volume);
   const audioRows = [['master', 'Общая громкость', 'Master volume'], ['effects', 'Эффекты и интерфейс', 'Effects and interface'],
     ['music', 'Музыка', 'Music'], ['ambient', 'Окружение', 'Ambient']].map(([key, ru, en]) => {
     const value = levels[key] * 100, label = settingsText(ru, en);
-    return `<div class="calrow"><div class="cal-t"><b>${label}</b></div><div class="cal-c"><input type="range" min="0" max="100" step="any" value="${value}" data-audio="${key}" aria-label="${label}"><span class="cal-v num" data-audiov="${key}">${+value.toFixed(1)}%</span></div></div>`;
+    return `<div class="calrow"><div class="cal-t"><b class="body">${label}</b></div><div class="cal-c"><input type="range" min="0" max="100" step="any" value="${value}" data-audio="${key}" aria-label="${label}"><span class="cal-v num" data-audiov="${key}">${+value.toFixed(1)}%</span></div></div>`;
   }).join('');
   if (!GameHost.frame) GameHost.ensure();
-  Sheet.open(`<div class="h1" style="margin:4px 4px 14px">${t('set.title')}</div>
-    <div class="settings-diff">
-      <div class="settings-diff-head"><b>${t('set.diff')}</b><small>${t('set.diffHint')}</small></div>
-      <div class="seg" id="dseg" role="group" aria-label="${t('set.diff')}"><span class="pill"></span>${DIFFS.map((d) => `<button data-v="${d.id}" class="${S.diff === d.id ? 'on' : ''}">${t(d.tk)}</button>`).join('')}</div>
-      <div class="settings-diff-info" id="diffDescription">${t(diffOf(S.diff).sk)}</div>
-    </div>
-    <div class="pnl sgroup">${row('sfx', t('set.sfx'), 'sound', t('set.sfxD'))}${row('vibro', t('set.vibro'), 'vibe', t('set.vibroD'))}${row('hint', t('set.hint'), 'target', settingsText('Маркеры и ранний сигнал мяча. В соревновании помощь выдаётся по регламенту.', 'Markers and early ball cues. Competition rations guidance by regulation.'))}${row('rm', t('set.rm'), 'motion', t('set.rmD'))}</div>
-    <p class="dim" data-motion-state style="font-size:11px;margin:6px 4px"></p><p class="dim" data-hint-state style="font-size:11px;margin:6px 4px"></p>
-    <div class="cap" style="margin:18px 4px 8px">${settingsText('Уровни звука', 'Audio levels')}</div>
-    <div class="pnl calib"><div class="cal-list" style="padding-top:14px" data-audio-list>${audioRows}<p class="dim" data-audio-state style="font-size:11px;margin:0"></p></div></div>
-    <div class="cap" style="margin:18px 4px 8px">${t('set.quality')}</div>
-    <div class="seg" id="qseg"><span class="pill"></span>${['high', 'mid', 'low'].map((q) => `<button data-v="${q}" class="${S.quality === q ? 'on' : ''}">${{ high: t('quality.high'), mid: t('quality.mid'), low: t('quality.low') }[q]}</button>`).join('')}</div>
-    <div class="cap" style="margin:18px 4px 8px">${t('set.language')}</div>
-    <div class="seg" id="langseg"><span class="pill"></span>${I18n.LANGS.map((L) => `<button data-v="${L.id}" class="${I18n.lang === L.id ? 'on' : ''}">${L.name}</button>`).join('')}</div>
-    <div class="pnl sgroup" style="margin-top:10px"><div class="srow"><span class="si">${Art.icon('expand', { c: '#9BE8FF' })}</span><span class="st"><b>${t('set.fullscreen')}</b><small>${t('set.fullscreenD')}</small></span><button class="b3 dark sm" data-a="fs" style="margin-left:auto">${t('set.fullscreenBtn')}</button></div></div>
-    <div class="cap" style="margin:18px 4px 8px">${t('set.calib')} <small class="dim" style="text-transform:none;font-weight:400;font-size:11px">${t('set.calibHint')}</small></div>
-    <details class="pnl calib" data-calibration><summary class="cal-sum">${Art.icon('target', { c: '#9BE8FF' })} <span data-cal-summary></span></summary><div class="cal-list" data-cal-list></div><div class="cal-foot"><button class="b3 dark sm block" data-a="calReset" disabled>${t('set.calibReset')}</button></div></details>
-    <div class="cap" style="margin:18px 4px 8px">${t('set.missesTitle')} <small class="dim" style="text-transform:none;font-weight:400;font-size:11px">${t('set.missesHint')}</small></div>
-    <div class="pnl sgroup miss-gallery">
-      ${row('debug', settingsText('Диагностическая запись', 'Diagnostic recording'), 'target', settingsText('Улики для разбора остаются на устройстве. По умолчанию запись выключена.', 'Evidence for review stays on this device. Recording is off by default.'), GameHost.debug)}
-      ${row('missShots', t('set.missesSave'), 'target', t('set.missesSaveD'))}
-      <div class="srow"><span class="st"><b>${t('set.missesSize')}</b></span>
-        <select data-miss-size aria-label="${t('set.missesSize')}">${MISS_SHOT_SIZES.map(n => `<option value="${n}" ${S.missShotHalf === n ? 'selected' : ''}>${t('set.missesSize' + n)}</option>`).join('')}</select></div>
-      <div class="srow"><span class="st"><b>${t('set.missesStat')}</b><small data-miss-stat></small></span></div>
-      <p class="miss-note" data-miss-storage role="status"></p>
-      <p class="miss-note miss-error" data-miss-error role="alert" hidden></p>
+  Sheet.open(`<div class="settings scroll">
+    <header class="settings-head"><h2 class="body-lg">${t('set.title')}</h2></header>
+
+    <section class="settings-section">
+      <div class="section-head"><b class="body">${t('set.diff')}</b><small class="caption">${t('set.diffHint')}</small></div>
+      <div class="seg" id="dseg" role="group" aria-label="${t('set.diff')}">${DIFFS.map((d) => `<button data-v="${d.id}" class="seg-btn ${S.diff === d.id ? 'on' : ''}">${t(d.tk)}</button>`).join('')}</div>
+      <p class="section-note" id="diffDescription">${t(diffOf(S.diff).sk)}</p>
+    </section>
+
+    <section class="settings-section toggles">
+      <h3 class="section-title">${t('set.toggles')}</h3>
+      <div class="toggle-list">
+        ${toggleRow('sfx', t('set.sfx'), 'sound', t('set.sfxD'))}
+        ${toggleRow('vibro', t('set.vibro'), 'vibe', t('set.vibroD'))}
+        ${toggleRow('hint', t('set.hint'), 'target', settingsText('Маркеры и ранний сигнал мяча. В соревновании помощь выдаётся по регламенту.', 'Markers and early ball cues. Competition rations guidance by regulation.'))}
+        ${toggleRow('rm', t('set.rm'), 'motion', t('set.rmD'))}
+      </div>
+      <p class="caption" data-motion-state></p>
+      <p class="caption" data-hint-state></p>
+    </section>
+
+    <section class="settings-section audio">
+      <div class="section-head"><b class="body">${settingsText('Уровни звука', 'Audio levels')}</b></div>
+      <div class="cal-list" data-audio-list>${audioRows}<p class="caption" data-audio-state></p></div>
+    </section>
+
+    <section class="settings-section">
+      <div class="section-head"><b class="body">${t('set.quality')}</b></div>
+      <div class="seg" id="qseg">${['high', 'mid', 'low'].map((q) => `<button data-v="${q}" class="seg-btn ${S.quality === q ? 'on' : ''}">${{ high: t('quality.high'), mid: t('quality.mid'), low: t('quality.low') }[q]}</button>`).join('')}</div>
+    </section>
+
+    <section class="settings-section">
+      <div class="section-head"><b class="body">${t('set.language')}</b></div>
+      <div class="seg" id="langseg">${I18n.LANGS.map((L) => `<button data-v="${L.id}" class="seg-btn ${I18n.lang === L.id ? 'on' : ''}">${L.name}</button>`).join('')}</div>
+    </section>
+
+    <section class="settings-section">
+      <div class="section-head"><b class="body">${t('set.fullscreen')}</b><small class="caption">${t('set.fullscreenD')}</small></div>
+      <button class="btn btn-ghost btn-block" data-a="fs">${t('set.fullscreenBtn')}</button>
+    </section>
+
+    <section class="settings-section calibration">
+      <div class="section-head"><b class="body">${t('set.calib')}</b><small class="caption">${t('set.calibHint')}</small></div>
+      <details class="pnl calib" data-calibration><summary class="cal-sum">${Art.icon('target', { c: '#9BE8FF' })} <span data-cal-summary></span></summary>
+        <div class="cal-list" data-cal-list></div>
+        <div class="cal-foot"><button class="btn btn-ghost btn-block sm" data-a="calReset" disabled>${t('set.calibReset')}</button></div>
+      </details>
+    </section>
+
+    <section class="settings-section misses">
+      <div class="section-head"><b class="body">${t('set.missesTitle')}</b><small class="caption">${t('set.missesHint')}</small></div>
+      <div class="toggle-list">
+        ${toggleRow('debug', settingsText('Диагностическая запись', 'Diagnostic recording'), 'target', settingsText('Улики для разбора остаются на устройстве. По умолчанию запись выключена.', 'Evidence for review stays on this device. Recording is off by default.'), GameHost.debug)}
+        ${toggleRow('missShots', t('set.missesSave'), 'target', t('set.missesSaveD'))}
+      </div>
+      <div class="size-row"><span class="size-label"><b class="body">${t('set.missesSize')}</b></span><select data-miss-size aria-label="${t('set.missesSize')}">${MISS_SHOT_SIZES.map(n => `<option value="${n}" ${S.missShotHalf === n ? 'selected' : ''}>${t('set.missesSize' + n)}</option>`).join('')}</select></div>
+      <div class="stat-row"><span class="stat-label"><b class="body">${t('set.missesStat')}</b><small class="caption" data-miss-stat></small></span></div>
+      <p class="caption" data-miss-storage role="status"></p>
+      <p class="caption miss-error" data-miss-error role="alert" hidden></p>
       <div class="miss-grid" aria-label="${t('set.missesTitle')}"></div>
-      <div class="miss-actions"><button class="b3 dark sm" data-a="missClear">${t('set.missesClearShots')}</button></div>
-    </div>
-    <p class="dim" style="font-size:11.5px;margin:14px 4px 0;line-height:1.5">${t('set.version', { v: '2.0.0' })}</p>`, {
+      <div class="miss-actions"><button class="btn btn-ghost btn-block sm" data-a="missClear">${t('set.missesClearShots')}</button></div>
+    </section>
+
+    <p class="caption settings-version">${t('set.version', { v: '2.0.0' })}</p>
+  </div>`, {
     onOpen: (w) => {
       let displayedShots = [], clearTimer = 0;
       const refreshAudio = () => {
         const values = repairAudioLevels(S.audioLevels, S.volume);
         w.querySelector('[data-audio-state]').textContent = S.sfx === false ? settingsText('Звук выключен. Уровни не пострадали.', 'Muted. Your levels survived.')
-          : values.master === 0 ? settingsText('Общая громкость 0%. Тишина в полном составе.', 'Master volume 0%. Silence at full strength.')
-          : values.effects === 0 ? settingsText('Эффекты и интерфейс выключены (0%). Без звуковых свидетелей.', 'Effects and interface sounds off (0%). No audible witnesses.') : '';
+          : values.master === 0 ? settingsText('Общая громкость 0%. Тишина в полном составе.', 'Master volume 0%. Silence at full strength.') : '';
       };
       refreshAudio(); refreshSettingsCalibration(w);
       const off = GameHost.on(message => {
@@ -163,14 +202,12 @@ function openSettings() {
         error.textContent = MissShots.captureError ? t('set.missesCaptureError', { error: MissShots.captureError }) : '';
         grid.replaceChildren();
         if (!shots.length) {
-          const empty = document.createElement('p'); empty.className = 'miss-empty'; empty.textContent = t('set.missesEmpty'); grid.appendChild(empty);
+          const empty = document.createElement('p'); empty.className = 'caption empty-note'; empty.textContent = t('set.missesEmpty'); grid.appendChild(empty);
         } else shots.map((s, i) => ({ s, i })).reverse().forEach(({ s, i }) => {
-          // The legacy gallery reused numeric ids after iframe reloads. Use
-          // the displayed index so old duplicate ids still open independently.
           const button = document.createElement('button'); button.type = 'button'; button.className = 'miss-thumb'; button.dataset.shotIndex = String(i);
           button.setAttribute('aria-label', missShotSummary(s));
           const img = document.createElement('img'); img.src = 'data:image/jpeg;base64,' + s.img; img.alt = '';
-          const meta = document.createElement('small'); meta.textContent = s.status === 'pending' ? t('miss.pending') : t('miss.noContact');
+          const meta = document.createElement('small'); meta.className = 'caption'; meta.textContent = s.status === 'pending' ? t('miss.pending') : t('miss.noContact');
           button.append(img, meta); grid.appendChild(button);
         });
       };
@@ -188,7 +225,7 @@ function openSettings() {
         }
         const thumb = e.target.closest('.miss-thumb');
         if (thumb) { zoomMissShot(w, displayedShots[+thumb.dataset.shotIndex], thumb); return; }
-        const row = e.target.closest('.srow'); const toggle = e.target.closest('.tgl') || (row && row.querySelector('.tgl')); if (!toggle) return;
+        const row = e.target.closest('.toggle-row'); const toggle = e.target.closest('.tgl') || (row && row.querySelector('.tgl')); if (!toggle) return;
         const k = toggle.dataset.k;
         const value = k === 'debug' ? GameHost.setDebug(!GameHost.debug) : (S[k] = !S[k]);
         if (k !== 'debug') { save(); GameHost.syncSettings(); }
@@ -229,8 +266,6 @@ function openSettings() {
         r.dataset.pending = String(GameHost.calibrationRequestId); refreshSettingsCalibration(w);
       });
       UI.seg($('#qseg', w), (v) => setQuality(v));
-      /* Единственный выбор уровня бота: сохраняется в профиле и применяется
-       * к следующему матчу. WTF отдельно предупреждает и вспыхивает. */
       UI.seg($('#dseg', w), (v) => {
         S.diff = clamp(+v, 0, DIFFS.length - 1); save();
         const D = diffOf(S.diff);

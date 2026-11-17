@@ -1,0 +1,495 @@
+/* =====================================================================
+   TTU v3 — Магазин (shop).
+   Фундаментальный rework: чёткая иерархия, минимальная цель касания 48px,
+   WCAG AA контраст, никаких инлайн-стилей, никаких декоративных эффектов.
+   ===================================================================== */
+
+/* --- Контейнер магазина --- */
+.shop-scroll {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+  -webkit-overflow-scrolling: touch;
+  padding-bottom: calc(var(--space-6) + var(--sab) + var(--tgb));
+}
+
+.shop-scroll::-webkit-scrollbar {
+  display: none;
+}
+
+/* --- Секция магазина --- */
+.shop-section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  padding: var(--space-4);
+}
+
+.section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.section-head .h2 {
+  margin: 0;
+  color: var(--ink);
+  font-family: var(--Unb);
+  font-weight: var(--fw-black);
+  font-size: var(--fs-large);
+  letter-spacing: var(--letter-tight);
+  text-transform: uppercase;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.section-head .h2 svg {
+  width: 22px;
+  height: 22px;
+  fill: currentColor;
+  flex: none;
+}
+
+.goods-count {
+  color: var(--ink-muted);
+  font-size: var(--fs-caption);
+  font-weight: var(--fw-bold);
+  letter-spacing: var(--letter-track);
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+/* --- Сетка товаров --- */
+.shop-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: var(--space-3);
+}
+
+/* --- Карточка товара --- */
+.item-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  border-radius: var(--radius-lg);
+  background: rgba(255, 255, 255, .04);
+  border: 1px solid var(--border);
+  cursor: pointer;
+  transition: border-color var(--dur-fast), background var(--dur-fast), box-shadow var(--dur-fast);
+}
+
+.item-card:focus-visible {
+  outline: 3px solid var(--accent-primary);
+  outline-offset: 2px;
+}
+
+.item-card:active {
+  transform: translateY(1px) scale(.99);
+}
+
+.item-card.rar.rare { border-color: var(--rar-rare); }
+.item-card.rar.epic { border-color: var(--rar-epic); }
+.item-card.rar.leg { border-color: var(--rar-leg); }
+
+.item-card.item-beam {
+  box-shadow: 0 0 30px rgba(255, 178, 30, .2);
+}
+
+.item-tag {
+  position: absolute;
+  top: -8px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 3;
+  font-size: 10px;
+  font-weight: var(--fw-black);
+  text-transform: uppercase;
+  padding: 3px 8px;
+  border-radius: 6px;
+  background: linear-gradient(180deg, #FF6A5A, #D8172C);
+  color: #fff;
+  box-shadow: 0 2px 0 #7E0A1A;
+  white-space: nowrap;
+}
+
+.item-art {
+  width: 64px;
+  height: 64px;
+  flex: none;
+  display: grid;
+  place-items: center;
+  border-radius: var(--radius-md);
+  background: rgba(255, 255, 255, .06);
+}
+
+.item-name {
+  color: var(--ink);
+  font-weight: var(--fw-bold);
+  font-size: var(--fs-base);
+  line-height: 1.3;
+  text-align: center;
+}
+
+.item-kind {
+  color: var(--ink-muted);
+  font-size: var(--fs-caption);
+  text-transform: uppercase;
+  letter-spacing: var(--letter-track);
+  text-align: center;
+}
+
+.item-price {
+  color: var(--ink-soft);
+  font-size: var(--fs-caption);
+  font-weight: var(--fw-bold);
+  text-align: center;
+}
+
+.item-price.own {
+  color: var(--accent-success);
+}
+
+/* --- Пакеты (звёзды / монеты) --- */
+.pack {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: var(--touch-target);
+  padding: var(--space-4) var(--space-3);
+  border-radius: var(--radius-lg);
+  background: rgba(255, 255, 255, .04);
+  border: 1px solid var(--border);
+  cursor: pointer;
+  transition: border-color var(--dur-fast), background var(--dur-fast), box-shadow var(--dur-fast);
+}
+
+.pack:focus-visible {
+  outline: 3px solid var(--accent-primary);
+  outline-offset: 2px;
+}
+
+.pack:active {
+  transform: translateY(1px) scale(.99);
+}
+
+.pack.pack-best {
+  border-color: var(--accent-gold);
+  background: rgba(255, 201, 58, .08);
+  box-shadow: 0 0 0 1px var(--accent-gold), 0 0 20px rgba(255, 201, 58, .15);
+}
+
+.pack-tag {
+  position: absolute;
+  top: -8px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 3;
+  font-size: 10px;
+  font-weight: var(--fw-black);
+  text-transform: uppercase;
+  padding: 3px 8px;
+  border-radius: 6px;
+  background: linear-gradient(180deg, #FFE066, #FFA41B);
+  color: #3A1A00;
+  box-shadow: 0 2px 0 #A85300;
+  white-space: nowrap;
+}
+
+.pack-art {
+  display: flex;
+  gap: 4px;
+  margin-bottom: var(--space-1);
+}
+
+.pack-gem, .pack-coin {
+  width: 42px;
+  height: 42px;
+  flex: none;
+  display: grid;
+  place-items: center;
+  border-radius: var(--radius-md);
+  background: rgba(255, 255, 255, .06);
+}
+
+.pack-price {
+  color: var(--ink-soft);
+  font-size: var(--fs-caption);
+  font-weight: var(--fw-bold);
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.pack-price svg {
+  width: 16px;
+  height: 16px;
+  fill: currentColor;
+  flex: none;
+}
+
+/* --- Чип Telegram Stars --- */
+.tg-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  min-height: 32px;
+  padding: 0 var(--space-3);
+  border-radius: var(--radius-md);
+  background: rgba(255, 255, 255, .06);
+  border: 1px solid var(--border);
+  color: var(--ink-soft);
+  font-size: var(--fs-caption);
+  font-weight: var(--fw-bold);
+}
+
+.tg-chip svg {
+  width: 16px;
+  height: 16px;
+  fill: currentColor;
+  flex: none;
+}
+
+/* --- Модал оплаты звёздами --- */
+.stars-pay {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-4);
+  background: var(--grad-surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 12px 24px -8px rgba(0, 0, 0, .6), inset 0 1px 0 rgba(255, 255, 255, .08);
+  text-align: center;
+}
+
+.pay-icon {
+  width: 76px;
+  height: 76px;
+  border-radius: var(--radius-full);
+  background: radial-gradient(circle, rgba(255, 201, 58, .3), rgba(255, 201, 58, .05));
+  display: grid;
+  place-items: center;
+}
+
+.pay-icon svg {
+  width: 36px;
+  height: 36px;
+  fill: currentColor;
+  flex: none;
+}
+
+.stars-pay .body-lg {
+  margin: 0;
+  color: var(--ink);
+  font-size: var(--fs-large);
+  text-transform: none;
+  letter-spacing: var(--letter-track);
+}
+
+.pay-text {
+  margin: 0;
+  color: var(--ink-soft);
+  font-size: var(--fs-small);
+  line-height: var(--lh-loose);
+  max-width: 260px;
+}
+
+.pay-btn {
+  width: 100%;
+  justify-content: center;
+}
+
+.status-note {
+  margin: 0;
+  color: var(--ink-muted);
+  font-size: var(--fs-caption);
+}
+
+/* --- Лист продукта --- */
+.product-sheet {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-4);
+  background: var(--grad-surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 12px 24px -8px rgba(0, 0, 0, .6), inset 0 1px 0 rgba(255, 255, 255, .08);
+}
+
+.product-stage {
+  position: relative;
+  width: 100%;
+  height: 230px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  background: rgba(0, 0, 0, .3);
+}
+
+.product-ill {
+  width: 210px;
+  height: 210px;
+  flex: none;
+  background-size: contain;
+  background-position: center;
+  background-repeat: no-repeat;
+  filter: drop-shadow(0 16px 18px rgba(0, 0, 0, .5));
+}
+
+.product-spin {
+  position: relative;
+  width: 170px;
+  height: 170px;
+  transform-style: preserve-3d;
+  flex: none;
+}
+
+.product-face {
+  position: absolute;
+  inset: 0;
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
+  filter: drop-shadow(0 16px 18px rgba(0, 0, 0, .5));
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.product-face.b {
+  transform: rotateY(180deg) scaleX(-1);
+}
+
+.product-hint {
+  position: absolute;
+  bottom: 8px;
+  font-size: 10.5px;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+  color: var(--ink-muted);
+  font-weight: var(--fw-bold);
+}
+
+.rarity-tag {
+  display: inline-block;
+  margin-top: var(--space-2);
+  padding: var(--space-1) var(--space-3);
+  border-radius: var(--radius-md);
+  font-size: var(--fs-caption);
+  font-weight: var(--fw-bold);
+  text-transform: uppercase;
+  letter-spacing: var(--letter-track);
+  color: #fff;
+}
+
+.product-sheet .body-lg {
+  margin: 0;
+  color: var(--ink);
+  font-size: var(--fs-large);
+  text-transform: none;
+  letter-spacing: var(--letter-track);
+  text-align: center;
+}
+
+/* --- Статистика продукта --- */
+.product-stats {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+}
+
+.stat-row {
+  display: grid;
+  grid-template-columns: 86px 1fr 32px;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: 12px;
+  font-weight: var(--fw-bold);
+  color: var(--ink-soft);
+}
+
+.stat-row .stat-label {
+  color: var(--ink-soft);
+  text-align: left;
+}
+
+.stat-row .stat-bar {
+  height: 4px;
+  border-radius: 2px;
+  background: rgba(255, 255, 255, .08);
+  overflow: hidden;
+}
+
+.stat-bar.bar-coral i { background: var(--grad-danger); }
+.stat-bar.bar-gold i { background: var(--grad-gold); }
+
+.stat-bar i {
+  display: block;
+  height: 100%;
+  border-radius: 2px;
+  transition: width .6s var(--ease-out);
+}
+
+.stat-val {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink);
+  font-weight: var(--fw-bold);
+}
+
+.product-desc {
+  margin: 0;
+  color: var(--ink-soft);
+  font-size: var(--fs-small);
+  line-height: var(--lh-loose);
+  text-align: center;
+}
+
+.product-stamp {
+  position: absolute;
+  top: 40%;
+  left: 50%;
+  transform: translate(-50%, -50%) rotate(-14deg);
+  font-family: var(--Unb);
+  font-weight: var(--fw-black);
+  font-size: 20px;
+  text-transform: uppercase;
+  color: #3BF5A0;
+  padding: 6px 14px;
+  border: 3px solid #3BF5A0;
+  border-radius: 10px;
+  text-shadow: 0 0 15px rgba(59, 245, 160, .5);
+  pointer-events: none;
+}
+
+/* --- Адаптив --- */
+@media (max-width: 320px) {
+  .shop-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+/* --- Предпочтение уменьшенного движения --- */
+@media (prefers-reduced-motion: reduce) {
+  .item-card,
+  .pack,
+  .stat-bar i {
+    transition: none !important;
+  }
+
+  .item-card:active,
+  .pack:active {
+    transform: none !important;
+  }
+}

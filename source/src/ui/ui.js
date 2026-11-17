@@ -93,6 +93,28 @@ const UI = {
       ${this.notificationButton()}
     </div>`;
   },
+  /* --- Новый премиальный верхний HUD (используется на главном экране и экранах меню) --- */
+  topHud({ back = false, title = '' } = {}) {
+    const L = leagueOf(S.rating), N = nextLeague(S.rating);
+    const p = N ? (S.rating - L.min) / (N.min - L.min) : 1;
+    const left = back
+      ? `<button class="btn btn-icon" data-act="back" aria-label="${t('common.back')}">${Art.icon('back', { c: '#fff', sw: 2.5 })}</button><h2 class="h2">${title}</h2>`
+      : `<button class="top-hud-me" data-act="profile" aria-label="${t('hud.profile')}">
+          <span class="top-hud-avatar">${Art.avatar(S.avatar || 'p0', 36)}</span>
+          <div class="top-hud-info">
+            <div class="top-hud-name">${S.name.split(' ')[0]}</div>
+            <div class="top-hud-sub">${t('hud.level', { n: S.level })} · ${leagueName(L)}</div>
+          </div>
+          <span class="top-hud-progress"><i style="--p:${p}"></i></span>
+        </button>`;
+    return `<div class="top-hud">${left}
+      <div class="top-hud-actions">
+        <div class="cur" data-cur="coins"><span class="ci">${Art.coin(24)}</span><span class="v num">${fmt(S.coins)}</span></div>
+        <div class="cur" data-cur="gems"><span class="ci">${Art.gem(22)}</span><span class="v num">${fmt(S.gems)}</span></div>
+        ${this.notificationButton()}
+      </div>
+    </div>`;
+  },
   bindHud(el) {
     const click = (e) => {
       const a = e.target.closest('[data-act]'); if (!a) return;

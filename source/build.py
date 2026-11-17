@@ -14,7 +14,7 @@ root = SOURCE_DIR / 'src'
 html = (root/'index.tpl.html').read_text()
 html = html.replace('<!--__PRELOADER__-->', (root/'ui'/'preloader.html').read_text())
 def b64(p): return 'data:font/woff2;base64,' + base64.b64encode((root/p).read_bytes()).decode()
-CSS_ORDER = ['css/base.css','css/screens_hub.css','css/screens_battle.css','css/screens_meta.css','css/screens_misc.css','css/match_hud.css']
+CSS_ORDER = ['css/base.css','css/screens_hub.css','css/screens_battle.css','css/screens_meta.css','css/screens_misc.css','css/match_hud.css','css/screens_training.css','css/screens_settings.css','css/screens_result.css','css/screens_profile.css','css/screens_shop.css','css/screens_online.css']
 css = '\n'.join((root/f).read_text() for f in CSS_ORDER)
 for k,f in {'__UNB900__':'unb900.woff2','__UNB600__':'unb600.woff2','__MAN600__':'man600.woff2','__MAN800__':'man800.woff2'}.items():
     css = css.replace(k, b64(f))

@@ -109,6 +109,18 @@ class Trainer {
     this.stats = { attempts: 0, hits: 0, success: 0, streak: 0, bestStreak: 0 };
     this.lastCapturedShotId = -1;
     this.oldAiLevel = game.ai && game.ai.levelIndex;
+
+    // --- AAA training juice: визуальный отклик на контакт в обучении ---
+    this.juice = {
+      active: false, t: 0, life: 0.45, type: 'ok',   // 'ok' | 'fail' | 'neutral'
+      pos: V3.new(0, PH.TABLE_Y, 0), flash: 0, shake: 0,
+      streakOk: 0, streakFail: 0,
+    };
+    // Призрачная рука: показывает эталонный жест перед мячом (дип-моушн в 3D)
+    this.ghost = {
+      active: false, t: 0, life: 1.2, points: null,   // [{x,y}, ...] в экранных coords нормализованных
+      color: [0.55, 0.95, 0.85], width: 3,
+    };
   }
   get S() { return this.custom || TRAIN_STEPS[this.step]; }
   get guide() { return this.stage === 'check' || this.S.coach === 'none' ||
@@ -335,7 +347,54 @@ class Trainer {
     if (this.g.swipe) this.motionContactGestureId = this.g.swipe.gestureId;
     this.flightTrace = [[b.p.x, b.p.y, b.p.z]]; this.traceAt = this.simTime;
     this.pending = this.lastShot; this.stats.hits++; this.total++; this.hitAt = this.simTime;
+
+    // --- AAA training juice: визуальный отклик сразу при контакте ---
+    const grade = this.lastShot.grade, quality = this.lastShot.quality ?? 0;
+    const isOk = grade === 'green' || (grade === 'yellow' && quality > 0.70);
+    const J = this.juice;
+    J.type = isOk ? 'ok' : 'fail';
+    J.active = true; J.t = 0; J.life = isOk ? 0.55 : 0.80;
+    J.flash = isOk ? 0.9 : 0.5;
+    J.shake = isOk ? 0.10 : 0.28;
+    J.pos.set(contactP ? contactP.x : b.p.x, contactP ? contactP.y : b.p.y, contactP ? contactP.z : b.p.z);
+    if (isOk) { J.streakOk++; J.streakFail = 0; }
+    else { J.streakFail++; J.streakOk = 0; }
+    // Адаптивная подсказка: после 2 ошибок подряд показываем кольцо и призрачную руку
+    if (J.streakFail >= 2 && !this.g.hintContact) { this.g.hintContact = true; this.g.autoHint = true; }
+    const nx = racket.normal ? racket.normal.x : 0, ny = racket.normal ? racket.normal.y : 1, nz = racket.normal ? racket.normal.z : 0;
+    const dir = V3.new(nx, ny, nz);
+    if (this.g.particles && contactP && !this.g.reducedMotion) {
+      const n = isOk ? 14 : 8;
+      const life = 0.30 + 0.12 * (isOk ? 1 : 0.5);
+      const spd = 3.5 + 5.0 * (isOk ? 1 : 0.6);
+      const stroke = racket.stroke && racket.stroke.id ? racket.stroke.id : 'DRIVE';
+      const meta = STROKES[stroke] || STROKES.DRIVE;
+      const rgb = flashRgb(meta);
+      for (let i = 0; i < n; i++) {
+        let vx = rndSym(1), vy = rndSym(1), vz = rndSym(1);
+        const l = Math.hypot(vx, vy, vz) || 1;
+        vx = vx / l * 0.35 + dir.x; vy = vy / l * 0.35 + dir.y; vz = vz / l * 0.35 + dir.z;
+        const nl = Math.hypot(vx, vy, vz) || 1;
+        this.g.particles.spawn(
+          contactP.x, contactP.y, contactP.z,
+          vx / nl * spd, vy / nl * spd, vz / nl * spd,
+          life, 0.012 + 0.006 * (isOk ? 1 : 0.5),
+          rgb[0], rgb[1], rgb[2], 8.0, false);
+      }
+    }
+    // Связка с игровой камерой: shake при контакте
+    this.g.shakeIt(J.shake, dir);
     this.sync();
+  }
+
+  /** Активирует призрачную руку — показывает эталонный жест перед мячом в 3D. */
+  showGhost(strokeId) {
+    const guide = TRAIN_GUIDES[strokeId];
+    if (!guide || !guide.gesture || !guide.gesture.points || !guide.gesture.points.length) return;
+    const G = this.ghost;
+    G.active = true; G.t = 0; G.life = 1.5; G.color = [0.55, 0.95, 0.85]; G.width = 3;
+    // Точки жеста в нормализованных координатах [-1,1]
+    G.points = guide.gesture.points.map(p => ({ x: p[0], y: p[1] }));
   }
   expectedStrokes(shot) {
     const C = this.S.check || {};
@@ -583,6 +642,20 @@ class Trainer {
     dtReal = Number.isFinite(dtReal) ? Math.max(0, dtReal) : 0;
     dtSim = Number.isFinite(dtSim) ? Math.max(0, dtSim) : 0;
     if (this.nudge > 0) this.nudge = Math.max(0, this.nudge - dtReal);
+    // --- AAA juice decay ---
+    const J = this.juice;
+    if (J.active) {
+      J.t += dtReal;
+      if (J.t >= J.life) J.active = false;
+      J.flash = Math.max(0, J.flash - dtReal * 2.5);
+      J.shake = Math.max(0, J.shake - dtReal * 2.0);
+    }
+    // Ghost decay
+    const G = this.ghost;
+    if (G.active) {
+      G.t += dtReal;
+      if (G.t >= G.life || G.t >= 1.5) G.active = false;
+    }
     if (this.frozen || this.finished) return;
     this.simTime += dtSim;
     this.t += this.phase === 'live' ? dtSim : dtReal;

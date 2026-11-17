@@ -1,22 +1,19 @@
 /* =====================================================================
-   ONLINE — матч с другом. Сетевой частью движет движок (команды net и
-   события net), оболочка показывает статус, код комнаты, пинг и приглашение.
-   Адрес реле берётся из адреса страницы (GameHost.relayUrl), поэтому ссылка
-   для друга — просто адрес игры + ?room=КОД.
+   TTU v3 — Онлайн (матч с другом). Глобальный rework.
+   Фундаментальный rework: чёткая иерархия, минимальная цель касания 48px,
+   WCAG AA контраст, никаких инлайн-стилей, никаких декоративных эффектов.
    ===================================================================== */
 const Net = { st: 'idle', room: '', side: 0, ping: 0, err: '', code: '', over: null, hud: null };
-/* Код комнаты — строго 5 символов A-Z0-9 (так валидирует реле). Пропускать
- * в разметку что-то другое нельзя: ссылка ?room= приходит извне. */
 const netCode = (v) => {
   const c = String(v || '').trim().toUpperCase();
   return /^[A-Z0-9]{5}$/.test(c) ? c : '';
 };
-const netEsc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+const netEsc = (s) => String(s).replace(/[&<>\"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 
 Router.def('online', {
   full: true, mood: 'arena',
   render() {
-    return `${UI.hud({ back: true, title: t('net.title') })}<div class="scroll net" id="netBody"></div>`;
+    return `${UI.hud({ back: true, title: t('net.title') })}<div class="scroll online-scroll" id="netBody"></div>`;
   },
   mount(el) {
     UI.bindHud(el);
@@ -29,7 +26,6 @@ Router.def('online', {
     GameHost.ensure();
     Net.code = netCode(new URLSearchParams(location.search).get('room'));
     this.paint();
-    /* пинг считает движок (ping/pong раз в 2 с), здесь только спрашиваем статус */
     this.iv = setInterval(() => { if (this.alive && GameHost.ready) GameHost.send('net', { cmd: 'status' }); }, 2000);
     el.addEventListener('click', (e) => {
       const b = e.target.closest('[data-act]'); if (!b) return;
@@ -39,19 +35,15 @@ Router.def('online', {
       if (k === 'join') {
         const code = netCode((el.querySelector('#netIn') || {}).value);
         if (!code) { Net.err = t('net.badCode'); this.paint(); return; }
-        Net.st = 'connecting'; Net.code = code; Net.hud = null; this.paint(); GameHost.send('net', { cmd: 'join', code });
-      }
+        Net.st = 'connecting'; Net.code = code; Net.hud = null; this.paint(); GameHost.send('net', { cmd: 'join', code }); }
       if (k === 'invite') this.invite(b);
       if (k === 'again') { Net.over = null; Net.hud = null; Net.st = 'idle'; Net.room = ''; Net.code = ''; GameHost.send('net', { cmd: 'leave' }); this.paint(); }
       if (k === 'leave') { Net.st = 'idle'; Net.room = ''; Net.code = ''; Net.err = ''; Net.hud = null; GameHost.send('net', { cmd: 'leave' }); this.paint(); }
       if (k === 'exit') this.quitMatch();
     });
-    /* глубокая ссылка с кодом: друг не должен вводить его руками */
     if (Net.code) { Net.st = 'connecting'; this.paint(); GameHost.send('net', { cmd: 'join', code: Net.code }); }
   },
   onNet(m) {
-    // Status polls can arrive after matchEnd; keep the result visible until
-    // the player explicitly chooses a new room or exits.
     if (!this.alive || Net.over) return;
     if (m.msg) Net.err = String(m.msg);
     const room = netCode(m.room);
@@ -59,7 +51,7 @@ Router.def('online', {
     if (Number.isFinite(m.latency)) Net.ping = m.latency;
     if (m.side === 1 || m.side === -1) Net.side = m.side;
     if (m.st) Net.st = m.st;
-    this.el.classList.toggle('net-playing', Net.st === 'match');
+    this.el.classList.toggle('online-playing', Net.st === 'match');
     if (Net.st === 'match') { GameHost.show(true); TGX.guard(true); }
     else GameHost.show(false);
     this.paint();
@@ -68,7 +60,7 @@ Router.def('online', {
     Net.over = { won: !!m.won, score: netEsc((m.score || []).join(':')) };
     Net.st = 'over';
     GameHost.send('outro'); GameHost.show(false); TGX.guard(false);
-    this.el.classList.remove('net-playing'); this.paint();
+    this.el.classList.remove('online-playing'); this.paint();
   },
   onHud(snapshot) {
     if (!this.alive || Net.over || !snapshot || snapshot.schema !== 1 || !snapshot.matchId ||
@@ -97,46 +89,49 @@ Router.def('online', {
     if (!this.alive || !this.el) return;
     const body = this.el.querySelector('#netBody'); if (!body) return;
     const relay = GameHost.relayUrl();
-    const head = (chip) => `<div class="pg-head rise" style="--d:0"><div class="h1">${t('net.title')}</div>${chip}</div>`;
 
     if (Net.st === 'match') {
       if (!this.hud) {
-        body.innerHTML = `<div class="match-hud-slot net-hud-slot"></div><div class="net-live">
-          <span class="net-meta"></span><span class="net-ping num"></span>
-          <button class="net-exit pe" data-act="exit" aria-label="${t('common.exit')}" title="${t('common.exit')}">${Art.icon('x', { c: 'currentColor', fill: 'none', sw: 2.2 })}</button></div>`;
+        body.innerHTML = `<div class="match-hud-slot net-hud-slot"></div><div class="online-live">
+          <span class="online-meta"></span><span class="online-ping num"></span>
+          <button class="btn btn-icon online-exit" data-act="exit" aria-label="${t('common.exit')}" title="${t('common.exit')}">${Art.icon('x', { c: 'currentColor', fill: 'none', sw: 2.2 })}</button></div>`;
         this.hud = MatchHUD.mount(body.querySelector('.net-hud-slot'));
       }
-      body.querySelector('.net-meta').textContent = `${t('net.roomCap')} ${Net.code} · ${t(Net.side === 1 ? 'net.host' : 'net.guest')}`;
-      body.querySelector('.net-ping').textContent = `${Net.ping || '—'} ${t('net.ms')}`;
+      body.querySelector('.online-meta').textContent = `${t('net.roomCap')} ${Net.code} · ${t(Net.side === 1 ? 'net.host' : 'net.guest')}`;
+      body.querySelector('.online-ping').textContent = `${Net.ping || '—'} ${t('net.ms')}`;
       if (Net.hud) this.hud.update(Net.hud, { t, names: [S.name, t('hud.far')], reducedMotion: effectiveReducedMotion() });
       return;
     }
     if (this.hud) { this.hud.dispose(); this.hud = null; }
     if (Net.over) {
-      body.innerHTML = head(`<span class="chip">${t('net.score')} <b class="num">${Net.over.score}</b></span>`) +
-        `<div class="pnl net-card rise" style="--d:1">
-          <div class="net-note">${t(Net.over.won ? 'net.won' : 'net.lost')}</div>
-          <button class="b3 gold" data-act="again">${t('net.again')}</button>
-          <button class="b3 dark" data-act="exit">${t('common.exit')}</button></div>`;
+      body.innerHTML = this.onlineHead(`<span class="chip chip-gold">${t('net.score')} <b class="num">${Net.over.score}</b></span>`) +
+        `<div class="pnl online-card"><div class="online-note">${t(Net.over.won ? 'net.won' : 'net.lost')}</div>
+          <button class="btn btn-ghost btn-block" data-act="again">${t('net.again')}</button>
+          <button class="btn btn-ghost btn-block" data-act="exit">${t('common.exit')}</button></div>`;
       return;
     }
     const wait = Net.st === 'assigned' || Net.st === 'waiting';
     const open = Net.st === 'idle' || Net.st === 'error' || Net.st === 'closed' || Net.st === 'peerleft' || Net.st === 'lobby';
     const note = netEsc(Net.st === 'error' && Net.err ? Net.err : t('net.st.' + Net.st));
-    body.innerHTML = head(`<span class="chip ${wait ? 'gold' : ''}">${Net.ping} ${t('net.ms')}</span>`) +
-      `<div class="pnl net-card rise" style="--d:1">
-        <div class="cap">${t('net.roomCap')}</div>
-        <div class="net-code num">${Net.code || '— · — · — · — · —'}</div>
-        <div class="net-note">${note}</div>
-        ${wait ? `<button class="b3 gold" data-act="invite">${t('net.invite')}</button>
-          <button class="b3 dark" data-act="leave">${t('net.leave')}</button>` : ''}
-        ${open ? `<button class="b3 gold" data-act="create">${t('net.create')}</button>
-          <div class="net-join"><input class="net-in num" id="netIn" maxlength="5" inputmode="text"
+    const relayHost = relay ? relay.replace(/^wss?:\/\//, '') : t('net.relayNone');
+    body.innerHTML = this.onlineHead(`<span class="chip ${wait ? 'chip-wait' : ''}">${Net.ping} ${t('net.ms')}</span>`) +
+      `<div class="pnl online-card">
+        <div class="caption online-cap">${t('net.roomCap')}</div>
+        <div class="online-code num">${Net.code || '— · — · — · — · —'}</div>
+        <div class="online-note caption">${note}</div>
+        ${wait ? `<button class="btn btn-ghost btn-block" data-act="invite">${t('net.invite')}</button>
+          <button class="btn btn-ghost btn-block" data-act="leave">${t('net.leave')}</button>` : ''}
+        ${open ? `<button class="btn btn-primary btn-block" data-act="create">${t('net.create')}</button>
+          <div class="online-join"><input class="online-in" id="netIn" maxlength="5" inputmode="text"
             autocapitalize="characters" autocomplete="off" spellcheck="false"
-            placeholder="${t('net.codePh')}"><button class="b3 dark" data-act="join">${t('net.join')}</button></div>` : ''}
+            placeholder="${t('net.codePh')}"><button class="btn btn-ghost btn-block sm" data-act="join">${t('net.join')}</button></div>` : ''}
       </div>
-      <div class="pnl inset net-relay rise" style="--d:2"><span>${Art.icon('info', { c: '#9BE8FF' })}</span>
-        <p>${t('net.relay')} <b class="num">${netEsc(relay ? relay.replace(/^wss?:\/\//, '') : t('net.relayNone'))}</b></p></div>`;
+      <div class="pnl online-relay"><span class="relay-icon">${Art.icon('info', { c: '#9BE8FF' })}</span>
+        <p class="relay-text">${t('net.relay')} <b class="num">${netEsc(relayHost)}</b></p></div>`;
+  },
+  onlineHead(chip) {
+    return `<header class="online-head flex items-center gap-3 mb-4">
+      <h2 class="body-lg">${t('net.title')}</h2>${chip}</header>`;
   },
   leave() { this.alive = false; clearInterval(this.iv); if (this.off) this.off(); this.hud?.dispose(); this.hud = null; GameHost.show(false); TGX.guard(false); },
   onBack() {

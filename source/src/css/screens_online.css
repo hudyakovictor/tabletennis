@@ -1,0 +1,251 @@
+/* =====================================================================
+   TTU v3 — Онлайн (online).
+   Фундаментальный rework: чёткая иерархия, минимальная цель касания 48px,
+   WCAG AA контраст, никаких инлайн-стилей, никаких декоративных эффектов.
+   ===================================================================== */
+
+/* --- Контейнер онлайн-экрана --- */
+.online-scroll {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+  -webkit-overflow-scrolling: touch;
+  padding-bottom: calc(var(--space-6) + var(--sab) + var(--tgb));
+}
+
+.online-scroll::-webkit-scrollbar {
+  display: none;
+}
+
+/* --- Заголовок --- */
+.online-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: calc(var(--sat) + var(--tgt) + var(--space-2)) var(--space-4) var(--space-2);
+  border-bottom: 1px solid var(--border);
+}
+
+.online-head .body-lg {
+  margin: 0;
+  color: var(--ink);
+  font-size: var(--fs-large);
+  text-transform: none;
+  letter-spacing: var(--letter-track);
+}
+
+/* --- Живой матч --- */
+.online-live {
+  position: relative;
+  z-index: 31;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-4);
+  border-radius: var(--radius-lg);
+  background: linear-gradient(180deg, rgba(26, 34, 64, .92) 0%, rgba(15, 20, 40, .98) 100%);
+  border: 1px solid var(--border-bright);
+  box-shadow: 0 12px 24px -8px rgba(0, 0, 0, .7), inset 0 1px 0 rgba(255, 255, 255, .1);
+  backdrop-filter: blur(12px);
+}
+
+.online-meta {
+  color: var(--ink-soft);
+  font-size: var(--fs-small);
+}
+
+.online-ping {
+  color: var(--accent-primary);
+  font-variant-numeric: tabular-nums;
+  font-weight: var(--fw-bold);
+}
+
+.online-exit {
+  width: var(--touch-target);
+  height: var(--touch-target);
+  min-width: var(--touch-target);
+  min-height: var(--touch-target);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  color: var(--ink-soft);
+  border: 1px solid var(--border);
+  box-shadow: 0 4px 0 rgba(0, 0, 0, .4), inset 0 1px 0 rgba(255, 255, 255, .1);
+  cursor: pointer;
+  display: grid;
+  place-items: center;
+}
+
+.online-exit svg {
+  width: 20px;
+  height: 20px;
+  fill: currentColor;
+  flex: none;
+}
+
+.online-exit:active {
+  transform: translateY(2px) scale(.96);
+  background: var(--surface-lift);
+}
+
+/* --- Карточка состояния --- */
+.online-card {
+  padding: var(--space-4);
+  border-radius: var(--radius-lg);
+  background: var(--grad-surface);
+  border: 1px solid var(--border);
+  box-shadow: 0 12px 24px -8px rgba(0, 0, 0, .6), inset 0 1px 0 rgba(255, 255, 255, .08);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.online-cap {
+  margin: 0;
+  color: var(--ink-muted);
+  font-size: var(--fs-caption);
+  font-weight: var(--fw-bold);
+  letter-spacing: var(--letter-track);
+  text-transform: uppercase;
+}
+
+.online-code {
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+  font-weight: var(--fw-bold);
+  font-size: var(--fs-large);
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+
+.online-note {
+  margin: 0;
+  color: var(--ink-soft);
+  font-size: var(--fs-small);
+  line-height: var(--lh-normal);
+}
+
+.online-join {
+  display: flex;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+}
+
+.online-in {
+  flex: 1;
+  min-height: var(--touch-target);
+  padding: 0 var(--space-4);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, .06);
+  color: var(--ink);
+  font: inherit;
+  font-variant-numeric: tabular-nums;
+  text-transform: uppercase;
+  letter-spacing: .08em;
+  cursor: text;
+}
+
+.online-in:focus-visible {
+  outline: 3px solid var(--accent-primary);
+  outline-offset: 2px;
+}
+
+.online-in::placeholder {
+  color: var(--ink-muted);
+}
+
+/* --- Реле --- */
+.online-relay {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-md);
+  background: rgba(255, 255, 255, .04);
+  border: 1px solid var(--border);
+  margin-top: var(--space-4);
+}
+
+.relay-icon {
+  flex: none;
+  color: var(--ink-muted);
+}
+
+.relay-icon svg {
+  width: 20px;
+  height: 20px;
+  fill: currentColor;
+  flex: none;
+}
+
+.relay-text {
+  margin: 0;
+  color: var(--ink-soft);
+  font-size: var(--fs-small);
+}
+
+.relay-text .num {
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+  font-weight: var(--fw-bold);
+}
+
+/* --- Чипы --- */
+.chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 32px;
+  padding: 0 var(--space-3);
+  border-radius: var(--radius-md);
+  background: rgba(255, 255, 255, .06);
+  border: 1px solid var(--border);
+  color: var(--ink-soft);
+  font-size: var(--fs-caption);
+  font-weight: var(--fw-bold);
+  letter-spacing: .05em;
+  text-transform: uppercase;
+}
+
+.chip-gold {
+  background: var(--grad-gold);
+  color: var(--ink-inverse);
+  border-color: var(--accent-gold);
+}
+
+.chip-wait {
+  background: var(--grad-gold);
+  color: var(--ink-inverse);
+  border-color: var(--accent-gold);
+}
+
+/* --- Состояние игры --- */
+.online-playing .online-scroll {
+  pointer-events: none;
+}
+
+.online-playing .online-live {
+  pointer-events: auto;
+}
+
+/* --- Адаптив --- */
+@media (max-width: 320px) {
+  .online-join {
+    flex-direction: column;
+  }
+
+  .online-in {
+    min-width: auto;
+  }
+}
+
+/* --- Предпочтение уменьшенного движения --- */
+@media (prefers-reduced-motion: reduce) {
+  .online-in,
+  .online-card,
+  .online-live {
+    transition: none !important;
+  }
+}

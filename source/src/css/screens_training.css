@@ -1,0 +1,1057 @@
+/* =====================================================================
+   TTU v3 — Экран обучения (training / academy).
+   Фундаментальный rework: чёткая иерархия, минимальная цель касания 48px,
+   WCAG AA контраст, никаких декоративных эффектов без функции.
+   ===================================================================== */
+
+/* --- Корневой контейнер экрана --- */
+.academy {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  background: var(--bg);
+}
+
+/* --- Главное меню обучения --- */
+.academy-menu {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.academy-scroll {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+  -webkit-overflow-scrolling: touch;
+  padding: var(--space-3) var(--space-4) calc(var(--space-6) + var(--sab) + var(--tgb));
+}
+
+.academy-scroll::-webkit-scrollbar {
+  display: none;
+}
+
+.academy-intro {
+  margin: 0 0 var(--space-5) 0;
+  color: var(--ink-soft);
+  font-size: var(--fs-small);
+  line-height: var(--lh-loose);
+}
+
+/* --- Режимы обучения (курс / удар / точность) --- */
+.academy-modes {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  margin-bottom: var(--space-6);
+  padding-top: var(--space-2);
+  padding-bottom: var(--space-2);
+}
+
+.academy-modes [data-mode] {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  min-height: var(--touch-target);
+  height: auto;
+  padding: var(--space-4);
+  border-radius: var(--radius-lg);
+  background: rgba(255, 255, 255, .04);
+  border: 1px solid var(--border);
+  box-shadow: 0 8px 0 rgba(0, 0, 0, .4), inset 0 1px 0 rgba(255, 255, 255, .1);
+  cursor: pointer;
+  transition: border-color var(--dur-fast), box-shadow var(--dur-fast), background var(--dur-fast);
+  isolation: isolate;
+}
+
+.academy-modes [data-mode]:focus-visible {
+  outline: 3px solid var(--accent-primary);
+  outline-offset: 2px;
+  border-radius: calc(var(--radius-lg) + 2px);
+}
+
+.academy-modes [data-mode]:active {
+  transform: translateY(2px) scale(.99);
+  box-shadow: 0 2px 0 rgba(0, 0, 0, .4), inset 0 1px 0 rgba(255, 255, 255, .2);
+}
+
+.academy-modes [data-mode].on {
+  border-color: var(--accent-primary);
+  background: rgba(46, 230, 255, .08);
+  box-shadow: 0 0 0 1px var(--accent-primary), 0 8px 0 rgba(0, 0, 0, .4), 0 0 20px rgba(46, 230, 255, .12);
+}
+
+.academy-modes [data-mode] .body {
+  color: var(--ink);
+  font-size: var(--fs-base);
+  font-weight: var(--fw-bold);
+}
+
+.academy-modes [data-mode] .caption {
+  color: var(--ink-muted);
+}
+
+/* --- Контент выбранного режима --- */
+.academy-content {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+}
+
+/* --- Заголовок курса --- */
+.academy-course-header {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-4);
+  border-radius: var(--radius-lg);
+  background: var(--grad-surface);
+  border: 1px solid var(--border);
+  box-shadow: 0 12px 24px -8px rgba(0, 0, 0, .6), inset 0 1px 0 rgba(255, 255, 255, .08);
+}
+
+.academy-course-header > div {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+}
+
+.academy-course-header small {
+  color: var(--ink-muted);
+}
+
+/* --- Карточка выбора (урок / удар / цель) --- */
+.academy-selection {
+  position: relative;
+  padding: var(--space-4);
+  border-radius: var(--radius-lg);
+  background: var(--grad-surface);
+  border: 1px solid var(--border);
+  box-shadow: 0 12px 24px -8px rgba(0, 0, 0, .6), inset 0 1px 0 rgba(255, 255, 255, .08);
+}
+
+.academy-selection > span {
+  display: block;
+  margin-bottom: var(--space-2);
+}
+
+.academy-selection .body-lg {
+  margin: 0 0 var(--space-3) 0;
+  color: var(--ink);
+}
+
+.academy-selection .body-sm {
+  margin: 0 0 var(--space-4) 0;
+  color: var(--ink-soft);
+}
+
+.academy-actions {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.academy-actions .btn-block {
+  justify-content: center;
+}
+
+/* --- Главы и уроки --- */
+.academy-chapters {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.academy-chapter {
+  padding: var(--space-4);
+  border-radius: var(--radius-lg);
+  background: rgba(255, 255, 255, .03);
+  border: 1px solid var(--border);
+}
+
+.academy-chapter header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  margin-bottom: var(--space-3);
+}
+
+.academy-chapter .num {
+  color: var(--ink-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.academy-chapter .body-sm {
+  margin: 0;
+  color: var(--ink-soft);
+}
+
+.academy-lessons {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.academy-lesson {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-height: var(--touch-target);
+  padding: var(--space-3);
+  border-radius: var(--radius-md);
+  background: rgba(255, 255, 255, .04);
+  border: 1px solid var(--border);
+  cursor: pointer;
+  transition: border-color var(--dur-fast), background var(--dur-fast), box-shadow var(--dur-fast);
+}
+
+.academy-lesson:focus-visible {
+  outline: 3px solid var(--accent-primary);
+  outline-offset: 2px;
+}
+
+.academy-lesson:active {
+  transform: translateY(1px) scale(.99);
+}
+
+.academy-lesson.on {
+  border-color: var(--accent-primary);
+  background: rgba(46, 230, 255, .08);
+  box-shadow: 0 0 0 1px var(--accent-primary), 0 0 16px rgba(46, 230, 255, .1);
+}
+
+.academy-lesson.mastered {
+  border-color: rgba(59, 245, 160, .35);
+  background: rgba(59, 245, 160, .06);
+}
+
+.academy-lesson.practiced {
+  border-color: rgba(255, 201, 58, .35);
+  background: rgba(255, 201, 58, .06);
+}
+
+.academy-lesson.new {
+  border-color: var(--border);
+  background: rgba(255, 255, 255, .04);
+}
+
+.academy-lesson-num {
+  flex: none;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background: rgba(255, 255, 255, .1);
+  color: var(--ink-muted);
+  font-weight: var(--fw-bold);
+}
+
+.academy-lesson .body {
+  color: var(--ink);
+}
+
+.academy-lesson small {
+  color: var(--ink-muted);
+}
+
+.academy-lesson .flex-none svg {
+  width: 20px;
+  height: 20px;
+  fill: currentColor;
+}
+
+/* --- Легенда спинов --- */
+.academy-spin-legend {
+  padding: var(--space-4);
+  border-radius: var(--radius-lg);
+  background: rgba(255, 255, 255, .03);
+  border: 1px solid var(--border);
+}
+
+.academy-spin-legend .flex {
+  gap: var(--space-5);
+}
+
+.academy-spin-legend .flex span {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+/* --- Подборки ударов / целей --- */
+.academy-picks {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: var(--space-3);
+}
+
+.academy-pick {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: var(--touch-target);
+  padding: var(--space-4) var(--space-3);
+  border-radius: var(--radius-lg);
+  background: rgba(255, 255, 255, .04);
+  border: 1px solid var(--border);
+  cursor: pointer;
+  transition: border-color var(--dur-fast), background var(--dur-fast), box-shadow var(--dur-fast);
+}
+
+.academy-pick:focus-visible {
+  outline: 3px solid var(--accent-primary);
+  outline-offset: 2px;
+}
+
+.academy-pick:active {
+  transform: translateY(1px) scale(.99);
+}
+
+.academy-pick.on {
+  border-color: var(--accent-primary);
+  background: rgba(46, 230, 255, .08);
+  box-shadow: 0 0 0 1px var(--accent-primary), 0 0 20px rgba(46, 230, 255, .12);
+}
+
+.academy-pick .caption {
+  color: var(--ink-muted);
+}
+
+.academy-pick .body {
+  color: var(--ink);
+  font-weight: var(--fw-bold);
+}
+
+.academy-pick small {
+  display: block;
+  margin-bottom: var(--space-2);
+}
+
+/* --- Живая сессия (над игровой сценой) --- */
+.academy-live {
+  position: absolute;
+  inset: 0;
+  z-index: 30;
+  display: flex;
+  flex-direction: column;
+  padding: calc(var(--sat) + var(--tgt) + var(--space-3)) var(--space-4) calc(var(--sab) + var(--tgb) + var(--space-4));
+  pointer-events: auto;
+}
+
+.academy-live.hidden {
+  display: none;
+}
+
+.academy-objective {
+  position: relative;
+  z-index: 31;
+  padding: var(--space-4);
+  border-radius: var(--radius-lg);
+  background: linear-gradient(180deg, rgba(26, 34, 64, .92) 0%, rgba(15, 20, 40, .98) 100%);
+  border: 1px solid var(--border-bright);
+  box-shadow: 0 12px 24px -8px rgba(0, 0, 0, .7), inset 0 1px 0 rgba(255, 255, 255, .1);
+  backdrop-filter: blur(12px);
+}
+
+.academy-step {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-bottom: var(--space-1);
+}
+
+.academy-step-num {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--accent-violet);
+  color: var(--ink-inverse);
+  font-size: var(--fs-caption);
+  font-weight: var(--fw-black);
+  display: grid;
+  place-items: center;
+  flex: none;
+}
+
+.academy-step-title {
+  color: var(--ink);
+  font-size: var(--fs-base);
+  font-weight: var(--fw-bold);
+}
+
+.academy-stage {
+  display: block;
+  margin-bottom: var(--space-3);
+  color: var(--accent-primary);
+  font-size: var(--fs-caption);
+  font-weight: var(--fw-bold);
+  letter-spacing: var(--letter-track);
+  text-transform: uppercase;
+}
+
+.academy-goal {
+  margin: 0 0 var(--space-4) 0;
+  color: var(--ink);
+  font-size: var(--fs-base);
+  line-height: var(--lh-normal);
+}
+
+.academy-progress {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-bottom: var(--space-4);
+}
+
+.academy-progress .progress-bar {
+  flex: 1;
+  height: 6px;
+}
+
+.academy-progress-text {
+  font-size: var(--fs-caption);
+  color: var(--ink-muted);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.academy-feedback {
+  margin: 0;
+  padding: var(--space-3);
+  border-radius: var(--radius-md);
+  font-size: var(--fs-small);
+  line-height: var(--lh-normal);
+  color: var(--ink-soft);
+  border: 1px solid transparent;
+  background: rgba(255, 255, 255, .03);
+}
+
+.academy-feedback.ok {
+  border-color: rgba(59, 245, 160, .4);
+  background: rgba(59, 245, 160, .08);
+  color: var(--accent-success);
+}
+
+.academy-feedback.fail {
+  border-color: rgba(255, 75, 62, .4);
+  background: rgba(255, 75, 62, .08);
+  color: var(--accent-danger);
+}
+
+.academy-result {
+  margin: 0;
+  color: var(--ink-muted);
+  font-size: var(--fs-small);
+}
+
+/* --- Инструменты и действия сессии --- */
+.academy-session-tools {
+  display: flex;
+  gap: var(--space-2);
+  margin-top: var(--space-4);
+}
+
+.academy-session-actions {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin-top: var(--space-4);
+}
+
+.academy-session-actions .btn-block {
+  justify-content: flex-start;
+  padding-left: var(--space-4);
+  padding-right: var(--space-4);
+  text-align: left;
+  gap: var(--space-3);
+}
+
+/* --- Оверлей и модальный диалог --- */
+.academy-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 45;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-4);
+  background: rgba(2, 3, 10, .65);
+  backdrop-filter: blur(10px);
+}
+
+.academy-overlay.hidden {
+  display: none;
+}
+
+.academy-dialog {
+  position: relative;
+  z-index: 46;
+  width: 100%;
+  max-width: 420px;
+  max-height: 90vh;
+  display: flex;
+  flex-direction: column;
+  border-radius: var(--radius-xl);
+  background: var(--grad-panel);
+  border: 1px solid var(--border-bright);
+  box-shadow: 0 24px 70px rgba(0, 0, 0, .75), inset 0 1px 0 rgba(255, 255, 255, .12);
+  overflow: hidden;
+  outline: none;
+}
+
+.academy-dialog:focus {
+  outline: none;
+}
+
+.academy-dialog-head {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding: var(--space-4) var(--space-5) var(--space-3);
+  border-bottom: 1px solid var(--border);
+}
+
+.academy-dialog-head .caption {
+  margin: 0;
+  color: var(--accent-primary);
+}
+
+.academy-dialog-head .body-lg {
+  margin: 0;
+  color: var(--ink);
+  font-size: var(--fs-large);
+  text-transform: none;
+  letter-spacing: var(--letter-track);
+}
+
+.academy-dialog-scroll {
+  flex: 1;
+  overflow-y: auto;
+  padding: var(--space-4) var(--space-5);
+  -webkit-overflow-scrolling: touch;
+}
+
+.academy-dialog-scroll::-webkit-scrollbar {
+  display: none;
+}
+
+.academy-dialog-actions {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-5) calc(var(--space-4) + var(--sab) + var(--tgb));
+  border-top: 1px solid var(--border);
+  background: linear-gradient(180deg, transparent, rgba(5, 7, 15, .4));
+}
+
+.academy-dialog-actions .btn-block {
+  justify-content: center;
+}
+
+/* --- Статистика --- */
+.academy-stat-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  margin-bottom: var(--space-2);
+}
+
+.academy-stat-row .caption {
+  flex: none;
+  color: var(--ink-muted);
+}
+
+.academy-stat-row .num {
+  flex: 1;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink);
+  font-weight: var(--fw-bold);
+}
+
+.academy-summary-stats {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+}
+
+.academy-summary-stats dl {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: var(--space-2) var(--space-4);
+  margin: 0;
+}
+
+.academy-summary-stats dt {
+  margin: 0;
+  color: var(--ink-muted);
+  font-size: var(--fs-small);
+}
+
+.academy-summary-stats dd {
+  margin: 0;
+  text-align: right;
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+  font-weight: var(--fw-bold);
+}
+
+.academy-coverage {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  margin-top: var(--space-4);
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--border);
+}
+
+.academy-coverage .caption {
+  color: var(--ink-muted);
+}
+
+.academy-coverage .num {
+  color: var(--accent-gold);
+  font-variant-numeric: tabular-nums;
+  font-weight: var(--fw-bold);
+}
+
+.academy-reward {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-top: var(--space-4);
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--border);
+  color: var(--accent-gold);
+}
+
+.academy-reward .caption {
+  color: var(--ink-soft);
+}
+
+/* --- Справочник (гид) --- */
+.academy-guide {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  margin-top: var(--space-4);
+}
+
+.academy-correction {
+  margin: 0;
+  padding: var(--space-3);
+  border-radius: var(--radius-md);
+  background: rgba(255, 201, 58, .12);
+  border: 1px solid rgba(255, 201, 58, .3);
+  color: var(--ink);
+  font-size: var(--fs-small);
+  line-height: var(--lh-normal);
+}
+
+.academy-inputs {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin-top: var(--space-4);
+}
+
+.academy-input {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-3);
+  border-radius: var(--radius-md);
+  background: rgba(255, 255, 255, .04);
+  border: 1px solid var(--border);
+}
+
+.academy-input.on {
+  border-color: var(--accent-primary);
+  background: rgba(46, 230, 255, .08);
+}
+
+.academy-input .caption {
+  margin: 0;
+  color: var(--ink);
+  font-weight: var(--fw-bold);
+}
+
+.academy-input .body-sm {
+  margin: 0;
+  color: var(--ink-soft);
+}
+
+.academy-details {
+  margin-top: var(--space-4);
+}
+
+.academy-details summary {
+  padding: var(--space-2) 0;
+  color: var(--ink-muted);
+  cursor: pointer;
+  list-style: none;
+}
+
+.academy-details summary::-webkit-details-marker {
+  display: none;
+}
+
+.academy-guide-details {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  margin-top: var(--space-2);
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--border);
+}
+
+.academy-guide-details h3 {
+  margin: 0 0 var(--space-1) 0;
+  color: var(--ink-muted);
+  font-size: var(--fs-caption);
+  text-transform: uppercase;
+  letter-spacing: var(--letter-track);
+}
+
+.academy-guide-details p {
+  margin: 0 0 var(--space-2) 0;
+  color: var(--ink-soft);
+  font-size: var(--fs-small);
+  line-height: var(--lh-loose);
+}
+
+/* --- SVG-диаграмма жеста --- */
+.academy-gesture {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.academy-gesture svg {
+  width: 100%;
+  max-width: 300px;
+  height: auto;
+  display: block;
+  margin: 0 auto;
+  border-radius: var(--radius-md);
+  background: #080f21;
+}
+
+.academy-motion-label {
+  fill: var(--ink-muted);
+  font-size: var(--fs-caption);
+  font-weight: var(--fw-bold);
+  letter-spacing: var(--letter-track);
+}
+
+.academy-motion-number {
+  fill: var(--ink);
+  font-size: var(--fs-caption);
+  font-weight: var(--fw-black);
+}
+
+.academy-demo-ball {
+  filter: drop-shadow(0 2px 4px rgba(0, 0, 0, .5));
+}
+
+.academy-gesture.comparison .academy-gesture-path {
+  opacity: .6;
+}
+
+.academy-motion-legend {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  margin-top: var(--space-2);
+  font-size: var(--fs-caption);
+}
+
+.academy-motion-legend .expected {
+  color: var(--accent-success);
+}
+
+.academy-motion-legend .actual {
+  color: var(--accent-danger);
+}
+
+.academy-gesture figcaption {
+  margin: 0;
+  color: var(--ink-muted);
+  font-size: var(--fs-caption);
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.academy-gesture figcaption b {
+  color: var(--ink);
+}
+
+/* --- Placement (цель удара) --- */
+.academy-placement {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.academy-placement svg {
+  width: 100%;
+  max-width: 240px;
+  height: auto;
+  display: block;
+  margin: 0 auto;
+  border-radius: var(--radius-md);
+  background: #080f21;
+}
+
+.academy-placement figcaption {
+  margin: 0;
+  color: var(--ink-muted);
+  font-size: var(--fs-caption);
+}
+
+/* --- Обратная связь после удара --- */
+.academy-feedback {
+  position: relative;
+}
+
+.academy-checks {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin-top: var(--space-3);
+}
+
+.academy-check {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-md);
+  font-size: var(--fs-small);
+}
+
+.academy-check.ok {
+  background: rgba(59, 245, 160, .12);
+  border: 1px solid rgba(59, 245, 160, .3);
+  color: var(--accent-success);
+}
+
+.academy-check.miss {
+  background: rgba(255, 75, 62, .12);
+  border: 1px solid rgba(255, 75, 62, .3);
+  color: var(--accent-danger);
+}
+
+.academy-check svg {
+  width: 16px;
+  height: 16px;
+  fill: currentColor;
+  flex: none;
+}
+
+.academy-attempt-name {
+  margin: 0;
+  color: var(--ink-soft);
+  font-size: var(--fs-small);
+}
+
+.academy-attempt-name b {
+  color: var(--ink);
+}
+
+/* --- Схема траектории мяча --- */
+.academy-diagram {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  margin-top: var(--space-4);
+}
+
+.academy-views {
+  display: flex;
+  gap: var(--space-4);
+  flex-wrap: wrap;
+}
+
+.academy-views > div {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.academy-views b {
+  margin: 0;
+  color: var(--ink-muted);
+  font-size: var(--fs-caption);
+  text-transform: uppercase;
+  letter-spacing: var(--letter-track);
+}
+
+.academy-views svg {
+  width: 100%;
+  max-width: 320px;
+  height: auto;
+  display: block;
+  border-radius: var(--radius-md);
+  background: #080f21;
+}
+
+.academy-demo-ball {
+  filter: drop-shadow(0 2px 4px rgba(0, 0, 0, .5));
+}
+
+.academy-legend {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  flex-wrap: wrap;
+  margin-top: var(--space-3);
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--border);
+}
+
+.academy-legend .flex {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--fs-caption);
+  color: var(--ink-muted);
+}
+
+.academy-line {
+  width: 16px;
+  height: 3px;
+  border-radius: 2px;
+  background: var(--line);
+  flex: none;
+}
+
+.academy-target {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #ffd54a;
+  opacity: .55;
+  flex: none;
+}
+
+.academy-spin {
+  margin: 0;
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-md);
+  background: rgba(255, 255, 255, .04);
+  border: 1px solid var(--border);
+  color: var(--ink-soft);
+  font-size: var(--fs-small);
+}
+
+.academy-spin b {
+  color: var(--ink);
+}
+
+/* --- Пустое состояние загрузки --- */
+.academy-loading {
+  margin: 0;
+  color: var(--ink-muted);
+  font-size: var(--fs-small);
+  text-align: center;
+}
+
+/* --- Детали итога --- */
+.academy-dialog-scroll .academy-goal {
+  margin: 0 0 var(--space-3) 0;
+}
+
+.academy-dialog-scroll .academy-summary-stats {
+  margin-top: var(--space-3);
+}
+
+.academy-dialog-scroll .academy-feedback {
+  margin: var(--space-4) 0 0 0;
+}
+
+.academy-dialog-scroll .academy-details {
+  margin-top: var(--space-4);
+}
+
+/* --- Демонстрация движения (кнопки) --- */
+.academy-demo-controls {
+  display: flex;
+  gap: var(--space-2);
+  margin-top: var(--space-3);
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--border);
+}
+
+.academy-demo-controls [data-demo-status] {
+  margin-top: var(--space-1);
+  min-height: var(--fs-caption);
+}
+
+/* --- Ответы викторины --- */
+.academy-answers {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin-top: var(--space-3);
+}
+
+.academy-answer-status {
+  margin: 0;
+  color: var(--ink-muted);
+  font-size: var(--fs-caption);
+  min-height: var(--fs-caption);
+}
+
+/* --- Свойства состояния --- */
+[aria-pressed="true"] {
+  outline: none;
+}
+
+.academy-lesson[aria-pressed="true"],
+.academy-pick[aria-pressed="true"] {
+  border-color: var(--accent-primary);
+}
+
+/* --- Адаптив: очень узкие экраны --- */
+@media (max-width: 320px) {
+  .academy-picks {
+    grid-template-columns: 1fr;
+  }
+
+  .academy-modes [data-mode] {
+    padding: var(--space-3);
+  }
+
+  .academy-dialog {
+    max-height: 95vh;
+    margin: var(--space-2);
+  }
+}
+
+/* --- Предпочтение減ленного движения --- */
+@media (prefers-reduced-motion: reduce) {
+  .academy-lesson,
+  .academy-pick,
+  .academy-modes [data-mode],
+  .btn {
+    transition: none !important;
+  }
+
+  .academy-lesson:active,
+  .academy-pick:active,
+  .academy-modes [data-mode]:active,
+  .btn:active {
+    transform: none !important;
+  }
+}

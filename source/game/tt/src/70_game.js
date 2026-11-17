@@ -193,6 +193,36 @@ class Game {
     this.timeScale = 1; this.targetTimeScale = 1;
     this.shake = 0; this.shakeDir = V3.new();
 
+    // --- AAA juice: hitstop / impact feel ---------------------------------
+    this.hitstop = {
+      active: false,
+      t: 0,            // remaining real seconds of frozen time
+      target: 0,       // time scale during hitstop (0.08–0.30)
+      decay: 6,        // return-to-normal speed (1/s)
+      lastHit: 0,      // Game.time of last accepted hit
+      cooldown: 0.14,  // don't stack hitstop closer than this
+    };
+    this.impactFlash = 0;   // additive contact-point flash (0..1), decays per frame
+    this.impactFlashPos = V3.new(0, PH.TABLE_Y, 0);
+    this.camFovKick = 0;    // temporary FOV delta from a hard hit
+    this.camFovKickDecay = 8;
+    this.ballPop = 1;       //球体 pop-scale при ударе (1 = норма, >1 = раздут)
+    this.ballPopDecay = 10;
+
+    // --- AAA arena lighting: прожекторы отзываются на розыгрыш ------------
+    this.arenaLight = {
+      // целевые цвета основного и двух заливных прожекторов
+      mainT: V3.new(3.00, 2.95, 2.80),
+      fill1T: V3.new(1.40, 1.70, 2.20),
+      fill2T: V3.new(1.70, 1.55, 1.35),
+      // текущие (сглаженные) цвета
+      main: V3.new(3.00, 2.95, 2.80),
+      fill1: V3.new(1.40, 1.70, 2.20),
+      fill2: V3.new(1.70, 1.55, 1.35),
+      pulse: 0,     // 0..1 — пульсация света после удара
+      pulseDecay: 7,
+    };
+
     // Follow-through state
     this.followThrough = {
       active: false,
@@ -259,8 +289,14 @@ class Game {
         this.reducedMotion = !!event.matches || !!this.motionOff;
         if (this.ui) this.ui.reducedMotion = this.reducedMotion;
         if (this.reducedMotion) {
-           this.shake = 0; this.hitFlash = 0;
-           this.marks.length = 0; this.particles.n = 0; this.contactFlashes.length = 0;
+          this.shake = 0; this.hitFlash = 0;
+          this.hitstop.active = false; this.hitstop.t = 0;
+          this.impactFlash = 0; this.camFovKick = 0;
+          this.arenaLight.pulse = 0;
+          V3.copy(this.arenaLight.main, this.arenaLight.mainT);
+          V3.copy(this.arenaLight.fill1, this.arenaLight.fill1T);
+          V3.copy(this.arenaLight.fill2, this.arenaLight.fill2T);
+          this.marks.length = 0; this.particles.n = 0; this.contactFlashes.length = 0;
           if (this.R && this.R.post) { this.R.post.radial = 0; this.R.post.flash = 0; }
           if (this.lobbyScene?.reduceMotion()) this.render();
         }
@@ -2070,7 +2106,87 @@ class Game {
       else if (sid === 'SMASH') this.matchTasks.smash++;
       if (racket.isServe) this.matchTasks.serves++;
       this.buzz(Math.round(lerp(8, 26, clamp(speed / 90, 0, 1))));
-      this.shakeIt(clamp(speed / 55, 0.03, 0.38) * 0.45, V3.new(rndSym(0.4), 0.5, 1));
+
+      // --- AAA impact juice ------------------------------------------------
+      const isGolden = this.ball.golden === 'win';
+      const hitStrength = clamp(speed / 90, 0, 1);            // 0..1 по скорости
+      const qualityK = clamp((quality ?? 0.8), 0, 1);
+
+      // Hitstop: мяч «замирает» на мгновение при сильном и чистом ударе.
+      // Золотой удар — глубже и дольше; нет хитстопа в обучении/режиме без движения.
+      if (!this.reducedMotion && !this.training && (isGolden || (speed > 11 && qualityK > 0.75))) {
+        const hsDur = isGolden ? 0.14 : 0.09;
+        const hsScale = isGolden ? 0.12 : 0.30;
+        if (!this.hitstop.active || this.time - this.hitstop.lastHit > this.hitstop.cooldown) {
+          this.hitstop.active = true;
+          this.hitstop.t = hsDur;
+          this.hitstop.target = hsScale;
+          this.hitstop.lastHit = this.time;
+        }
+      }
+
+      // Вспышка в точке контакта + FOV-кик от удара (камера «отдаётся»).
+      this.impactFlash = Math.min(1, this.impactFlash + 0.35 * hitStrength * qualityK);
+      if (contactP) V3.copy(this.impactFlashPos, contactP);
+      this.camFovKick = clamp(this.camFovKick + 1.2 * hitStrength, 0, 3.5);
+
+      // Силовой shake: зелёный/золотой бьёт жёстче, блок — мягче.
+      const shakeAmt = isGolden
+        ? clamp(speed / 40, 0.08, 0.55)
+        : clamp(speed / 55, 0.03, 0.38) * (0.45 + 0.35 * qualityK);
+      const shakeDir = V3.new(rndSym(0.4), 0.5 + 0.4 * qualityK, 1);
+      this.shakeIt(shakeAmt, shakeDir);
+
+      // Частицы удара: искры в точке контакта, цвет = принятый удар.
+      if (this.particles && contactP && !this.reducedMotion && !this.training) {
+        const n = isGolden ? 22 : Math.max(6, Math.round(14 * hitStrength));
+        const life = 0.28 + 0.18 * hitStrength;
+        const spd = 4.0 + 9.0 * hitStrength;
+        const stroke = racket.stroke && racket.stroke.id ? racket.stroke.id : 'DRIVE';
+        const meta = STROKES[stroke] || STROKES.DRIVE;
+        const rgb = flashRgb(meta);
+        // направление разлета — вдоль нормали клинка и по траектории мяча
+        const nx = racket.normal ? racket.normal.x : 0, ny = racket.normal ? racket.normal.y : 1, nz = racket.normal ? racket.normal.z : 0;
+        const dir = V3.new(nx, ny, nz);
+        for (let i = 0; i < n; i++) {
+          let vx = rndSym(1), vy = rndSym(1), vz = rndSym(1);
+          const l = Math.hypot(vx, vy, vz) || 1;
+          vx = vx / l * 0.35 + dir.x; vy = vy / l * 0.35 + dir.y; vz = vz / l * 0.35 + dir.z;
+          const nl = Math.hypot(vx, vy, vz) || 1;
+          this.particles.spawn(
+            contactP.x, contactP.y, contactP.z,
+            vx / nl * spd, vy / nl * spd, vz / nl * spd,
+            life, 0.014 + 0.008 * hitStrength,
+            rgb[0], rgb[1], rgb[2], 9.0, false);
+        }
+      }
+
+      // Золотой удар — короткое кино-слоумо после хитстопа, чтобы игрок
+      // ощутил «я попал идеально». Не в carrière-турнирах и онлайне (там честное время).
+      if (isGolden && !this.training && !(this.network && this.network.isInMatch)
+          && !(typeof gameplayCalibrationLocked === 'function' && gameplayCalibrationLocked(this))) {
+        this.punchSlowmo(0.30, 0.42);
+      }
+
+      // Свет reaccирует на удар: золото — тёплый прожектор, силовой удар — brevemente холодный блик.
+      const AL = this.arenaLight;
+      if (isGolden) {
+        V3.set(AL.mainT, 3.6, 2.9, 2.1);
+        V3.set(AL.fill1T, 2.4, 1.9, 1.3);
+        V3.set(AL.fill2T, 2.8, 2.2, 1.5);
+      } else if (speed > 11) {
+        V3.set(AL.mainT, 3.4, 3.2, 3.0);
+        V3.set(AL.fill1T, 1.6, 1.9, 2.4);
+        V3.set(AL.fill2T, 2.0, 1.8, 1.6);
+      } else {
+        V3.set(AL.mainT, 3.00, 2.95, 2.80);
+        V3.set(AL.fill1T, 1.40, 1.70, 2.20);
+        V3.set(AL.fill2T, 1.70, 1.55, 1.35);
+      }
+      AL.pulse = Math.min(1, AL.pulse + 0.35 * hitStrength);
+      // мяч кратко «раздувается» при сильном контакте — тактильный отклик масштаба
+      if (hitStrength > 0.35) this.ballPop = Math.min(1.25, 1 + 0.18 * hitStrength);
+      // конец AAA impact juice
       // Time is changed only by the player's separate slow-motion control.
       // refresh the landing preview
       if (this.settings.showPredict) {
@@ -4600,6 +4716,12 @@ class Game {
     this.camLook.z = expSmooth(this.camLook.z, this.camLookT.z, k * 1.2, dt);
     this.fov = expSmooth(this.fov, this.fovT, 5, dt);
 
+    // FOV-кик от сильного удара: камера кратко «отдаётся» назад, передавая вес клинка.
+    if (this.camFovKick > 0.01) {
+      this.camFovKick = Math.max(0, this.camFovKick - dt * this.camFovKickDecay);
+      this.fov += this.camFovKick;
+    }
+
     // Camera shake is an optional impact effect, not part of the simulation.
     this.shake = this.reducedMotion ? 0 : Math.max(0, this.shake - dt * 3.4);
     const s = this.reducedMotion ? 0 : this.shake * this.shake * 0.055;
@@ -4822,10 +4944,19 @@ class Game {
     }
     if (this.slowmoUntil && this.time > this.slowmoUntil) { this.targetTimeScale = 1; this.slowmoUntil = 0; }
     this.updateSlowmo(dtReal);
+
+    // --- AAA hitstop: freeze time briefly on strong / golden hits -------
+    if (this.hitstop.active) {
+      this.hitstop.t = Math.max(0, this.hitstop.t - dtReal);
+      if (this.hitstop.t <= 0) { this.hitstop.active = false; this.hitstop.t = 0; }
+    }
+    const hitstopScale = this.hitstop.active ? this.hitstop.target : 1;
+
     // Normal play always runs at real time; only an explicit slow-motion
     // effect may reduce it. Legacy flytime preferences cannot accelerate it.
     const inspectorActive = this.inspectSlowmo && this.slowmo.allowed;
-    const requestedScale = inspectorActive || this.slowmo.active || this.slowmoUntil ? this.targetTimeScale : 1;
+    const requestedScale = (inspectorActive || this.slowmo.active || this.slowmoUntil ? this.targetTimeScale : 1)
+      * hitstopScale;
     const targetScale = clamp(Number.isFinite(requestedScale) ? requestedScale : 1, 0.1, 1);
     this.timeScale = typeof gameplayCalibrationLocked === 'function' && gameplayCalibrationLocked(this)
       ? 1 : clamp(expSmooth(Number.isFinite(this.timeScale) ? this.timeScale : 1, targetScale, 9, dtReal), 0.1, 1);
@@ -4997,7 +5128,23 @@ class Game {
     for (const m of this.messages) m.t += dtReal;
     while (this.messages.length && this.messages[0].t > this.messages[0].dur) this.messages.shift();
     this.hitFlash = Math.max(0, this.hitFlash - dtReal * 3.2);
+    this.impactFlash = Math.max(0, this.impactFlash - dtReal * 4.5);
+    this.ballPop = Math.max(1, this.ballPop - dtReal * this.ballPopDecay);
     this.ageContactFlashes(this.time);
+
+    // --- AAA arena light animation ---------------------------------------
+    const AL = this.arenaLight;
+    AL.pulse = Math.max(0, AL.pulse - dtReal * AL.pulseDecay);
+    const pulseBoost = 1 + 0.5 * AL.pulse;
+    V3.lerp(AL.main, AL.main, AL.mainT, clamp(6 * dtReal * pulseBoost, 0, 1));
+    V3.lerp(AL.fill1, AL.fill1, AL.fill1T, clamp(6 * dtReal * pulseBoost, 0, 1));
+    V3.lerp(AL.fill2, AL.fill2, AL.fill2T, clamp(6 * dtReal * pulseBoost, 0, 1));
+    if (this.R && this.R.env) {
+      const e = this.R.env;
+      V3.copy(e.lightCol, AL.main);
+      V3.copy(e.fill1.c, AL.fill1);
+      V3.copy(e.fill2.c, AL.fill2);
+    }
 
     // Only the timer advances here. Position and orientation each have one
     // owner in updatePlayerPaddle / PaddleStrokeMotion, before rendering.
@@ -5202,7 +5349,7 @@ class Game {
     if (this.ball.live || this.state === GS.SERVE_READY || this._idleStill || pointBall) {
       const BS = (this._cal && this._cal.ballSize !== undefined) ? (0.8 + this._cal.ballSize * 0.5) : 1;
       const visualBall = pointBall || this.ball;
-      M4.compose(tmp.m, visualBall.p, visualBall.q, V3.set(tmp.scl, BS, BS, BS));
+      M4.compose(tmp.m, visualBall.p, visualBall.q, V3.set(tmp.scl, BS * this.ballPop, BS * this.ballPop, BS * this.ballPop));
       const hints = this.hintContact !== false && !(typeof gameplayCalibrationLocked === 'function' && gameplayCalibrationLocked(this));
       const gk = shadowPass || !hints || pointBall ? 0 : strikeGreenTint(this._strike, STRIKE_LEAD, STRIKE_FULL);
       if (gk > 0.02) {
@@ -5303,15 +5450,45 @@ class Game {
        *  red    = wrong place or wrong time.
        *  The opponent's returns keep the old spin palette. */
        const ts = this.ball.trailStroke || (this.lastShotInfo && this.lastShotInfo.stroke) || null;
-       const hex = (ts && ts.col) ? ts.col : '#a0b4c8';
-       const col = [parseInt(hex.slice(1,3),16)/255, parseInt(hex.slice(3,5),16)/255, parseInt(hex.slice(5,7),16)/255];
+       const b = this.ball;
+       const grade = this.ball.trailGrade && b.lastHitBy === 1 ? this.ball.trailGrade : null;
+       let col;
+       if (grade === 'green') col = [0.42, 1.0, 0.62];        // чистый контакт — неоновый зелёный
+       else if (grade === 'yellow') col = [1.0, 0.85, 0.35];  // на грани — янтарный
+       else if (grade === 'red') col = [1.0, 0.45, 0.45];     // промах/отклонение — красный
+       else {
+         /* Шлейф окрашен по типу вращения, а не по вердикту:
+          * топспин — оранжевый, подрезка — голубой, боковое — зелёный,
+          * почти без вращения — белый. Насыщенность ∝ частоте вращения. */
+         col = spinTrailColor(b.w, b.v);
+       }
        const k = 0.9;
-       const grade = this.ball.trailGrade && this.ball.lastHitBy === 1 ? this.ball.trailGrade : null;
+       const opacity = grade ? 0.85 : clamp(0.25 + 0.55 * clamp(V3.len(b.w) / 200, 0, 1), 0.25, 0.85);
        R.draw(me.trail, M4.identity(tmp.m), {
          color: [col[0], col[1], col[2]], rough: 1, blend: 'add', doubleSided: true, unlit: 1,
-         emissive: [col[0] * k * 1.4, col[1] * k * 1.4, col[2] * k * 1.4], opacity: grade ? 0.8 : 0.3,
+         emissive: [col[0] * k * 1.4, col[1] * k * 1.4, col[2] * k * 1.4], opacity,
        });
     }
+
+    /* Цвет шлейфа по типу вращения мяча (радуга «чтения спина»).
+     * Топспин (ось X relative to flight) → оранжевый, чоп/подрезка → синий,
+     * сайдспин (ось Y) → зелёный/фиолетовый, почти без спина → белый. */
+  function spinTrailColor(w, v) {
+    const spin = V3.len(w);
+    if (spin < 25) return [0.92, 0.95, 1.0];                 // мёртвый мяч — холодный белый
+    const travelDirZ = v.z < 0 ? 1 : -1;                      // +z к игроку, −z от него
+    const topSigned = -travelDirZ * w.x;                      // + = топспин, − = подрезка
+    const side = w.y;                                         // + = правый сайд, − = левый
+    const topK = clamp(topSigned / spin, -1, 1);
+    const sideK = clamp(side / spin, -1, 1);
+    // смешиваем базовые цвета по долям топ/сайд
+    let r = 0.92, g = 0.95, b = 1.0;
+    if (topK > 0.15) { r = 1.0; g = 0.5 + 0.5 * (1 - topK); b = 0.15 + 0.15 * (1 - topK); } // оранжевый→красный
+    else if (topK < -0.15) { r = 0.3 + 0.2 * (-topK); g = 0.5 + 0.5 * (1 + topK); b = 1.0; } // голубой→синий
+    if (Math.abs(sideK) > 0.25) { g = 0.35 + 0.5 * Math.abs(sideK); r = 0.5 + 0.3 * Math.abs(sideK); b = 0.6 + 0.3 * Math.abs(sideK); } // зелёный→фиолетовый
+    return [clamp(r, 0, 1), clamp(g, 0, 1), clamp(b, 0, 1)];
+  }
+  function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
 
     /* bounce marks */
     for (const mk of this.marks) {
@@ -5359,6 +5536,25 @@ class Game {
       });
     }
 
+    /* impact flash — яркая пульса в точке последнего контакта (отдельно от
+     * цветных ореолов принятого удара; читается как «принял мяч_cleanly»). */
+    if (this.impactFlash > 0.015) {
+      const a = clamp(this.impactFlash, 0, 1);
+      const sz = PH.R * (2.6 + 1.4 * a);
+      this.billboard(tmp.m, this.impactFlashPos, sz, 0);
+      R.draw(me.quad, tmp.m, {
+        color: [1, 1, 1], tex: this.scene.tex.glow, blend: 'add', doubleSided: true, unlit: 1,
+        emissive: [1, 0.92, 0.72], rough: 1, opacity: 0.55 * a * a,
+      });
+      // вторая, уже затухающая волна чуть крупнее
+      const sz2 = PH.R * (4.2 + 1.8 * a);
+      this.billboard(tmp.m, this.impactFlashPos, sz2, 0);
+      R.draw(me.quad, tmp.m, {
+        color: [1, 1, 1], tex: this.scene.tex.glow, blend: 'add', doubleSided: true, unlit: 1,
+        emissive: [0.7, 0.78, 1], rough: 1, opacity: 0.30 * a * a,
+      });
+    }
+
     /* particles */
     const P = this.particles;
     for (let i = 0; i < P.n; i++) {
@@ -5376,6 +5572,52 @@ class Game {
     /* Свечение вокруг мяча убрано: аддитивный ореол поверх и без того
      * светлого мяча размывал его силуэт именно там, где надо бить.
      * Мяч держится в кадре за счёт emissive в материале и тёмной арены. */
+
+    /* --- AAA training juice: вспышка контакта и призрачная рука --- */
+    const tr = this.training;
+    if (tr) {
+      const J = tr.juice;
+      if (J.active && J.flash > 0.01 && J.pos) {
+        const a = J.flash * J.flash;
+        const sz = PH.R * (2.2 + 1.6 * a);
+        this.billboard(tmp.m, V3.new(J.pos.x, J.pos.y, J.pos.z), sz, 0);
+        const ok = J.type === 'ok';
+        R.draw(me.quad, tmp.m, {
+          color: [1, 1, 1], tex: this.scene.tex.glow, blend: 'add', doubleSided: true, unlit: 1,
+          emissive: ok ? [0.35, 1.0, 0.55] : [1.0, 0.45, 0.45],
+          rough: 1, opacity: 0.85 * a,
+        });
+      }
+      // Призрачная рука — эталонный жест перед мячом
+      const G = tr.ghost;
+      if (G.active && G.points && G.points.length > 1) {
+        const k = 1 - Math.min(1, G.t / G.life);
+        const a = 0.7 * k * k;
+        const gsz = 0.014;
+        const b = this.ball;
+        const z0 = b ? b.z - 1.1 : -1.4;
+        for (let i = 0; i < G.points.length - 1; i++) {
+          const p1 = G.points[i], p2 = G.points[i + 1];
+          const mx = (p1.x + p2.x) / 2, my = (p1.y + p2.y) / 2;
+          const wx = b ? b.x + mx * 0.55 : mx * 0.55;
+          const wy = b ? b.y + 0.35 + my * 0.40 : 0.5 + my * 0.40;
+          const wz = z0;
+          this.billboard(tmp.m, V3.new(wx, wy, wz), gsz, 0);
+          R.draw(me.quad, tmp.m, {
+            color: [1, 1, 1], tex: this.scene.tex.glow, blend: 'add', doubleSided: true, unlit: 1,
+            emissive: [G.color[0], G.color[1], G.color[2]], rough: 1, opacity: a,
+          });
+        }
+        // конечная точка жеста — чуть крупнее
+        const last = G.points[G.points.length - 1];
+        this.billboard(tmp.m, V3.new(b ? b.x + last.x * 0.55 : last.x * 0.55,
+                                     b ? b.y + 0.35 + last.y * 0.40 : 0.5 + last.y * 0.40, z0), gsz * 1.6, 0);
+        R.draw(me.quad, tmp.m, {
+          color: [1, 1, 1], tex: this.scene.tex.glow, blend: 'add', doubleSided: true, unlit: 1,
+          emissive: [G.color[0], G.color[1], G.color[2]], rough: 1, opacity: a * 1.2,
+        });
+      }
+    }
   }
 
   /** The opponent is deliberately NOT a character model: a floating bat

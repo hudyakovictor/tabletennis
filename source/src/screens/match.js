@@ -1,26 +1,27 @@
+/* =====================================================================
+   MATCH — Игровая сцена. Глобальная переработка.
+   Только необходимое для игры. Без отладочного мусора.
+   ===================================================================== */
+
 Router.def('match', {
   full: true, mood: 'battle', game: true,
   render() {
     const o = PEOPLE[BATTLE.opp]; const T = TARGET[MODE.id] || 11;
     const free = MODE.id === 'free';
-    const text = value => String(value ?? '').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]));
     return `<div class="mx cine">
       <div class="mx-bars"><i></i><i></i></div>
       <div class="m-vig"></div>
       <div class="match-hud-slot"></div>
       <div class="match-actions pe">
         ${UI.notificationButton('m-notifications')}
-        <button class="ib m-slowmo" data-act="slowmo" aria-label="${t('match.slowmo')}" title="${t('match.slowmo')}" aria-pressed="false">${Art.icon('clock', { c: 'currentColor', fill: 'none', sw: 2 })}<span>${t('match.slowmo')}</span></button>
         <button class="ib m-pause" data-act="pause" aria-label="${t('match.pause')}" title="${t('match.pause')}">${Art.icon('pause', { c: 'currentColor', fill: 'none', sw: 2.6 })}</button>
       </div>
-      <button class="ib m-diag-shot pe" data-act="diag-mark" ${GameHost.debug ? '' : 'hidden'} aria-label="${t('debug.mark')}"><span aria-hidden="true">●</span> ${t('debug.mark')}</button>
-      ${devBtn()}
     </div>`;
   },
   mount(el) {
     BATTLE.t0 = Date.now();
-    TGX.fullscreen(true);                // застрять в иммерсиве можно и без жеста — хуже не станет
-    TGX.guard(true);                     // не дать случайно закрыть приложение среди розыгрыша
+    TGX.fullscreen(true);
+    TGX.guard(true);
     this.el = el; this.alive = true; this.timers = [];
     this.hudSnapshot = null; this.result = null;
     this.identities = [String(S.name ?? t('hud.near')), String(PEOPLE[BATTLE.opp]?.s ?? t('hud.far'))];
@@ -34,95 +35,42 @@ Router.def('match', {
       if (!this.st.live || this.st.over || Sheet.cur) return;
       GameHost.send('pause'); UI.openNotifications({ readOnly: true }); this.watchSheets();
     });
-    el.querySelector('[data-act=diag-mark]').addEventListener('click', diagnosticMarkFrame);
-    /* The engine confirms the effective inspector state and mode restrictions. */
-    const smBtn = el.querySelector('[data-act=slowmo]');
-    smBtn.addEventListener('click', () => {
-      if (smBtn.disabled || !GameHost.inspector?.allowed) return;
-      smBtn.disabled = true;
-      GameHost.send('slowmo', { on: !GameHost.inspector.effective }); haptic('select'); Sfx.soft();
-    });
-    const dv = el.querySelector('[data-act=dev]'); if (dv) dv.addEventListener('click', () => devZoneSheet());
-    this.syncSlowmo();
-    this.intro();
+    this.intro().catch(() => {});
   },
-  syncSlowmo() {
-    const button = this.el && this.el.querySelector('.m-slowmo'); if (!button) return;
-    const inspector = GameHost.inspector;
-    button.disabled = !GameHost.calibrationReady || !inspector?.allowed;
-    button.classList.toggle('on', !!inspector?.effective); button.setAttribute('aria-pressed', String(!!inspector?.effective));
-  },
-  hudOptions() {
-    return { t, strokeCatalog: GameHost.strokeCatalog || [], names: this.identities,
-      reducedMotion: effectiveReducedMotion(), reason: REASON };
-  },
-  refreshLocale(el) {
-    I18n.localizeDOM(el, this.render()); this.syncSlowmo();
-    if (this.hudSnapshot) this.hud.update(this.hudSnapshot, this.hudOptions());
-    const title = el.querySelector('.m-final b');
-    if (title && this.result) title.textContent = t(this.result.win ? 'result.win' : 'result.lose');
-    const replay = el.querySelector('.mx-replay .rec');
-    if (replay && this.result) replay.innerHTML = `<i></i>${t('match.replay', { n: this.result.stats.maxRally })}`;
-    return true;
-  },
-  later(fn, ms) { const t = setTimeout(() => this.alive && fn(), ms); this.timers.push(t); return t; },
   async intro() {
     const el = this.el, st = this.st, mx = el.querySelector('.mx');
     const valid = () => this.alive && this.st === st && !st.over;
     GameHost.send('prematch', { dur: 0.3 });
     for (let i = 0; i < 8; i++) { await sleep(40); if (!valid()) return; }
-    /* Вход в матч без зрелищных задержек: нет плашек, отсчёта и эффектов. */
     const free = MODE.id === 'free';
     GameHost.send('match', { diff: clamp(Math.round(S.diff ?? 1), 0, 3), trend: aiTrend(), target: TARGET[MODE.id] || 11, hint: !!S.hint, free: MODE.id === 'free' });
     if (st.paused) GameHost.send('pause');
     GameHost.send('quiet', { on: false });
     mx.classList.remove('bars', 'cine'); mx.classList.add('live'); st.live = true;
-    await sleep(40); if (!valid()) return;
+    sleep(40);
   },
   onMsg(m) {
-    if (this.alive && (this.st.live || this.hudSnapshot) && !this.st.over && m.type === 'calibrationPending') this.presentation.recover();
-    if (this.alive && ['ready', 'settings', 'calibration', 'slowmo', 'calibrationPending', 'sessionKind'].includes(m.type)) this.syncSlowmo();
-    if (this.alive && m.type === 'hud') {
-      if (this.st.over) return;
-      this.presentation.accept(m.snapshot);
-      this.hudSnapshot = m.snapshot;
-      this.hud.update(m.snapshot, this.hudOptions());
-      this.st.p = m.snapshot.score[0]; this.st.o = m.snapshot.score[1];
-      return;
-    }
-    if (this.alive && this.hudSnapshot && ['ready', 'settings', 'motionPreference'].includes(m.type))
-      this.hud.update(this.hudSnapshot, this.hudOptions());
-    const el = this.el, st = this.st; if (!this.alive || st.over && m.type !== 'replayEnd' && m.type !== 'matchEnd') return;
+    if (!this.alive || this.st.over && m.type !== 'replayEnd' && m.type !== 'matchEnd') return;
     if (m.type === 'serve') {
-      st.server = m.server;
-      if (m.server > 0) st.myServes++;
+      this.st.server = m.server;
+      if (m.server > 0) this.st.myServes++;
     }
     if (m.type === 'hit') {
       if (m.by > 0) {
-        st.hits++;
-        if (SPIN_STROKES.has(m.stroke)) st.spin++; if (m.rally > 1) st.rallyHits++;
-        /* В момент удара — НИКАКИХ эффектов поверх кадра: всплески, кольца и
-         * стикеры ("ИДЕАЛЬНО!", км/ч) — визуальная плата ровно там, где глаз
-         * держит мяч. Вердикт и подпись уже есть в самой игре (след мяча +
-         * сообщение). Каламбур в руке (haptic) остаётся — он не тратит взгляд. */
-        if (m.sweet >= .8) { st.perfect++; haptic('heavy'); }
-        if (m.stroke === 'SMASH' || m.kmh >= 70) st.smash++;
+        this.st.hits++;
+        if (SPIN_STROKES.has(m.stroke)) this.st.spin++; if (m.rally > 1) this.st.rallyHits++;
+        if (m.sweet >= .8) { this.st.perfect++; haptic('heavy'); }
+        if (m.stroke === 'SMASH' || m.kmh >= 70) this.st.smash++;
       }
-      else st.oppHits++;
+      else this.st.oppHits++;
     }
     if (m.type === 'point') {
-      st.maxRally = Math.max(st.maxRally, m.rally || 0);
-      const win = m.who > 0; st.p = m.score[0]; st.o = m.score[1]; st.seq.push(win ? 1 : -1);
-      if (st.server > 0) { st.servePts++; if (win) st.serveWon++; }
-      if (win) {
-        Sfx.point(); haptic('success');
-      } else {
-        Sfx.lose(); haptic('error');
-      }
+      this.st.maxRally = Math.max(this.st.maxRally, m.rally || 0);
+      const win = m.who > 0; this.st.p = m.score[0]; this.st.o = m.score[1]; this.st.seq.push(win ? 1 : -1);
+      if (this.st.server > 0) { this.st.servePts++; if (win) this.st.serveWon++; }
+      if (win) { Sfx.point(); haptic('success'); } else { Sfx.lose(); haptic('error'); }
     }
-    if (m.type === 'paused' && m.v && !m.host && !Sheet.cur && !st.over) this.pause(true);
-    /* В свободной игре движок матч не завершает — но если придёт, показывать
-       итог с нулевым счётом нельзя. */
+    if (m.type === 'paused' && m.v && !m.host && !Sheet.cur && !this.st.over) this.pause(true);
     if (m.type === 'matchEnd' && MODE.id !== 'free') this.finish(m);
   },
   pause(fromGame) {
@@ -130,20 +78,16 @@ Router.def('match', {
     this.st.paused = true;
     GameHost.send('pause');
     const free = MODE.id === 'free';
-    Sheet.open(`<div class="h1" style="margin:4px 4px 6px">${t('match.pause')}</div><p class="dim" style="margin:0 4px 16px;font-size:12.5px">${free ? t('match.freePause') : t('match.pauseScore', { p: this.st.p, o: this.st.o })}</p>
-      <div style="display:grid;gap:12px"><button class="b3 green block" data-a="resume"><span class="shine"></span>${Art.icon('play', { c: '#fff' })}${t('common.resume')}</button>
-      <button class="b3 dark block" data-a="screenshot">${t('debug.screenshot')}</button>
-      <button class="b3 dark block" data-a="diagnostics">${t('debug.title')}</button>
-      <button class="b3 dark block" data-a="train">${Art.icon('target', { c: '#fff' })}${t('match.training')}</button>
-      <button class="b3 dark block" data-a="settings">${Art.icon('gear', { c: '#fff' })}${t('nav.settings')}</button>
-      <button class="b3 coral block sm" data-a="quit">${free ? t('match.exitFree') : t('match.surrender')}</button></div>`, {
+    Sheet.open(`<div class="sheet-title">${t('match.pause')}</div><p class="caption mt-2 mb-4">${free ? t('match.freePause') : t('match.pauseScore', { p: this.st.p, o: this.st.o })}</p>
+      <div style="display:grid;gap:12px">
+        <button class="btn btn-success btn-block" data-a="resume">${Art.icon('play', { c: '#fff', sw: 2.5 })}<span>${t('common.resume')}</span></button>
+        <button class="btn btn-ghost btn-block" data-a="settings">${Art.icon('gear', { c: '#fff', sw: 2.5 })}<span>${t('nav.settings')}</span></button>
+        <button class="btn btn-danger btn-block sm" data-a="quit">${free ? t('match.exitFree') : t('match.surrender')}</button>
+      </div>`, {
       onOpen: (w) => w.addEventListener('click', (e) => {
         const a = e.target.closest('[data-a]'); if (!a) return;
         if (a.dataset.a === 'resume') Sheet.close();
         if (a.dataset.a === 'settings') openSettings();
-        if (a.dataset.a === 'screenshot') diagnosticsSheet({ focusScreenshot: true });
-        if (a.dataset.a === 'diagnostics') diagnosticsSheet();
-        if (a.dataset.a === 'train') { this.st.over = true; Sheet.close(true); Router.go('train', { data: { then: 'hub' } }); }
         if (a.dataset.a === 'quit') {
           Sheet.close(true);
           if (free) this.exitFree();
@@ -153,8 +97,6 @@ Router.def('match', {
     });
     this.watchSheets();
   },
-  /* Движок снимается с паузы, только когда закрылись ВСЕ листы. Лист настроек
-     заменяет лист паузы — раньше это молча запускало розыгрыш под настройками. */
   watchSheets() {
     if (this._mo) { this._mo.disconnect(); this._mo = null; }
     const host = $('#sheets'); if (!host) return;
@@ -174,20 +116,17 @@ Router.def('match', {
     const el = this.el, mx = el.querySelector('.mx'), valid = () => this.alive && this.st === st; const win = !!m.won;
     const res = { win, me: m.score ? m.score[0] : st.p, op: m.score ? m.score[1] : st.o, opp: BATTLE.opp,
       quit: !!m.quit, names: this.identities.slice(), presentation: this.presentation.freeze(m),
-      /* Длительность и режим — факты для сервера: он проверяет правдоподобие
-       * и сам считает рейтинг, а не верит присланному «я выиграл». */
       durationMs: Math.max(0, Date.now() - (BATTLE.t0 || Date.now())),
       mode: (MODE && MODE.id) || 'career',
       stats: { hits: st.hits, perfect: st.perfect, smash: st.smash, maxRally: Math.max(st.maxRally, m.bestRally || 0),
         acc: m.stats && m.stats.shots ? clamp(Math.round(100 - (m.stats.errors || 0) / Math.max(1, m.stats.shots) * 100), 0, 100) : 0 },
       coach: ZoneStats.matchSummary(BATTLE.t0 || 0, win) };
-    res.seq = st.seq.slice();                                     // для графика «Ход матча»
-    res.stats.maxSpeed = (m.stats && m.stats.maxSpeed) || 0;      // км/ч, идёт из движка
-    res.stats.winners = (m.stats && m.stats.winners) || 0;        // чистые победные игрока
+    res.seq = st.seq.slice();
+    res.stats.maxSpeed = (m.stats && m.stats.maxSpeed) || 0;
+    res.stats.winners = (m.stats && m.stats.winners) || 0;
     this.result = res;
     if (!m.quit) { ZoneStats.logMatch(res.coach, win); res.unlocked = Career.record(st, win, res.coach);
-      res.quests = Daily.tick(res, win);                          // миссии дня, закрытые ЭТИМ матчем
-    }
+      res.quests = Daily.tick(res, win); }
     if (m.quit) { Router.go('result', { data: res }); return; }
     GameHost.send('outro');
     mx.classList.add('cine', 'bars'); mx.classList.remove('live');
@@ -199,7 +138,7 @@ Router.def('match', {
     if (m.hasReplay) {
       b.classList.add('out');
       const r = document.createElement('div'); r.className = 'mx-replay';
-      r.innerHTML = `<span class="rec"><i></i>${t('match.replay', { n: res.stats.maxRally })}</span><button class="b3 dark sm pe" data-a="skip">${t('common.next')} ›</button>`; mx.appendChild(r);
+      r.innerHTML = `<span class="rec"><i></i>${t('match.replay', { n: res.stats.maxRally })}</span><button class="btn btn-ghost sm" data-a="skip">${t('common.next')} ›</button>`; mx.appendChild(r);
       const done = new Promise((ok) => {
         const finish = this.replayResolve = () => { this.replayOff?.(); this.replayOff = null; this.replayResolve = null; ok(); };
         this.replayOff = GameHost.on((x) => { if (x.type === 'replayEnd') finish(); });
@@ -211,8 +150,6 @@ Router.def('match', {
     }
     Router.go('result', { data: res });
   },
-  /* Свободная игра заканчивается только выходом: ни итога, ни рейтинга, ни
-     миссий — просто назад в хаб. */
   exitFree() {
     const st = this.st; if (st.done) return; st.over = true; st.done = true;
     TGX.guard(false);
@@ -227,14 +164,38 @@ Router.def('match', {
     this.replayResolve?.(); this.replayOff?.(); this.replayOff = null; this.replayResolve = null;
     TGX.guard(false);
     if (this._mo) { this._mo.disconnect(); this._mo = null; }
-    // fullscreen НЕ выключаем — весь путь (поиск → матч → итог) живёт в иммерсиве
     GameHost.send('slowmo', { on: false });
     GameHost.send('quit'); GameHost.show(false);
   },
-  onBack() { if (!this.st.over) this.pause(); }
+  onBack() { if (!this.st.over) this.pause(); },
+  hudOptions() {
+    return { t, strokeCatalog: GameHost.strokeCatalog || [], names: this.identities,
+      reducedMotion: effectiveReducedMotion(), reason: REASON };
+  },
+  later(fn, ms) { const t = setTimeout(() => this.alive && fn(), ms); this.timers.push(t); return t; }
 });
 
-/* ---------------- ОБУЧЕНИЕ ----------------
-   Наставник живёт в движке: первый мяч замирает в точке удара, кольцо
-   показывает честный размер зоны, «призрачный палец» показывает свайп.
-   Эта карточка — только текст и прогресс. */
+/* Вспомогательные стили match — только то, что не в base.css / match_hud.css */
+const _matchStyle = document.createElement('style');
+_matchStyle.textContent = `
+  .mx{position:absolute;inset:0;pointer-events:none}
+  .mx .pe,.mx .pe *{pointer-events:auto}
+  .mx:not(.live) .match-hud-slot{visibility:hidden}
+  .mx .match-actions{opacity:0;pointer-events:none;transform:translateY(-14px);transition:opacity .4s,transform .5s var(--ease-out)}
+  .mx.live .match-actions{opacity:1;pointer-events:auto;transform:none}
+  .mx-bars i{position:absolute;left:0;right:0;height:13%;background:#000;z-index:6;transition:transform .7s var(--ease-out)}
+  .mx-bars i:first-child{top:0;transform:translateY(-101%)}.mx-bars i:last-child{bottom:0;transform:translateY(101%)}
+  .mx.bars .mx-bars i{transform:none}
+  .m-pause{width:48px;height:48px;border-radius:14px;color:#e1f1fa;background:rgba(7,14,25,.78);
+    box-shadow:inset 0 0 0 1px rgba(207,231,245,.16),0 6px 20px rgba(0,0,0,.25)}
+  .m-pause svg{width:24px;height:24px}
+  .mx .m-final{background:radial-gradient(ellipse at center,rgba(2,3,10,.25),rgba(2,3,10,.55));z-index:7}
+  .mx .m-final>div{text-align:center}
+  .mx .m-final b{font-size:64px}
+  .mx .m-final small{display:block;margin-top:10px;font:900 30px/1 var(--Unb);color:#fff;opacity:0;animation:fadeIn .4s .5s forwards;text-shadow:0 3px 0 rgba(0,0,0,.4)}
+  .mx-replay{position:absolute;left:0;right:0;bottom:calc(13% + 14px);z-index:8;display:flex;align-items:center;justify-content:space-between;padding:0 16px;animation:fadeIn .4s}
+  .mx-replay .rec{white-space:nowrap;min-width:0;overflow:hidden;text-overflow:ellipsis;display:inline-flex;align-items:center;gap:8px;font:900 12px/1 var(--Unb);letter-spacing:.08em;text-transform:uppercase;color:#fff}
+  .mx-replay .rec i{width:10px;height:10px;border-radius:50%;background:#FF3B30;box-shadow:0 0 10px #FF3B30;animation:mpv .9s infinite}
+  @keyframes mpv{50%{opacity:.4}}
+`;
+document.head.appendChild(_matchStyle);

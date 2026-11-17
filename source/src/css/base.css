@@ -1,296 +1,359 @@
 /* =====================================================================
-   TTU v2 — game-grade design system
-   Направление: «Неоновая арена». Дисплейный шрифт Unbounded 900,
-   объёмные «конфетные» кнопки с губой, рамки по редкости, живой свет.
-   Анимируем только transform/opacity, тяжёлое уходит в canvas.
+   TTU v3 — AAA+ design system. Глобальная переработка.
+   Принципы:
+   1. Одна доминирующая цель на экране. Всё остальное — второстепенно.
+   2. Минимальная цель касания 48×48 px.
+   3. Контраст WCAG AA для всего текста.
+   4. Информация иерархична: H1 → H2 → H3 → тело → подпись.
+   5. Никаких декоративных эффектов без функции.
+   6. Пустые состояния — никогда не показываем пустоту.
+   7. Обратная связь на каждое действие.
    ===================================================================== */
+
 @font-face{font-family:"Unb";src:url(__UNB900__) format("woff2");font-weight:900;font-display:block}
 @font-face{font-family:"Unb";src:url(__UNB600__) format("woff2");font-weight:600;font-display:block}
 @font-face{font-family:"Man";src:url(__MAN600__) format("woff2");font-weight:600;font-display:block}
 @font-face{font-family:"Man";src:url(__MAN800__) format("woff2");font-weight:800;font-display:block}
 
 :root{
-  --bg0:#04050D; --bg1:#0A0D22; --bg2:#141A3E;
-  --ink:#FFFFFF; --ink2:rgba(222,230,255,.74); --ink3:rgba(160,174,226,.52);
-  --coral:#FF4B3E; --coral2:#FF7A4D; --coralD:#A8121C;
-  --cyan:#2EE6FF; --cyan2:#7DF3FF; --cyanD:#0868A8;
-  --gold:#FFC93A; --gold2:#FFE680; --goldD:#B86A00;
-  --violet:#9F6BFF; --violetD:#5320C9;
-  --green:#3BF5A0; --greenD:#0A9B5C;
-  --r-common:#93A6CC; --r-rare:#33B6FF; --r-epic:#B061FF; --r-leg:#FFB21E;
-  --display:"Unb", "Arial Black", system-ui, sans-serif;
-  --body:"Man", -apple-system, "SF Pro Text", Roboto, system-ui, sans-serif;
-  --spring:cubic-bezier(.34,1.56,.64,1);
-  --spring2:cubic-bezier(.18,1.25,.4,1);
-  --out:cubic-bezier(.16,1,.3,1);
-  --in:cubic-bezier(.55,0,1,.45);
-  --sat:env(safe-area-inset-top,0px); --sab:env(safe-area-inset-bottom,0px);
-  --tgt:0px; /* Telegram safe-area: сверху (status bar + кнопки TMA), ставится из JS */
-  --tgb:0px; /* Telegram safe-area: снизу (home indicator + нижняя панель), ставится из JS */
-}
-*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
-html,body{margin:0;height:100%;background:var(--bg0);color:var(--ink);font-family:var(--body);font-weight:600;-webkit-font-smoothing:antialiased;overflow:hidden;overscroll-behavior:none;user-select:none;-webkit-user-select:none;touch-action:manipulation}
-button{font:inherit;color:inherit;border:0;background:none;padding:0;cursor:pointer}
-svg{display:block}
-.num{font-variant-numeric:tabular-nums}
+  /* --- Цвета: глубокая тёмная арена, высокий контраст --- */
+  --bg:#05070F;
+  --surface:#0F1428;
+  --surface-lift:#1A2240;
+  --border:rgba(255,255,255,.12);
+  --border-bright:rgba(255,255,255,.25);
 
-/* ---------------- каркас: приложение на весь вьювпорт (TMA fullscreen) ----------------
-   Никакой рисованной «рамки телефона»: по спецификации Mini Apps контент
-   заполняет весь контейнер, отступы дают лишь safe-area (env + Telegram). */
-#desk{height:100%;display:flex;justify-content:center;align-items:stretch;
-  background:radial-gradient(1000px 700px at 70% 20%,#16123a 0%,transparent 60%),radial-gradient(900px 700px at 10% 100%,#2a0d1b 0%,transparent 60%),#05060d}
-#deviceWrap{position:relative;flex:1;min-width:0;display:flex}
-#device{position:relative;flex:1;width:100%;height:100vh;height:100dvh;overflow:hidden;background:var(--bg0);isolation:isolate;transform:translateZ(0)}
-body.in-tg{--sat:0px;--sab:0px} /* внутри Telegram env() дублирует safeAreaInset — питаемся только из JS-сумм */
-@media (min-width:900px) and (min-height:620px){
-  /* большой экран (напр. Telegram Desktop): узкая центральная колонка, без рамки */
-  #desk{display:flex;justify-content:center;align-items:center}
-  #deviceWrap{flex:none;width:min(460px,54vh);height:min(96vh,1000px)}
-  #device{height:100%;border-radius:26px;box-shadow:0 40px 120px rgba(0,0,0,.65),0 0 160px rgba(80,60,255,.10)}
+  --ink:#FFFFFF;
+  --ink-soft:rgba(255,255,255,.72);
+  --ink-muted:rgba(255,255,255,.45);
+  --ink-inverse:#0A0E1E;
+
+  /* --- Семантические акценты (по функции, а не по оттенку) --- */
+  --accent-primary:#2EE6FF;   /* главное действие, навигация */
+  --accent-success:#3BF5A0;   /* успех, верно, завершено */
+  --accent-warning:#FFC93A;   /* внимание, в процессе */
+  --accent-danger:#FF4B3E;    /* ошибка, удаление, отмена */
+  --accent-gold:#FFC93A;      /* премиум, валюта, награды */
+  --accent-violet:#9F6BFF;    /* обучение, навыки, прогресс */
+
+  /* --- Редкость предметов --- */
+  --rar-common:#93A6CC;
+  --rar-rare:#33B6FF;
+  --rar-epic:#B061FF;
+  --rar-leg:#FFB21E;
+
+  /* --- Типографическая иерархия --- */
+  --fs-caption:11px;
+  --fs-small:13px;
+  --fs-base:16px;
+  --fs-large:20px;
+  --fs-title:28px;
+  --fs-display:40px;
+
+  --fw-normal:600;
+  --fw-bold:800;
+  --fw-black:900;
+
+  --lh-tight:1.2;
+  --lh-normal:1.5;
+  --lh-loose:1.7;
+
+  --letter-tight:-.02em;
+  --letter-track:.05em;
+
+  /* --- Размеры и отступы --- */
+  --radius-sm:10px;
+  --radius-md:16px;
+  --radius-lg:24px;
+  --radius-xl:32px;
+  --radius-full:999px;
+
+  --space-2:8px;
+  --space-3:16px;
+  --space-4:24px;
+  --space-5:32px;
+  --space-6:48px;
+
+  /* --- Доступность: минимальная цель касания --- */
+  --touch-target:48px;
+
+  /* --- Анимация --- */
+  --ease-spring:cubic-bezier(.34,1.56,.64,1);
+  --ease-out:cubic-bezier(.16,1,.3,1);
+  --ease-in:cubic-bezier(.55,0,1,.45);
+  --ease-bounce:cubic-bezier(.17,.89,.32,1.49);
+
+  --dur-fast:.15s;
+  --dur-normal:.3s;
+  --dur-slow:.5s;
+
+  /* --- Safe area --- */
+  --sat:env(safe-area-inset-top,0px);
+  --sab:env(safe-area-inset-bottom,0px);
+  --tgt:0px;
+  --tgb:0px;
+
+  /* --- Градиенты --- */
+  --grad-surface:linear-gradient(180deg,rgba(26,34,64,.92) 0%,rgba(15,20,40,.98) 100%);
+  --grad-primary:linear-gradient(135deg,#2EE6FF 0%,#1A6CF0 100%);
+  --grad-success:linear-gradient(135deg,#3BF5A0 0%,#10B45A 100%);
+  --grad-danger:linear-gradient(135deg,#FF4B3E 0%,#D8172C 100%);
+  --grad-gold:linear-gradient(135deg,#FFC93A 0%,#FFA41B 100%);
 }
-/* ДЕСКТОП (мышь, широкое окно): в матче/тренировке «устройство»
-   раскрывается на всё окно — большой стол, свайп мышью по полному
-   полю; меню остаются телефонной колонкой (правило выше). Без условия
-   pointer: тач-ноутбуки и планшеты в матче тоже получают полный экран. */
-@media (min-width:760px){
+
+/* --- Сброс --- */
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent;-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}
+html,body{margin:0;height:100%;background:var(--bg);color:var(--ink);font-family:var(--body);font-size:var(--fs-base);font-weight:var(--fw-normal);line-height:var(--lh-normal);-webkit-font-smoothing:antialiased;overflow:hidden;overscroll-behavior:none;touch-action:manipulation}
+button,input,select,textarea{font:inherit;color:inherit;border:none;background:none;margin:0;padding:0;text-align:left}
+a{color:inherit;text-decoration:none}
+
+/* --- Типографика --- */
+.h1{font-family:var(--Unb);font-weight:var(--fw-black);font-size:var(--fs-display);letter-spacing:var(--letter-tight);line-height:var(--lh-tight);text-transform:uppercase;margin:0}
+.h2{font-family:var(--Unb);font-weight:var(--fw-black);font-size:var(--fs-title);letter-spacing:var(--letter-tight);line-height:var(--lh-tight);text-transform:uppercase;margin:0}
+.h3{font-family:var(--Unb);font-weight:var(--fw-bold);font-size:var(--fs-large);letter-spacing:var(--letter-track);line-height:var(--lh-tight);text-transform:uppercase;margin:0}
+.body{font-size:var(--fs-base);line-height:var(--lh-normal);color:var(--ink)}
+.body-sm{font-size:var(--fs-small);line-height:var(--lh-loose);color:var(--ink-soft)}
+.caption{font-size:var(--fs-caption);letter-spacing:var(--letter-track);text-transform:uppercase;color:var(--ink-muted);font-weight:var(--fw-bold)}
+
+/* --- Каркас приложения --- */
+#desk{height:100%;display:flex;justify-content:center;align-items:stretch;background:radial-gradient(1000px 700px at 70% 20%,#16123a 0%,transparent 60%),radial-gradient(900px 700px at 10% 100%,#2a0d1b 0%,transparent 60%),var(--bg)}
+#deviceWrap{position:relative;flex:1;min-width:0;display:flex}
+#device{position:relative;flex:1;width:100%;height:100vh;height:100dvh;overflow:hidden;background:var(--bg);isolation:isolate;transform:translateZ(0)}
+@media(min-width:900px) and (min-height:620px){
+  #desk{justify-content:center;align-items:center}
+  #deviceWrap{flex:none;width:min(460px,54vh);height:min(96vh,1000px)}
+  #device{border-radius:var(--radius-xl);box-shadow:0 40px 120px rgba(0,0,0,.65)}
+}
+@media(min-width:760px){
   body.in-game #deviceWrap{width:100%;height:100%}
   body.in-game #device{border-radius:0;box-shadow:none}
-  body.in-game #gameLayer{border-radius:0}
 }
 
-/* ---------------- layers ---------------- */
-#bg{position:absolute;inset:0;width:100%;height:100%;z-index:0}
+/* --- Layers --- */
+#bg{position:absolute;inset:0;z-index:0}
 #screens{position:absolute;inset:0;z-index:2}
 #nav{z-index:20}
 #sheets{position:absolute;inset:0;z-index:40;pointer-events:none}
-#fx{position:absolute;inset:0;width:100%;height:100%;z-index:60;pointer-events:none}
-#toasts{position:absolute;left:0;right:0;top:calc(64px + var(--sat) + var(--tgt));z-index:70;display:flex;flex-direction:column;align-items:center;gap:8px;pointer-events:none}
-#flash{position:absolute;inset:0;z-index:65;pointer-events:none;opacity:0;background:#fff;mix-blend-mode:overlay}
+#fx{position:absolute;inset:0;z-index:60;pointer-events:none}
+#toasts{position:absolute;left:0;right:0;top:calc(64px + var(--sat) + var(--tgt));z-index:70;display:flex;flex-direction:column;align-items:center;gap:var(--space-2);pointer-events:none}
 .screen{position:absolute;inset:0;display:flex;flex-direction:column;overflow:hidden;will-change:transform,opacity}
 .screen.hidden{visibility:hidden;pointer-events:none}
-.scroll{flex:1;overflow-y:auto;overflow-x:hidden;-webkit-overflow-scrolling:touch;scrollbar-width:none;padding-bottom:calc(110px + var(--sab) + var(--tgb))}
+.scroll{flex:1;overflow-y:auto;overflow-x:hidden;-webkit-overflow-scrolling:touch;padding-bottom:calc(120px + var(--sab) + var(--tgb))}
 .scroll::-webkit-scrollbar{display:none}
-.safe-top{padding-top:calc(var(--sat) + var(--tgt) + 10px)}
+.safe-top{padding-top:calc(var(--sat) + var(--tgt) + var(--space-3))}
 
-/* ---------------- typography ---------------- */
-.h-display{font-family:var(--display);font-weight:900;letter-spacing:-.02em;line-height:.95;text-transform:uppercase}
-.h1{font-family:var(--display);font-weight:900;font-size:28px;letter-spacing:-.02em;text-transform:uppercase;line-height:1}
-.h2{font-family:var(--display);font-weight:900;font-size:17px;letter-spacing:-.01em;text-transform:uppercase}
-.h3{font-family:var(--display);font-weight:600;font-size:13px;letter-spacing:.02em;text-transform:uppercase}
-.cap{font-size:10.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--ink3);font-weight:800}
-.mut{color:var(--ink2)} .dim{color:var(--ink3)}
-.stroke{-webkit-text-stroke:1.5px rgba(0,0,0,.35);paint-order:stroke fill}
-.txt-gold{background:linear-gradient(180deg,#FFF6C8 0%,#FFD34D 45%,#FF9A1A 100%);-webkit-background-clip:text;background-clip:text;color:transparent}
-.txt-cyan{background:linear-gradient(180deg,#E6FDFF 0%,#5EEBFF 50%,#1C9BFF 100%);-webkit-background-clip:text;background-clip:text;color:transparent}
-.txt-coral{background:linear-gradient(180deg,#FFE3D6 0%,#FF7A4D 45%,#E8202A 100%);-webkit-background-clip:text;background-clip:text;color:transparent}
-.sec-title{display:flex;align-items:center;justify-content:space-between;margin:22px 16px 10px}
-.sec-title .h2{display:flex;align-items:center;gap:8px}
+/* --- Базовая кнопка: цель касания 48px --- */
+.btn{
+  position:relative;display:inline-flex;align-items:center;justify-content:center;
+  min-height:var(--touch-target);height:var(--touch-target);padding:0 var(--space-4);
+  border-radius:var(--radius-md);font-family:var(--Unb);font-weight:var(--fw-black);
+  font-size:16px;letter-spacing:.02em;text-transform:uppercase;cursor:pointer;
+  transition:transform var(--dur-fast) var(--ease-out),box-shadow var(--dur-fast) var(--ease-out);
+  isolation:isolate;
+}
+.btn::before{
+  content:"";position:absolute;inset:0;border-radius:inherit;
+  background:linear-gradient(180deg,rgba(255,255,255,.12) 0%,rgba(255,255,255,.02) 50%,transparent 100%);
+  z-index:1;pointer-events:none;
+}
+.btn:active,.btn.pressed{transform:translateY(2px) scale(.985)}
+.btn:focus-visible{outline:3px solid var(--accent-primary);outline-offset:2px;border-radius:calc(var(--radius-md) + 2px)}
+.btn:disabled{opacity:.45;pointer-events:none;filter:grayscale(.6)}
 
-/* ---------------- 3D candy buttons ---------------- */
-.b3{--c1:#FFE066;--c2:#FFB01F;--c3:#FF8A00;--lip:#A85300;--fg:#3A1A00;--h:56px;
-  position:relative;display:inline-flex;align-items:center;justify-content:center;gap:10px;height:var(--h);padding:0 26px;border-radius:18px;
-  font-family:var(--display);font-weight:900;font-size:17px;letter-spacing:.01em;text-transform:uppercase;color:var(--fg);
-  background:linear-gradient(180deg,var(--c1) 0%,var(--c2) 52%,var(--c3) 100%);
-  box-shadow:0 6px 0 var(--lip),0 14px 26px -4px rgba(0,0,0,.55),inset 0 2px 0 rgba(255,255,255,.7),inset 0 -4px 0 rgba(0,0,0,.12);
-  transform:translateY(0);transition:transform .14s var(--spring),box-shadow .14s var(--spring),filter .2s;isolation:isolate;overflow:visible;text-shadow:0 1px 0 rgba(255,255,255,.35)}
-.b3::before{content:"";position:absolute;inset:3px 4px 50% 4px;border-radius:14px 14px 40% 40%/14px 14px 12px 12px;background:linear-gradient(180deg,rgba(255,255,255,.55),rgba(255,255,255,.04));z-index:-1;pointer-events:none}
-.b3 .shine{position:absolute;inset:0;border-radius:inherit;overflow:hidden;pointer-events:none}
-.b3 .shine::after{content:"";position:absolute;top:-20%;bottom:-20%;width:38%;left:-60%;background:linear-gradient(100deg,transparent,rgba(255,255,255,.75),transparent);transform:skewX(-18deg);animation:shine 3.4s var(--out) infinite}
-@keyframes shine{0%,62%{left:-60%}100%{left:130%}}
-.b3.pressed,.b3:active{transform:translateY(5px);box-shadow:0 1px 0 var(--lip),0 6px 12px -4px rgba(0,0,0,.55),inset 0 2px 0 rgba(255,255,255,.6),inset 0 -2px 0 rgba(0,0,0,.12)}
-.b3.coral{--c1:#FF9A6B;--c2:#FF4B3E;--c3:#E01E36;--lip:#7E0A1A;--fg:#fff;text-shadow:0 2px 0 rgba(120,10,20,.45)}
-.b3.cyan{--c1:#9BF6FF;--c2:#2EC9FF;--c3:#1A86F0;--lip:#0A3F8A;--fg:#fff;text-shadow:0 2px 0 rgba(10,50,120,.45)}
-.b3.green{--c1:#9DFFB9;--c2:#2EE07A;--c3:#10B45A;--lip:#07603A;--fg:#fff;text-shadow:0 2px 0 rgba(5,80,40,.45)}
-.b3.violet{--c1:#D3B5FF;--c2:#9F6BFF;--c3:#7337F0;--lip:#3B158C;--fg:#fff;text-shadow:0 2px 0 rgba(50,10,120,.45)}
-.b3.dark{--c1:#3A4380;--c2:#252B5C;--c3:#1B2048;--lip:#0B0E26;--fg:#fff;text-shadow:none}
-.b3.dark::before{opacity:.25}
-.b3.sm{--h:40px;font-size:13px;padding:0 16px;border-radius:13px;box-shadow:0 4px 0 var(--lip),0 8px 16px -4px rgba(0,0,0,.5),inset 0 2px 0 rgba(255,255,255,.6),inset 0 -3px 0 rgba(0,0,0,.12)}
-.b3.sm.pressed,.b3.sm:active{transform:translateY(3px);box-shadow:0 1px 0 var(--lip),inset 0 2px 0 rgba(255,255,255,.6)}
-.b3.sm::before{border-radius:10px 10px 30% 30%/10px 10px 8px 8px}
-.b3.xl{--h:74px;font-size:24px;border-radius:24px;padding:0 34px;box-shadow:0 8px 0 var(--lip),0 20px 40px -6px rgba(0,0,0,.6),inset 0 3px 0 rgba(255,255,255,.7),inset 0 -5px 0 rgba(0,0,0,.14)}
-.b3.xl.pressed,.b3.xl:active{transform:translateY(7px);box-shadow:0 1px 0 var(--lip),0 8px 14px -4px rgba(0,0,0,.6),inset 0 3px 0 rgba(255,255,255,.6)}
-.b3.xl::before{border-radius:20px 20px 40% 40%/20px 20px 14px 14px}
-.b3.block{display:flex;width:100%}
-.b3[disabled]{filter:grayscale(.9) brightness(.7);pointer-events:none}
-.b3 .ic{width:22px;height:22px}
-.b3.xl .ic{width:30px;height:30px}
-/* видимый keyboard focus на всех объёмных кнопках */
-.b3:focus-visible,.ib:focus-visible{outline:2px solid #9be8ff;outline-offset:3px}
+/* --- Варианты кнопок по функции --- */
+.btn-primary{
+  background:var(--grad-primary);color:var(--ink-inverse);
+  box-shadow:0 6px 0 #0B4D7A,0 14px 28px -6px rgba(0,0,0,.55),inset 0 2px 0 rgba(255,255,255,.6);
+}
+.btn-primary:active{box-shadow:0 2px 0 #0B4D7A,0 6px 12px -4px rgba(0,0,0,.55),inset 0 2px 0 rgba(255,255,255,.7)}
+.btn-success{
+  background:var(--grad-success);color:var(--ink-inverse);
+  box-shadow:0 6px 0 #0A6E3C,0 14px 28px -6px rgba(0,0,0,.55),inset 0 2px 0 rgba(255,255,255,.6);
+}
+.btn-success:active{box-shadow:0 2px 0 #0A6E3C,0 6px 12px -4px rgba(0,0,0,.55),inset 0 2px 0 rgba(255,255,255,.7)}
+.btn-danger{
+  background:var(--grad-danger);color:#fff;
+  box-shadow:0 6px 0 #8E151D,0 14px 28px -6px rgba(0,0,0,.55),inset 0 2px 0 rgba(255,255,255,.4);
+}
+.btn-ghost{
+  background:rgba(255,255,255,.06);color:var(--ink);
+  border:1px solid var(--border);
+  box-shadow:0 4px 0 rgba(0,0,0,.4),inset 0 1px 0 rgba(255,255,255,.15);
+}
+.btn-ghost:active{background:rgba(255,255,255,.12)}
+.btn-block{width:100%;justify-content:center}
+.btn-sm{height:40px;padding:0 var(--space-3);font-size:14px}
 
-/* круглая иконка-кнопка */
-.ib{position:relative;width:44px;height:44px;border-radius:15px;display:grid;place-items:center;
-  background:linear-gradient(180deg,#2C3470,#1A1F4A);box-shadow:0 4px 0 #0A0D26,inset 0 1.5px 0 rgba(255,255,255,.18),0 8px 16px -6px rgba(0,0,0,.6);transition:transform .14s var(--spring),box-shadow .14s}
-.ib:active,.ib.pressed{transform:translateY(3px);box-shadow:0 1px 0 #0A0D26,inset 0 1.5px 0 rgba(255,255,255,.18)}
-.ib svg{width:22px;height:22px}
-.dot{position:absolute;top:-5px;right:-5px;min-width:20px;height:20px;padding:0 5px;border-radius:10px;background:linear-gradient(180deg,#FF6A5A,#E0172C);color:#fff;font:900 11px/20px var(--display);text-align:center;box-shadow:0 0 0 2.5px var(--bg1),0 4px 10px rgba(224,23,44,.6);animation:dotpop 2.4s var(--spring) infinite}
-@keyframes dotpop{0%,80%,100%{transform:scale(1)}88%{transform:scale(1.25)}}
+/* --- Крупная кнопка действия --- */
+.btn-hero{
+  min-height:56px;height:56px;padding:0 32px;
+  font-size:20px;box-shadow:0 8px 0 rgba(0,0,0,.5),0 20px 40px -8px rgba(0,0,0,.6),inset 0 2px 0 rgba(255,255,255,.7);
+}
+.btn-hero:active{transform:translateY(4px) scale(.99);box-shadow:0 2px 0 rgba(0,0,0,.5),0 8px 16px -4px rgba(0,0,0,.5),inset 0 2px 0 rgba(255,255,255,.8)}
 
-/* ---------------- panels ---------------- */
-.pnl{position:relative;border-radius:22px;background:linear-gradient(180deg,rgba(46,54,118,.78) 0%,rgba(22,26,64,.88) 100%);
-  box-shadow:inset 0 1px 0 rgba(255,255,255,.14),inset 0 0 0 1px rgba(255,255,255,.05),0 14px 30px -10px rgba(0,0,0,.7)}
-.pnl.inset{background:linear-gradient(180deg,rgba(6,8,24,.72),rgba(12,15,40,.6));box-shadow:inset 0 2px 6px rgba(0,0,0,.6),inset 0 -1px 0 rgba(255,255,255,.06)}
-.chip{display:inline-flex;align-items:center;gap:6px;height:24px;padding:0 10px;border-radius:12px;font-size:11px;font-weight:800;letter-spacing:.04em;text-transform:uppercase;background:rgba(255,255,255,.08);color:var(--ink2)}
-.chip.gold{background:linear-gradient(180deg,rgba(255,201,58,.28),rgba(255,140,0,.18));color:#FFE28A;box-shadow:inset 0 0 0 1px rgba(255,201,58,.35)}
-.chip.cyan{background:rgba(46,230,255,.14);color:var(--cyan2);box-shadow:inset 0 0 0 1px rgba(46,230,255,.3)}
-.chip.coral{background:rgba(255,75,62,.18);color:#FFB3A6;box-shadow:inset 0 0 0 1px rgba(255,75,62,.35)}
-.chip.green{background:rgba(59,245,160,.15);color:#9CFFD0;box-shadow:inset 0 0 0 1px rgba(59,245,160,.3)}
-.chip.violet{background:rgba(159,107,255,.18);color:#D9C6FF;box-shadow:inset 0 0 0 1px rgba(159,107,255,.35)}
+/* --- Иконка-кнопка --- */
+.btn-icon{
+  width:var(--touch-target);height:var(--touch-target);min-width:var(--touch-target);min-height:var(--touch-target);
+  border-radius:var(--radius-md);display:grid;place-items:center;
+  background:var(--surface);color:var(--ink-soft);
+  border:1px solid var(--border);
+  box-shadow:0 4px 0 rgba(0,0,0,.4),inset 0 1px 0 rgba(255,255,255,.1);
+  cursor:pointer;
+}
+.btn-icon:active{transform:translateY(2px) scale(.96);background:var(--surface-lift)}
+.btn-icon:focus-visible{outline:3px solid var(--accent-primary);outline-offset:2px}
+.btn-icon svg{width:24px;height:24px;fill:currentColor}
+.btn-icon.active{color:var(--accent-primary);border-color:var(--accent-primary);background:rgba(46,230,255,.08)}
 
-/* ---------------- progress bars ---------------- */
-.bar{position:relative;height:14px;border-radius:8px;background:rgba(0,0,0,.45);box-shadow:inset 0 2px 4px rgba(0,0,0,.6),0 1px 0 rgba(255,255,255,.06);overflow:hidden}
-.bar>i{position:absolute;inset:2px auto 2px 2px;width:calc((100% - 4px) * var(--p,0));border-radius:6px;background:linear-gradient(180deg,#9BF6FF,#2EC9FF 55%,#1A86F0);box-shadow:inset 0 1px 0 rgba(255,255,255,.6),0 0 12px rgba(46,201,255,.6);transition:width 1s var(--out)}
-.bar>i::after{content:"";position:absolute;inset:0;border-radius:inherit;background:repeating-linear-gradient(-45deg,rgba(255,255,255,.18) 0 6px,transparent 6px 12px);animation:barstripes 1s linear infinite}
-@keyframes barstripes{to{background-position:17px 0}}
-.bar.gold>i{background:linear-gradient(180deg,#FFF0A0,#FFC93A 55%,#FF9500);box-shadow:inset 0 1px 0 rgba(255,255,255,.7),0 0 12px rgba(255,180,0,.6)}
-.bar.coral>i{background:linear-gradient(180deg,#FFB199,#FF4B3E 55%,#D51B30);box-shadow:inset 0 1px 0 rgba(255,255,255,.6),0 0 12px rgba(255,75,62,.6)}
-.bar.green>i{background:linear-gradient(180deg,#B8FFD5,#3BF5A0 55%,#10B45A)}
-.bar .lbl{position:absolute;inset:0;display:grid;place-items:center;font:900 10px/1 var(--display);letter-spacing:.04em;color:#fff;text-shadow:0 1px 2px rgba(0,0,0,.8);z-index:2}
+/* --- Карточки --- */
+.card{
+  position:relative;border-radius:var(--radius-lg);padding:var(--space-4);
+  background:var(--grad-surface);
+  border:1px solid var(--border);
+  box-shadow:0 12px 24px -8px rgba(0,0,0,.6),inset 0 1px 0 rgba(255,255,255,.08);
+  transition:transform var(--dur-fast) var(--ease-out),box-shadow var(--dur-fast) var(--ease-out);
+}
+.card:active{transform:translateY(2px) scale(.99)}
+.card.interactive{cursor:pointer}
+.card.selected{
+  border-color:var(--accent-primary);
+  box-shadow:0 0 0 1px var(--accent-primary),0 12px 24px -8px rgba(0,0,0,.6),0 0 20px rgba(46,230,255,.15);
+}
 
-/* ---------------- top HUD ---------------- */
-.hud{position:relative;z-index:5;display:flex;align-items:center;gap:6px;padding:calc(var(--sat) + var(--tgt) + 8px) 10px 4px}
-.hud-me{position:relative;display:flex;align-items:center;flex:1;min-width:0;min-height:36px;text-align:left;gap:8px}
-/* касание: видимая строка 36 px, зона нажатия — 44 px (не растягивая HUD) */
-.hud-me::after{content:'';position:absolute;left:0;right:0;top:-4px;bottom:-4px}
-.hud-title{flex:1;min-width:0;margin-left:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.hud-name{min-width:0;flex:0 1 auto}
-.hud-name b{display:block;font:900 11px/1.1 var(--display);letter-spacing:-.01em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.hud-name span{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:9px;color:var(--ink2);margin-top:2px}
-.hud-bar{flex:1;min-width:30px;height:8px;border-radius:4px;background:rgba(255,255,255,.10);overflow:hidden;box-shadow:inset 0 1px 2px rgba(0,0,0,.4)}
-.hud-bar i{display:block;height:100%;width:calc(var(--p)*100%);border-radius:4px;background:linear-gradient(90deg,#FFD95C,#F5A623);transition:width .4s var(--spring)}
-.notice-button{position:relative;display:grid;place-items:center;flex:none;width:34px;height:34px;border-radius:11px;color:#e1f1fa;
-  background:rgba(10,17,30,.76);box-shadow:inset 0 0 0 1px rgba(192,227,245,.16),0 4px 12px rgba(0,0,0,.25)}
-/* касание: видимая иконка 34px, зона — 46px */
-.notice-button::after{content:'';position:absolute;inset:-6px}
-.notice-button svg{width:18px;height:18px}
-.notice-count{position:absolute;top:-3px;right:-2px;min-width:14px;height:14px;padding:0 3px;border-radius:7px;background:#e8b75c;color:#172130;
-  font:900 8px/14px var(--display);text-align:center;box-shadow:0 0 0 2px #0b1420}
-.notice-count[hidden]{display:none}
-@media(max-width:360px){.hud{gap:4px;padding-left:8px;padding-right:8px}.hud-name b{font-size:10px}.hud-name span{font-size:8px}.hud .cur{font-size:10px}}
-.cur{position:relative;display:flex;align-items:center;height:26px;padding:0 5px 0 22px;border-radius:10px;background:rgba(3,5,18,.7);box-shadow:inset 0 2px 3px rgba(0,0,0,.7),0 1px 0 rgba(255,255,255,.08);font:900 11px/1 var(--display);letter-spacing:-.01em}
-.cur .ci{position:absolute;left:-4px;top:50%;width:22px;height:22px;transform:translateY(-50%);filter:drop-shadow(0 2px 3px rgba(0,0,0,.5))}
-.cur .plus{position:relative;width:16px;height:16px;margin-left:5px;border-radius:6px;display:grid;place-items:center;background:linear-gradient(180deg,#5BF79A,#18B85F);box-shadow:0 2px 0 #07603A,inset 0 1px 0 rgba(255,255,255,.6);color:#fff;font:900 12px/1 var(--display)}
-.cur .v{min-width:28px;text-align:right}
-.bump{animation:bump .42s var(--spring)}
-@keyframes bump{0%{transform:scale(1)}35%{transform:scale(1.28) translateY(-2px)}100%{transform:scale(1)}}
-.bump-ic{animation:bumpic .5s var(--spring)}
-@keyframes bumpic{0%{transform:translateY(-50%) scale(1) rotate(0)}30%{transform:translateY(-50%) scale(1.4) rotate(-14deg)}100%{transform:translateY(-50%) scale(1) rotate(0)}}
+/* --- Пустые состояния --- */
+.empty-state{
+  display:flex;flex-direction:column;align-items:center;justify-content:center;
+  text-align:center;padding:var(--space-6) var(--space-4);
+}
+.empty-icon{width:80px;height:80px;border-radius:var(--radius-full);display:grid;place-items:center;
+  margin-bottom:var(--space-4);background:rgba(255,255,255,.06);border:1px solid var(--border)}
+.empty-icon svg{width:40px;height:40px;fill:var(--ink-muted)}
+.empty-title{font-family:var(--Unb);font-weight:var(--fw-black);font-size:var(--fs-title);margin:0 0 var(--space-3) 0;color:var(--ink)}
+.empty-text{font-size:var(--fs-small);line-height:var(--lh-loose);color:var(--ink-soft);max-width:260px;margin:0 0 var(--space-5) 0}
 
-/* ---------------- bottom nav: four single-colour icons ---------------- */
-#nav{position:absolute;left:0;right:0;bottom:0;padding:0 10px calc(var(--sab) + var(--tgb) + 10px);display:flex;align-items:flex-end;
-  background:linear-gradient(180deg,transparent,rgba(4,8,16,.82) 48%,rgba(4,8,16,.96));transition:transform .45s var(--out)}
-#nav.hide{transform:translateY(130%)}
-#nav .navbg{position:absolute;left:10px;right:10px;bottom:calc(var(--sab) + var(--tgb) + 10px);height:60px;border-radius:19px;
-  background:rgba(13,23,36,.96);box-shadow:inset 0 0 0 1px rgba(196,220,235,.13),0 10px 28px rgba(0,0,0,.42)}
-#nav .tab{position:relative;z-index:1;flex:1;height:60px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;color:#94a7b4;transition:color .2s}
-#nav .tab.on{color:#d9f6ff}
-#nav .tab .glow{position:absolute;inset:7px 10%;border-radius:13px;background:rgba(127,206,224,.13);opacity:0;transition:opacity .2s}
-#nav .tab.on .glow{opacity:1}
-#nav .tab .ti{position:relative;width:22px;height:22px}
-#nav .tab .tl{position:relative;max-width:100%;padding:0 2px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;
-  font:800 8.5px/1 var(--body);letter-spacing:.04em;text-transform:uppercase;opacity:.66;transition:opacity .2s}
-#nav .tab.on .tl{opacity:1}
-#nav .tab:focus-visible,.notice-button:focus-visible,.hud-me:focus-visible{outline:2px solid #9be8ff;outline-offset:2px}
+/* --- Скелетон загрузки --- */
+.skeleton{
+  position:relative;overflow:hidden;color:transparent;background:#141A30;
+  background:linear-gradient(90deg,#141A30 25%,#1F2A4A 50%,#141A30 75%);
+  background-size:200% 100%;animation:skeleton 1.6s var(--ease-out) infinite;
+}
+@keyframes skeleton{0%{background-position:200% 0}100%{background-position:-200% 0}}
+.skeleton-text{height:1em;border-radius:4px;margin-bottom:var(--space-3)}
+.skeleton-text:last-child{margin-bottom:0}
 
-/* The bell lists only currently available in-game rewards. */
-.notice-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin:2px 2px 18px}
-.notice-head .h1{font-size:21px;margin-top:5px}
-.notice-kicker{font:800 10px/1 var(--body);letter-spacing:.13em;text-transform:uppercase;color:#87b2c7}
-.notice-close{display:grid;place-items:center;flex:none;width:38px;height:38px;border-radius:12px;color:#c8dce5;background:rgba(255,255,255,.07)}
-.notice-close svg{width:19px;height:19px}
-.notice-list{display:grid;gap:9px}
-.notice-row{width:100%;display:flex;align-items:center;gap:12px;text-align:left;padding:12px;border-radius:16px;
-  background:rgba(113,158,183,.10);box-shadow:inset 0 0 0 1px rgba(178,222,236,.10)}
-.notice-icon{display:grid;place-items:center;flex:none;width:40px;height:40px;border-radius:12px;color:#a8e1f1;background:rgba(111,194,220,.12)}
-.notice-icon svg{width:21px;height:21px}
-.notice-copy{flex:1;min-width:0}.notice-copy b{display:block;font-size:13px}.notice-copy small{display:block;margin-top:3px;font-size:11px;line-height:1.35;color:var(--ink2)}
-.notice-arrow{font-size:24px;line-height:1;color:#91afbe}
-.notice-empty{display:grid;justify-items:center;gap:8px;padding:30px 16px 35px;text-align:center;color:var(--ink2)}
-.notice-empty svg{width:30px;height:30px;color:#91afbe}.notice-empty p{margin:0;font-size:13px}
+/* --- Top HUD --- */
+.top-hud{
+  position:relative;z-index:10;display:flex;align-items:center;gap:var(--space-3);
+  padding:calc(var(--sat) + var(--tgt) + var(--space-2)) var(--space-4) var(--space-2);
+  background:linear-gradient(180deg,transparent,rgba(5,7,15,.6));
+  border-bottom:1px solid var(--border);
+}
+.top-hud-me{
+  display:flex;align-items:center;gap:var(--space-3);flex:1;min-width:0;
+}
+.top-hud-avatar{width:40px;height:40px;border-radius:50%;border:2px solid var(--border-bright);flex-shrink:0}
+.top-hud-info{flex:1;min-width:0}
+.top-hud-name{font-family:var(--Unb);font-weight:var(--fw-black);font-size:15px;letter-spacing:var(--letter-tight);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--ink)}
+.top-hud-sub{font-size:var(--fs-caption);color:var(--ink-muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.top-hud-progress{flex:0 0 auto;width:120px;height:6px;border-radius:3px;background:rgba(255,255,255,.08);overflow:hidden;margin-left:var(--space-3)}
+.top-hud-progress i{display:block;height:100%;border-radius:3px;background:var(--accent-gold);box-shadow:0 0 10px rgba(255,201,58,.6)}
+.top-hud-actions{display:flex;gap:var(--space-2);flex-shrink:0}
 
-/* ---------------- toasts ---------------- */
-.toast{display:flex;align-items:center;gap:10px;padding:10px 16px 10px 10px;border-radius:16px;background:linear-gradient(180deg,#2A3170,#171B44);box-shadow:inset 0 1px 0 rgba(255,255,255,.15),0 12px 28px rgba(0,0,0,.6);font-size:13px;font-weight:800;
-  animation:toastIn .55s var(--spring2) both}
-.toast.out{animation:toastOut .25s var(--in) both}
-.toast .ti{width:30px;height:30px;flex:none}
-@keyframes toastIn{from{transform:translateY(-40px) scale(.85);opacity:0}}
-@keyframes toastOut{to{transform:translateY(-20px) scale(.9);opacity:0}}
+/* --- Bottom nav --- */
+.bottom-nav{
+  position:absolute;left:0;right:0;bottom:0;padding:0 var(--space-4) calc(var(--sab) + var(--tgb) + var(--space-4));
+  display:flex;align-items:flex-end;gap:var(--space-2);
+  background:linear-gradient(180deg,transparent,rgba(5,7,15,.85) 50%,rgba(5,7,15,.98));
+}
+.bottom-nav .tab{
+  flex:1;height:56px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:var(--space-2);
+  color:var(--ink-muted);font-size:var(--fs-caption);font-weight:var(--fw-bold);letter-spacing:.05em;text-transform:uppercase;
+  border-radius:var(--radius-md);transition:color var(--dur-normal),transform var(--dur-fast);
+}
+.bottom-nav .tab.on{color:var(--ink)}
+.bottom-nav .tab .ti{width:26px;height:26px;position:relative}
+.bottom-nav .tab .ti svg{width:26px;height:26px;fill:currentColor}
+.bottom-nav .tab.on .ti svg{fill:var(--accent-primary)}
+.bottom-nav .tab:focus-visible{outline:3px solid var(--accent-primary);outline-offset:2px}
 
-/* ---------------- wipe transition ---------------- */
-#wipe{position:absolute;inset:0;z-index:80;pointer-events:none;overflow:hidden;visibility:hidden}
-#wipe.on{visibility:visible}
-#wipe i{position:absolute;left:-60%;width:220%;height:46%;transform:translateX(-120%) skewY(-12deg);}
-#wipe i:nth-child(1){top:-6%;background:linear-gradient(90deg,#FF4B3E,#FF7A4D)}
-#wipe i:nth-child(2){top:30%;background:linear-gradient(90deg,#0A0D22,#141A3E);box-shadow:0 0 0 6px #2EE6FF}
-#wipe i:nth-child(3){top:66%;background:linear-gradient(90deg,#1A86F0,#2EE6FF)}
-#wipe.in i{animation:wipeIn .42s var(--in) forwards}
-#wipe.in i:nth-child(2){animation-delay:.05s}
-#wipe.in i:nth-child(3){animation-delay:.1s}
-#wipe.outw i{transform:translateX(0) skewY(-12deg);animation:wipeOut .5s var(--out) forwards}
-#wipe.outw i:nth-child(2){animation-delay:.04s}
-#wipe.outw i:nth-child(3){animation-delay:.08s}
-@keyframes wipeIn{from{transform:translateX(-120%) skewY(-12deg)}to{transform:translateX(0) skewY(-12deg)}}
-@keyframes wipeOut{from{transform:translateX(0) skewY(-12deg)}to{transform:translateX(120%) skewY(-12deg)}}
-
-/* ---------------- entry choreography ---------------- */
-.rise{opacity:0;transform:translateY(26px) scale(.96)}
-.screen.live .rise{animation:rise .7s var(--spring2) forwards;animation-delay:calc(var(--d,0) * 55ms + 60ms)}
-@keyframes rise{to{opacity:1;transform:none}}
-.pop{opacity:0;transform:scale(.4)}
-.screen.live .pop{animation:popin .6s var(--spring) forwards;animation-delay:calc(var(--d,0) * 70ms + 100ms)}
-/* перерисовка по серверным данным: без входной хореографии, сразу в конечном виде */
-.screen.repaint .rise,.screen.repaint .pop,.screen.repaint .trow{animation:none;opacity:1;transform:none}
-/* график уже был нарисован до перерисовки — не заставляем его рисоваться заново */
-.screen.repaint .ch-line{stroke-dashoffset:0}
-.screen.repaint .ch-area{opacity:1}
-@keyframes popin{to{opacity:1;transform:none}}
-
-/* ---------------- sheets ---------------- */
-.sheet-wrap{position:absolute;inset:0;pointer-events:auto;display:flex;flex-direction:column;justify-content:flex-end}
-.sheet-wrap .scrim{position:absolute;inset:0;background:rgba(2,3,10,.62);backdrop-filter:blur(3px);-webkit-backdrop-filter:blur(3px);opacity:0;transition:opacity .3s}
+/* --- Sheets --- */
+.sheet-wrap{position:absolute;inset:0;pointer-events:auto;display:flex;flex-direction:column;justify-content:flex-end;z-index:50}
+.sheet-wrap .scrim{position:absolute;inset:0;background:rgba(2,3,10,.7);backdrop-filter:blur(12px);opacity:0;transition:opacity var(--dur-normal)}
 .sheet-wrap.open .scrim{opacity:1}
-.sheet{position:relative;max-height:88%;display:flex;flex-direction:column;border-radius:30px 30px 0 0;padding:10px 16px calc(var(--sab) + var(--tgb) + 18px);
-  background:linear-gradient(180deg,#252C68 0%,#141838 40%,#0E1130 100%);box-shadow:inset 0 1.5px 0 rgba(255,255,255,.16),0 -20px 60px rgba(0,0,0,.6);
-  transform:translateY(105%);transition:transform .55s var(--spring2)}
+.sheet{
+  position:relative;max-height:92vh;display:flex;flex-direction:column;
+  border-radius:var(--radius-xl) var(--radius-xl) 0 0;
+  padding:var(--space-4) var(--space-5) calc(var(--sab) + var(--tgb) + var(--space-4));
+  background:var(--grad-panel);
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.12),0 -24px 70px rgba(0,0,0,.75),0 0 40px rgba(46,230,255,.04);
+  transform:translateY(120%);transition:transform var(--dur-slow) var(--ease-spring);
+}
 .sheet-wrap.open .sheet{transform:none}
-.sheet-wrap.closing .sheet{transition:transform .28s var(--in);transform:translateY(105%)}
+.sheet-wrap.closing .sheet{transition:transform .25s var(--ease-in);transform:translateY(120%)}
 .sheet-wrap.closing .scrim{opacity:0}
-.sheet .grab{width:44px;height:5px;border-radius:3px;background:rgba(255,255,255,.22);margin:0 auto 12px}
-.sheet .sbody{overflow-y:auto;scrollbar-width:none}
+.sheet .grab{width:40px;height:5px;border-radius:3px;background:rgba(255,255,255,.25);margin:0 auto var(--space-3) auto}
+.sheet-title{font-family:var(--Unb);font-weight:var(--fw-black);font-size:24px;letter-spacing:var(--letter-tight);margin:0 0 var(--space-3) 0}
+.sheet-body{overflow-y:auto;scrollbar-width:none}
+.sheet-body::-webkit-scrollbar{display:none}
+:root{--grad-panel:linear-gradient(180deg,rgba(30,38,92,.88) 0%,rgba(20,26,56,.95) 100%);}
 
-/* ---------------- rarity frames ---------------- */
-.rar{--rc:var(--r-common)}
-.rar.rare{--rc:var(--r-rare)} .rar.epic{--rc:var(--r-epic)} .rar.leg{--rc:var(--r-leg)}
-.beam{position:relative;isolation:isolate}
-.beam::before{content:"";position:absolute;inset:-2px;border-radius:inherit;padding:2px;background:conic-gradient(from var(--ang,0deg),transparent 0 60%,var(--rc) 75%,#fff 80%,var(--rc) 85%,transparent 100%);
-  -webkit-mask:linear-gradient(#000 0 0) content-box,linear-gradient(#000 0 0);-webkit-mask-composite:xor;mask-composite:exclude;animation:beam 3.2s linear infinite;z-index:2;pointer-events:none}
-@property --ang{syntax:"<angle>";inherits:false;initial-value:0deg}
-@keyframes beam{to{--ang:360deg}}
+/* --- Прогресс-бары --- */
+.progress-bar{
+  position:relative;height:8px;border-radius:4px;background:rgba(255,255,255,.08);overflow:hidden;
+}
+.progress-bar i{display:block;height:100%;border-radius:4px;background:var(--accent-primary);box-shadow:0 0 12px currentColor;transition:width .6s var(--ease-out)}
+.progress-bar.success i{background:var(--accent-success);box-shadow:0 0 12px rgba(59,245,160,.6)}
+.progress-bar.danger i{background:var(--accent-danger);box-shadow:0 0 12px rgba(255,75,62,.6)}
+.progress-bar.gold i{background:var(--accent-gold);box-shadow:0 0 12px rgba(255,201,58,.6)}
 
-/* ---------------- toggle ---------------- */
-.tgl{position:relative;width:54px;height:32px;border-radius:16px;background:rgba(0,0,0,.5);box-shadow:inset 0 2px 4px rgba(0,0,0,.6);transition:background .3s}
-.tgl::before{content:'';position:absolute;top:-6px;left:-4px;right:-4px;bottom:-6px}
-.tgl::after{content:"";position:absolute;top:3px;left:3px;width:26px;height:26px;border-radius:50%;background:linear-gradient(180deg,#fff,#C9D2F5);box-shadow:0 3px 6px rgba(0,0,0,.4);transition:transform .45s var(--spring)}
-.tgl.on{background:linear-gradient(180deg,#2EE07A,#10B45A)}
-.tgl.on::after{transform:translateX(22px)}
+/* --- Список --- */
+.list{display:flex;flex-direction:column;gap:var(--space-2)}
+.list-item{
+  display:flex;align-items:center;gap:var(--space-3);padding:var(--space-3);
+  border-radius:var(--radius-md);background:rgba(255,255,255,.03);border:1px solid var(--border);
+}
 
-/* ---------------- tabs pill ---------------- */
-.seg{position:relative;display:flex;padding:4px;border-radius:16px;background:rgba(0,0,0,.4);box-shadow:inset 0 2px 4px rgba(0,0,0,.5)}
-.seg button{position:relative;z-index:1;flex:1;height:40px;border-radius:12px;font:900 12px/1 var(--display);text-transform:uppercase;color:var(--ink3);transition:color .3s}
-.seg button.on{color:#fff}
-.seg .pill{position:absolute;top:4px;bottom:4px;border-radius:12px;background:linear-gradient(180deg,#3A4390,#262D66);box-shadow:inset 0 1.5px 0 rgba(255,255,255,.2),0 3px 0 #0B0E26;transition:left .45s var(--spring),width .45s var(--spring)}
+/* --- Toasts --- */
+.toast{
+  display:flex;align-items:center;gap:var(--space-2);padding:var(--space-3) var(--space-4);
+  border-radius:var(--radius-md);background:rgba(15,20,40,.92);color:var(--ink);
+  border:1px solid var(--border);box-shadow:0 8px 24px rgba(0,0,0,.5);
+  font-size:var(--fs-small);font-weight:var(--fw-bold);animation:toastIn .4s var(--ease-out) both;
+}
+.toast.out{animation:toastOut .25s var(--ease-in) both}
+@keyframes toastIn{from{transform:translateY(20px);opacity:0}to{transform:none;opacity:1}}
+@keyframes toastOut{to{transform:translateY(-10px);opacity:0}}
 
-/* Four bot levels must stay readable even on narrow phones. */
-.settings-diff{margin:0 0 16px}
-.settings-diff-head{display:flex;flex-direction:column;gap:4px;margin:0 4px 8px}
-.settings-diff-head b{font:900 11px/1.2 var(--display);text-transform:uppercase;color:#e1eafb}
-.settings-diff-head small,.settings-diff-info{font:600 11px/1.35 var(--body);color:rgba(196,210,235,.72)}
-.settings-diff-info{min-height:15px;margin:7px 4px 0}
-#dseg button{min-width:0;padding:0 2px;font:800 11px/1 var(--body);letter-spacing:0;color:#aab9d3}
-#dseg button.on{color:#fff}
-
-/* ---------------- reduced motion ---------------- */
-body.rm *{animation-duration:.001ms!important;animation-iteration-count:1!important;transition-duration:.001ms!important}
-body.q-low .b3 .shine,body.q-low .beam::before{display:none}
-
-/* аудит касаний: маленькая «+» у валюты получает невидимую зону 44×44 */
-.cur .plus::before{content:'';position:absolute;inset:-12px}
+/* --- Утилиты --- */
+.fade-in{animation:fadeIn var(--dur-normal) var(--ease-out) both}
+@keyframes fadeIn{from{opacity:0}to{opacity:1}}
+.slide-up{animation:slideUp var(--dur-slow) var(--ease-spring) both}
+@keyframes slideUp{from{opacity:0;transform:translateY(24px)}to{opacity:1;transform:none}}
+.scale-in{animation:scaleIn .25s var(--ease-out) both}
+@keyframes scaleIn{from{opacity:0;transform:scale(.92)}to{opacity:1;transform:scale(1)}}
+.hidden{display:none!important}
+.visually-hidden{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
+.text-center{text-align:center}
+.flex{display:flex}
+.flex-col{display:flex;flex-direction:column}
+.items-center{align-items:center}
+.justify-center{justify-content:center}
+.flex-1{flex:1}
+.flex-none{flex:none}
+.gap-2{gap:var(--space-2)}
+.gap-3{gap:var(--space-3)}
+.gap-4{gap:var(--space-4)}
+.gap-5{gap:var(--space-5)}
+.gap-6{gap:var(--space-6)}
+.mt-2{margin-top:var(--space-2)}
+.mt-3{margin-top:var(--space-3)}
+.mt-4{margin-top:var(--space-4)}
+.mt-5{margin-top:var(--space-5)}
+.mt-6{margin-top:var(--space-6)}
+.mb-2{margin-bottom:var(--space-2)}
+.mb-3{margin-bottom:var(--space-3)}
+.mb-4{margin-bottom:var(--space-4)}
+.mb-5{margin-bottom:var(--space-5)}
+.mb-6{margin-bottom:var(--space-6)}
+.p-3{padding:var(--space-3)}
+.p-4{padding:var(--space-4)}
