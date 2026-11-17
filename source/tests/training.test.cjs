@@ -42,9 +42,12 @@ function masterAll(api, targetCatalog = catalog) {
 test('the current save migrates legacy flags without inventing academy mastery or changing earned state', () => {
   const legacy = { v: 6, tutorialDone: true, tutorialRewarded: true, coins: 713, gems: 9, rating: 1420, wins: 11, losses: 5,
     level: 4, xp: 251, diff: 3, cal: { captureK: 1.12, spinGain: .93 }, hist: [{ t: 10, r: 1400 }],
-    passSeason: 5, passLvl: 7, passXp: 60, premium: true, claimed: { f: [1, 2], p: [1] }, equipped: { rubber: 'r-owned', blade: 'b-owned' } };
+    passSeason: 5, passLvl: 7, passXp: 60, premium: true, claimed: { f: [1, 2], p: [1] },
+    owned: ['r-owned', 'b-owned'], equipped: { rubber: 'r-owned', blade: 'b-owned' } };
   const api = loadState(legacy); assert.ok(api.SAVE_VERSION >= 8); assert.equal(api.S.v, api.SAVE_VERSION);
-  for (const key of Object.keys(legacy).filter(key => key !== 'v')) assert.deepEqual(plain(api.S[key]), legacy[key], key);
+  for (const key of Object.keys(legacy).filter(key => !['v', 'owned', 'equipped'].includes(key))) assert.deepEqual(plain(api.S[key]), legacy[key], key);
+  assert.deepEqual(plain(api.S.owned), ['r-standard', 'r-owned', 'b-owned']);
+  assert.deepEqual(plain(api.S.equipped), { racket: 'r-standard' });
   assert.deepEqual(plain(api.S.training), { version: 1, lessons: {}, lastLesson: null });
   assert.deepEqual(plain(api.trainingMastery(api.S, catalog)), { mastered: 0, total: 3, coverage: 0, courseComplete: false });
   assert.equal(api.awardTrainingCompletion(api.S, catalog), false); assert.equal(api.S.coins, 713); assert.equal(api.S.gems, 9);

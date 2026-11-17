@@ -33,13 +33,13 @@ for (const axis of ['x', 'z']) for (const sign of [-1, 1]) for (const direction 
 
 test('slow edge bounces remain real contacts and a second receiver bounce ends the point', () => {
   const g = Object.create(Game.prototype), contacts = [];
-  let edgeSounds = 0, winner = 0;
+  let edgeSounds = 0, tableSounds = 0, edgeFeedback = 0, winner = 0;
   Object.assign(g, { time: 1, state: GS.RALLY, stats: {}, rallyBounces: [], isServeBall: false,
     ball: { p: V3.new(PH.T_HALF_WID - .001, PH.TABLE_Y + PH.R + .001, .5),
       v: V3.new(0, -.35, 0), w: V3.new(), q: Q.new(), live: true, lastHitBy: -1 },
-    player: { lastHitT: 1 }, audio: { hitEdge() { edgeSounds++; }, hitTable() {}, hitNet() {}, hitFloor() {} },
+    player: { lastHitT: 1 }, audio: { hitEdge() { edgeSounds++; }, hitTable() { tableSounds++; }, hitNet() {}, hitFloor() {} },
     recorder: { addBounce() {} }, watchdog: { tableContact(e) { contacts.push(e); } },
-    msg() {}, shakeIt() {}, _trailCrumb() {}, watchdogSubstep() {}, addMark() {}, emitParticles() {},
+    msg() { edgeFeedback++; }, shakeIt() {}, _trailCrumb() {}, watchdogSubstep() {}, addMark() {}, emitParticles() {},
     awardPoint(who) { winner = who; this.ball.live = false; } });
   for (let i = 0; i < 600 && g.ball.live; i++) {
     g.time += 1 / 600; g.player.lastHitT = g.time; g.stepPhysics(1 / 600);
@@ -49,5 +49,30 @@ test('slow edge bounces remain real contacts and a second receiver bounce ends t
   assert.ok(contacts[1].time - contacts[0].time < .35);
   assert.equal(winner, -1, 'receiver failed to return before the second bounce');
   assert.equal(g.ball.live, false);
-  assert.equal(edgeSounds, 1, 'feedback stays rate-limited');
+  assert.equal(edgeFeedback, 1, 'visual edge feedback stays rate-limited');
+  assert.equal(tableSounds, 2, 'every real collision has one dry table cue, even two close edge bounces');
+  assert.equal(edgeSounds, 0, 'an edge does not add a second transient over the base contact');
+});
+
+test('recorded weak-normal edge witness has one live/predicted contact and cannot award a premature point', () => {
+  const p = V3.new(.37435006549318794, 1.4956347050357772, 1.200767946336776);
+  const v = V3.new(-.9023632048174567, .4692986016484436, -7.654537023117085);
+  const w = V3.new(-28.177399564617033, -13.783426272581995, 6.400938055664742);
+  const dt = PH.SIM_DT, steps = 270, forecast = predict(p, v, w, { dt, maxT: steps * dt - 1e-9 });
+  let contacts = 0, winner = 0;
+  const g = Object.create(Game.prototype);
+  Object.assign(g, { time: 1, state: GS.RALLY, stats: {}, rallyBounces: [], isServeBall: false,
+    ball: { p: V3.clone(p), v: V3.clone(v), w: V3.clone(w), q: Q.new(), live: true, lastHitBy: 1 },
+    player: { lastHitT: 1 }, audio: { hitTable() {}, hitNet() {}, hitFloor() {} },
+    recorder: { addBounce() {} }, watchdog: { tableContact() { contacts++; } },
+    msg() {}, shakeIt() {}, _trailCrumb() {}, watchdogSubstep() {}, addMark() {}, emitParticles() {},
+    awardPoint(who) { winner = who; this.ball.live = false; } });
+  for (let i = 0; i < steps && g.ball.live; i++) {
+    g.time += dt; g.player.lastHitT = g.time; g.stepPhysics(dt);
+  }
+  assert.equal(contacts, 1); assert.equal(forecast.bounces, 1); assert.equal(forecast.b2, null);
+  assert.equal(winner, 0); assert.equal(g.ball.live, true);
+  for (const [actual, expected] of [[g.ball.p, forecast.end], [g.ball.v, forecast.endV], [g.ball.w, forecast.endW]]) {
+    for (const axis of ['x', 'y', 'z']) assert.ok(Math.abs(actual[axis] - expected[axis]) < 1e-8, axis + ' live/predicted parity');
+  }
 });

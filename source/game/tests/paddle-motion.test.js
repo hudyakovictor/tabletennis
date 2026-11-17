@@ -2,13 +2,81 @@ const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const { load } = require('./helpers.cjs');
 const lib = load(['10_math.js', '30_physics.js', '38_paddle_motion.js', '40_swipe.js', '56_rig.js'],
-  ['PaddleStrokeMotion', 'PaddleReadClock', 'PaddleRig', 'paddleGripProfile', 'paddleContactRange',
+  ['PaddleStrokeMotion', 'PaddleReadClock', 'PaddleTrick', 'PaddleRig', 'paddlePoseQuaternion', 'paddleGripProfile', 'paddleContactRange',
     'paddleForehand', 'stepPaddleAngle', 'paddleAngleDelta', 'paddleBottomExtent', 'keepPaddleAboveTable',
     'paddleTableClearance', 'paddleContactPose',
     'faceFromWrist', 'paddleFaceAngles', 'playerWristPose', 'deriveStroke', 'refineRacket', 'classifyStroke',
     'strokeFrame', 'resolvedRacketFrame', 'SwipeTracker', 'impactRacket', 'predict', 'PH', 'V3', 'Q', 'M4', 'DEG']);
 const { V3, DEG, faceFromWrist, PaddleStrokeMotion } = lib;
 const near = (a, b, eps = 1e-9) => assert.ok(Math.abs(a - b) < eps, `${a} != ${b}`);
+
+test('bounded CSS-pixel circle detection accepts both directions and ignores jitter, straight lines and thin loops', () => {
+  for (const direction of [-1, 1]) for (const radius of [28, 55, 110]) {
+    const trick = new lib.PaddleTrick(); let recognized = 0;
+    // A real straight approach must not poison the following intentional circle.
+    for (let i = 0; i < 12; i++) trick.observe(250 - (11 - i) * 4, 200 - radius, i * .012, i * .012);
+    for (let i = 0; i <= 40; i++) {
+      const angle = -Math.PI / 2 + direction * Math.PI * 2 * i / 40, now = .15 + i * .012;
+      const found = trick.observe(250 + radius * Math.cos(angle), 200 + radius * Math.sin(angle), now, now);
+      if (found) { assert.equal(found, direction); assert.equal(trick.start(found, now), true); recognized++; }
+    }
+    assert.equal(recognized, 1, `${radius}/${direction}`);
+    assert.equal(trick.active, true); assert.ok(trick.points.length <= 192);
+  }
+  for (const [rx, ry] of [[4, 4], [55, 8], [140, 35]]) {
+    const trick = new lib.PaddleTrick();
+    for (let i = 0; i <= 80; i++) {
+      const angle = Math.PI * 2 * i / 80;
+      assert.equal(trick.observe(300 + rx * Math.cos(angle), 200 + ry * Math.sin(angle), i * .01, i * .01), 0);
+    }
+  }
+  const jitter = new lib.PaddleTrick(); let seed = 21;
+  const random = () => (seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0) / 4294967296;
+  for (let i = 0; i < 4000; i++) {
+    assert.equal(jitter.observe(300 + (random() - .5) * 12, 200 + (random() - .5) * 12, i * .001, i * .001), 0);
+    assert.ok(jitter.points.length <= 192);
+  }
+});
+
+test('a 540-degree toss is time-based, lifts only the racket, keeps the quaternion continuous and finishes opposite', () => {
+  const normal = V3.norm(V3.new(), V3.new(.2, -.3, -1));
+  const paddle = { pos: V3.new(.2, 1.18, 1.8), normal, roll: .28,
+    q: lib.paddlePoseQuaternion(normal, .28) };
+  const before = JSON.stringify(paddle);
+  for (const direction of [-1, 1]) {
+    const outputs = [];
+    for (const fps of [30, 60, 120, 144]) {
+      const trick = new lib.PaddleTrick(); assert.equal(trick.start(direction, 2), true);
+      let elapsed = 0, previousAngle = 0;
+      while (elapsed < .36 - 1e-10) {
+        elapsed = Math.min(.36, elapsed + 1 / fps);
+        assert.equal(trick.advance(2 + elapsed), false);
+        assert.ok(direction * (trick.angle - previousAngle) >= -1e-10);
+        assert.ok(Math.abs(trick.angle - previousAngle) <= 20 * (1 / fps) + 1e-8);
+        previousAngle = trick.angle;
+      }
+      const pose = trick.pose(paddle);
+      near(pose.pos.y - paddle.pos.y, .18); near(trick.angle, direction * 1.5 * Math.PI);
+      near(Math.hypot(pose.q.x, pose.q.y, pose.q.z, pose.q.w), 1, 1e-8);
+      outputs.push(JSON.parse(JSON.stringify(pose)));
+      const rendered = JSON.stringify(pose), state = JSON.stringify({ progress: trick.progress, angle: trick.angle });
+      for (let i = 0; i < 100; i++) {
+        assert.equal(JSON.stringify(trick.pose(paddle)), rendered);
+        assert.equal(JSON.stringify(paddle), before);
+        assert.equal(JSON.stringify({ progress: trick.progress, angle: trick.angle }), state, 'drawing never advances animation');
+      }
+      assert.equal(trick.advance(2.72), true); near(trick.angle, direction * 3 * Math.PI);
+      assert.equal(trick.pose(paddle), null); assert.equal(trick.advance(3), false);
+      assert.equal(trick.start(direction, 2.9), false, 'one gesture cannot immediately retrigger');
+      assert.equal(trick.start(direction, 3.33), true);
+      trick.cancel(); assert.equal(trick.active, false); assert.equal(trick.points.length, 0);
+    }
+    for (const output of outputs.slice(1)) {
+      for (const axis of ['x', 'y', 'z']) near(output.pos[axis], outputs[0].pos[axis]);
+      for (const axis of ['x', 'y', 'z', 'w']) near(output.q[axis], outputs[0].q[axis], 1e-8);
+    }
+  }
+});
 
 test('real material below the tabletop is rejected even when its center is four cm above it', () => {
   const normal = V3.new(0, 0, -1), inside = V3.new(0, lib.PH.TABLE_Y + .04, .9);

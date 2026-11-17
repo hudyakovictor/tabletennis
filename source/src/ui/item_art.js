@@ -13,9 +13,15 @@ const ItemArt = {
       <path d="M10 52v6l40 20 40-20v-6L50 72z" fill="#0A1F57"/><path d="M50 32v40" stroke="#fff" stroke-width="1.5" opacity=".8"/><path d="M28 43l44 22" stroke="#fff" stroke-width="5" opacity=".85"/>
       <path d="M18 62v20M82 62v20M50 78v14" stroke="#0A0D1E" stroke-width="4"/></svg>`;
   },
+  pan(size = 90, opt = {}) {
+    return `<svg viewBox="0 0 100 100" width="${size}" height="${size}"><path d="M44 55h12l3 33a9 9 0 0 1-18 0z" fill="#282B2D" stroke="#606467" stroke-width="2"/><ellipse cx="50" cy="88" rx="3" ry="5" fill="#111416"/><path d="M43 8V4h14v4" fill="none" stroke="#606467" stroke-width="3"/><circle cx="50" cy="34" r="28" fill="#25282A" stroke="#707477" stroke-width="2"/><circle cx="50" cy="34" r="${opt.back ? 20 : 24}" fill="${opt.back ? '#34383A' : '#141719'}" stroke="#484D50" stroke-width="2"/><path d="M30 25a23 23 0 0 1 30-12" fill="none" stroke="#8A9094" stroke-width="2" opacity=".6"/></svg>`;
+  },
+  racketStandard(size = 90, opt = {}) {
+    return `<svg viewBox="0 0 100 100" width="${size}" height="${size}"><rect x="44" y="57" width="12" height="38" rx="3" fill="#795335" stroke="#C59B65" stroke-width="2"/><ellipse cx="50" cy="36" rx="27" ry="30" fill="#C7A36D" stroke="#6B553D" stroke-width="2"/><ellipse cx="50" cy="36" rx="25" ry="28" fill="${opt.back ? '#22252A' : '#C1232C'}"/><path d="M43 77h14M43 82h14" stroke="#D5B789" stroke-width="2"/></svg>`;
+  },
   of(it, size, opt = {}) {
     const ill = (typeof ILL !== 'undefined') && ILL['shop_' + it.id.replace('-', '_')];
     if (ill) return `<i class="ilf" style="display:block;width:${size}px;height:${size}px;background-image:url('${ill}');background-size:contain;background-position:center;background-repeat:no-repeat;-webkit-mask:radial-gradient(closest-side,#000 72%,transparent 100%);mask:radial-gradient(closest-side,#000 72%,transparent 100%)"></i>`;
-    return it.kind === 'trail' ? this.comet(size, it.col) : it.kind === 'table' ? this.table(size, it.col) : it.kind === 'rubber' ? Art.rubber(it.col, size, opt) : it.kind === 'blade' ? Art.blade(it.col, size, opt) : Art.paddle(it.col, size);
+    return it.kind === 'trail' ? this.comet(size, it.col) : it.kind === 'table' ? this.table(size, it.col) : it.kind === 'racket' ? (it.id === 'r-pan' ? this.pan(size, opt) : this.racketStandard(size, opt)) : it.kind === 'rubber' ? Art.rubber(it.col, size, opt) : it.kind === 'blade' ? Art.blade(it.col, size, opt) : Art.paddle(it.col, size);
   }
 };

@@ -191,7 +191,7 @@ test('rejection reasons from gameplay and the collision diagnostic gate are visi
     const sw = new lib.SwipeTracker();
     sw.down(.5, .72, at); sw.move(.52, .55, at + .06); sw.move(.54, .40, at + .12);
     if (released) sw.up(.54, .40, at + .12);
-    sw.pressZone = { accepted: true, shape: 'oval', score: .5, along: 20, across: 2, reason: null,
+    sw.pressZone = { accepted: true, shotId: g.shotId, shape: 'oval', score: .5, along: 20, across: 2, reason: null,
       pointerType: 'mouse', serving, pressT: at, vw: W, vh: H, x: 500, y: 250, pointerX: 480, pointerY: 250 };
     g.swipe = sw; g.swipeReleasedAt = released ? at + .12 : -Infinity;
     return sw;
@@ -465,4 +465,3 @@ test('v4 contact gate: world scaling by the local projection, finger floors, edg
   // px mode ignores the scale
   assert.equal(zone(null).sidePx, rules.contactSideTouchPx);
 });
-

@@ -66,7 +66,10 @@ function paddleContactRange(grip, stroke, forehand = true, isServe = false, cont
     const weak = Number.isFinite(context.swingSpeed) ? clamp((12 - context.swingSpeed) / 4, 0, 1) : 0;
     const low = Number.isFinite(context.contactY) ? clamp((1.10 - context.contactY) / .30, 0, 1) : 0;
     const back = Number.isFinite(context.incomingTop) ? clamp(-context.incomingTop / 300, 0, 1) : 0;
-    const opening = Math.min(15, Math.max(weak * 15, low * 10, back * 12));
+    // Stronger actual Magnus needs more opening on low/chopped feeds, still
+    // within the same closed-face wrist limit rather than extra arm speed.
+    const opening = Math.min(15, Math.max(weak * 15,
+      low * 10 * STROKE_CONFIG.flight.magnusGain, back * 12 * STROKE_CONFIG.flight.magnusGain));
     return [range[0], range[1] + opening];
   }
   return range;
@@ -178,6 +181,79 @@ class PaddleStrokeMotion {
     return { yaw: this.start.yaw + paddleAngleDelta(this.start.yaw, ready.yaw) * t,
       pitch: lerp(followPitch, ready.pitch, t),
       roll: followRoll + paddleAngleDelta(followRoll, ready.roll) * t, stage: this.stage };
+  }
+}
+
+/** Cosmetic only: bounded CSS-pixel circle input and an unwrapped 540-degree toss. */
+class PaddleTrick {
+  constructor() {
+    this.points = []; this.active = false; this.cooldownUntil = -Infinity;
+    this.progress = 0; this.angle = 0; this.lastTurn = 0;
+    this.output = { pos: V3.new(), q: Q.new() }; this.rotation = Q.new();
+  }
+  cancel() { this.points.length = 0; this.active = false; this.progress = this.angle = this.lastTurn = 0; }
+  observe(x, y, t, now) {
+    if (![x, y, t, now].every(Number.isFinite)) { this.cancel(); return 0; }
+    if (this.active || now < this.cooldownUntil) { this.points.length = 0; return 0; }
+    const points = this.points, last = points[points.length - 1];
+    if (last && t <= last.t) return 0;
+    if (last && (t - last.t < .008 || Math.hypot(x - last.x, y - last.y) < 1)) return 0;
+    if (points.length > 1) {
+      const previous = points[points.length - 2];
+      const dx = last.x - previous.x, dy = last.y - previous.y, nx = x - last.x, ny = y - last.y;
+      const angle = Math.atan2(dx * ny - dy * nx, dx * nx + dy * ny);
+      // Ignore a straight mouse approach before the actual circle begins.
+      if (Math.abs(angle) > .03 && Math.abs(this.lastTurn) < .015) points.splice(0, points.length - 1);
+      this.lastTurn = angle;
+    }
+    points.push({ x, y, t });
+    while (points.length > 192 || t - points[0].t > 1.1) points.shift();
+    if (points.length < 12 || t - points[0].t < .18) return 0;
+    let path = 0, area = 0, turn = 0, absoluteTurn = 0;
+    let minX = x, maxX = x, minY = y, maxY = y;
+    for (let i = 0; i < points.length; i++) {
+      const a = points[i], b = points[(i + 1) % points.length];
+      minX = Math.min(minX, a.x); maxX = Math.max(maxX, a.x);
+      minY = Math.min(minY, a.y); maxY = Math.max(maxY, a.y);
+      area += a.x * b.y - a.y * b.x;
+      if (i + 1 < points.length) path += Math.hypot(b.x - a.x, b.y - a.y);
+      if (i > 0 && i + 1 < points.length) {
+        const previous = points[i - 1], dx = a.x - previous.x, dy = a.y - previous.y;
+        const nx = b.x - a.x, ny = b.y - a.y;
+        const angle = Math.atan2(dx * ny - dy * nx, dx * nx + dy * ny);
+        turn += angle; absoluteTurn += Math.abs(angle);
+      }
+    }
+    const radius = Math.min(maxX - minX, maxY - minY) / 2;
+    const closed = Math.hypot(x - points[0].x, y - points[0].y);
+    if (radius < 22 || radius > 130 || path < 140 || closed > radius * .55 ||
+        Math.abs(turn) < TAU * .80 || Math.abs(turn) / Math.max(absoluteTurn, 1e-6) < .86 ||
+        TAU * Math.abs(area) / (path * path) < .70) return 0;
+    this.points.length = 0;
+    return Math.sign(turn);
+  }
+  start(direction, now, reducedMotion = false) {
+    if (this.active || now < this.cooldownUntil || !Number.isFinite(now) || ![-1, 1].includes(direction)) return false;
+    this.points.length = 0; this.lastTurn = 0; this.active = true; this.startedAt = now;
+    this.duration = reducedMotion ? 0 : .72; this.direction = direction;
+    this.progress = this.angle = 0;
+    return true;
+  }
+  advance(now) {
+    if (!this.active) return false;
+    this.progress = this.duration ? clamp((now - this.startedAt) / this.duration, 0, 1) : 1;
+    this.angle = this.direction * 3 * Math.PI * smoothstep(0, 1, this.progress);
+    if (this.progress < 1) return false;
+    this.active = false; this.points.length = 0; this.lastTurn = 0; this.cooldownUntil = now + .6;
+    return true;
+  }
+  pose(paddle) {
+    if (!this.active) return null;
+    const out = this.output;
+    V3.copy(out.pos, paddle.pos);
+    out.pos.y += .18 * Math.sin(Math.PI * this.progress) ** 2;
+    Q.mul(out.q, paddle.q, Q.setAxisAngle(this.rotation, 0, 1, 0, this.angle));
+    return out;
   }
 }
 

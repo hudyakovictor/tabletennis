@@ -25,11 +25,19 @@ test('play/ holds exactly one HTML, and it is the shell build', () => {
   assert.deepEqual(html, ['index.html'], 'play/ must contain only index.html — old builds belong in git history');
 
   const page = read('play/index.html').toString('utf8');
-  assert.match(title(page), /Table Tennis Ultimate/,
-    'play/index.html is not the shell build (title should be the TUI shell, not the bare engine page)');
+  const templateTitle = title(read('source/src/index.tpl.html').toString('utf8'));
+  assert.equal(templateTitle, 'Table Tennis WTF', 'the shell template defines the application identity');
+  assert.equal(title(page), templateTitle, 'play/index.html must use the shell template title, not the bare engine title');
+  assert.match(page, /const SHELL_BUILD = "shell [a-f0-9]{12}";/, 'shell fingerprint is missing');
+  assert.match(page, /id="screens"/, 'shell screen container is missing');
+  assert.match(page, /id="gamelayer"/, 'shell engine layer is missing');
+  assert.match(page, /window\.__TT_EMBED=1/, 'shell must activate the embedded-engine bridge');
   assert.ok(page.length > 2_000_000, `shell build is unexpectedly small: ${page.length} bytes`);
   // The shell embeds the engine as an escaped JSON string inside one line.
   assert.equal(count(page, 'const GAME_HTML = '), 1, 'shell build must embed exactly one engine');
+  const embedded = page.match(/^const GAME_HTML = (.+);$/m);
+  assert.ok(embedded, 'embedded engine must be one serialized document');
+  assert.match(JSON.parse(embedded[1]), /__TT_EMBED/, 'embedded document must include the engine bridge');
 });
 
 test('source/ holds sources only — no generated HTML builds', () => {

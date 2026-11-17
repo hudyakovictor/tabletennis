@@ -38,7 +38,8 @@ const settled = (page, id) => page.waitForFunction((screen) => Router.cur === sc
     page.on('pageerror', (e) => errors.push(e.message));
     await page.setViewport({ width: 390, height: 844, isMobile: true, hasTouch: true });
     await page.evaluateOnNewDocument(() => {
-      if (!localStorage.getItem('ttu-v2')) localStorage.setItem('ttu-v2', JSON.stringify({ v: 4, lang: 'ru', sfx: false, tutorialDone: true }));
+      if (!localStorage.getItem('ttu-v2')) localStorage.setItem('ttu-v2', JSON.stringify({ v: 4, lang: 'ru', sfx: false, tutorialDone: true,
+        owned: ['r-standard', 'r-pan'], equipped: { racket: 'r-pan' } }));
     });
     await page.goto(base, { waitUntil: 'load' });
     await settled(page, 'hub');
@@ -50,24 +51,26 @@ const settled = (page, id) => page.waitForFunction((screen) => Router.cur === sc
       const rect = (e) => { const r = e.getBoundingClientRect(); return { x: r.x, y: r.y, right: r.right, bottom: r.bottom, width: r.width, height: r.height }; };
       const cards = [...document.querySelectorAll('.screen.current .modebtn')];
       return {
-        cards: cards.map((e) => ({ box: rect(e), icon: rect(e.querySelector('.mb-i')), text: rect(e.querySelector('.mb-t')),
+        cards: cards.map((e) => ({ primary: !e.classList.contains('sec'), id: e.dataset.modebtn || e.dataset.act,
+          box: rect(e), icon: rect(e.querySelector('.mb-i')), text: rect(e.querySelector('.mb-t')),
           description: e.querySelector('small')?.textContent, title: e.querySelector('b').textContent })),
         nav: [...document.querySelectorAll('#nav .tab')].map((e) => ({ label: e.getAttribute('aria-label'), icon: !!e.querySelector('svg'),
-          visibleLabel: !!e.querySelector('.tl'), stroke: e.querySelector('svg')?.getAttribute('stroke'), gradient: !!e.querySelector('linearGradient') })),
+          visibleLabel: !!e.querySelector('.tl')?.getClientRects().length, stroke: e.querySelector('svg')?.getAttribute('stroke'), gradient: !!e.querySelector('linearGradient') })),
         avatar: !!document.querySelector('.hud .avatar'), title: !!document.querySelector('.arena-title'), difficulty: !!document.querySelector('.diffbar'),
         navTop: rect(document.querySelector('#nav')).y, notification: !!document.querySelector('.hud [data-act=notifications]')
       };
     });
-    assert.equal(hub.cards.length, 4);
+    assert.deepEqual(hub.cards.map(card => card.id), ['free', 'ranked', 'practice', 'quests', 'gifts']);
     for (const card of hub.cards) {
-      assert.ok(card.box.height >= 80 && card.box.height <= 90, 'mode cards are approximately half the old height');
-      assert.ok(card.icon.right <= card.text.x + 1, 'mode icon is left of its description');
-      assert.ok(card.description && card.title, 'each mode has a title and a description');
+      assert.ok(card.box.width >= 44 && card.box.height >= 44, 'mode and reward cards retain accessible touch targets');
+      assert.ok(card.primary ? card.icon.bottom <= card.text.y + 1 : card.icon.right <= card.text.x + 1,
+        'mode stickers sit above titles; reward stickers sit left of descriptions');
+      assert.ok(card.title); assert.equal(!!card.description, !card.primary);
       assert.ok(card.text.right <= card.box.right + 1 && card.text.bottom <= card.box.bottom + 1, 'mode text fits inside card');
       assert.ok(card.box.bottom <= hub.navTop + 1, 'mode cards are above the bottom navigation');
     }
     assert.deepEqual(hub.nav.map((x) => x.label), ['Главная', 'Турниры', 'Магазин', 'Настройки']);
-    assert.ok(hub.nav.every((x) => x.icon && !x.visibleLabel && x.stroke === 'currentColor' && !x.gradient));
+    assert.ok(hub.nav.every((x) => x.icon && x.visibleLabel && x.stroke === 'currentColor' && !x.gradient));
     assert.equal(hub.avatar, false); assert.equal(hub.title, false); assert.equal(hub.difficulty, false); assert.equal(hub.notification, true);
 
     await page.setViewport({ width: 320, height: 568, isMobile: true, hasTouch: true });
@@ -78,21 +81,28 @@ const settled = (page, id) => page.waitForFunction((screen) => Router.cur === sc
         return { right: r.right, bottom: r.bottom, textRight: text.right, textBottom: text.bottom };
       });
       const sc = document.querySelector('.hub-content'); sc.scrollTop = sc.scrollHeight;
-      const f = document.querySelector('.friends').getBoundingClientRect();
-      return { cards, navTop: nav.top, friendBottom: f.bottom, scrollTop: sc.scrollTop };
+      const rewards = document.querySelector('.grid-row2').getBoundingClientRect();
+      return { cards, navTop: nav.top, rewardBottom: rewards.bottom, scrollTop: sc.scrollTop };
     });
-    assert.ok(small.cards.every((r) => r.right <= 320 && r.bottom <= small.navTop && r.textRight <= r.right + 1 && r.textBottom <= r.bottom + 1));
-    assert.ok(small.scrollTop > 0 && small.friendBottom <= small.navTop, 'secondary content remains reachable above navigation on a short phone');
+    assert.ok(small.cards.every((r) => r.right <= 320 && r.textRight <= r.right + 1 && r.textBottom <= r.bottom + 1));
+    assert.ok(small.scrollTop > 0 && small.rewardBottom <= small.navTop, 'secondary rewards remain reachable above navigation on a short phone');
     await page.evaluate(() => { document.querySelector('.hub-content').scrollTop = 0; });
     await page.setViewport({ width: 844, height: 390, isMobile: true, hasTouch: true });
     const landscape = await page.evaluate(() => {
-      const cards = [...document.querySelectorAll('.screen.current .modebtn')].map((e) => e.getBoundingClientRect());
-      return { tops: cards.map((r) => r.top), bottoms: cards.map((r) => r.bottom), navTop: document.querySelector('#nav').getBoundingClientRect().top };
+      const modes = [...document.querySelectorAll('.play-grid .modebtn')].map(e => e.getBoundingClientRect());
+      const rewards = [...document.querySelectorAll('.grid-row2 .modebtn')].map(e => e.getBoundingClientRect());
+      const sc = document.querySelector('.hub-content'); sc.scrollTop = sc.scrollHeight;
+      return { modeTops: modes.map(r => r.top), rewardTops: rewards.map(r => r.top),
+        rewardBottom: document.querySelector('.grid-row2').getBoundingClientRect().bottom,
+        navTop: document.querySelector('#nav').getBoundingClientRect().top };
     });
-    assert.ok(Math.max(...landscape.tops) - Math.min(...landscape.tops) < 1, 'landscape has one compact row of modes');
-    assert.ok(Math.max(...landscape.bottoms) <= landscape.navTop, 'landscape modes are not covered by the nav');
+    assert.ok(Math.max(...landscape.modeTops) - Math.min(...landscape.modeTops) < 1);
+    assert.ok(Math.max(...landscape.rewardTops) - Math.min(...landscape.rewardTops) < 1);
+    assert.ok(Math.min(...landscape.rewardTops) > Math.max(...landscape.modeTops), 'landscape preserves the three-plus-two card grouping');
+    assert.ok(landscape.rewardBottom <= landscape.navTop, 'landscape rewards remain reachable above the nav');
     await page.setViewport({ width: 390, height: 844, isMobile: true, hasTouch: true });
-    console.log('ok: compact hub, monochrome accessible navigation, short and landscape layouts');
+    await page.evaluate(() => { document.querySelector('.hub-content').scrollTop = 0; });
+    console.log('ok: three-plus-two hub, monochrome accessible navigation, short and landscape layouts');
 
     // The bell is a real in-game list. Its count tracks claimable items, not invented remote pushes.
     assert.equal(await page.$eval('.screen.current .notice-count', (el) => el.textContent), '2');
@@ -122,9 +132,11 @@ const settled = (page, id) => page.waitForFunction((screen) => Router.cur === sc
     assert.equal(difficulty.value, 2); assert.equal(difficulty.pressed, 'true'); assert.ok(difficulty.description.includes('атакует'));
     await page.waitForFunction(() => JSON.parse(localStorage.getItem('ttu-v2')).diff === 2);
     await page.click('#sheets #langseg button[data-v="en"]');
-    await page.waitForFunction(() => I18n.lang === 'en' && !Sheet.cur && !Router.busy, { timeout: 30000 });
+    await page.waitForFunction(() => I18n.lang === 'en' && Sheet.cur && !Router.busy
+      && document.querySelector('#sheets #langseg button[data-v="en"]').getAttribute('aria-pressed') === 'true', { timeout: 30000 });
     assert.equal(await page.$eval('#nav [data-tab=hub]', (b) => b.getAttribute('aria-label')), 'Home');
     assert.equal(await page.$eval('#nav [data-tab=hub]', (b) => b.getAttribute('aria-current')), 'page');
+    await page.evaluate(() => Sheet.close(true));
     await page.reload({ waitUntil: 'load' }); await settled(page, 'hub');
     await page.waitForFunction(() => GameHost.ready, { timeout: 45000 });
     assert.equal(await page.evaluate(() => S.diff), 2);
@@ -141,17 +153,28 @@ const settled = (page, id) => page.waitForFunction((screen) => Router.cur === sc
     await page.click('#sheets [data-notice=gifts]'); await settled(page, 'hub'); await wait(850);
     assert.ok(await page.$('#sheets .gf-gift'));
     await page.evaluate(() => { S.freeAt = Date.now() + FREE_MS; saveNow(); UI.refreshNotifications(); Sheet.close(true); });
-    await page.click('.screen.current [data-modebtn=ranked]'); await settled(page, 'online');
-    assert.ok(await page.$('.screen.current .hud [data-act=notifications]'));
-    await page.click('.screen.current [data-act=back]'); await settled(page, 'hub');
+    await page.click('.screen.current [data-modebtn=ranked]'); await settled(page, 'mm');
+    await page.click('.screen.current [data-act=cancel]'); await settled(page, 'hub');
     await page.click('.screen.current [data-modebtn=career]'); await settled(page, 'profile');
+    assert.equal(await page.$$eval('.screen.current [data-equipment]', cards => cards.length), 2);
+    const inventory = await page.evaluate(() => JSON.stringify([S.coins, S.gems, S.owned, S.rewardReceipts]));
+    await page.click('.screen.current [data-equipment=r-standard]'); await wait(850);
+    await page.click('#sheets [data-a=equip]');
+    await page.waitForFunction(() => !Sheet.cur && document.querySelector('.screen.current [data-equipment=r-standard]').getAttribute('aria-pressed') === 'true'
+      && GameHost.frame.contentWindow.__game._equippedRacket === 'r-standard');
+    assert.equal(await page.evaluate(() => JSON.stringify([S.coins, S.gems, S.owned, S.rewardReceipts])), inventory);
+    assert.equal(await page.evaluate(() => JSON.parse(localStorage.getItem('ttu-v2')).equipped.racket), 'r-standard');
     await page.click('#nav [data-tab=hub]'); await settled(page, 'hub');
     await page.click('.screen.current [data-modebtn=practice]'); await settled(page, 'train');
-    await page.waitForSelector('.screen.current .tx.live');
-    const exitBox = await page.$eval('.screen.current .m-pause', (e) => { const r = e.getBoundingClientRect(); return { left: r.left, bottom: r.bottom }; });
-    assert.ok(exitBox.left < 30 && exitBox.bottom > 750, 'training exit remains bottom-left');
-    await page.click('.screen.current [data-act=exit]'); await settled(page, 'hub');
-    console.log('ok: menu destinations and training exit');
+    await page.waitForSelector('.screen.current .academy-lesson');
+    assert.equal(await page.$eval('.screen.current .academy-live', el => el.hidden), true, 'entering the academy does not start a lesson');
+    const exitBox = await page.$eval('.screen.current .academy-head [data-act=exit]', (e) => {
+      const r = e.getBoundingClientRect(); return { top: r.top, right: r.right, bottom: r.bottom, width: r.width, height: r.height };
+    });
+    assert.ok(exitBox.width >= 44 && exitBox.height >= 44 && exitBox.top >= 0 && exitBox.right <= 390 && exitBox.bottom <= 844,
+      'the academy exit is an accessible viewport-safe action');
+    await page.click('.screen.current .academy-head [data-act=exit]'); await settled(page, 'hub');
+    console.log('ok: menu destinations, owned equipment selection and academy exit');
 
     await page.click('.screen.current [data-modebtn=free]');
     await page.waitForSelector('.screen.current[data-id=match] .mx.live', { timeout: 30000 });
@@ -208,11 +231,24 @@ const settled = (page, id) => page.waitForFunction((screen) => Router.cur === sc
     const matchLayout = await page.evaluate(() => {
       const left = document.querySelector('.screen.current .match-hud').getBoundingClientRect();
       const right = document.querySelector('.screen.current .match-actions').getBoundingClientRect();
-      return { left: left.left, leftRight: left.right, rightLeft: right.left, right: right.right, top1: left.top, top2: right.top };
+      const controls = [...document.querySelectorAll('.screen.current .match-actions button')].map(button => {
+        const r = button.getBoundingClientRect(); return { act: button.dataset.act, x: r.x, y: r.y, width: r.width, height: r.height };
+      });
+      return { left: left.left, leftRight: left.right, width: left.width, height: left.height,
+        rightLeft: right.left, right: right.right, top1: left.top, top2: right.top, controls,
+        metrics: getComputedStyle(document.querySelector('.screen.current .match-hud-metrics')).display,
+        cells: document.querySelectorAll('.screen.current .match-hud-contact').length };
     });
     assert.ok(matchLayout.left >= 0 && matchLayout.leftRight < matchLayout.rightLeft && matchLayout.right <= 320 && Math.abs(matchLayout.top1 - matchLayout.top2) < 1, JSON.stringify(matchLayout));
+    assert.equal(matchLayout.width, 236); assert.ok(matchLayout.height >= 60 && matchLayout.height <= 66);
+    assert.ok(matchLayout.width * matchLayout.height <= 244 * 108 * .6, 'only the upper-left HUD footprint is roughly halved');
+    assert.equal(matchLayout.cells, 2); assert.equal(matchLayout.metrics, 'flex');
+    assert.deepEqual(matchLayout.controls.map(c => c.act), ['notifications', 'slowmo', 'pause']);
+    matchLayout.controls.forEach((c, i) => {
+      assert.equal(c.width, 44); assert.equal(c.height, 44); assert.equal(c.x, 264); assert.equal(c.y, matchLayout.top2 + i * 52);
+    });
     assert.deepEqual(errors, []);
-    console.log('ok: scored HUD updates and its controls do not overlap on a narrow phone');
+    console.log('ok: compact scored HUD, fixed contact cells and unchanged nonoverlapping right controls');
   } finally {
     await browser.close();
     await new Promise((resolve) => server.close(resolve));

@@ -149,16 +149,16 @@ const M4 = {
     return o;
   },
 
-  // upper-left 3x3 inverse-transpose packed as mat3 (9 floats)
+  // upper-left 3x3 inverse-transpose packed as column-major mat3 (9 floats)
   normalFromMat4(o3, a) {
     const a00 = a[0], a01 = a[1], a02 = a[2], a10 = a[4], a11 = a[5], a12 = a[6], a20 = a[8], a21 = a[9], a22 = a[10];
     const b01 = a22 * a11 - a12 * a21, b11 = -a22 * a10 + a12 * a20, b21 = a21 * a10 - a11 * a20;
     let det = a00 * b01 + a01 * b11 + a02 * b21;
     if (!det) { o3.set([1, 0, 0, 0, 1, 0, 0, 0, 1]); return o3; }
     det = 1.0 / det;
-    o3[0] = b01 * det; o3[1] = (-a22 * a01 + a02 * a21) * det; o3[2] = (a12 * a01 - a02 * a11) * det;
-    o3[3] = b11 * det; o3[4] = (a22 * a00 - a02 * a20) * det; o3[5] = (-a12 * a00 + a02 * a10) * det;
-    o3[6] = b21 * det; o3[7] = (-a21 * a00 + a01 * a20) * det; o3[8] = (a11 * a00 - a01 * a10) * det;
+    o3[0] = b01 * det; o3[1] = b11 * det; o3[2] = b21 * det;
+    o3[3] = (-a22 * a01 + a02 * a21) * det; o3[4] = (a22 * a00 - a02 * a20) * det; o3[5] = (-a21 * a00 + a01 * a20) * det;
+    o3[6] = (a12 * a01 - a02 * a11) * det; o3[7] = (-a12 * a00 + a02 * a10) * det; o3[8] = (a11 * a00 - a01 * a10) * det;
     return o3;
   },
 

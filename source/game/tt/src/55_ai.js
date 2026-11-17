@@ -364,10 +364,11 @@ class OpponentAI {
     if (!racket || !racket.vR) return racket;
     racket = enforceRacketEffort(racket);
     const cut = this.handicap < 1 ? 1 - (1 - this.handicap) * 0.45 : 1;
-    const scale = Math.min(1, cap / Math.max(racket.vmag, 0.5)) * cut;
-    if (scale >= 1) return racket;
+    // Both the seed and every solver candidate see the level/director cap.
+    // Cutting an already solved frame silently changed its landing depth.
+    racket = { ...racket, vmagCap: Math.min(racket.vmagCap ?? Infinity, cap * cut) };
     const swing = V3.new(), normal = V3.new();
-    strokeFrame(racket, 0, 0, scale, swing, normal);
+    strokeFrame(racket, 0, 0, cut, swing, normal);
     return resolvedRacketFrame(racket, normal, swing);
   }
 
@@ -459,13 +460,18 @@ class OpponentAI {
   _flightLegal(b, racket, isServe) {
     if (!racket || racket.valid === false) return false;
     if (isServe) return this._serveVerdict(b, racket).reason === 'ok';
+    return !!this._rallyFlight(b, racket);
+  }
+
+  _rallyFlight(b, racket) {
+    if (!racket || racket.valid === false) return null;
     const launch = resolveRacketLaunch(b, racket);
-    if (!launch || !strokeIdentityMatches(racket, launch)) return false;
+    if (!launch || !strokeIdentityMatches(racket, launch)) return null;
     const o = predict(launch.p, launch.v, launch.w,
       { dt: PH.SIM_DT, maxT: 2.6, stopOnFirstBounce: true, out: this._q });
-    if (o.diverged || !o.landed) return false;
-    return o.landed.z * racket.side <= 0 && Math.abs(o.landed.z) <= PH.T_HALF_LEN + 0.005 &&
-      Math.abs(o.landed.x) <= PH.T_HALF_WID + 0.005;
+    if (o.diverged || !o.landed || o.landed.z * racket.side > 0 ||
+      Math.abs(o.landed.z) > PH.T_HALF_LEN + 0.005 || Math.abs(o.landed.x) > PH.T_HALF_WID + 0.005) return null;
+    return o;
   }
 
   _serveVerdict(ball, racket) {
@@ -516,22 +522,40 @@ class OpponentAI {
   _ensureLegal(game, racket, plan) {
     const ball = game.ball;
     racket = enforceRacketEffort(racket);
-    if (this._flightLegal(ball, racket, false)) return racket;
     const L = this.L;
-    const aim = { x: clamp(((plan.aim && plan.aim.x) || 0) * 0.5, -0.42, 0.42),
-      z: -this.side * PH.T_HALF_LEN * 0.62 };
+    const aim = { x: clamp(plan.aim?.x ?? 0, -PH.T_HALF_WID + .05, PH.T_HALF_WID - .05),
+      z: -this.side * clamp(Math.abs(plan.aim?.z ?? .85), .18, PH.T_HALF_LEN - .05) };
+    const requested = Math.max(.5, (racket.requestedVmag ?? racket.vmag) * (racket.effortBudget?.effortScale ?? 1));
+    const measure = candidate => {
+      const flight = this._rallyFlight(ball, candidate);
+      if (!flight) return null;
+      const error = Math.hypot(flight.landed.x - aim.x, flight.landed.z - aim.z);
+      const short = plan.archId !== 'DROP' ? Math.max(0, Math.min(.62, Math.abs(aim.z)) - Math.abs(flight.landed.z)) : 0;
+      const paceLoss = Math.max(0, 1 - candidate.vmag / requested);
+      return { racket: candidate, error, cost: error + short + paceLoss * .12 + (candidate.stroke.id !== racket.stroke.id ? .12 : 0) };
+    };
+    let best = measure(racket);
+    if (best && (plan.archId === 'DROP' || best.error <= .12 + (1 - L.placeSkill) * .10)) return racket;
     const ctx = this._strokeContext(game, racket.effortBudget);
-    for (const id of ['BLOCK', 'PUSH', 'LOOP']) {
+    // Keep the intended family first. Defensive rescues compete by actual
+    // landing error and retained work instead of winning by loop order.
+    const same = refineRacket(ball.p, ball.v, ball.w,
+      { ...racket, aim, aiControlled: true }, Math.max(L.skill, .9), racket.quality);
+    let measured = measure(same);
+    if (measured && (!best || measured.cost < best.cost)) best = measured;
+    if (best && best.error <= .12 + (1 - L.placeSkill) * .10) return best.racket;
+    for (const id of ['BLOCK', 'PUSH', 'LOOP'].filter(id => id !== racket.stroke.id)) {
       const cand = racketForStroke(id, ctx, {
-        vmag: clamp(plan.speed * 0.55, 2.2, Math.min(4.6, Math.max(3.0, L.vmagMin + 1.2))),
-        aim, quality: 0.8 + 0.1 * L.skill,
+        ...this._swingOptions(plan), aim, quality: racket.quality,
       });
       cand.effortRequest = racket.effortRequest;
       cand.netClear = 0.12;
-      const solved = this._scaleRacket(refineRacket(ball.p, ball.v, ball.w, cand,
-        Math.max(L.skill, 0.85), cand.quality), L.vmagMax);
-      if (this._flightLegal(ball, solved, false)) return solved;
+      const seed = this._scaleRacket({ ...cand, aiControlled: true }, L.vmagMax);
+      const solved = refineRacket(ball.p, ball.v, ball.w, seed, Math.max(L.skill, .9), seed.quality);
+      measured = measure(solved);
+      if (measured && (!best || measured.cost < best.cost)) best = measured;
     }
+    if (best) return best.racket;
     racket.valid = false;
     racket.invalidReason = 'unreturnable';
     return racket;
@@ -749,7 +773,9 @@ class OpponentAI {
       wantX = playerSide * sign(wantX || 1) * (0.75 + 0.20 * this._rand());
     }
 
-    return { x: wantX, z: Math.abs(wantZ) };
+    if (archId === 'DROP') wantZ = -(.18 + .14 * this._rand());
+    return { x: clamp(wantX, -PH.T_HALF_WID + .05, PH.T_HALF_WID - .05),
+      z: -this.side * clamp(Math.abs(wantZ), archId === 'DROP' ? .18 : .62, PH.T_HALF_LEN - .05) };
   }
 
   /** Серия агрессии: атакующий удар копит счётчик, любой другой его рвёт.
@@ -797,7 +823,8 @@ class OpponentAI {
     racket.effortRequest = request;
 
     // Solve on copies. The game applies the returned impact exactly once.
-    racket = this._scaleRacket(refineRacket(ball.p, ball.v, ball.w, racket, L.skill, racket.quality), L.vmagMax);
+    racket = this._scaleRacket({ ...racket, aiControlled: true }, L.vmagMax);
+    racket = refineRacket(ball.p, ball.v, ball.w, racket, L.skill, racket.quality);
     racket = this._ensureLegal(game, racket, plan);
     // Error pressure includes this attack, but only the executed family counts.
     if (racket.valid !== false) this.noteStroke(racket.stroke.id);
@@ -865,7 +892,8 @@ class OpponentAI {
         aim: attempt ? { x: aimX * 0.35, z: -this.side * PH.T_HALF_LEN * 0.72 } : { x: aimX, z: aimZ } });
       prototype.effortRequest = request;
       prototype.vmagCap = CAP.vmag;
-      finalRacket = this._scaleRacket(refineRacket(ball.p, ball.v, ball.w, prototype, 1, prototype.quality), CAP.vmag);
+      const seed = this._scaleRacket(prototype, CAP.vmag);
+      finalRacket = refineRacket(ball.p, ball.v, ball.w, seed, 1, seed.quality);
       diagnostic = this._serveVerdict(ball, finalRacket);
       if (diagnostic.reason !== 'ok') {
         const lateral = diagnostic.secondBounce ? Math.sign(diagnostic.secondBounce.x) : direction;

@@ -45,7 +45,7 @@ function load({ now = '2026-10-20T06:30:00Z', raw = null, cached = null, respons
     clearTimeout: (id) => timers.delete(id),
     Nav: { dots: () => counts.dots++ }, Router: { cur: 'pass', repaint: () => counts.repaints++ },
   });
-  vm.runInContext([read('core/state.js'), read('data/season.js'), read('services/progress.js'),
+  vm.runInContext([read('core/state.js'), read('data/catalog.js'), read('data/season.js'), read('services/progress.js'),
     'globalThis.fixture = { S, Progress, season: globalThis.TTSeason };'].join('\n'), context);
   return {
     ...context.fixture, entries, saves, timers, counts, listeners, document, Api,
@@ -170,6 +170,36 @@ test('invalid or older responses do not discard a validated calendar', () => {
   assert.equal(season.currentPass()[0].f.n, 900);
 });
 
+test('previously valid retired IDs and rubber colors keep raw cached calendars, dates and closed-season progress', () => {
+  const legacy = [
+    ...['r-coral', 'r-void', 'r-teal', 'b-ink', 't-gold', 't-coral', 'tb-neon', 'f-season'].map(itemId => ({ itemId })),
+    ...['#Ff4B3E', '#9f6bff', '#14C8B4'].map(col => ({ col }))
+  ];
+  const e = s5(); e.status = 'finished';
+  legacy.forEach((card, i) => { e.config.pass[i].p = { k: 'card', n: 1, ...card }; });
+  const cached = calendar([e], '2026-12-08T00:00:00Z');
+  const raw = { v: 9, passSeason: 5, passLvl: 7, passXp: 60, premium: true, claimed: { f: [1, 2], p: [3] },
+    rewardReceipts: ['pass:5:p:6'], owned: ['r-coral', 'event-earned'], gems: 19 };
+  const f = load({ now: '2026-12-08T00:00:00Z', cached, raw }), before = plain(f.S);
+  assert.equal(f.season.seasonNumber(), 5); assert.equal(f.season.seasonOver(), true);
+  assert.equal(f.season.currentSeason().start, at(e.startsAt)); assert.equal(f.season.seasonEnd(), at(e.endsAt));
+  assert.deepEqual(plain(f.season.currentPass().slice(0, legacy.length).map(row => row.p)), legacy.map(() => ({ k: 'card', n: 1, itemId: 'r-pan' })));
+  assert.equal(f.season.currentPass()[0].f.n, 900);
+  assert.deepEqual(plain(f.S.owned), ['r-standard', 'event-earned']);
+  for (const key of ['passSeason', 'passLvl', 'passXp', 'premium', 'claimed', 'rewardReceipts', 'gems']) assert.deepEqual(plain(f.S[key]), raw[key]);
+  const input = structuredClone(cached);
+  assert.equal(f.season.setServerSeason(input), true);
+  assert.deepEqual(input, cached); assert.deepEqual(JSON.parse(f.entries.get('ttu-seasons')), cached);
+  assert.deepEqual(plain(f.S), before); assert.equal(f.saves.length, 0);
+  for (const card of [{ itemId: 'unknown', col: '#9f6bff' }, { itemId: 'season-bundle' }, { col: '#123456' }, { itemId: 'r-void', n: 2 }]) {
+    const bad = structuredClone(cached); bad.events[0].config.pass[0].p = { k: 'card', n: 1, ...card };
+    assert.equal(f.season.setServerSeason(bad), false, JSON.stringify(card));
+    assert.equal(f.season.seasonNumber(), 5); assert.equal(f.season.seasonOver(), true);
+    assert.deepEqual(JSON.parse(f.entries.get('ttu-seasons')), cached);
+    assert.deepEqual(plain(f.S), before); assert.equal(f.saves.length, 0);
+  }
+});
+
 test('authoritative empty calendar closes the pass rather than reopening fallback', () => {
   const f = load();
   assert.equal(f.season.setServerSeason(calendar([])), true);
@@ -180,13 +210,17 @@ test('authoritative empty calendar closes the pass rather than reopening fallbac
 
 test('rollover resets only seasonal progress, premium and claims, once', async () => {
   const raw = { v: 6, passSeason: 4, passLvl: 7, passXp: 60, premium: true, claimed: { f: [1, 2], p: [1] },
-    coins: 12345, gems: 678, level: 12, xp: 456, rating: 1321, wins: 8, losses: 3, owned: ['r-teal'], chests: [{ id: 'earned', kind: 'silver', state: 'ready' }], hist: [{ t: 1, r: 1000 }] };
+    coins: 12345, gems: 678, level: 12, xp: 456, rating: 1321, wins: 8, losses: 3, owned: ['r-teal', 'r-pan', 'event-earned'],
+    equipped: { racket: 'r-pan', rubber: 'r-teal', table: 'tb-neon' }, chests: [{ id: 'earned', kind: 'silver', state: 'ready' }], hist: [{ t: 1, r: 1000 }] };
   const f = load({ now: '2026-11-15T00:00:00Z', raw, response: calendar([s4(), s5()]) });
+  const equipment = { owned: plain(f.S.owned), equipped: plain(f.S.equipped) };
+  assert.deepEqual(equipment, { owned: ['r-standard', 'r-pan', 'event-earned'], equipped: { racket: 'r-pan' } });
   await f.Progress.applySeasonRollover();
   assert.equal(f.S.passSeason, 5);
   assert.equal(f.S.passLvl, 0); assert.equal(f.S.passXp, 0); assert.equal(f.S.premium, false);
   assert.deepEqual(plain(f.S.claimed), { f: [], p: [] });
-  for (const key of ['coins', 'gems', 'level', 'xp', 'rating', 'wins', 'losses', 'owned', 'chests', 'hist']) assert.deepEqual(plain(f.S[key]), raw[key], key);
+  for (const key of ['coins', 'gems', 'level', 'xp', 'rating', 'wins', 'losses', 'chests', 'hist']) assert.deepEqual(plain(f.S[key]), raw[key], key);
+  assert.deepEqual({ owned: plain(f.S.owned), equipped: plain(f.S.equipped) }, equipment);
   assert.equal(f.saves.length, 1);
   assert.equal(f.saves[0].passSeason, 5);
   f.S.passLvl = 2; f.S.passXp = 30; f.S.premium = true; f.S.claimed.f.push(1);

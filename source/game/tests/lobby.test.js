@@ -89,7 +89,9 @@ test('lobbyReady requires settled textures and a presented prepared scene; waiti
   f.scene.panoramaSettled = true; f.g.render(); assert.equal(f.messages.length, 0);
   f.scene.asphaltSettled = true; f.R.gl.isContextLost = () => true; f.g.render();
   assert.equal(f.messages.length, 0, 'an invalid GPU is not a ready scene');
-  f.R.gl.isContextLost = () => false; f.g.render();
+  f.R.gl.isContextLost = () => false; f.scene.racketsSettled = false; f.g.render();
+  assert.equal(f.messages.length, 0, 'readiness includes the required racket atlas');
+  f.scene.racketsSettled = true; f.g.render();
   assert.equal(f.messages[0].type, 'lobbyReady'); assert.equal(f.messages[0].requestId, 17);
   for (let i = 0; i < 180; i++) f.step();
   assert.equal(f.messages.filter(m => m.type === 'lobbyReady').length, 1);
@@ -226,7 +228,7 @@ test('effective reduced motion bypasses the flight and freezes autonomous ball, 
   assert.equal(c.hits, 1); assert.equal(f.g.state, f.GS.MENU);
 });
 
-test('leaving MENU cancels the lobby and normal rendering contains no robot geometry', () => {
+test('leaving MENU cancels the lobby and procedural fallback rendering contains no robot geometry', () => {
   const f = fixture(); f.prepare(false); f.g.setState(f.GS.RALLY);
   assert.equal(f.controller().active, false); assert.equal(f.controller().phase, 'off');
   f.draws.length = 0; f.g.drawDynamic(false);
@@ -237,6 +239,40 @@ test('leaving MENU cancels the lobby and normal rendering contains no robot geom
     assert.throws(() => f.Game.prototype[name].call(g), /next gameplay step/);
     assert.equal(stopped, 1, name + ' cancels before modifying live-game state');
   }
+});
+
+test('equipped pan reaches the player and lobby while the opponent keeps the standard racket', () => {
+  const f = fixture(), options = [];
+  f.g._equippedRacket = 'r-pan';
+  f.g.rig.draw = (R, S, o) => options.push(o);
+  f.prepare(false);
+  assert.deepEqual(options.slice(-2).map(o => o.racket), ['r-pan', 'r-standard']);
+  f.g.setState(f.GS.RALLY); options.length = 0;
+  f.g.player.activeFace = -1; f.g.aiPaddle.activeFace = 1;
+  f.g.drawDynamic(false);
+  assert.deepEqual(options.map(o => [o.racket, o.activeFace]), [['r-pan', -1], ['r-standard', 1]]);
+});
+
+test('host equipment bridge selects whole rackets and cannot revive retired materials, trails or table', () => {
+  const f = fixture(), equips = [], labels = [];
+  f.g.equip.set = (...ids) => equips.push(ids);
+  f.g.preview = { active: true, localize: () => labels.push(f.g._equippedRacket) };
+  f.scene.mat.table = { color: [.74, .77, .84] };
+  f.g.trendFromHistory = () => 0;
+  f.document.getElementById = id => id === 'gl' ? f.canvas : null;
+  f.window.__TT_EMBED = true; f.window.__game = f.g;
+  vm.runInContext(fs.readFileSync(path.join(root, 'tt/src/92_embed.js'), 'utf8'), f.context);
+  const send = equipped => f.events.get('message')({ source: f.window.parent,
+    data: { __tt: 1, type: 'equip', equipped } });
+  send({ racket: 'r-pan', rubber: 'r-coral', blade: 'b-ink', trail: 't-gold', table: 'tb-neon' });
+  assert.equal(f.g._equippedRacket, 'r-pan');
+  assert.deepEqual(equips.at(-1), ['b_base', 'r_base', 'r_base']);
+  assert.equal(f.g._customTrailCol, null);
+  assert.deepEqual(f.scene.mat.table.color, [.74, .77, .84]);
+  send({ racket: 'missing', trail: 't-coral' });
+  assert.equal(f.g._equippedRacket, 'r-standard');
+  assert.equal(f.g._customTrailCol, null);
+  assert.deepEqual(labels, ['r-pan', 'r-standard'], 'an open preview updates its playing-surface label immediately');
 });
 
 test('arena image loading settles honestly on upload, onerror, decode/upload failure and omitted assets', () => {
@@ -314,4 +350,43 @@ test('real embed bridge trusts only its parent, wakes for preparation and preser
   assert.equal(f.messages.filter(m => m.type === 'lobbyReady').length, readyCount, 'GPU reload must use a fresh iframe');
   assert.equal(f.g.ball.live, false);
   assert.ok(!f.messages.some(m => ['point', 'hit', 'attempt', 'matchEnd'].includes(m.type)));
+});
+
+test('imported racket textures preserve atlas orientation and wait for every upload or fallback exactly once', () => {
+  const f = fixture(), white = f.R.white = { fallback: true };
+  f.context.atob = value => Buffer.from(value, 'base64').toString('binary');
+  const textures = ['exact-atlas', 'decode-error', 'null-upload', 'gl-error', 'throw-upload'];
+  const model = { singleFace: false, faceOffset: .0043, textures,
+    parts: textures.map((_, texture) => ({ nv: 1, ni: 0, wide: false, data: Buffer.alloc(32).toString('base64'),
+      material: { texture, color: [1, 1, 1], rough: .8 } })) };
+  f.context.TT_RACKETS = { 'r-standard': model };
+  const before = JSON.stringify(model), scene = new f.Scene(f.R), images = f.images.slice(-textures.length);
+  assert.equal(scene.racketsSettled, false);
+  assert.deepEqual(images.map(image => image.src), textures);
+  assert.ok(scene.rackets['r-standard'].parts.every(part => part.mat.tex === white));
+  const uploaded = { atlas: true }, failed = { invalid: true }, uploads = [], deleted = [];
+  let glError = 0;
+  f.R.texFromCanvas = (image, options) => {
+    uploads.push({ src: image.src, options: JSON.parse(JSON.stringify(options)) });
+    if (image.src === 'throw-upload') throw Error('upload');
+    if (image.src === 'null-upload') return null;
+    if (image.src === 'gl-error') { glError = 1281; return failed; }
+    return uploaded;
+  };
+  f.R.gl.getError = () => { const error = glError; glError = 0; return error; };
+  f.R.gl.deleteTexture = texture => deleted.push(texture);
+  f.context.console = { ...console, warn() {} };
+  const load = images[0].onload, fail = images[0].onerror;
+  load(); fail(); load();
+  assert.equal(scene.racketsSettled, false, 'one image cannot settle the other pending images');
+  assert.equal(scene.rackets['r-standard'].parts[0].mat.tex, uploaded);
+  for (let i = 1; i < images.length; i++) {
+    if (i === 1) images[i].onerror(); else images[i].onload();
+    assert.equal(scene.racketsSettled, i === images.length - 1);
+    assert.equal(scene.rackets['r-standard'].parts[i].mat.tex, white, textures[i]);
+  }
+  assert.deepEqual(deleted, [failed]);
+  assert.deepEqual(uploads.map(upload => upload.src), ['exact-atlas', 'null-upload', 'gl-error', 'throw-upload']);
+  assert.ok(uploads.every(upload => upload.options.flipY === false && upload.options.wrap === 'clamp'));
+  assert.equal(JSON.stringify(model), before, 'the packed model and supplied atlas are not rewritten');
 });

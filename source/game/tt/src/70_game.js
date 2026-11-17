@@ -77,6 +77,7 @@ class Game {
      * своя история результатов в автономном меню движка. */
     this.aiTrend = 0;
     this.swipe = new SwipeTracker();
+    this._playerFace = 1;
     this.particles = new Particles();
     this.rig = new PaddleRig();
     this.equip = new Equipment();
@@ -363,7 +364,8 @@ class Game {
         _lastEvT = Math.max(_lastEvT, this.time);
         return _lastEvT;
       }
-      if (_domT0 === null || (!this.swipe.active && !this._playerWork?.held && Math.abs((this.time - _gameT0) - (ts - _domT0) * 0.001) > 0.22)) {
+      if (_domT0 === null || (!this.swipe.active && !this._playerWork?.held && !this.paddleTrick?.points.length &&
+          Math.abs((this.time - _gameT0) - (ts - _domT0) * 0.001) > 0.22)) {
         _domT0 = ts;
         _gameT0 = this.time;
         _lastEvT = this.time;
@@ -377,6 +379,7 @@ class Game {
     // Primary pointer strikes; right drag and two-finger gestures adjust the view.
     const ptrs = new Map();
     let activeStrokePointerId = null;
+    let lastStrokeTimestamp = -Infinity;
     let cameraDrag = null, cameraGesture = null, suppressTouches = false;
     const cameraPair = () => {
       const pair = [...ptrs.values()].slice(0, 2);
@@ -409,17 +412,20 @@ class Game {
     const dropStroke = () => {
       this._cancelPlayerWork();
       activeStrokePointerId = null;
+      lastStrokeTimestamp = -Infinity;
       this.swipe.cancel();
       this.pointerDown = false;
     };
 
     this.cancelInput = (reason = 'unspecified', event = null) => {
+      this.cancelPaddleTrick();
       if (this.preview?.active) return;
       if (this.debugRecording) this.logInput('input_cancel', { dom: event ? domEvent(event) : null,
         outcome: { reason, active: !!this.swipe.active, pointerDown: !!this.pointerDown, pointers: ptrs.size } });
       ptrs.clear(); cameraDrag = cameraGesture = null; suppressTouches = false; dropStroke();
     };
     const down = (e) => {
+      this.cancelPaddleTrick();
       if (this.preview?.active) return;
       if (this.paused || this.state === GS.MENU || this.state === GS.MATCH_END) {
         if (this.debugRecording) this.logInput('pointer_ignored', { dom: domEvent(e), outcome: { reason: this.paused ? 'PAUSED' : 'NON_PLAY_STATE' } });
@@ -471,12 +477,13 @@ class Game {
       }
 
       activeStrokePointerId = e.pointerId;
+      lastStrokeTimestamp = Number.isFinite(e.timeStamp) ? e.timeStamp : -Infinity;
       const tEv = evTime(e), simEv = evSimTime(tEv);
       const pointerType = e.pointerType || (this.pointerFine === false ? 'touch' : 'mouse');
       this.pointer = { x: n.x, y: n.y };
       this.pointerFine = pointerType !== 'touch' && pointerType !== 'pen';
 
-      this.swipe.down(n.rawX, n.rawY, tEv, simEv);
+      this.swipe.down(n.rawX, n.rawY, tEv, simEv, c.getBoundingClientRect());
       this._beginPlayerWork(n.rawX, n.rawY, tEv, simEv);
       this.swipe.tapMaxMovePx = 0;
       const rect = c.getBoundingClientRect();
@@ -615,26 +622,47 @@ class Game {
       if ((this.swipe.active || this._playerWork?.held) && ptrs.size < 2) {
         const z = this.swipe.pressZone;
         let samples = [];
-        if (typeof e.getCoalescedEvents === 'function') samples = e.getCoalescedEvents();
-        // Collect the whole hardware path before resolving a hit. Resolving
-        // each intermediate point would steal an arc as its first straight leg.
+        if (typeof e.getCoalescedEvents === 'function') {
+          try { samples = e.getCoalescedEvents() || []; } catch (_) { samples = []; }
+        }
+        // Resolve each available prefix, just as separate hardware events do.
+        // A later curve must never relabel a contact already made by its straight leg.
         let n;
         for (const sample of [...samples, e]) {
           if (Number.isFinite(sample.pointerId) && sample.pointerId !== e.pointerId) continue;
-          n = track(sample);
+          // Check the original clock before evTime clamps pre-start times to zero.
+          if (Number.isFinite(sample.timeStamp)) {
+            if (sample.timeStamp < lastStrokeTimestamp) continue;
+            lastStrokeTimestamp = sample.timeStamp;
+          } else if (sample !== e) continue;
           const tEv = evTime(sample), simEv = evSimTime(tEv);
+          const latest = Math.max(this.swipe.samples.at(-1)?.t ?? -Infinity, this._playerWork?.lastTime ?? -Infinity);
+          if (tEv < latest) continue;
+          n = track(sample);
           if (z) this.swipe.tapMaxMovePx = Math.max(this.swipe.tapMaxMovePx || 0,
             Math.hypot((n.rawX - z.pressX) * z.vw, (n.rawY - z.pressY) * z.vh));
           this.swipe.move(n.rawX, n.rawY, tEv, simEv);
           this._samplePlayerWork(n.rawX, n.rawY, tEv, simEv);
+          this.promotePendingServeZone();
+          this.promotePendingRallyBackswing(n);
+          this.tryInputHit(this.swipe.m);
         }
-        this.promotePendingServeZone();
-        this.promotePendingRallyBackswing(n);
+        if (!n) { if (e.cancelable) e.preventDefault(); return; }
         this.logInput('pointermove', { pointer: { x: n.x, y: n.y }, pointerId: e.pointerId, buttons: e.buttons,
           inputType: e.pointerType || (this.pointerFine === false ? 'touch' : 'mouse'),
           dom: this.debugRecording ? domEvent(e) : null });
-        this.tryInputHit(this.swipe.m);
-      } else track(e);
+      } else {
+        let samples = [];
+        if (e.pointerType === 'mouse' && typeof e.getCoalescedEvents === 'function') {
+          try { samples = e.getCoalescedEvents() || []; } catch (_) { samples = []; }
+        }
+        for (const sample of [...samples, e]) {
+          if (Number.isFinite(sample.pointerId) && sample.pointerId !== e.pointerId) continue;
+          const point = track(sample);
+          if (e.pointerType === 'mouse') this.observePaddleTrick(point, evTime(sample), !e.buttons && !sample.buttons);
+          else this.cancelPaddleTrick();
+        }
+      }
       if (e.cancelable) e.preventDefault();
     };
 
@@ -676,6 +704,7 @@ class Game {
         Math.hypot((n.rawX - zone.pressX) * zone.vw, (n.rawY - zone.pressY) * zone.vh));
       this.promotePendingServeZone();
       sw.up(n.rawX, n.rawY, tEv, simEv);
+      this.promotePendingRallyBackswing(n);
       // Only a stationary toss tap is disarmed. A completed early serve swipe
       // must survive release and meet the ball when the toss starts falling.
       if (zone && zone.singleGestureToss && !isRealStroke(sw.lastReleased, true)) {
@@ -725,11 +754,12 @@ class Game {
     });
     c.addEventListener('lostpointercapture', (e) => { if (ptrs.has(e.pointerId) || cameraDrag && cameraDrag.id === e.pointerId) this.cancelInput('lostpointercapture', e); });
     c.addEventListener('contextmenu', (e) => e.preventDefault());
+    c.addEventListener('pointerleave', () => this.cancelPaddleTrick());
     // Hover movement follows the bat. A held right button is not a camera command.
     window.addEventListener('pointermove', (e) => {
       if (this.preview?.active || e.target === c) return;
       if (ptrs.has(e.pointerId) || cameraDrag && cameraDrag.id === e.pointerId) move(e);
-      else if (!ptrs.size && !this.swipe.active) track(e);
+      else if (!ptrs.size && !this.swipe.active) { this.cancelPaddleTrick(); track(e); }
     });
     window.addEventListener('pointerup', (e) => { if (ptrs.has(e.pointerId) || cameraDrag && cameraDrag.id === e.pointerId) up(e); });
     window.addEventListener('blur', () => { this.cancelInput('window_blur'); this.setPaused(true); });
@@ -738,6 +768,7 @@ class Game {
       if (document.hidden || document.visibilityState === 'hidden') { this.cancelInput('document_hidden'); this.setPaused(true); this.profile.save(true); }
     });
     window.addEventListener('pagehide', (e) => {
+      this.cancelPaddleTrick();
       if (this.debugRecording) this.logInput('pagehide', { outcome: { persisted: !!e.persisted } });
       if (this.debugArchive) this.debugArchive.flush();
       this.profile.save(true); this.career.save();
@@ -868,7 +899,7 @@ class Game {
     return { side: 1, isServe: serving, playerControlled: !this.demoMode, grip: this.settings?.grip, hand: this.settings?.hand,
       forehand: paddleForehand(this.player?.pos?.x ?? 0, this.settings?.hand, this.player?.forehand),
       ball: V3.clone(this.ball.p), ballSpin: V3.clone(this.ball.w), ballVelocity: V3.clone(this.ball.v),
-      ballSpeed: V3.len(this.ball.v), equip: this.equip?.forSide(1) || {},
+      ballSpeed: V3.len(this.ball.v), equip: this.equip?.forSide(this.playerActiveFace) || {},
       moveYaw: this.padYaw || 0, movePitch: this.padPitch || 0,
       spinBias: this.settings?.spinBias || 'norm', spinGain: this.settings?.spinGain ?? 1, arcSens: this.settings?.arcSens ?? 1 };
   }
@@ -1004,6 +1035,7 @@ class Game {
       score: this.score.slice(), server: this.server, servesLeft: this.servesLeft,
       phase: replay ? this.replayFrom || GS.POINT : this.state, winner: this.matchWinner || 0,
       demo: !!this.demoMode, free: !!this.freePlay, target: this.settings.targetScore, paused: !!this.paused,
+      playerFace: this._playerFace === -1 ? -1 : 1,
       rally: this.rally, bestRally: this.bestRally, shotId: this.shotId,
       stateT: replay ? 0 : this.stateT, stateSimT: replay ? 0 : this.stateSimT,
       aiServeTimer: Math.max(0, this.aiServeTimer || 0), aiServeX: this.aiServeX || 0,
@@ -1020,7 +1052,8 @@ class Game {
   }
 
   _validateMatchResume(data) {
-    if (!data || data.schema !== 1 || typeof data.matchId !== 'string' || !data.matchId || data.matchId.length > 128) return null;
+    if (!data || data.schema !== 1 || typeof data.matchId !== 'string' || !data.matchId || data.matchId.length > 128 ||
+        data.playerFace !== undefined && data.playerFace !== 1 && data.playerFace !== -1) return null;
     const integer = n => Number.isSafeInteger(n) && n >= 0;
     const side = n => n === 1 || n === -1;
     const vector = v => v && ['x', 'y', 'z'].every(k => Number.isFinite(v[k]));
@@ -1062,13 +1095,14 @@ class Game {
         !integer(data.aiWork.shotId) || data.aiWork.shotId > data.shotId || !integer(data.aiWork.swingId) || data.aiWork.swingId > data.swingId ||
         !Number.isFinite(data.aiWork.paid) || data.aiWork.paid < 0 ||
         typeof data.aiWork.contacted !== 'boolean' || typeof data.aiWork.finished !== 'boolean')) return null;
-    return { ...data, stamina };
+    return { ...data, stamina, playerFace: data.playerFace ?? 1 };
   }
 
   /* --------------------------- match flow -------------------------- */
   startMatch(diff, resume = null) {
     const restored = resume === null ? null : this._validateMatchResume(resume);
     if (resume !== null && !restored) return false;
+    if (restored) this._playerFace = restored.playerFace;
     this._matchHudSuppressed = true;
     if (restored) { this.freePlay = restored.free; this.demoMode = restored.demo; this._keepDemo = restored.demo; }
     this.cancelInput?.('match_start');
@@ -1226,6 +1260,7 @@ class Game {
     return this.settings.showPlayerPaddle !== false &&
       (this.state === GS.MENU || (this.ui ? this.ui.inputMode !== 'touch' : this.pointerFine !== false));
   }
+  get playerActiveFace() { return this._equippedRacket === 'r-pan' ? 1 : this._playerFace === -1 ? -1 : 1; }
   startTraining(options = {}) {
     this.lobbyScene?.stop();
     this.setSessionKind('practice');
@@ -1259,6 +1294,7 @@ class Game {
   setState(s) {
     if (s !== GS.MENU) this.lobbyScene?.stop();
     const previous = this.state;
+    if (previous !== s) this.cancelPaddleTrick();
     this.state = s; this.stateT = 0; this.stateSimT = 0; if (this.paused) this.setPaused(false);
     this.syncAudioQuiet();
     if (this.debugRecording && previous !== s) this.logInput('state_change', { outcome: { from: previous, to: s } });
@@ -1614,6 +1650,7 @@ class Game {
     if (this.staminaEnabled()) this._pendingCredit = this._rallyId;
     /* очко закончилось — шлейф мёртвого мяча умирает вместе с ним,
      * а не висит «мерзкой полосой» до следующей подачи */
+    this.ball.live = false;
     this.ball.hist.length = 0; this.ball.trailGrade = null; this.ball.golden = null;
     const idx = who > 0 ? 0 : 1;
     /* Свободная игра: мяч разыгрывается как обычно, но счёт не растёт —
@@ -1700,7 +1737,8 @@ class Game {
   /* ------------------------- ball <-> world ------------------------ */
   onBounce(side, speed, info) {
     if (this.ball.lastHitBy === 1 && this.shotJournal) this.shotJournal.bounce(side, this.time);
-    if (!(info && info.edge > 0.25)) this.audio.hitTable(speed, this.ball.p.x);
+    const impactSpeed = Number.isFinite(info?.impactSpeed) ? info.impactSpeed : speed;
+    this.audio.hitTable(impactSpeed, { x: this.ball.p.x, y: PH.TABLE_Y, z: this.ball.p.z });
     this.addMark(this.ball.p.x, this.ball.p.z, speed);
     this.emitParticles(this.ball.p.x, PH.TABLE_Y + 0.005, this.ball.p.z,
       4 + (speed > 9 ? 4 : 0), 0.5 + speed * 0.06, 0.26, 0.016, 1, 1, 0.92, { x: 0, y: 0.7, z: 0 });
@@ -1878,7 +1916,7 @@ class Game {
     // Difficulty belongs to OpponentAI's launch solver. Clamping velocity
     // here invalidated its legal serves after they had already been solved.
 
-    const speed = V3.len(b.v), spin = V3.len(b.w);
+    const speed = V3.len(b.v), spin = V3.len(b.w), incoming = this._preHit;
     /* Здесь уже применены экипировка, бонус за точный контакт, штраф за
      * промах, смягчение темпа и карьерные бусты — то есть проверять потолки
      * имеет смысл только отсюда. */
@@ -1893,27 +1931,23 @@ class Game {
     } else {
       this.stats.aiShots = (this.stats.aiShots || 0) + 1;
       if (this.ai && typeof this.ai.recordHit === 'function')
-        this.ai.recordHit({ v: this._preHit?.v || b.v }, racket, { p: b.p, v: b.v, w: b.w, info }, this.strokeTime ?? this.time);
+        this.ai.recordHit({ v: incoming?.v || b.v }, racket, { p: b.p, v: b.v, w: b.w, info }, this.strokeTime ?? this.time);
     }
     if (this.state === GS.SERVE_TOSS) this.setState(GS.RALLY);
     this._publishMatchContact(side, racket, contactP, quality,
       side > 0 ? (this.lastSweet !== undefined ? this.lastSweet : 1) : 1);
 
-    /* Hit classification for audio routing:
-     * STRONG  = high speed AND clean sweet-spot contact → boosted impact + whoosh
-     * SLOPPY  = high speed but off-centre → whoosh only (no ball sound)
-     * NORMAL  = everything else → plain ball impact */
+    // Every accepted hit owns one base racket cue here. Strong/sloppy swings
+    // retain their extra whoosh; feedback must not repeat the physical contact.
     const softHit = !!(racket.arch && racket.arch.soft) || (side > 0 && this.lastSweet !== undefined && this.lastSweet < 0.38);
     const sweet = side > 0 ? (this.lastSweet !== undefined ? this.lastSweet : 1) : 1;
     const isStrongHit = speed > 7.5 && (quality ?? 0.8) > 0.70 && sweet > 0.50;
     const isFastSloppy = !isStrongHit && speed > 7.5 && (sweet < 0.50 || (quality ?? 0.8) < 0.70);
+    this.audio.hitRacket(speed, info ? info.contactSlip : 0, !isStrongHit && softHit, side + '/' + this.shotId, isStrongHit ? 1 : 0);
     if (isStrongHit) {
-      this.audio.hitRacket(speed, info ? info.contactSlip : 0, false, side + '/' + this.shotId, 1);
       this.audio.whoosh(clamp(speed / 10, 0.6, 1.4), 'hit/' + this.shotId);
     } else if (isFastSloppy) {
       this.audio.whoosh(clamp(speed / 12, 0.4, 1.0), 'sloppy/' + this.shotId);
-    } else {
-      this.audio.hitRacket(speed, info ? info.contactSlip : 0, softHit, side + '/' + this.shotId);
     }
     if (side > 0 && this.lastSweet !== undefined && this.lastSweet < 0.30) this.buzz(16);
     if (this.feedback) {
@@ -2297,7 +2331,6 @@ class Game {
           // the live trajectory without changing the AI/solver prediction.
           if (this.time - (this._edgeFxT || -9) > 0.45) {
             this._edgeFxT = this.time;
-            this.audio.hitEdge();
             this.msg(info.edgeAxis === 'x' ? 'РЕБРО СТОЛА!' : 'ЗАДНЯЯ КРОМКА!', 1.0, '#ffd34d');
             this.shakeIt(0.10 + 0.16 * info.edge, V3.new(0, 1, 0));
             this.stats.edgeBalls = (this.stats.edgeBalls || 0) + 1;
@@ -2834,7 +2867,7 @@ class Game {
     let n = V3.norm(V3.new(), pad.normal);
     if (n.x * b.v.x + n.y * b.v.y + n.z * b.v.z > 0) return false; // грань отвернута от мяча
     const gripped = playerWristPose(pad.pos, pad.vel, this.settings.hand, { grip: this.settings.grip, forehand: pad.forehand });
-    const rubber = this.equip ? (this.equip.forSide(1) || {}) : {};
+    const rubber = this.equip ? (this.equip.forSide(this.playerActiveFace) || {}) : {};
     let vR = V3.mul(V3.new(), pad.vel || V3.new(), 0.4);
     vR.z -= 0.9;                                    // лёгкий выпад навстречу — «стенка» живая
     const request = describeProfileEffort('BLOCK', this._playerEffortContext(false),
@@ -2870,6 +2903,10 @@ class Game {
     if (this.stats) {
       this.stats.blocks = (this.stats.blocks || 0) + 1;
       this.stats.shots = (this.stats.shots || 0) + 1;
+      const speed = V3.len(b.v), spin = V3.len(b.w);
+      this.stats.totalSpin = (this.stats.totalSpin || 0) + spin / TAU;
+      this.stats.maxSpeed = Math.max(this.stats.maxSpeed || 0, speed * 3.6);
+      this.stats.maxSpin = Math.max(this.stats.maxSpin || 0, spin / TAU);
       if (this.stats.byStroke) this.stats.byStroke.BLOCK = (this.stats.byStroke.BLOCK || 0) + 1;
     }
     if (this.shotJournal && typeof this.shotJournal.noteOutcome === 'function')
@@ -2899,7 +2936,7 @@ class Game {
     if (!impactRacket(v, w, racket.normal, racket.vR, racket.quality ?? .5, racket.rubber || {})) return false;
     const p = V3.addScaled(V3.clone(contact), contact, racket.normal, PH.R * STROKE_CONFIG.racket.launchSeparation);
     const validation = isServe ? STROKE_CONFIG.serve.solver : STROKE_CONFIG.racket.validation;
-    const o = predict(p, v, w, { dt: validation.coarseDt,
+    const o = predict(p, v, w, { dt: PH.SIM_DT,
       maxT: validation.maxT, stopAfterBounces: 2, out: this._q || (this._q = {}) });
     if (o.diverged || o.hitNet || !o.landed) return false;
     if (isServe) {
@@ -3022,7 +3059,7 @@ class Game {
      * assist or CCD re-evaluation may turn an outside press into a hit. */
     if (this.pressConsumed()) return false;
     if (!pz) return true;
-    return pz.accepted === true;
+    return pz.accepted === true && pz.shotId === this.shotId;
   }
 
   /** The pose the blade is drawn with this frame. The continuous test must use
@@ -3335,7 +3372,7 @@ class Game {
     const strokePos = inputPad ? inputPad.pos : pad.pos;
     const forehand = paddleForehand(strokePos.x, this.settings.hand, pad.forehand);
     const grip = playerWristPose(strokePos, pad.vel, this.settings.hand, { grip: this.settings.grip, forehand });
-    const sideParams = this.equip.forSide(1);
+    const sideParams = this.equip.forSide(this.playerActiveFace);
     const radius = MATCH_RULES.sweetRadius;
     const sweet = clamp((1 - hit.rad / reachRadius) * (sideParams.sweet || this.equip.sweetK), 0, 1);
     const offLat = clamp((hit.x - hit.px) / Math.max(radius, 1e-4), -1, 1);
@@ -3474,7 +3511,7 @@ class Game {
 
     racket = enforceRacketEffort(racket, effortBudget);
     const contactPose = paddleContactPose(contact, racket, { grip: this.settings.grip,
-      hand: this.settings.hand, forehand, roll: pad.roll, activeFace: 1 });
+      hand: this.settings.hand, forehand, roll: pad.roll, activeFace: this.playerActiveFace });
     if (!contactPose && !hit.edge) { this.logPressRejection('RACKET_TABLE_COLLISION'); return; }
     racket.contactInput = { pressZone: this.swipe.pressZone && { ...this.swipe.pressZone }, capture: captureSample && { ...captureSample, route: hit.captureKind || 'ccd' }, p: shotVec(contact), v: shotVec(b.v), w: shotVec(b.w), gesture: { ...m },
       context: { grip: this.settings?.grip, hand: this.settings?.hand, forehand, isServe: isServeStroke,
@@ -3565,6 +3602,7 @@ class Game {
         isNetCord: this.netTouched,
         isEdge: info && info.edge > 0.25,
         side: 1,
+        skipBaseHitAudio: true,
       });
     }
 
@@ -3611,16 +3649,9 @@ class Game {
     const work = this._aiWork = { side: -1, swingId: ++this._swingId, shotId: this.shotId,
       rallyId: this._rallyId, paid: Stamina.cost(request), request, budget };
     this._chargeStamina(-1, work.paid);
+    if (racket.valid === false) { this._finishSwingWork(work); return; }
     const reach = V3.dist(b.p, ai.pos);
     if (reach > 0.42) { this._finishSwingWork(work); return; }
-    /* A short ball that has already bounced on the AI's side sits well
-     * below the resting bat. The old `b.p.z > ai.pos.z + 0.08` gate refused
-     * every such recovery even when the bot had a valid plan, a committed
-     * backswing and enough 3-D reach — it was the last blocker for the
-     * "unreturnable short ball". Only a ball still travelling away from the
-     * AI (leaving its half) may be refused on height; an approaching or
-     * stationary post-bounce ball must be playable. */
-    if (b.v.z > 0.02 && b.p.z > ai.pos.z + 0.08) { this._finishSwingWork(work); return; }
 
     /* ITTF 2.07: the ball must touch the AI's court before the AI returns
      * it. The old test only refused while the ball was still over the table,
@@ -3649,6 +3680,38 @@ class Game {
   }
 
   /* ------------------------- paddle driving ------------------------ */
+  paddleTrickAllowed() {
+    return (this._equippedRacket ?? 'r-standard') === 'r-standard' && this.pointerFine !== false && this.playerPaddleVisible &&
+      !this.pointerDown && !this.swipe?.active && !this.paused && !this._ttSleeping && !this._ttContextLost &&
+      !this.preview?.active && !this.replayer?.on && !this.training && !this.demoMode && !this.network?.isInMatch &&
+      !this.ball?.live &&
+      (typeof document === 'undefined' || !document.hidden) &&
+      (this.state === GS.POINT || this.state === GS.SERVE_READY && (this.server === 1 || !!this.freePlay));
+  }
+  cancelPaddleTrick() { this.paddleTrick?.cancel(); }
+  syncPlayerPaddleFace() {
+    const pad = this.player, face = this.playerActiveFace;
+    if (!pad || pad.activeFace === face) return;
+    pad.roll = (pad.roll || 0) * (pad.activeFace === -1 ? -1 : 1) * face;
+    this.padRoll = pad.roll; pad.activeFace = face;
+    paddlePoseQuaternion(V3.mul(V3.new(), pad.normal, face), pad.roll, pad.q || (pad.q = Q.new()));
+    pad.poseReady = true; this._paddleHold = null;
+  }
+  observePaddleTrick(point, time, noButtons) {
+    if (!noButtons || point.rawX < 0 || point.rawX > 1 || point.rawY < 0 || point.rawY > 1 ||
+        !this.paddleTrickAllowed()) { this.cancelPaddleTrick(); return; }
+    const trick = this.paddleTrick || (this.paddleTrick = new PaddleTrick()), rect = this.canvas.getBoundingClientRect();
+    const direction = trick.observe(point.rawX * rect.width, point.rawY * rect.height, time, this.time);
+    if (direction && trick.start(direction, this.time, !!this.reducedMotion)) this.updatePaddleTrick();
+  }
+  updatePaddleTrick() {
+    const trick = this.paddleTrick;
+    if (!trick?.active) return;
+    if (!this.paddleTrickAllowed() || this.reducedMotion && trick.duration) { trick.cancel(); return; }
+    if (!trick.advance(this.time)) return;
+    this._playerFace = -this.playerActiveFace;
+    this.syncPlayerPaddleFace();
+  }
   /** Preserve the actual blade pose until the next pointer input. */
   holdPaddlePose() {
     const pad = this.player, pt = this.pointer || { x: .5, y: .55 };
@@ -3660,6 +3723,7 @@ class Game {
   }
 
   resetPaddle(hard) {
+    this.cancelPaddleTrick();
     const pad = this.player;
     const poseRoll = pad.roll;
     const broken = ![pad.pos.x, pad.pos.y, pad.pos.z].every(Number.isFinite);
@@ -3671,7 +3735,7 @@ class Game {
     this.pointerDown = false;
     this.padYaw = 0;
     this.padRoll = (this.settings.hand === 'left' ? -1 : 1)
-      * (this.settings.grip === 'penhold' ? Math.PI - 0.052 : 0.28);
+      * (this.settings.grip === 'penhold' ? Math.PI - 0.052 : 0.28) * this.playerActiveFace;
     this.padPitch = -(this.settings.grip === 'penhold' ? 5 : 15) * Math.PI / 180;
     if (this.paddleMotion) this.paddleMotion.reset();
     if (this.paddleReadClock) this.paddleReadClock.reset();
@@ -3709,8 +3773,9 @@ class Game {
     }
     if (resetPosition) {
       V3.set(pad.normal, 0, Math.sin(this.padPitch), -Math.cos(this.padPitch));
-      paddlePoseQuaternion(pad.normal, pad.roll, pad.q || (pad.q = Q.new()));
-      pad.activeFace = 1; pad.poseReady = true;
+      pad.activeFace = this.playerActiveFace;
+      paddlePoseQuaternion(V3.mul(V3.new(), pad.normal, pad.activeFace), pad.roll, pad.q || (pad.q = Q.new()));
+      pad.poseReady = true;
     } else {
       const face = paddleFaceAngles(pad.normal);
       this.padYaw = pad.yaw = face.yaw; this.padPitch = pad.pitch = face.pitch;
@@ -3723,6 +3788,7 @@ class Game {
   }
 
   updatePlayerPaddle(dt, strokeDt = dt) {
+    this.updatePaddleTrick();
     const cfg = STROKE_CONFIG.racket;
     const pad = this.player;
     V3.copy(pad.prev, pad.pos);
@@ -4073,7 +4139,7 @@ class Game {
     const rollRate = fine ? 17 : 11;
     this.padYaw = catchUp(this.padYaw || 0, wrist.yaw, yawRate);
     this.padPitch = catchUp(this.padPitch || 0, wrist.pitch, pitchRate);
-    this.padRoll = paddleAngleDelta(0, catchUp(this.padRoll || 0, wrist.roll, rollRate, 10, true));
+    this.padRoll = paddleAngleDelta(0, catchUp(this.padRoll || 0, wrist.roll * this.playerActiveFace, rollRate, 10, true));
     pad.yaw = this.padYaw; pad.pitch = this.padPitch; pad.roll = this.padRoll;
 
     // orientation follows the live gesture so you SEE the face angle
@@ -4131,7 +4197,7 @@ class Game {
     }
     pad.motionStage = strokePose ? strokePose.stage : intent ? 'swing' : this._prep > .02 ? 'prepare' : 'ready';
     if (!strokePose?.q && !held) {
-      pad.activeFace = 1;
+      pad.activeFace = this.playerActiveFace;
       paddlePoseQuaternion(V3.mul(this._bladeFace || (this._bladeFace = V3.new()), pad.normal, pad.activeFace),
         pad.roll, pad.q || (pad.q = Q.new()));
     }
@@ -4596,7 +4662,7 @@ class Game {
     const targetScale = clamp(Number.isFinite(requestedScale) ? requestedScale : 1, 0.1, 1);
     this.timeScale = typeof gameplayCalibrationLocked === 'function' && gameplayCalibrationLocked(this)
       ? 1 : clamp(expSmooth(Number.isFinite(this.timeScale) ? this.timeScale : 1, targetScale, 9, dtReal), 0.1, 1);
-    const dt = Math.min(dtReal, 0.05) * this.timeScale;
+    const dt = dtReal * this.timeScale;
     this.strokeTime += dt;
     this.stateSimT = (this.stateSimT || 0) + dt;
 
@@ -4992,10 +5058,13 @@ class Game {
        rendering must not mutate the simulation's orientation. */
     if (this.playerPaddleVisible) {
       const pp = this.player;
+      const trickPose = this.paddleTrick?.pose(pp);
       this.rig.draw(R, S, {
-        pos: pp.pos, normal: pp.normal, q: pp.poseReady && !this._idleStill ? pp.q : undefined, hand: this.settings.hand, shadowPass,
+        pos: trickPose?.pos || pp.pos, normal: pp.normal,
+        q: trickPose?.q || (pp.poseReady && !this._idleStill ? pp.q : undefined), hand: this.settings.hand, shadowPass,
         swing: pp.swing, roll: pp.roll || 0, absoluteRoll: true,
         mats: this.paddleMats(S, this.equip),
+        racket: this._equippedRacket, activeFace: pp.activeFace,
       });
     }
 
@@ -5008,6 +5077,7 @@ class Game {
       this.rig.draw(R, S, {
         pos: this.ai.pos, normal: flat, hand: this.settings.hand === 'right' ? 'left' : 'right',
         swing: 0, roll: 0, mats: this.paddleMats(S, this.aiEquip), shadowPass,
+        racket: 'r-standard',
       });
       return;
     }
@@ -5015,6 +5085,7 @@ class Game {
       pos: ap.pos, normal: ap.normal, q: ap.poseReady ? ap.q : undefined, hand: this.ai.hand || 'right',
       swing: 0, roll: ap.roll ?? this.ai.roll ?? .28, absoluteRoll: true,
       mats: this.paddleMats(S, this.aiEquip), shadowPass,
+      racket: 'r-standard', activeFace: ap.activeFace,
     });
 
   }

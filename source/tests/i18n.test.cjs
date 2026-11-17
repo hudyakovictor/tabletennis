@@ -33,9 +33,16 @@ function usedKeys() {
     for (const re of pats) for (const m of s.matchAll(re)) if (!m[1].endsWith('.')) keys.add(m[1]);  // 'kind.'+x — динамические семейства ниже
   }
   // dynamic families built by concatenation in code
-  for (const k of ['rubber', 'blade', 'trail', 'table', 'bundle']) keys.add('kind.' + k);
+  for (const k of ['racket', 'rubber', 'blade', 'trail', 'table', 'bundle']) keys.add('kind.' + k);
   for (const c of ['coins', 'gems']) keys.add('cur.' + c);
   for (const r of ['common', 'rare', 'epic', 'leg']) keys.add('rarity.' + r);
+  for (const id of ['win', 'lose', 'finished', 'avgSpeed', 'maxSpeed', 'avgSpin', 'maxSpin', 'summary', 'strokes', 'stroke', 'metric']) keys.add('result.' + id);
+  for (const coverage of ['complete', 'partial', 'missing']) keys.add('result.coverage.' + coverage);
+  const icons = vm.createContext({}); vm.runInContext(fs.readFileSync(path.join(SRC, 'ui/stroke_icons.js'), 'utf8'), icons);
+  for (const id of icons.StrokeIcons.ids) keys.add('hud.stroke.' + id);
+  for (const id of ['label', 'near', 'far', 'target', 'rally', 'rallyShort', 'serve', 'unlimited', 'low', 'energy', 'energyValue',
+    'kmh', 'rps', 'missing', 'free', 'lastContact', 'pointShort', 'letShort', 'ended', 'net', 'out', 'whiff', 'point', 'winner', 'let',
+    'matchPoint', 'paused', 'unknown', 'announceScore', 'announceServe', 'announceLow']) keys.add('hud.' + id);
   return keys;
 }
 

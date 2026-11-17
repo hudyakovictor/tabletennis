@@ -34,7 +34,8 @@ const lib = load([
   '10_math.js', '12_match_rules.js', '30_physics.js', '38_paddle_motion.js', '40_swipe.js',
   '55_ai.js', '57_camera.js', '46_physics_watchdog.js',
 ], [
-  'PH', 'V3', 'predict', 'integrateBall', 'impactRacket', 'bounceTable', 'netContactKind',
+  'PH', 'V3', 'predict', 'integrateBall', 'resolveRacketLaunch', 'strokeIdentityMatches', 'paddleContactPose',
+  'bounceTable', 'tableContact', 'netContactStep', 'bounceNet',
   'OpponentAI', 'AI_LEVELS', 'PhysicsWatchdog', 'cameraRigFor', 'rigViewProj', 'projectPoint',
   'STROKE_CONFIG', 'MATCH_RULES', 'clipTape', 'keepPaddleAboveTable', 'paddleLimitsFor',
   'PADDLE_STANCE_Z',
@@ -63,6 +64,7 @@ const project = (p) => lib.projectPoint(vp, p, {});
 
 const GRAVITY_DT = 1 / 600;
 const TABLE_Y = PH.TABLE_Y, BALL_R = PH.R;
+const tableHit = {}, netHit = {};
 
 /* Входящий мяч обязан быть ИГРАБЕЛЬНЫМ: он должен лечь на половину бота.
  * Иначе бот честно отказывается бить (computePlan → null), и прогон
@@ -84,11 +86,11 @@ function freshBall() {
   return null;
 }
 
-function makeStub(aiPos) {
+function makeStub(ai) {
   return {
     time: 0, strokeTime: 0, shotId: 1, rally: 5, netTouched: false,
-    state: 'RALLY', isServeBall: false,
-    ai: { pos: V3.new(0, PH.TABLE_Y + 0.25, -1.45), lastShot: null },
+    state: 'RALLY', isServeBall: false, rallyBounces: [],
+    ai,
     player: { pos: { x: 0, y: 1.05, z: 1.55 } },
     settings: { hand: 'right' },
     stats: { aiShots: 0 },
@@ -99,35 +101,13 @@ function makeStub(aiPos) {
 /* Один удар бота целиком: подлёт → замах → контакт → полёт отскока.
  * Каждый подшаг идёт через тот же интегратор, что в игре, отскоки — через
  * bounceTable/clipTape, а сторож кормится ровно как в 70_game.js. */
-/* Клинок бота двигается как в игре: по горизонтали — к прогнозу точки
- * встречи на его плоскости, по вертикали — по высоте мяча, с лимитами
- * depth-зависимые (paddleLimitsFor) и скоростью уровня (AI_LEVELS.move).
- * Сглаживание экспоненциальное, как ai._moveSmooth: ровно поэтому позы
- * разные от кадра к кадру, а не один замороженный вектор. */
-const _q = {};
-const REACH_X = 1.12;
-function moveBlade(stub, ball, dt, level) {
-  const ai = stub.ai.pos;
-  /* Плоскость клинка не искусственно «-2.05»: в игре её держит clamp
-   * noisyTarget (-2.5 … -R) и отход уровня (AI_LEVELS.standOff). Прокси
-   * обязан идти по той же границе, иначе сторож не видит позы глубокой
-   * стойки СЛОЖНОГО и WTF — как раз те, где клинок ниже и дальше тумбы. */
-  const stopZ = Math.max(-2.45, Math.min(-1.05, ai.z));
-  lib.predict(V3.clone(ball.p), V3.clone(ball.v), V3.clone(ball.w),
-    { dt: 1 / 240, maxT: 2.4, stopZ, stopDir: -1, stopAtPlane: true, out: _q });
-  const aim = _q.end && Number.isFinite(_q.end.x) ? _q.end : ball.p;
-  const lim = lib.paddleLimitsFor(stopZ);
-  let tx = Math.max(-Math.min(REACH_X, lim.x), Math.min(REACH_X, lim.x, aim.x));
-  let ty = Math.max(PH.TABLE_Y + Math.max(0.18, lim.yLo),
-    Math.min(PH.TABLE_Y + Math.min(0.96, lim.yHi), aim.y));
-  let tz = stopZ;
-  const rate = Math.max(2, Math.min(12, level.move * 2.5));
-  const k = 1 - Math.exp(-rate * dt);
-  ai.x += (tx - ai.x) * k;
-  ai.y += (ty - ai.y) * k;
-  ai.z += (tz - ai.z) * k * 0.9;
-  lib.keepPaddleAboveTable(ai, { x: 0, y: -0.1, z: 1 }, 0, PH.TABLE_Y, PH.T_HALF_WID, PH.T_HALF_LEN);
-  return { x: ai.x, y: ai.y, z: ai.z };
+// think() already moves the actual OpponentAI. Apply only the shared physical
+// bounds; moving a second proxy changed the tested center and interception time.
+function boundBlade(ai) {
+  const lim = lib.paddleLimitsFor(ai.pos.z);
+  ai.pos.x = Math.max(-lim.x, Math.min(lim.x, ai.pos.x));
+  ai.pos.y = Math.max(PH.TABLE_Y + lim.yLo, Math.min(PH.TABLE_Y + lim.yHi, ai.pos.y));
+  lib.keepPaddleAboveTable(ai.pos, ai.faceNormal, ai.roll, PH.TABLE_Y, PH.T_HALF_WID, PH.T_HALF_LEN);
 }
 
 function strokeOnce(w, ball, stub, levelIndex, ai, stats) {
@@ -138,7 +118,6 @@ function strokeOnce(w, ball, stub, levelIndex, ai, stats) {
   let accFrame = 0;
   let swung = false;
   let hitSeq = 0;
-  let botBounce = false;
   const contact = V3.new();
 
   for (let i = 0; i < 600 * 3 && ball.live; i++) {
@@ -153,26 +132,34 @@ function strokeOnce(w, ball, stub, levelIndex, ai, stats) {
     if (az > stats.maxZ) stats.maxZ = az;
 
     /* стол */
-    if (ball.v.y < 0 && ball.p.y <= TABLE_Y + BALL_R && ball.p.y > TABLE_Y - 0.25 &&
-        Math.abs(ball.p.x) <= PH.T_HALF_WID + BALL_R && Math.abs(ball.p.z) <= PH.T_HALF_LEN + BALL_R) {
-      ball.p.y = TABLE_Y + BALL_R + 1e-5;
+    const touch = ball.v.y < 0 && lib.tableContact(p0.x, p0.y, p0.z, ball.p.x, ball.p.y, ball.p.z, tableHit);
+    if (touch) {
+      const normalSpeed = -ball.v.y;
+      V3.copy(ball.p, touch); ball.p.y += 1e-5;
       const bt = lib.bounceTable(ball.p, ball.v, ball.w);
       w.tableContact({ time: t, edge: bt ? bt.edge : 0, edgeAxis: bt && bt.edgeAxis,
-        side: Math.sign(ball.p.z) || 1, speed: Math.abs(ball.v.y) });
-      if (ball.p.z < 0) botBounce = true;
+        side: Math.sign(ball.p.z) || 1, speed: normalSpeed });
+      stub.rallyBounces.push(Math.sign(ball.p.z) || 1);
       stats.bounces++;
+      // Same point lifetime as Game.onBounce: an own-court or second receiver
+      // bounce is terminal, not another opportunity for a delayed AI swing.
+      const side = Math.sign(ball.p.z) || 1;
+      if (side === ball.lastHitBy || stub.rallyBounces.filter(s => s === -ball.lastHitBy).length >= 2) {
+        ball.live = false; break;
+      }
     }
     /* сетка */
-    if (p0.z * ball.p.z <= 0 && Math.abs(ball.p.z) < 0.2 && ball.p.y < PH.NET_TOP + BALL_R) {
-      lib.clipTape(ball.p, ball.v, ball.w);
+    const netKind = lib.netContactStep(p0.x, p0.y, p0.z, ball.p.x, ball.p.y, ball.p.z, netHit);
+    if (netKind) {
+      if (netKind === 2) lib.clipTape(ball.p, ball.v, ball.w);
+      else lib.bounceNet(ball.p, ball.v, ball.w, Math.sign(p0.z) || 1);
+      stub.netTouched = true;
       stats.nets++;
     }
 
     /* поза клинка бота: та, которой он будет бить (ai.pos) */
     V3.copy(oppPad.pos, stub.ai.pos);
-    const nn = { x: 0.4, y: -0.1, z: 1 };
-    const l = Math.hypot(nn.x, nn.y, nn.z);
-    oppPad.normal = { x: nn.x / l, y: nn.y / l, z: nn.z / l };
+    V3.copy(oppPad.normal, ai.faceNormal);
 
     w.substep({ dt: GRAVITY_DT, time: t, p0, p1: ball.p, ball,
       opp: { pad: oppPad, padPrev: prevOpp, hitRadius: 0.152 },
@@ -184,25 +171,27 @@ function strokeOnce(w, ball, stub, levelIndex, ai, stats) {
       accFrame -= frameDt;
       stub.time += frameDt; stub.strokeTime += frameDt;
       ai.think(stub, frameDt);
-      moveBlade(stub, ball, frameDt, lib.AI_LEVELS[levelIndex] || { move: 3 });
+      boundBlade(ai);
       stats.poses.add(`${stub.ai.pos.x.toFixed(3)},${stub.ai.pos.y.toFixed(3)},${stub.ai.pos.z.toFixed(3)}`);
       if (stub.ai.pos.z < stats.bladeMinZ) stats.bladeMinZ = stub.ai.pos.z;
       /* ровно условия 70_game.watchdogArmFrame: план есть, мяч летит к боту,
        * уже отскочил на его половине и ещё перед ним */
-      w.armOpponent(!!(ai.commit && ball.live && ball.lastHitBy === 1 && botBounce &&
+      w.armOpponent(!!(ai.commit && ball.live && ball.lastHitBy === 1 && stub.rallyBounces.some(side => side < 0) &&
         ball.p.z > stub.ai.pos.z - 0.02),
         { shotId: stub.shotId, stroke: ai.commit ? ai.commit.archId : null, aiLevel: levelIndex });
       prevOpp = { x: oppPad.pos.x, y: oppPad.pos.y, z: oppPad.pos.z };
 
       /* бот бьёт только там, где мяч реально рядом (как tryAiHit) */
-      if (!swung && ball.p.z < 0.2 && V3.dist(ball.p, stub.ai.pos) <= 0.42) {
+      if (!swung && ball.p.z < 0.2 && V3.dist(ball.p, stub.ai.pos) <= 0.42 &&
+          stub.rallyBounces.some(side => side < 0) && !(ball.v.z > .02 && ball.p.z > ai.pos.z + .08)) {
         const racket = ai.swing(stub);
         if (racket) {
           const before = { v: V3.clone(ball.v), w: V3.clone(ball.w) };
-          const info = lib.impactRacket(ball.v, ball.w, racket.normal, racket.vR,
-            racket.quality, racket.rubber || {});
-          if (info) {
+          const pose = lib.paddleContactPose(ball.p, racket, { hand: 'right', grip: 'shakehand', forehand: racket.forehand, roll: ai.roll });
+          const launch = lib.resolveRacketLaunch(ball, racket);
+          if (pose && launch && lib.strokeIdentityMatches(racket, launch)) {
             V3.copy(contact, ball.p);
+            V3.copy(ball.v, launch.v); V3.copy(ball.w, launch.w);
             stats.contactBehind.push(Math.abs(contact.z) - PH.T_HALF_LEN);
             /* скорость мяча СРАЗУ после контакта клинка бота — это и есть
              * «сила удара» уровня, а не максимум за весь полёт */
@@ -214,14 +203,16 @@ function strokeOnce(w, ball, stub, levelIndex, ai, stats) {
             if (L && L.vmagMax > 0) stats.maxVmagVsLevel = Math.max(stats.maxVmagVsLevel, vmag / L.vmagMax);
             if (limit > 0) stats.maxVmagRatio = Math.max(stats.maxVmagRatio, vmag / limit);
             w.contact({ time: t, side: -1, serve: false, aiLevel: levelIndex,
-              contact, pad: { pos: stub.ai.pos }, padBefore: stub.ai.pos, racket });
+              contact, pad: pose, padBefore: stub.ai.pos, racket });
             w.stroke({ time: t, side: -1, aiLevel: levelIndex, tactic: ai.tactic,
               strokeId: (racket.stroke && racket.stroke.id) || null, vmag, vR: racket.vR,
               quality: racket.quality, contact,
               racket: { pos: racket.pos || stub.ai.pos, normal: racket.normal },
               ball: { v: ball.v, w: ball.w }, ballBefore: before });
-            V3.addScaled(ball.p, ball.p, racket.normal, BALL_R * lib.STROKE_CONFIG.racket.launchSeparation);
+            V3.copy(ai.pos, pose.pos); V3.copy(ai.faceNormal, racket.normal); ai.roll = pose.roll;
+            V3.copy(ball.p, launch.p);
             ball.lastHitBy = -1;
+            stub.rallyBounces.length = 0;
             hitSeq++;
             swung = true;
             stats.swings++;
@@ -244,7 +235,8 @@ function runLevel(levelIndex, strokes) {
   const w = new PhysicsWatchdog();
   w.onTicket = null;
   const ai = new OpponentAI(levelIndex);
-  const stub = makeStub();
+  ai.rng = rnd;
+  const stub = makeStub(ai);
   const stats = { strokes: 0, swings: 0, declines: 0, bounces: 0, nets: 0, hitSeq: 0, poses: new Set(),
     maxVmagRatio: 0, maxVmag: 0, maxVmagVsLevel: 0, maxX: 0, maxZ: 0, maxBallSpeed: 0, maxBallY: 0,
     /* стойка бота: насколько глубоко клинок уходит за линию стола и где
@@ -262,6 +254,7 @@ function runLevel(levelIndex, strokes) {
     stub.strokeTime = stub.time;
     stub.shotId++;
     stub.netTouched = false;
+    stub.rallyBounces.length = 0;
     stub.rally = 5;
     ai.reset();
     w.resetShot();

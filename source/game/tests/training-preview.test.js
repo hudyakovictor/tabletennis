@@ -173,6 +173,22 @@ test('foundation tap reference has a static touch window and no zero-length draw
   assert.equal(gameHash(g), before); p.close();
 });
 
+test('preview and contact inset read the current racket selector without rebuilding the physical clip', () => {
+  const { g, p } = fixture(), options = [];
+  p._rig.draw = (R, S, o) => options.push({ racket: o.racket, face: o.activeFace });
+  g._equippedRacket = 'r-pan';
+  assert.equal(p.open({ strokeId: 'LOOP', forehand: false }), true);
+  p.command('contact'); p.render();
+  assert.ok(options.length > 0);
+  assert.ok(options.every(o => o.racket === 'r-pan' && o.face === -1));
+  const clip = p.clip;
+  g._equippedRacket = 'r-standard'; options.length = 0;
+  p.render();
+  assert.equal(p.clip, clip);
+  assert.ok(options.every(o => o.racket === 'r-standard' && o.face === -1));
+  p.close();
+});
+
 test('all 44 lessons open their physical family without progressing the active lesson', () => {
   const { p, g } = fixture(), before = gameHash(g);
   for (const step of lib.TRAIN_STEPS) {
@@ -401,6 +417,35 @@ test('contact camera renders the requested timeline sample; only its reference i
   }
   assert.ok(lib.V3.dist(p.ball.p, p.clip.ball.p) > .005, 'scrub sample must differ from fixed contact');
   p.close();
+});
+
+test('imported preview models keep the same physical playing plane for both standard faces and the pan bottom', () => {
+  for (const racket of ['r-standard', 'r-pan']) for (const forehand of [true, false]) {
+    const { p, g, draws } = fixture();
+    g._equippedRacket = racket;
+    g.scene.rackets = {
+      'r-standard': { faceOffset: .0043, singleFace: false, parts: [{ mesh: { ...g.scene.mesh.blade, ibo: 'atlas-paddle' }, mat: { color: [1, 1, 1] } }] },
+      'r-pan': { faceOffset: .010, singleFace: true, parts: [{ mesh: { ...g.scene.mesh.blade, ibo: 'pan-bottom' }, mat: { color: [.2, .2, .2], metal: .9 } }] },
+    };
+    assert.equal(p.open({ strokeId: 'DRIVE', forehand }), true);
+    p.command('camera', 'contact'); p.command('seek', .52);
+    const before = gameHash(g); p.render();
+    const model = g.scene.rackets[racket], drawn = draws.find(draw => draw.buffer === model.parts[0].mesh.ibo);
+    assert.ok(drawn); assert.ok(!draws.some(draw => draw.buffer === 'blade'), 'imported geometry replaces the procedural paddle');
+    const face = model.singleFace ? 1 : p.racket.activeFace;
+    const point = lib.M4.transformPoint(lib.V3.new(), drawn.model, lib.V3.new(0, 0, face * model.faceOffset));
+    const pose = lib.M4.compose(lib.M4.create(), p.racket.p, p.racket.q, lib.V3.new(1, 1, 1));
+    vectorNear(point, lib.M4.transformPoint(lib.V3.new(), pose, lib.V3.new(0, 0, p.racket.activeFace * .010)), 1e-6);
+    assert.equal(gameHash(g), before, 'preview renders cannot mutate game state');
+    const elements = new Map(), element = selector => {
+      if (!elements.has(selector)) elements.set(selector, { setAttribute() {} });
+      return elements.get(selector);
+    };
+    p.root = { querySelector: element, querySelectorAll: () => [], toggleAttribute() {} };
+    p.localize();
+    assert.equal(element('.tt-preview-face').textContent, p._text(racket === 'r-pan' ? 'pan' : forehand ? 'red' : 'black'));
+    p.root = null; p.close();
+  }
 });
 
 test('same WebGL contact inset uploads its own camera, clears only scoped depth and restores presentation', () => {

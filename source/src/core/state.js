@@ -11,7 +11,7 @@
    уровень 1. Всё остальное зарабатывается матчами (см. сложность формы в
    screens/match.js). */
 const SAVE_KEY = 'ttu-v2';
-const SAVE_VERSION = 9;
+const SAVE_VERSION = 10;
 const DEFAULT_STATE = {
   v: SAVE_VERSION, lang: null,
   name: 'Anton Spin', nick: '@anton_tt', club: 'Spin Lab',
@@ -28,7 +28,7 @@ const DEFAULT_STATE = {
     { id: 'c3', kind: 'epic', state: 'locked' },
     null
   ],
-  owned: ['r-teal', 'b-ink', 't-coral'], equipped: { rubber: 'r-teal', blade: 'b-ink', trail: 't-coral' },
+  owned: ['r-standard'], equipped: { racket: 'r-standard' },
   sfx: true, music: true, vibro: true, rm: false, quality: 'mid', assist: true, tutorial: true, hint: true, tutorialDone: false,
   audioLevels: { master: .8, effects: .9, music: .25, ambient: .2 },
   cal: {}, // Sparse raw preferences; the engine registry supplies all calibration defaults.
@@ -67,7 +67,19 @@ const MIGRATIONS = {
   6: (s) => { s.training = repairTrainingState(s.training); },
   7: (s) => { s.cal = repairCalibrationPreferences(s.cal); s.audioLevels = repairAudioLevels(s.audioLevels, s.volume); },
   8: (s) => { s.rewardReceipts = repairRewardReceipts(s.rewardReceipts); },
+  /* v9 → v10: переход на цельную ракетку (racket) вместо отдельных rubber/blade/trail.
+     Удаляем старые товары и слот table; оставляем только бесплатную стандартную
+     ракетку и купленную сковородку (если была). Прочие балансы и прогресс сохраняем. */
+  9: repairEquipmentState
 };
+function repairEquipmentState(s) {
+  // State loads before Catalog. Retire only known goods, not other earned IDs.
+  const retired = new Set(['r-coral', 'r-void', 'r-teal', 'b-ink', 't-gold', 't-coral', 'tb-neon', 'f-season', 'season-bundle']);
+  s.owned = [...new Set((Array.isArray(s.owned) ? s.owned : []).filter(id => typeof id === 'string' && id.trim() && !retired.has(id)))];
+  if (!s.owned.includes('r-standard')) s.owned.unshift('r-standard');
+  const selected = s.equipped && typeof s.equipped === 'object' && !Array.isArray(s.equipped) && s.equipped.racket;
+  s.equipped = { racket: selected === 'r-pan' && s.owned.includes('r-pan') ? 'r-pan' : 'r-standard' };
+}
 function repairRewardReceipts(raw) {
   return [...new Set((Array.isArray(raw) ? raw : []).filter(id => typeof id === 'string' && id.trim() && id.length <= 192))];
 }
@@ -147,12 +159,12 @@ const Store = {
   write(key, s) { if (!this.ok) return false; try { localStorage.setItem(key, JSON.stringify(s)); return true; } catch (e) { return false; } },
   load() {
     let raw = this.read(SAVE_KEY);
-    if (!raw || typeof raw !== 'object') raw = this.read(SAVE_KEY + '.bak');   // битый основной → бэкап
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) raw = this.read(SAVE_KEY + '.bak');   // битый основной → бэкап
     // The old embedded engine really stored these preferences, independently of the shell.
     const legacyProfile = this.read('topspin.arena.save.v1');
     const legacySettings = legacyProfile && legacyProfile.settings && typeof legacyProfile.settings === 'object' ? legacyProfile.settings : {};
     const legacyQuality = legacySettings.quality === 'medium' ? 'mid' : ['high', 'low'].includes(legacySettings.quality) ? legacySettings.quality : null;
-    if (!raw || typeof raw !== 'object') {
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
       if (!Number.isFinite(legacySettings.volume) && typeof legacySettings.sound !== 'boolean' && !legacySettings.audioLevels &&
           typeof legacySettings.haptics !== 'boolean' && !Number.isFinite(legacySettings.difficulty) && !legacyQuality) return null;
       const fresh = structuredClone(DEFAULT_STATE);
@@ -164,7 +176,7 @@ const Store = {
       return fresh;
     }
     const from = Number.isFinite(raw.v) ? raw.v : 1;
-    if (from > SAVE_VERSION) return raw;                                        // сейв новее игры: не ломаем
+    if (from > SAVE_VERSION) { repairEquipmentState(raw); return raw; }         // сохраняем новую схему, кроме удалённой экипировки
     if (from < SAVE_VERSION) this.write(SAVE_KEY + '.bak', raw);                // бэкап до миграции
     const draft = Object.assign(structuredClone(DEFAULT_STATE), raw);
     const importingAudio = from < 8 && !Object.prototype.hasOwnProperty.call(raw, 'audioLevels');
@@ -182,8 +194,7 @@ const Store = {
     if (!draft.claimed || typeof draft.claimed !== 'object') draft.claimed = structuredClone(DEFAULT_STATE.claimed);
     if (!Array.isArray(draft.claimed.f)) draft.claimed.f = [];
     if (!Array.isArray(draft.claimed.p)) draft.claimed.p = [];
-    if (!Array.isArray(draft.owned)) draft.owned = DEFAULT_STATE.owned.slice();
-    if (!draft.equipped || typeof draft.equipped !== 'object') draft.equipped = Object.assign({}, DEFAULT_STATE.equipped);
+    repairEquipmentState(draft);
     if (!Array.isArray(draft.chests)) draft.chests = structuredClone(DEFAULT_STATE.chests);
     draft.training = repairTrainingState(draft.training);
     draft.rewardReceipts = repairRewardReceipts(draft.rewardReceipts);

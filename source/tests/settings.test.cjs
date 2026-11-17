@@ -60,6 +60,23 @@ test('ready sends current settings before mode, discards old hint/cal packets an
   assert.equal(f.GameHost.calibration.effective.flytime, .5);
 });
 
+test('ready and iframe reload resync current owned racket selection before mode, not stale equipment packets', () => {
+  const f = hostFixture({ v: 9, owned: ['r-pan', 'r-void'], equipped: { racket: 'r-pan', rubber: 'r-void', trail: 't-gold', table: 'tb-neon' } });
+  f.GameHost.send('equip', { equipped: { racket: 'r-standard', table: 'tb-neon' } });
+  f.GameHost.send('train', { mode: 'course' }); f.ready();
+  const packets = f.sent.filter(m => m.type === 'equip');
+  assert.equal(packets.length, 1); assert.deepEqual(packets[0].equipped, { racket: 'r-pan' });
+  assert.ok(f.sent.indexOf(packets[0]) < f.sent.findIndex(m => m.type === 'train'));
+  assert.deepEqual(plain(f.S.owned), ['r-standard', 'r-pan']);
+  f.S.equipped.racket = 'r-standard'; f.GameHost.reload();
+  f.GameHost.send('equip', { equipped: { racket: 'r-pan', trail: 't-gold' } }); f.ready();
+  assert.deepEqual(f.sent.findLast(m => m.type === 'equip').equipped, { racket: 'r-standard' });
+  const unowned = hostFixture({ v: 9, owned: ['r-void'], equipped: { racket: 'r-pan', table: 'tb-neon' } });
+  unowned.GameHost.send('equip', { equipped: { racket: 'r-pan' } }); unowned.ready();
+  assert.deepEqual(unowned.sent.findLast(m => m.type === 'equip').equipped, { racket: 'r-standard' });
+  assert.deepEqual(plain(unowned.S.owned), ['r-standard']);
+});
+
 test('stale calibration acknowledgements cannot overwrite a newer request', () => {
   const f = hostFixture(); f.ready();
   f.GameHost.send('cal', { k: 'flytime', v: 0 }); const oldId = f.GameHost.calibrationRequestId;

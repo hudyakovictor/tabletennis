@@ -1,6 +1,113 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const { load } = require('./helpers.cjs');
+
+test('trajectory and live physics agree on tabletop contact before the net in the same step', () => {
+  const { Game, GS, PH, V3, Q, predict } = load(['10_math.js', '30_physics.js', '40_swipe.js', '70_game.js'],
+    ['Game', 'GS', 'PH', 'V3', 'Q', 'predict']);
+  for (const side of [-1, 1]) for (const vy of [-1, -.1]) {
+    const p = V3.new(0, PH.TABLE_Y + PH.R + .0001, .03 * side);
+    const v = V3.new(0, vy, -8 * side), w = V3.new(), bounces = [];
+    const g = Object.create(Game.prototype);
+    Object.assign(g, { time: 1, state: GS.RALLY, stats: {},
+      ball: { p: V3.clone(p), v: V3.clone(v), w: V3.clone(w), q: Q.new(), live: true, lastHitBy: 1 },
+      player: { lastHitT: 1 }, audio: { hitNet() {}, hitFloor() {} }, moments: { addBounce() {} },
+      onBounce(hitSide) { bounces.push(hitSide); }, msg() {}, shakeIt() {}, _trailCrumb() {},
+      watchdogSubstep() {}, emitParticles() {}, buzz() {} });
+    g.stepPhysics(PH.SIM_DT);
+    assert.deepEqual(bounces, [side]);
+    assert.equal(!!g.netTouched, vy === -.1);
+    for (const stop of [{}, { stopOnFirstBounce: true }, { stopAfterBounces: 1 }]) {
+      const out = predict(p, v, w, { dt: PH.SIM_DT, maxT: PH.SIM_DT, ...stop });
+      assert.equal(out.bounces, bounces.length);
+      assert.equal(out.hitNet, !!g.netTouched);
+      assert.ok(Math.abs(out.landed.z - g.ball.p.z) < 1e-9 || g.netTouched,
+        'prediction uses the interpolated tabletop point, not the overshooting endpoint');
+    }
+  }
+});
+
+test('normal matrix follows model rotation in column-major order', () => {
+  const { M4, Q, V3 } = load(['10_math.js'], ['M4', 'Q', 'V3']);
+  for (const axis of [V3.new(1, 0, 0), V3.new(0, 1, 0), V3.new(0, 0, 1), V3.new(1, 2, -3)]) {
+    const q = Q.setAxisAngle(Q.new(), axis.x, axis.y, axis.z, .73);
+    const model = M4.compose(M4.create(), V3.new(3, -2, 5), q, V3.new(1, 1, 1));
+    const before = Array.from(model), normal = new Float32Array(9);
+    assert.equal(M4.normalFromMat4(normal, model), normal);
+    for (let col = 0; col < 3; col++) for (let row = 0; row < 3; row++) {
+      assert.ok(Math.abs(normal[col * 3 + row] - model[col * 4 + row]) < 1e-6,
+        `normal matrix must rotate with the model at column ${col}, row ${row}`);
+    }
+    assert.deepEqual(Array.from(model), before, 'normal extraction does not mutate the model');
+  }
+});
+
+test('normal matrix preserves tangent-plane perpendicularity under rotation and nonuniform scale', () => {
+  const { M4, Q, V3 } = load(['10_math.js'], ['M4', 'Q', 'V3']);
+  const q = Q.fromEuler(Q.new(), .37, -.81, .22);
+  const rotation = M4.compose(M4.create(), V3.new(), q, V3.new(1, 1, 1));
+  const u = V3.new(1, 2, -1), v = V3.new(-2, 1, .5), n = V3.cross(V3.new(), u, v);
+  for (const scale of [V3.new(.4, 1.8, 3.1), V3.new(-1.4, .65, 2.3)]) {
+    const model = M4.compose(M4.create(), V3.new(7, -5, 3), q, scale);
+    const normal = M4.normalFromMat4(new Float32Array(9), model);
+    const transformed = V3.new(
+      normal[0] * n.x + normal[3] * n.y + normal[6] * n.z,
+      normal[1] * n.x + normal[4] * n.y + normal[7] * n.z,
+      normal[2] * n.x + normal[5] * n.y + normal[8] * n.z);
+    const expected = M4.transformDir(V3.new(), rotation, V3.new(n.x / scale.x, n.y / scale.y, n.z / scale.z));
+    assert.ok(V3.dist(transformed, expected) < 2e-6, 'normal uses rotation and reciprocal scale');
+    V3.norm(transformed, transformed);
+    for (const tangent of [u, v]) {
+      const t = M4.transformDir(V3.new(), model, tangent);
+      V3.norm(t, t);
+      assert.ok(Math.abs(V3.dot(transformed, t)) < 1e-6, 'normal stays perpendicular to both transformed tangents');
+    }
+  }
+});
+
+test('normal matrix retains the singular identity fallback and output buffer', () => {
+  const { M4, Q, V3 } = load(['10_math.js'], ['M4', 'Q', 'V3']);
+  for (const scale of [V3.new(0, 2, 3), V3.new(2, 0, 3), V3.new(2, 3, 0)]) {
+    const model = M4.compose(M4.create(), V3.new(1, 2, 3), Q.fromEuler(Q.new(), .3, -.7, .2), scale);
+    const normal = new Float32Array(9).fill(17);
+    assert.equal(M4.normalFromMat4(normal, model), normal);
+    assert.deepEqual(Array.from(normal), [1, 0, 0, 0, 1, 0, 0, 0, 1]);
+  }
+});
+
+test('cylinder caps and unchanged box winding agree with supplied normals', () => {
+  const { makeCylinder, makeBox, V3, TAU } = load(['10_math.js', '20_gl.js'], ['makeCylinder', 'makeBox', 'V3', 'TAU']);
+  const meshes = [makeBox(2, .5, 3)];
+  for (const [rTop, rBot, h, seg] of [[.05, .05, .08, 24], [.1, .2, .75, 7], [.2, .1, .75, 3]]) {
+    const g = makeCylinder(rTop, rBot, h, seg), sides = makeCylinder(rTop, rBot, h, seg, false);
+    assert.equal(g.nv, sides.nv + 2 * (seg + 2));
+    assert.equal(g.ni, sides.ni + 6 * seg);
+    for (const key of ['pos', 'nrm', 'uv', 'idx']) {
+      assert.deepEqual(Array.from(g[key].subarray(0, sides[key].length)), Array.from(sides[key]), `capping preserves side ${key}`);
+    }
+    for (let cap = 0; cap < 2; cap++) {
+      const ny = cap === 0 ? 1 : -1, y = ny * h / 2, r = cap === 0 ? rTop : rBot;
+      const centre = sides.nv + cap * (seg + 2);
+      assert.deepEqual(Array.from(g.pos.subarray(centre * 3, centre * 3 + 3)), [0, Math.fround(y), 0]);
+      assert.deepEqual(Array.from(g.uv.subarray(centre * 2, centre * 2 + 2)), [.5, .5]);
+      for (let i = 0; i <= seg; i++) {
+        const vertex = centre + 1 + i, angle = i / seg * TAU, c = Math.cos(angle), s = Math.sin(angle);
+        assert.deepEqual(Array.from(g.pos.subarray(vertex * 3, vertex * 3 + 3)), [Math.fround(c * r), Math.fround(y), Math.fround(s * r)]);
+        assert.deepEqual(Array.from(g.nrm.subarray(vertex * 3, vertex * 3 + 3)), [0, ny, 0]);
+        assert.deepEqual(Array.from(g.uv.subarray(vertex * 2, vertex * 2 + 2)), [Math.fround(c * .5 + .5), Math.fround(s * .5 + .5)]);
+      }
+    }
+    meshes.push(g);
+  }
+  for (const g of meshes) for (let i = 0; i < g.ni; i += 3) {
+    const a = g.idx[i] * 3, b = g.idx[i + 1] * 3, c = g.idx[i + 2] * 3;
+    const ab = V3.new(g.pos[b] - g.pos[a], g.pos[b + 1] - g.pos[a + 1], g.pos[b + 2] - g.pos[a + 2]);
+    const ac = V3.new(g.pos[c] - g.pos[a], g.pos[c + 1] - g.pos[a + 1], g.pos[c + 2] - g.pos[a + 2]);
+    const face = V3.cross(V3.new(), ab, ac), normal = V3.new(g.nrm[a], g.nrm[a + 1], g.nrm[a + 2]);
+    assert.ok(V3.dot(face, normal) > 0, `triangle ${i / 3} must face its supplied normal`);
+  }
+});
+
 function careerFixture() {
   const lib = load(['10_math.js', '25_career.js'], ['Career', 'PERKS', 'TOURNAMENTS']);
   const game = { settings: { assist: .6, posAssist: .7, difficulty: 2 },
@@ -132,6 +239,27 @@ for (const wy of [0, -300, 300]) {
     assert.equal(solved.clear, flight.clear);
   });
 }
+test('weak-closing tilted edge resolves once from untouched state instead of falling through the playing plane', () => {
+  const l = load(['10_math.js', '30_physics.js'], ['PH', 'V3', 'tableContact', 'bounceTable', 'integrateBall', 'impactSphere']);
+  for (const axis of ['x', 'z']) for (const sign of [-1, 1]) {
+    const p = l.V3.new(.14, l.PH.TABLE_Y + l.PH.R, .14);
+    p[axis] = sign * ((axis === 'x' ? l.PH.T_HALF_WID : l.PH.T_HALF_LEN) + .0116);
+    const v = l.V3.new(.1, -3.6434, .1), w = l.V3.new(-28, -14, 6.4); v[axis] = sign * 5.08;
+    const expectedV = l.V3.clone(v), expectedW = l.V3.clone(w), initial = l.V3.clone(p);
+    const restitution = Math.max(.68, Math.min(.92, l.PH.E_TABLE - l.PH.E_TABLE_SPEED * -v.y)) * .70;
+    l.impactSphere(expectedV, expectedW, l.V3.new(0, 1, 0), l.V3.new(), restitution, l.PH.MU_TABLE, l.PH.ET_TABLE);
+    const info = l.bounceTable(p, v, w);
+    assert.ok(info && info.edge === 1 && info.edgeAxis === axis);
+    assert.ok(v.y > 0, 'a top contact cannot exit through the playing plane');
+    for (const coordinate of ['x', 'y', 'z']) {
+      assert.ok(Math.abs(v[coordinate] - expectedV[coordinate]) < 1e-12, 'one physical impulse, not a patched output');
+      assert.ok(Math.abs(w[coordinate] - expectedW[coordinate]) < 1e-12, 'spin from the same untouched incoming state');
+    }
+    assert.equal(p.x, initial.x); assert.equal(p.z, initial.z);
+    const previous = l.V3.clone(p); l.integrateBall(p, v, w, l.PH.SIM_DT);
+    assert.equal(l.tableContact(previous.x, previous.y, previous.z, p.x, p.y, p.z, {}), null);
+  }
+});
 test('predict clears reused result fields between flights', () => {
   const { predict, V3 } = load(['10_math.js', '30_physics.js'], ['predict', 'V3']);
   const out = {};

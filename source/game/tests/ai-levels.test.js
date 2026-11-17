@@ -191,6 +191,84 @@ test('один сид — одна тактика, один удар, одна �
   }
 });
 
+test('ordinary targets stay inside the real table on both sides while DROP remains intentionally short', () => {
+  for (let level = 0; level < AI_LEVELS.length; level++) for (const side of [-1, 1]) {
+    const ai = new lib.OpponentAI(level); ai.side = side; ai.rng = lcg(513 + level);
+    const game = fixtureGame(), plan = { speed: 8, short: false, wide: false };
+    for (let i = 0; i < 200; i++) for (const family of ['DRIVE', 'LOOP', 'BLOCK', 'DROP']) {
+      ai.tactic = ai.rollTactic();
+      const aim = ai.pickTarget(game, plan, family);
+      assert.ok(Math.abs(aim.x) <= PH.T_HALF_WID - .05 + 1e-9);
+      assert.equal(Math.sign(aim.z), -side);
+      assert.ok(Math.abs(aim.z) <= PH.T_HALF_LEN - .05 + 1e-9);
+      if (family === 'DROP') assert.ok(Math.abs(aim.z) >= .18 && Math.abs(aim.z) <= .32);
+      else assert.ok(Math.abs(aim.z) >= .62);
+    }
+  }
+});
+
+test('level, director and stamina caps are visible to every solver candidate, not applied after its prediction', () => {
+  const l = load(['10_math.js', '30_physics.js', '40_swipe.js', '55_ai.js'],
+    ['OpponentAI', 'Stamina', 'V3', 'PH', 'racketEffortCap', 'resolveRacketLaunch', 'predict']);
+  for (let level = 0; level < 4; level++) for (const empty of [false, true]) {
+    const ai = new l.OpponentAI(level), incoming = l.V3.new(0, -.5, -5);
+    ai.rng = () => .99; ai.setHandicap(.78);
+    const ball = { p: l.V3.new(0, 1.14, -1.1), v: incoming, w: l.V3.new(-90, 0, 0) };
+    let budget, quotes = 0, candidates = 0;
+    const game = { ball, strokeTime: 1, getEffortBudget(side, request) {
+      quotes++;
+      budget = l.Stamina.deriveEffortBudget({ energy: empty ? 0 : 100, fatigue: empty ? 45 : 0,
+        capacity: empty ? 55 : 100, enabled: true }, { ...request, side, actionId: 'candidate-cap' });
+      return budget;
+    } };
+    ai.commit = { archId: 'DRIVE', speed: 7, aim: { x: .15, z: .95 } }; ai.swingAt = 1;
+    const impact = l.context.impactRacket;
+    l.context.impactRacket = (v, w, n, vr, ...args) => {
+      candidates++;
+      assert.ok(l.V3.len(vr) <= Math.min(budget.vmagCap, ai.L.vmagMax * (1 - .22 * .45)) + 1e-8,
+        `${level}/${empty}: a solver candidate exceeded its pre-impact limits`);
+      return impact(v, w, n, vr, ...args);
+    };
+    let racket;
+    try { racket = ai.swing(game); } finally { l.context.impactRacket = impact; }
+    assert.equal(quotes, 1); assert.ok(candidates > 0);
+    assert.equal(racket.effortBudget, budget);
+    assert.ok(racket.vmag <= l.racketEffortCap(racket) + 1e-8);
+    const launch = l.resolveRacketLaunch(ball, racket);
+    assert.ok(launch, 'the actual returned frame contacts the incoming ball');
+    const actual = l.predict(launch.p, launch.v, launch.w, { dt: l.PH.SIM_DT, maxT: 2.6, stopOnFirstBounce: true });
+    assert.notEqual(racket.valid, false, `${level}/${empty}: a routine fixture must be returnable`);
+    assert.ok(actual.landed?.z > 0 && actual.landed.z <= PH.T_HALF_LEN && !actual.hitNet);
+    assert.equal(ai.stats.shots, 0, 'planning does not fabricate accepted contact statistics');
+  }
+});
+
+test('final ordinary returns retain meaningful depth and pace at all four distinct difficulties', () => {
+  const l = load(['10_math.js', '30_physics.js', '40_swipe.js', '55_ai.js'],
+    ['OpponentAI', 'Stamina', 'V3', 'PH', 'resolveRacketLaunch', 'predict']);
+  const rows = [];
+  for (let level = 0; level < 4; level++) {
+    const measured = [];
+    for (const family of ['DRIVE', 'LOOP', 'BLOCK']) for (const x of [-.2, .2]) {
+      const ai = new l.OpponentAI(level); ai.rng = () => .99;
+      const ball = { p: l.V3.new(x, 1.16, -1.2), v: l.V3.new(0, -.5, -6), w: l.V3.new(-100, 0, 0) };
+      const game = { ball, strokeTime: 1 };
+      ai.commit = { archId: family, speed: 7, aim: { x: 0, z: level ? 1.08 : .86 } }; ai.swingAt = 1;
+      const racket = ai.swing(game), launch = l.resolveRacketLaunch(ball, racket);
+      assert.ok(launch); assert.notEqual(racket.valid, false);
+      const actual = l.predict(launch.p, launch.v, launch.w, { dt: l.PH.SIM_DT, maxT: 2.6, stopOnFirstBounce: true });
+      assert.ok(actual.landed?.z > 0 && !actual.hitNet);
+      measured.push({ depth: actual.landed.z, speed: l.V3.len(launch.v) });
+    }
+    rows.push({ depth: measured.reduce((sum, row) => sum + row.depth, 0) / measured.length,
+      speed: measured.reduce((sum, row) => sum + row.speed, 0) / measured.length });
+  }
+  assert.ok(rows[0].depth > .62, 'EASY does not turn every ordinary return into a drop');
+  for (const row of rows.slice(1)) assert.ok(row.depth > .88, 'ordinary medium/hard returns retain intended depth');
+  assert.ok(rows[2].speed > rows[0].speed + 1, 'HARD remains firmer than EASY');
+  assert.ok(rows[3].speed > rows[1].speed + .5, 'WTF retains its higher tempo');
+});
+
 /* ---------- 6. Микс ударов ---------- */
 
 const PLANS = [

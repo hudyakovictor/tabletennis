@@ -56,8 +56,8 @@ const { repo } = require('./helpers.cjs');
       await frame.waitForFunction(() => window.__game && window.__game.training && window.__game.training.phase === 'intro');
       await page.waitForSelector('.academy-dialog [data-act="start"]');
       const intro = await frame.evaluate(() => ({ phase: window.__game.training.phase, live: window.__game.ball.live,
-        input: window.__game.ui.inputMode, paddle: window.__game.playerPaddleVisible, embeddedCard: getComputedStyle(document.getElementById('tIntro')).display }));
-      assert.deepEqual(intro, { phase: 'intro', live: false, input: touch ? 'touch' : 'mouse', paddle: !touch, embeddedCard: 'none' }); checks++;
+        input: window.__game.ui.inputMode, paddle: window.__game.playerPaddleVisible, embeddedCard: !!document.getElementById('tIntro') }));
+      assert.deepEqual(intro, { phase: 'intro', live: false, input: touch ? 'touch' : 'mouse', paddle: !touch, embeddedCard: false }); checks++;
       const geometry = await page.evaluate(() => {
         const d = document.querySelector('.academy-dialog').getBoundingClientRect();
         return { fits: d.width <= innerWidth && d.height <= innerHeight && d.top >= 0 && d.bottom <= innerHeight,

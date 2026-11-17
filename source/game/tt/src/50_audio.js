@@ -5,13 +5,13 @@
 'use strict';
 
 const TT_AUDIO_LEVELS = Object.freeze({ master: 0.8, effects: 0.9, music: 0.25, ambient: 0.2 });
-// Offsets are in gapless-decoded seconds. Measured single ball transients do
-// not establish different materials, so both contact APIs share the variants.
+// Offsets are in gapless-decoded seconds. Reserve the brighter ball2 attack
+// for a short dry table tick; ball1/ball3 keep the fuller racket contact.
 // Gains leave headroom for MP3 overshoot; the swing is deliberately quieter.
 const TT_AUDIO_MANIFEST = Object.freeze([
-  Object.freeze({ key: 'ball1', events: Object.freeze(['hitRacket', 'hitTable']), offset: 0, duration: 0.12, gain: 0.62 }),
-  Object.freeze({ key: 'ball2', events: Object.freeze(['hitRacket', 'hitTable']), offset: 0, duration: 0.12, gain: 0.51 }),
-  Object.freeze({ key: 'ball3', events: Object.freeze(['hitRacket', 'hitTable']), offset: 0, duration: 0.15, gain: 0.61 }),
+  Object.freeze({ key: 'ball1', events: Object.freeze(['hitRacket']), offset: 0, duration: 0.12, gain: 0.62 }),
+  Object.freeze({ key: 'ball2', events: Object.freeze(['hitTable']), offset: 0, duration: 0.08, gain: 0.51 }),
+  Object.freeze({ key: 'ball3', events: Object.freeze(['hitRacket']), offset: 0, duration: 0.15, gain: 0.61 }),
   Object.freeze({ key: 'swing', events: Object.freeze(['whoosh']), offset: 0.16, duration: 0.275, gain: 0.18 }),
 ]);
 
@@ -62,9 +62,10 @@ class AudioEngine {
       this.wet = c.createGain(); this.wet.gain.value = 0.08;
       this.dry = c.createGain(); this.dry.gain.value = 1;
       // bus remains the effects output used by existing callers.
-      this.bus = c.createGain(); this.musicBus = c.createGain(); this.ambientBus = c.createGain();
+      this.bus = c.createGain(); this.tableBus = c.createGain(); this.musicBus = c.createGain(); this.ambientBus = c.createGain();
       this.bus.connect(this.dry); this.dry.connect(this.comp);
       this.bus.connect(this.conv); this.conv.connect(this.wet); this.wet.connect(this.comp);
+      this.tableBus.connect(this.comp); // dry contacts retain the effects volume, without a room tail
       this.musicBus.connect(this.comp); this.ambientBus.connect(this.comp);
       this.comp.connect(this.master); this.master.connect(c.destination);
       this._noiseBuf = this._makeNoise(2);
@@ -117,6 +118,7 @@ class AudioEngine {
     const silent = this.muted || this.quiet || this.volume === 0;
     if (this.master) this.master.gain.value = silent ? 0 : this.volume;
     if (this.bus) this.bus.gain.value = this.levels.effects;
+    if (this.tableBus) this.tableBus.gain.value = this.levels.effects;
     if (this.musicBus) this.musicBus.gain.value = this.levels.music;
     if (this.ambientBus) this.ambientBus.gain.value = this.levels.ambient;
     if (silent || this.levels.effects === 0) this.stopEffects();
@@ -184,15 +186,16 @@ class AudioEngine {
       source = c.createBufferSource(); source.buffer = buffer;
       if (rate !== 1) source.playbackRate.value = rate;
       const gain = c.createGain(), nodes = [gain], volume = sample.gain * level;
+      const end = t + duration / rate, output = event === 'hitTable' ? this.tableBus : this.bus;
       gain.gain.setValueAtTime(0, t);
       gain.gain.linearRampToValueAtTime(volume, t + 0.0004);
-      gain.gain.setValueAtTime(volume, t + duration - 0.004);
-      gain.gain.linearRampToValueAtTime(0, t + duration);
+      gain.gain.setValueAtTime(volume, end - 0.004);
+      gain.gain.linearRampToValueAtTime(0, end);
       source.connect(gain);
       if (pan !== 0 && c.createStereoPanner) {
         const p = c.createStereoPanner(); p.pan.value = clamp(pan, -1, 1); nodes.push(p);
-        gain.connect(p); p.connect(this.bus);
-      } else gain.connect(this.bus);
+        gain.connect(p); p.connect(output);
+      } else gain.connect(output);
       this._trackSource(source, nodes);
       source.start(t, sample.offset, duration);
       return true;
@@ -233,7 +236,7 @@ class AudioEngine {
   }
   dispose() {
     this._removeUnlock(); this.stopEffects(); this.stopMusic(); this.stopAudience(); this._stopAmbient();
-    for (const key of ['master', 'bus', 'musicBus', 'ambientBus', 'comp', 'conv', 'wet', 'dry', '_audienceBus']) {
+    for (const key of ['master', 'bus', 'tableBus', 'musicBus', 'ambientBus', 'comp', 'conv', 'wet', 'dry', '_audienceBus']) {
       if (this[key]) { try { this[key].disconnect(); } catch (_) {} }
       this[key] = null;
     }
@@ -279,7 +282,7 @@ class AudioEngine {
     s.start(t); s.stop(t + dur + 0.02);
     return { s, g, flt };
   }
-  _tone(freq, dur, gainV, type, when, detune) {
+  _tone(freq, dur, gainV, type, when, detune, output = this.bus, pan = 0) {
     if (!this.canPlay() || !(gainV > 0)) return null;
     const c = this.ctx, t = Number.isFinite(when) ? Math.max(c.currentTime, when) : c.currentTime;
     const o = c.createOscillator(); o.type = type || 'sine'; o.frequency.setValueAtTime(freq, t);
@@ -288,21 +291,26 @@ class AudioEngine {
     g.gain.setValueAtTime(0, t);
     g.gain.linearRampToValueAtTime(gainV, t + 0.0015);
     g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
-    o.connect(g); g.connect(this.bus);
-    this._trackSource(o, [g]);
+    const nodes = [g];
+    o.connect(g);
+    if (pan !== 0 && c.createStereoPanner) {
+      const p = c.createStereoPanner(); p.pan.value = clamp(pan, -1, 1); nodes.push(p);
+      g.connect(p); p.connect(output);
+    } else g.connect(output);
+    this._trackSource(o, nodes);
     o.start(t); o.stop(t + dur + 0.02);
     return { o, g };
   }
 
   /* ---------------- gameplay events ---------------- */
-  hitTable(speed, x, eventId) {
+  hitTable(speed, position, eventId) {
     if (!this.canPlay() || !this._once('hitTable', eventId)) return;
     const v = clamp((Number.isFinite(speed) ? Math.abs(speed) : 0) / 7, 0.08, 1.4);
-    if (this._playSample('hitTable', 0.45 + v * 0.5, Number.isFinite(x) ? x * 0.7 : 0)) return;
-    const t = this.ctx.currentTime;
-    this._noise(0.055 + v * 0.02, 0.26 * v, 'bandpass', 2400 + v * 2600, 2.2, t);
-    this._tone(820 + v * 340 + (this._random() * 2 - 1) * 40, 0.075, 0.30 * v, 'triangle', t, 0.55);
-    this._tone(214 + (this._random() * 2 - 1) * 12, 0.15, 0.12 * v, 'sine', t, 0.6);
+    const x = Number.isFinite(position?.x) ? position.x : 0, z = Number.isFinite(position?.z) ? position.z : 0;
+    // Symmetric court depth: at most 5% gain variation, no distance filtering.
+    const positionGain = 1 - 0.025 * Math.min(2, Math.hypot(x, z)), pan = clamp(x * 0.28, -0.22, 0.22);
+    if (this._playSample('hitTable', (0.45 + v * 0.5) * positionGain, pan)) return;
+    this._tone(1050 + v * 250, 0.055, 0.24 * v * positionGain, 'triangle', this.ctx.currentTime, 0.7, this.tableBus, pan);
   }
   /** Contact speed sets level; slip shapes only an unavailable-sample fallback.
    *  boost > 0: higher playback rate and louder (strong clean hit). */

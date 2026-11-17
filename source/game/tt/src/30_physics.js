@@ -164,7 +164,7 @@ function aeroAccel(out, v, w) {
     V3.cross(_acc_tmp, w, v);
     const cl_len = V3.len(_acc_tmp);
     if (cl_len > 1e-6) {
-      const k = (0.5 * PH.RHO * PH.AREA * cl * speed * speed) / (PH.M * cl_len);
+      const k = (0.5 * PH.RHO * PH.AREA * cl * speed * speed) / (PH.M * cl_len) * STROKE_CONFIG.flight.magnusGain;
       out.x += _acc_tmp.x * k;
       out.y += _acc_tmp.y * k;
       out.z += _acc_tmp.z * k;
@@ -173,7 +173,7 @@ function aeroAccel(out, v, w) {
   return out;
 }
 
-/** Measured model: drag from the C_D(Re, Sp) table, Magnus F = C_M ρ V (ω × v). */
+/** Measured reference plus one shared arcade gain on Magnus, never on drag/gravity. */
 function aeroAccelMeasured(out, v, w) {
   const speed = V3.len(v);
   if (speed < 1e-5) { out.x = 0; out.y = -PH.G; out.z = 0; return out; }
@@ -184,7 +184,7 @@ function aeroAccelMeasured(out, v, w) {
   out.y = -kd * speed * v.y - PH.G;
   out.z = -kd * speed * v.z;
   if (wlen > 1e-3) {
-    const k = aeroCmMeasured(speed, wlen) * _K_MAG;
+    const k = aeroCmMeasured(speed, wlen) * _K_MAG * STROKE_CONFIG.flight.magnusGain;
     if (k > 0) {
       V3.cross(_acc_tmp, w, v);
       out.x += _acc_tmp.x * k; out.y += _acc_tmp.y * k; out.z += _acc_tmp.z * k;
@@ -325,6 +325,7 @@ const N_UP = V3.new(0, 1, 0), ZERO3 = V3.new(0, 0, 0);
 /* 27 mm band around the white line where a contact counts as an edge ball. */
 PH.EDGE_BAND = PH.R * 1.35;
 const _edgeN = { x: 0, y: 1, z: 0 };
+const _edgeV = V3.new(), _edgeW = V3.new();
 
 /**
  * Ball vs table top, including the white line.
@@ -359,7 +360,17 @@ function bounceTable(p, v, w) {
     // A confirmed descending tabletop contact cannot separate from its impact normal.
     if (v.y < 0 && V3.dot(v, n) > 0) n = N_UP;
   }
-  const info = impactSphere(v, w, n, ZERO3, e, PH.MU_TABLE, PH.ET_TABLE);
+  let info;
+  if (n !== N_UP) {
+    // This is a descending contact with the horizontal playing top. A tilted
+    // edge response must not leave the ball moving through that same plane.
+    // Retry from untouched input, never clamp velocity or apply two impulses.
+    V3.copy(_edgeV, v); V3.copy(_edgeW, w);
+    info = impactSphere(_edgeV, _edgeW, n, ZERO3, e, PH.MU_TABLE, PH.ET_TABLE);
+    if (info && _edgeV.y >= 0) { V3.copy(v, _edgeV); V3.copy(w, _edgeW); }
+    else { n = N_UP; info = null; }
+  }
+  if (!info) info = impactSphere(v, w, n, ZERO3, e, PH.MU_TABLE, PH.ET_TABLE);
   p.y = PH.TABLE_Y + PH.R + 1e-5;
   if (info) { info.edge = k; info.edgeAxis = ex < ez ? 'x' : 'z'; }
   return info;
@@ -520,20 +531,7 @@ function predict(p0, v0, w0, opts = {}) {
     if (pathIndex >= 0) out.path.push(_pp.x, _pp.y, _pp.z);
     if (_pp.y > out.apex) out.apex = _pp.y;
 
-    /* The plane crossing is recorded even when the ball clears the net —
-     * solveLaunch() measures the clearance from it, and a missing netCross
-     * silently scored every shot as if it had cleared by 99 m. */
-    if (!out.netCross && (prevZ > 0) !== (_pp.z > 0)) {
-      const a = Math.abs(prevZ) / (Math.abs(prevZ) + Math.abs(_pp.z) + 1e-9);
-      out.netCross = { y: lerp(prevY, _pp.y, a), x: lerp(prevX, _pp.x, a), t };
-    }
-    // net: the same model the live simulation runs (mesh / tape / clean)
-    const netKind = netContactStep(prevX, prevY, prevZ, _pp.x, _pp.y, _pp.z, _netHit);
-    if (netKind > 0) {
-      out.netKind = netKind;
-      out.hitNet = true;
-      break;
-    }
+    let stopOnBounce = false;
     /* Where the ball crosses the table's horizontal plane, interpolated
      * inside the step. Also the point where a miss overshoots. */
     if (_pv.y < 0 && _pp.y - PH.R <= PH.TABLE_Y && prevY - PH.R > PH.TABLE_Y) {
@@ -547,30 +545,44 @@ function predict(p0, v0, w0, opts = {}) {
     if (_pv.y < 0) {
       const hit = tableContact(prevX, prevY, prevZ, _pp.x, _pp.y, _pp.z, _tabHit);
       if (hit) {
-      _pp.x = hit.x; _pp.z = hit.z; _pp.y = hit.y + 1e-5;
-      // The integrated endpoint may already be below the table or past a
-      // line. The visual sample must use the same interpolated contact as
-      // the trajectory and landing verdict, including on a stopping bounce.
-      if (pathIndex >= 0) {
-        out.path[pathIndex] = _pp.x; out.path[pathIndex + 1] = _pp.y; out.path[pathIndex + 2] = _pp.z;
-      }
-      out.bounces++;
-      if (out.bounces === 1) { out.landed = { x: hit.x, z: hit.z, t, vy: _pv.y, speed: V3.len(_pv) }; bounceSide = Math.sign(hit.z); }
-      else if (out.bounces === 2) out.b2 = { x: hit.x, z: hit.z, t, speed: V3.len(_pv) };
-      else if (out.bounces === 3) out.b3 = { x: hit.x, z: hit.z, t, speed: V3.len(_pv) };
-      if (opts.stopOnFirstBounce) break;
-      /* The serve solver asks for exactly two bounces and nothing else: the
-       * rest of the flight (up to 1.5 s of RK4 at 300 Hz) was integrated and
-       * thrown away on every one of the ~150 candidates per serve, which is
-       * most of the 50-90 ms the search used to block the frame for. */
-      if (opts.stopAfterBounces && out.bounces >= opts.stopAfterBounces) break;
-      const bi = bounceTable(_pp, _pv, _pw);
-      if (bi && bi.edge > out.edge) {
-        out.edge = bi.edge;
-        out.edgeBounce = { x: _pp.x, z: _pp.z, k: bi.edge, axis: bi.edgeAxis, t };
-      }
+        _pp.x = hit.x; _pp.z = hit.z; _pp.y = hit.y + 1e-5;
+        // The integrated endpoint may already be below the table or past a
+        // line. The visual sample must use the same interpolated contact as
+        // the trajectory and landing verdict, including on a stopping bounce.
+        if (pathIndex >= 0) {
+          out.path[pathIndex] = _pp.x; out.path[pathIndex + 1] = _pp.y; out.path[pathIndex + 2] = _pp.z;
+        }
+        out.bounces++;
+        if (out.bounces === 1) { out.landed = { x: hit.x, z: hit.z, t, vy: _pv.y, speed: V3.len(_pv) }; bounceSide = Math.sign(hit.z); }
+        else if (out.bounces === 2) out.b2 = { x: hit.x, z: hit.z, t, speed: V3.len(_pv) };
+        else if (out.bounces === 3) out.b3 = { x: hit.x, z: hit.z, t, speed: V3.len(_pv) };
+        /* The serve solver asks for exactly two bounces and nothing else: the
+         * rest of the flight (up to 1.5 s of RK4 at 300 Hz) was integrated and
+         * thrown away on every one of the ~150 candidates per serve, which is
+         * most of the 50-90 ms the search used to block the frame for. */
+        stopOnBounce = !!opts.stopOnFirstBounce || !!(opts.stopAfterBounces && out.bounces >= opts.stopAfterBounces);
+        if (!stopOnBounce) {
+          const bi = bounceTable(_pp, _pv, _pw);
+          if (bi && bi.edge > out.edge) {
+            out.edge = bi.edge;
+            out.edgeBounce = { x: _pp.x, z: _pp.z, k: bi.edge, axis: bi.edgeAxis, t };
+          }
+        }
       }
     }
+    /* The table clips the segment before the net test, exactly as in live
+     * physics. Even a stopping bounce must retain a simultaneous net touch. */
+    if (!out.netCross && (prevZ > 0) !== (_pp.z > 0)) {
+      const a = Math.abs(prevZ) / (Math.abs(prevZ) + Math.abs(_pp.z) + 1e-9);
+      out.netCross = { y: lerp(prevY, _pp.y, a), x: lerp(prevX, _pp.x, a), t };
+    }
+    const netKind = netContactStep(prevX, prevY, prevZ, _pp.x, _pp.y, _pp.z, _netHit);
+    if (netKind > 0) {
+      out.netKind = netKind;
+      out.hitNet = true;
+      break;
+    }
+    if (stopOnBounce) break;
     // requested crossing plane (racket plane of a player)
     if (stopZ !== undefined && out.reachT < 0) {
       if ((stopDir > 0 && _pp.z >= stopZ) || (stopDir < 0 && _pp.z <= stopZ)) {

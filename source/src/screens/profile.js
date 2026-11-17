@@ -9,7 +9,7 @@ Router.def('profile', {
     const series = ratingSeries(30); this.series = series; this.pts = series.map((p) => p.r);
     const sk = Career.radar(); this.sk = sk;
     const ach = ACH.map((a) => [t(a.tk), a.i, !!Career.got[a.id], t(a.dk)]); const achN = ach.filter((a) => a[2]).length;
-    const eq = (k) => ALL_ITEMS.find((x) => x.id === S.equipped[k]) || null;
+    const rackets = ALL_ITEMS.filter(it => it.kind === 'racket' && S.owned.includes(it.id));
     return `${UI.hud()}<div class="scroll">
       <div class="pf-hero pnl rise" style="--d:0">
         <div class="pf-av">${Art.avatar('me', 92, { round: false })}<span class="pf-lv">${S.level}</span></div>
@@ -28,9 +28,9 @@ Router.def('profile', {
       <div class="sec-title rise" style="--d:6"><span class="h2">${Art.icon('trophy')}${t('profile.achievements')}</span><span class="dim" style="font-size:11.5px">${achN} / ${ach.length}</span></div>
       <div class="ach">${ach.map(([t, i, got, dsc], k) => `<div class="ac ${got ? 'got' : ''} pop" style="--d:${k + 6}" data-ach="${dsc}" data-press><span class="aci">${Art.icon(i, { c: got ? '#3A1A00' : 'rgba(255,255,255,.35)', sw: 2.2, fill: got && ICON_FILL.has(i) ? '#3A1A00' : 'transparent' })}</span><small>${t}</small></div>`).join('')}</div>
       <div class="sec-title rise" style="--d:8"><span class="h2">${Art.icon('paddle', { c: '#FFB3A6' })}${t('profile.equipment')}</span></div>
-      <div class="grid3 eq">${['rubber', 'blade', 'trail'].map((k, i) => { const it = eq(k);
-        return it ? `<div class="icard rar ${it.r} rise" style="--d:${9 + i}"><span class="ic-art">${ItemArt.of(it, 56)}</span><span class="ic-n">${itemName(it)}</span><span class="ic-t">${kindName(it)}</span></div>`
-          : `<div class="icard rise" style="--d:${9 + i}"><span class="ic-art dim-ic">${Art.icon('lock', { c: 'rgba(255,255,255,.3)' })}</span><span class="ic-n dim">${t('profile.notEquipped')}</span><span class="ic-t">${kindName(k)}</span></div>`; }).join('')}</div>
+      <div class="grid3 eq" role="group" aria-label="${t('profile.equipment')}" tabindex="-1">${rackets.map((it, i) => { const selected = it.id === S.equipped.racket;
+        return `<button type="button" class="icard rar ${it.r} rise" style="--d:${9 + i}" data-equipment="${it.id}" aria-pressed="${selected}" ${selected ? 'disabled' : ''} data-press><span class="ic-art">${ItemArt.of(it, 56)}</span><span class="ic-n">${itemName(it)}</span><span class="ic-t">${kindName(it)}</span><span class="ic-p ${selected ? 'own' : ''}">${selected ? Art.icon('check', { c: '#9CFFD0' }) + t('profile.equipped') : t('shop.equip')}</span></button>`;
+      }).join('')}</div>
     </div>`;
   },
   /* Техника удара: точность контакта по последним матчам — из тех же попыток,
@@ -89,6 +89,10 @@ Router.def('profile', {
     UI.bindHud(el);
     el.querySelector('[data-act=settings]').addEventListener('click', openSettings);
     el.querySelectorAll('[data-ach]').forEach((a) => a.addEventListener('click', () => { haptic('select'); toast(`<b>${a.querySelector('small').textContent}</b> · ${a.dataset.ach}`, a.classList.contains('got') ? 'check' : 'lock'); }));
+    el.querySelectorAll('[data-equipment]').forEach(card => card.addEventListener('click', () => {
+      const it = Catalog.byId(card.dataset.equipment);
+      if (it && S.owned.includes(it.id)) Router.screens.shop.product(it);
+    }));
     setTimeout(() => {
       $$('[data-n]', el).forEach((b) => tickNumber(b, 0, +b.dataset.n, 1100));
       const wr = el.querySelector('.wr'); if (wr) { wr.style.transition = 'stroke-dashoffset 1.3s cubic-bezier(.16,1,.3,1)'; wr.style.strokeDashoffset = wr.dataset.o; }

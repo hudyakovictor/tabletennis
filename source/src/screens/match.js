@@ -28,7 +28,9 @@ Router.def('match', {
     TGX.fullscreen(true);                // застрять в иммерсиве можно и без жеста — хуже не станет
     TGX.guard(true);                     // не дать случайно закрыть приложение среди розыгрыша
     this.el = el; this.alive = true; this.timers = [];
-    this.hudSnapshot = null;
+    this.hudSnapshot = null; this.result = null;
+    this.identities = [String(S.name ?? t('hud.near')), String(PEOPLE[BATTLE.opp]?.s ?? t('hud.far'))];
+    this.presentation = MatchHUD.createSummary();
     this.hud = MatchHUD.mount(el.querySelector('.match-hud-slot'), this.hudOptions());
     const st = this.st = { p: 0, o: 0, server: 0, over: false, hits: 0, perfect: 0, smash: 0, maxRally: 0, myServes: 0, live: false, spin: 0, oppHits: 0, rallyHits: 0, servePts: 0, serveWon: 0, seq: [] };
     GameHost.ensure(); GameHost.show(true); GameHost.send('quiet', { on: true }); GameHost.send('mute', { on: !S.sfx });
@@ -57,45 +59,54 @@ Router.def('match', {
     button.classList.toggle('on', !!inspector?.effective); button.setAttribute('aria-pressed', String(!!inspector?.effective));
   },
   hudOptions() {
-    return { t, strokeCatalog: GameHost.strokeCatalog || [], names: [S.name, PEOPLE[BATTLE.opp].s],
-      botLevel: t(diffOf(S.diff).tk), reducedMotion: effectiveReducedMotion(), reason: REASON };
+    return { t, strokeCatalog: GameHost.strokeCatalog || [], names: this.identities,
+      reducedMotion: effectiveReducedMotion(), reason: REASON };
   },
   refreshLocale(el) {
     I18n.localizeDOM(el, this.render()); this.syncSlowmo();
     if (this.hudSnapshot) this.hud.update(this.hudSnapshot, this.hudOptions());
+    const title = el.querySelector('.m-final b');
+    if (title && this.result) title.textContent = t(this.result.win ? 'result.win' : 'result.lose');
+    const replay = el.querySelector('.mx-replay .rec');
+    if (replay && this.result) replay.innerHTML = `<i></i>${t('match.replay', { n: this.result.stats.maxRally })}`;
     return true;
   },
   later(fn, ms) { const t = setTimeout(() => this.alive && fn(), ms); this.timers.push(t); return t; },
   async intro() {
-    const el = this.el, mx = el.querySelector('.mx'), intro = el.querySelector('.mx-intro');
+    const el = this.el, st = this.st, mx = el.querySelector('.mx'), intro = el.querySelector('.mx-intro');
+    const valid = () => this.alive && this.st === st && !st.over;
     GameHost.send('prematch', { dur: 3.1 });
-    await sleep(120); if (!this.alive) return;
+    await sleep(120); if (!valid()) return;
     mx.classList.add('bars'); Sfx.whoosh();
-    await sleep(380); if (!this.alive) return;
+    await sleep(380); if (!valid()) return;
     intro.classList.add('a'); Sfx.impact(); haptic('medium');
-    await sleep(520); if (!this.alive) return;
+    await sleep(520); if (!valid()) return;
     intro.classList.add('b'); Sfx.soft();
-    await sleep(520); if (!this.alive) return;
+    await sleep(520); if (!valid()) return;
     intro.classList.add('c'); Sfx.impact(); haptic('medium');
-    await sleep(1250); if (!this.alive) return;
+    await sleep(1250); if (!valid()) return;
     intro.classList.add('out');
     const c = el.querySelector('.mx-count');
     /* отсчёт — ЧЕСТНЫЕ секунды: раньше тикал каждые 560 мс и «3-2-1»
      * пролетал в 1.8 раза быстрее, чем считает человек */
-    for (const n of ['3', '2', '1']) { c.innerHTML = `<b>${n}</b>`; Sfx.count(1); haptic('medium'); await sleep(980); if (!this.alive) return; }
+    for (const n of ['3', '2', '1']) { c.innerHTML = `<b>${n}</b>`; Sfx.count(1); haptic('medium'); await sleep(980); if (!valid()) return; }
     c.innerHTML = `<b class="go">${t('match.go')}</b>`; Sfx.count(0); haptic('heavy'); flash('#fff', .25, 260);
     /* free: движок держит freePlay — очки разыгрываются, счёт не растёт.
        Уровень бота (S.diff) и тренд последних матчей уходят в движок явно:
        бот больше не захардкожен на «ПРО», а форма игрока не двигает уровень
        целиком — только ±4 % агрессии/точности между матчами. */
     GameHost.send('match', { diff: clamp(Math.round(S.diff ?? 1), 0, 3), trend: aiTrend(), target: TARGET[MODE.id] || 11, hint: !!S.hint, free: MODE.id === 'free' });
+    if (st.paused) GameHost.send('pause');
     GameHost.send('quiet', { on: false });
-    mx.classList.remove('bars', 'cine'); mx.classList.add('live'); this.st.live = true;
-    await sleep(520); c.innerHTML = '';
+    mx.classList.remove('bars', 'cine'); mx.classList.add('live'); st.live = true;
+    await sleep(520); if (!valid()) return; c.innerHTML = '';
   },
   onMsg(m) {
+    if (this.alive && (this.st.live || this.hudSnapshot) && !this.st.over && m.type === 'calibrationPending') this.presentation.recover();
     if (this.alive && ['ready', 'settings', 'calibration', 'slowmo', 'calibrationPending', 'sessionKind'].includes(m.type)) this.syncSlowmo();
     if (this.alive && m.type === 'hud') {
+      if (this.st.over) return;
+      this.presentation.accept(m.snapshot);
       this.hudSnapshot = m.snapshot;
       this.hud.update(m.snapshot, this.hudOptions());
       this.st.p = m.snapshot.score[0]; this.st.o = m.snapshot.score[1];
@@ -138,6 +149,7 @@ Router.def('match', {
   },
   pause(fromGame) {
     if (this.st.over) return;
+    this.st.paused = true;
     GameHost.send('pause');
     const free = MODE.id === 'free';
     Sheet.open(`<div class="h1" style="margin:4px 4px 6px">${t('match.pause')}</div><p class="dim" style="margin:0 4px 16px;font-size:12.5px">${free ? t('match.freePause') : t('match.pauseScore', { p: this.st.p, o: this.st.o })}</p>
@@ -171,6 +183,7 @@ Router.def('match', {
     this._mo = new MutationObserver(() => {
       if (!Sheet.cur && !this.st.over && this.alive) {
         this._mo.disconnect(); this._mo = null;
+        this.st.paused = false;
         GameHost.send('mute', { on: !S.sfx }); GameHost.send('hint', { on: !!S.hint }); GameHost.send('resume');
       }
     });
@@ -180,8 +193,9 @@ Router.def('match', {
     const st = this.st; if (st.done) return; st.over = true; st.done = true;
     TGX.guard(false);
     if (this._mo) { this._mo.disconnect(); this._mo = null; }
-    const el = this.el, mx = el.querySelector('.mx'); const win = !!m.won;
+    const el = this.el, mx = el.querySelector('.mx'), valid = () => this.alive && this.st === st; const win = !!m.won;
     const res = { win, me: m.score ? m.score[0] : st.p, op: m.score ? m.score[1] : st.o, opp: BATTLE.opp,
+      quit: !!m.quit, names: this.identities.slice(), presentation: this.presentation.freeze(m),
       /* Длительность и режим — факты для сервера: он проверяет правдоподобие
        * и сам считает рейтинг, а не верит присланному «я выиграл». */
       durationMs: Math.max(0, Date.now() - (BATTLE.t0 || Date.now())),
@@ -192,17 +206,18 @@ Router.def('match', {
     res.seq = st.seq.slice();                                     // для графика «Ход матча»
     res.stats.maxSpeed = (m.stats && m.stats.maxSpeed) || 0;      // км/ч, идёт из движка
     res.stats.winners = (m.stats && m.stats.winners) || 0;        // чистые победные игрока
+    this.result = res;
     if (!m.quit) { ZoneStats.logMatch(res.coach, win); res.unlocked = Career.record(st, win, res.coach);
       res.quests = Daily.tick(res, win);                          // миссии дня, закрытые ЭТИМ матчем
     }
     if (m.quit) { Router.go('result', { data: res }); return; }
     GameHost.send('outro');
     mx.classList.add('cine', 'bars'); mx.classList.remove('live');
-    await sleep(700); if (!this.alive) return;
+    await sleep(700); if (!valid()) return;
     const b = document.createElement('div'); b.className = 'm-final ' + (win ? 'win' : 'lose');
     b.innerHTML = `<div><b class="h-display">${win ? t('result.win') : t('result.lose')}</b><small class="num">${res.me} : ${res.op}</small></div>`; mx.appendChild(b);
     win ? (Sfx.win(), haptic('success'), flash('#FFE680', .45), FX.confetti(FX.W / 2, FX.H * .42, 120, 1.2)) : (Sfx.lose(), haptic('error'));
-    await sleep(2300); if (!this.alive) return;
+    await sleep(2300); if (!valid()) return;
     if (m.hasReplay) {
       b.classList.add('out');
       const r = document.createElement('div'); r.className = 'mx-replay';
@@ -214,7 +229,7 @@ Router.def('match', {
         this.later(finish, 16000);
       });
       GameHost.send('replay');
-      await done; if (!this.alive) return;
+      await done; if (!valid()) return;
     }
     Router.go('result', { data: res });
   },
@@ -230,6 +245,7 @@ Router.def('match', {
   leave() {
     this.alive = false; this.off && this.off(); this.timers.forEach(clearTimeout);
     this.hud?.dispose(); this.hud = null; this.hudSnapshot = null;
+    this.presentation = null; this.result = null; this.identities = null;
     this.replayResolve?.(); this.replayOff?.(); this.replayOff = null; this.replayResolve = null;
     TGX.guard(false);
     if (this._mo) { this._mo.disconnect(); this._mo = null; }

@@ -4,16 +4,16 @@ const { load } = require('./helpers.cjs');
 const windowHandlers = new Map();
 
 const lib = load(['10_math.js', '12_match_rules.js', '30_physics.js', '38_paddle_motion.js',
-  '40_swipe.js', '42_shot_diagnostics.js', '56_rig.js', '57_camera.js', '70_game.js'],
+  '40_swipe.js', '42_shot_diagnostics.js', '56_rig.js', '57_camera.js', '84_racket.js', '70_game.js'],
   ['Game', 'SwipeTracker', 'PaddleStrokeMotion', 'isRealStroke', 'tapStrokeMetrics', 'ShotJournal', 'V3', 'PH', 'GS',
-    'STROKES', 'SERVE_STROKE_ALIAS', 'STROKE_CONFIG',
-    'rigViewProj', 'integrateBall', 'predict', 'M4'],
+    'STROKES', 'SERVE_STROKE_ALIAS', 'STROKE_CONFIG', 'bladePlaneCapture', 'deriveStroke', 'describeStrokeEffort',
+    'rigViewProj', 'integrateBall', 'predict', 'Equipment', 'M4', 'Q'],
   { window: { addEventListener(type, handler) { windowHandlers.set(type, handler); } }, document: { addEventListener() {},
     body: { style: {}, classList: { toggle() {} } }, documentElement: { style: {} } } });
 
-function inputGame(pointerType = 'touch', scale = 1) {
+function inputGame(pointerType = 'touch', scale = 1, viewport) {
   const { V3, PH, GS } = lib, handlers = new Map();
-  const g = Object.create(lib.Game.prototype), width = pointerType === 'mouse' ? 1280 : 390, height = pointerType === 'mouse' ? 760 : 844;
+  const g = Object.create(lib.Game.prototype), width = viewport?.width ?? (pointerType === 'mouse' ? 1280 : 390), height = viewport?.height ?? (pointerType === 'mouse' ? 760 : 844);
   g.canvas = { style: {}, clientWidth: width, clientHeight: height, setPointerCapture() {},
     addEventListener: (type, fn) => handlers.set(type, fn),
     getBoundingClientRect: () => ({ left: 0, top: 0, width, height }) };
@@ -46,6 +46,126 @@ function inputGame(pointerType = 'touch', scale = 1) {
   return { g, send, sendWindow, width, height };
 }
 
+function idleMouseCircle(f, direction = 1, coalesced = false, buttons = 0) {
+  const { g, width, height, send } = f, start = g.time;
+  const points = Array.from({ length: 41 }, (_, i) => ({
+    x: .5 + 55 * Math.cos(direction * Math.PI * 2 * i / 40) / width,
+    y: .6 + 55 * Math.sin(direction * Math.PI * 2 * i / 40) / height,
+  }));
+  const timestamp = i => 1000 + (start + i * .012) * 1000;
+  if (coalesced) {
+    g.time = start + .48;
+    send('pointermove', points[40], timestamp(40), { buttons,
+      getCoalescedEvents: () => points.map((p, i) => ({ pointerId: 1, pointerType: 'mouse',
+        clientX: p.x * width, clientY: p.y * height, timeStamp: timestamp(i) })) });
+  } else for (const [i, point] of points.entries()) {
+    g.time = start + i * .012;
+    send('pointermove', point, timestamp(i), { buttons });
+  }
+}
+
+test('native-style mouse circles toss only the idle standard racket and catch its opposite face without changing the ball', () => {
+  for (const grip of ['shakehand', 'penhold']) for (const hand of ['left', 'right']) {
+  for (const direction of [-1, 1]) for (const coalesced of [false, true]) {
+    const f = inputGame('mouse'), { g } = f;
+    g.settings.grip = grip; g.settings.hand = hand;
+    g.state = lib.GS.POINT; g.ball.live = false; g._equippedRacket = 'r-standard'; g.resetPaddle(true);
+    const before = JSON.stringify({ ball: g.ball, stats: g.stats, shotId: g.shotId, work: g._playerWork });
+    const originalNormal = lib.V3.clone(g.player.normal), originalRoll = g.player.roll;
+    const expectedCatch = lib.Q.mul(lib.Q.new(), g.player.q, lib.Q.setAxisAngle(lib.Q.new(), 0, 1, 0, direction * 3 * Math.PI));
+    idleMouseCircle(f, direction, coalesced);
+    assert.equal(g.paddleTrick?.active, true); assert.equal(g.paddleTrick.direction, direction);
+    assert.equal(g.playerActiveFace, 1, 'side changes on the catch, not at takeoff');
+    g.time = g.paddleTrick.startedAt + .36; g.updatePaddleTrick();
+    const pose = g.paddleTrick.pose(g.player);
+    assert.ok(pose.pos.y > g.player.pos.y + .17);
+    assert.equal(JSON.stringify({ ball: g.ball, stats: g.stats, shotId: g.shotId, work: g._playerWork }), before);
+    g.time = g.paddleTrick.startedAt + .72; g.updatePaddleTrick();
+    assert.equal(g.paddleTrick.active, false); assert.equal(g.playerActiveFace, -1); assert.equal(g.player.activeFace, -1);
+    nearInput(g.player.roll, -originalRoll); nearInput(lib.V3.dist(g.player.normal, originalNormal), 0);
+    const q = g.player.q;
+    const redNormal = lib.V3.new(2 * (q.x * q.z + q.w * q.y), 2 * (q.y * q.z - q.w * q.x), 1 - 2 * (q.x * q.x + q.y * q.y));
+    nearInput(lib.V3.dot(redNormal, originalNormal), -1);
+    nearInput(Math.abs(q.x * expectedCatch.x + q.y * expectedCatch.y + q.z * expectedCatch.z + q.w * expectedCatch.w), 1);
+    g.cancelInput('after_catch'); g.resetPaddle(false); g.setPaused(true); g.setPaused(false);
+    assert.equal(g.playerActiveFace, -1); assert.equal(g.player.activeFace, -1);
+    assert.equal(JSON.stringify({ ball: g.ball, stats: g.stats, shotId: g.shotId, work: g._playerWork }), before);
+  }
+  }
+});
+
+test('mouse-circle gestures are cosmetic, standard-only and disabled in every unsafe input state', () => {
+  const unsafe = [g => { g._equippedRacket = 'r-pan'; }, g => { g._equippedRacket = 'unknown'; }, g => { g.ball.live = true; },
+    g => { g.paused = true; }, g => { g.replayer.on = true; }, g => { g.preview = { active: true }; },
+    g => { g.training = {}; }, g => { g.demoMode = true; }, g => { g.network = { isInMatch: true }; },
+    g => { g._ttSleeping = true; }, g => { g._ttContextLost = true; }, g => { g.pointerDown = true; },
+    g => { g.swipe.active = true; }, g => { g.state = lib.GS.MENU; }, g => { g.state = lib.GS.SERVE_TOSS; },
+    g => { g.state = lib.GS.REPLAY; }, g => { g.state = lib.GS.MATCH_END; },
+    g => { g.state = lib.GS.SERVE_READY; g.server = -1; }];
+  for (const change of unsafe) {
+    const f = inputGame('mouse'), { g } = f; g.state = lib.GS.POINT; g.ball.live = false; g._equippedRacket = 'r-standard';
+    change(g);
+    const before = JSON.stringify({ ball: g.ball, stats: g.stats, shotId: g.shotId });
+    idleMouseCircle(f);
+    assert.notEqual(g.paddleTrick?.active, true); assert.equal(g.playerActiveFace, 1);
+    assert.equal(JSON.stringify({ ball: g.ball, stats: g.stats, shotId: g.shotId }), before);
+  }
+  for (const type of ['touch', 'pen']) {
+    const f = inputGame(type), { g } = f; g.state = lib.GS.POINT; g.ball.live = false;
+    // The outer PointerEvent's actual type remains authoritative.
+    idleMouseCircle(f, 1, false);
+    assert.notEqual(g.paddleTrick?.active, true); assert.equal(g.playerActiveFace, 1);
+  }
+  const held = inputGame('mouse'); held.g.state = lib.GS.POINT; held.g.ball.live = false;
+  idleMouseCircle(held, 1, false, 1); assert.notEqual(held.g.paddleTrick?.active, true);
+});
+
+test('a hover packet cannot reuse a button-held coalesced path as an idle circle', () => {
+  const { g, send, width, height } = inputGame('mouse');
+  g.state = lib.GS.POINT; g.ball.live = false;
+  const samples = Array.from({ length: 41 }, (_, i) => ({ pointerId: 1, pointerType: 'mouse', buttons: 1,
+    clientX: width * .5 + 55 * Math.cos(Math.PI * 2 * i / 40),
+    clientY: height * .6 + 55 * Math.sin(Math.PI * 2 * i / 40), timeStamp: 1000 + i * 14 }));
+  send('pointermove', { x: .5 + 55 / width, y: .6 }, 1580, { buttons: 0, getCoalescedEvents: () => samples });
+  assert.notEqual(g.paddleTrick?.active, true); assert.equal(g.playerActiveFace, 1); assert.equal(g.stats.shots, 0);
+});
+
+test('abort clears only the transient trick; reduced motion changes the side without a toss', () => {
+  for (const abort of [f => f.g.cancelInput('cancel'), f => f.g.setPaused(true),
+    f => f.send('pointerleave'), f => f.sendWindow('blur'),
+    f => { f.g.ball.live = true; f.g.updatePaddleTrick(); },
+    f => { f.g._equippedRacket = 'r-pan'; f.g.updatePaddleTrick(); },
+    f => { f.g.reducedMotion = true; f.g.updatePaddleTrick(); }]) {
+    const f = inputGame('mouse'); f.g.state = lib.GS.POINT; f.g.ball.live = false; f.g.resetPaddle(true);
+    idleMouseCircle(f); assert.equal(f.g.paddleTrick?.active, true);
+    f.g.time = f.g.paddleTrick.startedAt + .36; f.g.updatePaddleTrick(); abort(f);
+    assert.equal(f.g.paddleTrick.active, false); assert.equal(f.g.paddleTrick.points.length, 0);
+    assert.equal(f.g._playerFace ?? 1, 1, 'an aborted toss has not selected the opposite standard face');
+  }
+  const rm = inputGame('mouse'); rm.g.state = lib.GS.POINT; rm.g.ball.live = false; rm.g.reducedMotion = true; rm.g.resetPaddle(true);
+  idleMouseCircle(rm);
+  assert.equal(rm.g.playerActiveFace, -1); assert.equal(rm.g.paddleTrick.active, false);
+  assert.equal(rm.g.paddleTrick.pose(rm.g.player), null); assert.equal(rm.g.stats.shots, 0);
+});
+
+test('the caught standard face survives the next accepted stroke and its recovery', () => {
+  const f = inputGame('mouse'), { g, send } = f;
+  g.state = lib.GS.POINT; g.ball.live = false; g.resetPaddle(true); idleMouseCircle(f);
+  g.time = g.paddleTrick.startedAt + .72; g.updatePaddleTrick();
+  assert.equal(g.playerActiveFace, -1);
+  g.state = lib.GS.RALLY; g.ball.live = true; g.ball.lastHitBy = -1; g.rallyBounces = [1];
+  lib.V3.copy(g.player.pos, g.ball.p); g.player.pos.y -= .04;
+  lib.V3.copy(g.player.prevPos, g.player.pos); lib.V3.copy(g.player.prev, g.player.pos);
+  g._paddleHold = null; g._calValues = { captureK: 1 };
+  const point = g.project(g.ball.p, {}), end = { x: point.x, y: point.y - .08 };
+  send('pointerdown', point, 10000); send('pointermove', end, 10040); send('pointerup', end, 10080);
+  assert.equal(g.stats.shots, 1); assert.equal(g.player.activeFace, -1); assert.equal(g.player.contactPose.activeFace, -1);
+  assert.equal(g.player.contactPose.localPoint.z, -.010);
+  for (let i = 0; i < 40; i++) {
+    g.updatePlayerPaddle(1 / 60); assert.equal(g.player.activeFace, -1); assert.equal(g.playerActiveFace, -1);
+  }
+});
+
 function releasedSwipe() {
   const g = Object.create(lib.Game.prototype);
   g.time = 10; g.strokeTime = 5; g.swipeReleasedAt = -Infinity;
@@ -56,6 +176,28 @@ function releasedSwipe() {
   g.swipeReleasedAt = 10;
   return g;
 }
+
+test('a compact horizontal serve with the actual standard equipment has two legal production bounces', () => {
+  for (const direction of [-1, 1]) for (const face of [-1, 1]) {
+    const { g, send } = inputGame('mouse', .3);
+    g.equip = new lib.Equipment(); g._playerFace = face;
+    g.state = lib.GS.SERVE_TOSS; g.server = 1; g.isServeBall = true; g.rallyBounces = [];
+    lib.V3.set(g.player.pos, 0, lib.PH.TABLE_Y + .28, 1.78);
+    lib.V3.copy(g.player.prevPos, g.player.pos);
+    lib.V3.set(g.ball.p, 0, lib.PH.TABLE_Y + .30, 1.6);
+    lib.V3.set(g.ball.v, 0, -1, -.02); lib.V3.zero(g.ball.w); g.ball.lastHitBy = 0;
+    g.tossStartY = lib.PH.TABLE_Y + .14; g.tossApex = lib.PH.TABLE_Y + .40;
+    const p = g.project(g.ball.p, {});
+    send('pointerdown', p, 1000);
+    for (let i = 1; i <= 4; i++) send('pointermove', { x: p.x + direction * .02 * i, y: p.y }, 1000 + i * 20.1);
+    assert.equal(g.stats.shots, 1);
+    const flight = lib.predict(g.ball.p, g.ball.v, g.ball.w,
+      { dt: lib.PH.SIM_DT, maxT: 2.6, stopAfterBounces: 2 });
+    assert.equal(flight.hitNet, false);
+    assert.ok(flight.landed && flight.landed.z > 0 && flight.b2 && flight.b2.z < 0,
+      JSON.stringify({ direction, face, first: flight.landed, second: flight.b2, quality: g.lastShotInfo?.quality }));
+  }
+});
 
 test('a released stroke stays fresh in ball time, not wall time, through slowmo transitions', () => {
   const g = releasedSwipe();
@@ -159,6 +301,128 @@ test('instant input keeps bounce, reach, pause and cancellation gates', () => {
   assert.equal(cancelledTap.g.ball.lastHitBy, -1, 'a cancelled pending click cannot hit');
 });
 
+test('held and released mouse and touch gestures cannot return a different shot', () => {
+  for (const type of ['mouse', 'touch']) for (const released of [false, true]) {
+    const { g, send } = inputGame(type);
+    g.ball.lastHitBy = 1; g.ball.v.z = -6;
+    const p = g.project(g.ball.p, {}), end = { x: p.x, y: p.y - .08 };
+    send('pointerdown', p, 1000); send('pointermove', end, 1040);
+    if (released) send('pointerup', end, 1080);
+    assert.equal(g.swipe.pressZone.accepted, true);
+    assert.equal(g.swipe.pressZone.shotId, g.shotId);
+    g.shotId++; g.ball.lastHitBy = -1; g.ball.v.z = 6;
+    g.rallyBounces = [1]; g.time += .15; g.strokeTime += .15;
+    lib.V3.copy(g.player.pos, g.ball.p); lib.V3.copy(g.player.prevPos, g.player.pos);
+    assert.ok(g.playerStrokeIntent(false), 'the old gesture is still fresh, not merely expired');
+    assert.equal(g.pressAdmitsBall(), false);
+    const before = JSON.stringify(g.ball);
+    g.tryInputHit(released ? g.swipe.lastReleased : g.swipe.m);
+    g.tryPlayerHit(lib.V3.clone(g.ball.p));
+    assert.equal(g.stats.shots, 0, `${type}/${released}: old press returned a new shot`);
+    assert.equal(JSON.stringify(g.ball), before);
+    assert.equal(g.pressConsumed(), false);
+  }
+});
+
+test('the final pointerup promotes a real rally backswing just like pointermove', () => {
+  for (const type of ['mouse', 'touch']) for (const finalEvent of ['pointerup', 'pointermove']) {
+    const { g, send } = inputGame(type);
+    lib.V3.set(g.ball.p, 0, 1.7, 1.3); lib.V3.set(g.ball.v, 0, 1, 12);
+    const p = g.project(g.ball.p, {});
+    send('pointerdown', { x: .5, y: .55 }, 1000);
+    send('pointermove', { x: .5, y: .53 }, 1020);
+    assert.equal(g.swipe.pressZone.accepted, false);
+    assert.equal(g.swipe.pressZone.pendingBackswing, true);
+    send(finalEvent, p, 1100);
+    assert.equal(g.stats.shots, 1, `${type}/${finalEvent}: final stroke point was ignored`);
+    assert.equal(g.ball.lastHitBy, 1);
+    assert.notEqual(g.shotJournal.latest.contact.incoming.gesture.tap, true);
+    send('pointerup', p, 1120);
+    assert.equal(g.stats.shots, 1, 'a later release cannot repeat the contact');
+  }
+});
+
+test('a tilted blade cannot mix lateral and depth allowances from different capture frames', () => {
+  for (const type of ['mouse', 'touch']) for (const direction of [-1, 1]) {
+    const { g, send } = inputGame(type), { V3 } = lib;
+    g.tryInputHit = () => {};
+    const p = g.project(g.ball.p, {});
+    send('pointerdown', p, 1000); send('pointermove', { x: p.x, y: p.y - .08 }, 1040);
+    g.time += .1; g.strokeTime += .1;
+    V3.set(g.ball.p, direction * .2, 1.05, 1.9); V3.set(g.ball.v, 0, 0, 6);
+    V3.set(g.player.pos, 0, 1.05, 1.5); V3.copy(g.player.prevPos, g.player.pos);
+    V3.norm(g.player.normal, V3.new(direction, 0, -1));
+    const capture = lib.bladePlaneCapture(g.ball.p, g.ball.p, g.player.pos, g.player.pos, g.player.normal);
+    assert.equal(capture.ok, false); assert.equal(capture.grace, false);
+    nearInput(capture.lat, .2); nearInput(capture.dzEff, .4);
+    const before = JSON.stringify(g.ball);
+    g.tryPlayerHit(V3.clone(g.ball.p));
+    assert.equal(g.stats.shots, 0, `${type}/${direction}: phantom tilted-blade contact`);
+    assert.equal(JSON.stringify(g.ball), before);
+    // Both whole capture frames remain independently usable.
+    for (const [dx, dz, lateral, depth] of [[.1, .2, .1, .2], [.26, .02, .28 / Math.SQRT2, .24 / Math.SQRT2]]) {
+      const ball = V3.new(direction * dx, 1.05, 1.5 + dz);
+      const legal = lib.bladePlaneCapture(ball, ball, g.player.pos, g.player.pos, g.player.normal);
+      assert.equal(legal.ok, true); assert.equal(legal.grace, false);
+      nearInput(legal.lat, lateral); nearInput(legal.dzEff, depth);
+    }
+  }
+});
+
+test('stationary sample density and eviction preserve held and released swipe eligibility without old power', () => {
+  for (const type of ['mouse', 'touch']) for (const released of [false, true]) for (const moves of [0, 24, 128]) {
+    const { g, send } = inputGame(type), { V3 } = lib;
+    g.tryInputHit = () => {};
+    const p = g.project(g.ball.p, {});
+    send('pointerdown', { x: p.x, y: p.y + .10 }, 1000);
+    g.time = g.strokeTime = 1.05;
+    send('pointermove', p, 1050);
+    assert.ok(g.playerStrokeIntent(false));
+    const peak = g.swipe.m.peakSpeed;
+    for (let i = 1; i <= moves; i++) {
+      g.time = g.strokeTime = 1.05 + .5 * i / (moves + 1);
+      send('pointermove', p, g.time * 1000);
+    }
+    g.time = g.strokeTime = 1.55;
+    send(released ? 'pointerup' : 'pointermove', p, 1550);
+    const metrics = released ? g.swipe.lastReleased : g.swipe.m;
+    assert.equal(lib.isRealStroke(metrics, false), true);
+    assert.equal(lib.isRealStroke(metrics, true), true);
+    assert.ok(g.playerStrokeIntent(false));
+    nearInput(metrics.gesturePeakSpeed, peak); nearInput(metrics.pathLen, .10);
+    nearInput(metrics.peakSpeed, 0); nearInput(metrics.speed, 0); nearInput(metrics.releaseSpeed, 0);
+    if (moves > g.swipe.maxSamples) {
+      assert.equal(metrics.samples, g.swipe.maxSamples);
+      assert.ok(g.swipe.evictedPathLen > .09, 'the original moving segment was evicted');
+    }
+    const ctx = g._playerEffortContext(false), neutral = { ...metrics, gesturePeakSpeed: 0 };
+    assert.equal(lib.deriveStroke({ ...metrics }, { ...ctx }).power, 0);
+    assert.deepEqual(lib.describeStrokeEffort(metrics, ctx), lib.describeStrokeEffort(neutral, ctx));
+    V3.copy(g.player.pos, g.ball.p); V3.copy(g.player.prevPos, g.player.pos);
+    g.tryPlayerHit(V3.clone(g.ball.p));
+    assert.equal(g.stats.shots, 1, `${type}/${released}/${moves}: recognized stroke disappeared`);
+  }
+});
+
+test('recognition peak resets on down and cancel and never admits a stationary or too-slow gesture', () => {
+  const sw = new lib.SwipeTracker();
+  sw.down(.5, .7, 0); sw.move(.5, .6, .05);
+  assert.equal(lib.isRealStroke(sw.m, false), true);
+  const fast = { ...sw.m };
+  delete fast.gesturePeakSpeed;
+  assert.equal(lib.isRealStroke(fast, false), true, 'internal profiles still use their explicit peakSpeed');
+  sw.down(.5, .7, 1);
+  assert.equal(sw.m.gesturePeakSpeed, 0);
+  sw.move(.5, .7, 1.1); sw.up(.5, .7, 1.2);
+  assert.equal(lib.isRealStroke(sw.lastReleased, false), false);
+  sw.down(.5, .7, 2); sw.move(.5, .6, 2.05); sw.cancel();
+  assert.equal(sw.m.gesturePeakSpeed, 0); assert.equal(sw.lastReleased, null);
+  sw.down(.5, .7, 3); sw.move(.5, .6, 5); sw.up(.5, .6, 5.1);
+  assert.ok(sw.lastReleased.pathLen > .09);
+  assert.equal(lib.isRealStroke(sw.lastReleased, false), false);
+  assert.equal(lib.isRealStroke(sw.lastReleased, true), false);
+});
+
 test('a legal falling toss can be served by a confirmed click; a rising toss cannot', () => {
   for (const vy of [1, -1]) {
     const { g, send } = inputGame();
@@ -220,7 +484,9 @@ test('on-ball horizontal mouse and touch drags create signed sidespin in rally a
         assert.notEqual(gesture.tap, true, `${label}: swipe became a tap`);
         assert.ok(Math.abs(gesture.curl) < 1e-6, `${label}: sidespin cannot require a C-shaped gesture`);
         assert.ok(Math.abs(g.ball.w.y) > Math.abs(g.ball.w.x), `${label}: vertical spin dominates ${JSON.stringify(g.ball.w)}`);
-        assert.ok(direction * g.ball.w.y > 0, `${label}: sideways brush sign does not follow its direction`);
+        assert.ok(direction * g.ball.w.y > 0, `${label}: sideways brush sign does not follow its direction ${JSON.stringify({
+          v: g.ball.v, w: g.ball.w, normal: g.lastShotInfo.normal, vR: g.lastShotInfo.vR,
+          elev: g.lastShotInfo.elev, contact: g.lastShotInfo.contact, azFace: g.lastShotInfo.azFace, azSwing: g.lastShotInfo.azSwing })}`);
         const flight = lib.predict(lib.V3.clone(g.ball.p), lib.V3.clone(g.ball.v), lib.V3.clone(g.ball.w),
           { dt: lib.PH.SIM_DT, maxT: 2.6, stopAfterBounces: serving ? 2 : 1, stopOnFirstBounce: !serving, out: {} });
         assert.equal(flight.hitNet, false, `${label}: sidespin struck the net`);
@@ -404,6 +670,82 @@ test('coalesced pointer samples retain the curved path instead of only its short
   assert.ok(g.swipe.m.samples >= points.length);
   assert.ok(g.swipe.m.pathLen > .40, `path was reduced to ${g.swipe.m.pathLen}`);
   assert.ok(Math.abs(g.swipe.m.curl) > 2, `curve was reduced to ${g.swipe.m.curl}`);
+});
+
+test('a coalesced future curve cannot steal or relabel an earlier real straight contact', () => {
+  const records = [];
+  for (const coalesced of [false, true]) {
+    const { g, send, width, height } = inputGame('mouse'), p = g.project(g.ball.p, {});
+    const points = [[p.x + .07, p.y], [p.x + .09, p.y + .025], [p.x + .07, p.y + .06],
+      [p.x + .02, p.y + .08], [p.x - .02, p.y + .06]];
+    send('pointerdown', p, 1000);
+    if (coalesced) {
+      const samples = points.map(([x, y], i) => ({ pointerId: 1, pointerType: 'mouse',
+        clientX: x * width, clientY: y * height, timeStamp: 1040 + i * 20 }));
+      const last = points.at(-1);
+      send('pointermove', { x: last[0], y: last[1] }, 1120, { getCoalescedEvents: () => samples });
+    } else for (const [i, [x, y]] of points.entries()) send('pointermove', { x, y }, 1040 + i * 20);
+    assert.equal(g.stats.shots, 1);
+    assert.equal(g.shotJournal.latest.strokeId, 'SIDE');
+    const gesture = g.shotJournal.latest.contact.incoming.gesture;
+    nearInput(gesture.curl, 0); nearInput(gesture.pathLen, .07);
+    records.push(JSON.parse(JSON.stringify({ gesture, v: g.ball.v, w: g.ball.w })));
+  }
+  assert.deepEqual(records[1], records[0], 'event batching must preserve the earliest real contact');
+});
+
+test('a coalesced path from before pointer-down cannot steal the current contact or produce maximal force', () => {
+  const accepted = [];
+  for (const stale of [false, true]) {
+    const { g, send, width, height } = inputGame('mouse'), p = g.project(g.ball.p, {});
+    send('pointerdown', p, 1000);
+    const end = { x: p.x + .07, y: p.y };
+    const samples = stale ? [{ pointerId: 1, pointerType: 'mouse', timeStamp: 980,
+      clientX: (p.x - .3) * width, clientY: (p.y - .2) * height },
+      { pointerId: 1, pointerType: 'mouse', timeStamp: 995,
+        clientX: (p.x + .2) * width, clientY: (p.y + .1) * height }] : [];
+    send('pointermove', end, 1040, { getCoalescedEvents: () => samples });
+    assert.equal(g.stats.shots, 1); assert.equal(g.shotJournal.latest.strokeId, 'SIDE');
+    const gesture = g.shotJournal.latest.contact.incoming.gesture;
+    nearInput(gesture.pathLen, .07); nearInput(gesture.curl, 0); nearInput(gesture.peakSpeed, 1.75);
+    accepted.push(JSON.parse(JSON.stringify({ gesture, v: g.ball.v, w: g.ball.w })));
+  }
+  assert.deepEqual(accepted[1], accepted[0]);
+});
+
+function nearInput(a, b) { assert.ok(Math.abs(a - b) < 1e-8, `${a} != ${b}`); }
+
+test('modest curves already observed before the first legal contact survive individual and coalesced input', () => {
+  for (const [width, height] of [[1280, 760], [390, 844], [320, 480]]) for (const direction of [-1, 1]) {
+    const accepted = [];
+    for (const coalesced of [false, true]) {
+      const { g, send } = inputGame(width > height ? 'mouse' : 'touch', 1, { width, height });
+      const start = g.project(g.ball.p, {}), points = Array.from({ length: 13 }, (_, i) => {
+        const angle = -Math.PI / 2 + 75 * Math.PI / 180 * i / 12;
+        return { x: start.x + direction * 42 * Math.cos(angle) / width,
+          y: start.y + 42 * (Math.sin(angle) + 1) / height };
+      });
+      g.rallyBounces = [];
+      send('pointerdown', points[0], 1000);
+      for (let i = 1; i <= 9; i++) send('pointermove', points[i], 1000 + i * 6);
+      assert.equal(g.stats.shots, 0, 'an unbounced ball cannot be returned');
+      g.rallyBounces = [1];
+      if (coalesced) {
+        const samples = points.slice(10).map((p, i) => ({ pointerId: 1,
+          pointerType: width > height ? 'mouse' : 'touch', clientX: p.x * width,
+          clientY: p.y * height, timeStamp: 1060 + i * 6 }));
+        send('pointermove', points[12], 1072, { getCoalescedEvents: () => samples });
+      } else for (let i = 10; i <= 12; i++) send('pointermove', points[i], 1000 + i * 6);
+      const label = `${width}x${height}/${direction}/${coalesced}`;
+      assert.equal(g.stats.shots, 1, `${label}: earliest legal contact must be real`);
+      assert.equal(g.shotJournal.latest.strokeId, direction < 0 ? 'HOOK' : 'FADE', label);
+      const gesture = g.shotJournal.latest.contact.incoming.gesture;
+      assert.ok(Math.abs(gesture.curl) >= .55 && Math.abs(gesture.curl) < 75 * Math.PI / 180,
+        'the saved contact uses the available prefix, not the completed future arc');
+      accepted.push(JSON.parse(JSON.stringify({ gesture, v: g.ball.v, w: g.ball.w })));
+    }
+    assert.deepEqual(accepted[1], accepted[0], `${width}x${height}/${direction}: identical accepted prefixes`);
+  }
 });
 
 test('a late cancellation from a different pointer cannot abandon the current stroke', () => {

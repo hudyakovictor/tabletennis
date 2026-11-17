@@ -202,12 +202,19 @@ function bladePlaneCapture(ballPos, ballPrev, padPos, padPrev, padNormal, isServ
     }
   }
   const d3 = Math.hypot(cx, cy, cz);
-  const lat = Math.min(Math.hypot(cx, cy), inPlane);
-  const dzEff = Math.min(Math.abs(cz), faceDist);
-  const ok = isServe ? d3 <= lim.radius : (lat <= lim.radius && dzEff <= lim.depth);
+  const worldLat = Math.hypot(cx, cy), worldDepth = Math.abs(cz);
+  const worldOK = worldLat <= lim.radius && worldDepth <= lim.depth;
+  const planeOK = inPlane <= lim.radius && faceDist <= lim.depth;
+  const worldGrace = worldLat <= lim.radius * GRACE_RULES.bandMul && worldDepth <= lim.depth * GRACE_RULES.depthMul;
+  const planeGrace = inPlane <= lim.radius * GRACE_RULES.bandMul && faceDist <= lim.depth * GRACE_RULES.depthMul;
+  // Lateral distance and depth must belong to the same capture frame.
+  const usePlane = !worldOK && (planeOK || !worldGrace && planeGrace);
+  const lat = usePlane ? inPlane : worldLat;
+  const dzEff = usePlane ? faceDist : worldDepth;
+  const ok = isServe ? d3 <= lim.radius : worldOK || planeOK;
   const grace = !ok && (isServe
     ? d3 <= lim.radius * GRACE_RULES.serveBandMul
-    : (lat <= lim.radius * GRACE_RULES.bandMul && dzEff <= lim.depth * GRACE_RULES.depthMul));
+    : worldGrace || planeGrace);
   return {
     ok,
     grace,

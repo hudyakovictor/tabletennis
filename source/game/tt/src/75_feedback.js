@@ -46,7 +46,7 @@ const HIT_FEEDBACK = {
 
 /**
  * Main hit feedback executor.
- * Called from Game.applyHit — transforms impact into experience.
+ * Physical contacts skip base audio owned by Game.applyHit, not other layers.
  */
 class HitFeedbackSystem {
   constructor(game) {
@@ -72,6 +72,7 @@ class HitFeedbackSystem {
    *   - isEdge: whether edge ball
    *   - contactPoint: {x,y,z} where contact occurred
    *   - side: +1 player, -1 AI
+   *   - skipBaseHitAudio: Game.applyHit owns the physical racket transient
    */
   execute(ctx) {
     const now = this.game.time;
@@ -144,8 +145,8 @@ class HitFeedbackSystem {
    */
   audio(quality, speed, spinType, spinMag, ctx) {
     const audio = this._audio;
-    if (!audio || !audio.ok || ctx.skipBaseHitAudio || ctx.preview) return;
-    if (audio.hitRacket) audio.hitRacket(speed, Number.isFinite(ctx.contactSlip) ? ctx.contactSlip : 0,
+    if (!audio || !audio.ok || ctx.preview) return;
+    if (!ctx.skipBaseHitAudio && audio.hitRacket) audio.hitRacket(speed, Number.isFinite(ctx.contactSlip) ? ctx.contactSlip : 0,
       ctx.soft === true || quality < 0.4, ctx.contactId);
   }
 

@@ -186,6 +186,7 @@ class PaddleRig {
   constructor() {
     this._q = Q.new();
     this._rollQ = Q.new();
+    this._modelQ = Q.new();
     this._m = M4.create();
     this._partM = M4.create();
     this._normal = V3.new();
@@ -211,21 +212,11 @@ class PaddleRig {
     };
   }
 
-  draw(R, S, o) {
-    // Copy a supplied quaternion: callers retain ownership of their pose.
-    const q = o.q ? Q.copy(this._q, o.q)
-      : this.paddleQuat(this._q, o.normal, o.hand, o.swing, o.roll, o.absoluteRoll);
-    const me = S.mesh, ma = S.mat, mats = o.mats || {};
-    const draw = o.shadowPass
-      ? (mesh, matrix, mat) => R.drawShadow(mesh, matrix, null, 0)
-      : (mesh, matrix, mat) => R.draw(mesh, matrix, mat);
-    const ghost = o.ghost ? this.ghostMat(o) : null;
+  drawStandard(R, S, o, q, draw, ghost, mats, ma) {
+    const me = S.mesh;
     M4.compose(this._m, o.pos, q, this._one);
     draw(me.blade, this._m, ghost || mats.wood || ma.bladeWood);
 
-    // Offsets must use the very same quaternion as the blade, not a stale
-    // physics normal. Red/black are fixed surfaces, never swapped by ball
-    // velocity (which used to make the colours pop at every bounce).
     M4.transformDir(this._normal, this._m, { x: 0, y: 0, z: 1 });
     V3.addScaled(this._pos, o.pos, this._normal, 0.0085);
     M4.compose(this._partM, this._pos, q, this._one);
@@ -238,6 +229,31 @@ class PaddleRig {
     V3.add(this._pos, o.pos, this._pos);
     M4.compose(this._partM, this._pos, q, this._one);
     draw(me.handle, this._partM, ghost || mats.grip || ma.handle);
+  }
+
+  draw(R, S, o) {
+    const face = o.activeFace === -1 ? -1 : 1;
+    // Copy a supplied quaternion: callers retain ownership of their pose.
+    const q = o.q ? Q.copy(this._q, o.q)
+      : this.paddleQuat(this._q, V3.mul(this._normal, o.normal, face), o.hand, o.swing, o.roll, o.absoluteRoll);
+    const ma = S.mat, mats = o.mats || {};
+    const draw = o.shadowPass
+      ? (mesh, matrix, mat) => R.drawShadow(mesh, matrix, null, 0)
+      : (mesh, matrix, mat) => R.draw(mesh, matrix, mat);
+    const ghost = o.ghost ? this.ghostMat(o) : null;
+
+    const model = S.rackets && S.rackets[o.racket === 'r-pan' ? 'r-pan' : 'r-standard'];
+    if (model) {
+      const modelQ = model.singleFace && face < 0
+        ? Q.mul(this._modelQ, q, Q.setAxisAngle(this._rollQ, 0, 1, 0, Math.PI)) : q;
+      M4.compose(this._m, o.pos, modelQ, this._one);
+      // Align the imported playing surface with the unchanged physical contact plane.
+      const offset = face * (.010 - model.faceOffset);
+      for (let axis = 0; axis < 3; axis++) this._m[12 + axis] += this._m[8 + axis] * offset;
+      for (const part of model.parts) draw(part.mesh, this._m, ghost || part.mat);
+    } else {
+      this.drawStandard(R, S, o, q, draw, ghost, mats, ma);
+    }
     return q;
   }
 }

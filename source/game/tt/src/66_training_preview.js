@@ -16,10 +16,11 @@ const TRAINING_PREVIEW_TEXT = {
   fh: ['Forehand', '\u0421\u043f\u0440\u0430\u0432\u0430'], bh: ['Backhand', '\u0421\u043b\u0435\u0432\u0430'],
   tableguide: ['Table guide', '\u0421\u0445\u0435\u043c\u0430 \u043d\u0430 \u0441\u0442\u043e\u043b\u0435'],
   gesture: ['Touch gesture', '\u0416\u0435\u0441\u0442 \u043f\u0430\u043b\u044c\u0446\u0430'],
-  normal: ['Rubber normal', '\u041d\u043e\u0440\u043c\u0430\u043b\u044c \u043d\u0430\u043a\u043b\u0430\u0434\u043a\u0438'],
+  normal: ['Playing-surface normal', '\u041d\u043e\u0440\u043c\u0430\u043b\u044c \u0438\u0433\u0440\u043e\u0432\u043e\u0439 \u0441\u0442\u043e\u0440\u043e\u043d\u044b'],
   head: ['Blade head', '\u0413\u043e\u043b\u043e\u0432\u0430 \u0440\u0430\u043a\u0435\u0442\u043a\u0438'],
   red: ['Red rubber', '\u041a\u0440\u0430\u0441\u043d\u0430\u044f \u043d\u0430\u043a\u043b\u0430\u0434\u043a\u0430'],
   black: ['Black rubber', '\u0427\u0451\u0440\u043d\u0430\u044f \u043d\u0430\u043a\u043b\u0430\u0434\u043a\u0430'],
+  pan: ['Outside playing bottom', '\u0412\u043d\u0435\u0448\u043d\u0435\u0435 \u0438\u0433\u0440\u043e\u0432\u043e\u0435 \u0434\u043d\u043e'],
   rps: ['rps', '\u043e\u0431/\u0441'], ready: ['Ready position', '\u0418\u0441\u0445\u043e\u0434\u043d\u043e\u0435 \u043f\u043e\u043b\u043e\u0436\u0435\u043d\u0438\u0435'],
   backswing: ['Backswing', '\u0417\u0430\u043c\u0430\u0445'], swing: ['Swing', '\u0423\u0434\u0430\u0440'],
   follow: ['Follow-through', '\u041f\u0440\u043e\u0432\u043e\u0434\u043a\u0430'], recover: ['Return to ready', '\u0412\u043e\u0437\u0432\u0440\u0430\u0442 \u0432 \u0433\u043e\u0442\u043e\u0432\u043d\u043e\u0441\u0442\u044c'],
@@ -55,7 +56,7 @@ class TrainingPreview {
     this._screen = {};
     this._a = V3.new(); this._b = V3.new(); this._scale = V3.new(1, 1, 1);
     this._q = Q.new(); this._matrix = M4.create();
-    this._drawPaddle = { pos: this.racket.p, q: this.racket.q };
+    this._drawPaddle = { pos: this.racket.p, q: this.racket.q, racket: 'r-standard' };
     this._cameraDirty = true;
     this._layoutDirty = true;
     this._restoreGL = { viewport: new Int32Array(4), scissor: new Int32Array(4), normal: new Float32Array(9) };
@@ -257,7 +258,7 @@ class TrainingPreview {
       clip.normalLines = this._arrowMatrices(pose.point, rk.normal, .19);
       clip.headLines = this._arrowMatrices(pose.pos, motion.contact.up, .17);
       clip.normalMat = { ...this._normalMat, color: pose.activeFace > 0 ? [1, .30, .31] : [.80, .83, .89] };
-      clip.drawPaddle = { pos: pose.pos, q: pose.q };
+      clip.drawPaddle = { pos: pose.pos, q: pose.q, racket: 'r-standard' };
       clip.contactBounds = [pose.pos, ball.p, V3.addScaled(V3.new(), pose.pos, motion.contact.up, -.19),
         V3.addScaled(V3.new(), pose.point, rk.normal, .22)];
       const insetDirection = V3.norm(V3.new(), V3.addScaled(V3.new(), rk.normal, motion.contact.up, .28));
@@ -606,7 +607,7 @@ class TrainingPreview {
     const view = step ? trainingLessonView(step) : trainingGuideView(p.technique);
     this.root.querySelector('#ttPreviewTitle').textContent = view.title;
     this.root.querySelector('.tt-preview-instruction').textContent = view.brief[this.g.ui && this.g.ui.inputMode === 'mouse' ? 'mouse' : 'touch'];
-    this.root.querySelector('.tt-preview-face').textContent = this._text(p.forehand ? 'red' : 'black');
+    this.root.querySelector('.tt-preview-face').textContent = this._text(this.g._equippedRacket === 'r-pan' ? 'pan' : p.forehand ? 'red' : 'black');
     this.root.querySelector('.tt-preview-inset').setAttribute('aria-label', this._text('contact'));
     this.root.querySelector('.tt-preview-status').textContent = this._text(this.reducedMotion ? 'reduced' : 'isolated');
     const family = ET(TRAIN_GUIDES[p.technique].title);
@@ -761,6 +762,8 @@ class TrainingPreview {
 
   _drawContact() {
     const c = this.clip, R = this.g.R, S = this.g.scene;
+    c.drawPaddle.racket = this.g._equippedRacket;
+    c.drawPaddle.activeFace = c.pose.activeFace;
     this._rig.draw(R, S, c.drawPaddle);
     M4.compose(this._matrix, c.ball.p, c.ball.q, V3.set(this._scale, 1, 1, 1)); R.draw(S.mesh.ball, this._matrix, S.mat.ball);
     this._drawContactGlyphs();
@@ -815,6 +818,8 @@ class TrainingPreview {
       this.g.scene.drawStatic(R, false);
       M4.compose(this._matrix, this.ball.p, this.ball.q, V3.set(this._scale, 1, 1, 1));
       R.draw(this.g.scene.mesh.ball, this._matrix, this.g.scene.mat.ball);
+      this._drawPaddle.racket = this.g._equippedRacket;
+      this._drawPaddle.activeFace = this.racket.activeFace;
       this._rig.draw(R, this.g.scene, this._drawPaddle);
       this.g.scene.drawNet(R);
       if (this.camera === 'contact') this._drawContactGlyphs();

@@ -353,18 +353,15 @@ test('AI request uses existing level powerK, quotes its own side, and planning n
   assert.deepEqual(plain(l.AI_LEVELS), config, 'no difficulty-table stamina mutation');
 });
 
-test('AI legality fallback, execution errors and handicap keep the same immutable pre-impact budget', () => {
-  const l = fresh(), ai = new l.OpponentAI(0), { ball, ctx, options } = fixture(l, 'DRIVE', -1);
+test('ranked AI legality fallback, execution errors and handicap keep the same immutable pre-impact budget', () => {
+  const l = fresh(), ai = new l.OpponentAI(2), { ball, ctx, options } = fixture(l, 'DRIVE', -1);
   const request = l.describeProfileEffort('DRIVE', ctx, { ...options, vmag: 19.5 });
   const budget = budgetFor(l, STATES[2], request, -1);
   const raw = l.racketForStroke('DRIVE', { ...ctx, effortBudget: budget }, { ...options, vmag: 19.5 });
   raw.effortRequest = request;
   const game = { ball, strokeTime: 1, getEffortBudget() { throw new Error('fallback requoted executed work'); } };
-  const legal = ai._flightLegal; let calls = 0;
-  ai._flightLegal = () => calls++ > 0;
-  const fallback = ai._ensureLegal(game, raw, { speed: 7, aim: options.aim });
-  ai._flightLegal = legal;
-  assert.equal(fallback.stroke.id, 'BLOCK');
+  const fallback = ai._ensureLegal(game, { ...raw, valid: false }, { archId: 'DRIVE', speed: 7, aim: options.aim });
+  assertLegal(l, ball, fallback, 'ranked fallback is physically legal, not a mocked first BLOCK');
   assert.equal(fallback.effortRequest, request);
   assertCap(l, fallback, budget, 'fallback');
   ai.setHandicap(.7);

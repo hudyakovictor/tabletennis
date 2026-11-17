@@ -110,8 +110,8 @@ function makeCylinder(rTop, rBot, h, seg = 24, caps = true) {
         geoPush(g, c * r, y, s * r, 0, ny, 0, c * 0.5 + 0.5, s * 0.5 + 0.5);
       }
       for (let i = 0; i < seg; i++) {
-        if (ny > 0) geoTri(g, cI, start + i, start + i + 1);
-        else geoTri(g, cI, start + i + 1, start + i);
+        if (ny > 0) geoTri(g, cI, start + i + 1, start + i);
+        else geoTri(g, cI, start + i, start + i + 1);
       }
     }
   }
@@ -214,6 +214,14 @@ function transformGeo(g, fn) {
   return g;
 }
 
+function racketGeometry(part) {
+  const bytes = Uint8Array.from(atob(part.data), c => c.charCodeAt(0)), buffer = bytes.buffer;
+  const nv = part.nv, ni = part.ni;
+  return { nv, ni, pos: new Float32Array(buffer, 0, nv * 3),
+    nrm: new Float32Array(buffer, nv * 12, nv * 3), uv: new Float32Array(buffer, nv * 24, nv * 2),
+    idx: part.wide ? new Uint32Array(buffer, nv * 32, ni) : new Uint16Array(buffer, nv * 32, ni) };
+}
+
 /* ----------------------------- shaders ----------------------------- */
 const VS_MAIN = `#version 300 es
 precision highp float;
@@ -256,7 +264,7 @@ float distributionGGX(vec3 N, vec3 H, float a){
   return a2/(3.14159265*d*d+1e-7);
 }
 float geomSchlick(float NdV, float k){ return NdV/(NdV*(1.0-k)+k); }
-vec3 fresnel(float c, vec3 F0){ return F0 + (1.0-F0)*pow(1.0-c,5.0); }
+vec3 fresnel(float c, vec3 F0){ return F0 + (1.0-F0)*pow(clamp(1.0-c,0.0,1.0),5.0); }
 
 float shadowFactor(){
   if(uShadowOn < 0.5) return 1.0;
@@ -342,10 +350,17 @@ void main(){
   }
   // hemisphere ambient
   float hemi = N.y*0.5+0.5;
-  vec3 amb = mix(uGroundCol, uSkyCol, hemi) * albedo * (1.0 - uMetal*0.6);
-  // crude specular occlusion from ambient
-  float NdV = max(dot(N,V),0.0);
-  vec3 ambSpec = mix(uGroundCol,uSkyCol, 0.75) * fresnel(NdV,F0) * (1.0-rough)*0.6;
+  vec3 hemisphere = mix(uGroundCol, uSkyCol, hemi);
+  vec3 amb = hemisphere * albedo * (1.0 - uMetal);
+  // Rough metals still reflect a broad environment; roughness must not erase that energy.
+  float NdV = clamp(dot(N,V),0.0,1.0);
+  vec3 reflected = reflect(-V,N);
+  vec3 envSpec = mix(mix(uGroundCol,uSkyCol,reflected.y*0.5+0.5),hemisphere,rough*rough);
+  // Broad reflected area light stays bright even when diffuse night ambient is
+  // low. It is filtered by the material's Fresnel, not added as an emissive rim.
+  envSpec += uLightCol * 0.32;
+  vec3 envF = F0 + (max(vec3(1.0-rough),F0)-F0)*pow(1.0-NdV,5.0);
+  vec3 ambSpec = envSpec * envF * (0.65-0.20*rough);
   vec3 col = Lo + amb + ambSpec + uEmissive;
 
   // rim
@@ -449,13 +464,13 @@ void main(){
   float l = dot(col, vec3(0.2126,0.7152,0.0722));
   col = mix(vec3(l), col, uSat);
   // vignette
-  float vig = smoothstep(0.95, 0.25, r*1.25);
+  float vig = 1.0 - smoothstep(0.25, 0.95, r*1.25);
   col *= mix(1.0, vig, uVignette);
   // grain
   float g = rand(uv*vec2(1920.0,1080.0) + fract(uTime)*vec2(31.7,17.3)) - 0.5;
   col += g*uGrain;
   // subtle s-curve
-  col = pow(col, vec3(0.9825));
+  col = pow(max(col,vec3(0.0)), vec3(0.9825));
   o = vec4(col,1.0);
 }`;
 
@@ -535,18 +550,18 @@ class Renderer {
 
     this.env = {
       lightDir: V3.new(-0.42, -0.86, -0.3),
-      lightCol: V3.new(3.45, 3.32, 3.08),
-      sky: V3.new(0.098, 0.118, 0.158),
-      ground: V3.new(0.030, 0.028, 0.027),
-      fill1: { p: V3.new(-2.5, 2.5, 1.9), c: V3.new(0.80, 0.90, 1.45) },
-      fill2: { p: V3.new(2.5, 2.5, -1.9), c: V3.new(1.40, 0.76, 0.50) },
+      lightCol: V3.new(3.00, 2.95, 2.80),
+      sky: V3.new(0.28, 0.32, 0.39),
+      ground: V3.new(0.085, 0.080, 0.070),
+      fill1: { p: V3.new(-2.4, 1.8, 2.7), c: V3.new(1.40, 1.70, 2.20) },
+      fill2: { p: V3.new(2.5, 1.9, -2.6), c: V3.new(1.70, 1.55, 1.35) },
       fogDensity: 0.0026,
       fogCol: V3.new(0.020, 0.024, 0.034),
     };
     /* Пост-обработка урезана до минимума: блум 0.52 превращал каждый яркий
      * пиксель мяча в ореол, зерно и хроматика шумили на весь кадр. Оставлен
      * лёгкий сдвиг светлых источников, тонмап и виньетка. */
-    this.post = { bloom: 0.16, exposure: 1.02, vignette: 0.86, grain: 0, ca: 0, radial: 0, sat: 1.05, flash: 0, focus: [0.5, 0.52], threshold: 1.30, soft: 0.55 };
+    this.post = { bloom: 0.16, exposure: 1.02, vignette: 0.28, grain: 0, ca: 0, radial: 0, sat: 1.05, flash: 0, focus: [0.5, 0.52], threshold: 1.30, soft: 0.55 };
     this.drawCalls = 0; this.tris = 0;
   }
 
@@ -617,10 +632,10 @@ class Renderer {
     return t;
   }
 
-  texFromCanvas(cv, { wrap = 'repeat', mips = true, srgbish = true } = {}) {
+  texFromCanvas(cv, { wrap = 'repeat', mips = true, srgbish = true, flipY = true } = {}) {
     const gl = this.gl, t = gl.createTexture();
     gl.bindTexture(gl.TEXTURE_2D, t);
-    gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
+    gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, flipY);
     gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false);
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, cv);
     const w = wrap === 'repeat' ? gl.REPEAT : gl.CLAMP_TO_EDGE;

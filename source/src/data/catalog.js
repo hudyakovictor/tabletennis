@@ -8,19 +8,11 @@
    Catalog.canBuy() — сюда же завтра встанут серверные цены и акции.
    ===================================================================== */
 const SHOP = [
-  { id: 'r-coral', nk: 'item.r-coral', kind: 'rubber', r: 'epic', price: { cur: 'coins', amt: 480 }, col: '#FF4B3E', st: [78, 92, 64], tagk: 'shop.tagHit' },
-  { id: 'r-void', nk: 'item.r-void', kind: 'rubber', r: 'leg', price: { cur: 'gems', amt: 240 }, col: '#9F6BFF', st: [95, 88, 72], tagk: 'shop.tagNew' },
-  { id: 'r-teal', nk: 'item.r-teal', kind: 'rubber', r: 'rare', price: { cur: 'coins', amt: 520 }, col: '#14C8B4', st: [66, 70, 92] },
-  { id: 't-gold', nk: 'item.t-gold', kind: 'trail', r: 'leg', price: { cur: 'gems', amt: 160 }, col: '#FFC93A', st: [0, 0, 0] },
-  { id: 'tb-neon', nk: 'item.tb-neon', kind: 'table', r: 'epic', price: { cur: 'gems', amt: 90 }, col: '#2EE6FF', st: [0, 0, 0] },
-  { id: 'b-ink', nk: 'item.b-ink', kind: 'blade', r: 'rare', price: { cur: 'coins', amt: 720 }, col: '#3A4390', st: [72, 60, 80] },
-  { id: 'season-bundle', nk: 'shop.seasonBundle', kind: 'bundle', r: 'leg', price: { cur: 'stars', amt: 349 }, items: ['r-coral', 'f-season'], gems: 80, once: true }
+  { id: 'r-pan', nk: 'item.r-pan', kind: 'racket', r: 'leg', price: { cur: 'gems', amt: 500 }, col: '#3A3A3A', st: [80, 60, 50], tagk: 'shop.tagNew' }
 ];
-/* Предметы вне витрины: начальный набор и дроп. Без этого реестра профиль
-   показывал в слоте «След мяча» чужую накладку (fallback на SHOP[0]). */
+/* Предметы вне витрины: бесплатная стандартная ракетка (скрыта из покупки). */
 const BONUS_ITEMS = [
-  { id: 't-coral', nk: 'item.t-coral', kind: 'trail', r: 'rare', price: null, col: '#FF7A4D', st: [0, 0, 0] },
-  { id: 'f-season', nk: 'shop.frame', kind: 'frame', r: 'epic', price: null, col: '#FFC93A', st: [0, 0, 0] }
+  { id: 'r-standard', nk: 'item.r-standard', kind: 'racket', r: 'common', price: null, col: '#8B7355', st: [70, 70, 70] }
 ];
 const ALL_ITEMS = SHOP.concat(BONUS_ITEMS);
 const STAR_PACKS = [{ id: 'gems-80', g: 80, s: 49 }, { id: 'gems-500', g: 500, s: 249, best: 1 }, { id: 'gems-1200', g: 1200, s: 499 }];
@@ -29,14 +21,12 @@ const Catalog = {
   byId(id) { return ALL_ITEMS.find((x) => x.id === id) || null; },
   rewardItem(reward) {
     if (!reward || reward.k !== 'card' || reward.n !== 1) return null;
-    // Cached/server calendars shipped color-only rubber rewards before itemId.
-    const it = reward.itemId !== undefined ? this.byId(reward.itemId) : ALL_ITEMS.find((x) => x.kind === 'rubber' && typeof reward.col === 'string' && x.col.toLowerCase() === reward.col.toLowerCase());
+    const it = reward.itemId !== undefined ? this.byId(reward.itemId) : ALL_ITEMS.find((x) => x.kind === 'racket' && typeof reward.col === 'string' && x.col.toLowerCase() === reward.col.toLowerCase());
     return it && it.kind !== 'bundle' ? it : null;
   },
   starPacks() { return STAR_PACKS; },
   coinPacks() { return COIN_PACKS; },
   starOffer(id) {
-    const bundle = this.bundles().find((x) => x.id === id && x.price.cur === 'stars'); if (bundle) return bundle;
     const pack = STAR_PACKS.find((x) => x.id === id); if (pack) return { id, price: { cur: 'stars', amt: pack.s }, gems: pack.g };
     return id === 'premium-pass' ? { id, price: { cur: 'stars', amt: 349 }, premium: true, once: true } : null;
   },

@@ -143,6 +143,7 @@
       this.camVP = rigViewProj(lrig, this.R.aspect(), this._rigBuf);
     };
     const setCine = (mode, dur) => {
+      g.cancelPaddleTrick?.();
       cine.from = lastSph; cine.mode = mode; cine.t = 0; if (dur) cine.dur = dur;
     };
 
@@ -152,6 +153,7 @@
       if (typeof orig !== 'function') return;
       obj[name] = function (...args) { return fn.call(this, orig.bind(this), ...args); };
     };
+    wrap(g, 'paddleTrickAllowed', function (orig) { return !cine.mode && orig(); });
     const stateName = (s) => Object.keys(GS).find((k) => GS[k] === s) || String(s);
     let hudRequestId = 0, lastHudHit = '', onlineHudSeq = 0;
     const publishOnlineHud = () => {
@@ -477,6 +479,7 @@ const showTip = (text) => { if (text) tip = { text, until: g.time + 4.6 }; };
     const glCanvas = document.getElementById('gl');
     if (glCanvas) glCanvas.addEventListener('webglcontextlost', (e) => {
       e.preventDefault(); g._ttSleeping = true; g._ttContextLost = true;
+      g.cancelPaddleTrick?.();
       g.clearContactFlashes?.();
       g.lobbyScene?.stop();
       if (g.preview?.active) g.preview.close(false);
@@ -514,28 +517,20 @@ const showTip = (text) => { if (text) tip = { text, until: g.time + 4.6 }; };
     const baseTableCol = g.scene && g.scene.mat && g.scene.mat.table && g.scene.mat.table.color
       ? g.scene.mat.table.color.slice() : null;
     const applyHostEquip = (eq) => {
-      if (!eq || typeof eq !== 'object' || !g.equip) return;
-      const bladeMap = { 'b-ink': 'b_carb' };
-      const rubberMap = { 'r-coral': 'r_tops', 'r-void': 'r_hyb', 'r-teal': 'r_ctl' };
-      const bId = bladeMap[eq.blade] || 'b_base';
-      const rId = rubberMap[eq.rubber] || 'r_base';
-      g.equip.set(bId, rId, rId);
-      if (eq.blade === 'b-ink') {
-        g.equip.colours.wood = [0.23, 0.26, 0.56];
-        g.equip.colours.grip = [0.12, 0.14, 0.28];
-      }
-      if (eq.rubber === 'r-coral') g.equip.colours.fore = [1.0, 0.29, 0.24];
-      else if (eq.rubber === 'r-void') g.equip.colours.fore = [0.62, 0.42, 1.0];
-      else if (eq.rubber === 'r-teal') g.equip.colours.fore = [0.08, 0.78, 0.71];
-      g.equip._tintKey = [eq.blade || '', eq.rubber || ''].join(':');
-
-      if (eq.trail === 't-gold') g._customTrailCol = [1.0, 0.79, 0.23];
-      else if (eq.trail === 't-coral') g._customTrailCol = [1.0, 0.48, 0.30];
-      else g._customTrailCol = null;
+      if (!eq || typeof eq !== 'object' || Array.isArray(eq) || !g.equip) return;
+      g.equip.set('b_base', 'r_base', 'r_base');
+      g.equip._tintKey = '';
+      g._eqCache = {};
+      g._customTrailCol = null;
 
       if (g.scene && g.scene.mat && g.scene.mat.table && baseTableCol) {
-        g.scene.mat.table.color = eq.table === 'tb-neon' ? [0.07, 0.24, 0.38] : baseTableCol.slice();
+        g.scene.mat.table.color = baseTableCol.slice();
       }
+
+      g.cancelPaddleTrick?.();
+      g._equippedRacket = eq.racket === 'r-pan' ? 'r-pan' : 'r-standard';
+      g.syncPlayerPaddleFace?.();
+      if (g.preview?.active) g.preview.localize();
     };
 
     const applyHostSettings = (m) => {
@@ -750,6 +745,7 @@ const showTip = (text) => { if (text) tip = { text, until: g.time + 4.6 }; };
         case 'missShots': missCap.setEnabled(!!m.on); missCap.setHalf(m.half); break;
         case 'rm':
           g.motionOff = !!m.on; g.reducedMotion = g.motionOff || !!(g.motionQuery && g.motionQuery.matches);
+          g.cancelPaddleTrick?.();
           if (ui) ui.reducedMotion = g.reducedMotion;
           if (g.reducedMotion) g.clearContactFlashes?.();
           if (g.lobbyScene?.reduceMotion()) g.render();

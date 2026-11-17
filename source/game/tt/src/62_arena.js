@@ -462,7 +462,7 @@ class LobbyExhibition {
         typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
     const scene = this.g.scene;
     if (this.requestId !== null && !this.readySent && this.cameraPrepared &&
-        scene.panoramaSettled && scene.asphaltSettled && scene.standsSettled) {
+        scene.panoramaSettled && scene.asphaltSettled && scene.standsSettled && scene.racketsSettled !== false) {
       this.readySent = true;
       this.post('lobbyReady', { requestId: this.requestId, reducedMotion: !!this.g.reducedMotion,
         textures: { panorama: scene.hasPanorama ? 'uploaded' : 'fallback',
@@ -499,11 +499,12 @@ class LobbyExhibition {
       const bs = this.radius() / PH.R;
       this._part(R, S, 'ball', S.mat.ball, shadow, g.ball.p.x, g.ball.p.y, g.ball.p.z, bs, bs, bs, g.ball.q);
     }
-     for (let i = 0; i < this.bots.length; i++) {
-       const bot = this.bots[i];
-       g.rig.draw(R, S, { ...bot.pad, hand: 'right', shadowPass: shadow,
-         mats: g.paddleMats(S, i === 0 ? g.equip : g.aiEquip) });
-     }
+    for (let i = 0; i < this.bots.length; i++) {
+      const bot = this.bots[i];
+      g.rig.draw(R, S, { ...bot.pad, hand: 'right', shadowPass: shadow,
+        mats: g.paddleMats(S, i === 0 ? g.equip : g.aiEquip),
+        racket: i === 0 ? g._equippedRacket : 'r-standard' });
+    }
   }
 
    drawShadows() {

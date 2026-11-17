@@ -40,193 +40,173 @@ function devZoneSheet() {
 }
 
 /* ---------------- ИТОГ МАТЧА ---------------- */
-/* «Разбор матча» — шторка снизу экрана итога. Закрыта: видна только ручка
-   с названием. Тап — поднимается на ~62% экрана поверх виджетов: внутри
-   крупная тепловая карта зоны удара (те же попытки, что собирает
-   ZoneStats) и советы по игре: главная ошибка матча из coach-разбора +
-   подсказки по статистике матча. */
 function analysisSheet(d) {
-  const c = d.coach, st = d.stats || {};
-  const has = !!(c && c.n >= 3 && Array.isArray(c.dots));
-  const tips = [];
-  if (has) tips.push({ h: c.title, p: c.tip });
-  if ((st.acc || 0) < 60) tips.push({ h: t('analysis.tipAccT'), p: t('analysis.tipAcc') });
-  if ((st.maxRally || 0) < 6) tips.push({ h: t('analysis.tipRallyT'), p: t('analysis.tipRally') });
-  tips.push({ h: t('analysis.tipSpinT'), p: t('analysis.tipSpin') });
-  let map;
-  if (has) {
-    const side = c.side, fwd = c.fwd, back = c.back;
-    const X = (a) => clamp(a.dx, -92, 92), Y = (a) => clamp(a.dy, -back - 12, fwd + 12);
-    const blobs = c.dots.map((a) => `<circle cx="${X(a)}" cy="${Y(a)}" r="30" fill="url(#heatG)"/>`).join('');
-    const dots = c.dots.map((a) => `<circle cx="${X(a)}" cy="${Y(a)}" r="6.5" fill="${a.contact ? '#3BF5A0' : a.accepted ? '#FF5A4D' : '#8E98C4'}" stroke="#0B0E22" stroke-width="2"/>`).join('');
-    map = `<div class="cap">${t('analysis.mapTitle')}</div>
-      <svg class="rs-map" viewBox="-104 ${-back - 30} 208 ${back + fwd + 60}" role="img" aria-label="${t('analysis.mapTitle')}">
-        <defs><radialGradient id="heatG"><stop offset="0%" stop-color="#FF6A3C" stop-opacity=".75"/><stop offset="55%" stop-color="#FF3C5A" stop-opacity=".32"/><stop offset="100%" stop-color="#FF3C5A" stop-opacity="0"/></radialGradient></defs>
-        <path d="M ${-side} 0 A ${side} ${back} 0 0 1 ${side} 0 A ${side} ${fwd} 0 0 1 ${-side} 0 Z" fill="rgba(53,198,244,.10)" stroke="#35C6F4" stroke-width="2.5" stroke-dasharray="9 7"/>
-        ${blobs}${dots}<circle r="7" fill="#FFD54A" stroke="#0B0E22" stroke-width="2"/>
-      </svg>
-      <div class="rs-legend"><span><i style="background:#3BF5A0"></i>${t('analysis.lgHit')}</span><span><i style="background:#FF5A4D"></i>${t('analysis.lgZone')}</span><span><i style="background:#8E98C4"></i>${t('analysis.lgOut')}</span></div>`;
-  } else {
-    map = `<div class="pnl rc tip" style="opacity:1;transform:none">${Art.icon('info', { c: '#9BE8FF' })}<p><b>${t('coach.tipLabel')}</b> ${t('coach.fallback')}</p></div>`;
-  }
-  return `<div class="res-sheet" id="resSheet">
-    <button class="rs-head" data-act="sheet" aria-expanded="false">
-      <span class="rs-grip"></span>
-      <span class="rs-name">${Art.icon('chart', { c: '#9BE8FF' })} ${t('result.analysis')}</span>
-      ${has ? `<span class="rs-pct num">${c.pct}%</span>` : ''}
-      <span class="rs-chev"></span>
-    </button>
-    <div class="rs-body">${map}
-      <div class="cap" style="margin-top:16px">${t('analysis.tipsTitle')}</div>
-      ${tips.slice(0, 3).map((x) => `<div class="rs-tip"><b>${x.h}</b><p>${x.p}</p></div>`).join('')}
-    </div>
-  </div>`;
+  const c = d.coach;
+  if (!c || !Number.isSafeInteger(c.n) || c.n < 3 || !Number.isSafeInteger(c.hit) || c.hit < 0 || c.hit > c.n ||
+      ![c.side, c.fwd, c.back].every(n => Number.isFinite(n) && n > 0 && n <= 1000) || !Array.isArray(c.dots)) return '';
+  const dots = c.dots.filter(a => a && Number.isFinite(a.dx) && Number.isFinite(a.dy)).slice(-24);
+  if (!dots.length) return '';
+  const { side, fwd, back } = c;
+  return `<details class="res-analysis">
+    <summary>${t('result.analysis')}<span class="num">${Math.round(c.hit / c.n * 100)}%</span></summary>
+    <p class="res-note">${t('result.analysisSample', { n: c.n })}</p>
+    <svg class="rs-map" viewBox="-104 ${-back - 30} 208 ${back + fwd + 60}" role="img" aria-label="${t('analysis.mapTitle')}">
+      <path d="M ${-side} 0 A ${side} ${back} 0 0 1 ${side} 0 A ${side} ${fwd} 0 0 1 ${-side} 0 Z" fill="rgba(53,198,244,.10)" stroke="#35C6F4" stroke-width="2" stroke-dasharray="9 7"/>
+      ${dots.map(a => `<circle cx="${clamp(a.dx, -92, 92)}" cy="${clamp(a.dy, -back - 12, fwd + 12)}" r="6.5" fill="${a.contact ? '#3BF5A0' : a.accepted ? '#FF5A4D' : '#8E98C4'}" stroke="#0B0E22" stroke-width="2"/>`).join('')}
+      <circle r="5" fill="#FFD54A"/>
+    </svg>
+    <div class="rs-legend"><span><i style="background:#3BF5A0"></i>${t('analysis.lgHit')}</span><span><i style="background:#FF5A4D"></i>${t('analysis.lgZone')}</span><span><i style="background:#8E98C4"></i>${t('analysis.lgOut')}</span></div>
+  </details>`;
 }
 
 Router.def('result', {
   full: true,
   get mood() { return 'gold'; },
   render(d) {
-    d = d || this.d || Demo.result(true); const changed = this.d !== d; this.d = d; const o = PEOPLE[d.opp];
-    /* Дельта — по той же формуле Эло, что и на сервере: иначе экран показал бы
-     * одно число, а профиль после синхронизации — другое. */
-    const delta = changed ? ratingDelta(S.rating, o && o.r, d.win) : this.delta; this.delta = delta;
-    const medals = [
-      { on: d.win, tk: 'result.win' }, { on: d.stats.perfect >= 3, tk: 'medal.perfect' }, { on: d.stats.maxRally >= 8, tk: 'medal.rally' }
-    ];
-    this.medals = medals;
-    /* Награду решаем здесь, а применяем в mount: экран обязан показывать ровно
-     * то, что игрок получит. Сундук обещаем только при свободном слоте. */
-    if (changed) this.loot = d.win ? { coins: 90, chest: (S.chests || []).some((c) => !c) } : null;
-    const L = leagueOf(S.rating), N = nextLeague(S.rating);
-    /* Ход матча: кумулятивная разница очков по ходу серии — видно, кто вёл
-     * и где был перелом. Аналитическая зрелищность без единого лишнего
-     * эффекта в самом матче. */
-    /* Блок «Ход матча» с графиком убран: отнимал место у разбора и дублировал
-     * счёт. Если понадобится — старый код в системе контроля версий. */
-    /* Кубок/трофей убран с экрана итога: дублировал смысл плашки ПОБЕДА
-     * и забирал место у разбора. Иллюстрация поражения остаётся. */
-    return `<div class="res ${d.win ? 'win' : 'lose'}">
-      ${d.win ? '' : `<i class="res-ill" style="background-image:url('${ILL.lose}')"></i>`}
-      <div class="hud mini">${''}<div style="flex:1"></div>
-        <div class="cur" data-cur="coins"><span class="ci">${Art.coin(36)}</span><span class="v num">${fmt(S.coins)}</span></div>
-        <div class="cur" data-cur="gems"><span class="ci">${Art.gem(34)}</span><span class="v num">${fmt(S.gems)}</span></div></div>
-      <div class="res-title h-display">${UI.split(d.win ? t('result.win') : t('result.lose'))}</div>
-      <div class="res-score">
-        <div class="rs-p">${Art.avatar('me', 62, { ring: '#FF7A4D' })}<b>${S.name.split(' ')[0]}</b></div>
-        <div class="rs-n num"><span class="${d.win ? 'w' : ''}">${d.me}</span><i>:</i><span class="${d.win ? '' : 'w'}">${d.op}</span></div>
-        <div class="rs-p">${Art.avatar('p' + d.opp, 62, { ring: o.c[0] })}<b>${o.s.split(' ').pop()}</b></div>
-      </div>
-      <div class="medals">${medals.map((m, i) => `<div class="md" data-i="${i}"><span class="mds">${Art.star(i === 1 ? 74 : 60, m.on)}</span><small>${t(m.tk)}</small></div>`).join('')}</div>
-      <div class="res-widgets">
-        <div class="pnl rc rating" style="--d:0"><span class="rcb">${Art.badge(L, 40)}</span><div class="rcm"><span class="cap">${t('result.rating')} · ${leagueName(L)}</span>
-          <div class="rcv"><b class="num" id="rRating">${fmt(S.rating)}</b><em class="${delta > 0 ? 'up' : 'dn'}">${delta > 0 ? '+' : ''}${delta}</em></div>
-          <div class="bar gold"><i id="rBar" style="--p:${N ? (S.rating - L.min) / (N.min - L.min) : 1}"></i></div></div></div>
-        <div class="pnl rc" style="--d:1"><span class="rcl"><span>${S.level}</span></span><div class="rcm"><span class="cap">${t('result.xp', { n: S.level })}</span>
-          <div class="rcv"><b class="num" id="rXp">${fmt(S.xp)}</b><span class="dim num">/ ${fmt(S.xpMax)}</span><em class="up">+${d.win ? 180 : 60} XP</em></div>
-          <div class="bar"><i id="rXpBar" style="--p:${S.xp / S.xpMax}"></i></div></div></div>
-        <div class="pnl rc stat big" style="--d:2"><span class="cap">${t('result.maxSpeed')}</span><b class="num">${d.stats.maxSpeed || 0}<small class="dim"> ${t('unit.kmh')}</small></b></div>
-        <div class="pnl rc stat big" style="--d:3"><span class="cap">${t('result.accuracy')}</span><b class="num">${d.stats.acc || 0}<small class="dim">%</small></b></div>
-      </div>
-      <div class="res-cards">
-        ${d.quests && d.quests.length ? `<div class="pnl rc" style="--d:4"><span class="rcb">${Art.icon('target', { c: '#9BE8FF' })}</span><div class="rcm"><span class="cap">${t('result.questDone')}</span><b>${d.quests.map((q) => q.t).join(' · ')}</b><small class="dim">${t('result.questReward')}</small></div></div>` : ''}
-        ${this.loot ? `<div class="pnl rc loot" style="--d:4"><span class="lc">${this.loot.chest ? Art.chest('silver', 64) : Art.coin(64)}</span><div class="rcm"><span class="cap">${t('result.reward')}</span><b>${this.loot.chest ? `${Art.chestName('silver')} ${t('chest.word')}` : t('result.rewardCoins')}</b>${this.loot.chest ? `<small class="dim">${t('result.chestSent')}</small>` : ''}</div><span class="lcoin">${Art.coin(30)}<b class="num">+${this.loot.coins}</b></span></div>` : ''}
-      </div>
-      <div class="res-btns"><button class="b3 dark" data-act="again">${Art.icon('refresh', { c: '#fff' })}${t('result.rematch')}</button><button class="b3 ${d.win ? '' : 'cyan'}" data-act="next"><span class="shine"></span>${t('common.next')}</button></div>
-      ${analysisSheet(d)}
+    d = d || this.d || { me: null, op: null, stats: {}, applied: true }; this.d = d;
+    const o = PEOPLE[d.opp]; this.reports ||= new WeakMap();
+    let report = this.reports.get(d);
+    if (!report) {
+      const pending = !d.applied && typeof d.win === 'boolean';
+      report = { rating: S.rating, xp: S.xp, xpMax: S.xpMax, level: S.level,
+        delta: pending ? Math.max(0, S.rating + ratingDelta(S.rating, o?.r, d.win)) - S.rating : null,
+        xpGain: pending ? d.win ? 180 : 60 : null,
+        loot: pending && d.win ? { coins: 90, chest: (S.chests || []).some(c => !c) } : null,
+        names: [d.names?.[0] ?? S.name ?? null, d.names?.[1] ?? o?.s ?? null], levelUp: false, levelUpShown: false, presented: false };
+      this.reports.set(d, report);
+    }
+    this.report = report;
+    const esc = n => String(n ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+    const names = report.names.map((n, i) => String(n ?? t(i ? 'hud.far' : 'hud.near')));
+    const score = n => Number.isSafeInteger(n) && n >= 0 ? String(n) : t('result.missing');
+    const summary = d.presentation || MatchHUD.createSummary().freeze();
+    const players = summary.players, strokes = [...new Set(players.flatMap(p => Object.keys(p.byStroke)))];
+    const strokeIds = globalThis.StrokeIcons?.ids || [];
+    strokes.sort((a, b) => (strokeIds.indexOf(a) < 0 ? 100 : strokeIds.indexOf(a)) - (strokeIds.indexOf(b) < 0 ? 100 : strokeIds.indexOf(b)));
+    const data = (n, coverage, measured = false) => {
+      if (!Number.isFinite(n)) return `<span class="res-missing" aria-label="${t('result.noData')}">${t('result.missing')}</span>`;
+      const number = measured ? new Intl.NumberFormat(I18n.lang, { maximumFractionDigits: 1 }).format(n) : String(n);
+      return coverage === 'complete' ? esc(number) : `<abbr title="${t('result.partial')}" aria-label="${t('result.partialNumber', { n: number })}">${esc(number)}${measured ? '*' : '+'}</abbr>`;
+    };
+    const head = label => `<thead><tr><th scope="col">${t(label)}</th>${names.map(n => `<th scope="col" title="${esc(n)}">${esc(n)}</th>`).join('')}</tr></thead>`;
+    const metrics = [['speed', 'avg', 'result.avgSpeed'], ['speed', 'max', 'result.maxSpeed'], ['spin', 'avg', 'result.avgSpin'], ['spin', 'max', 'result.maxSpin']]
+      .filter(([key, stat]) => players.some(p => Number.isFinite(p[key][stat])));
+    const L = leagueOf(report.rating), N = nextLeague(report.rating);
+    const outcome = typeof d.win === 'boolean' ? d.win ? 'win' : 'lose' : 'finished';
+    return `<div class="res ${outcome}" data-outcome="${outcome}">
+      <div class="res-scroll scroll" role="region" tabindex="0" aria-label="${t('result.summary')}"><div class="res-report">
+        <header class="res-header">
+          <h1 class="res-title h-display">${t('result.' + outcome)}</h1>
+          ${d.quit ? `<p class="res-context">${t('result.surrender')}</p>` : ''}
+          <div class="res-score" aria-label="${t('match.score')}">
+            <div class="rs-p ${d.win === true ? 'w' : ''}"><b title="${esc(names[0])}">${esc(names[0])}</b></div>
+            <div class="rs-n num"><span>${score(d.me)}</span><i>:</i><span>${score(d.op)}</span></div>
+            <div class="rs-p ${d.win === false ? 'w' : ''}"><b title="${esc(names[1])}">${esc(names[1])}</b></div>
+          </div>
+        </header>
+        <section class="res-progress" aria-label="${t('result.progress')}">
+          <div class="res-progress-row"><span>${t('result.rating')} · ${esc(leagueName(L))}</span><b class="num" id="rRating">${fmt(report.rating)}</b>${report.delta !== null ? `<em class="${report.delta >= 0 ? 'up' : 'dn'} num">${report.delta > 0 ? '+' : ''}${report.delta}</em>` : ''}</div>
+          <div class="bar gold"><i id="rBar" style="--p:${N ? clamp((report.rating - L.min) / (N.min - L.min), 0, 1) : 1}"></i></div>
+          <div class="res-progress-row"><span>${t('result.xp', { n: report.level })}</span><b class="num" id="rXp">${fmt(report.xp)}</b><small class="num">/ ${fmt(report.xpMax)}</small>${report.xpGain !== null ? `<em class="up num">+${report.xpGain} XP</em>` : ''}</div>
+          <div class="bar"><i id="rXpBar" style="--p:${clamp(report.xp / report.xpMax, 0, 1)}"></i></div>
+          ${report.levelUp ? `<button class="res-level-up" data-act="level-up" ${report.levelUpShown ? 'disabled' : ''}>${t('result.levelUpReward', { n: report.level })}</button>` : ''}
+        </section>
+        <section class="res-section" data-coverage="${summary.coverage}">
+          <h2>${t('result.summary')}</h2><p class="res-note">${t('result.coverage.' + summary.coverage)}</p>
+          <table class="res-table">${head('result.metric')}<tbody>
+            <tr><th scope="row">${t('result.hits')}</th>${players.map(p => `<td class="num" data-stat="hits" data-coverage="${p.coverage}">${data(p.hits, p.coverage)}</td>`).join('')}</tr>
+            <tr><th scope="row">${t('result.bestRally')}</th><td colspan="2" class="num" data-stat="best-rally" data-coverage="${summary.bestRallyCoverage}">${data(summary.bestRally, summary.bestRallyCoverage)}</td></tr>
+          </tbody></table>
+        </section>
+        <section class="res-section">
+          <h2>${t('result.strokes')}</h2>
+          ${strokes.length ? `<table class="res-table res-strokes">${head('result.stroke')}<tbody>${strokes.map(id => `<tr data-stroke="${esc(id)}"><th scope="row"><span class="res-stroke-name">${globalThis.StrokeIcons?.create(id).outerHTML || ''}<span>${t(strokeIds.includes(id) ? 'hud.stroke.' + id : 'hud.unknown')}</span></span></th>${players.map(p => `<td class="num" data-coverage="${p.strokeCoverage}">${data(p.byStroke[id] ?? (p.strokeCoverage === 'complete' ? 0 : null), p.strokeCoverage)}</td>`).join('')}</tr>`).join('')}</tbody></table>` : `<p class="res-note">${t(summary.coverage === 'complete' ? 'result.noStrokes' : 'result.noStrokeData')}</p>`}
+        </section>
+        ${metrics.length ? `<section class="res-section"><h2>${t('result.ballMetrics')}</h2><p class="res-note">${t('result.metricSample')}</p><table class="res-table">${head('result.metric')}<tbody>${metrics.map(([key, stat, label]) => `<tr><th scope="row">${t(label)} <small>${t(key === 'speed' ? 'unit.kmh' : 'hud.spinUnit')}</small></th>${players.map(p => `<td class="num" data-metric="${key}-${stat}" data-coverage="${p[key].coverage}">${data(p[key][stat], p[key].coverage, true)}</td>`).join('')}</tr>`).join('')}</tbody></table></section>` : ''}
+        ${report.loot ? `<section class="res-section res-reward"><h2>${t('result.reward')}</h2><div>${Art.coin(24)}<b class="num">+${report.loot.coins}</b><span>${t('result.rewardCoins')}</span></div>${report.loot.chest ? `<div>${Art.chest('silver', 32)}<span>${Art.chestName('silver')} ${t('chest.word')}</span></div><p class="res-note">${t('result.chestSent')}</p>` : ''}</section>` : ''}
+        ${d.quests?.length ? `<section class="res-section res-quests"><h2>${t('result.questDone')}</h2>${d.quests.map(q => `<p>${esc(q.id && I18n._lookup('mission.' + q.id) ? t('mission.' + q.id) : q.t)} <small>${t(q.claimed ? 'result.questClaimed' : 'result.questReady')}</small></p>`).join('')}<p class="res-note">${t('result.questReward')}</p></section>` : ''}
+        ${analysisSheet(d)}
+      </div></div>
+      <footer class="res-btns"><button class="b3 dark" data-act="again">${Art.icon('refresh', { c: '#fff' })}${t('result.rematch')}</button><button class="b3 ${d.win ? '' : 'cyan'}" data-act="next">${t('common.next')}</button></footer>
     </div>`;
   },
-  refreshLocale(el) { I18n.localizeDOM(el, this.render(this.d)); return true; },
+  refreshLocale(el) { I18n.localizeDOM(el, this.render(this.d), '.rs-n'); return true; },
   mount(el) {
-    const d = this.d; const res = el.querySelector('.res'); this.alive = true;
-    /* Награды применяем СРАЗУ, до дорожки анимации (идемпотентно через d.applied).
-       Раньше всё записывалось глубоко в таймлайне: ранний тап «Далее»/«Назад»
-       терял рейтинг и опыт, которые экран уже показывал. */
-    if (!d.applied) {
+    const d = this.d, report = this.report;
+    this.alive = true; this.navigating = false; this.el = el; const token = this.token = {};
+    this.animations = [];
+    // Commit before presentation or navigation, retaining the result object's identity.
+    if (!d.applied && typeof d.win === 'boolean') {
       d.applied = true;
-      this.r0 = S.rating; this.x0 = S.xp;
-      /* The ladder has a floor: a long losing run used to drive the rating
-       * negative, and the league badge then showed a number no league owns. */
-      S.rating = Math.max(0, S.rating + this.delta);
-      /* Точка в историю рейтинга: профиль рисует график по ней, а не по
-       * синусоиде. Второй аргумент — рейтинг до матча, отправная точка дня. */
-      ratingNote(S.rating, this.r0);
+      const before = S.rating;
+      S.rating = Math.max(0, S.rating + report.delta); report.delta = S.rating - before;
+      ratingNote(S.rating, before);
       if (d.win) { S.wins++; S.streak++; } else { S.losses++; S.streak = 0; }
-      /* форма (aiTrend в battle_common.js) — последние 8 результатов, победа = 1:
-       * по ней бот понимает тренд МЕЖДУ матчами, а не внутри розыгрыша */
       S.form = (Array.isArray(S.form) ? S.form : []).concat(d.win ? 1 : 0).slice(-8);
-      const add = d.win ? 180 : 60;
-      this.xv = Math.min(S.xp + add, S.xpMax); this.xpBar = Math.min(1, (S.xp + add) / S.xpMax);
-      S.xp += add; this.lvlUp = false;
-      if (S.xp >= S.xpMax) { S.xp -= S.xpMax; S.level++; this.lvlUp = true; }
-      /* Награда за победу — здесь, а не в конце анимации: ранний тап «Далее»
-       * терял монеты и сундук, которые экран уже пообещал. */
-      if (this.loot) {
-        S.coins += this.loot.coins;
-        if (this.loot.chest) {
+      S.xp += report.xpGain;
+      if (S.xp >= S.xpMax) { S.xp -= S.xpMax; S.level++; report.levelUp = true; }
+      if (report.loot) {
+        S.coins += report.loot.coins;
+        if (report.loot.chest) {
           const slot = S.chests.findIndex((c) => !c);
+          report.loot.chest = slot >= 0;
           if (slot >= 0) S.chests[slot] = { id: 'c' + Date.now(), kind: 'silver', state: 'locked' };
         }
       }
       save();
-      /* В сеть уходят только факты (матч и закрытая ступень) и только после
-       * того, как локальные числа записаны: без сервера экран не меняется. */
+      report.rating = S.rating; report.xp = S.xp; report.xpMax = S.xpMax; report.level = S.level;
       if (typeof Progress !== 'undefined' && d.durationMs > 0) {
         const o = PEOPLE[d.opp] || {};
         Progress.match({ me: d.me, op: d.op, durationMs: d.durationMs, mode: d.mode,
-          oppRating: o.r, oppName: o.s, bestRally: d.stats.maxRally });
-        if (this.lvlUp) Progress.level({ level: S.level, durationMs: d.durationMs, xp: S.xp });
+          oppRating: o.r, oppName: o.s, bestRally: d.stats?.maxRally });
+        if (report.levelUp) Progress.level({ level: S.level, durationMs: d.durationMs, xp: S.xp });
       }
+      // The report shows the actual slot assignment and post-rollover XP immediately.
+      el.innerHTML = this.render(d);
     }
-    BG.mood(d.win ? 'gold' : 'lose');
-    el.querySelector('[data-act=next]').addEventListener('click', () => Router.go('hub'));
-    /* Реванш — СРАЗУ в матч с тем же соперником (BATTLE.opp и MODE живы):
-       ни радара, ни экрана VS — тот же игрок, новый матч. */
-    el.querySelector('[data-act=again]').addEventListener('click', () => Router.go('match'));
-    const sheet = el.querySelector('#resSheet');
-    if (sheet) {
-      const head = sheet.querySelector('[data-act=sheet]');
-      head.addEventListener('click', () => {
-        const open = sheet.classList.toggle('open');
-        head.setAttribute('aria-expanded', String(open));
-        haptic('select'); Sfx.soft();
-      });
+    BG.mood(typeof d.win === 'boolean' ? d.win ? 'gold' : 'lose' : 'arena');
+    const res = el.querySelector('.res'), valid = () => this.alive && !this.navigating && this.token === token && this.d === d && res.isConnected;
+    const click = e => {
+      const button = e.target.closest('[data-act]'); if (!valid() || !button || !el.contains(button)) return;
+      if (button.dataset.act === 'next') this.navigate('hub');
+      if (button.dataset.act === 'again') this.navigate('match');
+      if (button.dataset.act === 'level-up') this.openLevelUp();
+    };
+    el.addEventListener('click', click); this.off = () => el.removeEventListener('click', click);
+    if (!report.presented) {
+      report.presented = true;
+      if (!effectiveReducedMotion() && typeof res.animate === 'function') this.animations.push(res.animate(
+        [{ opacity: .8, transform: 'translateY(4px)' }, { opacity: 1, transform: 'none' }], { duration: 180, easing: 'ease-out' }));
+      (async () => {
+        await sleep(150); if (!valid()) return;
+        if (typeof d.win === 'boolean') d.win ? Sfx.win() : Sfx.lose();
+        if (d.unlocked?.length) { await achievementPops(d.unlocked, valid); if (!valid()) return; }
+        if (report.levelUp && !report.levelUpShown) { await sleep(350); if (valid()) this.openLevelUp(); }
+      })();
     }
-    (async () => {
-      await sleep(150); res.classList.add('t1');
-      if (d.win) { Sfx.win(); FX.rain(70); } else Sfx.lose();
-      await sleep(650); if (!this.alive) return; res.classList.add('t2');
-      // звёзды-медали: штамп с ударом
-      for (const [i, m] of this.medals.entries()) {
-        await sleep(330); if (!this.alive) return;
-        const md = el.querySelector(`.md[data-i="${i}"]`); md.classList.add('on');
-        if (m.on) { const p = FX.pt(md.querySelector('.mds')); setTimeout(() => { FX.burst(p.x, p.y, { count: 26, speed: 10, size: 1.1 }); FX.twinkles(p.x, p.y, 40, 6); Sfx.impact(); haptic('heavy'); FX.shake(5, 200); }, 180); }
-        else { setTimeout(() => Sfx.soft(), 180); }
-      }
-      await sleep(500); if (!this.alive) return; res.classList.add('t3');
-      await sleep(450);
-      // рейтинг — уже записан в состояние, здесь только визуальная дорожка
-      const L = leagueOf(S.rating), N = nextLeague(S.rating);
-      tickNumber(el.querySelector('#rRating'), this.r0, S.rating, 900, { onTick: () => Sfx.tick() });
-      el.querySelector('#rBar').style.setProperty('--p', N ? (S.rating - L.min) / (N.min - L.min) : 1);
-      await sleep(900); if (!this.alive) return;
-      // опыт
-      tickNumber(el.querySelector('#rXp'), this.x0, this.xv, 800);
-      el.querySelector('#rXpBar').style.setProperty('--p', this.xpBar);
-      await sleep(900); if (!this.alive) return;
-      if (this.loot) {
-        /* Баланс уже начислен в mount — здесь только дорожка монет. */
-        const lc = el.querySelector('.lcoin'), lch = el.querySelector('.lc');
-        if (lc) Wallet.show('coins', this.loot.coins, FX.pt(lc));
-        if (lch) lch.classList.add('drop');
-      }
-      res.classList.add('t4');
-      if (d.unlocked && d.unlocked.length) { await sleep(700); await achievementPops(d.unlocked, () => this.alive); }
-      if (this.lvlUp) { await sleep(1200); if (this.alive) LevelUp.show(S.level); }
-    })();
   },
-  leave() { this.alive = false; },
-  onBack() { Router.go('hub'); }
+  openLevelUp() {
+    const report = this.report;
+    if (!this.alive || this.navigating || !report.levelUp || report.levelUpShown) return;
+    report.levelUpShown = true; LevelUp.show(report.level);
+    const button = this.el?.querySelector('[data-act=level-up]'); if (button) button.disabled = true;
+  },
+  navigate(id) {
+    this.navigating = true; this.animations?.forEach(a => a.cancel()); this.animations = [];
+    clearTimeout(this.routeTimer); const token = this.token;
+    const go = () => {
+      if (!this.alive || this.token !== token) return;
+      if (Router.busy) { this.routeTimer = setTimeout(go, 40); return; }
+      this.routeTimer = null; Router.go(id);
+    };
+    go();
+  },
+  dispose() {
+    this.alive = false; this.token = null; clearTimeout(this.routeTimer);
+    this.off?.(); this.off = null; this.animations?.forEach(a => a.cancel()); this.animations = [];
+  },
+  leave() { this.dispose(); this.el = null; },
+  onBack() { this.navigate('hub'); }
 });
 
 /* ---------------- ОТКРЫТИЕ СУНДУКА ---------------- */
@@ -237,8 +217,7 @@ Router.def('chest', {
     this.loot = [
       { k: 'coins', n: d.kind === 'gold' ? 320 : 180, tk: 'cur.coinsWord', r: 'common', art: Art.coin(110) },
       { k: 'gems', n: d.kind === 'gold' ? 8 : 4, tk: 'cur.gemsWord', r: 'rare', art: Art.gem(104) },
-      { k: 'card', n: 1, item: 'r-coral', r: 'epic', art: Art.rubber('#FF4B3E', 120) },
-      ...(d.kind === 'gold' ? [{ k: 'card', n: 1, item: 't-gold', r: 'leg', art: ItemArt.comet(110) }] : [])
+      { k: 'card', n: 1, item: 'r-pan', r: 'leg', art: ItemArt.of(Catalog.byId('r-pan'), 120) }
     ];
     return `<div class="cho">
       <div class="hud mini"><div style="flex:1"></div>
@@ -318,13 +297,10 @@ Router.def('chest', {
     const cells = $$('.sg', sum);
     await Promise.all([c && Wallet.add('coins', c.n, FX.pt(cells[0])), sleep(220).then(() => g && Wallet.add('gems', g.n, FX.pt(cells[1])))]);
     if (this.d.slot !== undefined) { S.chests[this.d.slot] = null; save(); }
-    /* The cards the chest SHOWS must actually be granted: the gallery promised
-     * "НОВЫЙ ПРЕДМЕТ" for t-gold and the profile still said «не куплено»,
-     * because nothing but r-coral ever entered the inventory. */
+    // Grant only the cards shown, once per owned item.
     for (const it of this.loot) {
       if (it.k === 'card' && it.item && Catalog.byId(it.item) && !S.owned.includes(it.item)) S.owned.push(it.item);
     }
-    if (!S.owned.includes('r-coral')) S.owned.push('r-coral');
     save();
     if (this.phase === 'sum') {
       this.phase = 'done'; $('#choT', el).textContent = t('chest.inBalance')

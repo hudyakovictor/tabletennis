@@ -95,10 +95,35 @@ function fixture(options = {}) {
 async function ready(f) { assert.equal(f.a.init(), true); await f.a.preloadSamples(); return f.a; }
 const peakGain = source => Math.max(...source.connections[0].gain.events.map(event => event[1]));
 
+const gameLib = load(['10_math.js', '30_physics.js', '40_swipe.js', '56_rig.js', '57_camera.js', '70_game.js'],
+  ['Game', 'V3', 'Q', 'PH', 'GS', 'STROKES', 'SwipeTracker', 'tapStrokeMetrics', 'integrateBall', 'tableContact', 'bounceTable']);
+function gameFixture(f) {
+  const { V3, Q, PH, GS } = gameLib, g = Object.create(gameLib.Game.prototype);
+  Object.assign(g, {
+    time: 1, strokeTime: 1, state: GS.RALLY, server: 1, shotId: 0, rally: 0,
+    paused: false, reducedMotion: true, isServeBall: false, recenterT: 0, netTouched: false,
+    ball: { p: V3.new(0, 1.05, 1.5), v: V3.new(0, -.1, 6), w: V3.new(), q: Q.new(), live: true, lastHitBy: -1 },
+    player: { pos: V3.new(0, 1.05, 1.5), prev: V3.new(0, 1.05, 1.5), prevPos: V3.new(0, 1.05, 1.5),
+      normal: V3.new(0, 0, -1), vel: V3.new(), roll: 0, lastHitT: -9 },
+    swipe: new gameLib.SwipeTracker(), swipeReleasedAt: -Infinity, rallyBounces: [1],
+    audio: f.a, career: { active: false }, ai: { lastShot: {} },
+    equip: { forSide: () => ({ e: PH.E_RACKET, mu: PH.MU_RACKET, et: PH.ET_RACKET, damp: 1, sweet: 1 }), vmagK: 1, sweetK: 1 },
+    settings: { hand: 'right', grip: 'shakehand', followThrough: false, haptics: true },
+    stats: { shots: 0, totalSpin: 0, maxSpeed: 0, maxSpin: 0, byStroke: {} },
+    matchTasks: { topspin: 0, smash: 0, serves: 0 }, hitFlash: 0, shake: 0, fov: 44,
+    contactFlashes: [], _contactFlashSeen: new Set(), anticipation: { active: false, visualOffset: V3.new() },
+    recorder: { addShot() {}, addBounce() {} }, moments: { addContact() {} },
+    msg() {}, buzz() {}, shakeIt() {}, logInput() {}, emitParticles() {}, addMark() {}, holdPaddlePose() {},
+    _publishMatchContact() {}, _syncMatchHud() {},
+  });
+  g.hitFeedback = new f.HitFeedbackSystem(g);
+  return g;
+}
+
 test('four audio defaults are real buses, and volume is the master alias', async () => {
   const f = fixture(), a = await ready(f);
   assert.deepEqual({ ...a.levels }, { master: .8, effects: .9, music: .25, ambient: .2 });
-  assert.equal(a.master.gain.value, .8); assert.equal(a.bus.gain.value, .9);
+  assert.equal(a.master.gain.value, .8); assert.equal(a.bus.gain.value, .9); assert.equal(a.tableBus.gain.value, .9);
   assert.equal(a.musicBus.gain.value, .25); assert.equal(a.ambientBus.gain.value, .2);
   assert.ok(a.musicBus.connections.includes(a.comp)); assert.ok(a.ambientBus.connections.includes(a.comp));
   a.setVolume(.31); assert.equal(a.levels.master, .31); assert.equal(a.master.gain.value, .31);
@@ -115,7 +140,7 @@ test('master zero chosen before context survives init, unlock and mute changes',
   const f = fixture(), { a } = f; a.setVolume(0); a.setMuted(true);
   assert.equal(await a.unlock(), true); a.setMuted(false);
   assert.equal(a.volume, 0); assert.equal(a.master.gain.value, 0); assert.equal(f.sources().length, 0);
-  a.hitRacket(15, 20); a.whoosh(1); a.ui('good'); a.applause(1);
+  a.hitRacket(15, 20); a.hitTable(7, { x: .5, z: -1 }); a.whoosh(1); a.ui('good'); a.applause(1);
   assert.equal(f.sources().length, 0);
 });
 test('unsupported or failed context creation stays not ok and cleans the partial graph', () => {
@@ -159,8 +184,8 @@ test('pending decode uses only fallback and never replays that contact on comple
 test('missing, corrupt and unsupported sample decoders stay on fallback without retries', async () => {
   for (const options of [{ bank: {} }, { badKeys: ['ball1', 'ball2', 'ball3', 'swing'] }, { bank: { ball1: 'not base64!' } }]) {
     const f = fixture(options), a = await ready(f);
-    a.hitTable(7, 0); a.whoosh(1); const decoded = a.ctx.decodes.length;
-    assert.equal(f.effects().length, 0); assert.equal(f.sources().length, 4);
+    a.hitTable(7, { x: 0, z: 0 }); a.whoosh(1); const decoded = a.ctx.decodes.length;
+    assert.equal(f.effects().length, 0); assert.equal(f.sources().length, 2);
     await a.preloadSamples(); assert.equal(a.ctx.decodes.length, decoded);
   }
   const f = fixture(); f.a.init(); f.a.ctx.decodeAudioData = undefined;
@@ -175,30 +200,74 @@ test('one ready variant is preferable to synthesizing over failed variants', asy
 test('unusable trimmed buffers are excluded before choosing a healthy cached variant', async () => {
   const f = fixture(), a = await ready(f); a._sampleBuffers.get('ball1').duration = .001;
   a.hitRacket(12, 30, false, 0);
-  assert.equal(f.sources().length, 1); assert.equal(f.effects()[0].buffer.key, 'ball2');
+  assert.equal(f.sources().length, 1); assert.equal(f.effects()[0].buffer.key, 'ball3');
   a._sampleBuffers.get('swing').duration = .1; a.whoosh(1, 0);
   assert.equal(f.effects().length, 1); assert.equal(f.sources().length, 2);
 });
 test('physical contact and swing each play one sample with no synthetic layers', async () => {
   const f = fixture(), a = await ready(f);
   a.hitRacket(13, 500, false, 'player'); a.hitRacket(13, 500, false, 'ai');
-  a.hitTable(7, .5, 'bounce'); a.whoosh(1, 'swing');
+  a.hitTable(7, { x: .5, z: -1 }, 'bounce'); a.whoosh(1, 'swing');
   assert.equal(f.sources().length, 4); assert.equal(f.effects().length, 4);
-  assert.deepEqual(f.effects().map(source => source.buffer.key), ['ball1', 'ball2', 'ball1', 'swing']);
+  assert.deepEqual(f.effects().map(source => source.buffer.key), ['ball1', 'ball3', 'ball2', 'swing']);
   assert.ok(f.effects().every(source => source.starts[0][0] === a.ctx.currentTime && source.playbackRate.value === 1));
 });
-test('manifest cuts measured silence/tails without assigning invented contact materials', async () => {
+test('manifest trims the existing assets and reserves distinct variants for each contact type', async () => {
   const f = fixture(), a = await ready(f);
   const lengths = { ball1: .311519274, ball2: .251383220, ball3: .444195011, swing: 1.169319728 };
   for (const sample of f.TT_AUDIO_MANIFEST) {
     assert.ok(Object.isFrozen(sample)); assert.ok(Object.isFrozen(sample.events));
     assert.ok(sample.offset >= 0 && sample.duration > 0 && sample.offset + sample.duration <= lengths[sample.key]);
     assert.ok(sample.gain > 0 && sample.gain < 1);
-    if (sample.key !== 'swing') assert.deepEqual([...sample.events], ['hitRacket', 'hitTable']);
+    assert.deepEqual([...sample.events], [sample.key === 'swing' ? 'whoosh' : sample.key === 'ball2' ? 'hitTable' : 'hitRacket']);
   }
   a.whoosh(1, 0); const source = f.effects()[0];
   assert.deepEqual(source.starts[0], [10, .16, .275]);
   assert.equal(source.connections[0].gain.events.at(-1)[1], 0);
+});
+test('both courts use the same short dry table sample with only mild positional gain and pan', async () => {
+  const f = fixture(), a = await ready(f);
+  a.hitTable(7, { x: .6, y: .76, z: 1.2 }, 'near');
+  a.hitTable(7, { x: .6, y: .76, z: -1.2 }, 'far');
+  a.hitTable(7, { x: 0, y: .76, z: 0 }, 'center');
+  const [near, far, center] = f.effects();
+  assert.deepEqual(f.effects().map(source => source.buffer.key), ['ball2', 'ball2', 'ball2']);
+  assert.equal(peakGain(near), peakGain(far), 'court sign must not muffle the opponent');
+  assert.ok(peakGain(far) >= peakGain(center) * .95);
+  for (const source of [near, far, center]) {
+    assert.deepEqual(source.starts[0], [10, 0, .08]); assert.equal(source.playbackRate.value, 1);
+    const gain = source.connections[0], output = gain.connections[0];
+    assert.equal(gain.gain.events.at(-1)[1], 0);
+    assert.equal(output.kind === 'panner' ? output.connections[0] : output, a.tableBus);
+    if (output.kind === 'panner') assert.ok(Math.abs(output.pan.value) <= .22);
+  }
+  assert.deepEqual(a.tableBus.connections, [a.comp]);
+  assert.ok(!a.tableBus.connections.includes(a.conv), 'table contacts must not enter the room tail');
+  a.setLevels({ effects: .3 }); assert.equal(a.tableBus.gain.value, .3);
+  a.ctx.createStereoPanner = undefined; a.hitTable(7, { x: -1, z: -1 }, 'mono');
+  assert.equal(f.effects().at(-1).connections[0].connections[0], a.tableBus);
+});
+test('first table contacts fall back once, stay dry and never replay after a pending decode', async () => {
+  const f = fixture({ mode: 'deferred' }), { a } = f; a.init();
+  a.hitTable(7, { x: .6, z: 1.2 }, 0); a.hitTable(7, { x: .6, z: -1.2 }, 1);
+  a.hitTable(7, { x: .6, z: 1.2 }, 0);
+  assert.equal(f.sources().length, 2); assert.equal(f.effects().length, 0);
+  for (const source of f.sources()) {
+    assert.equal(source.kind, 'oscillator');
+    assert.equal(source.connections[0].connections[0].connections[0], a.tableBus);
+    assert.ok(source.stops[0][0] - source.starts[0][0] <= .1);
+  }
+  const decoding = a.preloadSamples(); for (const finish of a.ctx.pending) finish(); await decoding;
+  assert.equal(f.sources().length, 2);
+  a.hitTable(7, { x: .6, z: -1.2 }, 1); assert.equal(f.sources().length, 2);
+  a.hitTable(7, { x: .6, z: -1.2 }, 2);
+  assert.equal(f.sources().length, 3); assert.equal(f.effects()[0].buffer.key, 'ball2');
+});
+test('a failed table variant never borrows a ready racket sample on either court', async () => {
+  const f = fixture({ badKeys: ['ball2'] }), a = await ready(f);
+  a.hitTable(7, { x: .5, z: 1 }, 0); a.hitTable(7, { x: .5, z: -1 }, 1);
+  assert.equal(f.effects().length, 0); assert.equal(f.sources().length, 2);
+  assert.ok(f.sources().every(source => source.kind === 'oscillator'));
 });
 test('event IDs including zero deduplicate contact and the entire active swing', async () => {
   const f = fixture(), a = await ready(f);
@@ -221,14 +290,21 @@ test('contact speed changes only bounded gain, independent of simulation tempo',
   slow.a.hitRacket(13, 80, false); fast.a.hitRacket(13, 80, false); soft.a.hitRacket(13, 80, true);
   assert.equal(peakGain(slow.effects()[0]), peakGain(fast.effects()[0]));
   assert.ok(peakGain(soft.effects()[0]) < peakGain(slow.effects()[0]));
-  fast.a.hitRacket(1000, 0); assert.ok(peakGain(fast.effects()[1]) <= .51 * 1.2);
+  fast.a.hitRacket(1000, 0); assert.ok(peakGain(fast.effects()[1]) <= .61 * 1.2);
+});
+test('boosted racket sample fades on its actual playback-rate-adjusted audio-clock end', async () => {
+  const f = fixture(), a = await ready(f); a.hitRacket(13, 0, false, 'strong', 1);
+  const source = f.effects()[0], end = 10 + .12 / 1.25;
+  assert.equal(source.playbackRate.value, 1.25); assert.deepEqual(source.starts[0], [10, 0, .12]);
+  assert.deepEqual(source.connections[0].gain.events.at(-1), ['linear', 0, end]);
+  assert.equal(source.connections[0].gain.events.at(-2)[2], end - .004);
 });
 test('sample rotation and procedural audience/noise never consume simulation RNG', async () => {
   const f = fixture(); vm.runInContext('Math.random = () => { throw Error("simulation RNG consumed"); };', f.context);
   const a = await ready(f);
   for (let i = 0; i < 5; i++) a.hitRacket(10, 0, false, i);
-  a.hitTable(7, 0); a.hitNet(); a.hitFloor(4); a.applause(.3); a.onRallyHit(4);
-  assert.deepEqual(f.effects().slice(0, 6).map(source => source.buffer.key), ['ball1', 'ball2', 'ball3', 'ball1', 'ball2', 'ball1']);
+  a.hitTable(7, { x: 0, z: 0 }); a.hitNet(); a.hitFloor(4); a.applause(.3); a.onRallyHit(4);
+  assert.deepEqual(f.effects().slice(0, 6).map(source => source.buffer.key), ['ball1', 'ball3', 'ball1', 'ball3', 'ball1', 'ball2']);
 });
 test('effect source and dedup history caps stay bounded during an event burst', async () => {
   const f = fixture(), a = await ready(f);
@@ -237,7 +313,7 @@ test('effect source and dedup history caps stay bounded during an event burst', 
   assert.ok(f.effects().slice(0, 176).every(source => source.stops.length === 1 && source.disconnects === 1 && source.onended === null));
 });
 test('onended releases source and connected nodes exactly once', async () => {
-  const f = fixture(), a = await ready(f); a.hitTable(7, .5);
+  const f = fixture(), a = await ready(f); a.hitTable(7, { x: .5, z: -1 });
   const source = f.effects()[0], gain = source.connections[0], panner = gain.connections[0], ended = source.onended;
   source.finish(); ended();
   assert.equal(a._effectSources.size, 0); assert.equal(a._sourceNodes.size, 0);
@@ -262,7 +338,7 @@ test('failed sample start cleans its nodes before a single fallback', async () =
 });
 for (const silence of ['mute', 'quiet', 'zero']) test(silence + ' stops every active channel and cannot schedule new audio', async () => {
   const f = fixture(), a = await ready(f); a._unlocked = true; a._startCrowd();
-  a.hitRacket(13, 50); a.applause(.3);
+  a.hitRacket(13, 50); a.hitTable(7, { x: .5, z: -1 }); a.applause(.3);
   const musicSource = a.ctx.createBufferSource(), gain = a.ctx.createGain();
   musicSource.connect(gain); gain.connect(a.musicBus); a._trackSource(musicSource, [gain], 'music'); musicSource.start(10);
   const voices = f.sources();
@@ -271,12 +347,12 @@ for (const silence of ['mute', 'quiet', 'zero']) test(silence + ' stops every ac
   else a.setVolume(0);
   assert.equal(a._sourceNodes.size, 0); assert.equal(a.master.gain.value, 0);
   assert.ok(voices.every(source => source.disconnects === 1 && source.onended === null));
-  a.hitRacket(15, 200); a.whoosh(1); a.point(true); a.gameOver(true); a.ui('good'); a.applause(1); a.onRallyHit(8);
+  a.hitRacket(15, 200); a.hitTable(7, { x: .5, z: -1 }); a.whoosh(1); a.point(true); a.gameOver(true); a.ui('good'); a.applause(1); a.onRallyHit(8);
   await a.resume(); assert.equal(f.sources().length, voices.length);
 });
 test('individual zero channels do not mute other buses', async () => {
   const f = fixture(), a = await ready(f); a.setLevels({ effects: 0 });
-  a.hitRacket(13, 0); assert.equal(f.effects().length, 0);
+  a.hitRacket(13, 0); a.hitTable(7, { x: .5, z: -1 }); assert.equal(f.effects().length, 0);
   a.point(true); assert.ok(a._audienceSources.size > 0);
   a.setLevels({ ambient: 0, effects: .9 });
   assert.equal(a._audienceSources.size, 0); a.hitRacket(13, 0); assert.equal(a._effectSources.size, 1);
@@ -358,6 +434,77 @@ test('Game base contact plus feedback skip flag still produces exactly one conta
   const feedback = new f.HitFeedbackSystem({ audio: a });
   feedback.audio(1, 13, 'topspin', 300, { contactId: 'hit', skipBaseHitAudio: true, isNetCord: true, isEdge: true, isWinner: true });
   assert.equal(f.sources().length, 1);
+});
+test('applyHit owns exactly one racket dispatch for clean, sloppy, normal and soft hits on both sides', async () => {
+  for (const side of [1, -1]) for (const [speed, quality, sweet, whoosh] of [[6, .8, 1, 0], [13, .9, 1, 1], [13, .3, .2, 1], [3, .3, .2, 0]]) {
+    const f = fixture(), a = await ready(f), g = gameFixture(f), calls = [], base = a.hitRacket;
+    a.hitRacket = function (...args) { calls.push(args); return base.apply(this, args); };
+    g.feedback = new f.HitFeedbackSystem(g); g.lastSweet = sweet;
+    gameLib.V3.set(g.ball.v, 0, 0, -side * speed);
+    g.applyHit(side, { stroke: gameLib.STROKES.DRIVE, arch: { soft: speed === 3 } }, g.ball.p, quality, { contactSlip: 5 });
+    assert.equal(calls.length, 1, `${side}/${speed}/${quality}: dispatch ownership, not just event deduplication`);
+    assert.equal(calls[0][3], side + '/1'); assert.equal(calls[0][1], 5);
+    assert.equal(f.effects().filter(source => source.buffer.key !== 'swing').length, 1);
+    assert.equal(f.effects().filter(source => source.buffer.key === 'swing').length, whoosh);
+  }
+});
+test('real player contact explicitly skips feedback base audio but keeps its visual, haptic and camera layers', async () => {
+  const f = fixture(), a = await ready(f), g = gameFixture(f), calls = [], layers = [], base = a.hitRacket;
+  a.hitRacket = function (...args) { calls.push(args); return base.apply(this, args); };
+  const execute = g.hitFeedback.execute;
+  let context;
+  g.hitFeedback.execute = function (ctx) { context = ctx; return execute.call(this, ctx); };
+  g.hitFeedback.visual = () => layers.push('visual'); g.hitFeedback.haptic = () => layers.push('haptic');
+  g.hitFeedback.camera = () => layers.push('camera');
+  g.swipe.down(.5, .6, .9); g.swipe.up(.5, .6, 1);
+  const tap = gameLib.tapStrokeMetrics(g.swipe.lastReleased, .5, .6);
+  g.tryPlayerHit(gameLib.V3.clone(g.ball.p), tap, g.player);
+  assert.equal(g.stats.shots, 1, 'the real contact path must reach applyHit');
+  assert.equal(context.skipBaseHitAudio, true); assert.deepEqual(layers, ['visual', 'haptic', 'camera']);
+  assert.equal(calls.length, 1); assert.equal(f.effects().filter(source => source.buffer.key !== 'swing').length, 1);
+});
+test('passive block preserves its single separate soft racket cue without replaying the contact', async () => {
+  const f = fixture(), a = await ready(f), g = gameFixture(f), calls = [], base = a.hitRacket;
+  a.hitRacket = function (...args) { calls.push(args); return base.apply(this, args); };
+  g.applyHit = () => { throw Error('audio must not refactor passive-block bookkeeping'); };
+  g.swipe.down(.5, .6, .8); g.swipe.realGestureId = g.swipe.gestureId;
+  gameLib.V3.set(g.ball.p, g.player.pos.x + .03, g.player.pos.y - .02, g.player.pos.z - .12);
+  gameLib.V3.set(g.ball.v, .1, -.4, 4.8);
+  assert.equal(g._tryPassiveBlock(g.player, g.ball), true);
+  assert.equal(calls.length, 1); assert.equal(calls[0][2], true);
+  assert.equal(f.sources().length, 1); assert.equal(f.effects()[0].buffer.key, 'ball1');
+  assert.equal(g._tryPassiveBlock(g.player, g.ball), false); assert.equal(calls.length, 1);
+});
+test('actual table collisions on both courts use interpolated position and pre-bounce normal speed once, including edges', async () => {
+  const { V3, PH } = gameLib;
+  for (const side of [1, -1]) for (const edge of [false, true]) {
+    const f = fixture(), a = await ready(f), g = gameFixture(f), calls = [], base = a.hitTable;
+    a.hitTable = function (...args) { calls.push(args); return base.apply(this, args); };
+    a.hitEdge = () => { throw Error('table edge must not dispatch another transient'); };
+    g._trailCrumb = () => {}; g.tryPlayerHit = () => {}; g.watchdogSubstep = () => {};
+    g.ball.lastHitBy = -side; g.rallyBounces = [];
+    V3.set(g.ball.p, edge ? PH.T_HALF_WID - .015 : .23, PH.TABLE_Y + PH.R + .004, side * .85);
+    V3.set(g.ball.v, 5, -7, side * 2);
+    const start = V3.clone(g.ball.p), p = V3.clone(start), v = V3.clone(g.ball.v), w = V3.clone(g.ball.w);
+    gameLib.integrateBall(p, v, w, PH.SIM_DT);
+    const contact = gameLib.tableContact(start.x, start.y, start.z, p.x, p.y, p.z, {});
+    const expectedInfo = gameLib.bounceTable({ ...contact }, v, w);
+    g.stepPhysics(PH.SIM_DT);
+    assert.equal(calls.length, 1); assert.equal(calls[0][0], expectedInfo.impactSpeed);
+    assert.deepEqual({ ...calls[0][1] }, { x: contact.x, y: PH.TABLE_Y, z: contact.z });
+    assert.ok(Math.abs(contact.x - p.x) > .001, 'the fixture distinguishes contact from end-of-step position');
+    assert.notEqual(calls[0][0], Math.abs(g.ball.v.y), 'restitution must not set audio level');
+    assert.equal(f.sources().length, 1); assert.equal(f.effects()[0].buffer.key, 'ball2');
+    g.stepPhysics(PH.SIM_DT); assert.equal(calls.length, 1, 'an upward separating ball cannot repeat the cue');
+  }
+});
+test('Game pause silences dry table voices and resumes without changing requested audio levels', async () => {
+  const f = fixture(), a = await ready(f), g = gameFixture(f), levels = { ...a.levels };
+  a.hitTable(7, { x: .5, z: -1 }); const voice = f.effects()[0];
+  g.setPaused(true); assert.equal(a.quiet, true); assert.equal(a._effectSources.size, 0);
+  assert.equal(voice.disconnects, 1); a.hitTable(7, { x: .5, z: 1 }); assert.equal(f.effects().length, 1);
+  g.setPaused(false); a.hitTable(7, { x: .5, z: -1 }); assert.equal(f.effects().length, 2);
+  assert.deepEqual({ ...a.levels }, levels); assert.equal(a.tableBus.gain.value, levels.effects);
 });
 test('music init is silent/lazy and does not require an initialized context', async () => {
   const f = fixture(), music = new f.MusicSystem(f.a);

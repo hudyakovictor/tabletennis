@@ -14,6 +14,19 @@ function metrics(overrides = {}) {
 }
 const near = (a, b, eps = 1e-8) => assert.ok(Math.abs(a - b) < eps, `${a} != ${b}`);
 
+test('stale coalesced samples cannot rewrite the press or amplify its calibrated speed', () => {
+  const l = fresh(), tracker = new l.SwipeTracker(), reference = new l.SwipeTracker();
+  tracker.down(.5, .6, 1, 3); reference.down(.5, .6, 1, 3);
+  tracker.move(.1, .1, .99, 2.9);
+  tracker.move(.52, .6, 1.02, 3.02); reference.move(.52, .6, 1.02, 3.02);
+  const observed = JSON.stringify(tracker.m), sim = tracker.sampleSimTime;
+  tracker.move(.9, .2, 1.01, 3.01);
+  assert.equal(JSON.stringify(tracker.m), observed); assert.equal(tracker.sampleSimTime, sim);
+  tracker.move(.56, .6, 1.06, 3.06); reference.move(.56, .6, 1.06, 3.06);
+  assert.equal(JSON.stringify(tracker.m), JSON.stringify(reference.m));
+  near(tracker.m.pathLen, .06); near(tracker.m.peakSpeed, 1);
+});
+
 test('serve.sideK changes classification without reloading the modules', () => {
   const l = fresh(), config = l.STROKE_CONFIG;
   const m = metrics({ right: .3, up: Math.sqrt(1 - .3 ** 2) }), ctx = { isServe: true };
@@ -114,6 +127,43 @@ test('recognized near-closed arcs remain lateral despite their short or zero cho
   const jitter = metrics({ samples: 4, dist: .01, pathLen: .01, curl: 0 });
   assert.equal(l.isRealStroke(jitter, false), false);
   assert.equal(l.classifyStroke(metrics({ dist: .2, pathLen: .3, curl: -.8 }), ctx, .1).id, 'LOB');
+});
+
+test('coherent 60-90 degree CSS-pixel arcs classify consistently without changing calibrated power', () => {
+  const l = fresh(), ctx = { ball: { x: 0, y: 1.12, z: 1.65 }, ballSpeed: 6 };
+  for (const [width, height] of [[1280, 760], [390, 844], [320, 480]]) {
+    for (const degrees of [60, 75, 90]) for (const direction of [-1, 1]) {
+      const shaped = new l.SwipeTracker(), calibrated = new l.SwipeTracker();
+      shaped.down(.5, .5, 0, 0, { width, height }); calibrated.down(.5, .5, 0, 0);
+      const radius = 80, steps = 12;
+      for (let i = 1; i <= steps; i++) {
+        const angle = -Math.PI / 2 + degrees * Math.PI / 180 * i / steps;
+        const x = .5 + direction * radius * Math.cos(angle) / width;
+        const y = .5 + radius * (Math.sin(angle) + 1) / height;
+        shaped.move(x, y, i * .01); calibrated.move(x, y, i * .01);
+      }
+      const m = shaped.m, label = `${width}x${height}/${degrees}/${direction}`;
+      assert.equal(l.isRealStroke(m, false), true, label);
+      assert.equal(l.classifyStroke(m, ctx, m.peakSpeed / 4.2).id, direction < 0 ? 'HOOK' : 'FADE', label);
+      near(m.curl, direction * degrees * Math.PI / 180 * (steps - 1) / steps);
+      near(m.turnCoherence, 1);
+      for (const key of ['dist', 'pathLen', 'speed', 'releaseSpeed', 'peakSpeed', 'dur', 'up', 'right']) {
+        near(m[key], calibrated.m[key]);
+      }
+    }
+  }
+  for (const up of [0, .196]) {
+    const straight = metrics({ up, right: Math.sqrt(1 - up * up), curl: 0, bend: 1, turnCoherence: 1 });
+    assert.equal(l.classifyStroke(straight, { ...ctx, ball: { y: .95, z: 1.65 } }, .6).id, up === 0 ? 'SIDE' : 'DRIVE');
+    assert.equal(l.classifyStroke(straight, { ...ctx, ball: { y: 1.4, z: 1.65 } }, .8).id, up === 0 ? 'SIDE' : 'SMASH');
+  }
+});
+
+test('alternating noisy turns cannot impersonate a coherent C gesture', () => {
+  const l = fresh(), ctx = { ball: { y: 1.12, z: 1.65 }, ballSpeed: 6 };
+  const noise = metrics({ up: .5, right: .86, curl: 1.2, pathLen: .3, dist: .2, bend: 1.5, turnCoherence: .35 });
+  assert.ok(!['HOOK', 'FADE'].includes(l.classifyStroke(noise, ctx, .6).id));
+  assert.equal(l.isRealStroke({ ...noise, pathLen: .02, dist: .01 }, false), false);
 });
 
 test('the same arc keeps its spin direction across the chord-direction threshold', () => {

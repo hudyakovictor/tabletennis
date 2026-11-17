@@ -7,31 +7,71 @@
 function cv(w, h) { const c = document.createElement('canvas'); c.width = w; c.height = h; return c; }
 
 /* ------------------------- procedural textures --------------------- */
+function surfaceRandom(seed) {
+  return () => ((seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0) / 4294967296);
+}
+
 function texTableTop(palette) {
   // canvas x = table WIDTH (1.525 m), canvas y = table LENGTH (2.74 m)
-  const W = 1024, H = 1840, c = cv(W, H), g = c.getContext('2d');
+  const W = 1024, H = 2048, c = cv(W, H), g = c.getContext('2d');
+  // Surface wear is stable and must not consume the rally's random sequence.
+  const random = surfaceRandom(0x51bacead);
   const base = palette.table || '#123f74';
   g.fillStyle = base; g.fillRect(0, 0, W, H);
+  g.fillStyle = 'rgba(178,190,184,0.12)'; g.fillRect(0, 0, W, H);
   const img = g.getImageData(0, 0, W, H), d = img.data;
   for (let i = 0; i < d.length; i += 4) {
-    const n = (Math.random() - 0.5) * 10;
+    const n = (random() - 0.5) * 6;
     d[i] += n; d[i + 1] += n; d[i + 2] += n;
   }
   g.putImageData(img, 0, 0);
   const rg = g.createRadialGradient(W / 2, H / 2, H * 0.08, W / 2, H / 2, H * 0.62);
-  rg.addColorStop(0, 'rgba(255,255,255,0.040)');
-  rg.addColorStop(1, 'rgba(0,0,0,0.38)');
+  rg.addColorStop(0, 'rgba(255,255,255,0.020)');
+  rg.addColorStop(1, 'rgba(0,0,0,0.11)');
   g.fillStyle = rg; g.fillRect(0, 0, W, H);
+  for (let i = 0; i < 36; i++) {
+    const x = random() * W, y = random() * H, r = 20 + random() * 90;
+    const patch = g.createRadialGradient(x, y, 0, x, y, r);
+    patch.addColorStop(0, i % 3 ? 'rgba(214,221,205,0.035)' : 'rgba(47,54,48,0.04)');
+    patch.addColorStop(1, 'rgba(0,0,0,0)');
+    g.fillStyle = patch; g.fillRect(x - r, y - r, r * 2, r * 2);
+  }
+  for (let i = 0; i < 100; i++) {
+    g.fillStyle = 'rgba(196,202,180,0.04)';
+    g.fillRect(random() * W, random() * H, 8 + random() * 80, 1 + random() * 2);
+  }
   // ITTF markings: 20 mm side + end lines, 3 mm centre line
   const lwX = Math.max(3, Math.round(W * 0.020 / PH.T_WID));
   const lwY = Math.max(3, Math.round(H * 0.020 / PH.T_LEN));
-  g.fillStyle = '#ffffff'; g.globalAlpha = 0.95;
+  g.fillStyle = '#e9e9df'; g.globalAlpha = 0.93;
   g.fillRect(0, 0, lwX, H); g.fillRect(W - lwX, 0, lwX, H);      // side lines
   g.fillRect(0, 0, W, lwY); g.fillRect(0, H - lwY, W, lwY);      // end lines
   const clw = Math.max(2, Math.round(W * 0.003 / PH.T_WID));
   g.fillRect((W - clw) / 2, 0, clw, H);                          // centre line
   g.globalAlpha = 1;
-  g.fillStyle = 'rgba(0,0,0,0.26)'; g.fillRect(0, H / 2 - 2, W, 4);  // halves seam
+  g.fillStyle = 'rgba(0,0,0,0.18)'; g.fillRect(0, H / 2 - 1, W, 2);  // halves seam
+  g.fillStyle = 'rgba(127,105,77,0.55)';
+  for (let i = 0; i < 84; i++) {
+    const size = 3 + random() * 12, depth = 1 + random() * 2, side = i % 4;
+    if (side < 2) g.fillRect(side ? W - depth : 0, random() * (H - size), depth, size);
+    else g.fillRect(random() * (W - size), side === 2 ? 0 : H - depth, size, depth);
+  }
+  return c;
+}
+
+function texFrame() {
+  const S = 256, c = cv(S, S), g = c.getContext('2d'), random = surfaceRandom(0x72ab1e00);
+  g.fillStyle = '#343b3c'; g.fillRect(0, 0, S, S);
+  for (let i = 0; i < 2200; i++) {
+    g.fillStyle = i % 3 ? 'rgba(203,206,190,0.045)' : 'rgba(12,18,19,0.08)';
+    g.fillRect(random() * S, random() * S, 1, 1 + random() * 3);
+  }
+  for (let i = 0; i < 22; i++) {
+    const x = random() * S, y = random() * S, r = 2 + random() * 9;
+    const rust = g.createRadialGradient(x, y, 0, x, y, r);
+    rust.addColorStop(0, 'rgba(129,81,45,0.42)'); rust.addColorStop(1, 'rgba(129,81,45,0)');
+    g.fillStyle = rust; g.fillRect(x - r, y - r, r * 2, r * 2);
+  }
   return c;
 }
 
@@ -53,25 +93,26 @@ function texFloor(palette) {
 
 function texNet() {
   const W = 1024, H = 256, c = cv(W, H), g = c.getContext('2d');
+  const tape = H * 0.14;
   g.clearRect(0, 0, W, H);
   // mesh
-  g.strokeStyle = 'rgba(232,240,255,0.78)'; g.lineWidth = 1.5;
-  const cells = 86;
+  g.strokeStyle = 'rgba(8,10,12,0.94)'; g.lineWidth = 1.75;
+  const cells = Math.round((PH.T_WID + 2 * PH.NET_OVERHANG) / 0.01);
   for (let i = 0; i <= cells; i++) {
     const x = i * W / cells;
-    g.beginPath(); g.moveTo(x, 0); g.lineTo(x, H * 0.86); g.stroke();
+    g.beginPath(); g.moveTo(x, tape); g.lineTo(x, H); g.stroke();
   }
-  const rows = 22;
+  const rows = Math.round(PH.NET_H * 0.86 / 0.01);
   for (let j = 0; j <= rows; j++) {
-    const y = H * 0.86 * j / rows;
+    const y = tape + (H - tape) * j / rows;
     g.beginPath(); g.moveTo(0, y); g.lineTo(W, y); g.stroke();
   }
   // white tape along the top
-  g.fillStyle = '#f2f6ff'; g.fillRect(0, H * 0.86, W, H * 0.14);
-  g.fillStyle = 'rgba(0,0,0,0.12)'; g.fillRect(0, H * 0.86, W, 3);
+  g.fillStyle = '#eeefe9'; g.fillRect(0, 0, W, tape);
+  g.fillStyle = 'rgba(0,0,0,0.18)'; g.fillRect(0, tape - 2, W, 2);
   // bottom cord
-  g.strokeStyle = 'rgba(240,246,255,0.9)'; g.lineWidth = 3;
-  g.beginPath(); g.moveTo(0, 2); g.lineTo(W, 2); g.stroke();
+  g.strokeStyle = 'rgba(8,10,12,0.94)'; g.lineWidth = 3;
+  g.beginPath(); g.moveTo(0, H - 2); g.lineTo(W, H - 2); g.stroke();
   return c;
 }
 
@@ -213,6 +254,7 @@ class Scene {
     /* ---- textures ---- */
     this.tex = {
       table: R.texFromCanvas(texTableTop(P), { wrap: 'clamp' }),
+      frame: R.texFromCanvas(texFrame(), { wrap: 'repeat' }),
       floor: R.texFromCanvas(texFloor(P), { wrap: 'repeat' }),
       net: R.texFromCanvas(texNet(), { wrap: 'clamp' }),
       ball: R.texFromCanvas(texBall(), { wrap: 'repeat' }),
@@ -243,8 +285,13 @@ class Scene {
     }, () => { this.asphaltSettled = true; });
 
     /* ---- meshes ---- */
+    const tableBody = makeBox(T.T_WID, T.T_THICK, T.T_LEN);
+    // The separate top is the only upward face; no coplanar box roof or stretched side markings.
+    tableBody.idx = tableBody.idx.filter(i => tableBody.nrm[i * 3 + 1] <= 0);
+    tableBody.ni = tableBody.idx.length;
     this.mesh = {
-      tableTop: R.mesh(makeBox(T.T_WID, T.T_THICK, T.T_LEN, 1, true)),
+      tableTop: R.mesh(makePlane(T.T_WID, T.T_LEN)),
+      tableBody: R.mesh(tableBody),
       apron: R.mesh(makeBox(1, 1, 1)),
       leg: R.mesh(makeCylinder(0.035, 0.030, T.T_H - T.T_THICK, 14)),
       legBar: R.mesh(makeBox(1, 1, 1)),
@@ -268,12 +315,14 @@ class Scene {
     };
 
     /* ---- materials ---- */
+    const paint = P.table.slice(1).match(/../g).map(component => parseInt(component, 16) / 255);
     this.mat = {
-      table: { color: [0.74, 0.77, 0.84], tex: this.tex.table, rough: 0.48, metal: 0.0, specTint: 0.88 },
-      apron: { color: [0.34, 0.37, 0.44], rough: 0.56, metal: 0.0, specTint: 0.6 },
-      frame: { color: [0.10, 0.11, 0.14], rough: 0.38, metal: 0.72 },
+      table: { color: [0.88, 0.91, 0.96], tex: this.tex.table, rough: 0.90, metal: 0.0, specTint: 0.22 },
+      tableBody: { color: paint.map(component => component * 0.88 + 0.025), rough: 0.92, metal: 0.0, specTint: 0.20 },
+      apron: { color: [0.18, 0.22, 0.24], rough: 0.86, metal: 0.0, specTint: 0.35 },
+      frame: { color: [0.50, 0.55, 0.60], tex: this.tex.frame, rough: 0.82, metal: 0.42 },
       net: { color: [1, 1, 1], tex: this.tex.net, rough: 0.72, alphaTest: 0.08, blend: true, doubleSided: true },
-      post: { color: [0.08, 0.09, 0.11], rough: 0.32, metal: 0.8 },
+      post: { color: [0.50, 0.55, 0.60], tex: this.tex.frame, rough: 0.60, metal: 0.70 },
       ball: { color: [1.0, 1.0, 0.99], tex: this.tex.ball, rough: 0.33, metal: 0, specTint: 1.5, emissive: [0.34, 0.335, 0.29], rim: 0.62, rimCol: [1.0, 0.97, 0.88], rimPower: 2.0 },
       bladeWood: { color: [0.92, 0.72, 0.47], rough: 0.46, emissive: [0.055, 0.042, 0.028], rim: 0.26, rimCol: [0.72, 0.82, 1.0], rimPower: 2.2 },
       rubberRed: { color: [1.08, 1.08, 1.08], tex: this.tex.rubberRed, rough: 0.74, specTint: 0.8, emissive: [0.075, 0.020, 0.016], rim: 0.30, rimCol: [1.0, 0.64, 0.56], rimPower: 2.1 },
@@ -293,25 +342,63 @@ class Scene {
       pool: { color: [1, 1, 1], tex: this.tex.glow, blend: 'add', emissive: [0.050, 0.058, 0.080], doubleSided: true, rough: 1 },
     };
 
+    this.rackets = {};
+    let pending = 0;
+    const models = typeof TT_RACKETS !== 'undefined' ? TT_RACKETS : {};
+    for (const [id, model] of Object.entries(models)) {
+      const parts = model.parts.map(part => ({ mesh: R.mesh(racketGeometry(part)),
+        mat: { ...part.material, tex: part.material.texture !== undefined ? R.white : null } }));
+      this.rackets[id] = { parts, singleFace: model.singleFace, faceOffset: model.faceOffset };
+      for (let index = 0; index < model.textures.length; index++) {
+        const image = new Image(); pending++;
+        let settled = false;
+        const settle = () => {
+          if (settled) return;
+          settled = true; image.onload = image.onerror = null;
+          this.racketsSettled = --pending === 0;
+        };
+        image.onload = () => {
+          if (settled) return;
+          try {
+            // glTF UVs already address image rows from the top; don't flip the atlas.
+            // The pan's authored sampler repeats its POT texture; the standard atlas stays clamped.
+            const texture = R.texFromCanvas(image, { wrap: id === 'r-pan' ? 'repeat' : 'clamp', flipY: false });
+            if (!texture || R.gl?.getError && R.gl.getError() !== 0) {
+              if (texture) R.gl?.deleteTexture?.(texture);
+              return;
+            }
+            for (const part of parts) if (part.mat.texture === index) part.mat.tex = texture;
+          } catch (error) {
+            console.warn('Racket texture upload failed', error);
+          } finally { settle(); }
+        };
+        image.onerror = settle;
+        try { image.src = model.textures[index]; } catch (error) { settle(); }
+      }
+    }
+    this.racketsSettled = pending === 0;
+
     /* ---- static transform cache ---- */
     this.M = {};
     const m = (k) => (this.M[k] = this.M[k] || M4.create());
     const pos = V3.new(), rot = Q.new(), scl = V3.new(1, 1, 1);
 
-    M4.compose(m('tableTop'), V3.set(pos, 0, T.T_H - T.T_THICK / 2, 0),
+    M4.compose(m('tableBody'), V3.set(pos, 0, T.T_H - T.T_THICK / 2, 0),
+      Q.identity(rot), V3.set(scl, 1, 1, 1));
+    M4.compose(m('tableTop'), V3.set(pos, 0, T.T_H, 0),
       Q.identity(rot), V3.set(scl, 1, 1, 1));
 
     // slim rail around the rim, flush with the body
     const ap = 0.016;
-    const apY = T.T_H - T.T_THICK - 0.010;
+    const apY = T.T_H - T.T_THICK - 0.034 / 2;
     M4.compose(m('apronN'), V3.set(pos, 0, apY, -T.T_HALF_LEN + ap / 2),
-      Q.identity(rot), V3.set(scl, T.T_WID + 0.004, 0.034, ap));
+      Q.identity(rot), V3.set(scl, T.T_WID, 0.034, ap));
     M4.compose(m('apronS'), V3.set(pos, 0, apY, T.T_HALF_LEN - ap / 2),
-      Q.identity(rot), V3.set(scl, T.T_WID + 0.004, 0.034, ap));
+      Q.identity(rot), V3.set(scl, T.T_WID, 0.034, ap));
     M4.compose(m('apronW'), V3.set(pos, -T.T_HALF_WID + ap / 2, apY, 0),
-      Q.identity(rot), V3.set(scl, ap, 0.034, T.T_LEN + 0.004));
+      Q.identity(rot), V3.set(scl, ap, 0.034, T.T_LEN - ap * 2));
     M4.compose(m('apronE'), V3.set(pos, T.T_HALF_WID - ap / 2, apY, 0),
-      Q.identity(rot), V3.set(scl, ap, 0.034, T.T_LEN + 0.004));
+      Q.identity(rot), V3.set(scl, ap, 0.034, T.T_LEN - ap * 2));
 
     this.legs = [];
     for (const sx of [-1, 1]) for (const sz of [-1, 1]) {
@@ -424,6 +511,7 @@ class Scene {
       }
       R.draw(me.quad, this.tableShade, this._shadowMat0);
     }
+    d(me.tableBody, M.tableBody, ma.tableBody);
     d(me.tableTop, M.tableTop, ma.table);
     d(me.box, M.apronN, ma.apron); d(me.box, M.apronS, ma.apron);
     d(me.box, M.apronW, ma.apron); d(me.box, M.apronE, ma.apron);

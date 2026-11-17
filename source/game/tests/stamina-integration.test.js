@@ -223,8 +223,13 @@ test('passive block has one common contact, true quality and legacy sweet, witho
   const c = g.getMatchSnapshot().contacts[0];
   assert.equal(c.stroke, 'BLOCK'); assert.equal(c.quality, .30); assert.equal(c.sweet, .72);
   close(c.kmh, V3.len(g.ball.v) * 3.6); close(c.rps, V3.len(g.ball.w) / lib.TAU);
+  close(g.stats.maxSpeed, V3.len(g.ball.v) * 3.6); close(g.stats.maxSpin, V3.len(g.ball.w) / lib.TAU);
+  close(g.stats.totalSpin, V3.len(g.ball.w) / lib.TAU);
+  assert.equal(g.stats.shots, 1); assert.equal(g.stats.blocks, 1); assert.equal(g.stats.byStroke.BLOCK, 1);
+  const acceptedStats = json(g.stats);
   assert.equal(g._tryPassiveBlock(g.player, g.ball), false);
   assert.equal(g.getMatchSnapshot().contacts[0].eventId, c.eventId);
+  assert.deepEqual(json(g.stats), acceptedStats, 'a passive block updates real maxima once, not a second contact');
 });
 
 test('scored practice marker and demo enable both sides; actual excluded modes suspend work and recovery', () => {
@@ -248,13 +253,14 @@ test('scored practice marker and demo enable both sides; actual excluded modes s
 });
 
 test('recovery advances only eligible scaled physics steps, independently of update frame rate', () => {
-  for (const scale of [1, .25]) for (const fps of [30, 60, 120]) {
+  for (const scale of [1, .25]) for (const fps of [10, 15, 20, 30, 60, 120]) {
     const f = fixture(), g = f.g;
     g.stamina = [Stamina.charge(Stamina.fresh(), 40), Stamina.charge(Stamina.fresh(), 20)];
     const before = json(g.stamina);
     g.timeScale = g.targetTimeScale = scale; g.inspectSlowmoRequested = g.inspectSlowmo = true; g.updateSlowmo = noop;
     const physical = f.tick(1.2, 1 / fps);
     close(physical + g._acc, 1.2 * scale, `scaled physics plus fractional remainder at ${fps} fps`);
+    close(g.strokeTime - 1, physical + g._acc, `stroke and physics clocks at ${fps} fps`);
     const expected = before.map(s => Stamina.advance(s, physical));
     for (let i = 0; i < 2; i++) {
       close(g.stamina[i].energy, expected[i].energy); close(g.stamina[i].regenDelayRemaining, expected[i].regenDelayRemaining);
@@ -333,6 +339,34 @@ test('invalid resume is side-effect free and terminal resume retains its winner;
   assert.notEqual(g._matchId, oldId); assert.deepEqual(json(g.stamina), [json(Stamina.fresh()), json(Stamina.fresh())]);
 });
 
+test('match recovery retains only the validated selected face, never partial circle or toss animation state', () => {
+  const from = fixture(), to = fixture();
+  from.g._playerFace = -1; from.g.resetPaddle(true);
+  from.g.paddleTrick = { active: true, points: [{ x: 10, y: 12, t: 1 }], cancel() { this.active = false; this.points.length = 0; } };
+  const checkpoint = json(from.g.captureMatchResume());
+  assert.equal(checkpoint.playerFace, -1); assert.equal(checkpoint.paddleTrick, undefined);
+  to.g.paddleTrick = { active: true, points: [1], cancel() { this.active = false; this.points.length = 0; } };
+  assert.equal(to.g.startMatch(0, checkpoint), true);
+  assert.equal(to.g.playerActiveFace, -1); assert.equal(to.g.player.activeFace, -1);
+  assert.equal(to.g.paddleTrick.active, false); assert.equal(to.g.paddleTrick.points.length, 0);
+  const before = json(to.g.captureMatchResume());
+  for (const invalid of [0, 2, null, 'black', {}, NaN]) {
+    assert.equal(to.g.startMatch(0, { ...checkpoint, playerFace: invalid }), false);
+    assert.deepEqual(json(to.g.captureMatchResume()), before);
+  }
+  const legacy = { ...checkpoint }; delete legacy.playerFace;
+  assert.equal(to.g.startMatch(0, legacy), true); assert.equal(to.g.playerActiveFace, 1);
+  to.g._playerFace = -1; to.g.resetPaddle(true);
+  const physical = json({ ball: to.g.ball, stats: to.g.stats });
+  to.g._equippedRacket = 'r-pan'; to.g.syncPlayerPaddleFace();
+  assert.equal(to.g.playerActiveFace, 1, 'pan keeps its own outside playing bottom');
+  assert.equal(to.g.player.activeFace, 1); assert.ok(to.g.player.roll > 0);
+  to.g._equippedRacket = 'r-standard'; to.g.syncPlayerPaddleFace();
+  assert.equal(to.g.playerActiveFace, -1, 'switching equipment does not erase the selected standard face');
+  assert.equal(to.g.player.activeFace, -1); assert.ok(to.g.player.roll < 0);
+  assert.deepEqual(json({ ball: to.g.ball, stats: to.g.stats }), physical);
+});
+
 test('contact event IDs do not change during throttled energy publications; both fixed cells use actual vectors', () => {
   const f = fixture(), g = f.g; swing(f);
   const near = json(g.getMatchSnapshot().contacts[0]);
@@ -354,6 +388,23 @@ test('contact event IDs do not change during throttled energy publications; both
   for (let i = 1; i < f.events.length; i++) assert.ok(f.events[i].seq > f.events[i - 1].seq);
   g.setPaused(true); assert.equal(f.events.at(-1).paused, true);
   g.setPaused(false); g.prepServe(); assert.deepEqual(json(g.getMatchSnapshot().contacts), [null, null]);
+});
+
+test('AI contact telemetry retains the real incoming vectors when watchdog consumes its pre-hit snapshot', () => {
+  const { g } = fixture();
+  const incoming = V3.new(0, -.3, -8), outgoing = V3.new(.5, 1, 4);
+  g._preHit = { v: V3.clone(incoming), w: V3.new(-120, 0, 0), by: -1 };
+  g.watchdogStroke = function () { this._preHit = null; };
+  V3.copy(g.ball.v, outgoing); V3.set(g.ball.w, 30, -40, 0);
+  g.applyHit(-1, { stroke: STROKES.PUSH, arch: lib.ARCH.PUSH, power: .2,
+    normal: V3.new(0, 0, 1), vR: V3.new(0, .4, 1) }, V3.clone(g.ball.p), .83, { impactSpeed: 8 });
+  const telemetry = g.ai.telemetry();
+  close(g.ai.stats.sumSpeed / telemetry.shots, V3.len(incoming)); close(g.ai.stats.sumOut / g.ai.stats.outN, V3.len(outgoing));
+  close(g.ai.stats.sumRatio / g.ai.stats.ratioN, V3.len(outgoing) / V3.len(incoming));
+  assert.equal(telemetry.avgOut, +V3.len(outgoing).toFixed(2));
+  assert.equal(telemetry.ratio, +(V3.len(outgoing) / V3.len(incoming)).toFixed(2));
+  assert.ok(telemetry.ratio < .6, 'incoming speed is not accidentally replaced by the outgoing speed');
+  assert.equal(telemetry.shots, 1);
 });
 
 test('AI executed whiff debits once before reach, but ready planning and repeated searches do not debit', () => {

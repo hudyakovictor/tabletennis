@@ -46,6 +46,55 @@ test('repeated rendering cannot rotate the input pose or change rubber sides', (
   }
 });
 
+test('imported rackets use their own materials and align the active playing face without mutating the pose', () => {
+  const { rig, R, S, Q, V3, M4, calls } = rigFixture();
+  S.rackets = {
+    'r-standard': { faceOffset: .0043, singleFace: false, parts: [{ mesh: 'atlas-paddle', mat: { tex: 'exact-atlas' } }] },
+    'r-pan': { faceOffset: .010, singleFace: true, parts: [{ mesh: 'pan-back', mat: { metal: .9 } }, { mesh: 'pierced-handle', mat: { metal: .9 } }] },
+  };
+  for (const racket of ['r-standard', 'r-pan']) for (const face of [-1, 1]) for (const shadowPass of [false, true]) {
+    calls.length = 0;
+    const o = { pos: V3.new(.2, 1, 1.5), q: Q.fromEuler(Q.new(), .25, -.4, .1),
+      racket, activeFace: face, shadowPass, mats: { wood: 'obsolete-tint' } };
+    const before = JSON.stringify(o);
+    rig.draw(R, S, o);
+    assert.equal(JSON.stringify(o), before);
+    assert.deepEqual(calls.map(c => c.mesh), racket === 'r-standard' ? ['atlas-paddle'] : ['pan-back', 'pierced-handle']);
+    assert.equal(calls.every(c => !!c.shadow === shadowPass), true);
+    if (!shadowPass) assert.deepEqual(calls[0].mat, S.rackets[racket].parts[0].mat);
+    const model = S.rackets[racket];
+    const point = M4.transformPoint(V3.new(), calls[0].matrix, V3.new(0, 0, model.faceOffset * (model.singleFace ? 1 : face)));
+    const pose = M4.compose(M4.create(), o.pos, o.q, V3.new(1, 1, 1));
+    const expected = M4.transformPoint(V3.new(), pose, V3.new(0, 0, face * .010));
+    assert.ok(V3.dist(point, expected) < 1e-6);
+  }
+  calls.length = 0;
+  rig.draw(R, S, { pos: V3.new(), normal: V3.new(0, 0, 1), racket: 'unknown' });
+  assert.equal(calls[0].mesh, 'atlas-paddle');
+});
+
+test('normal-only imported poses keep the selected racket face and pan outside bottom on the physical contact plane', () => {
+  const { rig, R, S, V3, M4, calls } = rigFixture();
+  S.rackets = {
+    'r-standard': { faceOffset: .0043, singleFace: false, parts: [{ mesh: 'atlas-paddle', mat: {} }] },
+    'r-pan': { faceOffset: .010, singleFace: true, parts: [{ mesh: 'pan-bottom', mat: {} }] },
+  };
+  for (const racket of ['r-standard', 'r-pan']) for (const face of [-1, 1])
+    for (const hand of ['left', 'right']) for (const shadowPass of [false, true]) {
+      calls.length = 0;
+      const normal = V3.norm(V3.new(), V3.new(.05, 1, -.16));
+      const o = { pos: V3.new(.2, 1, 1.5), normal, racket, activeFace: face, hand, shadowPass };
+      const before = JSON.stringify(o), model = S.rackets[racket];
+      rig.draw(R, S, o);
+      const modelFace = model.singleFace ? 1 : face;
+      const point = M4.transformPoint(V3.new(), calls[0].matrix, V3.new(0, 0, modelFace * model.faceOffset));
+      const expected = V3.addScaled(V3.new(), o.pos, normal, .010);
+      assert.ok(V3.dist(point, expected) < 1e-6, `${racket}/${face}/${hand}/${shadowPass}`);
+      assert.ok(V3.dist(M4.transformDir(V3.new(), calls[0].matrix, V3.new(0, 0, modelFace)), normal) < 1e-6);
+      assert.equal(JSON.stringify(o), before, 'render and shadows do not mutate the physical pose');
+    }
+});
+
 test('grip roll is bounded and never alters the face normal for either hand', () => {
   const { rig, Q, V3, M4 } = rigFixture();
   for (const hand of ['left', 'right']) {

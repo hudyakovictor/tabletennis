@@ -4,13 +4,16 @@ const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
 const stateSource = fs.readFileSync(path.join(__dirname, '../src/core/state.js'), 'utf8');
+const plain = value => JSON.parse(JSON.stringify(value));
 
 function loadState(raw, options = {}) {
   const entries = new Map([['ttu-v2', JSON.stringify(raw)], ['ttu-miss-shots', '[{"id":1,"img":"T0xE"}]']]);
+  if (Object.hasOwn(options, 'primary')) entries.set('ttu-v2', options.primary);
+  if (Object.hasOwn(options, 'backup')) entries.set('ttu-v2.bak', options.backup);
   if (options.engine) entries.set('topspin.arena.save.v1', JSON.stringify(options.engine));
   const localStorage = { getItem: k => entries.get(k) ?? null, setItem: (k, v) => entries.set(k, v), removeItem: k => entries.delete(k) };
   const context = vm.createContext({ localStorage, structuredClone, setTimeout, clearTimeout, window: options.window });
-  vm.runInContext(stateSource + '\n;globalThis.api = { S, SAVE_VERSION, DEFAULT_STATE, repairAudioLevels, repairCalibrationPreferences, effectiveReducedMotion };', context);
+  vm.runInContext(stateSource + '\n;globalThis.api = { S, SAVE_VERSION, DEFAULT_STATE, repairAudioLevels, repairCalibrationPreferences, effectiveReducedMotion, saveNow };', context);
   return { ...context.api, entries };
 }
 
@@ -66,6 +69,97 @@ test('fresh settings use the approved preset, with no duplicated calibration def
   assert.equal(S.sfx, true); assert.equal(S.vibro, true); assert.equal(S.hint, true); assert.equal(S.rm, false); assert.equal(S.missShots, false);
   assert.deepEqual(JSON.parse(JSON.stringify(S.audioLevels)), { master: .8, effects: .9, music: .25, ambient: .2 });
   assert.deepEqual(Object.keys(S.cal), []);
+  assert.deepEqual(plain(S.owned), ['r-standard']);
+  assert.deepEqual(plain(S.equipped), { racket: 'r-standard' });
+});
+
+test('v9 equipment migration retires only known goods and preserves all unrelated earned state', () => {
+  const retired = ['r-coral', 'r-void', 'r-teal', 'b-ink', 't-gold', 't-coral', 'tb-neon', 'f-season', 'season-bundle'];
+  const raw = { v: 9, owned: [...retired, 'r-pan', 'r-unreleased', 't-event'],
+    equipped: { racket: 'r-pan', rubber: 'r-coral', blade: 'b-ink', trail: 't-gold', table: 'tb-neon' },
+    coins: 713, gems: 900, rating: 1420, wins: 11, losses: 5, streak: 3, bestRally: 17, form: [1, 0, 1],
+    level: 4, xp: 251, hist: [{ t: 10, r: 1400 }], diff: 3, cal: { camZoom: 75 },
+    passSeason: 5, passLvl: 7, passXp: 60, premium: true, claimed: { f: [1, 2], p: [3] },
+    rewardReceipts: ['item:r-coral', 'purchase:old-charge', 'bundle:4', 'pass:5:p:3'],
+    chests: [{ id: 'earned', kind: 'gold', state: 'ready' }, null], tutorialDone: true, tutorialRewarded: true,
+    training: { version: 1, lastLesson: 'TOPSPIN', lessons: { TOPSPIN: { mastered: true, practiced: true, attempts: 7, correct: 6 } } },
+    earnedBadge: { id: 'tournament-winner' } };
+  const { S, SAVE_VERSION, entries } = loadState(raw);
+  assert.equal(SAVE_VERSION, 10); assert.equal(S.v, SAVE_VERSION);
+  assert.deepEqual(plain(S.owned), ['r-standard', 'r-pan', 'r-unreleased', 't-event']);
+  assert.deepEqual(plain(S.equipped), { racket: 'r-pan' });
+  for (const key of Object.keys(raw).filter(key => !['v', 'owned', 'equipped'].includes(key))) assert.deepEqual(plain(S[key]), raw[key], key);
+  assert.deepEqual(JSON.parse(entries.get('ttu-v2.bak')), raw);
+  assert.deepEqual(JSON.parse(entries.get('ttu-v2')), raw, 'load must not overwrite the original save');
+});
+
+test('legacy and current saves safely repair corrupt ownership containers before choosing equipment', () => {
+  for (const v of [5, 9, 10]) for (const owned of [null, {}, 'r-pan', 42, false, []]) {
+    const { S } = loadState({ v, owned, equipped: { racket: 'r-pan', trail: 't-gold', table: 'tb-neon' },
+      coins: 777, gems: 19, passLvl: 7, premium: true, claimed: { f: [1], p: [3] }, rewardReceipts: ['pass:4:p:3'] });
+    assert.deepEqual(plain(S.owned), ['r-standard'], `${v}: ${JSON.stringify(owned)}`);
+    assert.deepEqual(plain(S.equipped), { racket: 'r-standard' });
+    assert.equal(S.coins, 777); assert.equal(S.gems, 19); assert.equal(S.passLvl, 7); assert.equal(S.premium, true);
+    assert.deepEqual(plain(S.claimed), { f: [1], p: [3] }); assert.deepEqual(plain(S.rewardReceipts), ['pass:4:p:3']);
+  }
+  const { S } = loadState({ v: 10, owned: [null, 'r-pan', 'r-standard', 'r-standard', 7, {}, '', ' ', 't-event', 't-event'], equipped: ['r-pan'] });
+  assert.deepEqual(plain(S.owned), ['r-pan', 'r-standard', 't-event']);
+  assert.deepEqual(plain(S.equipped), { racket: 'r-standard' });
+});
+
+test('pan selection requires ownership and a valid explicit racket choice, on migration and reload', () => {
+  for (const v of [9, 10]) for (const row of [
+    { owned: [], equipped: { racket: 'r-pan' }, expected: 'r-standard' },
+    { owned: ['r-unreleased'], equipped: { racket: 'r-pan' }, expected: 'r-standard' },
+    { owned: ['r-pan'], equipped: { racket: 'r-pan', rubber: 'r-coral', blade: 'b-ink', trail: 't-gold', table: 'tb-neon' }, expected: 'r-pan' },
+    { owned: ['r-pan'], equipped: { racket: 'r-standard' }, expected: 'r-standard' },
+    { owned: ['r-pan'], equipped: { racket: 'unknown' }, expected: 'r-standard' },
+    ...[null, [], 'r-pan', true, 1].map(equipped => ({ owned: ['r-pan'], equipped, expected: 'r-standard' }))
+  ]) {
+    const { S } = loadState({ v, owned: row.owned, equipped: row.equipped });
+    assert.equal(S.owned.filter(id => id === 'r-standard').length, 1);
+    assert.equal(S.owned.includes('r-pan'), row.owned.includes('r-pan'));
+    assert.deepEqual(plain(S.equipped), { racket: row.expected });
+  }
+});
+
+test('current-version cleanup and repeated persisted reloads are idempotent and keep the original backup', () => {
+  const raw = { v: 10, owned: ['t-event', 'r-standard', 'r-standard', 'r-coral', 'r-pan', 't-event', 'tb-neon'],
+    equipped: { racket: 'r-pan', trail: 't-gold', table: 'tb-neon' }, rewardReceipts: ['purchase:charge', 'bundle:4'],
+    claimed: { f: [2], p: [3] }, coins: 731, gems: 99 };
+  const backup = JSON.stringify({ v: 9, owned: ['r-coral'], gems: 99 });
+  let f = loadState(raw, { backup });
+  assert.deepEqual(plain(f.S.owned), ['t-event', 'r-standard', 'r-pan']);
+  assert.deepEqual(plain(f.S.equipped), { racket: 'r-pan' });
+  const normalized = plain(f.S);
+  for (let i = 0; i < 3; i++) {
+    assert.equal(f.saveNow(), true);
+    assert.deepEqual(JSON.parse(f.entries.get('ttu-v2')), normalized);
+    assert.equal(f.entries.get('ttu-v2.bak'), backup);
+    f = loadState(JSON.parse(f.entries.get('ttu-v2')), { backup });
+    assert.deepEqual(plain(f.S), normalized);
+  }
+});
+
+test('corrupt primary containers recover real ownership from backup rather than granting a new pan', () => {
+  const backup = { v: 9, owned: ['r-coral', 'r-pan', 't-event'], equipped: { racket: 'r-pan', table: 'tb-neon' }, coins: 812, gems: 36 };
+  for (const primary of ['{broken', 'null', '[]', '42', '"not-state"']) {
+    const { S, entries } = loadState(null, { primary, backup: JSON.stringify(backup) });
+    assert.deepEqual(plain(S.owned), ['r-standard', 'r-pan', 't-event']);
+    assert.deepEqual(plain(S.equipped), { racket: 'r-pan' });
+    assert.equal(S.coins, 812); assert.equal(S.gems, 36);
+    assert.deepEqual(JSON.parse(entries.get('ttu-v2.bak')), backup);
+  }
+});
+
+test('newer save schemas retain their version and foreign data while retired equipment is removed', () => {
+  const raw = { v: 11, owned: ['r-pan', 't-event', 't-gold'], equipped: { racket: 'r-pan', table: 'tb-neon' },
+    coins: 777, claimsV11: { event: 'earned' } };
+  const { S, entries } = loadState(raw);
+  assert.equal(S.v, 11); assert.deepEqual(plain(S.claimsV11), raw.claimsV11); assert.equal(S.coins, 777);
+  assert.deepEqual(plain(S.owned), ['r-standard', 'r-pan', 't-event']);
+  assert.deepEqual(plain(S.equipped), { racket: 'r-pan' });
+  assert.equal(entries.has('ttu-v2.bak'), false);
 });
 
 test('v8 settings migration retains explicit mute/zero/fractions, gallery, progress and inventory', () => {
@@ -75,7 +169,9 @@ test('v8 settings migration retains explicit mute/zero/fractions, gallery, progr
     training: { version: 1, lessons: { TOPSPIN: { mastered: true, practiced: true, attempts: 7, correct: 6 } }, lastLesson: 'TOPSPIN' },
     claimed: { f: [1, 2], p: [1] }, tutorialDone: true, tutorialRewarded: true, premium: true };
   const { S, entries } = loadState(raw);
-  for (const key of Object.keys(raw).filter(key => key !== 'v')) assert.deepEqual(JSON.parse(JSON.stringify(S[key])), raw[key], key);
+  for (const key of Object.keys(raw).filter(key => !['v', 'owned', 'equipped'].includes(key))) assert.deepEqual(JSON.parse(JSON.stringify(S[key])), raw[key], key);
+  assert.deepEqual(plain(S.owned), ['r-standard', 'r-real']);
+  assert.deepEqual(plain(S.equipped), { racket: 'r-standard' });
   assert.equal(S.audioLevels.master, 0); assert.equal(S.audioLevels.effects, .9);
   assert.deepEqual(JSON.parse(entries.get('ttu-v2.bak')), raw);
   assert.equal(JSON.parse(entries.get('ttu-miss-shots'))[0].img, 'T0xE');

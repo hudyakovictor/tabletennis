@@ -5,6 +5,8 @@
 'use strict';
 
 const STROKE_CONFIG = {
+  // Source-only playfeel tuning; the measured drag/lift fit remains the reference.
+  flight: { magnusGain: 2.0 },
   archetypes: {
     LOOP: { elev: 58, contact: 63, speed: 1.00, lat: 0.50, back: false },
     COUNTER: { elev: 46, contact: 56, speed: 1.06, lat: 0.50, back: false },
@@ -36,7 +38,7 @@ const STROKE_CONFIG = {
     overTableMargin: 0.02, touchDistMax: 0.050, touchSpeedMax: 0.45,
     blockIncomingSpeed: 7, blockIncomingTop: 220, dropHeightMax: 0.34,
     arcSensRange: [0.6, 1.8], arcCurlThreshold: 0.55, arcDistMin: 0.028,
-    arcBendMin: 1.15, arcStraightnessMax: 0.74, arcStrongCurlThreshold: 0.90,
+    arcBendMin: 1.035, arcTurnCoherenceMin: 0.82, arcStraightnessMax: 0.74, arcStrongCurlThreshold: 0.90,
     smashHeightMin: 0.14, smashSpeedMin: 0.52, smashUMax: 0.52,
     backUMin: -0.28, chopDepthMargin: 0.40, chopDistMin: 0.20,
     dropSpeedMax: 0.22, dropTableHeightMax: 0.35,

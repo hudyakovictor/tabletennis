@@ -21,6 +21,8 @@ class SwipeTracker {
     this.originT = 0;
     this.evictedPathLen = 0;
     this.evictedCurl = 0; this.evictedSegment = null;
+    this.evictedShapePathLen = 0; this.evictedAbsTurn = 0;
+    this.shapeScaleX = 1; this.shapeScaleY = 1;
     this.m = this.blankMetrics();
     this.lastReleased = null;
     /* Which gesture has already been a real swipe (see
@@ -33,12 +35,12 @@ class SwipeTracker {
     return {
       sx: 0, sy: 0, x: 0, y: 0, dx: 0, dy: 0,
       dist: 0, pathLen: 0, straightness: 1,
-      speed: 0, peakSpeed: 0, releaseSpeed: 0, accel: 0,
+      speed: 0, peakSpeed: 0, gesturePeakSpeed: 0, releaseSpeed: 0, accel: 0,
       angle: 0, angleDeg: 0, up: 0, right: 0,
-      curl: 0, dur: 0, samples: 0, jerk: 0, smooth: 1,
+      curl: 0, bend: 1, turnCoherence: 1, dur: 0, samples: 0, jerk: 0, smooth: 1,
     };
   }
-  down(x, y, t, simTime) {
+  down(x, y, t, simTime, viewport) {
     this.gestureId++;
     this.realGestureId = -1; this.realAt = 0; this.realAtSim = null;
     this.consumedGestureId = -1; this.consumedAt = -Infinity;
@@ -47,6 +49,12 @@ class SwipeTracker {
     this.originX = x; this.originY = y; this.originT = t;
     this.evictedPathLen = 0;
     this.evictedCurl = 0; this.evictedSegment = null;
+    this.evictedShapePathLen = 0; this.evictedAbsTurn = 0;
+    // Shape uses a common CSS-pixel scale; velocity/power keep their calibrated axes.
+    const width = viewport && viewport.width, height = viewport && viewport.height;
+    const common = width > 0 && height > 0 ? Math.max(width, height) : 1;
+    this.shapeScaleX = width > 0 && height > 0 ? width / common : 1;
+    this.shapeScaleY = width > 0 && height > 0 ? height / common : 1;
     // Gesture speed uses real time, but its opportunity to meet the ball
     // must age in the same (possibly slowed) time as the ball's physics.
     this.startSimTime = Number.isFinite(simTime) ? simTime : null;
@@ -60,9 +68,11 @@ class SwipeTracker {
   }
   move(x, y, t, simTime) {
     if (!this.active) return;
-    if (Number.isFinite(simTime)) this.sampleSimTime = simTime;
     const s = this.samples, last = s[s.length - 1];
-    if (last && t < last.t) t = last.t;
+    // Old coalesced/hover samples cannot rewrite a newer stroke point or
+    // become a zero-time, maximal-force movement at the start of a press.
+    if (!Number.isFinite(t) || last && t < last.t) return;
+    if (Number.isFinite(simTime)) this.sampleSimTime = simTime;
     if (last && t - last.t < 0.0025) {
       // Several pointer events can arrive between animation frames. Never
       // overwrite the starting point: doing so erased fast drags completely.
@@ -84,6 +94,7 @@ class SwipeTracker {
     this.startSimTime = null; this.sampleSimTime = null; this.releaseSimTime = null;
     this.evictedPathLen = 0;
     this.evictedCurl = 0; this.evictedSegment = null;
+    this.evictedShapePathLen = 0; this.evictedAbsTurn = 0;
     this.samples.length = 0;
     this.lastReleased = null;
     this.m = this.blankMetrics();
@@ -91,10 +102,15 @@ class SwipeTracker {
   trimSamples() {
     while (this.samples.length > this.maxSamples) {
       const old = this.samples.shift(), first = this.samples[0];
-      const x = first.x - old.x, y = first.y - old.y, distance = Math.hypot(x, y);
-      this.evictedPathLen += distance;
+      const dx = first.x - old.x, dy = first.y - old.y;
+      this.evictedPathLen += Math.hypot(dx, dy);
+      const x = dx * this.shapeScaleX, y = dy * this.shapeScaleY, distance = Math.hypot(x, y);
+      this.evictedShapePathLen += distance;
       const prev = this.evictedSegment;
-      if (prev && distance > 1e-5) this.evictedCurl += Math.atan2(prev.x * y - prev.y * x, prev.x * x + prev.y * y);
+      if (prev && distance > 1e-5) {
+        const turn = Math.atan2(prev.x * y - prev.y * x, prev.x * x + prev.y * y);
+        this.evictedCurl += turn; this.evictedAbsTurn += Math.abs(turn);
+      }
       this.evictedSegment = { x, y };
     }
   }
@@ -132,29 +148,40 @@ class SwipeTracker {
 
     // path length + curl (signed turning, + = counter-clockwise on screen)
     let pl = this.evictedPathLen || 0, curl = this.evictedCurl || 0, jerkAcc = 0, prevSpeed = 0, speedChanges = 0;
+    let shapePath = this.evictedShapePathLen || 0, absTurn = this.evictedAbsTurn || 0;
     let activePeak = 0;
     const peakCut = b.t - 0.28;
     for (let i = 1; i < n; i++) {
       const px = s[i].x - s[i - 1].x, py = s[i].y - s[i - 1].y;
       const seg = Math.hypot(px, py);
       pl += seg;
+      const shapeX = px * this.shapeScaleX, shapeY = py * this.shapeScaleY;
+      const shapeSegment = Math.hypot(shapeX, shapeY);
+      shapePath += shapeSegment;
       const dt = Math.max(0.0025, s[i].t - s[i - 1].t);
       const sp = seg / dt;
-      if (s[i].t >= peakCut || n <= 8) {
+      // Recognition survives pauses and sample eviction; effort uses only the fresh peak.
+      m.gesturePeakSpeed = Math.max(m.gesturePeakSpeed, sp);
+      if (s[i].t >= peakCut) {
         if (sp > activePeak) activePeak = sp;
       }
       if (i > 1) { jerkAcc += Math.abs(sp - prevSpeed); speedChanges++; }
       prevSpeed = sp;
       if (i > 1 || this.evictedSegment) {
-        const qx = i > 1 ? s[i - 1].x - s[i - 2].x : this.evictedSegment.x;
-        const qy = i > 1 ? s[i - 1].y - s[i - 2].y : this.evictedSegment.y;
-        const cr = qx * py - qy * px, dp = qx * px + qy * py;
-        if (seg > 1e-5) curl += Math.atan2(cr, dp);     // signed turn, radians
+        const qx = i > 1 ? (s[i - 1].x - s[i - 2].x) * this.shapeScaleX : this.evictedSegment.x;
+        const qy = i > 1 ? (s[i - 1].y - s[i - 2].y) * this.shapeScaleY : this.evictedSegment.y;
+        const cr = qx * shapeY - qy * shapeX, dp = qx * shapeX + qy * shapeY;
+        if (shapeSegment > 1e-5) {
+          const turn = Math.atan2(cr, dp);
+          curl += turn; absTurn += Math.abs(turn);
+        }
       }
     }
     m.pathLen = pl;
     m.straightness = pl > 1e-5 ? clamp(m.dist / pl, 0, 1) : 1;
     m.curl = clamp(curl, -3.2, 3.2);          // total signed turning [rad]
+    m.bend = shapePath / Math.max(1e-5, Math.hypot(m.dx * this.shapeScaleX, m.dy * this.shapeScaleY));
+    m.turnCoherence = absTurn > 1e-5 ? clamp(Math.abs(curl) / absTurn, 0, 1) : 1;
     m.jerk = speedChanges ? jerkAcc / speedChanges : 0;
 
     // velocity over the trailing 55 ms window (what the hand is doing *now*)
@@ -167,6 +194,7 @@ class SwipeTracker {
     m.speed = Math.hypot(vx, vy);
     m.releaseSpeed = m.speed;
     m.peakSpeed = Math.max(activePeak, m.speed);
+    m.gesturePeakSpeed = Math.max(m.gesturePeakSpeed, m.speed);
     // 25 ms acceleration (is the hand still accelerating into the ball?)
     let i1 = n - 1; while (i1 > 0 && b.t - s[i1].t < 0.025) i1--;
     const w1 = s[i1], wdt1 = Math.max(0.0025, b.t - w1.t);
@@ -332,7 +360,8 @@ function isRealStroke(m, serving) {
   if (!Number.isFinite(m.dist) || m.dist < min.dist) {
     if (!(m.pathLen >= limits.arc.path && Math.abs(m.curl || 0) >= limits.arc.curl)) return false;
   }
-  if (!Number.isFinite(m.peakSpeed) || m.peakSpeed < min.speed) return false;
+  const peak = m.gesturePeakSpeed ?? m.peakSpeed;
+  if (!Number.isFinite(peak) || peak < min.speed) return false;
   return true;
 }
 
@@ -341,6 +370,7 @@ function classifyBaseStroke(m, ctx, sp01) {
   const C = STROKE_CONFIG.classification;
   const r = m.right, u = m.up;
   const latMag = Math.abs(r);
+  const coherentTurn = !Number.isFinite(m.turnCoherence) || m.turnCoherence >= C.arcTurnCoherenceMin;
   const curly = Math.abs(m.curl) > C.serveCurlThreshold;
   const fast = sp01 > C.fastSpeedThreshold, veryFast = sp01 > C.veryFastSpeedThreshold, slow = sp01 < C.slowSpeedThreshold;
   /* Классификатор — чистый вопрос «какой это вид удара», он не должен
@@ -380,7 +410,7 @@ function classifyBaseStroke(m, ctx, sp01) {
    * Пороги масштабирует калибровка arcSens. */
   {
     const arcSens = clamp(Number.isFinite(ctx.arcSens) ? ctx.arcSens : 1, ...C.arcSensRange);
-    const bend = m.dist > 0.001 ? (m.pathLen || 0) / m.dist : 0;
+    const bend = Number.isFinite(m.bend) ? m.bend : m.dist > 0.001 ? (m.pathLen || 0) / m.dist : 0;
     /* Медленный сильный подъём — это свеча (LOB), даже если рука дрогнула
      * дугой: закрутка без темпа всё равно не полетит, а украденная свеча
      * ломает защиту. Быстрая дуга при любом направлении хорды — закрутка.
@@ -389,7 +419,7 @@ function classifyBaseStroke(m, ctx, sp01) {
     const lobLift = slow && u > C.liftUMin;
     const closedArc = m.dist < C.arcDistMin && (m.pathLen || 0) >= C.minGesture.arc.path &&
       Math.abs(m.curl) >= C.minGesture.arc.curl;
-    if (!lobLift && Math.abs(m.curl) >= C.arcCurlThreshold / arcSens && (m.dist >= C.arcDistMin || closedArc) &&
+    if (!lobLift && coherentTurn && Math.abs(m.curl) >= C.arcCurlThreshold / arcSens && (m.dist >= C.arcDistMin || closedArc) &&
       (closedArc || bend >= C.arcBendMin || (m.straightness <= C.arcStraightnessMax && Math.abs(m.curl) >= C.arcStrongCurlThreshold / arcSens))) {
       return m.curl < 0 ? STROKES.HOOK : STROKES.FADE;
     }
@@ -415,7 +445,7 @@ function classifyBaseStroke(m, ctx, sp01) {
     return STROKES.PUSH;
   }
   // a clearly curved sideways gesture = sidespin
-  if (latMag > C.sideLatThreshold && Math.abs(m.curl) > C.sideCurlThreshold) return (r > 0) ? STROKES.HOOK : STROKES.FADE;
+  if (coherentTurn && latMag > C.sideLatThreshold && Math.abs(m.curl) > C.sideCurlThreshold) return (r > 0) ? STROKES.HOOK : STROKES.FADE;
   // upward gestures = topspin family
   if (u > C.liftUMin) {
     if (slow && hAboveTable < C.lobHeightMax) {
@@ -744,7 +774,8 @@ function racketForStroke(strokeId, ctx, options = {}) {
 function resolveRacketLaunch(ball, racket, out = {}) {
   if (!ball || !racket || !saneV(ball.p) || !saneV(ball.v) || !saneV(ball.w) || !saneV(racket.vR) || !saneN(racket.normal)) return null;
   // Do not certify a locally clipped clone while the live caller holds another frame.
-  if (racket.effortBudget && V3.len(racket.vR) > racketEffortCap(racket) * (1 - (racket.arch?.absorb || 0)) + 1e-8) return null;
+  if ((racket.effortBudget || Number.isFinite(racket.vmagCap)) &&
+      V3.len(racket.vR) > racketEffortCap(racket) * (1 - (racket.arch?.absorb || 0)) + 1e-8) return null;
   out.p = V3.copy(out.p || V3.new(), launchPoint(ball.p, racket.normal));
   out.v = V3.copy(out.v || V3.new(), ball.v);
   out.w = V3.copy(out.w || V3.new(), ball.w);
@@ -829,13 +860,25 @@ function strokeBrushVelocity(racket, velocity, normal) {
     const signed = racket.verticalBrush || 0;
     velocity.y = neutralY + Math.abs(velocity.z - incoming.z) * signed * STROKE_CONFIG.serve.mixedBrushK;
   } else if (brush && Math.abs(normal.z) > 1e-6) {
-    // n x (ballV - racketV) has zero x torque for a horizontal brush.
-    // Match incoming vertical motion instead of manufacturing top/back brush.
-    // The face-tilt term (vz * ny/nz) is physical, but with the lateral face
-    // turn (latTurn) it used to reach -4.6 m/s on a pure horizontal swipe —
-    // the ball was driven straight into the player's own half, so "side-spin
-    // shot" was unplayable. Cap the manufactured vertical component at 1.5 m/s.
-    const neutralY = incoming.y + clamp((velocity.z - incoming.z) * normal.y / normal.z, -1.5, 1.5);
+    if (lateral && latAbs > 0) {
+      // Aiming rotates the bat into a different incoming vector. Retain the
+      // requested lateral brush in that face's tangent plane, not a spin edit
+      // after impact. The closing/brush ratio survives the effort cap and
+      // rebuilding the same frame, including an incoming topspin/backspin.
+      const horizontal = Math.hypot(normal.x, normal.z), fwd = -racket.side;
+      const nx = normal.x / horizontal, nz = normal.z / horizontal;
+      const tx = fwd * nz, tz = -fwd * nx;
+      const dx = velocity.x - incoming.x, dz = velocity.z - incoming.z;
+      const closing = dx * nx + dz * nz, across = dx * tx + dz * tz;
+      const minimum = Math.max(0, closing) * Math.tan(racket.contact * DEG) * cfg.lateralTurnK * lateralShare;
+      const requested = Math.sign(sw.right) * Math.max(Math.abs(across), minimum);
+      velocity.x = incoming.x + closing * nx + requested * tx;
+      velocity.z = incoming.z + closing * nz + requested * tz;
+    }
+    // Keep the vertical brush neutral relative to the incoming ball. Clipping
+    // this term created unintended topspin; the relative-velocity effort cap
+    // below preserves the neutral brush while the solver finds a lifted face.
+    const neutralY = incoming.y + (velocity.z - incoming.z) * normal.y / normal.z;
     velocity.y = lerp(velocity.y, neutralY, brush);
   }
   return capRacketVelocity(racket, velocity);
@@ -976,6 +1019,12 @@ function solveServeStroke(ballP, racket, evalStroke, side, assist) {
    * -128 rad/s, delivered -16). */
   const SPIN_W = solver.spinWeight;
   const spinWant = racket.spinWant || 0;
+  const verticalSign = racket.stroke.id === 'SERVE_BACK' ? side : -side;
+  let verticalWant = 0;
+  if (racket.stroke.id === 'SERVE_TOP' || racket.stroke.id === 'SERVE_BACK') {
+    evalStroke(0, 0, 1, 1, v, w);
+    verticalWant = Math.max(0, verticalSign * w.x);
+  }
   /* Hard ceiling on the work one serve may do. The search is a heuristic and
    * a pathological gesture (a 6-sample tap) used to walk every ladder, every
    * recovery sweep and then be solved a second time by the caller: measured
@@ -1049,7 +1098,9 @@ function solveServeStroke(ballP, racket, evalStroke, side, assist) {
       return costs.out + miss * costs.outMissK + d1 * costs.longOwnK + pc0;
     }
     legal = true; why = 'ok';
-    const spinCost = spinWant ? SPIN_W * Math.abs(w.z - spinWant) / STROKE_CONFIG.spin.cap : 0;
+    const spinCost = (spinWant ? SPIN_W * Math.abs(w.z - spinWant) / STROKE_CONFIG.spin.cap : 0) +
+      SPIN_W * Math.max(0, verticalWant - verticalSign * w.x) / STROKE_CONFIG.spin.cap *
+      (racket.playerControlled ? clamp(Math.abs(aim.z) / solver.minPastNet, 0, 1) : 1);
     /* A serve whose second bounce dies just behind the net is the single
      * least playable ball in the game: it is legal, unreachable at pace, and
      * the descent used to be happy to produce it because it happened to sit
@@ -1365,7 +1416,19 @@ function solveServeStroke(ballP, racket, evalStroke, side, assist) {
       }
       if (found) break;
     }
-    if (solvedLegal) { bE = eB; bA = aB; bS = sB; bD = dB; bAim = aim; bOwn = own; }
+    if (solvedLegal) {
+      // The first legal rescue is often a weak hard-hand poke. One bounded
+      // softness/pace neighborhood retains the requested physical spin/work
+      // without choosing an illegal serve or changing the family.
+      const seedScale = sB;
+      svBest = score(own, aim, eB, aB, sB, dB, true);
+      for (const mul of solver.scaleMultipliers) for (const dmp of DMP) {
+        const sc = Math.min(speedCap / Math.max(.5, racket.vmag), seedScale * mul);
+        const cost = score(own, aim, eB, aB, sc, dmp, true);
+        if (legal && cost < svBest) { svBest = cost; sB = sc; dB = dmp; }
+      }
+      bE = eB; bA = aB; bS = sB; bD = dB; bAim = aim; bOwn = own;
+    }
   }
 
   // A weaker player keeps part of their own error — but never to the point
@@ -1375,7 +1438,12 @@ function solveServeStroke(ballP, racket, evalStroke, side, assist) {
     // merely because a central serve happens to be legal.
     bV = score(bOwn, bAim, bE, bA, bS, bD, true);
     for (const step of [.10, .06, .03, .015]) {
-      for (const [de, da, ds] of [[0, step, 1], [0, -step, 1], [step, 0, 1], [-step, 0, 1], [0, 0, 1 + step], [0, 0, 1 - step]]) {
+      // Lift and pace are coupled by the stronger physical curve; checking
+      // only one axis can trap a cross-court short serve in a local optimum.
+      for (const [de, da, ds] of [[0, step, 1], [0, -step, 1], [step, 0, 1], [-step, 0, 1],
+        [0, 0, 1 + step], [0, 0, 1 - step], [step, 0, 1 + step], [step, 0, 1 - step],
+        [-step, 0, 1 + step], [-step, 0, 1 - step], [step, step, 1], [step, -step, 1],
+        [-step, step, 1], [-step, -step, 1]]) {
         const sc = Math.min(speedCap / Math.max(.5, racket.vmag), bS * ds);
         const cost = score(bOwn, bAim, bE + de, bA + da, sc, bD, true);
         if (cost < bV) { bV = cost; bE += de; bA += da; bS = sc; }
@@ -1470,7 +1538,7 @@ function resolvedRacketFrame(racket, normal, swing, extra) {
   const frame = { ...racket, ...extra };
   if (racket.effortBudget) frame.effortBudget = racket.effortBudget;
   const n = V3.norm(V3.new(), normal), v = V3.clone(swing);
-  if (frame.effortBudget) capRacketVelocity(frame, v);
+  if (frame.effortBudget || Number.isFinite(frame.vmagCap)) capRacketVelocity(frame, v);
   const fwd = -frame.side, speed = V3.len(v);
   const absorb = 1 - (frame.arch?.absorb || 0);
   return { ...frame, normal: n, vR: v,
@@ -1480,6 +1548,10 @@ function resolvedRacketFrame(racket, normal, swing, extra) {
 }
 
 function refineRacket(ballP, ballV, ballW, racket, assist, quality) {
+  // The solver's actual pre-impact vectors are authoritative, including callers
+  // that supplied only scalar ball speed when building the gesture prototype.
+  if (quality === undefined) quality = racket.quality;
+  racket = { ...racket, quality, incomingVelocity: V3.clone(ballV), incomingSpin: V3.clone(ballW) };
   if (racket.isServe || racket.stroke?.id === 'SIDE') racket = { ...racket, ballVelocity: V3.clone(ballV) };
   racket = enforceRacketEffort(racket);
   const intentionalOut = !!racket.playerControlled &&
@@ -1536,7 +1608,7 @@ function refineRacket(ballP, ballV, ballW, racket, assist, quality) {
   rawX = clamp(rawX, -2.2, 2.2); rawZ = clamp(rawZ, -3.2, 3.2);
 
   /* ---- 2. the assisted target is a blend of mistake and intent ---- */
-  const target = racket.playerControlled ? { ...racket.aim } : {
+  const target = racket.playerControlled || racket.aiControlled ? { ...racket.aim } : {
     x: lerp(rawX, racket.aim.x, assist),
     z: lerp(rawZ, racket.aim.z, assist),
   };
@@ -1559,8 +1631,9 @@ function refineRacket(ballP, ballV, ballW, racket, assist, quality) {
    * the log showed SIDE at 8.24 m/s against a 6.5 cap. */
   const strokeCap = racketEffortCap(racket);
   const scCeil = strokeCap / Math.max(0.5, racket.vmag);
-  // Soft hands still need the original recovery range after their seed is attenuated.
-  const softHeadroom = racket.arch.absorb && Number.isFinite(racket.effortBudget?.effortScale)
+  // Attenuated seeds still need the original search range within the same
+  // immutable effort cap. Otherwise a low-energy loop loses its reachable arm path.
+  const effortHeadroom = Number.isFinite(racket.effortBudget?.effortScale)
     ? 1 / Math.max(.1, racket.effortBudget.effortScale) : 1;
 
   /* ---- 3. converge the stroke rotation onto that target ----------- */
@@ -1594,7 +1667,7 @@ function refineRacket(ballP, ballV, ballW, racket, assist, quality) {
       // The assist polishes technique; it may NOT make you a different
       // athlete. Swing scale stays inside a believable human band and the
       // only other lever is how softly the hand holds the bat (damp).
-      const scLo = racket.arch.absorb ? 0.12 : 0.45, scHi = Math.min(1.50 * softHeadroom, scCeil);
+      const scLo = racket.arch.absorb ? 0.12 : 0.45, scHi = Math.min(1.50 * effortHeadroom, scCeil);
       if (sErr < 1) {
         const next = sc * Math.pow(sErr, 0.55);
         sc = clamp(next, scLo, scHi);
@@ -1621,7 +1694,7 @@ function refineRacket(ballP, ballV, ballW, racket, assist, quality) {
    * nothing between 0.1 and 1.0. The correction is a rotation of the
    * player's own stroke, so scaling it is physically meaningful — it is
    * the difference between a trained arm and an untrained one.         */
-  const polish = racket.playerControlled ? 1 : Math.pow(clamp(assist, 0, 1), 1.18);
+  const polish = racket.playerControlled || racket.aiControlled ? 1 : Math.pow(clamp(assist, 0, 1), 1.18);
   dE *= polish; dA *= polish;
   sc = 1 + (sc - 1) * polish;
   dmp = 1 + (dmp - 1) * polish;
@@ -1669,11 +1742,11 @@ function refineRacket(ballP, ballV, ballW, racket, assist, quality) {
     if (verdict < 0) {
       dE += step;
       if (Math.abs(latErr) > 0.16) dA = clamp(dA - Math.sign(latErr) * step * 0.85, -1.15, 1.15);
-      sc = clamp(sc * 1.05, 0.12, Math.min(2.20 * softHeadroom, scCeil)); dmp = Math.min(1, dmp * 1.05);
+      sc = clamp(sc * 1.05, 0.12, Math.min(2.20 * effortHeadroom, scCeil)); dmp = Math.min(1, dmp * 1.05);
     } else {
       dE -= step * 0.8;
       if (Math.abs(latErr) > 0.16) dA = clamp(dA - Math.sign(latErr) * step * 0.85, -1.15, 1.15);
-      dmp = Math.max(0.26, dmp * 0.94); sc = clamp(sc * 0.97, 0.10, Math.min(2.20 * softHeadroom, scCeil));
+      dmp = Math.max(0.26, dmp * 0.94); sc = clamp(sc * 0.97, 0.10, Math.min(2.20 * effortHeadroom, scCeil));
     }
     verdict = validate(dE, dA, sc, dmp, k > guard - 4);
   }
@@ -1687,10 +1760,10 @@ function refineRacket(ballP, ballV, ballW, racket, assist, quality) {
       dA = clamp(dA - Math.sign(crossing.x - target.x) * (.03 + j * .02), -1.15, 1.15);
     if (verdict < 0) {                      // net, or died on our own half
       dE += 0.03 + j * 0.02;
-      sc = clamp(sc * 1.04, 0.12, Math.min(2.20 * softHeadroom, scCeil));
+      sc = clamp(sc * 1.04, 0.12, Math.min(2.20 * effortHeadroom, scCeil));
     } else {                                // long
       dE -= 0.02 + j * 0.015;
-      sc = clamp(sc * 0.98, 0.10, Math.min(2.20 * softHeadroom, scCeil));
+      sc = clamp(sc * 0.98, 0.10, Math.min(2.20 * effortHeadroom, scCeil));
       dmp = Math.max(0.30, dmp * 0.96);
     }
     verdict = validate(dE, dA, sc, dmp, true);
@@ -1705,7 +1778,7 @@ function refineRacket(ballP, ballV, ballW, racket, assist, quality) {
   if (verdict !== 0 && assist >= .65 && envelope) {
     const candidates = [];
     const aimAz = clamp(Math.atan2(target.x - ballP.x, fwd * (target.z - ballP.z)) - racket.azFace, -1, 1);
-    const maxScale = Math.min(1.35 * softHeadroom, strokeCap / Math.max(STROKE_CONFIG.racket.vmin, racket.vmag));
+    const maxScale = strokeCap / Math.max(STROKE_CONFIG.racket.vmin, racket.vmag);
     for (const face of [envelope[1], (envelope[0] + envelope[1]) * .5, envelope[0]]) {
       // At a closed loop face the launch is non-monotone in arm elevation:
       // 50 degrees can die short while 65 grazes/separates. The intermediate
@@ -1733,7 +1806,7 @@ function refineRacket(ballP, ballV, ballW, racket, assist, quality) {
     }
   }
 
-  if (racket.playerControlled) {
+  if (racket.playerControlled || racket.aiControlled) {
     // A legal return is not necessarily the requested placement. Refine the
     // physical frame against the landing, not the first safe central ball.
     const placementCost = (e, a, scale, wrist) => {
@@ -1749,10 +1822,10 @@ function refineRacket(ballP, ballV, ballW, racket, assist, quality) {
       return error;
     };
     let cost = placementCost(dE, dA, sc, wristCorrection);
-    for (const step of [.16, .08, .04, .02]) {
+    for (const step of racket.aiControlled ? [.12, .06] : [.16, .08, .04, .02]) {
       for (const [de, da, ds, dw] of [[0, step, 1, 0], [0, -step, 1, 0], [step, 0, 1, 0], [-step, 0, 1, 0],
         [0, 0, 1 + step, 0], [0, 0, 1 - step, 0], [0, 0, 1, step], [0, 0, 1, -step]]) {
-        const scale = clamp(sc * ds, .10, Math.min(1.5 * softHeadroom, scCeil));
+        const scale = clamp(sc * ds, .10, Math.min(1.5 * effortHeadroom, scCeil));
         const next = placementCost(dE + de, dA + da, scale, wristCorrection + dw);
         if (next < cost) { cost = next; dE += de; dA += da; sc = scale; wristCorrection += dw; }
       }
@@ -1770,6 +1843,7 @@ function refineRacket(ballP, ballV, ballW, racket, assist, quality) {
   if (sc > scHard) sc = Math.max(0.10, scHard);
   const swing = V3.new(), normal = V3.new();
   strokeFrame(racket, dE, dA, sc, swing, normal, wristCorrection);
+  verdict = validate(dE, dA, sc, dmp, true);
   rubber.damp = materialDamp * dmp;
   return resolvedRacketFrame(racket, normal, swing, { rubber, dElev: dE, dAz: dA, dWrist: wristCorrection, scale: sc, damp: dmp, solved: sol, target, valid: verdict === 0 && !intentionalOut });
 }

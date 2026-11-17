@@ -1,4 +1,4 @@
-const { test, before, after } = require('node:test');
+const { test, after } = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
@@ -10,10 +10,10 @@ const strokes = vm.runInNewContext('(' + swipe.match(/const STROKES = (\{[\s\S]*
 const catalog = Object.values(strokes).map(({ id, col }) => ({ id, col }));
 const captureDir = process.env.HUD_CAPTURE_DIR;
 let browser;
-before(async () => { browser = await launchBrowser(); });
 after(async () => { if (browser) await browser.close(); });
 
 async function setup(t, { width = 390, height = 844, reducedMotion = true } = {}) {
+  browser ||= await launchBrowser();
   const fixture = await pageFixture(t, browser, [], { width, height, matchHUD: true });
   await fixture.page.evaluate(({ catalog, reducedMotion }) => {
     document.body.classList.remove('rm'); document.body.classList.add('in-game'); I18n.lang = 'ru';
@@ -25,7 +25,7 @@ async function setup(t, { width = 390, height = 844, reducedMotion = true } = {}
     const slot = document.createElement('div'); slot.className = 'match-hud-slot'; mx.append(slot);
     const actions = document.createElement('div'); actions.className = 'match-actions pe'; mx.append(actions);
     fixture.actionClicks = 0; fixture.input = [];
-    for (const [label, className] of [['Pause', 'ib m-pause'], ['Notices', 'notice-button'], ['Slow-Mo', 'ib m-slowmo']]) {
+    for (const [label, className] of [['Notices', 'notice-button'], ['Slow-Mo', 'ib m-slowmo'], ['Pause', 'ib m-pause']]) {
       const button = document.createElement('button'); button.type = 'button'; button.className = className;
       button.setAttribute('aria-label', label); button.textContent = label[0];
       button.addEventListener('click', () => fixture.actionClicks++); actions.append(button);
@@ -63,7 +63,10 @@ async function setup(t, { width = 390, height = 844, reducedMotion = true } = {}
     fixture.energy = (energy, capacity = 70) => fixture.send({ players: [{ side: 1, energy, capacity, fatigue: 100 - capacity, limited: true }, fixture.latest.players[1]] });
     fixture.finish = () => fixture.hud.element.getAnimations({ subtree: true }).forEach(a => a.finish());
   }, { catalog, reducedMotion });
-  await fixture.page.evaluate(() => document.fonts.ready);
+  await fixture.page.evaluate(async () => {
+    await Promise.all(['900 28px Unb', '800 11px Man'].map(font => document.fonts.load(font)));
+    await document.fonts.ready;
+  });
   return fixture;
 }
 
@@ -133,7 +136,7 @@ test('both confirmed contacts use the external palette, literal safe text and re
   const rgb = (hex) => 'rgb(' + hex.slice(1).match(/../g).map(s => parseInt(s, 16)).join(', ') + ')';
   assert.match(result.names[0], /^<img/); assert.equal(result.injected, false); assert.equal(result.hasQuality, false);
   assert.equal(result.active, '-1'); assert.deepEqual(result.score, ['7', '7']);
-  assert.equal(result.target, '\u0414\u043e 21'); assert.equal(result.rally, '\u041e\u0431\u043c\u0435\u043d 9');
+  assert.equal(result.target, '\u0414\u043e 21'); assert.equal(result.rally, '\u00d79');
   for (const [i, id] of ['DRIVE', 'CHOP'].entries()) {
     assert.equal(result.contacts[i].icon, id); assert.equal(result.contacts[i].color, rgb(strokes[id].col));
     assert.equal(result.contacts[i].iconColor, rgb(strokes[id].col));
@@ -206,17 +209,18 @@ test('stale/equal snapshots ignore data but still refresh names, palette, locale
   assert.equal(result.meter, '44 of 100; available maximum 70'); assert.deepEqual(errors, []);
 });
 
-test('result uses only the lower strip and persists until serve; old contacts never resurrect across rally/match/recovery', async (t) => {
+test('point status stays in compact meta without replacing last contacts; old records never resurrect across rally/match/recovery', async (t) => {
   const { page, errors } = await setup(t, { reducedMotion: false });
   const result = await page.evaluate(() => {
     fixture.hit(1, 2, 'DRIVE'); fixture.hit(-1, 3, 'BLOCK'); fixture.energy(48);
-    const el = fixture.hud.element, head = el.querySelector('.match-hud-head'), meter = el.querySelector('[role=meter]');
+    const el = fixture.hud.element, head = el.querySelector('.match-hud-head'), meter = el.querySelector('[role=meter]'), height = el.getBoundingClientRect().height;
     fixture.send({ phase: 'POINT', score: [1, 0], result: { id: 4, who: 1, reason: 'NET <img src=x>', winner: 0 }, event: { id: 4, type: 'point', side: 1 } });
     const resultAnimation = fixture.animations.findLast(r => r.node.classList.contains('match-hud-result'));
     fixture.energy(49); I18n.lang = 'en'; fixture.hud.update(fixture.latest);
-    const point = { shown: !el.querySelector('.match-hud-result').hidden, inside: !!el.querySelector('.match-hud-lower > .match-hud-result'),
+    const point = { shown: !el.querySelector('.match-hud-result').hidden, inside: !!head.querySelector('.match-hud-meta > .match-hud-result'),
       reason: el.querySelector('.match-hud-result-reason').textContent, unsafe: !!el.querySelector('img'),
-      icon: el.querySelector('.match-hud-result-icon svg').dataset.icon, energy: meter.getAttribute('aria-valuenow') };
+      title: el.querySelector('.match-hud-result').title, energy: meter.getAttribute('aria-valuenow'),
+      contacts: [...el.querySelectorAll('.match-hud-contact')].map(c => c.dataset.eventId), sameHeight: el.getBoundingClientRect().height === height };
     fixture.send({ phase: 'SERVE_READY', event: { id: 5, type: 'serve', side: -1 }, server: -1 });
     const cleared = { result: el.querySelector('.match-hud-result').hidden, contacts: [...el.querySelectorAll('.match-hud-contact')].map(c => c.dataset.eventId),
       score: el.querySelector('.match-hud-score').textContent, energy: meter.getAttribute('aria-valuenow'), canceled: resultAnimation.cancelled > 0 };
@@ -232,7 +236,7 @@ test('result uses only the lower strip and persists until serve; old contacts ne
     return { point, cleared, noResurrection, rally, recovery, match: el.dataset.matchId,
       finalScore: el.querySelector('.match-hud-score').textContent, finalContacts: [...el.querySelectorAll('.match-hud-contact')].map(c => c.dataset.eventId) };
   });
-  assert.deepEqual(result.point, { shown: true, inside: true, reason: 'en: NET <img src=x>', unsafe: false, icon: 'net', energy: '49' });
+  assert.deepEqual(result.point, { shown: true, inside: true, reason: 'Net', unsafe: false, title: 'en: NET <img src=x>', energy: '49', contacts: ['2', '3'], sameHeight: true });
   assert.deepEqual(result.cleared, { result: true, contacts: ['', ''], score: '1', energy: '49', canceled: true });
   assert.equal(result.noResurrection, true); assert.deepEqual(result.rally, ['', '7']);
   assert.deepEqual(result.recovery, { energy: '49', same: true }); assert.equal(result.match, 'match-b');
@@ -280,7 +284,7 @@ test('a restored serve tombstones cached hit, miss and result IDs before the nex
   assert.deepEqual(result.old, { contact: '', missed: false, result: false }); assert.equal(result.newContact, 'Block'); assert.deepEqual(errors, []);
 });
 
-test('rapid successive points replace one score/result animation; a new serve cancels the lower result immediately', async (t) => {
+test('rapid successive points replace one score/status animation; a new serve cancels the compact status immediately', async (t) => {
   const { page, errors } = await setup(t, { reducedMotion: false });
   const result = await page.evaluate(() => {
     fixture.finish(); fixture.hit(1, 2, 'LOOP');
@@ -296,7 +300,7 @@ test('rapid successive points replace one score/result animation; a new serve ca
     return { point, resultHidden: el.querySelector('.match-hud-result').hidden, canceled: second.animation.playState === 'idle',
       score: el.querySelector('.match-hud-score').textContent, contacts: el.querySelectorAll('.match-hud-contact').length };
   });
-  assert.deepEqual(result.point, { score: '2', reason: 'ru: NET', oldIdle: true, activeResults: 1 });
+  assert.deepEqual(result.point, { score: '2', reason: '\u0421\u0435\u0442\u043a\u0430', oldIdle: true, activeResults: 1 });
   assert.equal(result.resultHidden, true); assert.equal(result.canceled, true); assert.equal(result.score, '2'); assert.equal(result.contacts, 2); assert.deepEqual(errors, []);
 });
 
@@ -316,7 +320,7 @@ test('whiffs do not change the confirmed technique or rally; no tick or hit is a
     fixture.send({ paused: true });
     return { firstSpeech, miss, cleared, paused: el.querySelector('.match-hud-marker-text').textContent, afterPause: live.textContent };
   });
-  assert.deepEqual(result.miss, { marker: true, stroke: 'Push', event: '2', rally: 'Rally 4', speech: result.firstSpeech });
+  assert.deepEqual(result.miss, { marker: true, stroke: 'Push', event: '2', rally: '\u00d74', speech: result.firstSpeech });
   assert.equal(result.cleared, true); assert.equal(result.paused, 'Paused'); assert.equal(result.afterPause, result.firstSpeech); assert.deepEqual(errors, []);
 });
 
@@ -339,7 +343,7 @@ test('free and unlimited modes do not invent scores or full meters; unknown tech
   assert.equal(result.name, 'hud.near'); assert.deepEqual(errors, []);
 });
 
-for (const [width, height] of [[320, 568], [360, 640], [390, 844], [768, 1024], [1280, 800]]) {
+for (const [width, height] of [[320, 480], [320, 568], [360, 640], [390, 844], [768, 1024], [1280, 480], [1280, 800]]) {
   test(`real match CSS, local fonts and 44px actions fit ${width}x${height} in RU/EN and pass input through`, async (t) => {
     const { page, errors } = await setup(t, { width, height });
     for (const lang of ['ru', 'en']) {
@@ -359,19 +363,28 @@ for (const [width, height] of [[320, 568], [360, 640], [390, 844], [768, 1024], 
           icons: [...el.querySelectorAll('.match-hud-technique-icon')].map(rect), fonts: document.fonts.check('900 28px Unb') && document.fonts.check('800 11px Man'),
           through: document.elementFromPoint(probe.x, probe.y)?.id,
           overflow: document.documentElement.scrollWidth > innerWidth,
-          metrics: getComputedStyle(el.querySelector('.match-hud-metrics')).display };
+          metrics: getComputedStyle(el.querySelector('.match-hud-metrics')).display,
+          cells: [...el.querySelectorAll('.match-hud-contact')].map(rect), hasLevel: !!el.querySelector('.match-hud-level') };
       }, lang);
       assert.equal(layout.hud.x, 12); assert.equal(layout.hud.y, 12);
-      assert.equal(layout.hud.width, Math.min(400, width - 76)); assert.ok(layout.hud.height <= (width <= 520 || height <= 640 ? 112 : 144));
+      assert.equal(layout.hud.width, Math.min(352, width - 84)); assert.ok(layout.hud.height >= 60 && layout.hud.height <= 66);
+      const previousArea = Math.min(400, width - 76) * (width <= 520 || height <= 640 ? 108 : 135);
+      assert.ok(layout.hud.width * layout.hud.height <= previousArea * .6, 'only the upper-left score/energy/contact footprint is roughly halved');
       if (lang === 'en') t.diagnostic(`Measured HUD ${layout.hud.width}x${layout.hud.height}px with ${layout.buttons[0].width}x${layout.buttons[0].height}px actions`);
       assert.equal(layout.fonts, true, 'test measures the real local typefaces, not generic fallbacks'); assert.equal(layout.overflow, false);
       assert.ok(layout.buttons.every(b => b.width >= 44 && b.height >= 44));
+      layout.buttons.forEach((b, i) => {
+        assert.equal(b.width, 44); assert.equal(b.height, 44);
+        assert.equal(b.x, width - 56 - (width <= 620 ? 0 : (2 - i) * 52));
+        assert.equal(b.y, 12 + (width <= 620 ? i * 52 : 0));
+      });
       assert.ok(layout.buttons.every(b => b.x >= layout.hud.right + 8 || b.y >= layout.hud.bottom + 8));
       assert.ok(layout.boxes.every(b => b.size >= 11 && b.x >= layout.hud.x && b.right <= layout.hud.right + .5), JSON.stringify(layout.boxes));
       assert.ok(layout.icons.every(b => b.width >= 24 && b.width <= 32 && b.height >= 24 && b.height <= 32));
       assert.ok(layout.scores.every(s => s.text.width <= s.window.width), 'two-digit scores must not clip inside their recessed windows');
       assert.equal(layout.through, 'hud-input-surface');
-      assert.equal(layout.metrics === 'none', width <= 420);
+      assert.equal(layout.metrics, 'flex'); assert.equal(layout.cells.length, 2); assert.equal(layout.hasLevel, false);
+      assert.ok(layout.cells.every(c => c.height >= 24 && c.height <= 28 && c.right <= layout.hud.right && c.bottom <= layout.hud.bottom));
       if (width <= 620) assert.ok(layout.buttons.every(b => b.x === layout.buttons[0].x));
       else assert.ok(layout.buttons.every(b => b.y === layout.buttons[0].y));
       if (lang === 'en') {
@@ -398,7 +411,7 @@ test('safe-area and Telegram offsets stay aligned with actions without counting 
     return { ordinary, telegram: top(), height: fixture.hud.element.getBoundingClientRect().height };
   });
   assert.deepEqual(result.ordinary, { hud: 32, actions: 32 }); assert.deepEqual(result.telegram, { hud: 62, actions: 62 });
-  assert.ok(result.height <= 112); assert.deepEqual(errors, []);
+  assert.ok(result.height <= 66); assert.deepEqual(errors, []);
 });
 
 test('WAAPI is bounded, interruptible and inspectable mid-exchange at normal and quarter speed', async (t) => {
@@ -463,3 +476,173 @@ test('reduced-motion switches cancel movement/trails immediately; dispose remove
   assert.equal(disposed.connected, false); assert.equal(disposed.sameCount, true); assert.equal(disposed.roots, 0);
   assert.ok(disposed.listeners.every(n => n === 0)); assert.equal(disposed.active, 0); assert.deepEqual(errors, []);
 });
+
+// These tests exercise shell presentation without starting Chromium or the engine.
+function presentationFixture() {
+  const sizes = [];
+  class TrackedSet extends Set { add(n) { super.add(n); sizes.push(this.size); return this; } }
+  const context = vm.createContext({ Set: TrackedSet });
+  for (const file of ['ui/stroke_icons.js', 'ui/match_hud.js']) vm.runInContext(fs.readFileSync(path.join(__dirname, '../src', file), 'utf8'), context);
+  const summary = context.MatchHUD.createSummary();
+  let snapshot = { schema: 1, matchId: 'presentation-match', seq: 0, rallyId: 1, phase: 'SERVE_READY', score: [0, 0],
+    rally: 0, contacts: [null, null], event: { id: 1, type: 'serve', side: 1 } };
+  const send = changes => { snapshot = { ...snapshot, seq: snapshot.seq + 1, ...changes }; return summary.accept(snapshot); };
+  const hit = (side, stroke = 'DRIVE', kmh = 40, rps = 0) => {
+    const id = snapshot.event.id + 1, contacts = snapshot.contacts.slice();
+    contacts[side === 1 ? 0 : 1] = { matchId: snapshot.matchId, rallyId: snapshot.rallyId, side, eventId: id, stroke, kmh, rps };
+    return send({ phase: 'RALLY', rally: snapshot.rally + 1, contacts, event: { id, type: 'hit', side } });
+  };
+  return { summary, send, hit, sizes, ids: context.StrokeIcons.ids, snapshot: () => snapshot };
+}
+const plainPresentation = n => JSON.parse(JSON.stringify(n));
+
+test('presentation summary deduplicates accepted contacts and freezes exact per-side counts, speed and total spin', () => {
+  const f = presentationFixture(); f.send(); f.hit(1); f.hit(-1, 'CHOP', 60, 12); f.hit(1, 'BLOCK', 20, 4);
+  for (let i = 0; i < 20; i++) f.send();
+  assert.equal(f.summary.accept({ ...f.snapshot(), seq: 1 }), false);
+  assert.equal(f.summary.accept({ ...f.snapshot(), seq: 100, matchId: 'other-match' }), false);
+  const end = { stats: { shots: 2 }, ai: { shots: 1 }, bestRally: 3 }, frozen = f.summary.freeze(end);
+  assert.equal(frozen.coverage, 'complete'); assert.equal(frozen.bestRally, 3);
+  assert.deepEqual(plainPresentation(frozen.players.map(p => ({ hits: p.hits, observed: p.observedHits, by: p.byStroke, speed: p.speed, spin: p.spin }))), [
+    { hits: 2, observed: 2, by: { DRIVE: 1, BLOCK: 1 }, speed: { avg: 30, max: 40, samples: 2, coverage: 'complete' }, spin: { avg: 2, max: 4, samples: 2, coverage: 'complete' } },
+    { hits: 1, observed: 1, by: { CHOP: 1 }, speed: { avg: 60, max: 60, samples: 1, coverage: 'complete' }, spin: { avg: 12, max: 12, samples: 1, coverage: 'complete' } }
+  ]);
+  end.stats.shots = 999; f.snapshot().contacts[0].kmh = 999;
+  assert.equal(f.summary.accept({ ...f.snapshot(), seq: 999, phase: 'REPLAY' }), false);
+  assert.equal(f.hit(-1, 'SMASH', 99, 99), false); f.summary.recover();
+  assert.equal(f.summary.freeze({ stats: { shots: 999 } }), frozen);
+  assert.ok(Object.isFrozen(frozen) && Object.isFrozen(frozen.players) && frozen.players.every(p => Object.isFrozen(p) && Object.isFrozen(p.byStroke) && Object.isFrozen(p.speed) && Object.isFrozen(p.spin)));
+  assert.equal(frozen.players[0].speed.max, 40); assert.equal(frozen.recovered, false);
+});
+
+test('presentation recovery retains contacts, rejects cached replays and uses only observed metric denominators', () => {
+  const f = presentationFixture(); f.send(); f.hit(1, 'SERVE_NO_SPIN', 20, 0); f.hit(-1, 'LOOP', 30, 10);
+  f.summary.recover(); f.send({ visible: false }); f.send({ visible: true }); f.hit(1, 'BLOCK', 50, 6);
+  const frozen = f.summary.freeze({ stats: { shots: 100, byStroke: { SMASH: 100 }, maxSpeed: 999, maxSpin: 999 }, ai: { shots: 1 }, bestRally: 8 });
+  assert.equal(frozen.coverage, 'partial'); assert.equal(frozen.recovered, true);
+  assert.equal(frozen.players[0].hits, 100); assert.equal(frozen.players[0].observedHits, 2);
+  assert.deepEqual(plainPresentation(frozen.players[0].byStroke), { SERVE_NO_SPIN: 1, BLOCK: 1 });
+  assert.equal(frozen.players[0].speed.avg, 35); assert.equal(frozen.players[0].speed.max, 50); assert.equal(frozen.players[0].speed.samples, 2);
+  assert.equal(frozen.players[0].spin.avg, 3); assert.equal(frozen.players[0].spin.coverage, 'partial');
+  assert.equal(frozen.bestRally, 8); assert.equal(frozen.bestRallyCoverage, 'partial');
+});
+
+test('presentation late mounts, event gaps, missing metrics and unknown strokes cannot become complete or zero-filled', () => {
+  const f = presentationFixture(), contact = { matchId: 'presentation-match', rallyId: 1, eventId: 29, side: 1, stroke: '__proto__', kmh: 0, rps: -5 };
+  f.send({ seq: 8, phase: 'RALLY', contacts: [contact, null], event: { id: 30, type: 'whiff', side: -1 } });
+  const frozen = f.summary.freeze();
+  assert.equal(frozen.coverage, 'partial'); assert.equal(frozen.players[0].hits, 1); assert.equal(frozen.players[1].hits, null);
+  assert.deepEqual(plainPresentation(frozen.players[0].byStroke), { UNKNOWN: 1 });
+  assert.equal(frozen.players[0].speed.avg, 0); assert.equal(frozen.players[0].speed.coverage, 'partial');
+  assert.equal(frozen.players[0].spin.max, null); assert.equal(frozen.players[0].spin.coverage, 'missing');
+  const gap = presentationFixture(); gap.send(); gap.send({ event: { id: 3, type: 'point', side: 1 } });
+  assert.equal(gap.summary.freeze().coverage, 'partial');
+  const missing = presentationFixture(); missing.send(); missing.send({ event: { id: 2, type: 'hit', side: -1 } });
+  assert.equal(missing.summary.freeze().coverage, 'partial');
+  const counter = presentationFixture(); counter.send(); counter.hit(1);
+  assert.equal(counter.summary.freeze({ stats: { shots: 2 } }).coverage, 'partial', 'engine counters expose dropped coverage even with contiguous observed IDs');
+});
+
+test('presentation distinguishes a verified empty match from missing data and partial engine counter fallbacks', () => {
+  const absent = presentationFixture().summary.freeze();
+  assert.equal(absent.coverage, 'missing'); assert.equal(absent.bestRally, null);
+  assert.ok(absent.players.every(p => p.hits === null && p.speed.max === null && p.spin.max === null));
+  const empty = presentationFixture(); empty.send();
+  const verified = empty.summary.freeze({ stats: { shots: 0 }, ai: { shots: 0 }, bestRally: 0 });
+  assert.equal(verified.coverage, 'complete'); assert.equal(verified.bestRally, 0);
+  assert.ok(verified.players.every(p => p.hits === 0 && p.coverage === 'complete' && p.strokeCoverage === 'complete' && p.speed.max === null));
+  const fallback = presentationFixture().summary.freeze({ stats: { shots: 5, byStroke: { DRIVE: 5 }, maxSpeed: 60, maxSpin: 0 },
+    ai: { shots: 4, byStroke: { BLOCK: 4 }, avgOut: 12, maxOut: 15 }, bestRally: 10 });
+  assert.equal(fallback.coverage, 'partial'); assert.equal(fallback.players[0].hits, 5); assert.equal(fallback.players[1].hits, 4);
+  assert.equal(fallback.players[0].speed.max, 60, 'player maxSpeed telemetry is already km/h');
+  assert.equal(fallback.players[1].speed.max, 54, 'AI output telemetry is m/s');
+  assert.ok(fallback.players.every(p => p.speed.avg === null && p.speed.samples === 0 && p.speed.coverage === 'partial'));
+  assert.equal(fallback.players[0].spin.max, 0); assert.equal(fallback.players[0].spin.coverage, 'partial');
+  assert.equal(fallback.players[1].spin.max, null);
+  const zero = presentationFixture().summary.freeze({ stats: { shots: 0, maxSpeed: 0 } });
+  assert.equal(zero.players[0].hits, 0); assert.equal(zero.players[0].coverage, 'partial'); assert.equal(zero.players[1].hits, null);
+});
+
+test('presentation stroke buckets and ID retention remain bounded across long matches and recovery', () => {
+  const f = presentationFixture(); f.send();
+  for (let i = 0; i < 600; i++) f.hit(i % 2 ? -1 : 1, f.ids[i % f.ids.length], 30, i % 5);
+  const old = { matchId: 'presentation-match', rallyId: 1, eventId: 2, side: 1, stroke: 'SMASH', kmh: 999, rps: 999 };
+  f.summary.recover(); f.send({ contacts: [old, f.snapshot().contacts[1]], event: { id: 602, type: 'serve', side: 1 }, phase: 'SERVE_READY' });
+  const frozen = f.summary.freeze();
+  assert.deepEqual(plainPresentation(frozen.players.map(p => p.observedHits)), [300, 300]);
+  assert.ok(f.sizes.every(n => n <= 257), 'retains at most 256 IDs after each insertion');
+  assert.ok(frozen.players.every(p => Object.keys(p.byStroke).length <= 20 && p.speed.max === 30 && p.spin.max === 4));
+  const all = presentationFixture(); all.send();
+  for (const id of all.ids) all.hit(1, id, 25, id === 'SERVE_NO_SPIN' ? 0 : 6);
+  const by = all.summary.freeze().players[0].byStroke;
+  assert.deepEqual(Object.keys(by), [...all.ids]); assert.ok(Object.values(by).every(n => n === 1));
+});
+
+for (const [width, height] of [[320, 480], [320, 568], [360, 640], [390, 844], [768, 1024], [1280, 480], [1280, 800]]) {
+  test(`single-column report keeps one scroll region and a usable safe-area footer at ${width}x${height}`, async t => {
+    browser ||= await launchBrowser();
+    const { page, errors } = await pageFixture(t, browser, ['result'], { width, height, persisted: true, raw: { xp: 100, xpMax: 1800 } });
+    await page.evaluate(async () => {
+      const summary = MatchHUD.createSummary();
+      let snapshot = { schema: 1, matchId: 'layout-report', seq: 1, rallyId: 1, phase: 'SERVE_READY', rally: 0,
+        score: [0, 0], contacts: [null, null], event: { id: 1, type: 'serve', side: 1 } };
+      summary.accept(snapshot);
+      for (const stroke of StrokeIcons.ids) for (const side of [1, -1]) {
+        const id = snapshot.event.id + 1, contacts = snapshot.contacts.slice();
+        contacts[side === 1 ? 0 : 1] = { matchId: snapshot.matchId, rallyId: 1, eventId: id, side, stroke, kmh: side === 1 ? 40.5 : 30.2, rps: side === 1 ? 0 : 12 };
+        snapshot = { ...snapshot, seq: snapshot.seq + 1, phase: 'RALLY', rally: snapshot.rally + 1, contacts, event: { id, type: 'hit', side } };
+        summary.accept(snapshot);
+      }
+      fixture.names = ['Очень длинное имя <Player> With A Long Surname', 'An Entire Opponent Identity С Фамилией'];
+      fixture.resultData = { win: true, me: 22, op: 20, opp: 0, names: fixture.names, stats: {},
+        presentation: summary.freeze({ stats: { shots: 20 }, ai: { shots: 20 }, bestRally: 40 }),
+        quests: [{ id: 'win1', t: 'Win one', claimed: false }],
+        coach: { n: 40, hit: 30, side: 36, fwd: 150, back: 100, dots: [{ dx: 10, dy: -20, contact: true }] } };
+      await fixture.Router.go('result', { data: fixture.resultData });
+      await document.fonts.ready;
+      fixture.awarded = JSON.stringify(S);
+    });
+    for (const lang of ['en', 'ru']) {
+      const layout = await page.evaluate(lang => {
+        I18n.lang = lang; fixture.Router.refreshLocale();
+        const rect = el => { const r = el.getBoundingClientRect(); return { x: r.x, y: r.y, right: r.right, bottom: r.bottom, width: r.width, height: r.height }; };
+        const report = document.querySelector('.res-report'), scroll = document.querySelector('.res-scroll'), footer = document.querySelector('.res-btns');
+        const buttons = [...footer.querySelectorAll('button')]; buttons[0].focus();
+        return { device: rect(document.querySelector('#device')), report: rect(report), scroll: rect(scroll), footer: rect(footer), buttons: buttons.map(rect),
+          scrollRegions: document.querySelectorAll('.res .scroll').length, strokes: document.querySelectorAll('.res-strokes tbody tr').length,
+          names: [...document.querySelectorAll('.res-score .rs-p b')].map(n => n.textContent), score: document.querySelector('.rs-n').textContent,
+          average: document.querySelector('[data-metric="speed-avg"]').textContent, zero: document.querySelector('[data-metric="spin-avg"]').textContent,
+          focused: document.activeElement === buttons[0], hitTargets: buttons.map(button => { const r = button.getBoundingClientRect(); return document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2)?.closest('button') === button; }),
+          unchanged: JSON.stringify(S) === fixture.awarded, outcome: document.querySelector('.res-title').textContent,
+          column: getComputedStyle(document.querySelector('.res')).flexDirection, reportMax: getComputedStyle(report).maxWidth,
+          overflow: document.documentElement.scrollWidth > innerWidth || scroll.scrollWidth > scroll.clientWidth };
+      }, lang);
+      assert.equal(layout.column, 'column'); assert.equal(layout.reportMax, '460px'); assert.equal(layout.scrollRegions, 1);
+      assert.equal(layout.strokes, 20); assert.deepEqual(layout.names, ['Очень длинное имя <Player> With A Long Surname', 'An Entire Opponent Identity С Фамилией']);
+      assert.equal(layout.score, '22:20'); assert.equal(layout.average, lang === 'ru' ? '40,5' : '40.5'); assert.equal(layout.zero, '0');
+      assert.equal(layout.outcome, lang === 'ru' ? 'Победа' : 'Victory'); assert.equal(layout.unchanged, true); assert.equal(layout.overflow, false);
+      assert.equal(layout.focused, true); assert.ok(layout.hitTargets.every(Boolean)); assert.ok(layout.buttons.every(b => b.width >= 44 && b.height >= 48));
+      assert.ok(layout.buttons[0].right + 12 <= layout.buttons[1].x + .5);
+      assert.ok(layout.scroll.bottom <= layout.footer.y + .5 && layout.footer.bottom <= layout.device.bottom + .5);
+      assert.ok(layout.report.width <= 460 && layout.report.x >= layout.device.x && layout.report.right <= layout.device.right);
+      assert.ok(Math.abs((layout.report.x + layout.report.right) / 2 - (layout.device.x + layout.device.right) / 2) < 1, 'the existing device/frame policy centers the same column');
+    }
+    await page.focus('.res-analysis summary'); await page.keyboard.press('Enter');
+    const expanded = await page.evaluate(() => {
+      const scroll = document.querySelector('.res-scroll'), footer = document.querySelector('.res-btns');
+      scroll.scrollTop = scroll.scrollHeight;
+      const details = document.querySelector('.res-analysis'), a = details.getBoundingClientRect(), b = scroll.getBoundingClientRect(), f = footer.getBoundingClientRect();
+      return { open: details.open, top: scroll.scrollTop, contentBottom: a.bottom, scrollBottom: b.bottom, footerTop: f.top };
+    });
+    assert.equal(expanded.open, true); assert.ok(expanded.top > 0); assert.ok(expanded.contentBottom <= expanded.scrollBottom && expanded.scrollBottom <= expanded.footerTop);
+    const safe = await page.evaluate(() => {
+      const css = document.documentElement.style, scroll = document.querySelector('.res-scroll'), footer = document.querySelector('.res-btns');
+      const read = () => ({ top: getComputedStyle(scroll).paddingTop, bottom: getComputedStyle(footer).paddingBottom });
+      css.setProperty('--sat', '20px'); css.setProperty('--sab', '12px'); css.setProperty('--tgt', '0px'); css.setProperty('--tgb', '0px');
+      const ordinary = read(); document.body.classList.add('in-tg'); css.setProperty('--tgt', '50px'); css.setProperty('--tgb', '18px');
+      return { ordinary, telegram: read(), buttons: [...footer.querySelectorAll('button')].every(button => button.getBoundingClientRect().bottom <= footer.getBoundingClientRect().bottom - 18) };
+    });
+    assert.deepEqual(safe.ordinary, { top: '34px', bottom: '24px' }); assert.deepEqual(safe.telegram, { top: '64px', bottom: '30px' });
+    assert.equal(safe.buttons, true); assert.equal(await page.evaluate(() => fixture.resultData.applied), true); assert.deepEqual(errors, []);
+  });
+}

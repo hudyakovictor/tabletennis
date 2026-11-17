@@ -180,11 +180,8 @@ body.q-low .screen[data-id=hub].lobby::after{display:none}
 .rc.coach p{margin:0;font-size:12px;line-height:1.4;color:var(--ink2)}
 .rc.coach.good .ct{color:#7CFFC4}
 .rc.coach:not(.good) .ct{color:#FFD54A}
-/* кнопки результата всегда под пальцем, даже когда карточек больше экрана */
-.res-btns{position:sticky;bottom:0;z-index:3;margin-top:auto;padding-bottom:4px;background:linear-gradient(180deg,transparent,rgba(5,7,16,.85) 38%)}
-.res .res-btns{bottom:calc(56px + var(--sab))}
-.res{padding-bottom:0}
-.res-btns{padding-bottom:calc(var(--sab) + 16px)}
+/* Result owns one scroll region and a separate, immediately usable footer. */
+.screen[data-id=result]{pointer-events:auto}
 
 .tq{padding:14px 14px 12px;margin:12px 14px 0}
 .tq-leg{display:flex;gap:12px;margin:0 0 6px;font-size:10.5px;font-weight:700;color:var(--ink3)}.tq-leg i{display:inline-block;width:8px;height:8px;border-radius:2px;margin-right:5px;background:#5A6390}.tq-leg i.w{background:#3BF5A0}

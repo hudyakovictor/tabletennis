@@ -16,7 +16,11 @@ function setServerSeason(data) {
     const reward = (r) => {
       if (!r || !Number.isSafeInteger(r.n) || r.n <= 0) return null;
       if (r.k === 'coins' || r.k === 'gems' || (r.k === 'chest' && r.n === 1 && ['silver', 'gold', 'epic'].includes(r.kind))) return { ...r };
-      const item = typeof Catalog !== 'undefined' && Catalog.rewardItem(r);
+      // Compatibility belongs to persisted calendars, not direct item grants.
+      const legacy = r.k === 'card' && r.n === 1 && (r.itemId !== undefined
+        ? ['r-coral', 'r-void', 'r-teal', 'b-ink', 't-gold', 't-coral', 'tb-neon', 'f-season'].includes(r.itemId)
+        : typeof r.col === 'string' && ['#ff4b3e', '#9f6bff', '#14c8b4'].includes(r.col.toLowerCase()));
+      const item = typeof Catalog !== 'undefined' && Catalog.rewardItem(legacy ? { k: 'card', n: 1, itemId: 'r-pan' } : r);
       return item ? { k: 'card', n: 1, itemId: item.id } : null;
     };
     const normalized = pass.map((r, i) => r && r.s === n && r.l === i + 1 ? { ...r, f: reward(r.f), p: reward(r.p) } : null);
@@ -60,7 +64,7 @@ const seasonLeftShort = (now = Date.now()) => {
 };
 const passTier = (l, seasonN) => {
   const f = l % 5 === 0 ? { k: 'chest', kind: 'silver', n: 1 } : l % 2 ? { k: 'coins', n: 50 + l * 10 } : { k: 'gems', n: 2 + (l >> 1) };
-  const p = l % 5 === 0 ? { k: 'chest', kind: l % 10 === 0 ? 'epic' : 'gold', n: 1 } : l % 3 === 0 ? { k: 'card', n: 1, itemId: ['r-coral', 'r-void', 'r-teal'][(Math.floor(l / 3) - 1) % 3] } : { k: 'gems', n: 5 + l };
+  const p = l % 5 === 0 ? { k: 'chest', kind: l % 10 === 0 ? 'epic' : 'gold', n: 1 } : l % 3 === 0 ? { k: 'card', n: 1, itemId: 'r-pan' } : { k: 'gems', n: 5 + l };
   return { s: seasonN, l, f, p };
 };
 const PASS = [...Array(20)].map((_, i) => passTier(i + 1, HARD_SEASON.n));

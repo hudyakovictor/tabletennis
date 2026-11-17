@@ -49,6 +49,35 @@ test('the embedded frame has exactly one copy of each physics configuration', ()
   }
 });
 
+test('the build embeds both real racket models and the exact external paddle atlas', () => {
+  const frame = embeddedFrame(freshApp());
+  const models = JSON.parse(frame.match(/^const TT_RACKETS = (.*);$/m)[1]);
+  assert.deepEqual(Object.keys(models), ['r-standard', 'r-pan']);
+  for (const [id, triangles, parts] of [['r-standard', 800, 1], ['r-pan', 5512, 4]]) {
+    const model = models[id];
+    assert.equal(model.parts.length, parts);
+    assert.equal(model.parts.reduce((n, p) => n + p.ni / 3, 0), triangles);
+    assert.equal(model.textures.length, 1, 'shared material textures are embedded only once');
+    for (const part of model.parts) {
+      const bytes = Buffer.from(part.data, 'base64');
+      assert.equal(part.wide, false, 'the supplied models must also work without WebGL1 uint indices');
+      assert.equal(bytes.length, part.nv * 32 + part.ni * 2);
+      for (let i = 0; i < part.nv; i++) {
+        const x = bytes.readFloatLE(i * 12), y = bytes.readFloatLE(i * 12 + 4), z = bytes.readFloatLE(i * 12 + 8);
+        assert.ok(Math.abs(x) <= .077 && y >= -.176 && y <= .082 && Math.abs(z) <= .011001);
+        const n = [0, 1, 2].map(axis => bytes.readFloatLE(part.nv * 12 + i * 12 + axis * 4));
+        assert.ok(Math.abs(Math.hypot(...n) - 1) < 1e-6, 'scaled normals stay unit length');
+      }
+      for (let i = 0; i < part.ni; i++) assert.ok(bytes.readUInt16LE(part.nv * 32 + i * 2) < part.nv);
+    }
+  }
+  const atlas = Buffer.from(models['r-standard'].textures[0].split(',')[1], 'base64');
+  assert.deepEqual(atlas, fs.readFileSync(path.join(repo, 'source/assets/rackets/textures/standard_atlas.png')));
+  assert.equal(crypto.createHash('sha256').update(atlas).digest('hex'), '026db3c0419634097e71ea45e7f54656f83d1a01778ef502f090d42c24fa1252');
+  assert.deepEqual(Buffer.from(models['r-pan'].textures[0].split(',')[1], 'base64'),
+    fs.readFileSync(path.join(repo, 'source/assets/pan/textures/ObsidianCast_BaseColor.png')));
+});
+
 test('old and internal CLIs cannot produce a standalone engine artifact', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'topspin-no-engine-'));
   try {
