@@ -9,7 +9,7 @@ for (const width of [390, 1280]) test(`free/ranked routes and locale refresh pre
   const { page, errors } = await pageFixture(t, browser, ['hub'], { width });
   const result = await page.evaluate(async () => {
     const { Router } = fixture, visits = [];
-    for (const id of ['match', 'mm', 'train', 'profile', 'online']) Router.def(id, { render: () => '<div>' + id + '</div>', mount: () => visits.push([id, fixture.mode(), fixture.battle().opp]) });
+    for (const id of ['match', 'train', 'profile', 'online']) Router.def(id, { render: () => '<div>' + id + '</div>', mount: () => visits.push([id, fixture.mode(), fixture.battle().opp]) });
     await Router.go('hub', { mode: 'push' });
     Router.active.el.querySelector('[data-modebtn="free"]').click();
     await Router.go('hub', { mode: 'push' });
@@ -19,9 +19,9 @@ for (const width of [390, 1280]) test(`free/ranked routes and locale refresh pre
     root.querySelector('[data-modebtn="ranked"]').click();
     return { visits, refreshed, cur: Router.cur, shows: fixture.trace.host.filter(x => x === 'show').length, hides: fixture.trace.host.filter(x => x === 'hide').length };
   });
-  assert.deepEqual(result.visits, [['match', 'free', 0], ['mm', 'ranked', 0]]);
+  assert.deepEqual(result.visits, [['match', 'free', 0], ['match', 'ranked', 0]]);
   assert.deepEqual(result.refreshed, { sameRoot: true, sameState: true, sameStack: true, title: 'Quick match' });
-  assert.equal(result.cur, 'mm'); assert.equal(result.shows, result.hides); assert.deepEqual(errors, []);
+  assert.equal(result.cur, 'match'); assert.equal(result.shows, result.hides); assert.deepEqual(errors, []);
 });
 
 test('an explicit online lobby route remains available in Friends', async (t) => {
@@ -39,7 +39,7 @@ test('a busy hub route retry belongs to its mount and cannot navigate after disp
   const { page, errors } = await pageFixture(t, browser, ['hub']);
   await page.evaluate(async () => {
     const { Router } = fixture;
-    Router.def('mm', { render: () => '<div>ranked</div>' }); Router.def('empty', { render: () => '<div>empty</div>' });
+    Router.def('match', { render: () => '<div>ranked</div>' }); Router.def('empty', { render: () => '<div>empty</div>' });
     await Router.go('hub', { mode: 'push' });
     Router.busy = true; Router.active.el.querySelector('[data-modebtn="ranked"]').click();
     Router.busy = false; await Router.go('empty', { mode: 'push' });

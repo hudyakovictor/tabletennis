@@ -30,29 +30,6 @@ body.in-game #screens{pointer-events:none}
 .mx-bars i{position:absolute;left:0;right:0;height:13%;background:#000;z-index:6;transition:transform .7s var(--out)}
 .mx-bars i:first-child{top:0;transform:translateY(-101%)}.mx-bars i:last-child{bottom:0;transform:translateY(101%)}
 .mx.bars .mx-bars i{transform:none}
-/* lower-thirds */
-.mx-intro{position:absolute;inset:0;z-index:7}
-.mx-intro .lt{position:absolute;display:flex;align-items:center;gap:12px;padding:10px 16px;min-width:62%;
-  background:linear-gradient(90deg,var(--c2),var(--c1));box-shadow:0 10px 30px rgba(0,0,0,.45),inset 0 1px 0 rgba(255,255,255,.3);opacity:0}
-.mx-intro .lt b{display:block;font:900 20px/1.05 var(--display);text-transform:uppercase;color:#fff;text-shadow:0 2px 0 rgba(0,0,0,.3);letter-spacing:-.01em}
-.mx-intro .lt small{display:block;font-size:10.5px;font-weight:800;letter-spacing:.1em;text-transform:uppercase;color:rgba(255,255,255,.75);margin-bottom:3px}
-.mx-intro .lt .avatar{flex:none;box-shadow:0 0 0 3px rgba(255,255,255,.85)}
-.mx-intro .lt.op{top:calc(13% + 16px);left:0;clip-path:polygon(0 0,100% 0,calc(100% - 22px) 100%,0 100%);padding-right:40px;transform:translateX(-105%)}
-.mx-intro .lt.me{bottom:calc(13% + 16px);right:0;justify-content:flex-end;text-align:right;clip-path:polygon(22px 0,100% 0,100% 100%,0 100%);padding-left:40px;transform:translateX(105%)}
-.mx-intro.a .lt.op{animation:ltin .62s var(--spring2) forwards}
-.mx-intro.c .lt.me{animation:ltin .62s var(--spring2) forwards}
-@keyframes ltin{to{opacity:1;transform:none}}
-.mx-chip{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%) scale(.6);opacity:0;text-align:center;padding:12px 22px;border-radius:18px;
-  background:rgba(8,10,28,.78);backdrop-filter:blur(8px);box-shadow:inset 0 0 0 1.5px rgba(255,226,138,.5),0 0 40px rgba(255,190,60,.25)}
-.mx-chip span{display:block;font:800 10.5px/1 var(--display);letter-spacing:.16em;text-transform:uppercase;color:#FFE28A;margin-bottom:6px}
-.mx-chip b{font:900 26px/1 var(--display);text-transform:uppercase;color:#fff}
-.mx-intro.b .mx-chip{animation:chipin .5s var(--spring) forwards}
-@keyframes chipin{to{opacity:1;transform:translate(-50%,-50%) scale(1)}}
-.mx-intro.out .lt.op{animation:ltout .4s var(--out) forwards}.mx-intro.out .lt.me{animation:ltout2 .4s var(--out) forwards}
-.mx-intro.out .mx-chip{animation:fadeout .3s forwards}
-@keyframes ltout{from{opacity:1;transform:none}to{opacity:0;transform:translateX(-60%)}}
-@keyframes ltout2{from{opacity:1;transform:none}to{opacity:0;transform:translateX(60%)}}
-.mx-count{z-index:8}
 .mx .m-final{background:radial-gradient(ellipse at center,rgba(2,3,10,.25),rgba(2,3,10,.55));z-index:7}
 .mx .m-final>div{text-align:center}
 .mx .m-final small{display:block;margin-top:10px;font:900 30px/1 var(--display);color:#fff;opacity:0;animation:fadeto .4s .5s forwards;text-shadow:0 3px 0 rgba(0,0,0,.4)}

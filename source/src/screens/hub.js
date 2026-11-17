@@ -153,8 +153,8 @@ Router.def('hub', {
         }
         if (mb === 'practice') goRoute('train', { data: { then: 'hub' } });
         else if (mb === 'career') goRoute('profile');
-        else if (mb === 'ranked') goRoute('mm');
-        else goRoute('mm');
+        else if (mb === 'ranked') goRoute('match');
+        else goRoute('match');
         return;
       }
       if (a.dataset.chest !== undefined) return this.chestTap(+a.dataset.chest, a);
@@ -168,7 +168,7 @@ Router.def('hub', {
           goRoute('match');
         }
         else if (MODE.id === 'practice') goRoute('train', { data: { then: 'hub' } });
-        else goRoute('mm');
+        else goRoute('match');
       }
       if (k === 'mode' && this.modeSheet) this.modeSheet();
       if (k === 'ranks') Router.go('ranks');

@@ -15,12 +15,6 @@ Router.def('match', {
       </div>
       <button class="ib m-diag-shot pe" data-act="diag-mark" ${GameHost.debug ? '' : 'hidden'} aria-label="${t('debug.mark')}"><span aria-hidden="true">●</span> ${t('debug.mark')}</button>
       ${devBtn()}
-      <div class="mx-intro">
-        <div class="lt op" style="--c1:${o.c[0]};--c2:${o.c[1]}"><span><small>${text(o.club)} · ${fmt(o.r)}</small><b>${text(o.n)}</b></span></div>
-        <div class="mx-chip"><span>${t(MODE.tk)}</span><b>${free ? t('match.freeNoScore') : t('match.matchTo', { n: T })}</b></div>
-        <div class="lt me" style="--c1:#FF7A4D;--c2:#B4161E"><span><small>${text(S.club)} · ${fmt(S.rating)}</small><b>${text(S.name)}</b></span></div>
-      </div>
-      <div class="vs-count mx-count"></div>
     </div>`;
   },
   mount(el) {
@@ -73,33 +67,17 @@ Router.def('match', {
   },
   later(fn, ms) { const t = setTimeout(() => this.alive && fn(), ms); this.timers.push(t); return t; },
   async intro() {
-    const el = this.el, st = this.st, mx = el.querySelector('.mx'), intro = el.querySelector('.mx-intro');
+    const el = this.el, st = this.st, mx = el.querySelector('.mx');
     const valid = () => this.alive && this.st === st && !st.over;
-    GameHost.send('prematch', { dur: 3.1 });
-    await sleep(120); if (!valid()) return;
-    mx.classList.add('bars'); Sfx.whoosh();
-    await sleep(380); if (!valid()) return;
-    intro.classList.add('a'); Sfx.impact(); haptic('medium');
-    await sleep(520); if (!valid()) return;
-    intro.classList.add('b'); Sfx.soft();
-    await sleep(520); if (!valid()) return;
-    intro.classList.add('c'); Sfx.impact(); haptic('medium');
-    await sleep(1250); if (!valid()) return;
-    intro.classList.add('out');
-    const c = el.querySelector('.mx-count');
-    /* отсчёт — ЧЕСТНЫЕ секунды: раньше тикал каждые 560 мс и «3-2-1»
-     * пролетал в 1.8 раза быстрее, чем считает человек */
-    for (const n of ['3', '2', '1']) { c.innerHTML = `<b>${n}</b>`; Sfx.count(1); haptic('medium'); await sleep(980); if (!valid()) return; }
-    c.innerHTML = `<b class="go">${t('match.go')}</b>`; Sfx.count(0); haptic('heavy'); flash('#fff', .25, 260);
-    /* free: движок держит freePlay — очки разыгрываются, счёт не растёт.
-       Уровень бота (S.diff) и тренд последних матчей уходят в движок явно:
-       бот больше не захардкожен на «ПРО», а форма игрока не двигает уровень
-       целиком — только ±4 % агрессии/точности между матчами. */
+    GameHost.send('prematch', { dur: 0.3 });
+    for (let i = 0; i < 8; i++) { await sleep(40); if (!valid()) return; }
+    /* Вход в матч без зрелищных задержек: нет плашек, отсчёта и эффектов. */
+    const free = MODE.id === 'free';
     GameHost.send('match', { diff: clamp(Math.round(S.diff ?? 1), 0, 3), trend: aiTrend(), target: TARGET[MODE.id] || 11, hint: !!S.hint, free: MODE.id === 'free' });
     if (st.paused) GameHost.send('pause');
     GameHost.send('quiet', { on: false });
     mx.classList.remove('bars', 'cine'); mx.classList.add('live'); st.live = true;
-    await sleep(520); if (!valid()) return; c.innerHTML = '';
+    await sleep(40); if (!valid()) return;
   },
   onMsg(m) {
     if (this.alive && (this.st.live || this.hudSnapshot) && !this.st.over && m.type === 'calibrationPending') this.presentation.recover();
