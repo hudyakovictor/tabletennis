@@ -102,6 +102,7 @@ Router.def('train', {
     } else {
       const stroke = this.mode === 'stroke', items = stroke ? C.strokes : C.targets;
       body = `<p class="academy-note">${stroke ? t('academy.strokeIntro') : t('academy.accuracyIntro')}</p>
+        ${stroke && globalThis.StrokeIcons ? `<section class="academy-spin-legend"><p>${t('hud.motionLegend')}</p><div>${[['DRIVE','hud.spinTop'],['PUSH','hud.spinBack'],['SIDE','hud.spinSide'],['SERVE_NO_SPIN','hud.noSpin']].map(([id, label]) => `<span>${StrokeIcons.create(id).outerHTML}<small>${t(label)}</small></span>`).join('')}</div></section>` : ''}
         <div class="academy-picks ${stroke ? 'strokes' : 'targets'}" role="group" aria-label="${stroke ? t('academy.selectStroke') : t('academy.selectTarget')}">
           ${items.map((item) => `<button class="academy-pick ${item.id === selected.id ? 'on' : ''}" data-choice="${this.esc(item.id)}" aria-pressed="${item.id === selected.id}">${stroke ? `<small>${this.esc(item.id)}</small>` : Art.icon('target')}<b>${this.esc(item.title)}</b></button>`).join('')}</div>
         <article class="pnl academy-selection"><span class="cap">${stroke ? t('academy.stroke') : t('academy.target')}</span><h2>${this.esc(selected.title)}</h2>

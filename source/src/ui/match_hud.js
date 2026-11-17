@@ -176,11 +176,11 @@ const MatchHUD = (() => {
       const next = !!options.reducedMotion || media.matches;
       if (next !== reduced) { reduced = next; root.classList.toggle('is-reduced', reduced); stopMotion(); }
     }
-    function setIcon(holder, id, auxiliary = false) {
-      const key = (auxiliary ? 'aux:' : 'stroke:') + id;
+    function setIcon(holder, id, auxiliary = false, contact = null) {
+      const key = (auxiliary ? 'aux:' : 'stroke:') + id + (auxiliary ? '' : JSON.stringify(icons.profile(id, contact)));
       if (holder.dataset.drawing === key) return;
       if (holder.firstChild) cancel(holder.firstChild.querySelector('.stroke-icon-motion'));
-      holder.replaceChildren(auxiliary ? icons.auxiliary(id, doc) : icons.create(id, doc));
+      holder.replaceChildren(auxiliary ? icons.auxiliary(id, doc) : icons.create(id, doc, contact));
       holder.dataset.drawing = key;
     }
     function clearExchange() {
@@ -227,12 +227,22 @@ const MatchHUD = (() => {
         const entry = known && options.strokeCatalog?.find(item => item.id === contact.stroke);
         const color = entry?.col || 'var(--hud-neutral)';
         if (p.cell.style.getPropertyValue('--stroke') !== color) p.cell.style.setProperty('--stroke', color);
-        setIcon(p.icon, contact ? contact.stroke : 'UNKNOWN');
+        setIcon(p.icon, contact ? contact.stroke : 'UNKNOWN', false, contact);
+        const iconProfile = icons.profile(contact ? contact.stroke : 'UNKNOWN', contact);
+        const spinUnknown = iconProfile.plane === 'unknown' ||
+          !!contact && iconProfile.plane === 'none' && iconProfile.source === 'static';
+        attr(p.icon, 'title', tr(spinUnknown ? 'hud.noSpinData' : iconProfile.plane === 'none' ? 'hud.noSpin' :
+          iconProfile.source === 'static' ? 'hud.staticSpin' : 'hud.motionLegend'));
         text(p.stroke, contact ? tr(known ? 'hud.stroke.' + contact.stroke : 'hud.unknown') : tr('hud.missing'));
         attr(p.stroke, 'title', p.stroke.textContent);
         text(p.speed, tr('hud.kmh', { n: contact && Number.isFinite(contact.kmh) && contact.kmh >= 0 ? Math.round(contact.kmh) : tr('hud.missing') }));
-        text(p.spin, tr('hud.rps', { n: contact && Number.isFinite(contact.rps) && contact.rps >= 0 ? Math.round(contact.rps) : tr('hud.missing') }));
-        attr(p.cell, 'aria-label', tr('hud.lastContact', { name: name(i), stroke: p.stroke.textContent, speed: p.speed.textContent, spin: p.spin.textContent }));
+        text(p.spin, contact && spinUnknown ? tr('hud.noSpinDataShort') :
+          contact && iconProfile.plane === 'none' ? tr('hud.noSpin') :
+          tr('hud.rps', { n: contact && Number.isFinite(contact.rps) && contact.rps >= 0 ? Math.round(contact.rps) : tr('hud.missing') }));
+        const spinLabel = spinUnknown ? tr('hud.noSpinData') :
+          iconProfile.plane === 'none' ? tr('hud.noSpin') :
+          iconProfile.source === 'static' ? tr('hud.staticSpin') : tr('hud.motionLegend');
+        attr(p.cell, 'aria-label', tr('hud.lastContact', { name: name(i), stroke: p.stroke.textContent, speed: p.speed.textContent, spin: p.spin.textContent }) + '. ' + spinLabel);
         p.cell.classList.toggle('is-active', active === i);
         p.cell.classList.toggle('is-empty', !contact);
         p.cell.dataset.eventId = contact ? String(contact.eventId) : '';
@@ -294,7 +304,10 @@ const MatchHUD = (() => {
         const side = i ? -1 : 1, contact = incoming.contacts?.[i], whiff = incoming.whiffs?.[i];
         if (contact && contact.matchId === snapshot.matchId && contact.rallyId === snapshot.rallyId && contact.side === side && newer(contact.eventId, p.contactId)) {
           p.contactId = contact.eventId;
-          if (!atServe) { p.contact = { ...contact }; p.missed = false; hits.push(i); }
+          if (!atServe) { p.contact = { ...contact,
+            velocity: contact.velocity && { ...contact.velocity },
+            angularVelocity: contact.angularVelocity && { ...contact.angularVelocity } };
+            p.missed = false; hits.push(i); }
         } else if (!contact) p.contact = null;
         if (whiff && newer(whiff.id, p.whiffId)) {
           p.whiffId = whiff.id;
@@ -332,7 +345,7 @@ const MatchHUD = (() => {
       render();
       if (root.hidden || snapshot.paused) { stopMotion(); return; }
       if (!entered) { entered = true; animate(root, [{ opacity: 0, transform: 'translateY(-8px)' }, { opacity: 1, transform: 'none' }], 220); }
-      if (!result) {
+      if (!result && !reduced) {
         hits.forEach(i => { const m = icons.motion(players[i].contact.stroke); animate(players[i].icon.firstChild.querySelector('.stroke-icon-motion'), m.frames, m.duration); });
       }
       misses.forEach(i => animate(players[i].whiff, [{ opacity: .4, transform: 'translateY(-2px)' }, { opacity: 1, transform: 'none' }], 160));

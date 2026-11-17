@@ -203,7 +203,13 @@ test('25. two physical events in one substep give one contact, one episode and o
     setState(s) { this.state = s; awards++; }, shakeIt() {}, msg() {}, buzz() {}, logInput() {},
     addMark() {}, emitParticles() {}, equip: {},
   });
+  V3.set(g.ball.p, .2, 1.1, 1.4);
+  g.ball.q = Q.new();
   g.awardPoint(1, 'winner');
+  assert.equal(g.ball.live, false, 'the scoring ball must stop simulating');
+  assert.deepEqual({ ...g._pointBall.p }, { x: .2, y: 1.1, z: 1.4 });
+  g.ball.p.x = 9; // physics/replay changes must not move the scoring snapshot
+  assert.equal(g._pointBall.p.x, .2);
   const after = g.score[0] + g.score[1];
   g.awardPoint(1, 'same episode');
   g.awardPoint(-1, 'same episode');

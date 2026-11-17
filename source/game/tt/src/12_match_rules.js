@@ -754,8 +754,10 @@ function evaluateContactZone(corridor, ball, pointer, width, height, projectFn, 
     const edge = opts.edgePx ?? MATCH_RULES.contactEdgePx;
     const stride = Math.max(1, Math.floor(corridor.samples.length / 18));
     let prevPt = null, prevS = null;
-    for (let i = 0; i < corridor.samples.length; i += stride) {
-      const s = corridor.samples[i];
+    // Always include the final sample: a stride that does not divide the
+    // path length otherwise drops the last legal segment of the corridor.
+    for (let i = 0; i < corridor.samples.length + stride - 1; i += stride) {
+      const s = corridor.samples[Math.min(i, corridor.samples.length - 1)];
       const pr = projectFn(s, {});
       if (!pr || !pr.ok) continue;
       const sx = vw > edge * 2 ? clamp(pr.x * vw, edge, vw - edge) : pr.x * vw;

@@ -143,7 +143,18 @@ const { repo } = require('./helpers.cjs');
       await page.waitForFunction(() => !document.querySelector('.academy-menu').hidden);
       assert.equal(await page.evaluate(() => !!(S.training.lessons.DRIVE && S.training.lessons.DRIVE.mastered)), false); checks++;
 
-      await activate('[data-mode="stroke"]'); await activate('.academy-pick[data-choice="LOOP"]'); await activate('.academy-selection [data-act="open"]');
+      await activate('[data-mode="stroke"]');
+      const iconLegend = await page.evaluate(() => {
+        const legend = document.querySelector('.academy-spin-legend');
+        return { text: legend?.textContent, icons: [...legend.querySelectorAll('svg')].map(svg => ({
+          id: svg.dataset.icon, spin: svg.dataset.spin, width: svg.getBoundingClientRect().width,
+          balls: svg.querySelectorAll('.stroke-icon-ball').length })) };
+      });
+      assert.match(iconLegend.text, /стрелка|arrow/i);
+      assert.deepEqual(iconLegend.icons.map(i => i.id), ['DRIVE', 'PUSH', 'SIDE', 'SERVE_NO_SPIN']);
+      assert.ok(iconLegend.icons.every(i => i.width === 48 && i.balls === 1));
+      assert.equal(iconLegend.icons.at(-1).spin, 'none'); checks++;
+      await activate('.academy-pick[data-choice="LOOP"]'); await activate('.academy-selection [data-act="open"]');
       await frame.waitForFunction(() => window.__game.training && window.__game.training.S.stroke === 'LOOP');
       await page.waitForSelector('.academy-dialog [data-act="start"]'); await screenshot('motion');
       await activate('.academy-dialog [data-act="start"]');

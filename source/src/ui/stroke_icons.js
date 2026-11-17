@@ -1,29 +1,82 @@
-/* Authored 32px silhouettes. Technique colour belongs to the supplied catalog. */
+/* Shared, shot-relative 32px motion diagrams. */
 const StrokeIcons = (() => {
+  // All diagrams use one coordinate system: the outgoing horizontal direction
+  // points right, vertical is up, and the spin components use the same
+  // shot-relative convention as measureShotSpin in the engine.
   const ball = (x, y, r = 3) => `<circle class="stroke-icon-ball" cx="${x}" cy="${y}" r="${r}" fill="var(--hud-ball,#f7fbff)" stroke="none"/>`;
-  const toss = '<path class="stroke-icon-toss" d="M5 26V16m-2.5 3L5 16l2.5 3"/>';
-  const drawings = Object.freeze({
-    DRIVE: '<path d="M3 22h16q6 0 9-5M24 17h4v4M10 12q5-6 11-2m-4-3 4 3-4 1"/>' + ball(15, 17),
-    LOOP: '<path d="M4 27C7 16 11 5 22 6m-4-3 4 3-3 4M13 14c5-4 11-1 11 4"/>' + ball(25, 22),
-    COUNTER: '<path d="M3 10h19l-4-4m4 4-4 4M29 23H10l4-4m-4 4 4 4"/>' + ball(8, 16, 3.2),
-    SMASH: '<path d="m8 4 15 16-8-3 9 11 4-9-5 1M4 10l7 8M3 17l4 4"/>' + ball(16, 10),
-    SIDE: '<path d="M3 16h6m14 0h6M8 9C24 2 31 16 22 23m0-5v5h5M11 24l-5-1 2-5"/>' + ball(16, 16),
-    HOOK: '<path d="M5 26V14C5 2 27 1 27 14c0 8-9 9-11 3m-3 3 3-3 4 2"/>' + ball(13, 10),
-    FADE: '<path d="M27 27C22 24 29 10 19 6 9 2 2 12 8 18m-1-5 1 5 5-1M20 24l4 2"/>' + ball(19, 16),
-    FLICK: '<path d="M4 25h8l4-8 5 3 6-12m-5 1 5-1 1 5M10 28l3-3"/>' + ball(13, 10),
-    BANANA: '<path d="M25 8C9-3 0 16 10 25c7 6 18-1 15-9-2-5-8-4-9 0m-2-4 2 4 4-1"/>' + ball(21, 6, 2.8),
-    PUSH: '<path d="M3 16h21l-4-3m4 3-4 3M9 23h17m-4-3 4 3-4 3"/>' + ball(12, 11),
-    CHOP: '<path d="M6 4l19 22m-6-1 6 1-1-6M7 19l8 9M3 21l4 5"/>' + ball(20, 11, 3.2),
-    CHOP_BLOCK: '<path d="M3 11h10M17 6l-3 12M14 18l11 8m-5 0h5v-5M7 24l7 4"/>' + ball(24, 13),
-    BLOCK: '<path d="M3 10h12l-3-3m3 3-3 3M20 5v22M15 23H8l3-3m-3 3 3 3"/>' + ball(14, 17, 2.8),
-    LOB: '<path d="M3 27C4-4 25-4 29 24m-4-3 4 3 1-5"/>' + ball(17, 7, 3.2),
-    DROP: '<path d="M3 15q7-16 15-2t4 12m-3-4 3 4 4-3M13 20v9m-3-7h6"/>' + ball(26, 13, 2.8),
-    SERVE_TOP: toss + '<path d="M11 23C12 9 23 5 28 12m-1-5 1 5-5-1M15 27q8 0 10-8"/>' + ball(5, 10, 2.5) + ball(21, 16),
-    SERVE_BACK: toss + '<path d="M11 17q7 9 17 3m-5-1 5 1-2 4M13 27h10l-3-3"/>' + ball(5, 10, 2.5) + ball(21, 12),
-    SERVE_SIDE: toss + '<path d="M12 11c17-7 24 14 6 14m3-4-3 4 5 2M13 18h4m8 0h4"/>' + ball(5, 10, 2.5) + ball(21, 17),
-    SERVE_FAST: toss + '<path d="M11 22h18l-4-4m4 4-4 4M12 26h7M12 18h4"/>' + ball(5, 10, 2.5) + ball(21, 14, 2.8),
-    SERVE_NO_SPIN: toss + '<path d="M12 25h4m5 0h7M12 7h3m11 0h3"/>' + ball(5, 10, 2.5) + ball(21, 16, 4.5)
+  const ids = Object.freeze(['DRIVE','LOOP','COUNTER','SMASH','SIDE','HOOK','FADE','FLICK','BANANA','PUSH',
+    'CHOP','CHOP_BLOCK','BLOCK','LOB','DROP','SERVE_TOP','SERVE_BACK','SERVE_SIDE','SERVE_FAST','SERVE_NO_SPIN']);
+  // Catalog examples, not a claim about every contact. Unknown spin remains
+  // distinct from a measured zero; SIDE and SERVE_SIDE show one example sign.
+  const profiles = Object.freeze({
+    DRIVE:['top',1,'level'], COUNTER:['top',1,'level'], LOOP:['top',1,'up'], FLICK:['top',1,'up'],
+    SMASH:['unknown',0,'down'], SIDE:['side',1,'level'], HOOK:['side',1,'level'], FADE:['side',-1,'level'],
+    BANANA:['mixed',1,'up'], PUSH:['top',-1,'level'], CHOP:['top',-1,'level'], CHOP_BLOCK:['top',-1,'level'],
+    BLOCK:['unknown',0,'level'], LOB:['top',1,'up'], DROP:['unknown',0,'level'],
+    SERVE_TOP:['top',1,'level'], SERVE_BACK:['top',-1,'level'], SERVE_SIDE:['side',1,'level'],
+    SERVE_FAST:['unknown',0,'level'], SERVE_NO_SPIN:['none',0,'level']
   });
+  const vec = v => v && [v.x, v.y, v.z].every(Number.isFinite);
+  function profile(id, contact) {
+    const base = Object.hasOwn(profiles, id) ? profiles[id] : ['unknown', 0, 'unknown'];
+    let [plane, direction, flight] = base, source = 'static';
+    // Components in shot coordinates: longitudinal, vertical, topspin axis.
+    let axis = plane === 'top' ? [0, 0, 1] : plane === 'side' ? [0, 1, 0] :
+      plane === 'mixed' ? [0, Math.SQRT1_2, Math.SQRT1_2] : null;
+    if (contact && vec(contact.velocity)) {
+      const v = contact.velocity, horizontal = Math.hypot(v.x, v.z);
+      flight = horizontal < 1e-8 && Math.abs(v.y) < 1e-8 ? 'unknown' :
+        v.y > horizontal * .18 ? 'up' : v.y < -horizontal * .18 ? 'down' : 'level';
+      source = 'measured';
+      if (vec(contact.angularVelocity) && Math.hypot(contact.angularVelocity.x, contact.angularVelocity.y, contact.angularVelocity.z) < 1e-8) {
+        plane = 'none'; direction = 0; axis = null;
+      } else if (vec(contact.angularVelocity) && horizontal > 1e-8) {
+        const w = contact.angularVelocity, fx = v.x / horizontal, fz = v.z / horizontal;
+        const top = w.x * fz - w.z * fx, side = w.y, cork = w.x * fx + w.z * fz;
+        const total = Math.hypot(top, side, cork);
+        const reference = Math.abs(top) > 1e-8 ? top : Math.abs(side) > 1e-8 ? side : cork;
+        direction = Math.sign(reference);
+        axis = [cork, side, top].map(n => n * direction / total);
+        const significant = axis.map(n => Math.abs(n) > .15);
+        plane = significant.filter(Boolean).length > 1 ? 'mixed' : significant[0] ? 'cork' : significant[1] ? 'side' : 'top';
+      } else { plane = 'unknown'; direction = 0; axis = null; }
+    }
+    return { plane, direction, flight, axis, source };
+  }
+  function spinArc(p) {
+    // Orthographic view of the same 3D plane for every shot. A small, fixed
+    // depth projection keeps a vertical/longitudinal axis visible edge-on.
+    // The complete angular-velocity vector determines the plane; reversing it
+    // reverses only the arrow. A positive topspin is clockwise in this view.
+    const n = [p.axis[0], p.axis[1], -p.axis[2]];
+    const reference = Math.abs(n[0]) < .9 ? [1, 0, 0] : [0, 1, 0];
+    const dot = reference[0]*n[0] + reference[1]*n[1] + reference[2]*n[2];
+    const u = reference.map((v, i) => v - dot * n[i]), len = Math.hypot(...u);
+    for (let i = 0; i < 3; i++) u[i] /= len;
+    const v = [n[1]*u[2] - n[2]*u[1], n[2]*u[0] - n[0]*u[2], n[0]*u[1] - n[1]*u[0]];
+    const project = angle => {
+      const a = Math.cos(angle), b = Math.sin(angle);
+      const x = u[0]*a + v[0]*b, y = u[1]*a + v[1]*b, z = u[2]*a + v[2]*b;
+      return [9 + 6.6 * (x + .3*z), 16 + 6.6 * (-y + .3*z)];
+    };
+    const points = Array.from({ length: 25 }, (_, i) => project(p.direction * (-2.15 + 4.3 * i / 24)));
+    const end = points.at(-1), before = points.at(-2), dx = end[0] - before[0], dy = end[1] - before[1];
+    const length = Math.hypot(dx, dy) || 1, ux = dx / length, uy = dy / length;
+    const left = [end[0] - 2.8*ux + 1.6*uy, end[1] - 2.8*uy - 1.6*ux];
+    const right = [end[0] - 2.8*ux - 1.6*uy, end[1] - 2.8*uy + 1.6*ux];
+    const fmt = point => point.map(n => n.toFixed(2)).join(' ');
+    return points.map((point, i) => `${i ? 'L' : 'M'}${fmt(point)}`).join(' ') +
+      ` M${fmt(left)} L${fmt(end)} L${fmt(right)}`;
+  }
+  function diagram(p) {
+    const ballMarkup = '<circle class="stroke-icon-ball" cx="9" cy="16" r="5" fill="#FFFFFF" stroke="#17212b" stroke-width=".7"/>';
+    const spin = p.axis ? `<path class="stroke-icon-spin" data-plane="${p.plane}" data-direction="${p.direction}" d="${spinArc(p)}" stroke="#F6B64B"/>` : '';
+    const d = p.flight === 'up' ? 'M20 17 L29 10 M25 10 L29 10 L28 14' :
+      p.flight === 'down' ? 'M20 15 L29 22 M25 22 L29 22 L28 18' :
+      p.flight === 'level' ? 'M20 16 H29 M26 13 L29 16 L26 19' : '';
+    const flight = d ? `<path class="stroke-icon-flight" data-flight="${p.flight}" d="${d}" stroke="#69CFFA"/>` : '';
+    return ballMarkup + spin + flight;
+  }
   const auxiliary = Object.freeze({
     energy: '<path d="m18 3-12 16h9l-1 10 12-17h-9Z"/>',
     whiff: '<path d="M10 20 5 27m5-7c-7-4-3-15 3-14 8 2 7 11 2 14ZM24 7l5 5m0-5-5 5M24 20h4"/>',
@@ -31,28 +84,6 @@ const StrokeIcons = (() => {
     out: '<path d="M4 10v16h19M9 14v7h9M17 6l10 9m-5-1 5 1-1-5"/>' + ball(26, 24, 3),
     point: '<path d="m16 3 12 13-12 13L4 16ZM10 16l4 4 8-9"/>',
     matchPoint: '<path d="M7 29V5m0 1h16l-4 5 4 5H7m18-11 3-2m-2 8h4M12 20l3 2 3-2-1 4 3 2h-4l-1 3-1-3h-4l3-2Z"/>'
-  });
-  const motion = Object.freeze({
-    DRIVE: ['translateX(-3px) scale(.97)', 'translateX(2px) scale(1.03)', 150],
-    LOOP: ['translateY(3px) scale(.97)', 'translateY(-3px) scale(1.03)', 210],
-    COUNTER: ['translateX(3px) scale(.97)', 'translateX(-3px) scale(1.03)', 140],
-    SMASH: ['translateY(-3px) scale(1.03,.97)', 'translateY(3px) scale(.97,1.03)', 150],
-    SIDE: ['translateX(-3px) scale(.97)', 'translateX(3px) scale(1.03)', 180],
-    HOOK: ['translate(-2px,2px) rotate(-8deg) scale(.97)', 'translate(2px,-1px) rotate(4deg) scale(1.03)', 200],
-    FADE: ['translate(2px,2px) rotate(8deg) scale(.97)', 'translate(-2px,-1px) rotate(-4deg) scale(1.03)', 200],
-    FLICK: ['translateY(2px) rotate(-6deg) scale(.97)', 'translateY(-2px) rotate(3deg) scale(1.03)', 140],
-    BANANA: ['translate(-2px,1px) rotate(-9deg) scale(.97)', 'translate(1px,-2px) rotate(5deg) scale(1.03)', 210],
-    PUSH: ['translateX(-2px) scale(.97)', 'translateX(1px) scale(1.01)', 180],
-    CHOP: ['translate(-2px,-3px) scale(.97)', 'translate(2px,2px) scale(1.03)', 180],
-    CHOP_BLOCK: ['translateY(-1px) scale(.97)', 'translate(1px,2px) scale(1.01)', 160],
-    BLOCK: ['translateX(1px) scale(.97)', 'translateX(-1px) scale(1.01)', 150],
-    LOB: ['translateY(3px) scale(.97)', 'translateY(-3px) scale(1.02)', 220],
-    DROP: ['translateY(-2px) scale(.97)', 'translateY(2px) scale(1.01)', 200],
-    SERVE_TOP: ['translateY(2px) scale(.97)', 'translate(1px,-2px) rotate(3deg) scale(1.03)', 180],
-    SERVE_BACK: ['translateY(-2px) scale(.97)', 'translate(1px,2px) rotate(-3deg) scale(1.02)', 180],
-    SERVE_SIDE: ['translateY(1px) scale(.97)', 'translateX(3px) rotate(3deg) scale(1.03)', 180],
-    SERVE_FAST: ['translateX(-3px) scale(.97)', 'translateX(3px) scale(1.03)', 140],
-    SERVE_NO_SPIN: ['translateX(-2px) scale(.97)', 'translateX(2px) scale(1.01)', 170]
   });
   const fallback = '<path d="M3 16h4m18 0h4"/>' + ball(16, 16, 4);
   const make = (markup, id, doc) => {
@@ -68,10 +99,16 @@ const StrokeIcons = (() => {
     return svg;
   };
   return Object.freeze({
-    ids: Object.freeze(Object.keys(drawings)), auxiliaryIds: Object.freeze(Object.keys(auxiliary)),
-    create(id, doc = document) { const known = Object.hasOwn(drawings, id); return make(known ? drawings[id] : fallback, known ? id : 'UNKNOWN', doc); },
+    ids, auxiliaryIds: Object.freeze(Object.keys(auxiliary)), profile,
+    create(id, doc = document, contact = null) {
+      const known = Object.hasOwn(profiles, id), p = profile(id, contact);
+      const svg = make(diagram(p), known ? id : 'UNKNOWN', doc);
+      svg.dataset.spin = p.plane; svg.dataset.direction = String(p.direction);
+      svg.dataset.flight = p.flight; svg.dataset.source = p.source;
+      return svg;
+    },
     auxiliary(id, doc = document) { const known = Object.hasOwn(auxiliary, id); return make(known ? auxiliary[id] : fallback, known ? id : 'UNKNOWN', doc); },
-    motion(id) { const m = Object.hasOwn(motion, id) ? motion[id] : motion.BLOCK; return { frames: [{ transform: m[0] }, { transform: m[1], offset: .45 }, { transform: 'none' }], duration: m[2] }; }
+    motion() { return { frames: [{ opacity: .55 }, { opacity: 1 }], duration: 150 }; }
   });
 })();
 globalThis.StrokeIcons = StrokeIcons;

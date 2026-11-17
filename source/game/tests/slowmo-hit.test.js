@@ -7,7 +7,7 @@ const lib = load(['10_math.js', '12_match_rules.js', '30_physics.js', '38_paddle
   '40_swipe.js', '42_shot_diagnostics.js', '56_rig.js', '57_camera.js', '84_racket.js', '70_game.js'],
   ['Game', 'SwipeTracker', 'PaddleStrokeMotion', 'isRealStroke', 'tapStrokeMetrics', 'ShotJournal', 'V3', 'PH', 'GS',
     'STROKES', 'SERVE_STROKE_ALIAS', 'STROKE_CONFIG', 'bladePlaneCapture', 'deriveStroke', 'describeStrokeEffort',
-    'rigViewProj', 'integrateBall', 'predict', 'Equipment', 'M4', 'Q'],
+    'rigViewProj', 'integrateBall', 'predict', 'solveStrikeCorridor', 'PADDLE_LIMITS', 'PADDLE_STANCE_Z', 'Equipment', 'M4', 'Q'],
   { window: { addEventListener(type, handler) { windowHandlers.set(type, handler); } }, document: { addEventListener() {},
     body: { style: {}, classList: { toggle() {} } }, documentElement: { style: {} } } });
 
@@ -1049,4 +1049,76 @@ test('volley, unreachable, paused and cancelled inputs never spawn a pulse', () 
   const cancelled = inputGame();
   cancelled.send('pointerdown'); cancelled.send('pointercancel'); cancelled.send('pointerup');
   assert.equal(cancelled.g.contactFlashes.length, 0, 'a cancelled click is not a contact');
+});
+
+test('player paddle runs the idempotent table-clearance guard once per update', () => {
+  const vm = require('node:vm');
+  const { g } = inputGame('mouse');
+  g._calValues = { captureK: 1 };
+  vm.runInContext(`globalThis.__auditOriginalGuard = enforcePaddleTableClearance;
+    globalThis.__auditGuardCalls = 0;
+    enforcePaddleTableClearance = function (...args) { globalThis.__auditGuardCalls++; return globalThis.__auditOriginalGuard(...args); };`, lib.context);
+  try {
+    g.updatePlayerPaddle(1 / 60);
+    assert.equal(lib.context.__auditGuardCalls, 1);
+  } finally {
+    vm.runInContext('enforcePaddleTableClearance = globalThis.__auditOriginalGuard; delete globalThis.__auditOriginalGuard; delete globalThis.__auditGuardCalls;', lib.context);
+  }
+});
+
+test('stationary intercept assist target does not accumulate per frame at 30, 60 or 120 Hz', () => {
+  const results = [];
+  for (const fps of [30, 60, 120]) {
+    const { g } = inputGame('mouse');
+    g._calValues = { captureK: 1 };
+    g.pointer = { x: .35, y: .55 };
+    g.pressAdmitsBall = () => true;
+    g.playerStrokeIntent = () => ({ dx: 0, dy: -.1, up: .5, right: 0, releaseSpeed: 1, peakSpeed: 1 });
+    g.swipe.pressZone = { accepted: true, shotId: g.shotId };
+    // The ball and pointer are deliberately stationary; this is not a full rally.
+    for (let i = 0; i < fps / 5; i++) { g.time += 1 / fps; g.updatePlayerPaddle(1 / fps); }
+    assert.equal(g._lockDbg.active, true);
+    assert.equal(g._lockDbg.intent, true);
+    results.push({ pos: { ...g.player.pos }, target: { ...g._padTarget } });
+  }
+  for (const result of results.slice(1)) {
+    assert.ok(lib.V3.dist(result.pos, results[0].pos) < .0001);
+    assert.ok(lib.V3.dist({ x: result.target.tx, y: result.target.ty, z: result.target.tz },
+      { x: results[0].target.tx, y: results[0].target.ty, z: results[0].target.tz }) < .0001);
+  }
+});
+
+test('frozen training invalidates the strike corridor when the paddle depth or ball changes', () => {
+  const { g } = inputGame('mouse');
+  g.training = { frozen: true };
+  g.player.pos.z = 1.2;
+  const first = g.strikeCorridor();
+  assert.strictEqual(g.strikeCorridor(), first, 'unchanged inputs should reuse the cache');
+  g.player.pos.z = 2.1; // the game clock and frame remain frozen while the player aims
+  const moved = g.strikeCorridor();
+  const direct = lib.solveStrikeCorridor(g.ball, g.player, g.rallyBounces, lib.predict, {
+    tableY: lib.PH.TABLE_Y, stanceZ: lib.PADDLE_STANCE_Z, minStepInZ: lib.PADDLE_LIMITS.zStepIn,
+    maxReachZ: lib.PADDLE_LIMITS.zFar, allowVolley: true,
+  });
+  assert.notStrictEqual(moved, first);
+  assert.deepEqual(JSON.parse(JSON.stringify(moved)), JSON.parse(JSON.stringify(direct)));
+  g.ball.p.x += .04;
+  const repositioned = g.strikeCorridor();
+  assert.notStrictEqual(repositioned, moved, 'a repositioned training ball must invalidate the cache');
+  g.training.frozen = false;
+  assert.notStrictEqual(g.strikeCorridor(), repositioned, 'leaving frozen mode changes volley eligibility');
+});
+
+test('frozen contact prediction follows a changed footwork plane without advancing game time', () => {
+  const { g } = inputGame('mouse');
+  g.training = { frozen: true };
+  g._footZ = 1.6;
+  const first = g.contactPrediction();
+  assert.ok(first);
+  assert.strictEqual(g.contactPrediction(), first);
+  g._footZ = 1.9;
+  const next = g.contactPrediction();
+  assert.ok(next);
+  assert.notStrictEqual(next, first);
+  assert.ok(Math.abs(next.p.z - first.p.z) > .1, `${first.p.z} -> ${next.p.z}`);
 });

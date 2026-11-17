@@ -991,7 +991,11 @@ class Game {
       staminaEnabled: this.staminaEnabled(), phase: this.state, score, target, server: this.server,
       rally: this.rally, paused: !!this.paused, matchPoint,
       players: [1, -1].map(side => ({ side, ...this.getStaminaState(side) })),
-      contacts: [0, 1].map(i => visible && this._matchContacts?.[i] ? { ...this._matchContacts[i] } : null),
+      contacts: [0, 1].map(i => {
+        const c = visible && this._matchContacts?.[i];
+        return c ? { ...c, velocity: c.velocity && { ...c.velocity },
+          angularVelocity: c.angularVelocity && { ...c.angularVelocity } } : null;
+      }),
       whiffs: [0, 1].map(i => visible && this._matchWhiffs?.[i] ? { ...this._matchWhiffs[i] } : null),
       event: visible && this._matchEvent ? { ...this._matchEvent } : null,
       result: visible && this._matchResult ? { ...this._matchResult, winner } : null };
@@ -1018,6 +1022,8 @@ class Game {
     this._matchContacts[i] = { matchId: this._matchId, eventId: id, rallyId: this._rallyId,
       swingId: work?.swingId || ++this._swingId, side, shotId: this.shotId,
       stroke: racket.stroke?.id || 'DRIVE', kmh: V3.len(this.ball.v) * 3.6, rps: V3.len(this.ball.w) / TAU,
+      // Capture outgoing vectors once, before any subsequent bounce changes them.
+      velocity: shotVec(this.ball.v), angularVelocity: shotVec(this.ball.w),
       quality: Number.isFinite(quality) ? quality : null, sweet: Number.isFinite(sweet) ? sweet : null,
       energy: state.energy, capacity: state.capacity, limited: !!racket.effortBudget?.limited,
       ...(point?.ok ? { x: point.x, y: point.y } : {}) };
@@ -1047,7 +1053,8 @@ class Game {
       aiWork: this._aiWork ? { side: -1, shotId: this._aiWork.shotId, rallyId: this._aiWork.rallyId,
         swingId: this._aiWork.swingId, paid: this._aiWork.paid,
         contacted: !!this._aiWork.contacted, finished: !!this._aiWork.finished } : null,
-      contacts: this._matchContacts.map(c => c && { ...c }), whiffs: this._matchWhiffs.map(w => w && { ...w }),
+      contacts: this._matchContacts.map(c => c && { ...c, velocity: c.velocity && { ...c.velocity },
+        angularVelocity: c.angularVelocity && { ...c.angularVelocity } }), whiffs: this._matchWhiffs.map(w => w && { ...w }),
       event: this._matchEvent && { ...this._matchEvent }, result: this._matchResult && { ...this._matchResult } };
   }
 
@@ -1084,6 +1091,7 @@ class Game {
           !integer(c.eventId) || c.eventId > data.eventId || !integer(c.swingId) || c.swingId > data.swingId ||
           !integer(c.shotId) || typeof c.stroke !== 'string' ||
           !['kmh', 'rps', 'energy', 'capacity'].every(k => Number.isFinite(c[k]) && c[k] >= 0) ||
+          !['velocity', 'angularVelocity'].every(k => c[k] == null || vector(c[k])) ||
           c.energy > c.capacity || c.capacity > STAMINA_CONFIG.energyMax || typeof c.limited !== 'boolean' ||
           !['quality', 'sweet'].every(k => c[k] === null || Number.isFinite(c[k]) && c[k] >= 0 && c[k] <= 1) ||
           !['x', 'y'].every(k => c[k] === undefined || Number.isFinite(c[k])))) return null;
@@ -1164,7 +1172,8 @@ class Game {
     this._swingId = restored ? restored.swingId : 0;
     this._pendingCredit = restored ? restored.pendingCredit : null;
     this._creditedRally = restored ? restored.creditedRally : -1;
-    this._matchContacts = restored ? restored.contacts.map(c => c && { ...c }) : [null, null];
+    this._matchContacts = restored ? restored.contacts.map(c => c && { ...c,
+      velocity: c.velocity && { ...c.velocity }, angularVelocity: c.angularVelocity && { ...c.angularVelocity } }) : [null, null];
     this._matchWhiffs = restored ? restored.whiffs.map(w => w && { ...w }) : [null, null];
     this._matchEvent = restored?.event ? { ...restored.event } : null;
     this._matchResult = restored?.result ? { ...restored.result } : null;
@@ -1397,6 +1406,7 @@ class Game {
       this._playerWork = this._aiWork = null;
     }
     const toss = STROKE_CONFIG.serve.toss;
+    this._pointBall = null;
     const s = this.server;
     const b = this.ball;
     const x = s > 0 ? 0 : rndSym(toss.readyXJitter);
@@ -1473,14 +1483,23 @@ class Game {
   strikeCorridor() {
     const b = this.ball, pad = this.player;
     if (!b || !b.live || b.lastHitBy !== -1 || this.state !== GS.RALLY) return null;
-    if (this._scFrame === this.frame && this._scTime === this.time) return this._sc;
+    const frozen = !!(this.training && this.training.frozen);
+    // In a frozen lesson frame/time do not advance, but the player can still
+    // move the paddle (and lessons can reposition the ball). The corridor's
+    // pad anchor and path must not be cached across those changes.
+    const frozenKey = frozen ? [b.p.x, b.p.y, b.p.z, b.v.x, b.v.y, b.v.z,
+      b.w.x, b.w.y, b.w.z, pad?.pos?.z,
+      !!(this.rallyBounces && this.rallyBounces.some(s => s > 0))].join('|') : null;
+    if (this._scFrame === this.frame && this._scTime === this.time &&
+        this._scFrozen === frozen && (!frozen || this._scFrozenKey === frozenKey)) return this._sc;
     this._scFrame = this.frame; this._scTime = this.time;
+    this._scFrozen = frozen; this._scFrozenKey = frozenKey;
     this._sc = solveStrikeCorridor(b, pad, this.rallyBounces, predict, {
       tableY: PH.TABLE_Y,
       stanceZ: PADDLE_STANCE_Z,
       minStepInZ: PADDLE_LIMITS.zStepIn,
       maxReachZ: PADDLE_LIMITS.zFar,
-      allowVolley: !!(this.training && this.training.frozen),
+      allowVolley: frozen,
     });
     return this._sc;
   }
@@ -1579,10 +1598,21 @@ class Game {
   contactPrediction() {
     const b = this.ball, pad = this.player;
     if (!b.live || b.lastHitBy !== -1 || !(b.v.z > .08 || (b.p.z > 0.15 && b.v.z > -0.35)) || this.state !== GS.RALLY) return null;
-    if (this._cpFrame === this.frame && this._cpTime === this.time) return this._cp;
-    this._cpFrame = this.frame; this._cpTime = this.time;
-    const o = this._cpOut || (this._cpOut = {});
+    const frozen = !!this.training?.frozen;
     const expected = this.training?.S?.check?.context;
+    // Frozen lessons keep frame/time fixed while the player can move and the
+    // training state can change. Keep cached predictions only for identical
+    // inputs, including the contact plane and lesson eligibility rules.
+    const frozenKey = frozen ? [b.p.x, b.p.y, b.p.z, b.v.x, b.v.y, b.v.z,
+      b.w.x, b.w.y, b.w.z, pad?.pos?.z, this._footZ, this.settings?.hand,
+      !!(this.rallyBounces && this.rallyBounces.some(s => s > 0)),
+      !!expected, expected?.forehand, expected?.overTable, expected?.maxHeight,
+      expected?.incomingTop, expected?.incomingSpeed].join('|') : null;
+    if (this._cpFrame === this.frame && this._cpTime === this.time &&
+        this._cpFrozen === frozen && (!frozen || this._cpFrozenKey === frozenKey)) return this._cp;
+    this._cpFrame = this.frame; this._cpTime = this.time;
+    this._cpFrozen = frozen; this._cpFrozenKey = frozenKey;
+    const o = this._cpOut || (this._cpOut = {});
     if (expected) {
       const sc = this.strikeCorridor();
       const sample = sc?.valid && sc.samples.find(p => p.z >= PADDLE_LIMITS.zStepIn && p.z <= PADDLE_LIMITS.zFar &&
@@ -1650,6 +1680,8 @@ class Game {
     if (this.staminaEnabled()) this._pendingCredit = this._rallyId;
     /* очко закончилось — шлейф мёртвого мяча умирает вместе с ним,
      * а не висит «мерзкой полосой» до следующей подачи */
+    // Continue the finished ball separately, without affecting scoring or replay.
+    this.capturePointBall();
     this.ball.live = false;
     this.ball.hist.length = 0; this.ball.trailGrade = null; this.ball.golden = null;
     const idx = who > 0 ? 0 : 1;
@@ -1735,6 +1767,48 @@ class Game {
   }
 
   /* ------------------------- ball <-> world ------------------------ */
+  capturePointBall() {
+    const b = this.ball;
+    this._pointBall = { p: V3.clone(b.p), v: V3.clone(b.v), w: V3.clone(b.w),
+      q: b.q ? Q.copy(Q.new(), b.q) : Q.new(), settled: false };
+  }
+
+  /** The finished ball is scenery, not a second rally: use the same collision
+   * primitives, but never call scoring, paddle, journal or replay handlers. */
+  advancePointBall(dt) {
+    const b = this._pointBall;
+    if (!b || b.settled || this.replayer?.on ||
+        (this.state !== GS.POINT && this.state !== GS.MATCH_END) || !(dt > 0) || !Number.isFinite(dt)) return;
+    const n = Math.ceil(Math.min(dt, .1) / PHYS_DT), step = Math.min(dt, .1) / n;
+    const prev = this._pointBallPrev || (this._pointBallPrev = V3.new());
+    const hit = this._pointBallHit || (this._pointBallHit = { x: 0, y: 0, z: 0 });
+    for (let i = 0; i < n && !b.settled; i++) {
+      V3.copy(prev, b.p);
+      integrateBall(b.p, b.v, b.w, step);
+      Q.integrate(b.q, b.q, spinVisualRate(b.w, this._spinVis || (this._spinVis = V3.new())), step);
+      if (b.v.y < 0) {
+        const tb = tableContact(prev.x, prev.y, prev.z, b.p.x, b.p.y, b.p.z, hit);
+        if (tb) {
+          const speed = -b.v.y;
+          b.p.x = tb.x; b.p.y = tb.y; b.p.z = tb.z;
+          bounceTable(b.p, b.v, b.w);
+          if (speed > .3) this.audio?.hitTable?.(speed, { x: b.p.x, y: PH.TABLE_Y, z: b.p.z });
+          if (speed < .15 && V3.len(b.v) < .2) { V3.zero(b.v); V3.zero(b.w); b.settled = true; }
+        }
+      }
+      const nk = netContactStep(prev.x, prev.y, prev.z, b.p.x, b.p.y, b.p.z, hit);
+      if (nk === 2) clipTape(b.p, b.v, b.w);
+      else if (nk === 1) bounceNet(b.p, b.v, b.w, Math.sign(prev.z) || 1);
+      if (b.p.y <= PH.R && b.v.y < 0) {
+        const speed = V3.len(b.v);
+        b.p.y = PH.R;
+        impactSphere(b.v, b.w, N_UP, ZERO3, PH.E_FLOOR, PH.MU_FLOOR, 0);
+        if (speed > .3) this.audio?.hitFloor?.(speed);
+        if (V3.len(b.v) < .2) { V3.zero(b.v); V3.zero(b.w); b.settled = true; }
+      }
+    }
+  }
+
   onBounce(side, speed, info) {
     if (this.ball.lastHitBy === 1 && this.shotJournal) this.shotJournal.bounce(side, this.time);
     const impactSpeed = Number.isFinite(info?.impactSpeed) ? info.impactSpeed : speed;
@@ -2422,6 +2496,7 @@ class Game {
     }
     this.msg('ПЕРЕПОДАЧА (LET)', 1.4, '#9fd0ff');
     this.audio.ui();
+    this.capturePointBall();
     this.ball.live = false;
     this.lastPoint = null;
     this.setState(GS.POINT);
@@ -2447,7 +2522,8 @@ class Game {
     journal.observe(sw.gestureId, m, { time: this.time, isServe: serving, active: sw.active,
       sampleTime: heldStroke ? sw.realAt : sw.active && lastSample ? lastSample.t : this.swipeReleasedAt,
       sampleSimTime: heldStroke ? sw.realAtSim : sw.active ? sw.sampleSimTime : sw.releaseSimTime,
-      simTime: this.strokeTime, windowSec: serving ? 1.15 : heldStroke ? 2.5 : sw.active ? .18 : .25,
+      simTime: this.strokeTime, windowSec: sw.active ? (serving ? 1.15 : heldStroke ? 2.5 : .18)
+        : this.releasedStrokeWindow(serving),
       strokeId: r && r.stroke.id });
   }
 
@@ -2659,7 +2735,7 @@ class Game {
     }
     const releasedAt = Number.isFinite(this.swipeReleasedAt) ? this.swipeReleasedAt : -Infinity;
     const releasedAge = this.strokeAge(sw.releaseSimTime, releasedAt);
-    const deadWin = serving ? 1.15 : .25;
+    const deadWin = this.releasedStrokeWindow(serving);
     if (!sw.active && isRealStroke(sw.lastReleased, serving) && releasedAge >= deadWin)
       return this.logPressRejection('TIMING_EARLY', { releasedAgeMs: (this.time - releasedAt) * 1000, simulationAgeMs: releasedAge * 1000 });
     const heldWin = serving ? 1.15 : 2.5;
@@ -2993,6 +3069,13 @@ class Game {
       ? this.strokeTime - simStamp : this.time - realStamp;
   }
 
+  releasedStrokeWindow(serving = false) {
+    if (serving) return 1.15;
+    const zone = this.swipe && this.swipe.pressZone;
+    return zone && zone.accepted === true && zone.shotId === this.shotId
+      ? Math.max(.25, CONTACT_CORRIDOR_RULES.strokeReleaseWindowSec) : .25;
+  }
+
   playerStrokeIntent(serving = false) {
     const sw = this.swipe;
     const lastSample = sw.samples[sw.samples.length - 1];
@@ -3010,10 +3093,7 @@ class Game {
      * press stamp at all, which is what the "an old released swipe cannot hit
      * a later ball" contract exercises — keeps the original 0.25 s and can
      * never re-arm itself. */
-    const admittedAttempt = !!(sw.pressZone && sw.pressZone.accepted === true &&
-      sw.pressZone.shotId === this.shotId);
-    const deadWin = serving ? 1.15
-      : admittedAttempt ? Math.max(0.25, CONTACT_CORRIDOR_RULES.strokeReleaseWindowSec) : 0.25;
+    const deadWin = this.releasedStrokeWindow(serving);
     /* A real swipe can be held in position for a block. Only a fresh sample
        may start that hold: discovering an old motion late must not re-arm it.
        A stationary hold is not a swipe; a tap is recognised on release. */
@@ -4211,13 +4291,6 @@ class Game {
      * playerWristPose) were dead, and right after a stroke (when the template
      * moved pad.pos once more) the pose saw a stale zero velocity while the
      * bat had visibly moved: the "chaotically twitching racket after a hit". */
-    /* Idempotent second pass (see enforcePaddleTableClearance): the pose came
-     * from the stroke template, so the first lift above ran on a different
-     * normal. Height is corrected again; horizontal position is never
-     * rewound to `prevPos` (that rewind froze the bat for a frame and fed the
-     * CCD and `pad.vel` a teleport — the "AI paddle jump" on the player's
-     * side, seen as a stutter along the table edge). */
-    if (!held) enforcePaddleTableClearance(pad.pos, pad.normal, pad.roll, .006, PH.TABLE_Y, PH.T_HALF_WID, PH.T_HALF_LEN, pad.q);
     V3.mul(pad.vel, V3.sub(pad.vel, pad.pos, pad.prevPos), 1 / Math.max(dt, 1e-4));
     pad.poseReady = true;
     pad.swing = Math.max(0, pad.swing - dt * 4.5);
@@ -4784,6 +4857,8 @@ class Game {
      * for the contact — 0.1-0.2 m at a normal swipe speed. */
     this.updatePlayerPaddle(dtReal, dt);
     this.watchdogArmFrame();
+    // A point reached inside the physics loop starts moving on the next frame.
+    this.advancePointBall(dt);
 
     // physics substeps
     if (this.ball.live) {
@@ -5029,11 +5104,13 @@ class Game {
     const STRIKE_FULL = 0.15;
     // помощь хосту (g.hintContact): заевшемуся игроку мяч зеленеет заранее
     const STRIKE_LEAD = this.hintContact ? 0.45 : 0.30;
-    if (this.ball.live || this.state === GS.SERVE_READY || this._idleStill) {
+    const pointBall = !this.replayer?.on && (this.state === GS.POINT || this.state === GS.MATCH_END) && this._pointBall;
+    if (this.ball.live || this.state === GS.SERVE_READY || this._idleStill || pointBall) {
       const BS = (this._cal && this._cal.ballSize !== undefined) ? (0.8 + this._cal.ballSize * 0.5) : 1;
-      M4.compose(tmp.m, this.ball.p, this.ball.q, V3.set(tmp.scl, BS, BS, BS));
+      const visualBall = pointBall || this.ball;
+      M4.compose(tmp.m, visualBall.p, visualBall.q, V3.set(tmp.scl, BS, BS, BS));
       const hints = this.hintContact !== false && !(typeof gameplayCalibrationLocked === 'function' && gameplayCalibrationLocked(this));
-      const gk = shadowPass || !hints ? 0 : strikeGreenTint(this._strike, STRIKE_LEAD, STRIKE_FULL);
+      const gk = shadowPass || !hints || pointBall ? 0 : strikeGreenTint(this._strike, STRIKE_LEAD, STRIKE_FULL);
       if (gk > 0.02) {
         let gm = this._ballGreen;
         if (!gm) {
@@ -5097,12 +5174,13 @@ class Game {
    *  геометрии вдвое меньше. */
   drawContactShadows() {
     if (this.state === GS.MENU && this.lobbyScene?.active) { this.lobbyScene.drawShadows(); return; }
-    const R = this.R, S = this.scene, b = this.ball;
+    const pointBall = !this.replayer?.on && (this.state === GS.POINT || this.state === GS.MATCH_END) && this._pointBall;
+    const R = this.R, S = this.scene, b = pointBall || this.ball;
     const TY = PH.TABLE_Y, HW = PH.T_HALF_WID + 0.05, HL = PH.T_HALF_LEN + 0.05;
     S.blob(R, 0, 0, 0, 0, 1, 0.12, 1);                       // under the table
     const onTable = (x, z) => Math.abs(x) < HW && Math.abs(z) < HL;
 
-    if ((b.live || this.state === GS.SERVE_READY) && onTable(b.p.x, b.p.z) && b.p.y > TY - 0.02) {
+    if ((pointBall || b.live || this.state === GS.SERVE_READY) && onTable(b.p.x, b.p.z) && b.p.y > TY - 0.02) {
       S.blob(R, b.p.x, b.p.y, b.p.z, TY, 0.085, 0.40, 1);
     }
     /* Ракетки: одно пятно, только когда ракетка над столом. Тень за его

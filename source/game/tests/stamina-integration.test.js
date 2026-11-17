@@ -376,6 +376,12 @@ test('contact event IDs do not change during throttled energy publications; both
   assert.equal(both.contacts.length, 2); assert.equal(both.contacts[0].eventId, near.eventId);
   assert.equal(both.contacts[1].side, -1); assert.equal(both.contacts[1].stroke, 'PUSH');
   close(both.contacts[1].kmh, Math.sqrt(17.25) * 3.6); close(both.contacts[1].rps, 50 / lib.TAU);
+  assert.deepEqual(json(both.contacts[1].velocity), { x: .5, y: 1, z: 4 });
+  assert.deepEqual(json(both.contacts[1].angularVelocity), { x: 30, y: -40, z: 0 });
+  V3.set(g.ball.v, -3, -1, 0); V3.zero(g.ball.w); // later flight or bounce is not a new contact
+  both.contacts[1].velocity.y = 99; // snapshots cannot mutate the engine's record
+  assert.deepEqual(json(g.getMatchSnapshot().contacts[1].velocity), { x: .5, y: 1, z: 4 });
+  assert.deepEqual(json(g.getMatchSnapshot().contacts[1].angularVelocity), { x: 30, y: -40, z: 0 });
   assert.equal(g.lastShotInfo.side, 1, 'far-side publication does not overwrite the player journal');
   g.stamina[0] = { energy: 50, fatigue: 10, regenDelayRemaining: 0, low: false };
   f.events.length = 0; f.tick(1);
@@ -515,4 +521,28 @@ test('AI serve proposals are free, failed proposals stay free, validated physica
       f.tick(.01); close(g.stamina[1].energy, 100 - paid); assert.equal(g.stats.aiShots, 1);
     }
   }
+});
+
+test('released admitted rally gesture stays pending in diagnostics while it can still hit', () => {
+  const f = fixture(), g = f.g;
+  g.rallyBounces = [];
+  swing(f);
+  assert.equal(g.swipe.pressZone.accepted, true);
+  assert.equal(g.stats.shots, 0);
+  const release = g.swipe.releaseSimTime;
+  g.strokeTime = release + .30; g.time = g.swipeReleasedAt + .30;
+  assert.ok(g.playerStrokeIntent(false), 'gameplay still allows the released stroke');
+  const decisions = [];
+  g.logInput = (type, extra) => { if (type === 'decision') decisions.push(extra.outcome.reason); };
+  g.ball.p.z = g.player.pos.z + .5;
+  g.rallyBounces = [1];
+  g.logNoStrokeIntent(false);
+  assert.ok(!decisions.includes('TIMING_EARLY'), 'diagnostics must not reject a still-eligible stroke');
+  g.updateShotDiagnostics();
+  assert.equal(g.shotJournal.latest.outcome, 'pending');
+  close(g.shotJournal.latest.deadlineSim, release + lib.CONTACT_CORRIDOR_RULES.strokeReleaseWindowSec);
+  g.strokeTime = release + lib.CONTACT_CORRIDOR_RULES.strokeReleaseWindowSec + .01;
+  g.time = g.swipeReleasedAt + lib.CONTACT_CORRIDOR_RULES.strokeReleaseWindowSec + .01;
+  g.updateShotDiagnostics();
+  assert.equal(g.shotJournal.latest.outcome, 'no_contact');
 });
