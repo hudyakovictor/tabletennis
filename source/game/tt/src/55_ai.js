@@ -108,8 +108,14 @@ const AI_TACTICS = {
  * идентичность вращения (ракетка слишком быстрая, чтобы мяч успел закрутиться
  * назад) — контракт ai-serve-contract это ловит. Сила уровня живёт в розыгрыше. */
 const AI_SERVE_CAPS = [
-  { vmag: 4.4, orbit: PH.T_HALF_WID * 0.44 },  // EASY
-  { vmag: 6.0, orbit: PH.T_HALF_WID * 0.55 },  // MEDIUM
+  /* EASY used to serve at 4.4 m/s of bat, which physically could not carry
+   * the second bounce past ~0.5 m from the net: the ball bounced twice and
+   * died almost in place (the "соперник подал, мяч потерял скорость и скачет
+   * на месте" complaint; measured p50 second-bounce depth 0.48 m, 107/120
+   * serves shorter than 0.70 m). 4.9 m/s keeps the level's gentle pace but
+   * lets the ball reach the receiver (p50 ~0.75 m, measured). */
+  { vmag: 4.9, orbit: PH.T_HALF_WID * 0.44 },  // EASY
+  { vmag: 6.2, orbit: PH.T_HALF_WID * 0.55 },  // MEDIUM
   { vmag: 9.6, orbit: PH.T_HALF_WID * 0.70 },  // HARD
   { vmag: 11.0, orbit: PH.T_HALF_WID * 0.80 }, // WTF
 ];
@@ -513,7 +519,7 @@ class OpponentAI {
       diagnostic.reason = 'second_bounce_out';
     else if (diagnostic.postBounceApex > AI_SERVE_APEX) diagnostic.reason = 'post_bounce_apex';
     else if ((cap.vmag <= 6 || racket.stroke.id === 'SERVE_SIDE') &&
-      Math.abs(o.b2.x) > PH.T_HALF_WID * (cap.vmag <= 6 ? 0.60 : 0.66)) diagnostic.reason = 'width_cap';
+      Math.abs(o.b2.x) > PH.T_HALF_WID * (cap.vmag <= 6 ? 0.60 : 0.90)) diagnostic.reason = 'width_cap';
     else diagnostic.reason = 'ok';
     return diagnostic;
   }
@@ -905,7 +911,7 @@ class OpponentAI {
         const tweaks = ctx.effortBudget && diagnostic.reason === 'second_bounce_missing'
           ? [[0, centerYaw, capScale], [.10, centerYaw, capScale * .85], [.20, centerYaw, capScale * .70], [-.10, centerYaw, capScale]]
           : diagnostic.reason === 'width_cap'
-          ? [[0, -lateral * 0.12, 1], [0, lateral * 0.12, 1], [0, -lateral * 0.26, 1], [0, lateral * 0.26, 1]]
+          ? [[0, -lateral * 0.45, 1], [0, lateral * 0.45, 1], [0, -lateral * 0.90, 1], [0, lateral * 0.90, 1]]
           : diagnostic.reason === 'post_bounce_apex'
             ? [[0.20, yaw, 0.85], [0.20, yaw, 0.75], [0.50, yaw, serveType === 'SERVE_NO_SPIN' ? 0.80 : 0.55], [0.60, yaw, 0.50]]
           : [[-0.08, 0, 0.88], [0.08, 0, 0.88], [-0.16, 0, 0.72], [0.16, 0, 0.72]];

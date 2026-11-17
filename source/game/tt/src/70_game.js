@@ -530,8 +530,11 @@ class Game {
       // toss is still rising towards its apex, arm `pendingServeDrop` when the
       // press is horizontally aligned with the toss column.
       if ((servePress || serveReadyPress) && !this.swipe.pressZone.accepted) {
-        const rising = serveReadyPress || (this.ball && this.ball.v && this.ball.v.y >= -0.05);
-        if (rising && canArmEarlyServeSwipe(this.project(this.ball.p, {}), n, rect.width, rect.height, pointerType)) {
+        /* Late or off-column presses arm the same deferred serve: the zone is
+         * re-evaluated once the toss is actually falling (promotePendingServe-
+         * Zone), so the player never loses a point because the finger was not
+         * exactly on the ball when they started the motion. */
+        if (canArmEarlyServeSwipe(this.project(this.ball.p, {}), n, rect.width, rect.height, pointerType)) {
           this.swipe.pressZone.pendingServeDrop = true;
           this.swipe.pressZone.singleGestureToss = serveReadyPress;
         }
@@ -3389,6 +3392,18 @@ class Game {
       if (b.v.y < 0) this.logPressRejection('SERVE_TOSS_LOW', { tossRise: this.tossRiseNow() });
       return;
     }
+    /* ITTF 2.06.5: the ball must be above the playing surface when struck.
+     * A late toss eventually falls past the table behind the end line; the
+     * player could still reach it there and the engine happily fired a
+     * 6.6 m/s serve DOWN into the floor (measured on the 0.42 s late tap),
+     * which looked like a broken shot and scored as a fault. Reject the
+     * contact instead: the toss is dead and the normal dead-ball rule ends
+     * the point, visibly and honestly. */
+    if (serveCtx && b.p.y < PH.TABLE_Y + PH.R) {
+      this.debugRecording && this.diagnosticPhysicsGate('serve_below_table', { ballY: b.p.y });
+      this.logPressRejection('SERVE_BELOW_TABLE', { ballY: b.p.y });
+      return;
+    }
     let hit = null, gateDetail = null;
 
     if (serveCtx) {
@@ -4049,14 +4064,18 @@ class Game {
       tx = lerp(tx, b.p.x, k);
       ty = lerp(ty, b.p.y - tracking.underBall, k);
       tz = lerp(tz, b.p.z + tracking.zOffset, k);
-      let offset;
-      if (b.v.y > 0) {
-        const rise = clamp((b.p.y - startY) / (apexY - startY), 0, 1);
-        offset = 1 - (1 - rise) * (1 - rise);
-      } else {
-        const fall = clamp((apexY - b.p.y) / Math.max(.01, apexY - PH.TABLE_Y - windup.contactY), 0, 1);
-        offset = 1 - fall * fall;
-      }
+      /* One visible windup, over by the apex. The old curve kept the 0.55 m
+       * pull-back through the whole descent and released it only at the
+       * table, so a legal strike just after the apex met a bat half a metre
+       * behind the ball; the contact then snapped the bat forward in a single
+       * frame (serve-motion probe: 0.17-0.77 m delta on every serve — the
+       * "ракетка дёргается на подаче" complaint). A serve may only be struck
+       * while the ball is FALLING, so the whole legal contact window now has
+       * the bat at the toss, and the pull-back lives on the ascent where it
+       * cannot displace the contact. sin() keeps the motion continuous at both
+       * ends (0 at release, 0 at the apex, peak mid-rise). */
+      const rise = b.v.y > 0 ? clamp((b.p.y - startY) / Math.max(.01, apexY - startY), 0, 1) : 1;
+      const offset = b.v.y > 0 ? Math.sin(Math.PI * rise) : 0;
       tz += windup.amplitude * offset;
       ty -= windup.yDrop * offset;
     }
@@ -4160,7 +4179,10 @@ class Game {
     this._prep = servingNow ? expSmooth(this._prep || 0, (this.pointerDown && !intent) ? 1 : 0, 14, dt) : 0;
 
     let aimYaw = 0, aimPitch = 0;
-    if (fine && !intent) {
+    /* The serve face is owned by the toss, not by a pointer that is nearly
+     * stationary while the player waits for the ball. Aiming it from the ball
+     * here made the blade rotate on its own during the toss. */
+    if (fine && !intent && !servingNow) {
       const trail = this.mouseTrail;
       if (trail && trail.length >= 2 && this.time - trail[trail.length - 1].t < .18) {
         const a = trail[Math.max(0, trail.length - 6)], b = trail[trail.length - 1];
@@ -4225,7 +4247,12 @@ class Game {
     let want = this._wantN || (this._wantN = V3.new(0, -0.05, -1));
     const rest = this._restN || (this._restN = V3.new());
     faceFromWrist(rest, this.padYaw, this.padPitch, 1);
-    if (m) {
+    /* Keep a still, readable face through the whole serve toss. Deriving a
+     * stroke face from the pointer every frame made the blade flip up to 84°
+     * between frames (serve-motion probe) and then snap to the solved contact
+     * pose: the "ракетка странно дёргается на подаче" complaint. The solved
+     * face is applied at contact; until then the serve shows the ready face. */
+    if (m && (!servingNow || isRealStroke(m, true))) {
       const ctx = {
         side: 1, playerControlled: !this.demoMode, grip: this.settings?.grip, hand: this.settings?.hand, forehand: pad.forehand, isServe: servingNow,
         ball: { x: pad.pos.x, y: pad.pos.y, z: pad.pos.z },
@@ -4679,6 +4706,11 @@ class Game {
     this.swipe.pressZone = { accepted: true, via: 'demo', shape: MATCH_RULES.zoneShape,
       score: 0, along: 0, across: 0, reason: null, pointerType: 'demo',
       radius: MATCH_RULES.pressRadiusPx,
+      /* The demo bypasses pointerdown, but every admission gate still checks
+       * that the zone belongs to the CURRENT shot. Without shotId the attract
+       * bot could never hit: it served into the void and lost 0-11 with
+       * `stats.shots === 0` on every run. */
+      shotId: this.shotId,
       pressX: x0, pressY: y0, vw: rectD ? rectD.width : 1, vh: rectD ? rectD.height : 1 };
     this._demoGesture = {
       x0, y0, x1, y1,
