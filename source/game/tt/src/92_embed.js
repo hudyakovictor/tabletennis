@@ -638,7 +638,7 @@ const showTip = (text) => { if (text) tip = { text, until: g.time + 4.6 }; };
       switch (m.type) {
         case 'net': netCommand(m); break;
         case 'sleep': g.cancelPendingCapture(); g.cancelInput?.(); g.clearContactFlashes?.(); g.lobbyScene?.suspend(); g._ttSleeping = true; g.syncAudioQuiet(); break;
-        case 'wake': break;
+        case 'wake': g._ttSleeping = false; break;
         case 'previewOpen':
           leaveLobby();
           previewRequestId = Number.isFinite(m.requestId) ? m.requestId : previewRequestId;
