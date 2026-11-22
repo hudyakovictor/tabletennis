@@ -451,7 +451,10 @@ class Scene {
     // downsample to the old POT size for the legacy context.
     const panoW = R.isGL2 ? 2880 : 2048, panoH = R.isGL2 ? 1440 : 1024;
     if (A.panorama) arenaImageTex(R, A.panorama, panoW, panoH, (tx) => {
-      this.tex.panorama = tx; this.mat.panorama.tex = tx; this.mat.courtGround.tex = tx; this.hasPanorama = true;
+      this.tex.panorama = tx; this.mat.panorama.tex = tx; this.mat.courtGround.tex = tx;
+      // The panorama is projected on the room box. Without that geometry the
+      // plate has no surface to live on, so the procedural hall stays instead.
+      this.hasPanorama = !!this.mesh.room;
     }, () => { this.panoramaSettled = true; });
 
     /* ---- table + room geometry ---- */
@@ -642,7 +645,7 @@ class Scene {
       : (mesh, mat4, mat) => R.draw(mesh, mat4, mat);
     const M = this.M, me = this.mesh, ma = this.mat;
     if (!shadowPass) {
-      if (this.hasPanorama) {
+      if (this.hasPanorama && me.room) {
         // One stationary environment and one projection for both the image
         // and the model: translation during the orbit produces real parallax.
         d(me.room, M.room, ma.panorama);
