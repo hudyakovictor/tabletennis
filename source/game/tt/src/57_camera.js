@@ -181,112 +181,33 @@ function pointerBladeSolve(rig, aspect, px, py, opts) {
   const stance = PADDLE_STANCE_Z;
   const rs = REACH_SHELL;
   const limFor = (zc) => paddleLimitsFor(zc);
-  /* (1) пробная точка на стойке */
   if (!_pbsW) _pbsW = { x: 0, y: 0, z: 0, t: 0 };
-  if (!unprojectToPlane(rig, aspect, px, py, stance, _pbsW)) {
-    o.tx = PADDLE_HOME.x; o.ty = PADDLE_HOME.y; o.tz = stance;
-    o.reachFwd = 0; o.exact = true; o.zByPointer = false; return o;
-  }
-  const stanceLimits = limFor(stance);
-  // Meet the boundary continuously. Switching to an already-saturated
-  // height here made a one-pixel lift jump the depth by several centimetres.
-  const boundaryY = clamp(_pbsW.y, PH.TABLE_Y + Math.max(rs.yLoHard, stanceLimits.yLo),
-    PH.TABLE_Y + Math.min(rs.yHiHard, stanceLimits.yHi));
-  /* (3) bisection: найти z, где луч даёт высоту, допустимую на ЭТОЙ глубине
-   * (лимита низа над столом/за краем и потолка руки). y(z) монотонно растёт
-   * с z (глубже стоишь — выше на экране та же точка). */
-  const yAt = (z) => { const w = _pbsW2 || (_pbsW2 = {}); return unprojectToPlane(rig, aspect, px, py, z, w) ? w.y : NaN; };
-  const inShell = (z, y) => {
-    const lim = limFor(z);
-    const lo = PH.TABLE_Y + Math.max(rs.yLoHard, lim.yLo);
-    const hi = Math.min(PH.TABLE_Y + rs.yHiHard, PH.TABLE_Y + lim.yHi);
-    return y >= lo - 1e-6 && y <= hi + 1e-6;
-  };
-  let z = stance, exact = true;
-  const ySt = yAt(stance);
-  o.exact = true;
-  if (!inShell(stance, ySt)) {
-    /* биссекция по z: y монотонно растёт с z */
-    let a = PADDLE_LIMITS.zStepIn, b = PADDLE_LIMITS.zFar;
-    const ya = yAt(a), yb = yAt(b);
-    const wantY = clamp(boundaryY, Math.min(ya, yb), Math.max(ya, yb));
-    for (let i = 0; i < 24; i++) {
-      const mid = 0.5 * (a + b), ym = yAt(mid);
-      if (ym > wantY) b = mid; else a = mid;
-    }
-    z = 0.5 * (a + b);
-    const yZ = yAt(z), limZ = limFor(z);
-    const lo = PH.TABLE_Y + Math.max(rs.yLoHard, limZ.yLo);
-    const hi = Math.min(PH.TABLE_Y + rs.yHiHard, PH.TABLE_Y + limZ.yHi);
-    exact = yZ >= lo - 5e-3 && yZ <= hi + 5e-3;
-    if (!exact) {
-      /* луч не проходит оболочку нигде — парковка на ближайшей физической
-       * точке: потолок/пол при максимально возможной глубине */
-      const over = yZ > hi;
-      z = over ? PADDLE_LIMITS.zStepIn : PADDLE_LIMITS.zFar;
-      const limP = limFor(z);
-      const yP = yAt(z);
-      const loP = PH.TABLE_Y + Math.max(rs.yLoHard, limP.yLo);
-      const hiP = Math.min(PH.TABLE_Y + rs.yHiHard, PH.TABLE_Y + limP.yHi);
-      o.ty = clamp(yP, loP, hiP);
-      o.exact = false;
-    }
-  }
-  if (exact) {
-    /* точка на выбранной глубине */
-    const w = _pbsW3 || (_pbsW3 = {});
-    unprojectToPlane(rig, aspect, px, py, z, w);
-    o.ty = w.y;
-  }
-  const w2 = _pbsW4 || (_pbsW4 = {});
-  unprojectToPlane(rig, aspect, px, py, z, w2);
-  o.tx = softSat(w2.x, -rs.xSoft, rs.xSoft, -rs.xHard, rs.xHard);
-  /* край по x — зажим руки: курсор ушёл за плечо, клинок на пределе пиннится.
-   * Это честная граница, а не расхождение — помечаем как пин-зону. */
-  if (o.exact && Math.abs(w2.x) > rs.xSoft + 1e-9) { o.exact = false; o.pinned = Math.sign(w2.x); }
-  o.tz = z;
-  /* An ADMITTED press knows the depth of the ball it was stamped for. The
-   * shell above is a camera-map heuristic (it keeps the *cursor* inside a
-   * hand-shaped box); it must not overrule the real depth of a live ball.
-   * Without this the screen ray and the ball share a pixel but sit 0.6-0.8 m
-   * apart in Z, so the oval admits the press and the 3D blade still never
-   * enters the ball's physical envelope. The point stays ON THE RAY (under
-   * the finger); only its depth is chosen by the ball, not by the shell. */
+
+  let z = stance;
   if (opts && Number.isFinite(opts.forceZ)) {
-    const zf = clamp(opts.forceZ, PADDLE_LIMITS.zStepIn, PADDLE_LIMITS.zFar);
-    const wF = _pbsW6 || (_pbsW6 = {});
-    /* The caller only passes this for a press the gate already ADMITTED, so
-     * the pointer is inside the stamped oval around this very ball: the ray
-     * point at the ball's depth is within a bat-length of it by construction.
-     * Keep it exactly on the ray; the physical limits are applied later by
-     * the game (that clamp is what keeps the blade off the table). */
-    if (unprojectToPlane(rig, aspect, px, py, zf, wF)) {
-      o.tx = wF.x;
-      o.ty = wF.y;
-      o.tz = zf;
-      o.forcedZ = true;
-      o.pinned = Math.abs(wF.x) > rs.xSoft + 1e-9 ? Math.sign(wF.x) : 0;
-      o.exact = !o.pinned;
-    }
+    z = clamp(opts.forceZ, PADDLE_LIMITS.zStepIn, PADDLE_LIMITS.zFar);
+    o.forcedZ = true;
+  } else if (opts && Number.isFinite(opts.zFoot) && opts.zFoot < stance) {
+    z = clamp(opts.zFoot, PADDLE_LIMITS.zStepIn, PADDLE_LIMITS.zFar);
   }
-  /* короткий мяч: шаговый ассист может углубить плоскость, но только если
-   * указатель там физически достижим (та же проверка, что и у солвера) */
-  if (!o.forcedZ && opts && Number.isFinite(opts.zFoot) && opts.zFoot < o.tz) {
-    const yF = yAt(opts.zFoot);
-    if (Number.isFinite(yF) && inShell(opts.zFoot, yF)) {
-      const wF = _pbsW5 || (_pbsW5 = {});
-      unprojectToPlane(rig, aspect, px, py, opts.zFoot, wF);
-      o.tx = softSat(wF.x, -rs.xSoft, rs.xSoft, -rs.xHard, rs.xHard);
-      o.ty = wF.y; o.tz = opts.zFoot;
-      // The step-in changes the ray intersection: metadata must describe
-      // this final depth, not the discarded stance-plane intersection.
-      o.pinned = Math.abs(wF.x) > rs.xSoft + 1e-9 ? Math.sign(wF.x) : 0;
-      o.exact = !o.pinned;
-    } else {
-      /* указатель важнее ассиста: глубже плоскость не ставим — см. комментарий
-       * у depthForPointer («никогда не игнорируй указатель»). */
-    }
+
+  if (!unprojectToPlane(rig, aspect, px, py, z, _pbsW)) {
+    o.tx = PADDLE_HOME.x; o.ty = PADDLE_HOME.y; o.tz = z;
+    o.reachFwd = Math.max(0, stance - z); o.exact = true; o.zByPointer = false; return o;
   }
+
+  const lim = limFor(z);
+  const lo = PH.TABLE_Y + Math.max(rs.yLoHard, lim.yLo);
+  const hi = Math.min(PH.TABLE_Y + rs.yHiHard, PH.TABLE_Y + lim.yHi);
+
+  o.tx = softSat(_pbsW.x, -rs.xSoft, rs.xSoft, -rs.xHard, rs.xHard);
+  o.ty = o.forcedZ ? _pbsW.y : clamp(_pbsW.y, lo, hi);
+  o.tz = z;
+
+  const xPinned = Math.abs(_pbsW.x) > rs.xSoft + 1e-9;
+  const yPinned = !o.forcedZ && (_pbsW.y < lo - 1e-6 || _pbsW.y > hi + 1e-6);
+  o.pinned = xPinned ? Math.sign(_pbsW.x) : 0;
+  o.exact = !xPinned && !yPinned;
   o.reachFwd = Math.max(0, stance - o.tz);
   o.zByPointer = Math.abs(o.tz - stance) > 1e-6;
   return o;

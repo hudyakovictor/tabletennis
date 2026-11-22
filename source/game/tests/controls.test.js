@@ -356,9 +356,9 @@ test('green ball ramps by time-to-contact instead of burning one frame', () => {
 
 test('the green plateau in the shipped constants is long enough to catch', () => {
   const fs = require('node:fs'), path = require('node:path');
-  const src = fs.readFileSync(path.join(__dirname, '..', 'tt/src/70_game.js'), 'utf8');
+  const src = fs.readFileSync(path.join(__dirname, '..', 'tt/src/65_game_render.js'), 'utf8');
   const full = /const STRIKE_FULL = ([\d.]+)/.exec(src);
-  const lead = /const STRIKE_LEAD = this\.hintContact \? ([\d.]+) : ([\d.]+)/.exec(src);
+  const lead = /const STRIKE_LEAD = (?:this|game)\.hintContact \? ([\d.]+) : ([\d.]+)/.exec(src);
   assert.ok(full && lead, 'константы зелёного мяча на месте');
   /* Плато не меньше 120 мс: окно приёма открывается на eta ~0.09–0.18 с,
      и именно плато решает, увидит ли игрок зелёный или один кадр. */
