@@ -40,7 +40,7 @@ function fixture(width = 390, height = 844, dpr = 2) {
   const scene = { mesh: Object.fromEntries(['ball', 'box', 'sphere', 'capsule', 'blade', 'rubber', 'handle', 'quad'].map(n => [n, n])),
     mat: { ball: { color: [1, 1, 1], emissive: [0, 0, 0] }, courtGround: { asphalt: {} },
       bladeWood: {}, rubberRed: {}, rubberBlack: {}, handle: {} },
-    _tmp: { m: M4.create(), scl: V3.new() }, hasPanorama: true,
+    _tmp: { m: M4.create(), scl: V3.new() }, hasPanorama: false,
     panoramaSettled: true, asphaltSettled: true, standsSettled: true,
     drawStatic() {}, drawNet() {}, blob() {} };
   const pad = z => ({ pos: V3.new(0.4, 1.1, z), normal: V3.new(0, 0, -Math.sign(z)), q: Q.new(),
@@ -76,9 +76,9 @@ function fixture(width = 390, height = 844, dpr = 2) {
   return { ...lib, g, R, scene, canvas, window, document, events, images, messages, draws, presented, controller, prepare, launch, step, gameplay };
 }
 
-test('lobbyReady requires settled textures and a presented prepared scene; waiting bots cannot rally', () => {
+test('lobbyReady requires settled stands/rackets and a presented prepared scene; waiting bots cannot rally', () => {
   const f = fixture(), identity = f.g.ball, before = f.gameplay();
-  f.scene.panoramaSettled = false;
+  f.scene.standsSettled = false;
   assert.equal(f.controller().prepare({ intro: true, requestId: 17 }), true);
   assert.equal(f.messages.length, 0, 'preparation is not render readiness');
   f.g.render();
@@ -86,7 +86,7 @@ test('lobbyReady requires settled textures and a presented prepared scene; waiti
   assert.equal(f.messages.length, 0);
   assert.equal(f.draws.some(d => d.mesh === 'ball'), false, 'the splash owns the only visible ball');
   assert.equal(f.controller().launch({ requestId: 17, x: 0.5, y: 0.48, diameter: 1 }), false);
-  f.scene.panoramaSettled = true; f.R.gl.isContextLost = () => true; f.g.render();
+  f.scene.standsSettled = true; f.R.gl.isContextLost = () => true; f.g.render();
   assert.equal(f.messages.length, 0, 'an invalid GPU is not a ready scene');
   f.R.gl.isContextLost = () => false; f.scene.racketsSettled = false; f.g.render();
   assert.equal(f.messages.length, 0, 'readiness includes the required racket atlas');
@@ -302,7 +302,8 @@ test('arena image loading settles honestly on upload, onerror, decode/upload fai
   assert.equal(scene.standsSettled || scene.panoramaSettled, false);
   pending[0].onerror(); pending[1].onload();
   assert.equal(scene.standsSettled && scene.panoramaSettled, true);
-  assert.equal(scene.hasPanorama, true);
+  assert.equal(scene.hasPanorama, false, 'a removed room cannot be revived by a legacy panorama asset');
+  assert.equal(scene.mesh.room, undefined);
   f.window.__TT_ARENA = {};
   const fallback = new f.Scene(f.R);
   assert.equal(fallback.standsSettled && fallback.panoramaSettled, true);
@@ -324,11 +325,11 @@ test('real embed bridge trusts only its parent, wakes for preparation and preser
   send('lobby', { intro: true, requestId: 17 }, {});
   assert.equal(f.g._ttSleeping, true); assert.equal(f.g.lobbyScene, undefined);
   send('lobby', { intro: true, requestId: 1.5 }); assert.equal(f.g.lobbyScene, undefined);
-  f.scene.panoramaSettled = false;
+  f.scene.standsSettled = false;
   send('lobby', { intro: true, requestId: 17 });
   assert.equal(f.g._ttSleeping, false); assert.equal(f.controller().phase, 'waiting');
   assert.equal(f.messages.some(m => m.type === 'lobbyReady'), false);
-  f.scene.panoramaSettled = true; f.g.render();
+  f.scene.standsSettled = true; f.g.render();
   assert.equal(f.messages.filter(m => m.type === 'lobbyReady').length, 1);
   send('lobby'); assert.equal(f.controller().phase, 'waiting');
   send('lobbyLaunch', { requestId: 18, x: 0.5, y: 0.48, diameter: 1 });
@@ -345,7 +346,11 @@ test('real embed bridge trusts only its parent, wakes for preparation and preser
     if (f.g.state !== f.GS.MENU) f.g.returnToMenu();
     send('lobby'); assert.equal(f.controller().active, true);
     const eye = { ...f.g.camPos };
-    send(type); assert.equal(f.controller().active, false, type);
+    if (type === 'train') {
+      send(type); assert.equal(f.controller().active, true, 'invalid training intent cannot cancel the lobby');
+      send(type, { requestId: 1, mode: 'course' });
+    } else send(type);
+    assert.equal(f.controller().active, false, type);
     if (type === 'prematch') {
       f.g.updateCamera(0);
       assert.ok(f.V3.dist(eye, f.g.camPos) < 1e-8, 'prematch begins at the current lobby view');

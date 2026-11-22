@@ -80,7 +80,15 @@ class TrainingAttemptRecorder {
   event(type, real, simulation, data = {}) {
     this.push(real, simulation, true);
     const event = { type, real, simulation, ...data };
-    this.events.push(event); if (this.events.length > 64) this.events.shift();
+    this.events.push(event);
+    if (this.events.length > 64) {
+      let contactAt = -1;
+      for (let i = this.events.length - 1; i >= 0; i--) {
+        if (this.events[i].type === 'contact' && this.events[i].side === 1) { contactAt = i; break; }
+      }
+      // Keep the last player contact when later bounce noise fills the journal.
+      this.events.splice(contactAt === 0 ? 1 : 0, 1);
+    }
     if (type === 'contact' && data.side === 1) this.lastContact = this.input.slice();
   }
   gesture(swipe, real, simulation, contact = false) {

@@ -115,7 +115,7 @@ async function inspectScene(frame, label, captureDir) {
         };
       });
       const frame = await appFrame(page);
-      await frame.waitForFunction(() => window.__game && window.__game.scene.hasPanorama, { timeout: 45000 });
+      await frame.waitForFunction(() => window.__game?.scene.racketsSettled, { timeout: 45000 });
       const result = await frame.evaluate(() => {
         const g = window.__game, R = g.R, gl = R.gl, scene = g.scene;
         g.paused = true; g.reducedMotion = true;
@@ -143,9 +143,11 @@ async function inspectScene(frame, label, captureDir) {
           views.push({ darkened, total, hash, eye });
         }
         scene._shadowMat0.opacity = 1;
-        return { isGL2: R.isGL2, views, glError: gl.getError(), draws: R.drawCalls };
+        return { isGL2: R.isGL2, views, glError: gl.getError(), draws: R.drawCalls,
+          hasPanorama: scene.hasPanorama, hasRoom: !!scene.mesh.room };
       });
       assert.equal(result.isGL2, !gl1, `WebGL version ${width}x${height}`);
+      assert.deepEqual([result.hasPanorama, result.hasRoom], [false, false], 'retired panorama geometry stays absent');
       assert.equal(result.glError, 0, 'render produced a WebGL error');
       assert.ok(result.draws > 0);
       assert.ok(new Set(result.views.map(v => v.hash)).size > 2, 'the fixed environment changes during a 360° orbit');
@@ -211,7 +213,7 @@ async function inspectScene(frame, label, captureDir) {
         const g = window.__game, c = g.lobbyScene;
         g.render();
         return { phase: c.phase, hits: c.hits, ready: c.readySent,
-          settled: g.scene.panoramaSettled && g.scene.standsSettled && g.scene.racketsSettled,
+          settled: g.scene.standsSettled && g.scene.racketsSettled,
           isGL2: g.R.isGL2, quality: g.settings.quality,
           error: g.R.gl.getError(), render: window.lobbyRenders.at(-1) };
       });
@@ -273,7 +275,7 @@ async function inspectScene(frame, label, captureDir) {
         return { panorama: g.scene.hasPanorama, shadow: !!g.scene.tex.tableGroundShadow,
           lobby: g.lobbyScene.active, error: g.R.gl.getError() };
       });
-      assert.deepEqual(match, { panorama: true, shadow: true, lobby: false, error: 0 });
+      assert.deepEqual(match, { panorama: false, shadow: true, lobby: false, error: 0 });
       assert.deepEqual(errors, []);
       await inspectScene(arena, `hub-${width}x${height}-dpr${dpr}-${gl1 ? 'gl1' : 'gl2'}-${quality}`, captureDir);
       if (captureDir) await lobby.screenshot({ path: path.join(captureDir, `hub-${width}x${height}-dpr${dpr}-shell.png`), fullPage: true });

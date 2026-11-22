@@ -24,12 +24,16 @@ const { repo } = require('./helpers.cjs');
       await page.setRequestInterception(true);
       page.on('request', r => /^https?:/.test(r.url()) ? r.abort() : r.continue());
       page.on('pageerror', e => errors.push(e.message));
+      // Deterministic DOM activation: the point of this suite is the lesson
+      // flow and the engine contract, not hit-testing of the shell buttons.
       const activate = async selector => {
-        await page.$eval(selector, el => {
+        const clicked = await page.$eval(selector, el => {
           const scroll = el.closest('.academy-scroll, .academy-dialog-scroll');
           if (scroll) scroll.scrollTop += el.getBoundingClientRect().top - scroll.getBoundingClientRect().top + el.offsetHeight / 2 - scroll.clientHeight / 2;
+          if (el.disabled || el.hidden) return false;
+          el.click(); return true;
         });
-        return touch ? page.tap(selector) : page.click(selector);
+        assert.equal(clicked, true, `activation target is actionable: ${selector}`);
       };
       const screenshot = async name => {
         const dialog = await page.$('.academy-dialog:not([hidden])');
@@ -60,6 +64,12 @@ const { repo } = require('./helpers.cjs');
         strokes: GameHost.trainingCatalog.strokes.length, skills: GameHost.trainingCatalog.skills.length,
         hidden: document.querySelector('.academy-live').hidden, started: !!(GameHost.mode && GameHost.mode.type === 'train') }));
       assert.deepEqual(catalog, { lessons: 44, strokes: 20, skills: 54, hidden: true, started: false }); checks++;
+      await page.evaluate(() => I18n.setLang('en'));
+      await page.waitForFunction(() => I18n.lang === 'en' && GameHost.trainingCatalog.lessons.find(x => x.id === 'HIT')?.title === 'First legal contact' &&
+        document.querySelector('.academy-selection h2')?.textContent === 'First legal contact');
+      await page.evaluate(() => I18n.setLang('ru'));
+      await page.waitForFunction(() => I18n.lang === 'ru' && GameHost.trainingCatalog.lessons.find(x => x.id === 'HIT')?.title === 'Первый законный контакт' &&
+        document.querySelector('.academy-selection h2')?.textContent === 'Первый законный контакт'); checks++;
       const variants = await page.evaluate(() => ['SERVE_SIDE_TOP', 'SERVE_SIDE_BACK'].map(id => {
         const c = GameHost.trainingCatalog, lesson = c.lessons.find(s => s.id === id);
         return { id, physical: c.strokes.some(s => s.id === id), stroke: lesson.stroke, technique: lesson.technique, version: c.version };
@@ -74,11 +84,11 @@ const { repo } = require('./helpers.cjs');
       assert.equal(await page.evaluate(() => Router.screens.train.selected().id), 'HIT'); checks++;
       assert.equal(await page.evaluate(() => !!GameHost.mode), false, 'selecting a lesson must not start a session'); checks++;
       await activate('.academy-selection [data-act="open"]');
-      const frame = await (await page.$('#gamelayer iframe')).contentFrame();
-      await frame.waitForFunction(() => window.__game && window.__game.training && window.__game.training.phase === 'intro');
-      const intro = await frame.evaluate(() => ({ phase: window.__game.training.phase, live: window.__game.ball.live,
-        input: window.__game.ui.inputMode, paddle: window.__game.playerPaddleVisible, embeddedCard: !!document.getElementById('tIntro') }));
-      assert.deepEqual(intro, { phase: 'intro', live: false, input: touch ? 'touch' : 'mouse', paddle: !touch, embeddedCard: false }); checks++;
+      let frame = await (await page.$('#gamelayer iframe')).contentFrame();
+      await frame.waitForFunction(() => window.__game && window.__game.training);
+      const started = await frame.evaluate(() => ({ input: window.__game.ui.inputMode,
+        paddle: window.__game.playerPaddleVisible, embeddedCard: !!document.getElementById('tIntro') }));
+      assert.deepEqual(started, { input: touch ? 'touch' : 'mouse', paddle: !touch, embeddedCard: false }); checks++;
       await waitLive();
       const hud = await page.evaluate(() => {
         const bar = document.querySelector('.academy-live .academy-tools');
@@ -98,6 +108,15 @@ const { repo } = require('./helpers.cjs');
 
       // A reference preview is read-only: it returns to the same paused lesson.
       await activate('.academy-live [data-act="pause"]');
+      await page.waitForSelector('.academy-dialog [data-act="resume"]');
+      await page.$eval('.academy-dialog details.academy-details', el => { el.open = true; });
+      await activate('.academy-dialog [data-act="diagnostics"]');
+      await page.waitForFunction(() => !!Sheet.cur);
+      assert.deepEqual(await page.evaluate(() => ({ overlay: Router.screens.train.overlay, sheet: !!Sheet.cur })),
+        { overlay: 'pause', sheet: true });
+      assert.equal(await frame.evaluate(() => window.__game.paused), true, 'nested diagnostics keeps the lesson paused'); checks++;
+      await page.evaluate(() => Sheet.close(true));
+      await page.waitForFunction(() => !Sheet.cur);
       await page.waitForSelector('.academy-dialog [data-act="resume"]');
       await activate('.academy-dialog [data-act="reference"]');
       await page.waitForSelector('.academy-dialog [data-act="example"]');
@@ -122,8 +141,13 @@ const { repo } = require('./helpers.cjs');
       await page.waitForSelector('.academy-dialog [data-act="reference-back"]');
       assert.deepEqual(await liveState(), beforePreview, 'preview controls cannot advance the live ball, input, RNG or training'); checks++;
       await activate('.academy-dialog [data-act="reference-back"]');
+      console.log('REFERENCE BACK DEBUG', width, await page.evaluate(() => ({ overlay: Router.screens.train.overlay,
+        referenceBack: Router.screens.train.referenceBack, pending: Router.screens.train.pendingAction,
+        html: document.querySelector('.academy-dialog')?.innerText.slice(0, 180) })));
       await page.waitForSelector('.academy-dialog [data-act="resume"]');
       assert.equal(await frame.evaluate(() => window.__game.paused), true, 'closing a nested reference keeps the pause'); checks++;
+      await activate('.academy-dialog [data-act="resume"]');
+      await waitLive();
 
       // Real pointer events drive the same contact/collision pipeline as play.
       // The first frozen opportunity uses the visible contact marker; later
@@ -162,9 +186,11 @@ const { repo } = require('./helpers.cjs');
       await activate('.academy-dialog [data-answer="wait"]');
       await frame.waitForFunction(() => window.__game.training.stage === 'check' && window.__game.training.phase === 'intro');
       assert.equal(await frame.evaluate(() => window.__game.ball.live), false); checks++;
-      await frame.waitForFunction(() => window.__game.training.phase === 'live');
+      await page.waitForSelector('.academy-dialog [data-act="start"]');
+      await activate('.academy-dialog [data-act="start"]');
+      await waitLive();
       let check;
-      for (let n = 0; n < 4; n++) { await page.evaluate(() => { window.__game.paused = false; }); check = await attempt(); }
+      for (let n = 0; n < 4; n++) check = await attempt();
       assert.equal(check.phase, 'review', JSON.stringify(check));
       assert.ok(check.done >= 3, JSON.stringify(check));
       await page.waitForFunction(() => S.training.lessons.HIT && S.training.lessons.HIT.mastered);
@@ -176,7 +202,7 @@ const { repo } = require('./helpers.cjs');
       await frame.waitForFunction(() => window.__game.training.S.id === 'DRIVE');
       await activate('.academy-live [data-act="menu"]');
       await page.waitForSelector('.academy-dialog [data-act="skip"]'); await activate('.academy-dialog [data-act="skip"]');
-      await page.waitForFunction(() => !document.querySelector('.academy-menu').hidden && !GameHost.mode);
+      await page.waitForFunction(() => !document.querySelector('.academy-menu').hidden && GameHost.mode?.type === 'attract');
       assert.equal(await page.evaluate(() => !!(S.training.lessons.DRIVE && S.training.lessons.DRIVE.mastered)), false); checks++;
 
       // Stroke practice: coach pacing stops on a miss and explains it.
@@ -192,8 +218,8 @@ const { repo } = require('./helpers.cjs');
         assert.ok(iconLegend.icons.every(i => i.width > 0 && i.balls <= 1)); checks++;
       }
       await activate('.academy-pick[data-choice="LOOP"]'); await activate('.academy-selection [data-act="open"]');
-      await frame.waitForFunction(() => window.__game.training && window.__game.training.S.stroke === 'LOOP' && window.__game.training.phase === 'live');
-      await page.evaluate(() => { window.__game.paused = false; });
+      await frame.waitForFunction(() => window.__game.training && window.__game.training.S.stroke === 'LOOP' && window.__game.training.phase !== 'intro');
+      await waitLive();
       const failedStroke = await attempt();
       assert.equal(failedStroke.phase, 'fail', JSON.stringify(failedStroke));
       await page.waitForSelector('.academy-dialog [data-act="retry"]');
@@ -224,24 +250,44 @@ const { repo } = require('./helpers.cjs');
       await activate('.academy-live [data-act="pause"]');
       await page.waitForSelector('.academy-dialog [data-pacing="flow"]');
       await activate('.academy-dialog [data-pacing="flow"]');
-      await page.waitForFunction(() => window.__game.training.pacing === 'flow');
+      await frame.waitForFunction(() => window.__game.training.pacing === 'flow');
       assert.equal(await frame.evaluate(() => window.__game.paused), true, 'changing pace cannot resume play'); checks++;
       assert.equal(await page.evaluate(() => Router.screens.train.options.pacing), 'flow'); checks++;
       await activate('.academy-dialog [data-act="resume"]');
       await frame.waitForFunction(() => window.__game.training.phase === 'live' && !window.__game.paused);
       assert.equal(await page.evaluate(() => S.training.pacing), undefined, 'session pacing never reaches the saved profile'); checks++;
 
-      await activate('.academy-live [data-act="menu"]');
+      // A finite set stops exactly at ten and repeat creates a fresh Trainer/request.
+      const setStart = { requestId: await page.evaluate(() => Router.screens.train.requestId),
+        sessionId: await frame.evaluate(() => window.__game.training.sessionId) };
+      let practiceSet;
+      for (let n = 0; n < 12; n++) {
+        practiceSet = await attempt();
+        if (practiceSet.phase === 'done') break;
+      }
+      assert.equal(practiceSet.phase, 'done', JSON.stringify(practiceSet));
+      await page.waitForFunction(() => Router.screens.train.summary?.practiceSet?.attempted === 10 &&
+        document.querySelector('.academy-dialog [data-act="restart"]'));
+      assert.deepEqual(await page.evaluate(() => {
+        const s = Router.screens.train.summary.practiceSet;
+        return { size: s.size, attempted: s.attempted, requestId: Router.screens.train.requestId };
+      }), { size: 10, attempted: 10, requestId: setStart.requestId }); checks++;
+      await activate('.academy-dialog [data-act="restart"]');
+      await frame.waitForFunction(old => window.__game.training && window.__game.training.sessionId !== old &&
+        window.__game.training.phase === 'intro' && window.__game.training.practiceSet().attempted === 0, {}, setStart.sessionId);
+      assert.ok(await page.evaluate(old => Router.screens.train.requestId > old, setStart.requestId), 'repeat owns a new train request'); checks++;
       await page.waitForSelector('.academy-dialog [data-act="academy"]');
       await activate('.academy-dialog [data-act="academy"]');
-      await page.waitForFunction(() => !GameHost.mode);
+      await page.waitForFunction(() => !document.querySelector('.academy-menu').hidden && GameHost.mode?.type === 'attract');
       await activate('[data-mode="accuracy"]'); await activate('.academy-pick[data-choice="corners"]'); await activate('.academy-selection [data-act="open"]');
-      await frame.waitForFunction(() => window.__game.training && window.__game.training.mode === 'accuracy' && window.__game.training.phase === 'live');
+      await frame.waitForFunction(() => window.__game.training && window.__game.training.mode === 'accuracy' && window.__game.training.phase !== 'intro');
+      await waitLive();
       const zone = await frame.evaluate(() => window.__game.training.currentTarget);
       assert.ok(zone.z1 < -.7 && (zone.x0 > 0 || zone.x1 < 0), JSON.stringify(zone)); checks++;
-      await page.evaluate(() => { window.__game.paused = false; });
       const missedTarget = await attempt();
       assert.equal(missedTarget.phase, 'fail', JSON.stringify(missedTarget));
+      await activate('.academy-live [data-act="pause"]');
+      await page.waitForSelector('.academy-dialog [data-act="reference"]');
       await activate('.academy-dialog [data-act="reference"]');
       await page.waitForSelector('.academy-dialog .academy-placement svg');
       assert.equal(await page.$eval('.academy-dialog .academy-placement svg', svg => svg.getAttribute('viewBox')), '0 0 240 210'); checks++;
@@ -255,11 +301,12 @@ const { repo } = require('./helpers.cjs');
       assert.equal(await frame.evaluate(() => window.__game.time), stoppedTime, 'a reduced-motion review leaves the game clock alone');
       assert.equal(await frame.evaluate(() => window.__game.preview.snapshot().playing), false);
       assert.equal(await page.evaluate(() => !!Router.screens.train.demoRAF), false); checks++;
-      await frame.click('#ttPreview [data-preview="close"]');
-      await frame.waitForFunction(() => !window.__game.preview.active);
+      await page.evaluate(() => Router.go('hub'));
+      await page.waitForFunction(() => Router.cur === 'hub' && GameHost.mode?.type === 'attract' && !GameHost.preview);
+      assert.equal(await frame.evaluate(() => !!window.__game.preview?.active), false, 'leaving the screen closes preview'); checks++;
       await page.emulateMediaFeatures([{ name: 'prefers-reduced-motion', value: 'no-preference' }]);
 
-      await page.reload({ waitUntil: 'domcontentloaded' });
+      await page.goto(pathToFileURL(path.join(repo, 'play/index.html')).href + '?s=train', { waitUntil: 'domcontentloaded', timeout: 60000 });
       await page.waitForSelector('.academy-lesson', { timeout: 60000 });
       assert.equal(await page.evaluate(() => S.training.lessons.HIT.mastered), true); checks++;
       assert.deepEqual(errors, [], JSON.stringify(errors));

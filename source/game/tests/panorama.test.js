@@ -1,12 +1,10 @@
-/* The background is world geometry, not a camera-centred skybox. */
+/* The arena is the procedural floor/table scene; panorama room geometry is retired. */
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const { load } = require('./helpers.cjs');
 const {
-  NIGHT_HALL, NIGHT_HALL_YAW, nightHallWorld, nightHallUV, makeNightHallRoom,
   TABLE_GROUND_SHADOW, tableGroundShadowAlpha, PH, Scene, M4, V3, FS_MAIN, FS_COMPOSITE,
 } = load(['10_math.js', '20_gl.js', '30_physics.js', '60_scene.js'], [
-  'NIGHT_HALL', 'NIGHT_HALL_YAW', 'nightHallWorld', 'nightHallUV', 'makeNightHallRoom',
   'TABLE_GROUND_SHADOW', 'tableGroundShadowAlpha', 'PH', 'Scene', 'M4', 'V3', 'FS_MAIN', 'FS_COMPOSITE',
 ]);
 const near = (a, b, tolerance = 1e-5) => assert.ok(Math.abs(a - b) < tolerance, `${a} != ${b}`);
@@ -99,45 +97,6 @@ test('material lighting retains rough-metal reflection and clamps undefined post
   assert.match(FS_COMPOSITE, /pow\(max\(col,vec3\(0\.0\)\)/);
 });
 
-test('the night hall is a fixed room whose floor meets the table at y=0', () => {
-  const room = makeNightHallRoom();
-  assert.ok(room.nv > 1000 && room.ni > 1000);
-  let minY = Infinity, maxY = -Infinity, maxR = 0;
-  for (let i = 0; i < room.nv; i++) {
-    const x = room.pos[i * 3], y = room.pos[i * 3 + 1], z = room.pos[i * 3 + 2];
-    assert.ok(Number.isFinite(x) && Number.isFinite(y) && Number.isFinite(z));
-    minY = Math.min(minY, y); maxY = Math.max(maxY, y);
-    maxR = Math.max(maxR, Math.hypot(x, z));
-  }
-  near(minY, 0, 1e-5); near(maxY, NIGHT_HALL.height, 1e-5);
-  assert.ok(maxR > Math.hypot(NIGHT_HALL.halfWidth, NIGHT_HALL.halfLength));
-  for (const value of room.uv) assert.ok(Number.isFinite(value));
-  for (let i = 0; i < room.ni; i++) assert.ok(room.idx[i] < room.nv);
-});
-
-test('night-hall UVs stay on the panorama and unwrap continuously', () => {
-  for (let a = 0; a < 360; a += 5) {
-    const t = a * Math.PI / 180, x = 3 * Math.sin(t), z = 3 * Math.cos(t);
-    for (const y of [0.2, NIGHT_HALL.captureY, 3.5]) {
-      const uv = nightHallUV(x, y, z);
-      assert.ok(Number.isFinite(uv.u) && Number.isFinite(uv.v));
-      assert.ok(uv.v >= 0 && uv.v <= 1, `v=${uv.v}`);
-    }
-  }
-});
-
-test('night-hall corners rotate as a rigid room around the table', () => {
-  const radius = Math.hypot(NIGHT_HALL.halfWidth, NIGHT_HALL.halfLength);
-  for (const [x, z] of [[NIGHT_HALL.halfWidth, NIGHT_HALL.halfLength], [-NIGHT_HALL.halfWidth, NIGHT_HALL.halfLength],
-    [NIGHT_HALL.halfWidth, -NIGHT_HALL.halfLength], [-NIGHT_HALL.halfWidth, -NIGHT_HALL.halfLength]]) {
-    const p = nightHallWorld(x, 0, z);
-    near(Math.hypot(p.x, p.z), radius, 1e-5);
-  }
-  const origin = nightHallWorld(0, 0, 0);
-  near(origin.x, 0); near(origin.z, 0); near(origin.y, NIGHT_HALL.height / 2);
-  assert.ok(Number.isFinite(NIGHT_HALL_YAW));
-});
-
 test('table shade has a broad tabletop silhouette, four contact patches and soft edges', () => {
   const s = TABLE_GROUND_SHADOW, shadow = tableGroundShadowAlpha;
   assert.ok(shadow(s.offsetX, s.offsetZ) > 0.65, 'under the tabletop');
@@ -149,12 +108,12 @@ test('table shade has a broad tabletop silhouette, four contact patches and soft
   assert.ok(shadow(s.width / 2, s.depth / 2) < 0.01, 'transparent at texture edge');
 });
 
-test('panorama room, table and shadow share one scene; fallback and shadow pass remain safe', () => {
+test('removed panorama geometry cannot suppress the fallback floor, table or shadow pass', () => {
   const s = Object.create(Scene.prototype);
   const meshNames = ['tableTop', 'tableBody', 'frame', 'frameDark', 'zinc', 'wheel', 'bolt', 'tape',
-    'markerSide', 'markerEnd', 'net', 'room', 'floor', 'quad', 'wall', 'box'];
+    'markerSide', 'markerEnd', 'net', 'floor', 'quad', 'wall', 'box'];
   s.mesh = Object.fromEntries(meshNames.map(n => [n, n]));
-  s.M = { floor: 'world', tableTop: 'top', tableBody: 'body', net: 'net', room: 'room',
+  s.M = { floor: 'world', tableTop: 'top', tableBody: 'body', net: 'net',
     markerEnd: 'end', markerSides: ['sideA', 'sideB'] };
   s.mat = { table: {}, tableBody: {}, frame: {}, frameDark: {}, zinc: {}, wheel: {}, bolt: {}, tape: {},
     markerSide: {}, markerEnd: {}, net: {}, floor: {}, stands: {}, ceiling: {}, pool: {},
@@ -163,14 +122,14 @@ test('panorama room, table and shadow share one scene; fallback and shadow pass 
   s.walls = ['wall1']; s.ceiling = 'ceiling';
   const calls = [], R = { draw: (mesh, matrix) => calls.push([mesh, matrix]), drawShadow: (mesh, matrix) => calls.push([mesh, matrix]) };
   s.hasPanorama = true; s.drawStatic(R, false);
-  assert.deepEqual(calls.slice(0, 2), [['room', 'room'], ['quad', 'shade']]);
+  assert.ok(calls.some(([mesh]) => mesh === 'floor'));
+  assert.ok(calls.some(([mesh, matrix]) => mesh === 'quad' && matrix === 'shade'));
   assert.ok(calls.some(([mesh]) => mesh === 'tableTop'));
   assert.ok(calls.some(([mesh, matrix]) => mesh === 'markerSide' && matrix === 'sideA'));
   calls.length = 0; s.hasPanorama = false; s.drawStatic(R, false);
   assert.ok(calls.some(([mesh]) => mesh === 'floor'));
   assert.ok(calls.some(([mesh, matrix]) => mesh === 'quad' && matrix === 'shade'));
-  assert.ok(!calls.some(([mesh]) => mesh === 'room'));
   calls.length = 0; s.drawStatic(R, true);
   assert.ok(calls.some(([mesh]) => mesh === 'tableTop'));
-  assert.ok(!calls.some(([mesh]) => mesh === 'room' || mesh === 'floor' || mesh === 'quad'));
+  assert.ok(!calls.some(([mesh]) => mesh === 'floor' || mesh === 'quad'));
 });
