@@ -112,20 +112,14 @@ Router.def('result', {
           ${report.levelUp ? `<button class="res-level-up" data-act="level-up" ${report.levelUpShown ? 'disabled' : ''}>${t('result.levelUpReward', { n: report.level })}</button>` : ''}
         </section>
         <section class="res-section" data-coverage="${summary.coverage}">
-          <h2>${t('result.summary')}</h2><p class="res-note">${t('result.coverage.' + summary.coverage)}</p>
-          <table class="res-table">${head('result.metric')}<tbody>
-            <tr><th scope="row">${t('result.hits')}</th>${players.map(p => `<td class="num" data-stat="hits" data-coverage="${p.coverage}">${data(p.hits, p.coverage)}</td>`).join('')}</tr>
-            <tr><th scope="row">${t('result.bestRally')}</th><td colspan="2" class="num" data-stat="best-rally" data-coverage="${summary.bestRallyCoverage}">${data(summary.bestRally, summary.bestRallyCoverage)}</td></tr>
+          <table class="res-table"><tbody>
+            <tr><th scope="row">${t('result.hits')}</th><td class="num" data-stat="hits">${data(players[0]?.hits, players[0]?.coverage)}</td></tr>
+            <tr><th scope="row">${t('result.bestRally')}</th><td class="num" data-stat="best-rally">${data(summary.bestRally, summary.bestRallyCoverage)}</td></tr>
+            ${Number.isFinite(players[0]?.speed?.max) ? `<tr><th scope="row">${t('result.maxSpeed')} <small>${t('unit.kmh')}</small></th><td class="num" data-metric="speed-max">${data(players[0].speed.max, players[0].speed.coverage, true)}</td></tr>` : ''}
           </tbody></table>
         </section>
-        <section class="res-section">
-          <h2>${t('result.strokes')}</h2>
-          ${strokes.length ? `<table class="res-table res-strokes">${head('result.stroke')}<tbody>${strokes.map(id => `<tr data-stroke="${esc(id)}"><th scope="row"><span class="res-stroke-name">${globalThis.StrokeIcons?.create(id).outerHTML || ''}<span>${t(strokeIds.includes(id) ? 'hud.stroke.' + id : 'hud.unknown')}${['none','unknown'].includes(globalThis.StrokeIcons?.profile(id).plane) ? ` <small class="res-spin-status">· ${t(globalThis.StrokeIcons.profile(id).plane === 'none' ? 'hud.noSpin' : 'hud.noSpinDataShort')}</small>` : ''}</span></span></th>${players.map(p => `<td class="num" data-coverage="${p.strokeCoverage}">${data(p.byStroke[id] ?? (p.strokeCoverage === 'complete' ? 0 : null), p.strokeCoverage)}</td>`).join('')}</tr>`).join('')}</tbody></table>` : `<p class="res-note">${t(summary.coverage === 'complete' ? 'result.noStrokes' : 'result.noStrokeData')}</p>`}
-        </section>
-        ${metrics.length ? `<section class="res-section"><h2>${t('result.ballMetrics')}</h2><p class="res-note">${t('result.metricSample')}</p><table class="res-table">${head('result.metric')}<tbody>${metrics.map(([key, stat, label]) => `<tr><th scope="row">${t(label)} <small>${t(key === 'speed' ? 'unit.kmh' : 'hud.spinUnit')}</small></th>${players.map(p => `<td class="num" data-metric="${key}-${stat}" data-coverage="${p[key].coverage}">${data(p[key][stat], p[key].coverage, true)}</td>`).join('')}</tr>`).join('')}</tbody></table></section>` : ''}
-        ${report.loot ? `<section class="res-section res-reward"><h2>${t('result.reward')}</h2><div>${Art.coin(24)}<b class="num">+${report.loot.coins}</b><span>${t('result.rewardCoins')}</span></div>${report.loot.chest ? `<div>${Art.chest('silver', 32)}<span>${Art.chestName('silver')} ${t('chest.word')}</span></div><p class="res-note">${t('result.chestSent')}</p>` : ''}</section>` : ''}
-        ${d.quests?.length ? `<section class="res-section res-quests"><h2>${t('result.questDone')}</h2>${d.quests.map(q => `<p>${esc(q.id && I18n._lookup('mission.' + q.id) ? t('mission.' + q.id) : q.t)} <small>${t(q.claimed ? 'result.questClaimed' : 'result.questReady')}</small></p>`).join('')}<p class="res-note">${t('result.questReward')}</p></section>` : ''}
-        ${analysisSheet(d)}
+        ${report.loot ? `<section class="res-section res-reward"><div>${Art.coin(22)}<b class="num">+${report.loot.coins}</b>${report.loot.chest ? `<span style="margin-left:auto;display:inline-flex;align-items:center;gap:6px">${Art.chest('silver', 24)}<span>${Art.chestName('silver')}</span></span>` : ''}</div></section>` : ''}
+        ${d.quests?.length ? `<section class="res-section res-quests">${d.quests.map(q => `<p>${esc(q.id && I18n._lookup('mission.' + q.id) ? t('mission.' + q.id) : q.t)}</p>`).join('')}</section>` : ''}
       </div></div>
       <footer class="res-btns"><button class="b3 dark" data-act="again">${Art.icon('refresh', { c: '#fff' })}${t('result.rematch')}</button><button class="b3 ${d.win ? '' : 'cyan'}" data-act="next">${t('common.next')}</button></footer>
     </div>`;

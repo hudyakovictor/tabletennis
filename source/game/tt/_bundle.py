@@ -19,7 +19,7 @@ JS_ORDER = ['05_stroke_config.js', '06_calibration.js', '03_i18n.js', '10_math.j
             '43_input_telemetry.js', '44_diagnostics.js', '44_miss_shots.js', '45_perf.js',
             '46_physics_watchdog.js', '50_audio.js', '55_ai.js', '56_rig.js', '57_camera.js',
             '58_coach.js', '59_replay.js', '60_scene.js', '61_particles.js', '62_arena.js',
-            '64_training_data.js', '65_train.js', '66_training_preview.js', '75_feedback.js',
+            '64_training_data.js', '65_game_render.js', '65_train.js', '66_match_flow.js', '66_training_preview.js', '67_player_input.js', '68_player_paddle.js', '69_game_loop.js', '69_player_hit.js', '75_feedback.js',
             '75_music.js', '76_emotion.js', '84_racket.js', '86_meta.js',
             '70_game.js', '80_ui.js', '90_boot.js', '92_embed.js']
 CSS_ORDER = ['05_style.css', '07_preview.css']

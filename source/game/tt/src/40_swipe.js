@@ -400,27 +400,15 @@ function classifyBaseStroke(m, ctx, sp01) {
   if (latMag > C.sideLatThreshold && Math.abs(u) < C.horizontalUMax &&
       Math.abs(m.curl || 0) <= C.sideCurlThreshold &&
       (m.compactFlick || (m.pathLen ?? m.dist ?? 0) >= C.minGesture.rally.path)) return STROKES.SIDE;
-  /* ДУГА «С» = БОКОВАЯ ЗАКРУТКА. Жест рисует дугу: большой суммарный
-   * поворот при заметно более длинном пути, чем хорда. Направление хорды
-   * у дуги случайно (та же «С» сверху вниз и снизу вверх — один жест),
-   * поэтому дуга проверяется ДО семейств «вверх/вниз по хорде», иначе
-   * половина всех «С» уезжала в подставки, а вторая — в накаты. Буква «С»
-   * (выпуклость влево, curl < 0) закручивает мяч влево — HOOK; зеркальная
-   * дуга (curl > 0) — вправо, FADE: куда гнётся жест, туда и летит мяч.
-   * Пороги масштабирует калибровка arcSens. */
+  /* ДУГА «С» = БОКОВАЯ ЗАКРУТКА (упрощённое надёжное распознавание).
+   * Достаточно заметного изгиба пути (curl >= 0.38 / arcSens и straightness <= 0.94)
+   * при длине пути >= 0.035, без жёстких требований к bend/turnCoherence. */
   {
     const arcSens = clamp(Number.isFinite(ctx.arcSens) ? ctx.arcSens : 1, ...C.arcSensRange);
-    const bend = Number.isFinite(m.bend) ? m.bend : m.dist > 0.001 ? (m.pathLen || 0) / m.dist : 0;
-    /* Медленный сильный подъём — это свеча (LOB), даже если рука дрогнула
-     * дугой: закрутка без темпа всё равно не полетит, а украденная свеча
-     * ломает защиту. Быстрая дуга при любом направлении хорды — закрутка.
-     * Порог curl=0.55/arcSens (было 0.85) — палец на телефоне не рисует
-     * идеальную C: реалистичная дуга даёт 0.5–0.7 рад. */
-    const lobLift = slow && u > C.liftUMin;
-    const closedArc = m.dist < C.arcDistMin && (m.pathLen || 0) >= C.minGesture.arc.path &&
-      Math.abs(m.curl) >= C.minGesture.arc.curl;
-    if (!lobLift && coherentTurn && Math.abs(m.curl) >= C.arcCurlThreshold / arcSens && (m.dist >= C.arcDistMin || closedArc) &&
-      (closedArc || bend >= C.arcBendMin || (m.straightness <= C.arcStraightnessMax && Math.abs(m.curl) >= C.arcStrongCurlThreshold / arcSens))) {
+    const lobLift = slow && u > C.liftUMin && Math.abs(m.curl) < 0.75 / arcSens;
+    const pathLen = m.pathLen ?? m.dist ?? 0;
+    const straight = m.straightness ?? 1;
+    if (!lobLift && pathLen >= 0.035 && Math.abs(m.curl) >= 0.38 / arcSens && straight <= 0.94) {
       return m.curl < 0 ? STROKES.HOOK : STROKES.FADE;
     }
   }

@@ -28,6 +28,24 @@ function load(files, names, extra = {}) {
   if (!process.env.TT_TEST_REF && files.includes('70_game.js') && !files.includes('61_particles.js')) {
     files = [...files]; files.splice(files.indexOf('70_game.js'), 0, '61_particles.js');
   }
+  if (!process.env.TT_TEST_REF && files.includes('70_game.js') && !files.includes('65_game_render.js')) {
+    files = [...files]; files.splice(files.indexOf('70_game.js'), 0, '65_game_render.js');
+  }
+  if (!process.env.TT_TEST_REF && files.includes('70_game.js') && !files.includes('66_match_flow.js')) {
+    files = [...files]; files.splice(files.indexOf('70_game.js'), 0, '66_match_flow.js');
+  }
+  if (!process.env.TT_TEST_REF && files.includes('70_game.js') && !files.includes('67_player_input.js')) {
+    files = [...files]; files.splice(files.indexOf('70_game.js'), 0, '67_player_input.js');
+  }
+  if (!process.env.TT_TEST_REF && files.includes('70_game.js') && !files.includes('68_player_paddle.js')) {
+    files = [...files]; files.splice(files.indexOf('70_game.js'), 0, '68_player_paddle.js');
+  }
+  if (!process.env.TT_TEST_REF && files.includes('70_game.js') && !files.includes('69_game_loop.js')) {
+    files = [...files]; files.splice(files.indexOf('70_game.js'), 0, '69_game_loop.js');
+  }
+  if (!process.env.TT_TEST_REF && files.includes('70_game.js') && !files.includes('69_player_hit.js')) {
+    files = [...files]; files.splice(files.indexOf('70_game.js'), 0, '69_player_hit.js');
+  }
   if (!process.env.TT_TEST_REF && files.includes('65_train.js') && !files.includes('64_training_data.js')) {
     files = [...files]; files.splice(files.indexOf('65_train.js'), 0, '64_training_data.js');
   }
@@ -47,7 +65,7 @@ function load(files, names, extra = {}) {
   }
   if (!process.env.TT_TEST_REF && files.some(f => ['06_calibration.js', '25_career.js', '27_network.js', '40_swipe.js',
     '42_shot_diagnostics.js', '55_ai.js', '57_camera.js', '58_coach.js', '64_training_data.js', '65_train.js',
-    '66_training_preview.js', '70_game.js', '76_emotion.js', '80_ui.js', '84_career_ui.js', '86_meta.js',
+    '65_game_render.js', '66_match_flow.js', '66_training_preview.js', '67_player_input.js', '68_player_paddle.js', '69_game_loop.js', '69_player_hit.js', '70_game.js', '76_emotion.js', '80_ui.js', '84_career_ui.js', '86_meta.js',
     '90_boot.js', '92_embed.js'].includes(f))) {
     files = ['03_i18n.js', ...files.filter(f => f !== '03_i18n.js')];
   }
