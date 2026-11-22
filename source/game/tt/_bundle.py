@@ -142,10 +142,9 @@ def build_frame():
 
     arena = {}
     if not os.environ.get('TT_NO_ARENA'):
-        for key, filename in {'panorama': 'street-court.jpg', 'asphalt': 'asphalt-tile.jpg'}.items():
-            path = SRC.parent / 'assets' / filename
-            if path.exists():
-                arena[key] = 'data:image/jpeg;base64,' + base64.b64encode(path.read_bytes()).decode('ascii')
+        path = SRC.parent / 'assets' / 'night-hall.webp'
+        if path.exists():
+            arena['panorama'] = 'data:image/webp;base64,' + base64.b64encode(path.read_bytes()).decode('ascii')
     audio = {}
     for key, filename in {'swing': 'missing the ball.mp3', 'ball1': '43d6230aeba4b8c.mp3',
                           'ball2': '8eba8ea8ef04f24.mp3', 'ball3': 'c3c37baf3cd71bd.mp3'}.items():

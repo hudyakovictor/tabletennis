@@ -18,6 +18,7 @@ function trainerFixture(options = {}) {
   const progress = [], completions = [];
   const g = {
     score: [6, 4], state: GS.RALLY, time: 0, shotId: 0, rally: 0, serveBounces: 0, netTouched: false, rallyBounces: [], marks: [],
+    paused: false, timeScale: 1, targetTimeScale: 1, slowmoUntil: 0, slowmo: { on: false, active: false },
     ball: { live: false, p: V3.new(0, 1, .9), v: V3.new(), w: V3.new(), q: Q.new(), hist: [], lastHitBy: 0 },
     career: { coins: 400, rating: 1234 }, audio: { ui() {} },
     ui: { inputMode: 'mouse', trainSync() {}, trainDone(t) { completions.push(t.summary()); },
@@ -162,6 +163,234 @@ test('practice auto-feeds after a brief correction without resetting successes o
   t.update(.02); assert.equal(t.phase, 'live'); assert.equal(t.ballNo, ballNo + 1);
   assert.deepEqual([t.done, t.attempts, t.stats.attempts], counts);
   assert.equal(t.feedback, null); assert.deepEqual(plain(t.snapshot().latestFeedback), feedback);
+});
+
+test('learning-loop options accept only their documented types and expose safe legacy defaults', async context => {
+  const invalid = [undefined, null, 0, 1, -10, 9, 11, 10.5, NaN, Infinity, '', '10', '20', 'true', 'false', [], {},
+    new Number(10), new Boolean(true), new String('coach')];
+  const defaults = { pacing: 'flow', setSize: null, adaptive: false, variation: false };
+  for (const name of Object.keys(defaults)) await context.test(name, () => {
+    const values = [...invalid, ...(name === 'adaptive' || name === 'variation' ? [] : [false, true])];
+    for (const value of values) {
+      const { t } = trainerFixture({ mode: 'stroke', [name]: value });
+      try {
+        assert.equal(t[name], defaults[name], `${name}=${String(value)}`);
+        assert.equal(t.snapshot()[name], defaults[name], `snapshot ${name}=${String(value)}`);
+      } finally { t.quit(); }
+    }
+  });
+  await context.test('valid explicit settings and course size isolation', () => {
+    for (const mode of ['course', 'stroke', 'accuracy']) for (const setSize of [null, 10, 20]) {
+      const { t } = trainerFixture({ mode, pacing: 'coach', setSize, adaptive: true, variation: true, seed: 123 });
+      try {
+        const snapshot = t.snapshot();
+        for (const [key, value] of Object.entries({ pacing: 'coach', setSize: mode === 'course' ? null : setSize,
+          adaptive: true, variation: true })) assert.equal(snapshot[key], value, `${mode}.${key}`);
+        assert.equal(t.setSize, mode === 'course' ? null : setSize);
+        assert.deepEqual(plain(snapshot.attemptReplay), { available: false, attemptId: null, truncated: false });
+      } finally { t.quit(); }
+    }
+  });
+});
+
+test('coach practice holds one correction indefinitely and requires an explicit retry without losing successes', async context => {
+  for (const mode of ['course', 'stroke', 'accuracy']) await context.test(mode, () => {
+    const { g, t } = trainerFixture({ mode, lessonId: 'DRIVE', stroke: 'DRIVE', target: 'left', pacing: 'coach', setSize: 10 });
+    try {
+      startAttempt(t); playerContact(t); landContact(t);
+      assert.equal(t.phase, 'ok'); assert.equal(t.done, 1);
+      t.update(.99, 0); assert.equal(t.phase, 'ok'); assert.equal(t.ballNo, 1);
+      t.update(.02, 0); assert.equal(t.phase, 'live'); assert.equal(t.ballNo, 2);
+      t.onFault(-1, 'miss'); assert.equal(t.reviewHeld, true);
+      const feedback = t.feedback, result = t.result, stats = plain(t.stats), attempts = t.attempts, no = t.ballNo;
+      g.paused = true;
+      for (const dt of [1.49, .02, 30, 300]) {
+        t.update(dt, 0);
+        assert.equal(t.phase, 'fail'); assert.equal(t.ballNo, no); assert.equal(g.ball.live, false);
+        assert.equal(t.feedback, feedback); assert.equal(t.result, result); assert.equal(t.attempts, attempts);
+        assert.equal(t.done, 1); assert.deepEqual(plain(t.stats), stats); assert.equal(g.paused, true);
+        assert.equal(t.action('resume'), false);
+      }
+      assert.equal(t.action('start'), false); assert.equal(t.action('continue'), false);
+      assert.equal(t.action('answer', t.S.quiz.answer), false);
+      assert.equal(t.action('retry'), true); assert.equal(t.phase, 'wait'); assert.equal(t.t, 0);
+      assert.equal(t.feedback, null); assert.equal(t.latestFeedback, feedback); assert.equal(g.paused, true);
+      assert.equal(t.action('resume'), true);
+      t.update(.64, 0); assert.equal(t.phase, 'wait'); assert.equal(t.ballNo, no);
+      t.update(.02, 0); assert.equal(t.phase, 'live'); assert.equal(t.ballNo, no + 1);
+      assert.equal(t.done, 1); assert.deepEqual(plain(t.stats), stats); assert.equal(t.attempts, attempts);
+    } finally { t.quit(); }
+  });
+});
+
+test('explicit flow and omitted pacing retain the same real-time wait, success and failure delays', async context => {
+  for (const pacing of [undefined, 'flow']) await context.test(pacing || 'omitted', () => {
+    const { t } = trainerFixture({ lessonId: 'DRIVE', ...(pacing ? { pacing } : {}) });
+    try {
+      assert.equal(t.action('start'), true);
+      t.update(.64, 0); assert.equal(t.phase, 'wait'); assert.equal(t.ballNo, 0);
+      t.update(.02, 0); assert.equal(t.phase, 'live'); assert.equal(t.ballNo, 1);
+      playerContact(t); landContact(t);
+      t.update(.99, 20); assert.equal(t.phase, 'ok'); assert.equal(t.ballNo, 1);
+      t.update(.02, 0); assert.equal(t.phase, 'live'); assert.equal(t.ballNo, 2);
+      t.onFault(-1, 'miss'); assert.equal(t.reviewHeld, false); assert.equal(t.action('resume'), true);
+      t.update(1.49, 20); assert.equal(t.phase, 'fail'); assert.equal(t.ballNo, 2);
+      t.update(.02, 0); assert.equal(t.phase, 'live'); assert.equal(t.ballNo, 3);
+      assert.equal(t.attempts, 2); assert.equal(t.done, 1);
+    } finally { t.quit(); }
+  });
+});
+
+test('pacing changes preserve the phase, timer, ball and pause while resume obeys the explicit phase contract', async context => {
+  const phases = ['intro', 'wait', 'live', 'ok', 'fail', 'question', 'review'];
+  for (const paused of [false, true]) await context.test(`paused=${paused}`, () => {
+    const { g, t } = trainerFixture({ pacing: 'coach' });
+    try {
+      g.paused = paused;
+      for (const phase of phases) {
+        t.phase = phase; t.t = .37;
+        t.feedback = phase === 'fail' ? { neutral: false } : null;
+        const state = () => plain({ phase: t.phase, timer: t.t, ball: g.ball, no: t.ballNo, stats: t.stats, paused: g.paused });
+        const before = state();
+        for (const value of [undefined, null, false, 1, 'COACH', '10', new String('flow')]) {
+          assert.equal(t.action('pacing', value), false); assert.deepEqual(state(), before);
+        }
+        for (const value of ['flow', 'coach']) {
+          assert.equal(t.action('pacing', value), true); assert.equal(t.pacing, value); assert.deepEqual(state(), before);
+          assert.equal(t.action('resume'), ['wait', 'live', 'ok'].includes(phase) || phase === 'fail' && value === 'flow', `${phase}/${value}`);
+          assert.deepEqual(state(), before);
+        }
+        if (phase === 'fail') {
+          t.feedback.neutral = true; assert.equal(t.action('resume'), true); assert.deepEqual(state(), before);
+        }
+      }
+      t.finished = true; t.phase = 'done';
+      for (const action of ['resume', 'start', 'retry', 'continue', 'answer', 'pacing']) assert.equal(t.action(action, 'flow'), false, action);
+      assert.equal(g.paused, paused);
+    } finally { t.quit(); }
+  });
+});
+
+test('coach mode still runs a normal four-ball check without holds, slow motion or capture assistance', () => {
+  const { g, t, progress, completions } = trainerFixture({ lessonId: 'DRIVE', pacing: 'coach', setSize: 20, adaptive: true, variation: true, seed: 91 });
+  try {
+    finishPractice(t);
+    g.paused = true; g.timeScale = g.targetTimeScale = .35; g.slowmoUntil = 99; g.slowmo.on = g.slowmo.active = true;
+    assert.equal(t.action('answer', t.S.quiz.answer), true);
+    assert.equal(t.setSize, null); assert.equal(t.queue.length, 4); assert.equal(g.paused, true);
+    assert.equal(g.timeScale, 1); assert.equal(g.targetTimeScale, 1); assert.equal(g.slowmoUntil, 0);
+    assert.equal(g.slowmo.on, false); assert.equal(g.slowmo.active, false); assert.equal(g.slowmoAllowed, false);
+    const outcomes = [true, false, true, true];
+    for (let i = 0; i < outcomes.length; i++) {
+      startAttempt(t); g.rallyBounces.push(1); t.update(.01, .01);
+      assert.equal(t.frozen, false); assert.equal(t.guide, 'none'); assert.equal(t.tutorialScale, 1);
+      assert.equal(lib.getCaptureForgiveness(), 1); assert.equal(g.timeScale, 1);
+      if (outcomes[i]) { playerContact(t); landContact(t); } else { t.onFault(-1, 'miss'); assert.equal(t.action('resume'), true); }
+      assert.equal(t.attempts, i + 1); assert.equal(t.queueIndex, i + 1);
+      assert.equal(t.reviewHeld, false); assert.equal(t.finished, false); assert.equal(completions.length, 0);
+      if (i < 3) {
+        assert.notEqual(t.phase, 'review'); assert.equal(t.profile.lessons[t.S.id].mastered, false);
+        const no = t.ballNo, delay = outcomes[i] ? 1 : 1.5;
+        t.update(delay - .01, 0); assert.equal(t.ballNo, no);
+        t.update(.02, 0); assert.equal(t.phase, 'live'); assert.equal(t.ballNo, no + 1);
+      }
+    }
+    assert.equal(t.phase, 'review'); assert.equal(t.attempts, 4); assert.equal(t.done, 3); assert.equal(t.checkPassed, true);
+    assert.equal(t.profile.lessons[t.S.id].mastered, true); assert.equal(progress.filter(p => p.mastered).length, 1);
+    const summary = plain(t.summary()); t.update(300, 300); t.onFault(-1, 'miss'); t.onBounce(-1, 1);
+    assert.deepEqual(plain(t.summary()), summary); assert.equal(t.attempts, 4); assert.equal(t.ballNo, 7);
+  } finally { t.quit(); }
+});
+
+test('mixed finite practice stops on exactly 10 or 20 settled balls, with one summary and no course or economy credit', async context => {
+  const pattern = ['success', 'success', 'miss', 'incorrect', 'success', 'miss', 'incorrect', 'success', 'success', 'miss'];
+  for (const size of [10, 20]) for (const mode of ['stroke', 'accuracy']) for (const pacing of ['coach', 'flow']) {
+    for (const mastered of [false, true]) await context.test(`${mode}/${size}/${pacing}/mastered=${mastered}`, () => {
+      const progress = mastered ? { version: 1, lastLesson: 'PUSH', lessons: Object.fromEntries(TRAIN_STEPS.map(s =>
+        [s.id, { mastered: true, practiced: true, attempts: 7, correct: 6 }])) } : { version: 1, lessons: {} };
+      const { g, t, progress: updates, completions } = trainerFixture({ mode, stroke: 'DRIVE', target: 'left', pacing,
+        setSize: size, adaptive: true, variation: true, seed: 2026, progress });
+      try {
+        const profile = plain(t.profile), career = plain(g.career);
+        const outcomes = mastered ? [...pattern.slice(2), ...pattern.slice(0, 2)] : pattern;
+        const errors = { miss: 0, [mode === 'accuracy' ? 'outside' : 'stroke']: 0 };
+        for (let i = 0; i < size; i++) {
+          if (t.phase === 'fail' && pacing === 'coach') assert.equal(t.action('retry'), true);
+          startAttempt(t); assert.equal(t.ballNo, i + 1); assert.equal(t.attempts, i); assert.equal(t.queueIndex, i);
+          const outcome = outcomes[i % outcomes.length];
+          if (outcome === 'miss') t.onFault(-1, 'miss');
+          else {
+            playerContact(t, outcome === 'incorrect' ? mode === 'accuracy' ? { aim: { x: .45, z: -.7 } }
+              : { physicalStroke: 'PUSH', label: 'DRIVE' } : {});
+            assert.equal(t.phase, 'live'); assert.equal(t.attempts, i); assert.equal(t.queueIndex, i);
+            landContact(t);
+          }
+          if (outcome !== 'success') {
+            const code = outcome === 'miss' ? 'miss' : mode === 'accuracy' ? 'outside' : 'stroke';
+            assert.equal(t.feedback.code, code); errors[code]++;
+          }
+          assert.equal(t.attempts, i + 1); assert.equal(t.stats.attempts, i + 1); assert.equal(t.queueIndex, i + 1);
+          assert.equal(t.currentSlot, null); assert.equal(t.practicePassed, false); assert.equal(t.quizPassed, false); assert.equal(t.checkPassed, false);
+          assert.deepEqual(plain(t.profile), profile); assert.deepEqual(plain(g.career), career); assert.equal(updates.length, 0);
+          if (i < size - 1) { assert.equal(t.finished, false); assert.equal(completions.length, 0); assert.notEqual(t.phase, 'done'); }
+        }
+        assert.equal(t.finished, true); assert.equal(t.phase, 'done'); assert.equal(g.ball.live, false); assert.equal(t.reviewHeld, false);
+        assert.equal(t.done, size / 2); assert.equal(t.stats.success, size / 2); assert.equal(t.stats.bestStreak, 2);
+        assert.equal(t.ballNo, size); assert.equal(completions.length, 1); assert.equal(t.tutorialScale, 1); assert.equal(t.guide, 'none');
+        assert.equal(lib.getCaptureForgiveness(), 1); assert.equal(g.timeScale, 1); assert.equal(g.targetTimeScale, 1);
+        const summary = plain(t.summary()), result = summary.practiceSet;
+        assert.deepEqual(Object.keys(summary).sort(), ['courseComplete', 'mode', 'practiceSet', 'sessionId']);
+        assert.equal(summary.courseComplete, false); assert.equal(summary.mode, mode); assert.equal(summary.sessionId, t.sessionId);
+        assert.deepEqual(Object.keys(result).sort(), ['attempted', 'bestStreak', 'errors', 'size', 'successful']);
+        assert.equal(result.size, size); assert.equal(result.attempted, size); assert.equal(result.successful, size / 2); assert.equal(result.bestStreak, 2);
+        assert.deepEqual(Object.fromEntries(result.errors.map(e => [e.code, e.count])), errors);
+        for (const error of result.errors) {
+          assert.deepEqual(Object.keys(error).sort(), ['code', 'correction', 'count']);
+          assert.equal(typeof error.correction, 'string'); assert.ok(error.correction.length); assert.doesNotMatch(error.correction, /academy\.|undefined/);
+        }
+        assert.deepEqual(plain(t.snapshot().practiceSet), result); assert.deepEqual(plain(completions[0]), summary);
+        for (let i = 0; i < 3; i++) {
+          assert.equal(t.complete(), false); assert.equal(t.feed(), false); assert.equal(t.settle(true, 'duplicate'), false);
+          assert.equal(t.settle(false, 'duplicate'), false); t.pass(); t.fail('duplicate'); t.onLet(); t.onFault(-1, 'miss'); t.onBounce(-1, 1);
+          assert.equal(t.action('retry'), false); assert.equal(t.action('resume'), false); assert.equal(t.action('start'), false); assert.equal(t.skip(), false);
+          t.update(300, 300);
+          assert.equal(t.ballNo, size); assert.equal(t.attempts, size); assert.equal(g.ball.live, false); assert.equal(completions.length, 1);
+          assert.deepEqual(plain(t.summary()), summary); assert.deepEqual(plain(t.profile), profile); assert.deepEqual(plain(g.career), career);
+        }
+      } finally { t.quit(); }
+    });
+  }
+});
+
+test('direct finite-set restart clears statistics, errors and help streaks without changing options or saved progress', () => {
+  const options = { mode: 'stroke', stroke: 'DRIVE', pacing: 'flow', setSize: 20, adaptive: true, variation: true, seed: 64 };
+  const { g, t, progress, completions } = trainerFixture(options);
+  try {
+    const profile = plain(t.profile), sessionId = t.sessionId;
+    for (let i = 0; i < 2; i++) { startAttempt(t); playerContact(t); landContact(t); }
+    startAttempt(t); t.onFault(-1, 'miss');
+    assert.deepEqual(plain(t.stats), { attempts: 3, hits: 2, success: 2, streak: 0, bestStreak: 2 });
+    assert.equal(t.practiceSet().errors.length, 1); assert.equal(t.helpLevel, 'ring'); assert.equal(t.helpRun, 1);
+    const queue = t.queue;
+    assert.equal(t.action('restart'), true);
+    assert.deepEqual(plain(t.stats), { attempts: 0, hits: 0, success: 0, streak: 0, bestStreak: 0 });
+    assert.deepEqual(plain(t.practiceSet()), { size: 20, attempted: 0, successful: 0, bestStreak: 0, errors: [] });
+    assert.equal(t.done, 0); assert.equal(t.attempts, 0); assert.equal(t.fails, 0); assert.equal(t.ballNo, 0); assert.equal(t.queueIndex, 0);
+    assert.equal(t.currentSlot, null); assert.notEqual(t.queue, queue); assert.equal(t.queue.length, 20);
+    assert.equal(t.helpLevel, 'guided'); assert.equal(t.helpRun, 0); assert.equal(t.helpResult, null);
+    assert.equal(t.phase, 'intro'); assert.equal(g.ball.live, false); assert.equal(t.finished, false);
+    for (const value of [t.feedback, t.latestFeedback, t.result, t.lastShot, t.inputMotion, t.flightTrace, t.attemptClip, t.recording]) assert.equal(value, null);
+    assert.deepEqual(plain(t.snapshot().attemptReplay), { available: false, attemptId: null, truncated: false });
+    for (const key of ['pacing', 'setSize', 'adaptive', 'variation']) assert.equal(t[key], options[key]);
+    assert.equal(t.sessionId, sessionId); assert.deepEqual(plain(t.profile), profile); assert.equal(progress.length, 0); assert.equal(completions.length, 0);
+    startAttempt(t); playerContact(t); landContact(t);
+    assert.deepEqual(plain(t.stats), { attempts: 1, hits: 1, success: 1, streak: 1, bestStreak: 1 });
+    const replacement = trainerFixture(options);
+    try {
+      assert.notEqual(replacement.t.sessionId, sessionId); assert.equal(replacement.t.phase, 'intro'); assert.equal(replacement.t.stats.attempts, 0);
+      assert.equal(replacement.t.practiceSet().errors.length, 0); assert.equal(replacement.t.queueIndex, 0);
+    } finally { replacement.t.quit(); }
+  } finally { t.quit(); }
 });
 
 test('actual hand traces are copied before the tracker is cancelled, with screen aspect and the real contact origin', () => {
@@ -471,8 +700,11 @@ test('failed checks retry without mastery; skip and final-list traversal never c
 test('stroke and accuracy practice repeat indefinitely without course progress or a completion event', () => {
   for (const options of [{ mode: 'stroke', stroke: 'DRIVE' }, { mode: 'stroke', stroke: 'SERVE_TOP' }, { mode: 'accuracy', target: 'left' }]) {
     const { t, progress, completions } = trainerFixture(options); const id = t.S.id, step = t.step;
-    for (let i = 0; i < 8; i++) { startAttempt(t); playerContact(t); landContact(t); assert.equal(t.phase, 'ok'); }
-    assert.equal(t.done, 8); assert.equal(t.stats.success, 8); assert.equal(t.finished, false); assert.equal(t.S.id, id); assert.equal(t.step, step);
+    const snapshot = t.snapshot();
+    assert.equal(snapshot.pacing, 'flow'); assert.equal(snapshot.setSize, null); assert.equal(snapshot.adaptive, false); assert.equal(snapshot.variation, false);
+    assert.equal(snapshot.practiceSet, null); assert.equal(t.queue.length, 0);
+    for (let i = 0; i < 25; i++) { startAttempt(t); playerContact(t); landContact(t); assert.equal(t.phase, 'ok'); }
+    assert.equal(t.done, 25); assert.equal(t.stats.success, 25); assert.equal(t.attempts, 25); assert.equal(t.finished, false); assert.equal(t.S.id, id); assert.equal(t.step, step);
     assert.equal(t.summary().courseComplete, false); assert.equal(progress.length, 0); assert.equal(completions.length, 0); assert.deepEqual(plain(t.profile.lessons), {});
     t.skip(); assert.equal(t.S.id, id); t.nextStep(); assert.equal(t.S.id, id); assert.equal(t.done, 0); assert.equal(t.finished, false);
   }

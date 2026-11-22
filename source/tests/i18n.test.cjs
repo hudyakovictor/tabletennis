@@ -38,6 +38,10 @@ function usedKeys() {
   for (const r of ['common', 'rare', 'epic', 'leg']) keys.add('rarity.' + r);
   for (const id of ['win', 'lose', 'finished', 'avgSpeed', 'maxSpeed', 'avgSpin', 'maxSpin', 'summary', 'strokes', 'stroke', 'metric']) keys.add('result.' + id);
   for (const coverage of ['complete', 'partial', 'missing']) keys.add('result.coverage.' + coverage);
+  for (const pacing of ['coach', 'flow']) { keys.add('academy.pacing.' + pacing); keys.add('academy.pacing.' + pacing + 'Hint'); }
+  for (const level of ['guided', 'ring', 'independent']) keys.add('train.help.' + level);
+  for (const kind of ['lesson', 'set', 'check']) keys.add('train.recovery.' + kind);
+  for (const option of ['course', 'stroke', 'accuracy', 'adaptive', 'variation']) keys.add('academy.' + option);
   const icons = vm.createContext({}); vm.runInContext(fs.readFileSync(path.join(SRC, 'ui/stroke_icons.js'), 'utf8'), icons);
   for (const id of icons.StrokeIcons.ids) keys.add('hud.stroke.' + id);
   for (const id of ['label', 'near', 'far', 'target', 'rally', 'rallyShort', 'serve', 'unlimited', 'low', 'energy', 'energyValue',
@@ -85,4 +89,17 @@ test('plural forms and interpolation render', () => {
   assert.equal(I18n.t('gems.word', { n: 80 }), 'gems');
   assert.equal(I18n.t('match.matchTo', { n: 11 }), 'Match to 11');
   assert.equal(I18n.t('no.such.key'), 'no.such.key');   // fallback: the key itself, never a crash
+});
+
+test('academy pacing, help, set counts and recovery messages render in both languages', () => {
+  const I18n = loadI18n();
+  for (const lang of ['ru', 'en']) {
+    I18n.lang = lang;
+    for (const key of ['academy.pacing.coach', 'academy.pacing.flow', 'train.help.guided', 'train.help.ring', 'train.help.independent',
+      'train.recovery.lesson', 'train.recovery.set', 'train.recovery.check', 'train.actualAttempt', 'train.example', 'train.replayUnavailable', 'train.actionRejected']) {
+      assert.notEqual(I18n.t(key), key); assert.ok(I18n.t(key).length > 0);
+    }
+    const count = I18n.t('train.setProgress', { attempted: 7, size: 10, successful: 4 });
+    assert.match(count, /7\/10/); assert.match(count, /4/); assert.doesNotMatch(count, /\{\w+\}/);
+  }
 });

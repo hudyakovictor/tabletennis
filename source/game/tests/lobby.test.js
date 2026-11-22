@@ -78,7 +78,7 @@ function fixture(width = 390, height = 844, dpr = 2) {
 
 test('lobbyReady requires settled textures and a presented prepared scene; waiting bots cannot rally', () => {
   const f = fixture(), identity = f.g.ball, before = f.gameplay();
-  f.scene.panoramaSettled = f.scene.asphaltSettled = false;
+  f.scene.panoramaSettled = false;
   assert.equal(f.controller().prepare({ intro: true, requestId: 17 }), true);
   assert.equal(f.messages.length, 0, 'preparation is not render readiness');
   f.g.render();
@@ -86,8 +86,7 @@ test('lobbyReady requires settled textures and a presented prepared scene; waiti
   assert.equal(f.messages.length, 0);
   assert.equal(f.draws.some(d => d.mesh === 'ball'), false, 'the splash owns the only visible ball');
   assert.equal(f.controller().launch({ requestId: 17, x: 0.5, y: 0.48, diameter: 1 }), false);
-  f.scene.panoramaSettled = true; f.g.render(); assert.equal(f.messages.length, 0);
-  f.scene.asphaltSettled = true; f.R.gl.isContextLost = () => true; f.g.render();
+  f.scene.panoramaSettled = true; f.R.gl.isContextLost = () => true; f.g.render();
   assert.equal(f.messages.length, 0, 'an invalid GPU is not a ready scene');
   f.R.gl.isContextLost = () => false; f.scene.racketsSettled = false; f.g.render();
   assert.equal(f.messages.length, 0, 'readiness includes the required racket atlas');
@@ -298,15 +297,15 @@ test('arena image loading settles honestly on upload, onerror, decode/upload fai
   f.images.at(-1).onload();
   f.arenaImageTex(R, '', 4, 4, () => assert.fail('missing asset installed'), ok => outcomes.push(ok));
   assert.deepEqual(outcomes, [true, false, false, false]);
-  f.window.__TT_ARENA = { stands: 'stands', panorama: 'panorama', asphalt: 'asphalt' };
-  const scene = new f.Scene(f.R), pending = f.images.slice(-3);
-  assert.equal(scene.standsSettled || scene.panoramaSettled || scene.asphaltSettled, false);
-  pending[0].onerror(); pending[1].onload(); pending[2].onerror();
-  assert.equal(scene.standsSettled && scene.panoramaSettled && scene.asphaltSettled, true);
-  assert.equal(scene.hasPanorama, true); assert.equal(!!scene.mat.courtGround.asphalt, false);
+  f.window.__TT_ARENA = { stands: 'stands', panorama: 'panorama' };
+  const scene = new f.Scene(f.R), pending = f.images.slice(-2);
+  assert.equal(scene.standsSettled || scene.panoramaSettled, false);
+  pending[0].onerror(); pending[1].onload();
+  assert.equal(scene.standsSettled && scene.panoramaSettled, true);
+  assert.equal(scene.hasPanorama, true);
   f.window.__TT_ARENA = {};
   const fallback = new f.Scene(f.R);
-  assert.equal(fallback.standsSettled && fallback.panoramaSettled && fallback.asphaltSettled, true);
+  assert.equal(fallback.standsSettled && fallback.panoramaSettled, true);
   assert.equal(fallback.hasPanorama, false);
 });
 

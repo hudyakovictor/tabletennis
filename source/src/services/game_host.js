@@ -11,6 +11,7 @@ const GameHost = {
   _calibrationImported: false,
   inspector: null, sessionKind: 'free',
   trainingCatalog: null, trainSnapshot: null, trainRequestId: 0, trainSessionId: null,
+  trainingIntent: null, trainActionId: 0, _pendingTrainAction: null, _trainDone: false,
   preview: null, previewRequestId: 0, _previewReturn: null,
   debug: (() => { try { return sessionStorage.getItem('ttu-debug-recording') === '1'; } catch (e) { return false; } })(),
   setDebug(on) {
@@ -59,6 +60,9 @@ const GameHost = {
     const mode = this.mode, paused = this.paused;
     const resume = restoreMatch && mode?.type === 'match' ? this.captureMatchResume() : null;
     if (this.frame) this.frame.remove(); this.frame = null; this.ready = false; this.q = [];
+    this.trainingIntent = null; this.trainSessionId = null; this.trainSnapshot = null;
+    this._pendingTrainAction = null; this._trainDone = false; this._trainRecovery = null; this._trainRecoveryNotice = null;
+    this.preview = null; this._previewReturn = null;
     this.calibrationReady = false; this.calibration = null; this.calibrationRegistry = []; this.inspector = null;
     this.notify({ type: 'calibrationPending' }); this.ensure();
     if (resume) {
@@ -120,14 +124,32 @@ const GameHost = {
   // то, что надо повторить новому iframe после потери GPU-контекста
   mode: null, sticky: {}, paused: false, losses: [],
   send(type, data) {
+    if (type === 'resume' && (this.mode?.type === 'train' || this.preview && (this.preview.active || this.preview.pending))) return false;
     const m = Object.assign({ __tt: 1, type }, data || {});
-    if (['attract', 'lobby', 'match', 'train', 'quit'].includes(type) && this.preview && (this.preview.active || this.preview.pending)) {
+    if (['attract', 'lobby', 'match', 'train', 'quit'].includes(type)) {
+      this._pendingTrainAction = null; this._trainRecoveryNotice = null;
+      this.q = this.q.filter(x => !['train', 'trainAction', 'skipStep', 'previewOpen', 'previewCommand', 'previewClose'].includes(x.type));
       this._previewReturn = null;
-      this.send('previewClose', { requestId: this.previewRequestId }); this.preview = null;
+      if (this.preview && (this.preview.active || this.preview.pending)) this.send('previewClose', { requestId: this.preview.requestId });
+      this.preview = null;
+      if (type !== 'train') {
+        this.trainingIntent = null; this.trainSessionId = null; this.trainSnapshot = null; this._trainRecovery = null; this._trainDone = false;
+      }
     }
     if (type === 'previewOpen') {
+      if (this.preview && (this.preview.active || this.preview.pending) || !this.canOpenPreview(m)) return false;
       m.requestId = ++this.previewRequestId;
-      this.preview = { active: false, pending: true, requestId: m.requestId };
+      if (m.source === undefined) m.source = 'example';
+      if (m.trainRequestId === undefined) m.trainRequestId = this.trainingIntent?.requestId ?? null;
+      if (m.sessionId === undefined) m.sessionId = this.trainingIntent?.sessionId ?? null;
+      if (m.attemptId === undefined) m.attemptId = m.source === 'attempt' ? this.trainSnapshot?.attemptReplay?.attemptId ?? null : null;
+      this.preview = { active: false, pending: true, requestId: m.requestId,
+        trainRequestId: m.trainRequestId, sessionId: m.sessionId, attemptId: m.attemptId };
+    }
+    if (type === 'previewCommand' || type === 'previewClose') {
+      if (!this.preview || !(this.preview.active || this.preview.pending) || type === 'previewCommand' && !this.preview.active) return false;
+      if (m.requestId === undefined) m.requestId = this.preview.requestId;
+      if (m.requestId !== this.preview.requestId) return false;
     }
     if (type === 'settings' || type === 'cal') m.requestId = ++this.calibrationRequestId;
     if (type === 'quality') this._recoveryQuality = null;
@@ -146,7 +168,17 @@ const GameHost = {
     }
     if (type === 'train') {
       m.requestId = ++this.trainRequestId; m.progress = repairTrainingState(S.training);
-      this.trainSessionId = null; this.trainSnapshot = null;
+      m.mode = ['course', 'stroke', 'accuracy'].includes(m.mode) ? m.mode : 'course';
+      this.trainSessionId = null; this.trainSnapshot = null; this._trainDone = false; this._trainRecovery = null;
+      const { __tt, type: command, requestId, progress, ...options } = m;
+      this.trainingIntent = { requestId: m.requestId, data: structuredClone(options), sessionId: null };
+    }
+    if (type === 'trainAction' || type === 'skipStep') {
+      m.actionId = ++this.trainActionId;
+      if (m.requestId === undefined) m.requestId = this.trainingIntent?.requestId ?? null;
+      if (m.sessionId === undefined) m.sessionId = this.trainingIntent?.sessionId ?? null;
+      this._pendingTrainAction = { actionId: m.actionId, requestId: m.requestId, sessionId: m.sessionId,
+        action: m.action, value: m.answer ?? m.value };
     }
     if (['attract', 'lobby', 'match', 'train'].includes(type)) { this.mode = { type, data: { ...m } }; this.paused = false; }
     if (['quiet', 'mute', 'hint', 'quality', 'rm', 'debug'].includes(type)) this.sticky[type] = data || {};
@@ -156,10 +188,27 @@ const GameHost = {
         ['debug', 'pause', 'resume', 'slowmo', 'sleep', 'wake', 'match', 'train', 'quit'].includes(type))
       HostDiagnostics.record('host_command', { command: type, on: data && typeof data.on === 'boolean' ? data.on : null, ready: this.ready });
     if (this.ready && this.frame) this.frame.contentWindow.postMessage(m, '*'); else this.q.push(m);
+    if (type === 'train' || type === 'previewOpen') return m.requestId;
+    if (type === 'trainAction' || type === 'skipStep') return m.actionId;
   },
   on(fn) { this.subs.add(fn); return () => this.subs.delete(fn); },
-  openPreview(options) {
-    if (this.preview && (this.preview.active || this.preview.pending)) return false;
+  canOpenPreview(options) {
+    if (!options || typeof options !== 'object' || Array.isArray(options) ||
+        options.source !== undefined && !['example', 'attempt'].includes(options.source)) return false;
+    if (this.mode?.type === 'train') {
+      const intent = this.trainingIntent, snapshot = this.trainSnapshot;
+      if (!intent?.sessionId || !snapshot ||
+          options.trainRequestId !== undefined && options.trainRequestId !== intent.requestId ||
+          options.sessionId !== undefined && options.sessionId !== intent.sessionId ||
+          snapshot.stage === 'check' && (!['review', 'done'].includes(snapshot.phase) || !Number.isSafeInteger(snapshot.attempts) || snapshot.attempts < 4)) return false;
+      if (options.source === 'attempt' && (!snapshot.attemptReplay?.available ||
+          !['ok', 'fail', 'question', 'review', 'done'].includes(snapshot.phase) ||
+          (options.attemptId === undefined ? snapshot.attemptReplay.attemptId : options.attemptId) !== snapshot.attemptReplay.attemptId)) return false;
+    } else if (options.source === 'attempt' || options.trainRequestId != null || options.sessionId != null) return false;
+    return true;
+  },
+  openPreview(options = {}) {
+    if (this.preview && (this.preview.active || this.preview.pending) || !this.canOpenPreview(options)) return false;
     this.ensure();
     this._previewReturn = { shown: $('#gamelayer').classList.contains('on') };
     this.send('pause'); this.show(true); this.send('previewOpen', options);
@@ -171,11 +220,12 @@ const GameHost = {
   recover(m) {
     if (this.preview && (this.preview.active || this.preview.pending)) {
       this.preview = null; this._previewReturn = null;
-      this.notify({ type: 'preview', active: false, error: 'context_lost' });
+      this.notify({ type: 'preview', requestId: this.previewRequestId, active: false, error: 'context_lost' });
     }
     const now = Date.now(); this.losses = this.losses.filter((t) => now - t < 60000); this.losses.push(now);
     const ov = $('#glRecover'); ov && ov.classList.add('on');
     const mode = this.mode, quiet = this.sticky.quiet, paused = this.paused;
+    const snapshot = mode?.type === 'train' ? this._trainRecovery || this.trainSnapshot : null;
     const inspect = this.inspector && this.inspector.requested;
     if (this.losses.length >= 3) this._recoveryQuality = 'low';   // temporary GPU relief, not a saved preference
     const resume = m.resume || this.captureMatchResume() || { score: m.score, server: m.server };
@@ -185,9 +235,10 @@ const GameHost = {
     if (mode) {
       if (mode.type === 'match' && m.inMatch) this.send('match', Object.assign({}, mode.data, { resume }));
       else if (mode.type === 'train') {
-        const snapshot = this._trainRecovery;
-        this.send('train', { ...mode.data, lessonId: snapshot && snapshot.id || mode.data.lessonId,
-          resume: snapshot ? { stage: snapshot.stage, practicePassed: snapshot.practicePassed, quizPassed: snapshot.quizPassed } : null });
+        const requestId = this.send('train', { ...mode.data, lessonId: snapshot && snapshot.id || mode.data.lessonId,
+          resume: snapshot ? { stage: snapshot.stage, practicePassed: snapshot.practicePassed === true, quizPassed: snapshot.quizPassed === true } : null });
+        this._trainRecoveryNotice = { type: 'train', requestId, lessonId: snapshot && snapshot.id || mode.data.lessonId,
+          phase: 'intro', resetAttempts: true, replayAvailable: false };
       }
       else if (mode.type !== 'match') this.send(mode.type, mode.data);
       else this.send('attract');
@@ -214,6 +265,7 @@ window.addEventListener('message', (e) => {
     HostDiagnostics.record('engine_message', { messageType: m.type, paused: m.type === 'paused' ? !!m.v : null });
   if (m.type === 'glLost') {
     GameHost._trainRecovery = GameHost.trainSnapshot;
+    GameHost._pendingTrainAction = null;
     if (GameHost._glRecoveryPending) return;
     let flush = null;
     try {
@@ -222,10 +274,11 @@ window.addEventListener('message', (e) => {
     } catch (err) {}
     if (flush && typeof flush.then === 'function') {
       GameHost._glRecoveryPending = true;
+      const frame = GameHost.frame;
       // Give the bounded local journal a short chance to finish before the
       // old iframe is destroyed. Never leave GPU recovery waiting on storage.
       Promise.race([flush.catch(() => false), new Promise(resolve => setTimeout(resolve, 250))])
-        .then(() => { GameHost._glRecoveryPending = false; GameHost.recover(m); });
+        .then(() => { GameHost._glRecoveryPending = false; if (GameHost.frame === frame) GameHost.recover(m); });
     } else GameHost.recover(m);
     return;
   }
@@ -261,6 +314,7 @@ window.addEventListener('message', (e) => {
     }
     GameHost.calibrationReady = false; GameHost.calibration = null;
     if (m.trainingCatalog && m.trainingCatalog.version === 1) GameHost.trainingCatalog = m.trainingCatalog;
+    if (GameHost._trainRecoveryNotice) { m = { ...m, recovery: GameHost._trainRecoveryNotice }; GameHost._trainRecoveryNotice = null; }
     if (GameHost._recovering) { GameHost._recovering = false; setTimeout(() => { const ov = $('#glRecover'); ov && ov.classList.remove('on'); }, 350); }
     // Apply a fresh complete settings packet before any queued/recovered mode.
     GameHost.syncSettings();
@@ -281,9 +335,16 @@ window.addEventListener('message', (e) => {
     if (!GameHost.acceptMatchSnapshot(m.snapshot, m.hudRequestId)) return;
     m = { ...m, snapshot: GameHost.matchSnapshot };
   }
-  if (m.type === 'paused') GameHost.paused = !!m.v;
+  if (m.type === 'paused') {
+    if ((GameHost.mode?.type === 'train' || m.requestId !== undefined) &&
+        (GameHost.mode?.type !== 'train' || m.requestId !== GameHost.trainRequestId || m.sessionId !== GameHost.trainSessionId)) return;
+    GameHost.paused = !!m.v;
+  }
   if (m.type === 'preview') {
-    if (m.requestId !== GameHost.previewRequestId) return;
+    const preview = GameHost.preview, intent = GameHost.trainingIntent;
+    if (!preview || !(preview.active || preview.pending) || m.requestId !== preview.requestId ||
+        preview.trainRequestId != null && (intent?.requestId !== preview.trainRequestId || intent.sessionId !== preview.sessionId ||
+          m.trainRequestId !== preview.trainRequestId || m.sessionId !== preview.sessionId)) return;
     GameHost.preview = { ...m, pending: false }; GameHost.paused = !!m.paused;
     if (!m.active && GameHost._previewReturn) {
       const back = GameHost._previewReturn; GameHost._previewReturn = null;
@@ -291,20 +352,44 @@ window.addEventListener('message', (e) => {
     }
   }
   if (m.type === 'trainingCatalog' && m.catalog && m.catalog.version === 1) GameHost.trainingCatalog = m.catalog;
+  if (m.type === 'trainActionAck') {
+    const pending = GameHost._pendingTrainAction, intent = GameHost.trainingIntent;
+    if (GameHost.mode?.type !== 'train' || GameHost._trainDone || !intent?.sessionId || !pending ||
+        m.actionId !== pending.actionId || m.requestId !== pending.requestId || m.sessionId !== pending.sessionId ||
+        m.requestId !== intent.requestId || m.sessionId !== intent.sessionId || typeof m.accepted !== 'boolean') return;
+    GameHost._pendingTrainAction = null;
+    if (m.accepted && pending.action === 'pacing' && ['coach', 'flow'].includes(pending.value)) {
+      GameHost.mode.data.pacing = pending.value; intent.data.pacing = pending.value;
+    }
+  }
   if (['train', 'trainingProgress', 'trainDone'].includes(m.type)) {
-    if (m.requestId !== GameHost.trainRequestId || !GameHost.mode || GameHost.mode.type !== 'train') return;
+    if (m.requestId !== GameHost.trainRequestId || m.requestId !== GameHost.trainingIntent?.requestId ||
+        GameHost.mode?.type !== 'train' || m.mode !== GameHost.mode.data.mode ||
+        typeof m.sessionId !== 'string' || !m.sessionId || m.sessionId.length > 120 ||
+        GameHost._trainDone && (m.type !== 'train' || m.phase !== 'done')) return;
     if (m.type === 'train') {
       if (GameHost.trainSessionId && GameHost.trainSessionId !== m.sessionId) return;
       GameHost.trainSessionId = m.sessionId; GameHost.trainSnapshot = m;
+      if (['coach', 'flow'].includes(m.pacing)) GameHost.mode.data.pacing = m.pacing;
+      GameHost.trainingIntent = { requestId: m.requestId, sessionId: m.sessionId,
+        data: structuredClone({ ...GameHost.trainingIntent.data,
+          ...(typeof m.id === 'string' && m.id ? { lessonId: m.id } : {}),
+          ...(['coach', 'flow'].includes(m.pacing) ? { pacing: m.pacing } : {}) }) };
       if (m.mode === 'course' && S.training.lastLesson !== m.id && GameHost.trainingCatalog &&
           GameHost.trainingCatalog.lessons.some(s => s.id === m.id)) { S.training.lastLesson = m.id; save(); }
     } else if (m.sessionId !== GameHost.trainSessionId) return;
     if (m.type === 'trainingProgress' && applyTrainingProgress(S, m, GameHost.trainingCatalog)) saveNow();
     if (m.type === 'trainDone') {
-      const result = trainingMastery(S, GameHost.trainingCatalog);
-      const rewarded = m.mode === 'course' && m.courseComplete === true && result.courseComplete && awardTrainingCompletion(S, GameHost.trainingCatalog);
-      m = { ...m, ...result, courseComplete: m.mode === 'course' && result.courseComplete, rewarded: !!rewarded };
-      if (rewarded || result.courseComplete) saveNow();
+      GameHost._trainDone = true; GameHost._pendingTrainAction = null;
+      if (m.mode === 'course') {
+        const result = trainingMastery(S, GameHost.trainingCatalog);
+        const rewarded = m.courseComplete === true && result.courseComplete && awardTrainingCompletion(S, GameHost.trainingCatalog);
+        m = { ...m, ...result, courseComplete: result.courseComplete, rewarded: !!rewarded };
+        if (rewarded || result.courseComplete) saveNow();
+      } else {
+        const { mastered, total, coverage, mastery, profile, ...summary } = m;
+        m = { ...summary, courseComplete: false, rewarded: false };
+      }
     }
   }
   if (m.type === 'cameraCalibration' && m.values && typeof m.values === 'object') {

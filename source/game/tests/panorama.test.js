@@ -3,12 +3,10 @@ const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const { load } = require('./helpers.cjs');
 const {
-  STREET_COURT, streetCourtEdgeRadius, streetCourtGroundUV,
-  makeStreetCourtFloor, makeStreetCourtShell, makeStreetCourtMarking,
+  NIGHT_HALL, NIGHT_HALL_YAW, nightHallWorld, nightHallUV, makeNightHallRoom,
   TABLE_GROUND_SHADOW, tableGroundShadowAlpha, PH, Scene, M4, V3, FS_MAIN, FS_COMPOSITE,
 } = load(['10_math.js', '20_gl.js', '30_physics.js', '60_scene.js'], [
-  'STREET_COURT', 'streetCourtEdgeRadius', 'streetCourtGroundUV',
-  'makeStreetCourtFloor', 'makeStreetCourtShell', 'makeStreetCourtMarking',
+  'NIGHT_HALL', 'NIGHT_HALL_YAW', 'nightHallWorld', 'nightHallUV', 'makeNightHallRoom',
   'TABLE_GROUND_SHADOW', 'tableGroundShadowAlpha', 'PH', 'Scene', 'M4', 'V3', 'FS_MAIN', 'FS_COMPOSITE',
 ]);
 const near = (a, b, tolerance = 1e-5) => assert.ok(Math.abs(a - b) < tolerance, `${a} != ${b}`);
@@ -53,24 +51,18 @@ test('the table has one planar marked top at the physical height and an unmarked
   assert.ok(Array.from(top.nrm).every((value, i) => value === (i % 3 === 1 ? 1 : 0)));
 });
 
-test('aprons abut below the slab without crossing its bounds or overlapping at the corners', () => {
-  const f = tableFixture(), scene = new f.Scene(f.renderer), rails = [];
-  for (const key of ['apronN', 'apronS', 'apronW', 'apronE']) {
-    const matrix = scene.M[key], min = {}, max = {};
-    for (let axis = 0; axis < 3; axis++) {
-      const half = Math.abs(matrix[axis * 4 + axis]) / 2;
-      min[axis] = matrix[12 + axis] - half; max[axis] = matrix[12 + axis] + half;
-    }
-    near(max[1], PH.T_H - PH.T_THICK);
-    assert.ok(min[0] >= -PH.T_HALF_WID - 1e-6 && max[0] <= PH.T_HALF_WID + 1e-6);
-    assert.ok(min[2] >= -PH.T_HALF_LEN - 1e-6 && max[2] <= PH.T_HALF_LEN + 1e-6);
-    rails.push({ min, max });
+test('the ported frame is baked per material with finite, indexed geometry', () => {
+  const f = tableFixture(), scene = new f.Scene(f.renderer);
+  for (const key of ['frame', 'frameDark', 'zinc', 'wheel', 'bolt', 'tape']) {
+    const mesh = scene.mesh[key];
+    assert.ok(mesh && mesh.nv > 0, `${key} exists`);
+    for (const value of mesh.pos) assert.ok(Number.isFinite(value));
+    for (const value of mesh.nrm) assert.ok(Number.isFinite(value));
+    for (let i = 0; i < mesh.ni; i++) assert.ok(mesh.idx[i] < mesh.nv);
   }
-  for (let i = 0; i < rails.length; i++) for (let j = i + 1; j < rails.length; j++) {
-    const a = rails[i], b = rails[j];
-    assert.ok([0, 1, 2].some(axis => Math.min(a.max[axis], b.max[axis]) - Math.max(a.min[axis], b.min[axis]) < 1e-6));
-  }
-  near(rails[0].max[2], rails[2].min[2]); near(rails[1].min[2], rails[2].max[2]);
+  assert.equal(scene.mesh.markerSide.nv, 4);
+  assert.equal(scene.M.markerSides.length, 2);
+  for (const mm of scene.M.markerSides) near(Math.abs(mm[12]), 0.75435, 1e-4);
 });
 
 test('weathering is POT, retains physical line widths and does not consume gameplay random numbers', () => {
@@ -107,63 +99,43 @@ test('material lighting retains rough-metal reflection and clamps undefined post
   assert.match(FS_COMPOSITE, /pow\(max\(col,vec3\(0\.0\)\)/);
 });
 
-test('court and table are centred on the photographed circle rather than the old panorama eye', () => {
-  const centre = streetCourtGroundUV(0, 0);
-  near(centre.u, 0.5);
-  // The source centre of the circle is above the panorama's nadir. Mapping
-  // the table to v=0 (the old capture eye) would place it at the court edge.
-  const centreY = (1 - centre.v) * 1024;
-  assert.ok(centreY > 570 && centreY < 595, `centre y=${centreY}`);
-  const farY = (1 - streetCourtGroundUV(0, -4.7).v) * 1024;
-  const nearY = (1 - streetCourtGroundUV(0, 4.7).v) * 1024;
-  assert.ok(farY > 545 && farY < 555, `far circle edge y=${farY}`);
-  assert.ok(nearY > 805 && nearY < 830, `near circle edge y=${nearY}`);
-
-  const ring = makeStreetCourtMarking();
-  for (let i = 0; i < ring.nv; i++) {
-    const x = ring.pos[3 * i], y = ring.pos[3 * i + 1], z = ring.pos[3 * i + 2];
-    assert.ok(Math.abs(Math.hypot(x, z) - 4.7) < 0.05);
-    assert.ok(y > 0 && y < 0.04, 'paint belongs to the ground');
+test('the night hall is a fixed room whose floor meets the table at y=0', () => {
+  const room = makeNightHallRoom();
+  assert.ok(room.nv > 1000 && room.ni > 1000);
+  let minY = Infinity, maxY = -Infinity, maxR = 0;
+  for (let i = 0; i < room.nv; i++) {
+    const x = room.pos[i * 3], y = room.pos[i * 3 + 1], z = room.pos[i * 3 + 2];
+    assert.ok(Number.isFinite(x) && Number.isFinite(y) && Number.isFinite(z));
+    minY = Math.min(minY, y); maxY = Math.max(maxY, y);
+    maxR = Math.max(maxR, Math.hypot(x, z));
   }
-  assert.ok(Math.hypot(PH.T_HALF_WID, PH.T_HALF_LEN) < 4.7, 'the whole table is inside the circle');
+  near(minY, 0, 1e-5); near(maxY, NIGHT_HALL.height, 1e-5);
+  assert.ok(maxR > Math.hypot(NIGHT_HALL.halfWidth, NIGHT_HALL.halfLength));
+  for (const value of room.uv) assert.ok(Number.isFinite(value));
+  for (let i = 0; i < room.ni; i++) assert.ok(room.idx[i] < room.nv);
 });
 
-test('floor and walls meet without cracks, UV jumps or camera-relative coordinates', () => {
-  const floor = makeStreetCourtFloor(), shell = makeStreetCourtShell();
-  const stride = STREET_COURT.columns + 1;
-  const floorEdge = STREET_COURT.floorRows * stride;
-  for (let i = 0; i < stride; i++) {
-    for (let k = 0; k < 3; k++) near(floor.pos[3 * (floorEdge + i) + k], shell.pos[3 * i + k]);
-    for (let k = 0; k < 2; k++) near(floor.uv[2 * (floorEdge + i) + k], shell.uv[2 * i + k]);
-    assert.ok(Number.isFinite(streetCourtEdgeRadius(i / STREET_COURT.columns)));
-  }
-  for (const mesh of [floor, shell]) {
-    for (const value of mesh.pos) assert.ok(Number.isFinite(value));
-    for (const value of mesh.uv) assert.ok(Number.isFinite(value));
-    for (let i = 0; i < mesh.ni; i++) assert.ok(mesh.idx[i] < mesh.nv, 'mesh index is in bounds');
-    for (let row = 0; row < mesh.nv / stride; row++) {
-      const first = row * stride, last = first + STREET_COURT.columns;
-      for (let k = 0; k < 3; k++) near(mesh.pos[first * 3 + k], mesh.pos[last * 3 + k], 1e-4);
-      near(mesh.uv[first * 2], 0); near(mesh.uv[last * 2], 1);
-      near(mesh.uv[first * 2 + 1], mesh.uv[last * 2 + 1]);
+test('night-hall UVs stay on the panorama and unwrap continuously', () => {
+  for (let a = 0; a < 360; a += 5) {
+    const t = a * Math.PI / 180, x = 3 * Math.sin(t), z = 3 * Math.cos(t);
+    for (const y of [0.2, NIGHT_HALL.captureY, 3.5]) {
+      const uv = nightHallUV(x, y, z);
+      assert.ok(Number.isFinite(uv.u) && Number.isFinite(uv.v));
+      assert.ok(uv.v >= 0 && uv.v <= 1, `v=${uv.v}`);
     }
   }
-  // Ground vertices sample the panorama from the original capture point,
-  // independent of any subsequent 3D camera position.
-  for (const row of [2, 8, 16, 31]) for (const col of [20, 48, 96, 144, 172]) {
-    const i = row * stride + col;
-    const uv = streetCourtGroundUV(floor.pos[i * 3], floor.pos[i * 3 + 2]);
-    near(uv.u, floor.uv[i * 2], 1e-4); near(uv.v, floor.uv[i * 2 + 1], 1e-4);
-  }
 });
 
-test('a full lobby orbit stays inside the reconstructed court', () => {
-  for (let i = 0; i < 360; i++) {
-    const a = i * Math.PI / 180, x = 4.7 * Math.sin(a), z = 4.7 * Math.cos(a);
-    const u = streetCourtGroundUV(x, z).u;
-    const distance = Math.hypot(x, z - STREET_COURT.eyeZ);
-    assert.ok(distance < streetCourtEdgeRadius(u), `camera crosses wall at ${i}°`);
+test('night-hall corners rotate as a rigid room around the table', () => {
+  const radius = Math.hypot(NIGHT_HALL.halfWidth, NIGHT_HALL.halfLength);
+  for (const [x, z] of [[NIGHT_HALL.halfWidth, NIGHT_HALL.halfLength], [-NIGHT_HALL.halfWidth, NIGHT_HALL.halfLength],
+    [NIGHT_HALL.halfWidth, -NIGHT_HALL.halfLength], [-NIGHT_HALL.halfWidth, -NIGHT_HALL.halfLength]]) {
+    const p = nightHallWorld(x, 0, z);
+    near(Math.hypot(p.x, p.z), radius, 1e-5);
   }
+  const origin = nightHallWorld(0, 0, 0);
+  near(origin.x, 0); near(origin.z, 0); near(origin.y, NIGHT_HALL.height / 2);
+  assert.ok(Number.isFinite(NIGHT_HALL_YAW));
 });
 
 test('table shade has a broad tabletop silhouette, four contact patches and soft edges', () => {
@@ -177,24 +149,28 @@ test('table shade has a broad tabletop silhouette, four contact patches and soft
   assert.ok(shadow(s.width / 2, s.depth / 2) < 0.01, 'transparent at texture edge');
 });
 
-test('panorama, table and shadow use the same scene; fallback and shadow pass remain safe', () => {
+test('panorama room, table and shadow share one scene; fallback and shadow pass remain safe', () => {
   const s = Object.create(Scene.prototype);
-  const meshNames = ['tableTop', 'tableBody', 'box', 'leg', 'netPost', 'net', 'floor', 'quad', 'wall', 'courtFloor', 'courtShell', 'courtMarking'];
+  const meshNames = ['tableTop', 'tableBody', 'frame', 'frameDark', 'zinc', 'wheel', 'bolt', 'tape',
+    'markerSide', 'markerEnd', 'net', 'room', 'floor', 'quad', 'wall', 'box'];
   s.mesh = Object.fromEntries(meshNames.map(n => [n, n]));
-  s.M = { floor: 'world', tableTop: 'top', tableBody: 'body', apronN: 'apronN', apronS: 'apronS', apronW: 'apronW', apronE: 'apronE', net: 'net' };
-  s.mat = { table: {}, tableBody: {}, apron: {}, frame: {}, post: {}, net: {}, floor: {}, stands: {}, ceiling: {}, pool: {},
-    panorama: {}, courtGround: { asphalt: {} }, courtMarking: {} };
+  s.M = { floor: 'world', tableTop: 'top', tableBody: 'body', net: 'net', room: 'room',
+    markerEnd: 'end', markerSides: ['sideA', 'sideB'] };
+  s.mat = { table: {}, tableBody: {}, frame: {}, frameDark: {}, zinc: {}, wheel: {}, bolt: {}, tape: {},
+    markerSide: {}, markerEnd: {}, net: {}, floor: {}, stands: {}, ceiling: {}, pool: {},
+    panorama: {}, courtGround: {} };
   s.floorPool = 'pool'; s.tableShade = 'shade'; s._shadowMat0 = {};
-  s.walls = ['wall1']; s.ceiling = 'ceiling'; s.legs = ['leg1']; s.legBars = []; s.netPosts = [];
+  s.walls = ['wall1']; s.ceiling = 'ceiling';
   const calls = [], R = { draw: (mesh, matrix) => calls.push([mesh, matrix]), drawShadow: (mesh, matrix) => calls.push([mesh, matrix]) };
   s.hasPanorama = true; s.drawStatic(R, false);
-  assert.deepEqual(calls.slice(0, 4), [['courtShell', 'world'], ['courtFloor', 'world'], ['courtMarking', 'world'], ['quad', 'shade']]);
+  assert.deepEqual(calls.slice(0, 2), [['room', 'room'], ['quad', 'shade']]);
   assert.ok(calls.some(([mesh]) => mesh === 'tableTop'));
+  assert.ok(calls.some(([mesh, matrix]) => mesh === 'markerSide' && matrix === 'sideA'));
   calls.length = 0; s.hasPanorama = false; s.drawStatic(R, false);
   assert.ok(calls.some(([mesh]) => mesh === 'floor'));
   assert.ok(calls.some(([mesh, matrix]) => mesh === 'quad' && matrix === 'shade'));
-  assert.ok(!calls.some(([mesh]) => mesh === 'courtFloor'));
+  assert.ok(!calls.some(([mesh]) => mesh === 'room'));
   calls.length = 0; s.drawStatic(R, true);
   assert.ok(calls.some(([mesh]) => mesh === 'tableTop'));
-  assert.ok(!calls.some(([mesh]) => mesh === 'floor' || mesh === 'courtFloor' || mesh === 'quad'));
+  assert.ok(!calls.some(([mesh]) => mesh === 'room' || mesh === 'floor' || mesh === 'quad'));
 });

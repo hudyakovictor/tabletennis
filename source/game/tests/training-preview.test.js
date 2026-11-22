@@ -11,11 +11,81 @@ const names = ['TrainingPreview', 'Renderer', 'Game', 'GS', 'PH', 'STROKE_CONFIG
   'Equipment', 'MomentRecorder', 'Trainer', 'TRAIN_STEPS', 'TRAIN_FEEDS', 'TRAIN_GUIDES', 'PADDLE_TEMPLATES',
   'trainingFeedBall', 'racketForStroke', 'resolveRacketLaunch', 'predict', 'integrateBall',
   'tableContact', 'netContactStep', 'bounceTable', 'measureShotSpin', 'strokeIdentityMatches',
-  'paddleTableClearance', 'sampleStrokeTemplate', 'createStrokeTemplateOutput', 'projectPoint'];
+  'paddleTableClearance', 'sampleStrokeTemplate', 'createStrokeTemplateOutput', 'projectPoint',
+  'TrainingAttemptRecorder', 'validTrainingAttempt', 'sampleTrainingAttempt',
+  'TRAIN_ATTEMPT_CAP', 'TRAIN_ATTEMPT_STRIDE', 'TRAIN_ATTEMPT_HZ', 'ET',
+  'paddleContactPose', 'getCaptureForgiveness', 'setCaptureForgiveness', 'gameplayCalibrationLocked'];
 const lib = load(files, names, { Math: Object.create(Math) });
 const strokes = Object.keys(lib.PADDLE_TEMPLATES.strokes);
 const near = (a, b, epsilon = 1e-8) => assert.ok(Math.abs(a - b) <= epsilon, `${a} != ${b}`);
 const vectorNear = (a, b, epsilon) => { for (const k of ['x', 'y', 'z']) near(a[k], b[k], epsilon); };
+const quaternionNear = (a, b, epsilon = 1e-8) => {
+  const sign = a.x * b.x + a.y * b.y + a.z * b.z + a.w * b.w < 0 ? -1 : 1;
+  for (const key of ['x', 'y', 'z', 'w']) near(a[key], sign * b[key], epsilon);
+};
+const plain = value => JSON.parse(JSON.stringify(value));
+const attemptOutput = () => ({ ball: { p: {}, v: {}, w: {}, q: {} },
+  player: { pos: {}, q: {}, normal: {} }, opponent: { pos: {}, q: {}, normal: {} } });
+
+function setRecordedState(g, seconds) {
+  lib.V3.set(g.ball.p, .1 + seconds, 1.2 + seconds * .2, .9 - seconds * .3);
+  lib.V3.set(g.ball.v, 1, .2, -.3); lib.V3.set(g.ball.w, 320 + seconds, -73, 19);
+  lib.Q.setAxisAngle(g.ball.q, 0, 1, 0, seconds * .31);
+  for (const [pad, side] of [[g.player, 1], [g.aiPaddle, -1]]) {
+    lib.V3.set(pad.pos, side * (.2 + seconds * .1), 1.3 + seconds * .05, side * 1.7);
+    lib.V3.set(pad.normal, 0, 0, -side); lib.Q.setAxisAngle(pad.q, 0, 0, 1, seconds * side * .2);
+    pad.roll = .23 + seconds * side; pad.activeFace = seconds < .5 ? side : -side; pad.poseReady = true;
+  }
+  g.playerPaddleVisible = seconds < .7;
+}
+
+function recordingFixture(options = {}) {
+  const f = fixture(), { g } = f;
+  for (const method of ['setPaused', 'update', 'applyHit']) delete g[method];
+  g.resetPaddle = () => {};
+  g.cancelInput = () => { g.training?.captureAttemptGesture(); g.swipe.cancel(); g.pointerDown = false; };
+  g.ui = { inputMode: options.inputMode === 'mouse' ? 'mouse' : 'touch', trainSync() {}, trainProgress() {}, trainDone() {}, trainHide() {}, showShot() {} };
+  g.settings.hint = options.hint === true; g.settings.showTrail = g.settings.showPredict = false;
+  g.hintRequested = g.hintContact = g.settings.hint; g.sessionKind = 'practice';
+  g._playerFace = 1; g.player.prev = lib.V3.clone(g.player.pos);
+  for (const pad of [g.player, g.aiPaddle]) { pad.poseReady = true; pad.activeFace = 1; pad.roll = .23; }
+  g.slowmo = { on: false, active: false, allowed: true, energy: 1, used: 0 };
+  g.recorder = { reset() {}, addShot() {}, addBounce() {} };
+  g.moments = { push() {}, addContact() {}, addBounce() {} };
+  g.matchTasks = { topspin: 0, smash: 0, serves: 0, moments: 0 };
+  g.stats.totalSpin = g.stats.maxSpeed = 0;
+  g._recordContactFlash = g.shakeIt = g.buzz = () => {};
+  g.training = new lib.Trainer(g, { mode: 'stroke', stroke: 'DRIVE', pacing: 'coach', seed: 73,
+    requestId: 91, progress: { version: 1, lessons: {} }, ...options });
+  g.training.begin(); assert.equal(g.training.action('start'), true); g.training.feed();
+  return f;
+}
+
+// The real dispatcher, pause, substep physics and Trainer recording remain in
+// charge. Only unrelated presentation/CCD input owners are fixture callbacks.
+function gameLoopFixture(options = {}) {
+  const f = recordingFixture(options), { g } = f;
+  for (const method of ['updateShotDiagnostics', 'updatePlayerPaddle', 'updateStrikeWindow',
+    'updateOpponentPose', 'tryAiHit', 'tryPlayerHit', 'updateCamera', 'keepPaddleOnScreen',
+    'clampPaddleVolume', 'logInput', 'emitParticles']) g[method] = () => {};
+  g.substepPadPose = () => null; g.contactPrediction = () => null;
+  g.particles = { update() {} }; g.anticipation = { active: false, visualOffset: lib.V3.new() };
+  g.replayer = { on: false }; g.spinIndicator = { active: false };
+  g.messages = []; g.hitFlash = 0;
+  g.followThrough.active = false; g.inspectSlowmo = false;
+  g.profile.data.stats.minutes = 0; g.profile.maybeSave = () => {};
+  g.vw = g.R._w; g.vh = g.R._h; g._fpsN = g._fpsT = g._acc = 0;
+  g._calPolicyKey = ['practice', 'practice', false, false].join('|');
+  return f;
+}
+
+function completedAttempt(options = {}) {
+  const f = gameLoopFixture(options), { g } = f, t = g.training;
+  for (let i = 0; i < 300 && t.phase === 'live'; i++) g.update(1 / 60);
+  assert.notEqual(t.phase, 'live', 'real physics must settle the missed feed');
+  assert.ok(lib.validTrainingAttempt(t.attemptClip));
+  return f;
+}
 
 // Real Renderer methods below run against a GL recorder, not empty draw stubs.
 // This catches missing camera uniforms when changing only a viewport for an inset.
@@ -351,18 +421,39 @@ test('physics and trajectory buffers are not regenerated by playback, scrub, rat
   }
 });
 
-test('real-time playback is frame-rate independent and reduced motion remains static', () => {
-  const { p, g } = fixture(); const phases = [];
-  for (const fps of [30, 60, 120]) {
-    p.open({ strokeId: 'DRIVE', rate: .75 });
-    for (let i = 0; i < fps; i++) p.update(1 / fps);
-    phases.push(p.phase);
+test('real-time reference playback follows physical timestamps at every rate and frame rate', () => {
+  const { p, g } = fixture();
+  for (const strokeId of ['DRIVE', 'LOB', 'SERVE_FAST']) for (const rate of [1, .75, .5, .25]) {
+    const phases = [];
+    for (const fps of [30, 60, 120]) {
+      assert.equal(p.open({ strokeId, rate }), true);
+      const c = p.clip;
+      near(c.compiled.duration, 2.4, 1e-7);
+      near(c.contactTime, Math.max(c.inbound.duration, c.physicalDuration * c.compiled.contactPhase));
+      near(p.duration, c.contactTime + Math.max(c.outbound.duration, c.physicalDuration * (1 - c.compiled.contactPhase)));
+      near(c.contactPhase, c.contactTime / p.duration);
+      assert.ok(Math.abs(p.duration - 2.4) > .01, 'physical flight must not be stretched to the motion template');
+      for (let i = 0; i < fps / 2; i++) p.update(1 / fps);
+      near(p.phase * p.duration, rate / 2); phases.push(p.phase);
+    }
+    phases.forEach(phase => near(phase, phases[0]));
+    p.command('contact'); near(p.phase, p.clip.contactPhase);
+    vectorNear(p.ball.p, p.clip.ball.p);
+    p.command('seek', (p.clip.contactTime + p.clip.outbound.bounces[0].t) / p.duration);
+    vectorNear(p.ball.p, p.clip.outbound.bounces[0], 1e-7);
   }
-  for (const phase of phases) near(phase, .75 / 2.4);
+  p.close();
+});
+
+test('reduced motion uses physical contact phase and never starts reference autoplay', () => {
+  const { p, g } = fixture();
   g.motionOff = true; p.open({ strokeId: 'DRIVE' });
-  near(p.phase, p.clip.compiled.contactPhase); assert.equal(p.playing, false);
+  near(p.phase, p.clip.contactPhase); assert.equal(p.playing, false);
+  assert.ok(Math.abs(p.clip.contactPhase - p.clip.compiled.contactPhase) > .01);
   assert.equal(p.command('play'), false);
-  p.update(.1); near(p.phase, p.clip.compiled.contactPhase);
+  p.update(.1); near(p.phase, p.clip.contactPhase);
+  p.command('repeat'); assert.equal(p.playing, false); near(p.phase, 0);
+  p.command('contact'); vectorNear(p.ball.p, p.clip.ball.p);
   p.command('seek', .25); p.update(.1); near(p.phase, .25);
   g.motionOff = false; g.reducedMotion = true; p.update(.1); assert.equal(p.reducedMotion, true);
   g.reducedMotion = false; p.update(.1); assert.equal(p.reducedMotion, false);
@@ -475,25 +566,435 @@ test('same WebGL contact inset uploads its own camera, clears only scoped depth 
 
 test('render failures restore the exact gameplay matrices and GL viewport/scissor', () => {
   const { p, g, state } = fixture(); p.open({ strokeId: 'DRIVE' }); p.render();
-  const before = gameHash(g), viewport = state.viewport.slice(), scissor = state.scissor.slice();
+  const before = gameHash(g), viewport = state.viewport.slice(), scissor = state.scissor.slice(),
+    enabled = new Set(state.enabled), depthMask = state.depthMask, framebuffer = state.framebuffer, program = state.program;
   g.R.draw = () => { throw Error('synthetic GL failure'); };
-  assert.throws(() => p.render(), /synthetic GL failure/); delete g.R.draw;
+  assert.equal(p.render(), false); delete g.R.draw;
+  assert.equal(p.active, false); assert.equal(p.clip, null); assert.equal(p.error, lib.ET('preview.unavailable'));
   assert.equal(gameHash(g), before); assert.deepEqual(state.viewport, viewport); assert.deepEqual(state.scissor, scissor);
-  p.close();
+  assert.deepEqual(state.enabled, enabled); assert.equal(state.depthMask, depthMask);
+  assert.equal(state.framebuffer, framebuffer); assert.equal(state.program, program);
+  assert.equal(p.command('play'), false); assert.equal(p.close(), false);
 });
 
-test('close restores exact paused, quiet, mute and levels; mode close cannot wake audio', () => {
+test('close restores exact unmodified pause/audio state but preserves sound changes made during preview', () => {
   for (const paused of [false, true]) for (const quiet of [false, true]) for (const muted of [false, true]) {
     const { p, g } = fixture(); g.paused = paused; g.audio.setQuiet(quiet); g.audio.setMuted(muted);
     const before = gameHash(g, false), levels = { ...g.audio.levels };
     p.open({ strokeId: 'DRIVE' });
     assert.equal(g.paused, true); assert.equal(g.audio.quiet, true);
-    g.audio.setLevels({ master: .9, effects: 0, music: .8 }); g.audio.setMuted(!muted);
     p.close(); assert.equal(g.paused, paused); assert.equal(g.audio.quiet, quiet); assert.equal(g.audio.muted, muted);
     assert.deepEqual({ ...g.audio.levels }, levels); assert.equal(gameHash(g, false), before);
     assert.equal(p.close(), false); assert.equal(p._cache.size, 0); assert.equal(p.clip, null);
+    g.audio.setLevels({ master: .9, effects: 0, music: .8 }); g.audio.setMuted(!muted); g.settings.volume = .9;
+    const changed = gameHash(g, false), changedLevels = { ...g.audio.levels };
+    g.audio.setLevels(levels); g.audio.setMuted(muted); g.settings.volume = .43;
+    p.open({ strokeId: 'DRIVE' });
+    g.audio.setLevels(changedLevels); g.audio.setMuted(!muted); g.settings.volume = .9;
+    p.close(); assert.equal(g.paused, paused); assert.equal(g.audio.quiet, quiet); assert.equal(g.audio.muted, !muted);
+    assert.deepEqual({ ...g.audio.levels }, changedLevels); near(g.audio.volume, .9); near(g.settings.volume, .9);
+    assert.equal(gameHash(g, false), changed, 'close must not overwrite newly selected mute, levels or volume');
   }
   const { p, g } = fixture(); p.open({ strokeId: 'DRIVE' }); p.close(false);
   assert.equal(g.paused, true); assert.equal(g.audio.quiet, true);
   assert.equal(p._listeners.length, 0); assert.equal(p._pointers.size, 0);
+});
+
+for (const fps of [30, 60, 120]) test(`attempt recorder resamples ${fps}fps into the exact 43-float 30Hz layout`, () => {
+  const { g } = fixture(), meta = { attemptId: 7, sessionId: 'record-test' };
+  const r = new lib.TrainingAttemptRecorder(g, meta);
+  assert.equal(lib.TRAIN_ATTEMPT_HZ, 30); assert.equal(lib.TRAIN_ATTEMPT_STRIDE, 43); assert.equal(lib.TRAIN_ATTEMPT_CAP, 240);
+  const buffer = r.frames;
+  for (let i = 0; i <= fps; i++) { setRecordedState(g, i / fps); assert.equal(r.push(i / fps, i / fps * .65), true); }
+  const c = r.finish({ success: false, reason: 'miss' });
+  assert.equal(r.frames, buffer); assert.equal(buffer.length, 240 * 43);
+  assert.equal(Object.prototype.toString.call(c.frames), '[object Float64Array]');
+  assert.notEqual(c.frames.buffer, r.frames.buffer); assert.equal(c.frames.length, c.count * 43);
+  assert.equal(c.schema, 1); assert.equal(c.hz, 30); assert.equal(c.stride, 43); assert.equal(c.count, 31);
+  assert.equal(c.truncated, false); assert.ok(lib.validTrainingAttempt(c));
+  for (let i = 0; i < c.count; i++) { near(c.frames[i * 43], i / 30); near(c.frames[i * 43 + 1], i / 30 * .65); }
+  const f = Array.from(c.frames.slice(-43));
+  const values = v => ['x', 'y', 'z'].map(key => v[key]), quat = q => ['x', 'y', 'z', 'w'].map(key => q[key]);
+  const expected = [1, .65, ...values(g.ball.p), ...values(g.ball.v), ...values(g.ball.w), ...quat(g.ball.q),
+    ...values(g.player.pos), ...quat(g.player.q), ...values(g.player.normal), g.player.roll, -1, 0,
+    ...values(g.aiPaddle.pos), ...quat(g.aiPaddle.q), ...values(g.aiPaddle.normal), g.aiPaddle.roll, 1, 1, -1, 1];
+  f.forEach((value, i) => near(value, expected[i]));
+  assert.ok(Math.hypot(...f.slice(8, 11)) > 300, 'physical spin is not the visual quaternion rate');
+  near(Math.hypot(...f.slice(11, 15)), 1);
+});
+
+test('attempt sampler interpolates both complete paddle poses and separate physical spin/display orientation without physics or RNG', () => {
+  const { g } = fixture(), r = new lib.TrainingAttemptRecorder(g, {});
+  setRecordedState(g, 0); r.push(0, 0); setRecordedState(g, 1); r.push(1, .65);
+  const c = r.finish({ success: false }), out = attemptOutput(), before = gameHash(g, false), copy = Array.from(c.frames);
+  const refs = [out.ball.p, out.ball.v, out.ball.w, out.ball.q, out.player.pos, out.player.q, out.player.normal,
+    out.opponent.pos, out.opponent.q, out.opponent.normal];
+  const saved = {}, math = lib.context.Math, random = math.random, newV = lib.V3.new, newQ = lib.Q.new;
+  for (const name of ['integrateBall', 'predict', 'trainingFeedBall', 'resolveRacketLaunch', 'racketForStroke']) {
+    saved[name] = lib.context[name]; lib.context[name] = () => { throw Error(`actual sampler called ${name}`); };
+  }
+  try {
+    math.random = lib.V3.new = lib.Q.new = () => { throw Error('actual sampler allocated or consumed RNG'); };
+    for (const seconds of [-1, 0, .017, .123, .515, .999, 1, 4]) {
+      assert.equal(lib.sampleTrainingAttempt(c, seconds, out), out);
+      const time = Math.max(0, Math.min(1, seconds)); near(out.real, time); near(out.simulation, time * .65);
+      vectorNear(out.ball.p, { x: .1 + time, y: 1.2 + time * .2, z: .9 - time * .3 });
+      vectorNear(out.ball.v, { x: 1, y: .2, z: -.3 }); vectorNear(out.ball.w, { x: 320 + time, y: -73, z: 19 });
+      for (const [pad, side] of [[out.player, 1], [out.opponent, -1]]) {
+        vectorNear(pad.pos, { x: side * (.2 + time * .1), y: 1.3 + time * .05, z: side * 1.7 });
+        vectorNear(pad.normal, { x: 0, y: 0, z: -side }); near(pad.roll, .23 + time * side);
+        near(Math.hypot(...Object.values(pad.q)), 1);
+      }
+      near(Math.hypot(...Object.values(out.ball.q)), 1); assert.equal(out.ball.lastHitBy, -1); assert.equal(out.gap, false);
+    }
+    for (const seconds of [NaN, Infinity, undefined]) assert.equal(lib.sampleTrainingAttempt(c, seconds, out), false);
+    assert.equal(lib.sampleTrainingAttempt(null, .1, out), false);
+    assert.equal(gameHash(g, false), before); assert.deepEqual(Array.from(c.frames), copy);
+    [out.ball.p, out.ball.v, out.ball.w, out.ball.q, out.player.pos, out.player.q, out.player.normal,
+      out.opponent.pos, out.opponent.q, out.opponent.normal].forEach((value, i) => assert.equal(value, refs[i]));
+  } finally {
+    math.random = random; lib.V3.new = newV; lib.Q.new = newQ;
+    for (const name of Object.keys(saved)) lib.context[name] = saved[name];
+  }
+});
+
+test('attempt recorder preserves off-grid exact contact/outcome, bounds long clips and refuses interpolation across trimmed gaps', () => {
+  const { g } = fixture(), r = new lib.TrainingAttemptRecorder(g, {});
+  setRecordedState(g, 0); r.push(0, 0);
+  setRecordedState(g, .12345); r.event('contact', .12345, .0802425, { side: 1, strokeId: 'DRIVE' });
+  const contact = Array.from(r.input);
+  for (let i = 16; i <= 1800; i++) { setRecordedState(g, i / 120); r.push(i / 120, i / 120 * .65); }
+  r.event('outcome', 15.012345, 9.75802425, { success: false, reason: 'miss' });
+  const c = r.finish({ success: false, reason: 'miss' });
+  assert.equal(c.count, 240); assert.equal(c.truncated, true); assert.ok(lib.validTrainingAttempt(c));
+  assert.deepEqual(Array.from(c.frames.slice(0, 43)), contact);
+  near(c.frames[(c.count - 1) * 43], 15.012345); near(c.frames[(c.count - 1) * 43 + 1], 9.75802425);
+  assert.equal(c.events.at(-1).type, 'outcome'); assert.equal(c.events.find(e => e.type === 'contact').real, .12345);
+  assert.equal(c.outcome.reason, 'miss'); assert.equal(c.gaps.length, 1);
+  const gap = c.gaps[0], out = attemptOutput(); assert.ok(gap.to > gap.from + 1);
+  lib.sampleTrainingAttempt(c, (gap.to - gap.from) / 2, out); assert.equal(out.gap, true);
+  vectorNear(out.ball.p, { x: contact[2], y: contact[3], z: contact[4] });
+  vectorNear(out.ball.w, { x: contact[8], y: contact[9], z: contact[10] });
+  near(out.simulation, contact[1]);
+  lib.sampleTrainingAttempt(c, gap.to - c.startReal, out); assert.equal(out.gap, false);
+  vectorNear(out.ball.p, { x: c.frames[45], y: c.frames[46], z: c.frames[47] });
+  for (let i = 1; i < c.count; i++) assert.ok(c.frames[i * 43] >= c.frames[(i - 1) * 43]);
+});
+
+test('Game.update records only active real/simulation time through pause, freeze and guided 0.65 tempo', () => {
+  const { g } = gameLoopFixture({ adaptive: true, hint: true }), t = g.training;
+  for (let i = 0; i < 12; i++) g.update(1 / 60);
+  near(t.activeReal, .2); near(t.activeSim, .13); near(g.timeScale, .65);
+  const n = t.recording.n, time = g.time, sim = g.strokeTime, active = [t.activeReal, t.activeSim], ball = plain(g.ball);
+  g.setPaused(true); assert.equal(g.paused, true);
+  for (let i = 0; i < 120; i++) g.update(1 / 60);
+  near(g.time, time); near(g.strokeTime, sim); assert.deepEqual([t.activeReal, t.activeSim], active); assert.equal(t.recording.n, n);
+  assert.deepEqual(plain(g.ball), ball);
+  g.setPaused(false); t.frozen = true;
+  for (let i = 0; i < 120; i++) g.update(1 / 60);
+  near(g.time, time); near(g.strokeTime, sim); assert.deepEqual([t.activeReal, t.activeSim], active); assert.equal(t.recording.n, n);
+  assert.deepEqual(plain(g.ball), ball);
+  g.setPaused(true); g.settings.hint = g.hintRequested = false; g.update(1 / 60);
+  assert.equal(t.frozen, false); assert.equal(g.paused, true); assert.deepEqual([t.activeReal, t.activeSim], active);
+  g.setPaused(false); for (let i = 0; i < 6; i++) g.update(1 / 60);
+  near(t.activeReal, .3); near(t.activeSim, .23); near(g.timeScale, 1);
+  assert.notDeepEqual(plain(g.ball.p), ball.p, 'the real physics resumes at normal tempo after hint OFF');
+  t.onFault(-1, 'miss'); const c = t.attemptClip;
+  near(c.endReal, .3); near(c.frames[(c.count - 1) * 43 + 1], .23);
+  assert.ok(c.endReal < 1, 'paused and frozen menu time must not enter playback');
+  lib.setCaptureForgiveness(1);
+});
+
+test('Game.update begins recording before owners and samples after both paddle owners and final clamps', () => {
+  const { g } = gameLoopFixture(), t = g.training, order = [];
+  g.ball.live = false;
+  const begin = t.beginRecordingFrame.bind(t), capture = t.captureRecordingFrame.bind(t);
+  t.beginRecordingFrame = (...args) => { order.push('begin'); begin(...args); };
+  g.updatePlayerPaddle = () => { order.push('player'); lib.V3.set(g.player.pos, .3, 1.4, 1.6); };
+  g.updateOpponentPose = () => { order.push('opponent'); lib.V3.set(g.aiPaddle.pos, -.4, 1.5, -1.6); };
+  g.keepPaddleOnScreen = () => { order.push('screen'); g.player.pos.x = .25; };
+  g.clampPaddleVolume = () => { order.push('clamp'); g.player.pos.y = 1.35; };
+  t.captureRecordingFrame = () => { order.push('capture'); capture(); };
+  g.update(1 / 30);
+  assert.deepEqual(order, ['begin', 'player', 'opponent', 'screen', 'clamp', 'capture']);
+  const c = t.recording.finish({ success: false }), out = attemptOutput(); lib.sampleTrainingAttempt(c, 1 / 30, out);
+  vectorNear(out.player.pos, g.player.pos); vectorNear(out.opponent.pos, g.aiPaddle.pos);
+});
+
+test('actual contact pipeline copies original gesture timestamps before cancel and preserves exact incoming/outgoing/terminal frames', () => {
+  const { g, p } = gameLoopFixture({ stroke: 'BLOCK' }), t = g.training, V = lib.V3;
+  V.set(g.ball.p, .12, 1.12, .9); V.set(g.ball.v, .3, -.5, 7); V.set(g.ball.w, 35, 9, -3);
+  lib.Q.setAxisAngle(g.ball.q, 0, 1, 0, .48); const incoming = plain(g.ball);
+  g.rallyBounces = [1]; g.swipe.down(.4, .6, 42.001, 12.003); g.swipe.up(.4, .6, 42.045, 12.047);
+  g.swipe.pressZone = { accepted: true, shotId: g.shotId, distancePx: 0, pressT: 42.001 };
+  const points = plain(g.swipe.samples), gestureId = g.swipe.gestureId;
+  const m = lib.context.tapStrokeMetrics({ ...g.swipe.lastReleased }, .4, .6, false);
+  t.beginRecordingFrame(.1, .065); g._trainingSubFraction = .375;
+  g.tryPlayerHit = lib.Game.prototype.tryPlayerHit;
+  g.tryPlayerHit(V.clone(g.ball.p), m, { pos: V.clone(g.ball.p), prevPos: V.clone(g.ball.p), normal: V.new(0, 0, -1) });
+  assert.ok(t.lastShot, 'real input/contact pipeline must physically hit'); assert.equal(t.lastShot.stroke, 'BLOCK');
+  assert.equal(g.swipe.samples.length, 0, 'the real Game hit consumes the swipe');
+  const event = t.recording.events.find(e => e.type === 'contact'), gesture = t.recording.gestures.find(e => e.gestureId === gestureId);
+  near(event.real, .0375); near(event.simulation, .024375); assert.equal(event.gestureId, gestureId);
+  assert.deepEqual(plain(gesture.points), points); near(gesture.contactReal, event.real);
+  near(gesture.startSimTime, 12.003); near(gesture.sampleSimTime, 12.047);
+  for (const key of ['p', 'v', 'w']) vectorNear(event.incoming[key], incoming[key]); quaternionNear(event.incoming.q, incoming.q);
+  const outgoing = plain(g.ball), pose = plain(g.player);
+  for (const key of ['p', 'v', 'w']) vectorNear(event.outgoing[key], outgoing[key]); quaternionNear(event.outgoing.q, incoming.q);
+  assert.ok(event.pose); vectorNear(event.pose.pos, pose.pos); quaternionNear(event.pose.q, pose.q);
+  g._trainingSubFraction = null; t.captureRecordingFrame(); g.tryPlayerHit = () => {};
+  let terminalTime, terminalBall;
+  const physics = g.stepPhysics;
+  g.stepPhysics = function(dt) {
+    const time = t.recordingTime(); physics.call(this, dt);
+    if (t.attemptClip && !terminalTime) { terminalTime = time; terminalBall = plain(this.ball); }
+  };
+  for (let i = 0; i < 300 && t.phase === 'live'; i++) g.update(1 / 60);
+  const c = t.attemptClip; assert.ok(lib.validTrainingAttempt(c)); assert.ok(terminalTime);
+  assert.equal(c.outcome.contact, true); assert.equal(c.outcome.legal, true); assert.ok(c.events.some(e => e.type === 'bounce'));
+  const terminal = c.events.at(-1); assert.equal(terminal.type, 'outcome');
+  near(terminal.real, terminalTime[0]); near(terminal.simulation, terminalTime[1]); near(c.endReal, terminal.real);
+  const last = (c.count - 1) * 43; near(c.frames[last + 1], terminal.simulation);
+  for (const [offset, value] of [[2, terminalBall.p], [5, terminalBall.v], [8, terminalBall.w]])
+    ['x', 'y', 'z'].forEach((key, i) => near(c.frames[last + offset + i], value[key]));
+  const exact = Array.from({ length: c.count }, (_, i) => i * 43).filter(i => Math.abs(c.frames[i] - event.real) < 1e-12);
+  assert.ok(exact.length >= 2, 'pre-impulse and post-impulse contact states are both exact');
+  for (const [at, ball] of [[exact[0], incoming], [exact.at(-1), outgoing]])
+    for (const [offset, value] of [[2, ball.p], [5, ball.v], [8, ball.w]]) ['x', 'y', 'z'].forEach((key, i) => near(c.frames[at + offset + i], value[key]));
+  assert.equal(p.open({ source: 'attempt', attemptId: c.attemptId, play: false }), true);
+  assert.equal(p.command('contact'), true); near(p.phase, p.clip.contactPhase);
+  const s = p.snapshot(); near(s.sample.real, event.real); near(s.sample.simulation, event.simulation);
+  for (const key of ['p', 'v', 'w']) vectorNear(s.sample.ball[key], outgoing[key]); quaternionNear(s.sample.ball.q, outgoing.q);
+  vectorNear(s.sample.player.pos, pose.pos); quaternionNear(s.sample.player.q, pose.q);
+  assert.deepEqual(plain(s.gesture.points), points); assert.equal(s.contact.gestureId, gestureId); assert.equal(p.render(), true);
+  p.close();
+});
+
+test('a real missed feed produces an actual 3D clip without inventing a contact or generating an example', () => {
+  const { g, p, draws } = completedAttempt({ inputMode: 'mouse' }), t = g.training, c = t.attemptClip;
+  assert.equal(c.outcome.success, false); assert.equal(c.outcome.contact, false);
+  assert.equal(c.events.some(e => e.type === 'contact'), false); assert.ok(c.events.some(e => e.type === 'bounce'));
+  assert.ok(c.events.some(e => e.type === 'floor')); assert.equal(c.events.at(-1).type, 'outcome');
+  assert.equal(c.attemptId, c.metadata.attemptId); assert.equal(c.sessionId, c.metadata.sessionId);
+  assert.equal(c.metadata.hand, g.settings.hand); assert.equal(c.metadata.grip, g.settings.grip);
+  assert.deepEqual(plain(t.snapshot().attemptReplay), { available: true, attemptId: c.attemptId, truncated: false });
+  const before = gameHash(g), duration = c.endReal - c.startReal;
+  p._prepare = () => { throw Error('miss actual must never generate example'); };
+  assert.equal(p.open({ source: 'attempt', attemptId: c.attemptId, rate: 1, play: false }), true, p.error);
+  p.command('seek', .37); assert.equal(p.render(), true);
+  const s = p.snapshot(), out = attemptOutput(); lib.sampleTrainingAttempt(c, duration * .37, out);
+  assert.equal(s.source, 'attempt'); assert.equal(s.attemptId, c.attemptId); assert.equal(s.contact, null); assert.equal(s.contactPhase, null);
+  assert.equal(s.physics.recorded, true); assert.equal(s.physics.hz, 30); assert.equal(s.physics.frames, c.count);
+  near(s.physics.startReal, c.startReal); near(s.physics.endReal, c.endReal); near(s.duration, duration);
+  assert.deepEqual(plain(s.outcome), plain(c.outcome)); near(s.sample.real, out.real); near(s.sample.simulation, out.simulation);
+  for (const key of ['p', 'v', 'w']) vectorNear(s.sample.ball[key], out.ball[key]); quaternionNear(s.sample.ball.q, out.ball.q);
+  for (const side of ['player', 'opponent']) { vectorNear(s.sample[side].pos, out[side].pos); quaternionNear(s.sample[side].q, out[side].q); vectorNear(s.sample[side].normal, out[side].normal); }
+  const blades = draws.filter(draw => draw.buffer === 'blade'); assert.equal(blades.length, 2);
+  for (const [draw, pad] of [[blades[0], out.player], [blades[1], out.opponent]])
+    for (const [i, key] of [[12, 'x'], [13, 'y'], [14, 'z']]) near(draw.model[i], pad.pos[key], 1e-7);
+  const phase = p.phase; assert.equal(p.command('contact'), false); near(p.phase, phase);
+  assert.equal(gameHash(g), before); p.close();
+});
+
+test('actual playback controls change only preview clocks and preserve Trainer/RNG/physics/live state', () => {
+  const { p, g } = completedAttempt({ variation: true, adaptive: true }), c = g.training.attemptClip;
+  const before = gameHash(g), config = JSON.stringify([lib.PH, lib.STROKE_CONFIG]), saved = {};
+  for (const name of ['integrateBall', 'predict', 'trainingFeedBall', 'racketForStroke', 'resolveRacketLaunch']) {
+    saved[name] = lib.context[name]; lib.context[name] = () => { throw Error(`actual preview called ${name}`); };
+  }
+  const random = lib.context.Math.random, trainerRandom = g.training.random;
+  lib.context.Math.random = g.training.random = () => { throw Error('actual preview consumed RNG'); };
+  try {
+    for (const rate of [1, .5, .25]) for (const fps of [30, 60, 120]) {
+      assert.equal(g.openTrainingPreview({ source: 'attempt', attemptId: c.attemptId, rate }), true);
+      g.update(.1); g.setPaused(false); assert.equal(g.paused, true);
+      for (let i = 0; i < fps / 2; i++) p.update(1 / fps);
+      near(p.phase * p.duration, rate * .5); assert.equal(p.command('pause'), true);
+      const phase = p.phase; p.update(.1); near(p.phase, phase);
+      p.command('camera', { yaw: 1.2, pitch: .5 }); assert.equal(p.render(), true);
+      p.command('repeat'); near(p.phase, 0); assert.equal(p.playing, true);
+      p.snapshot(); assert.equal(gameHash(g), before);
+    }
+    p.close(); assert.equal(gameHash(g), before); assert.equal(JSON.stringify([lib.PH, lib.STROKE_CONFIG]), config);
+  } finally {
+    p.close(); lib.context.Math.random = random; g.training.random = trainerRandom;
+    for (const name of Object.keys(saved)) lib.context[name] = saved[name];
+  }
+});
+
+test('completed actual buffers stay detached across next feed, replacement, neutral cleanup and monotonic restart IDs', () => {
+  const { g } = completedAttempt(), t = g.training, first = t.attemptClip, hash = gameHash({ first }, false), id = first.attemptId;
+  t.feed(); assert.equal(t.attemptId, id + 1); assert.equal(t.getAttemptClip(id), first);
+  g.ball.p.x = 99; g.ball.v.y = 88; g.ball.w.z = 77; g.ball.q.x = .2; g.player.pos.x = .8; g.aiPaddle.pos.z = -8;
+  g.settings.hand = 'left'; g.settings.grip = 'penhold'; t.recording.frames.fill(0);
+  assert.equal(gameHash({ first }, false), hash); assert.equal(first.metadata.hand, 'right'); assert.equal(first.metadata.grip, 'shakehand');
+  t.onSystemFault('feeder'); assert.equal(t.recording, null); assert.equal(t.recordingFrame, null);
+  assert.equal(t.getAttemptClip(id), null); assert.equal(t.snapshot().attemptReplay.available, false);
+  t.feed(); assert.equal(t.attemptId, id + 2); g.ball.q.x = 0;
+  for (let i = 0; i < 300 && t.phase === 'live'; i++) g.update(1 / 60);
+  assert.ok(t.attemptClip); assert.ok(t.attemptClip.attemptId > id); assert.equal(t.getAttemptClip(id), null);
+  assert.equal(gameHash({ first }, false), hash);
+  const previous = t.attemptId; assert.equal(t.action('restart'), true); assert.equal(t.attemptClip, null); assert.equal(t.recording, null);
+  t.action('start'); t.feed(); assert.ok(t.attemptId > previous); assert.equal(t.getAttemptClip(id), null);
+  t.quit(); assert.equal(t.recording, null); assert.equal(t.attemptClip, null); assert.equal(g.training, null);
+});
+
+test('actual missing/stale IDs and unsupported clip formats never take ownership or silently become examples', async t => {
+  const { g, p } = completedAttempt(), trainer = g.training, c = trainer.attemptClip;
+  for (const [name, options] of [
+    ['missing', { source: 'attempt' }], ['stale', { source: 'attempt', attemptId: c.attemptId + 1 }],
+    ['string ID', { source: 'attempt', attemptId: String(c.attemptId) }], ['fractional ID', { source: 'attempt', attemptId: 1.5 }],
+    ['session', { source: 'attempt', attemptId: c.attemptId, sessionId: 'retired' }],
+    ['request', { source: 'attempt', attemptId: c.attemptId, trainRequestId: 999 }], ['source', { source: 'predicted', strokeId: 'DRIVE' }],
+  ]) await t.test(name, () => {
+    const before = gameHash(g, false); assert.equal(g.openTrainingPreview(options), false);
+    assert.equal(p.active, false); assert.equal(gameHash(g, false), before);
+  });
+  for (const [name, patch] of [
+    ['schema', { schema: 2 }], ['hz', { hz: 60 }], ['stride', { stride: 16 }], ['too short', { count: 1 }],
+    ['over cap', { count: 241 }], ['missing frames', { frames: null }], ['unfinished time', { endReal: c.startReal }],
+    ['non-finite frame', { frames: c.frames.map((value, i) => i === 8 ? NaN : value) }],
+    ['wrong precision', { frames: Float32Array.from(c.frames) }],
+  ]) await t.test(name, () => {
+    trainer.attemptClip = { ...c, ...patch };
+    try {
+      const before = gameHash(g, false); assert.equal(lib.validTrainingAttempt(trainer.attemptClip), false);
+      assert.equal(trainer.getAttemptClip(c.attemptId), null); assert.equal(p.open({ source: 'attempt', attemptId: c.attemptId }), false);
+      assert.equal(p.error, lib.ET('preview.unavailable')); assert.equal(p.active, false); assert.equal(gameHash(g, false), before);
+    } finally { p.close(); trainer.attemptClip = c; }
+  });
+});
+
+test('unfinished checks block both sources, but completed four-attempt reviews/done permit read-only actual under calibration lock', () => {
+  const { g, p } = completedAttempt(), t = g.training, c = t.attemptClip;
+  t.stage = 'check'; assert.equal(lib.gameplayCalibrationLocked(g), true);
+  for (const phase of ['live', 'fail', 'review', 'done']) for (const attempts of [0, 1, 3]) {
+    t.phase = phase; t.attempts = attempts;
+    assert.equal(t.getAttemptClip(c.attemptId), null);
+    for (const source of ['attempt', 'example']) assert.equal(g.openTrainingPreview({ source, attemptId: c.attemptId, strokeId: 'DRIVE' }), false);
+  }
+  for (const phase of ['review', 'done']) {
+    t.phase = phase; t.attempts = 4; t.finished = phase === 'done';
+    const before = gameHash(g);
+    assert.equal(t.getAttemptClip(c.attemptId), c);
+    assert.equal(g.openTrainingPreview({ source: 'attempt', attemptId: c.attemptId }), true, p.error);
+    p.command('seek', .5); assert.equal(p.render(), true); p.close(); assert.equal(gameHash(g), before);
+  }
+});
+
+test('actual profile is immutable and source switching is sequential/local without losing the recorded attempt', () => {
+  const { p, g } = completedAttempt(), c = g.training.attemptClip, before = gameHash(g);
+  assert.equal(p.open({ source: 'attempt', attemptId: c.attemptId, play: false }), true);
+  const profile = plain(p.profile), frames = c.frames;
+  for (const [action, value] of [['hand', 'left'], ['grip', 'penhold'], ['forehand', false]]) {
+    assert.equal(p.command(action, value), false); assert.deepEqual(plain(p.profile), profile);
+  }
+  assert.equal(p.command('source', 'example'), true); assert.equal(p.snapshot().source, 'example'); assert.equal(p.playing, false);
+  assert.equal(p.command('hand', 'left'), true); assert.equal(p.command('grip', 'penhold'), true);
+  assert.equal(p.command('source', 'attempt'), true); assert.equal(p.snapshot().source, 'attempt'); assert.equal(p.clip.record, c);
+  assert.deepEqual(plain(p.profile), profile); assert.equal(c.frames, frames); assert.equal(p.playing, false);
+  assert.equal(p.command('source', 'unknown'), false); assert.equal(p.clip.record, c); assert.equal(gameHash(g), before);
+  p.close(); assert.equal(gameHash(g), before);
+});
+
+test('reduced-motion actual never autoplays and resize refits presentation without advancing any clock or simulation', () => {
+  const { p, g } = completedAttempt(), c = g.training.attemptClip;
+  g.reducedMotion = true; assert.equal(p.open({ source: 'attempt', attemptId: c.attemptId, play: true }), true);
+  assert.equal(p.playing, false); assert.equal(p.command('play'), false); p.command('repeat'); assert.equal(p.playing, false);
+  p.command('seek', .4); p.update(.1); near(p.phase, .4); p.render();
+  const sample = plain(p.snapshot().sample), vp = Array.from(p._cameraBuf.vp), frames = c.frames;
+  g.R._w = 390; g.R._h = 844; const before = gameHash(g); assert.equal(p.render(), true);
+  assert.notDeepEqual(Array.from(p._cameraBuf.vp), vp); assert.deepEqual(plain(p.snapshot().sample), sample);
+  assert.equal(c.frames, frames); assert.equal(gameHash(g), before);
+  for (const point of p.clip.bounds) { const s = lib.projectPoint(p._cameraBuf.vp, point, {}); assert.ok(s.ok && s.x >= .0749 && s.x <= .9251 && s.y >= .0849 && s.y <= .9151); }
+  p.close();
+});
+
+test('attempt recorder discards incomplete or poisoned data and rejects backwards/non-finite real timestamps', () => {
+  const { g } = fixture(), r = new lib.TrainingAttemptRecorder(g, {});
+  r.push(0, 0); assert.equal(r.finish({ success: false }), null);
+  r.push(.1, .065); const count = r.n;
+  for (const real of [-.1, NaN, Infinity]) assert.equal(r.push(real, .07, true), false);
+  assert.equal(r.n, count); assert.equal(r.push(.2, Infinity), false);
+  g.ball.w.x = NaN; assert.equal(r.push(.2, .13), false); assert.equal(r.finish({ success: false }), null);
+});
+
+test('attempt sampler follows the shortest quaternion arc and keeps face/visibility flags discrete', () => {
+  const { g } = fixture(), r = new lib.TrainingAttemptRecorder(g, {});
+  setRecordedState(g, 0); r.push(0, 0); setRecordedState(g, 1); r.push(1, .65);
+  const c = r.finish({ success: false }), out = attemptOutput();
+  for (let i = 0; i < c.count; i++) {
+    const at = i * 43;
+    for (const start of [11, 18, 31]) for (let j = 0; j < 4; j++) c.frames[at + start + j] = (i % 2 ? -1 : 1) * (j === 3 ? 1 : 0);
+    c.frames[at + 26] = i < 15 ? 1 : -1; c.frames[at + 27] = i < 15 ? 1 : 0;
+    c.frames[at + 39] = i < 15 ? -1 : 1; c.frames[at + 40] = i < 15 ? 0 : 1;
+  }
+  for (const seconds of [.017, .123, .499, .5, .515, .999]) {
+    lib.sampleTrainingAttempt(c, seconds, out);
+    for (const q of [out.ball.q, out.player.q, out.opponent.q]) quaternionNear(q, { x: 0, y: 0, z: 0, w: 1 });
+    assert.equal(out.player.activeFace, seconds < .5 ? 1 : -1); assert.equal(out.player.visible, seconds < .5);
+    assert.equal(out.opponent.activeFace, seconds < .5 ? -1 : 1); assert.equal(out.opponent.visible, seconds >= .5);
+  }
+});
+
+test('attempt gesture/event/outcome data is bounded, timestamp-faithful and detached after finish', () => {
+  const { g } = fixture(), r = new lib.TrainingAttemptRecorder(g, {});
+  r.push(0, 0); r.push(.2, .13);
+  const swipe = { gestureId: 1, samples: Array.from({ length: 100 }, (_, i) => ({ x: i / 100, y: .7 - i / 200, t: 83.001 + i * .001 })),
+    startSimTime: 12.345, sampleSimTime: 12.409, evictedPathLen: .1, originX: .1, originY: .7, originT: 83.001 };
+  for (let id = 1; id <= 40; id++) { swipe.gestureId = id; r.gesture(swipe, .2, .13, id === 40); }
+  const data = { point: { x: .12, y: 1.2, z: .9 } }, outcome = { success: false, landing: { x: .1, z: -1 } };
+  r.event('contact', .212345, .13802425, { ...data, side: 1, strokeId: 'DRIVE' });
+  r.event('outcome', .3, .195, outcome); const c = r.finish(outcome), hash = gameHash({ c }, false);
+  assert.equal(c.gestures.length, 32); const gesture = c.gestures.at(-1);
+  assert.equal(gesture.gestureId, 40); assert.equal(gesture.points.length, 64); assert.equal(gesture.truncated, true);
+  assert.deepEqual(plain(gesture.points.at(-1)), swipe.samples.at(-1));
+  near(gesture.startSimTime, 12.345); near(gesture.sampleSimTime, 12.409); near(gesture.contactReal, .2);
+  r.frames.fill(0); r.events[0].point.x = 88; r.gestures.at(-1).points.at(-1).t = 99; outcome.landing.x = 77; swipe.samples.length = 0;
+  assert.equal(gameHash({ c }, false), hash);
+});
+
+test('touch actual preserves recorded hidden-player visibility without replacing either recorded pose', () => {
+  const { p, g, draws } = completedAttempt(), c = g.training.attemptClip;
+  assert.equal(p.open({ source: 'attempt', attemptId: c.attemptId, play: false }), true); p.command('seek', .4);
+  assert.equal(p._attemptSample.player.visible, false); assert.equal(p._attemptSample.opponent.visible, true);
+  assert.equal(p.render(), true); assert.equal(draws.filter(draw => draw.buffer === 'blade').length, 1);
+  const out = attemptOutput(); lib.sampleTrainingAttempt(c, p.phase * p.duration, out);
+  vectorNear(p.racket.p, out.player.pos); vectorNear(p._attemptSample.opponent.pos, out.opponent.pos); p.close();
+});
+
+test('attempt bounded event history retains the last player contact and final outcome after later bounce overflow', () => {
+  const { g } = fixture(), r = new lib.TrainingAttemptRecorder(g, {});
+  setRecordedState(g, 0); r.push(0, 0); setRecordedState(g, .12345);
+  r.event('contact', .12345, .0802425, { side: 1, strokeId: 'DRIVE', point: { ...g.ball.p } });
+  for (let i = 1; i <= 100; i++) {
+    const real = .2 + i * .1; setRecordedState(g, real);
+    r.event('bounce', real, real * .65, { side: i % 2 ? -1 : 1, point: { ...g.ball.p } });
+  }
+  r.event('outcome', 10.212345, 6.63802425, { success: false, reason: 'miss' });
+  const c = r.finish({ success: false, reason: 'miss' });
+  assert.ok(c.truncated); assert.ok(c.events.length <= 64); assert.ok(c.count <= 240);
+  const contact = c.events.find(e => e.type === 'contact' && e.side === 1);
+  assert.ok(contact, 'trimming later bounce history must not turn a real contact into a no-contact replay');
+  near(contact.real, .12345); assert.equal(c.events.at(-1).type, 'outcome'); near(c.endReal, 10.212345);
+});
+
+test('truncated actual preview exposes the gap and skips missing ball/paddle motion instead of synthesizing it', () => {
+  const { g, p } = completedAttempt({ inputMode: 'mouse' }), t = g.training, metadata = t.attemptClip.metadata;
+  const r = new lib.TrainingAttemptRecorder(g, metadata);
+  setRecordedState(g, 0); r.push(0, 0); setRecordedState(g, .12345);
+  r.event('contact', .12345, .0802425, { side: 1, strokeId: 'DRIVE', point: { ...g.ball.p },
+    outgoing: { p: { ...g.ball.p }, v: { ...g.ball.v }, w: { ...g.ball.w }, q: { ...g.ball.q } } });
+  for (let i = 16; i <= 1200; i++) { setRecordedState(g, i / 120); r.push(i / 120, i / 120 * .65); }
+  r.event('outcome', 10.012345, 6.50802425, { success: false, reason: 'miss' });
+  const c = { ...r.finish({ success: false, reason: 'miss', contact: true }), attemptId: t.attemptId, sessionId: t.sessionId };
+  t.attemptClip = c; const gap = c.gaps[0], out = attemptOutput();
+  assert.equal(p.open({ source: 'attempt', attemptId: c.attemptId, play: false }), true);
+  const seconds = (gap.from + gap.to) / 2 - c.startReal;
+  p.command('seek', seconds / p.duration); lib.sampleTrainingAttempt(c, seconds, out);
+  const s = p.snapshot(); assert.equal(s.source, 'attempt'); assert.equal(s.truncated, true); assert.equal(s.sample.gap, true);
+  vectorNear(s.sample.ball.p, out.ball.p); vectorNear(s.sample.player.pos, out.player.pos); vectorNear(s.sample.opponent.pos, out.opponent.pos);
+  for (const line of p.clip.pathLines) assert.ok(Math.hypot(line[8], line[9], line[10]) < .02, 'racket path must not bridge the trimmed gap');
+  assert.equal(p.command('contact'), true); near(p.snapshot().sample.real, .12345); assert.equal(p.snapshot().sample.gap, false);
+  p.close();
 });

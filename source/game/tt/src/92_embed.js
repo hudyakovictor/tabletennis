@@ -7,10 +7,10 @@
  *    attract                    slow orbit over an idle table (menus, VS)
  *    prematch {dur}             fly from the orbit into the playing camera
  *    match {diff,target,free,sessionKind} start a match (free — no score, endless)
- *    train {mode,lessonId,stroke,target,progress} voluntary academy/practice
- *    trainAction {action,answer} start/retry/restart/answer/continue
- *    previewOpen {lessonId,strokeId,technique,rate} | previewClose
- *    previewCommand {command,value} isolated motion/view controls
+ *    train {requestId,mode,lessonId,stroke,target,progress} academy/practice
+ *    trainAction {actionId,requestId,sessionId,action,answer?,value?}
+ *    previewOpen {requestId,trainRequestId,sessionId,attemptId,source,...}
+ *    previewClose {requestId} | previewCommand {requestId,command,value}
  *    pause / resume / quit
  *    outro                      victory orbit after the last point
  *    replay / skipReplay        best rally of the match
@@ -26,6 +26,7 @@
  *    lobbyHit {requestId,side,first:true} first incoming paddle contact
  *    ready {calibrationRegistry,calibration}, calibration, settings, slowmo,
  *    state, point, hit, serve, matchEnd, train, trainDone, attempt,
+ *    trainActionAck {actionId,requestId,sessionId,accepted}
  *    preview {requestId,active,paused,...} including direct close/Esc
  *    shot, shotresult, shoterror, autoHint, awake, paused, replayEnd, haptic,
  *    net {st, room, side, latency, msg}  — статусы онлайн-лобби
@@ -156,6 +157,7 @@
     wrap(g, 'paddleTrickAllowed', function (orig) { return !cine.mode && orig(); });
     const stateName = (s) => Object.keys(GS).find((k) => GS[k] === s) || String(s);
     let hudRequestId = 0, lastHudHit = '', onlineHudSeq = 0;
+    let trainRequestId = 0, trainActionId = 0;
     const publishOnlineHud = () => {
       if (!g.network?.isInMatch) return;
       const snapshot = g.getMatchSnapshot();
@@ -234,13 +236,35 @@
     wrap(g, 'setPaused', function (orig, v) {
       if (v && !hostCmd && document.visibilityState === 'visible') return undefined;
       const was = !!this.paused; const r = orig(v);
-      if (was !== !!this.paused) post('paused', { v: !!this.paused, host: hostCmd });
+      if (was !== !!this.paused) post('paused', { v: !!this.paused, host: hostCmd,
+        ...(this.training ? { requestId: this.training.options.requestId, sessionId: this.training.sessionId } : {}) });
       return r;
     });
     const hostPause = (v) => { hostCmd = true; try {
       if (g.lobbyScene?.active) g.lobbyScene.paused = !!v;
       g.setPaused(v);
     } finally { hostCmd = false; } };
+    const applyTrainingAction = (m, skip = false) => {
+      const fresh = Number.isSafeInteger(m.actionId) && m.actionId > trainActionId;
+      if (fresh) trainActionId = m.actionId;
+      const trainer = g.training;
+      let accepted = false;
+      if (fresh && !g._ttContextLost && trainer && !trainer.finished && trainer.phase !== 'done' && !g.preview?.active &&
+          m.requestId === trainRequestId && m.requestId === trainer.options.requestId &&
+          typeof m.sessionId === 'string' && m.sessionId === trainer.sessionId) {
+        accepted = (skip ? trainer.skip() : trainer.action(m.action, m.answer ?? m.value)) === true;
+        if (accepted) {
+          g.sessionKind = trainer.stage === 'check' ? 'check' : 'practice';
+          refreshGameCalibrationPolicy(g, '_policy'); publishCalibration();
+          if (!skip && !trainer.finished && trainer.phase !== 'done' &&
+              (['start', 'retry', 'continue', 'resume'].includes(m.action) || m.action === 'answer' && trainer.quizPassed === true)) {
+            wake(); hostPause(false);
+          }
+        }
+      }
+      post('trainActionAck', { actionId: m.actionId ?? null, requestId: m.requestId ?? null,
+        sessionId: m.sessionId ?? null, accepted });
+    };
     wrap(g, 'endReplay', function (orig, complete) { const was = this.replayer && this.replayer.on; const r = orig(complete); if (was) post('replayEnd', {}); return r; });
     wrap(g, 'buzz', function (orig, ms) { post('haptic', { kind: Array.isArray(ms) ? 'success' : ms >= 30 ? 'heavy' : 'light' }); });
     if (ui) {
@@ -268,7 +292,7 @@
         const key = [t.sessionId, t.revision, ET.lang(), ui.inputMode, t.coachText, t.nudge > 0].join('|');
         if (key !== lastTrain.key) {
           lastTrain.key = key;
-          post('train', Object.assign(t.snapshot(), { requestId: t.options.requestId }));
+          post('train', Object.assign(t.snapshot(), { requestId: t.options.requestId, sessionId: t.sessionId, mode: t.mode }));
         }
         return r;
       });
@@ -277,7 +301,7 @@
         attempts: t.attempts, correct: t.done, practicePassed: t.practicePassed, quizPassed: t.quizPassed,
         validated: t.checkPassed === true });
       wrap(ui, 'trainDone', function (orig, t) {
-        const r = orig(t); post('trainDone', Object.assign(t.summary(), { requestId: t.options.requestId })); return r;
+        const r = orig(t); post('trainDone', Object.assign(t.summary(), { requestId: t.options.requestId, sessionId: t.sessionId, mode: t.mode })); return r;
       });
       wrap(ui, 'trainHide', function (orig) { return orig(); });
     }
@@ -459,9 +483,9 @@ const showTip = (text) => { if (text) tip = { text, until: g.time + 4.6 }; };
       g.lobbyScene?.suspend(); g._ttSleeping = false; g.syncAudioQuiet(); post('awake', {});
     } };
     document.addEventListener('visibilitychange', () => { g.lobbyScene?.suspend(); });
-    let previewRequestId = 0;
-    const publishPreview = (opened) => post('preview', { ...g.preview?.snapshot(), requestId: previewRequestId,
-      active: !!g.preview?.active, paused: !!g.paused, opened, error: opened === false ? g.preview?.error || 'unavailable' : null });
+    let previewRequestId = 0, previewIntent = null;
+    const publishPreview = (opened) => post('preview', { ...g.preview?.snapshot(), ...previewIntent, requestId: previewRequestId,
+      active: !!g.preview?.active, paused: !!g.paused, opened, error: g.preview?.error || (opened === false ? 'unavailable' : null) });
     if (g.preview) {
       wrap(g.preview, 'open', function (orig, options) { const ok = orig(options); publishPreview(ok); return ok; });
       wrap(g.preview, 'close', function (orig, restore) {
@@ -478,14 +502,20 @@ const showTip = (text) => { if (text) tip = { text, until: g.time + 4.6 }; };
      * what was going on and the host rebuilds the whole iframe and resumes. */
     const glCanvas = document.getElementById('gl');
     if (glCanvas) glCanvas.addEventListener('webglcontextlost', (e) => {
-      e.preventDefault(); g._ttSleeping = true; g._ttContextLost = true;
+      e.preventDefault(); if (g._ttContextLost) return;
+      const trainer = g.training;
+      const recovery = { state: stateName(g.state), lobby, training: trainer ? trainer.step : null,
+        requestId: trainer?.options.requestId, sessionId: trainer?.sessionId,
+        inMatch: !lobby && !trainer && [GS.SERVE_READY, GS.SERVE_TOSS, GS.RALLY, GS.POINT].includes(g.state),
+        score: (g.score || [0, 0]).slice(), server: g.server, resume: g.captureMatchResume?.() };
+      g._ttSleeping = true; g._ttContextLost = true;
       g.cancelPaddleTrick?.();
       g.clearContactFlashes?.();
       g.lobbyScene?.stop();
       if (g.preview?.active) g.preview.close(false);
-      post('glLost', { state: stateName(g.state), lobby, training: g.training ? g.training.step : null,
-        inMatch: !lobby && !g.training && [GS.SERVE_READY, GS.SERVE_TOSS, GS.RALLY, GS.POINT].includes(g.state),
-        score: (g.score || [0, 0]).slice(), server: g.server, resume: g.captureMatchResume?.() });
+      g.cancelPendingCapture(); g.cancelInput?.('context_lost');
+      trainer?.quit();
+      post('glLost', recovery);
     }, false);
 
     // Non-lobby attract/prematch screens retain their original still life.
@@ -559,6 +589,7 @@ const showTip = (text) => { if (text) tip = { text, until: g.time + 4.6 }; };
       if (m.missShots && typeof m.missShots.on === 'boolean') { missCap.setEnabled(m.missShots.on); missCap.setHalf(m.missShots.half); }
       if (Object.prototype.hasOwnProperty.call(m, 'calibrations')) applyGameCalibrations(g, m.calibrations);
       else refreshGameCalibrationPolicy(g, '_policy');
+      g.training?.refreshHelp?.();
       post('settings', { requestId: Number.isFinite(m.requestId) ? m.requestId : null, calibration: calibrationState(g),
         audioLevels: { ...g.settings.audioLevels }, muted: g.settings.sound === false, reducedMotion: g.reducedMotion,
         quality: g.settings.quality });
@@ -630,27 +661,44 @@ const showTip = (text) => { if (text) tip = { text, until: g.time + 4.6 }; };
     window.addEventListener('message', (e) => {
       const m = e.data;
       if (e.source !== window.parent || !m || m.__tt !== 1) return;
+      if (g._ttContextLost && !['trainAction', 'skipStep'].includes(m.type)) return;
+      if (m.type === 'train' && (!Number.isSafeInteger(m.requestId) || m.requestId <= trainRequestId)) return;
       if (m.type === 'lobby' && m.intro === true && !Number.isSafeInteger(m.requestId)) return;
       // only commands that need a visible, running arena wake it; 'attract'/'quit' just set the scene
       // behind a hidden layer (menus, matchmaking) and must not restart full-rate rendering there
       const statusOnly = m.type === 'net' && m.cmd === 'status';
-      if (!statusOnly && !['sleep', 'mute', 'haptics', 'equip', 'quality', 'rm', 'debug', 'hint', 'inputMode', 'attract', 'quit', 'quiet', 'pause', 'resume', 'locale', 'missShots', 'cal', 'settings', 'sessionKind', 'slowmo'].includes(m.type)) wake();
+      if (!statusOnly && !['sleep', 'mute', 'haptics', 'equip', 'quality', 'rm', 'debug', 'hint', 'inputMode', 'attract', 'quit', 'quiet', 'pause', 'resume', 'locale', 'missShots', 'cal', 'settings', 'sessionKind', 'slowmo', 'trainAction', 'skipStep', 'previewOpen', 'previewClose', 'previewCommand'].includes(m.type)) wake();
       switch (m.type) {
         case 'net': netCommand(m); break;
         case 'sleep': g.cancelPendingCapture(); g.cancelInput?.(); g.clearContactFlashes?.(); g.lobbyScene?.suspend(); g._ttSleeping = true; g.syncAudioQuiet(); break;
         case 'wake': g._ttSleeping = false; break;
-        case 'previewOpen':
-          leaveLobby();
-          previewRequestId = Number.isFinite(m.requestId) ? m.requestId : previewRequestId;
+        case 'previewOpen': {
+          if (!Number.isSafeInteger(m.requestId) || m.requestId <= previewRequestId || g.preview?.active) break;
+          previewRequestId = m.requestId;
+          previewIntent = { trainRequestId: m.trainRequestId ?? null, sessionId: m.sessionId ?? null, attemptId: m.attemptId ?? null };
+          const trainer = g.training, source = m.source ?? 'example';
+          const replay = source === 'attempt' && trainer ? trainer.snapshot().attemptReplay : null;
+          if (!['example', 'attempt'].includes(source) ||
+              (trainer ? m.trainRequestId !== trainRequestId || m.trainRequestId !== trainer.options.requestId || m.sessionId !== trainer.sessionId ||
+                trainer.stage === 'check' && (!['review', 'done'].includes(trainer.phase) || !Number.isSafeInteger(trainer.attempts) || trainer.attempts < 4)
+                : source === 'attempt' || m.trainRequestId != null || m.sessionId != null) ||
+              source === 'attempt' && (!replay?.available || m.attemptId !== replay.attemptId ||
+                !['ok', 'fail', 'question', 'review', 'done'].includes(trainer.phase))) {
+            post('preview', { ...previewIntent, requestId: previewRequestId, active: false, paused: !!g.paused, opened: false, error: 'unavailable' });
+            break;
+          }
+          wake(); leaveLobby();
           hostPause(true);
           if (!g.openTrainingPreview(m)) publishPreview(false);
           break;
+        }
         case 'previewClose':
+          if (m.requestId !== previewRequestId || !g.preview?.active) break;
           g.cancelPendingCapture();
-          if (!g.preview?.close()) publishPreview();
+          g.preview.close();
           break;
         case 'previewCommand':
-          if (g.preview?.active) { g.preview.command(m.command, m.value); publishPreview(); }
+          if (m.requestId === previewRequestId && g.preview?.active && g.preview.command(m.command, m.value) === true) publishPreview();
           break;
         case 'settings': applyHostSettings(m); break;
         case 'sessionKind':
@@ -705,6 +753,9 @@ const showTip = (text) => { if (text) tip = { text, until: g.time + 4.6 }; };
           else if (cine.mode === 'attract') setCine('prematch', 1.2);
           break;
         case 'train':
+          trainRequestId = m.requestId;
+          g.cancelPendingCapture();
+          if (g.preview?.active) g.preview.close(false);
           leaveLobby();
           g.sessionKind = m.sessionKind === 'check' || m.resume && m.resume.stage === 'check' ? 'check' : 'practice';
           g.inspectSlowmoRequested = false; g.inspectSlowmo = false;
@@ -715,16 +766,11 @@ const showTip = (text) => { if (text) tip = { text, until: g.time + 4.6 }; };
           if (cine.mode === 'attract') setCine('prematch', 1.2);
           break;
         case 'trainAction':
-          if (g.training) {
-            g.training.action(m.action, m.answer);
-            g.sessionKind = g.training.stage === 'check' ? 'check' : 'practice';
-            refreshGameCalibrationPolicy(g, '_policy'); publishCalibration();
-            if (['start', 'retry', 'restart', 'continue'].includes(m.action) || m.action === 'answer' && g.training.quizPassed) hostPause(false);
-          }
+          applyTrainingAction(m);
           break;
         case 'inputMode': if (ui && ui.setInputMode) ui.setInputMode(m.pointerType); break;
         case 'pause': hostPause(true); break;
-        case 'resume': hostPause(false); break;
+        case 'resume': if (!g.training && !g.preview?.active) hostPause(false); break;
         case 'quit':
           g.cancelPendingCapture();
           leaveLobby(); g.inspectSlowmoRequested = false; g.inspectSlowmo = false; g.returnToMenu(); g.sessionKind = 'free';
@@ -733,10 +779,10 @@ const showTip = (text) => { if (text) tip = { text, until: g.time + 4.6 }; };
         case 'live': cine.mode = null; break;
         case 'replay': if (!g.playBestMoments()) post('replayEnd', {}); break;
         case 'skipReplay': g.skipReplay(); break;
-        case 'skipStep': if (g.training) g.training.skip(); break;
+        case 'skipStep': applyTrainingAction(m, true); break;
         case 'hint':
           autoHint = false; g.hintRequested = !!m.on;
-          refreshGameCalibrationPolicy(g, '_policy'); publishCalibration(); break;
+          refreshGameCalibrationPolicy(g, '_policy'); g.training?.refreshHelp?.(); publishCalibration(); break;
         /* Тумблер инспекторского слоу-мо из оболочки: разобрать траекторию
          * удара в замедлении. Состояние кнопки в движке догонит syncSlowmoControl. */
         case 'slowmo':

@@ -2,33 +2,6 @@
  * The parent frame dispatcher owns time. Nothing here starts a game or a RAF. */
 'use strict';
 
-const TRAINING_PREVIEW_TEXT = {
-  title: ['3D shot review', '3D-\u0440\u0430\u0437\u0431\u043e\u0440 \u0443\u0434\u0430\u0440\u0430'],
-  close: ['Return to lesson', '\u0412\u0435\u0440\u043d\u0443\u0442\u044c\u0441\u044f \u043a \u0443\u0440\u043e\u043a\u0443'],
-  play: ['Play', '\u0412\u043e\u0441\u043f\u0440\u043e\u0438\u0437\u0432\u0435\u0441\u0442\u0438'], pause: ['Pause', '\u041f\u0430\u0443\u0437\u0430'],
-  seek: ['Timeline', '\u0428\u043a\u0430\u043b\u0430 \u0432\u0440\u0435\u043c\u0435\u043d\u0438'], rate: ['Playback speed', '\u0421\u043a\u043e\u0440\u043e\u0441\u0442\u044c \u043f\u0440\u043e\u0441\u043c\u043e\u0442\u0440\u0430'],
-  camera: ['Camera view', '\u0420\u0430\u043a\u0443\u0440\u0441'], player: ['Player view', '\u0412\u0438\u0434 \u0438\u0433\u0440\u043e\u043a\u0430'], side: ['Side', '\u0421\u0431\u043e\u043a\u0443'],
-  top: ['Top', '\u0421\u0432\u0435\u0440\u0445\u0443'], contact: ['Contact frame', '\u041a\u0430\u0434\u0440 \u043a\u043e\u043d\u0442\u0430\u043a\u0442\u0430'],
-  grip: ['Grip', '\u0425\u0432\u0430\u0442'], hand: ['Hand', '\u0420\u0443\u043a\u0430'],
-  shakehand: ['Shakehand', '\u0415\u0432\u0440\u043e\u043f\u0435\u0439\u0441\u043a\u0438\u0439'], penhold: ['Penhold', '\u041f\u0435\u0440\u044c\u0435\u0432\u043e\u0439'],
-  right: ['Right', '\u041f\u0440\u0430\u0432\u0430\u044f'], left: ['Left', '\u041b\u0435\u0432\u0430\u044f'],
-  forehand: ['Forehand / backhand', '\u0421\u043f\u0440\u0430\u0432\u0430 / \u0441\u043b\u0435\u0432\u0430'],
-  fh: ['Forehand', '\u0421\u043f\u0440\u0430\u0432\u0430'], bh: ['Backhand', '\u0421\u043b\u0435\u0432\u0430'],
-  tableguide: ['Table guide', '\u0421\u0445\u0435\u043c\u0430 \u043d\u0430 \u0441\u0442\u043e\u043b\u0435'],
-  gesture: ['Touch gesture', '\u0416\u0435\u0441\u0442 \u043f\u0430\u043b\u044c\u0446\u0430'],
-  normal: ['Playing-surface normal', '\u041d\u043e\u0440\u043c\u0430\u043b\u044c \u0438\u0433\u0440\u043e\u0432\u043e\u0439 \u0441\u0442\u043e\u0440\u043e\u043d\u044b'],
-  head: ['Blade head', '\u0413\u043e\u043b\u043e\u0432\u0430 \u0440\u0430\u043a\u0435\u0442\u043a\u0438'],
-  red: ['Red rubber', '\u041a\u0440\u0430\u0441\u043d\u0430\u044f \u043d\u0430\u043a\u043b\u0430\u0434\u043a\u0430'],
-  black: ['Black rubber', '\u0427\u0451\u0440\u043d\u0430\u044f \u043d\u0430\u043a\u043b\u0430\u0434\u043a\u0430'],
-  pan: ['Outside playing bottom', '\u0412\u043d\u0435\u0448\u043d\u0435\u0435 \u0438\u0433\u0440\u043e\u0432\u043e\u0435 \u0434\u043d\u043e'],
-  rps: ['rps', '\u043e\u0431/\u0441'], ready: ['Ready position', '\u0418\u0441\u0445\u043e\u0434\u043d\u043e\u0435 \u043f\u043e\u043b\u043e\u0436\u0435\u043d\u0438\u0435'],
-  backswing: ['Backswing', '\u0417\u0430\u043c\u0430\u0445'], swing: ['Swing', '\u0423\u0434\u0430\u0440'],
-  follow: ['Follow-through', '\u041f\u0440\u043e\u0432\u043e\u0434\u043a\u0430'], recover: ['Return to ready', '\u0412\u043e\u0437\u0432\u0440\u0430\u0442 \u0432 \u0433\u043e\u0442\u043e\u0432\u043d\u043e\u0441\u0442\u044c'],
-  orbit: ['Drag to rotate. Pinch with two fingers or use the wheel to zoom.', '\u041f\u0435\u0440\u0435\u0442\u0430\u0441\u043a\u0438\u0432\u0430\u0439 \u0434\u043b\u044f \u043f\u043e\u0432\u043e\u0440\u043e\u0442\u0430. \u0421\u0432\u0435\u0434\u0438 \u0438\u043b\u0438 \u0440\u0430\u0437\u0432\u0435\u0434\u0438 \u0434\u0432\u0430 \u043f\u0430\u043b\u044c\u0446\u0430, \u043b\u0438\u0431\u043e \u043a\u0440\u0443\u0442\u0438 \u043a\u043e\u043b\u0435\u0441\u043e \u0434\u043b\u044f \u043c\u0430\u0441\u0448\u0442\u0430\u0431\u0430.'],
-  isolated: ['Silent. No attempts or progress are recorded. The report is off duty.', '\u0411\u0435\u0437 \u0437\u0432\u0443\u043a\u0430. \u041f\u043e\u043f\u044b\u0442\u043a\u0438 \u0438 \u043f\u0440\u043e\u0433\u0440\u0435\u0441\u0441 \u043d\u0435 \u0437\u0430\u043f\u0438\u0441\u044b\u0432\u0430\u044e\u0442\u0441\u044f. \u041f\u0440\u043e\u0442\u043e\u043a\u043e\u043b \u043e\u0442\u0434\u044b\u0445\u0430\u0435\u0442.'],
-  reduced: ['Reduced motion. Use the timeline to inspect the stroke.', '\u0414\u0432\u0438\u0436\u0435\u043d\u0438\u0435 \u043e\u0433\u0440\u0430\u043d\u0438\u0447\u0435\u043d\u043e. \u0420\u0430\u0437\u0431\u0438\u0440\u0430\u0439 \u0443\u0434\u0430\u0440 \u043f\u043e\u043b\u0437\u0443\u043d\u043a\u043e\u043c.'],
-};
-
 class TrainingPreview {
   constructor(game) {
     this.g = game;
@@ -57,6 +30,8 @@ class TrainingPreview {
     this._a = V3.new(); this._b = V3.new(); this._scale = V3.new(1, 1, 1);
     this._q = Q.new(); this._matrix = M4.create();
     this._drawPaddle = { pos: this.racket.p, q: this.racket.q, racket: 'r-standard' };
+    this._attemptSample = { ball: this.ball, player: { pos: this.racket.p, q: this.racket.q, normal: this.racket.n },
+      opponent: { pos: V3.new(), q: Q.new(), normal: V3.new() } };
     this._cameraDirty = true;
     this._layoutDirty = true;
     this._restoreGL = { viewport: new Int32Array(4), scissor: new Int32Array(4), normal: new Float32Array(9) };
@@ -69,8 +44,7 @@ class TrainingPreview {
   }
 
   _text(id) {
-    const row = TRAINING_PREVIEW_TEXT[id];
-    return row ? row[typeof ET !== 'undefined' && ET.lang() === 'ru' ? 1 : 0] : id;
+    return ET('preview.' + id);
   }
 
   _profile(options) {
@@ -140,6 +114,8 @@ class TrainingPreview {
     const at = clamp(time / flight.dt, 0, last), i = Math.floor(at), j = Math.min(i + 1, last), u = at - i;
     const a = i * 14, b = j * 14;
     V3.set(out.p, lerp(s[a + 1], s[b + 1], u), lerp(s[a + 2], s[b + 2], u), lerp(s[a + 3], s[b + 3], u));
+    const bounce = flight.bounces && flight.bounces.find(event => Math.abs(time - event.t) < 1e-9);
+    if (bounce) V3.set(out.p, bounce.x, bounce.y, bounce.z);
     V3.set(out.v, lerp(s[a + 4], s[b + 4], u), lerp(s[a + 5], s[b + 5], u), lerp(s[a + 6], s[b + 6], u));
     V3.set(out.w, lerp(s[a + 7], s[b + 7], u), lerp(s[a + 8], s[b + 8], u), lerp(s[a + 9], s[b + 9], u));
     const sign = s[a + 10] * s[b + 10] + s[a + 11] * s[b + 11] + s[a + 12] * s[b + 12] + s[a + 13] * s[b + 13] < 0 ? -1 : 1;
@@ -156,7 +132,7 @@ class TrainingPreview {
       profile.forehand, profile.feed, profile.gesture, profile.equipment, profile.target]);
     if (this._cache.has(key)) return this._cache.get(key);
     const c = compileStrokeTemplate(profile.strokeId, { side: profile.side, hand: profile.hand,
-      grip: profile.grip, forehand: profile.forehand, duration: this.duration });
+      grip: profile.grip, forehand: profile.forehand, duration: 2.4 });
     const serve = profile.strokeId.startsWith('SERVE_'), side = profile.side;
     const nearX = c.contact.ballP.x * side;
     let initial;
@@ -223,6 +199,10 @@ class TrainingPreview {
         bounces: incoming.bounces.filter(b => b.index <= index) };
       clip = { compiled: c, motion, inbound, outbound, ball, racket: rk, pose, launch,
         spin: measureShotSpin(launch.w, launch.v), verdict, physicalDuration, profile, path: [], safety: { ready: 0, back: 0, follow: 0 } };
+      clip.source = 'example';
+      clip.contactTime = Math.max(inbound.duration, physicalDuration * c.contactPhase);
+      clip.duration = clip.contactTime + Math.max(outbound.duration, physicalDuration * (1 - c.contactPhase));
+      clip.contactPhase = clip.contactTime / clip.duration;
       const sample = createStrokeTemplateOutput();
       // Retargeting a deep authored backswing to a short ball can put it through
       // the table. Fit a C1 vertical clearance envelope, zero at the contact and
@@ -272,13 +252,60 @@ class TrainingPreview {
     return clip;
   }
 
+  _prepareAttempt(options) {
+    const record = this.g.training?.getAttemptClip(options.attemptId);
+    if (!validTrainingAttempt(record)) return null;
+    const meta = record.metadata, contact = record.events.filter(e => e.type === 'contact' && e.side === 1).at(-1);
+    if (['hand', 'grip', 'racket'].some(key => options[key] !== undefined && options[key] !== meta[key])) return null;
+    const ball = { p: V3.new(), v: V3.new(), w: V3.new(), q: Q.new() };
+    const player = { pos: V3.new(), q: Q.new(), normal: V3.new() }, opponent = { pos: V3.new(), q: Q.new(), normal: V3.new() };
+    const contactTime = contact ? clamp(contact.real - record.startReal, 0, record.endReal - record.startReal) : record.endReal - record.startReal;
+    sampleTrainingAttempt(record, contactTime, { ball, player, opponent });
+    const gesture = record.gestures.find(g => g.contactReal === contact?.real) || record.gestures.at(-1);
+    const anchor = gesture?.contact || gesture?.points.at(-1) || { x: .5, y: .5 };
+    const points = (gesture?.points || []).map(p => [p.x - (anchor.x ?? anchor[0]), p.y - (anchor.y ?? anchor[1])]);
+    const stroke = contact?.strokeId || meta.strokeId, spin = measureShotSpin(contact?.outgoing?.w || ball.w, contact?.outgoing?.v || ball.v);
+    const profile = { lessonId: meta.lessonId, strokeId: stroke, technique: trainingExecutedTechnique(stroke, spin), side: 1,
+      hand: meta.hand, grip: meta.grip, forehand: contact?.forehand !== false, equipment: meta.equipment,
+      gesture: { kind: 'recorded', points, contactIndex: Math.max(0, points.length - 1), contactPhase: 1,
+        duration: gesture?.points.length ? Math.max(0, gesture.points.at(-1).t - gesture.points[0].t) * 1000 : 0 }, target: meta.target };
+    const pose = contact?.pose || { pos: player.pos, q: player.q, point: contact?.point || ball.p, localPoint: V3.new(), activeFace: player.activeFace };
+    const up = M4.transformDir(V3.new(), M4.compose(M4.create(), V3.new(), pose.q, V3.new(1, 1, 1)), V3.new(0, 1, 0));
+    const normal = contact?.normal || player.normal;
+    const clip = { source: 'attempt', record, profile, contactEvent: contact || null, ball,
+      duration: record.endReal - record.startReal, contactTime, contactPhase: contactTime / (record.endReal - record.startReal),
+      compiled: { contactPhase: contactTime / (record.endReal - record.startReal), backPhase: 0, finishPhase: 1 },
+      motion: { contact: { up } }, pose, racket: { normal, vR: contact?.vR || V3.new() }, spin,
+      launch: contact?.outgoing || null, drawPaddle: { pos: pose.pos, q: pose.q, racket: meta.racket, activeFace: pose.activeFace },
+      path: [], pathLines: [], pathLinesLow: [],
+      contactBounds: [pose.point, pose.pos, V3.addScaled(V3.new(), pose.pos, up, -.20), V3.addScaled(V3.new(), pose.point, normal, .22)],
+      insetEye: V3.addScaled(V3.new(), pose.point, V3.norm(V3.new(), V3.addScaled(V3.new(), normal, up, .28)), .63) };
+    for (let i = 0; i < record.count; i++) {
+      const k = i * TRAIN_ATTEMPT_STRIDE; clip.path.push(V3.new(record.frames[k + 15], record.frames[k + 16], record.frames[k + 17]));
+      if (i && !record.gaps.some(g => record.frames[k] >= g.to && record.frames[k - TRAIN_ATTEMPT_STRIDE] <= g.from)) {
+        const line = this._lineMatrix(clip.path[i - 1], clip.path[i], .0028); if (line) clip.pathLines.push(line);
+      }
+    }
+    clip.pathLinesLow = clip.pathLines.filter((_, i) => i % 2 === 0);
+    clip.normalLines = contact ? this._arrowMatrices(pose.point, normal, .19) : [];
+    clip.headLines = contact ? this._arrowMatrices(pose.pos, up, .17) : [];
+    clip.normalMat = this._normalMat; this._frameBox(clip);
+    return clip;
+  }
+
   _frameBox(clip) {
     const min = V3.new(-PH.T_HALF_WID, .06, -PH.T_HALF_LEN), max = V3.new(PH.T_HALF_WID, PH.NET_TOP, PH.T_HALF_LEN);
     const add = (x, y, z, r) => {
       min.x = Math.min(min.x, x - r); min.y = Math.min(min.y, y - r); min.z = Math.min(min.z, z - r);
       max.x = Math.max(max.x, x + r); max.y = Math.max(max.y, y + r); max.z = Math.max(max.z, z + r);
     };
-    for (const f of [clip.inbound, clip.outbound]) for (let i = 0; i < f.count; i++) {
+    if (clip.source === 'attempt') {
+      const f = clip.record;
+      for (let i = 0; i < f.count; i++) { const k = i * TRAIN_ATTEMPT_STRIDE;
+        add(f.frames[k + 2], f.frames[k + 3], f.frames[k + 4], PH.R);
+        add(f.frames[k + 28], f.frames[k + 29], f.frames[k + 30], .18);
+      }
+    } else for (const f of [clip.inbound, clip.outbound]) for (let i = 0; i < f.count; i++) {
       const k = i * 14; add(f.states[k + 1], f.states[k + 2], f.states[k + 3], PH.R);
     }
     for (const p of clip.path) add(p.x, p.y, p.z, .18);
@@ -287,23 +314,32 @@ class TrainingPreview {
   }
 
   open(options = {}) {
-    const profile = this._profile(options);
-    if (!profile) return false;
-    let clip;
-    try { clip = this._prepare(profile); } catch (error) { this.error = error.message; return false; }
-    if (!clip) { this.error = 'No physical reference for this profile'; return false; }
+    const source = options.source ?? 'example';
+    if (!['attempt', 'example'].includes(source) || this.g.training?.stage === 'check' &&
+        (!['review', 'done'].includes(this.g.training.phase) || this.g.training.attempts < 4) || this.g.R?.gl?.isContextLost?.()) {
+      this.error = this._text('unavailable'); return false;
+    }
+    if (this.g.training && (options.sessionId !== undefined && options.sessionId !== this.g.training.sessionId ||
+        options.trainRequestId !== undefined && options.trainRequestId !== this.g.training.options.requestId)) { this.error = this._text('unavailable'); return false; }
+    let clip, profile;
+    try {
+      if (source === 'attempt') { clip = this._prepareAttempt(options); profile = clip?.profile; }
+      else { profile = this._profile(options); if (profile) clip = this._prepare(profile); }
+    } catch (error) { this.error = this._text('unavailable'); return false; }
+    if (!clip || !profile) { this.error = this._text('unavailable'); return false; }
     if (!this.active) {
       const a = this.g.audio;
-      this._saved = { paused: this.g.paused, quiet: a && a.quiet, muted: a && a.muted,
-        levels: a && a.levels && { ...a.levels }, volume: a && a.volume };
+      this._saved = { paused: this.g.paused, quiet: a && a.quiet };
       this.g.paused = true;
       if (a && a.setQuiet) a.setQuiet(true);
       this.active = true;
       this._mount();
     }
-    this.profile = profile; this.clip = clip; this.error = null;
+    this.source = source; this.profile = profile; this.clip = clip; this.error = null;
+    this.duration = clip.duration; this._openOptions = { ...options, lessonId: options.lessonId || profile.lessonId,
+      attemptId: options.attemptId ?? this.g.training?.attemptClip?.attemptId };
     this.reducedMotion = this._motionOff();
-    this.phase = this.reducedMotion ? clip.compiled.contactPhase : 0;
+    this.phase = this.reducedMotion ? clip.contactPhase : 0;
     this.rate = Number.isFinite(options.rate) ? clamp(options.rate, .25, 1) : .5;
     this.playing = !this.reducedMotion && options.play !== false;
     this.tableguide = options.tableguide !== false;
@@ -331,15 +367,11 @@ class TrainingPreview {
     const a = this.g.audio, old = this._saved;
     if (restore && old) {
       this.g.paused = old.paused;
-      if (a) {
-        if (old.levels && a.setLevels) a.setLevels(old.levels);
-        else if (Number.isFinite(old.volume) && a.setVolume) a.setVolume(old.volume);
-        if (typeof old.muted === 'boolean' && a.setMuted) a.setMuted(old.muted);
-        if (a.setQuiet) a.setQuiet(old.quiet === true);
-      }
+      if (a && a.setQuiet) a.setQuiet(old.quiet === true);
     } else if (a && a.setQuiet) a.setQuiet(true);
     if (restore && this._focus && this._focus.isConnected && typeof this._focus.focus === 'function') this._focus.focus({ preventScroll: true });
     this._focus = this._saved = null;
+    this._openOptions = null;
     this.clip = this.profile = null; this._cache.clear(); this._worldGuide = null; this._grid = null; this._labels = null;
     this._gridMatrices = this._gestureMatrices = this._axisMatrices = null;
     return true;
@@ -360,16 +392,25 @@ class TrainingPreview {
     if (this.playing && Number.isFinite(dtReal) && dtReal > 0) {
       // A background gap pauses the reference rather than skipping the contact.
       if (dtReal > .5) this.playing = false;
-      else this.phase = (this.phase + dtReal * this.rate / this.duration) % 1;
+      else { this.phase = Math.min(1, this.phase + dtReal * this.rate / this.duration); if (this.phase === 1) this.playing = false; }
     }
     this._sample(); this._syncControls();
   }
 
   _sample() {
-    const c = this.clip, tc = c.compiled.contactPhase;
-    this._samplePaddle(c, this.phase, this.racket);
-    if (this.phase <= tc) this._sampleFlight(c.inbound, this.phase / tc * c.inbound.duration, this.ball);
-    else this._sampleFlight(c.outbound, (this.phase - tc) / (1 - tc) * c.outbound.duration, this.ball);
+    const c = this.clip;
+    let time = this.phase * this.duration;
+    if (Math.abs(time - c.contactTime) < 1e-9) time = c.contactTime;
+    if (this.source === 'attempt') {
+      sampleTrainingAttempt(c.record, time, this._attemptSample);
+      this.racket.activeFace = this._attemptSample.player.activeFace;
+      this.racket.stage = c.contactEvent && time < c.contactTime ? 'ready' : time === c.contactTime && c.contactEvent ? 'swing' : 'recover';
+      return;
+    }
+    this._motionPhase = clamp(c.compiled.contactPhase + (time - c.contactTime) / c.physicalDuration, 0, 1);
+    this._samplePaddle(c, this._motionPhase, this.racket);
+    if (time <= c.contactTime) this._sampleFlight(c.inbound, time - (c.contactTime - c.inbound.duration), this.ball);
+    else this._sampleFlight(c.outbound, time - c.contactTime, this.ball);
   }
 
   _samplePaddle(clip, phase, out) {
@@ -405,7 +446,8 @@ class TrainingPreview {
     if (action === 'close') return this.close(!(data && data.restore === false));
     if (!this.active) return false;
     const value = data && typeof data === 'object' ? data[action] ?? data.value : data;
-    if (action === 'play') { if (this.reducedMotion) return false; this.playing = true; }
+    if (action === 'play') { if (this.reducedMotion) return false; if (this.phase === 1) this.phase = 0; this.playing = true; }
+    else if (action === 'repeat') { this.phase = 0; this.playing = !this.reducedMotion; }
     else if (action === 'pause') this.playing = false;
     else if (action === 'seek') {
       const phase = data && typeof data === 'object' ? data.phase ?? data.value : data;
@@ -416,6 +458,7 @@ class TrainingPreview {
     } else if (action === 'camera') {
       if (typeof value === 'string') {
         if (!['player', 'side', 'top', 'contact'].includes(value)) return false;
+        if (value === 'contact' && this.source === 'attempt' && !this.clip.contactEvent) return false;
         this._setView(value);
       } else if (data && typeof data === 'object' && ['yaw', 'pitch', 'zoom'].some(k => Number.isFinite(data[k]))) {
         if (Number.isFinite(data.yaw)) this.orbit.yaw = data.yaw;
@@ -423,9 +466,16 @@ class TrainingPreview {
         if (Number.isFinite(data.zoom)) this.orbit.zoom = clamp(data.zoom, .65, 2);
         this._cameraDirty = true;
       } else return false;
-    } else if (action === 'contact') { this.phase = this.clip.compiled.contactPhase; this.playing = false; }
+    } else if (action === 'contact') {
+      if (this.source === 'attempt' && !this.clip.contactEvent) return false;
+      this.phase = this.clip.contactPhase; this.playing = false;
+    } else if (action === 'source') {
+      if (!['attempt', 'example'].includes(value)) return false;
+      return this.open({ ...this._openOptions, source: value, play: false });
+    }
     else if (action === 'tableguide') this.tableguide = typeof value === 'boolean' ? value : !this.tableguide;
     else if (['grip', 'hand', 'forehand'].includes(action)) {
+      if (this.source === 'attempt') return false;
       const next = action === 'forehand' && value === 'fh' ? true : action === 'forehand' && value === 'bh' ? false : value;
       const profile = this._profile({ ...this.profile, [action]: next });
       if (!profile) return false;
@@ -433,6 +483,7 @@ class TrainingPreview {
       try { clip = this._prepare(profile); } catch (error) { this.error = error.message; return false; }
       if (!clip) return false;
       this.profile = profile; this.clip = clip; this._cameraDirty = this._layoutDirty = true;
+      this.duration = clip.duration;
       this.localize();
     } else return false;
     this._sample(); this._syncControls(); return true;
@@ -441,12 +492,27 @@ class TrainingPreview {
   snapshot() {
     const c = this.clip, p = this.profile;
     const vec = v => ({ x: v.x, y: v.y, z: v.z });
+    if (this.source === 'attempt' && c) return { active: this.active, source: 'attempt', attemptId: c.record.attemptId,
+      lessonId: p.lessonId, strokeId: p.strokeId, technique: p.technique, playing: this.playing, phase: this.phase,
+      stage: this.racket.stage, duration: this.duration, rate: this.rate, camera: this.camera, orbit: { ...this.orbit },
+      hand: p.hand, grip: p.grip, forehand: p.forehand, side: p.side, equipment: c.record.metadata.equipment,
+      tableguide: this.tableguide, reducedMotion: !!this.reducedMotion, error: this.error || null,
+      contactPhase: c.contactEvent ? c.contactPhase : null, contact: c.contactEvent,
+      outcome: c.record.outcome, truncated: c.record.truncated,
+      physics: { recorded: true, hz: c.record.hz, frames: c.record.count, startReal: c.record.startReal, endReal: c.record.endReal,
+        bounces: c.record.events.filter(e => e.type === 'bounce').map(e => ({ real: e.real, simulation: e.simulation, side: e.side, point: e.point })) },
+      sample: { real: this._attemptSample.real, simulation: this._attemptSample.simulation, gap: this._attemptSample.gap,
+        ball: { p: vec(this.ball.p), v: vec(this.ball.v), w: vec(this.ball.w), q: { ...this.ball.q } },
+        player: { pos: vec(this.racket.p), q: { ...this.racket.q }, normal: vec(this.racket.n), activeFace: this.racket.activeFace },
+        opponent: { pos: vec(this._attemptSample.opponent.pos), q: { ...this._attemptSample.opponent.q }, normal: vec(this._attemptSample.opponent.normal) } },
+      gesture: c.record.gestures.at(-1) || null };
     return { active: this.active, lessonId: p && p.lessonId, skillId: p && p.skillId, strokeId: p && p.strokeId,
+      source: this.source || 'example',
       technique: p && p.technique, playing: this.playing, phase: this.phase, stage: this.racket.stage,
       duration: this.duration, rate: this.rate, camera: this.camera, orbit: { ...this.orbit },
       grip: p && p.grip, hand: p && p.hand, forehand: p && p.forehand, side: p && p.side,
       tableguide: this.tableguide, reducedMotion: !!this.reducedMotion, error: this.error || null,
-      contactPhase: c && c.compiled.contactPhase,
+      contactPhase: c && c.contactPhase,
       contact: c ? { point: vec(c.pose.point), ballP: vec(c.ball.p), bladeP: vec(c.pose.pos), q: { ...c.pose.q },
         normal: vec(c.racket.normal), localPoint: vec(c.pose.localPoint), activeFace: c.pose.activeFace,
         vR: vec(c.racket.vR), incoming: { v: vec(c.ball.v), w: vec(c.ball.w) },
@@ -489,10 +555,11 @@ class TrainingPreview {
           <circle class="tt-preview-touch-window" r="13"/><circle class="tt-preview-touch-contact" r="3"/>
           <circle class="tt-preview-touch-cursor" r="8"/></svg><p class="tt-preview-instruction"></p></div></aside>
       <footer class="tt-preview-footer"><div class="tt-preview-transport"><button type="button" class="tbt" data-preview="play"></button>
+        <button type="button" class="tbt" data-preview="repeat" data-preview-text="repeat"></button>
         <label class="tt-preview-timeline"><span data-preview-text="seek"></span><input data-preview="seek" type="range" min="0" max="1" step="0.001"/></label>
         <output class="tt-preview-phase"></output><button type="button" class="tbt" data-preview="contact" data-preview-text="contact"></button>
         <label><span data-preview-text="rate"></span><select data-preview="rate"><option value="0.25">0.25x</option><option value="0.5">0.50x</option><option value="0.75">0.75x</option><option value="1">1.00x</option></select></label></div>
-        <div class="tt-preview-settings">${select('camera', ['player', 'side', 'top', 'contact'])}${select('grip', ['shakehand', 'penhold'])}
+        <div class="tt-preview-settings">${select('source', ['attempt', 'example'])}${select('camera', ['player', 'side', 'top', 'contact'])}${select('grip', ['shakehand', 'penhold'])}
           ${select('hand', ['right', 'left'])}${select('forehand', ['fh', 'bh'])}<label class="tt-preview-toggle"><input type="checkbox" data-preview="tableguide" checked/><span data-preview-text="tableguide"></span></label></div>
         <small class="tt-preview-status"></small></footer>`;
     parent.appendChild(root);
@@ -606,12 +673,15 @@ class TrainingPreview {
     const p = this.profile, step = TRAIN_STEPS.find(s => s.id === p.lessonId);
     const view = step ? trainingLessonView(step) : trainingGuideView(p.technique);
     this.root.querySelector('#ttPreviewTitle').textContent = view.title;
-    this.root.querySelector('.tt-preview-instruction').textContent = view.brief[this.g.ui && this.g.ui.inputMode === 'mouse' ? 'mouse' : 'touch'];
-    this.root.querySelector('.tt-preview-face').textContent = this._text(this.g._equippedRacket === 'r-pan' ? 'pan' : p.forehand ? 'red' : 'black');
+    this.root.querySelector('.tt-preview-header small').textContent = this._text(this.source);
+    this.root.querySelector('.tt-preview-instruction').textContent = this.source === 'attempt' ? this._text('actualNotice') : view.brief[this.g.ui && this.g.ui.inputMode === 'mouse' ? 'mouse' : 'touch'];
+    const racket = this.source === 'attempt' ? this.clip.record.metadata.racket : this.g._equippedRacket;
+    this.root.querySelector('.tt-preview-face').textContent = this._text(racket === 'r-pan' ? 'pan' : p.forehand ? 'red' : 'black');
     this.root.querySelector('.tt-preview-inset').setAttribute('aria-label', this._text('contact'));
-    this.root.querySelector('.tt-preview-status').textContent = this._text(this.reducedMotion ? 'reduced' : 'isolated');
+    this.root.querySelector('.tt-preview-status').textContent = [this._text(this.source === 'attempt' ? 'actualNotice' : 'exampleNotice'),
+      this._text(this.reducedMotion ? 'reduced' : 'isolated'), this.source === 'attempt' && this.clip.record.truncated ? this._text('truncated') : ''].filter(Boolean).join(' ');
     const family = ET(TRAIN_GUIDES[p.technique].title);
-    this.root.querySelector('.tt-preview-contact-label').textContent = family + ' ' + Math.round(this.clip.spin.totalRps) + ' ' + this._text('rps');
+    this.root.querySelector('.tt-preview-contact-label').textContent = this.source === 'attempt' && !this.clip.contactEvent ? this._text('noContact') : family + ' ' + Math.round(this.clip.spin.totalRps) + ' ' + this._text('rps');
     this.root.querySelector('.tt-preview-gesture svg').setAttribute('aria-label', view.controls.touch);
     this.root.toggleAttribute('data-preview-reduced', this.reducedMotion);
     this._syncControls();
@@ -620,6 +690,11 @@ class TrainingPreview {
   _syncControls() {
     if (!this.controls || !this.profile) return;
     const p = this.profile, c = this.controls;
+    c.source.value = this.source;
+    c.source.querySelector('[value="attempt"]').disabled = !this.g.training?.getAttemptClip(this._openOptions?.attemptId);
+    for (const key of ['hand', 'grip', 'forehand']) c[key].closest('label').hidden = this.source === 'attempt';
+    c.contact.disabled = this.source === 'attempt' && !this.clip.contactEvent;
+    c.camera.querySelector('[value="contact"]').disabled = c.contact.disabled;
     c.play.textContent = this._text(this.playing ? 'pause' : 'play'); c.play.disabled = this.reducedMotion;
     c.play.setAttribute('aria-pressed', String(this.playing));
     c.seek.value = String(this.phase); c.seek.setAttribute('aria-label', this._text('seek'));
@@ -696,8 +771,8 @@ class TrainingPreview {
   _buildGuide() {
     const p = this.profile, model = p.gesture, ballP = this.clip.ball.p;
     const anchor = projectPoint(this._guideBuf.vp, { x: ballP.x, y: PH.TABLE_Y + .003, z: ballP.z }, {});
-    const mirror = p.hand === 'left' ? -1 : 1;
-    this._worldGuide = model.points.map(point => this._tableRay(anchor.x + point[0] * mirror, anchor.y + point[1], V3.new()));
+    const mirror = this.source === 'attempt' ? 1 : p.hand === 'left' ? -1 : 1;
+    this._worldGuide = this.source === 'attempt' ? [] : model.points.map(point => this._tableRay(anchor.x + point[0] * mirror, anchor.y + point[1], V3.new()));
     this._grid = []; this._labels = [];
     if (this.root) this.root.querySelector('.tt-preview-labels').replaceChildren();
     const line = (a, b) => this._grid.push([a, b]);
@@ -723,7 +798,7 @@ class TrainingPreview {
       if (el) { el.textContent = text; this.root.querySelector('.tt-preview-labels').appendChild(el); }
       this._labels.push({ text, point, el });
     }
-    if (this.root) {
+    if (this.root && model.points.length) {
       const xs = model.points.map(point => point[0] * mirror), ys = model.points.map(point => point[1]);
       const minX = Math.min(...xs), maxX = Math.max(...xs), minY = Math.min(...ys), maxY = Math.max(...ys);
       const scale = Math.min(280, 204 / Math.max(.01, maxX - minX), 96 / Math.max(.01, maxY - minY));
@@ -735,6 +810,7 @@ class TrainingPreview {
       }
       this._gesturePoints = pts;
     }
+    if (this.root) this.root.querySelector('.tt-preview-gesture svg').hidden = !model.points.length;
   }
 
   _lineMatrix(a, b, width) {
@@ -762,7 +838,7 @@ class TrainingPreview {
 
   _drawContact() {
     const c = this.clip, R = this.g.R, S = this.g.scene;
-    c.drawPaddle.racket = this.g._equippedRacket;
+    c.drawPaddle.racket = this.source === 'attempt' ? c.record.metadata.racket : this.g._equippedRacket;
     c.drawPaddle.activeFace = c.pose.activeFace;
     this._rig.draw(R, S, c.drawPaddle);
     M4.compose(this._matrix, c.ball.p, c.ball.q, V3.set(this._scale, 1, 1, 1)); R.draw(S.mesh.ball, this._matrix, S.mat.ball);
@@ -803,10 +879,13 @@ class TrainingPreview {
     }
     const old = { vp: R.viewProj, proj: R.proj, view: R.view, cam: R.camPos }, state = this._restoreGL;
     state.viewport.set(gl.getParameter(gl.VIEWPORT)); state.scissor.set(gl.getParameter(gl.SCISSOR_BOX));
-    state.scissorOn = gl.isEnabled(gl.SCISSOR_TEST); state.depthMask = gl.getParameter(gl.DEPTH_WRITEMASK);
+    state.scissorOn = gl.isEnabled(gl.SCISSOR_TEST); state.depthOn = gl.isEnabled(gl.DEPTH_TEST);
+    state.cullOn = gl.isEnabled(gl.CULL_FACE); state.blendOn = gl.isEnabled(gl.BLEND);
+    state.depthMask = gl.getParameter(gl.DEPTH_WRITEMASK);
     state.framebuffer = gl.getParameter(gl.FRAMEBUFFER_BINDING); state.program = gl.getParameter(gl.CURRENT_PROGRAM);
     state.drawCalls = R.drawCalls; state.tris = R.tris;
     if (R.nrmMat) state.normal.set(R.nrmMat);
+    let failure = null;
     try {
       gl.disable(gl.SCISSOR_TEST);
       R.viewProj = this._cameraBuf.vp; R.proj = this._cameraBuf.proj; R.view = this._cameraBuf.view; R.camPos = this._cameraRig.eye;
@@ -818,9 +897,10 @@ class TrainingPreview {
       this.g.scene.drawStatic(R, false);
       M4.compose(this._matrix, this.ball.p, this.ball.q, V3.set(this._scale, 1, 1, 1));
       R.draw(this.g.scene.mesh.ball, this._matrix, this.g.scene.mat.ball);
-      this._drawPaddle.racket = this.g._equippedRacket;
+      this._drawPaddle.racket = this.source === 'attempt' ? this.clip.record.metadata.racket : this.g._equippedRacket;
       this._drawPaddle.activeFace = this.racket.activeFace;
-      this._rig.draw(R, this.g.scene, this._drawPaddle);
+      if (this.source !== 'attempt' || this._attemptSample.player.visible) this._rig.draw(R, this.g.scene, this._drawPaddle);
+      if (this.source === 'attempt') this._rig.draw(R, this.g.scene, { ...this._attemptSample.opponent, racket: 'r-standard' });
       this.g.scene.drawNet(R);
       if (this.camera === 'contact') this._drawContactGlyphs();
       else {
@@ -835,7 +915,7 @@ class TrainingPreview {
         for (const line of R.quality === 'low' ? this.clip.pathLinesLow : this.clip.pathLines)
           R.draw(this.g.scene.mesh.box, line, this._racketPathMat);
       }
-      if (this._inset) {
+      if (this._inset && (this.source !== 'attempt' || this.clip.contactEvent)) {
         const c = this.clip, rig = this._insetRig;
         V3.copy(rig.look, c.pose.point);
         V3.copy(rig.eye, c.insetEye);
@@ -848,7 +928,8 @@ class TrainingPreview {
       this._useCamera(this._cameraRig, this._cameraBuf);
       R.present(this.reducedMotion ? 0 : this.phase * this.duration);
       this._overlay();
-    } finally {
+    } catch (error) { failure = error; this.error = this._text('unavailable'); }
+    finally {
       R.viewProj = old.vp; R.proj = old.proj; R.view = old.view; R.camPos = old.cam;
       R.drawCalls = state.drawCalls; R.tris = state.tris;
       if (R.nrmMat) R.nrmMat.set(state.normal);
@@ -857,8 +938,13 @@ class TrainingPreview {
       gl.useProgram(state.program); gl.bindFramebuffer(gl.FRAMEBUFFER, state.framebuffer);
       gl.viewport(...state.viewport); gl.scissor(...state.scissor);
       if (state.scissorOn) gl.enable(gl.SCISSOR_TEST); else gl.disable(gl.SCISSOR_TEST);
+      if (state.depthOn) gl.enable(gl.DEPTH_TEST); else gl.disable(gl.DEPTH_TEST);
+      if (state.cullOn) gl.enable(gl.CULL_FACE); else gl.disable(gl.CULL_FACE);
+      if (state.blendOn) gl.enable(gl.BLEND); else gl.disable(gl.BLEND);
       gl.depthMask(state.depthMask);
     }
+    if (failure) { this.close(); return false; }
+    return true;
   }
 
   _overlay() {
@@ -872,9 +958,14 @@ class TrainingPreview {
     const contact = projectPoint(vp, this.clip.pose.point, this._screen), el = this.root.querySelector('.tt-preview-contact-label');
     el.hidden = !contact.ok || contact.x < .02 || contact.x > .98 || contact.y < .02 || contact.y > .98;
     el.style.left = clamp(contact.x, .12, .88) * 100 + '%'; el.style.top = clamp(contact.y - .085, .07, .92) * 100 + '%';
+    if (this.source === 'attempt') {
+      if (this._attemptSample.gap) el.textContent = this._text('gap');
+      this.root.querySelector('.tt-preview-touch-cursor').setAttribute('hidden', ''); return;
+    }
     const model = this.profile.gesture, tc = this.clip.compiled.contactPhase, lo = this.clip.compiled.backPhase, hi = this.clip.compiled.finishPhase;
-    const progress = this.phase <= tc ? clamp((this.phase - lo) / (tc - lo), 0, 1) * model.contactPhase
-      : model.contactPhase + clamp((this.phase - tc) / (hi - tc), 0, 1) * (1 - model.contactPhase);
+    const phase = this._motionPhase;
+    const progress = phase <= tc ? clamp((phase - lo) / (tc - lo), 0, 1) * model.contactPhase
+      : model.contactPhase + clamp((phase - tc) / (hi - tc), 0, 1) * (1 - model.contactPhase);
     const points = this._gesturePoints;
     let total = 0; for (let i = 1; i < points.length; i++) total += Math.hypot(points[i][0] - points[i - 1][0], points[i][1] - points[i - 1][1]);
     let distance = progress * total, x = points[0][0], y = points[0][1];

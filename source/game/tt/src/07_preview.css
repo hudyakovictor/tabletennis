@@ -5,6 +5,7 @@
 .tt-preview button,.tt-preview select,.tt-preview input{font-family:inherit;color:var(--txt)}
 .tt-preview button{min-height:44px;white-space:nowrap;font-size:12px;padding:8px 12px;letter-spacing:.02em}
 .tt-preview button:disabled{opacity:.45;cursor:default}
+.tt-preview [hidden]{display:none!important}
 .tt-preview button:focus-visible,.tt-preview select:focus-visible,.tt-preview input:focus-visible{outline:2px solid var(--acc);outline-offset:3px}
 .tt-preview-stage{position:relative;min-width:0;min-height:0;touch-action:none;cursor:grab}
 .tt-preview-stage:active{cursor:grabbing}
@@ -84,7 +85,7 @@
   .tt-preview-gesture svg{height:78px}
   .tt-preview-details{padding-top:4px;padding-bottom:4px}
   .tt-preview-instruction{max-height:25px;font-size:8px}
-  .tt-preview-footer{padding-top:4px;padding-bottom:max(6px,env(safe-area-inset-bottom))}
+  .tt-preview-footer{padding-top:4px;padding-bottom:max(6px,env(safe-area-inset-bottom));max-height:44vh;overflow-y:auto;overscroll-behavior:contain}
   .tt-preview-status{font-size:8px}
 }
 @media(max-width:700px) and (max-height:480px){

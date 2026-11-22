@@ -12,23 +12,33 @@ const calSource = read('game/tt/src/06_calibration.js'), embedSource = read('gam
 const plain = value => JSON.parse(JSON.stringify(value));
 const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
 function storage(raw) {
-  const entries = new Map([['ttu-v2', JSON.stringify(raw ?? null)]]);
-  return { entries, getItem: key => entries.get(key) ?? null, setItem: (key, value) => entries.set(key, value), removeItem: key => entries.delete(key) };
+  const entries = new Map([['ttu-v2', JSON.stringify(raw ?? null)]]), writes = [];
+  return { entries, writes, getItem: key => entries.get(key) ?? null,
+    setItem(key, value) { writes.push({ key, value }); entries.set(key, value); }, removeItem: key => entries.delete(key) };
 }
 function classes() {
   const values = new Set();
   return { contains: key => values.has(key), add: key => values.add(key), remove: key => values.delete(key),
     toggle(key, on) { if (on === undefined) on = !values.has(key); on ? values.add(key) : values.delete(key); return on; } };
 }
+const academyCatalog = { version: 1, skills: [{ id: 'tap' }, { id: 'LOOP' }],
+  lessons: [{ id: 'CONTACT', skills: ['tap'] }, { id: 'TOPSPIN', skills: ['LOOP'] }] };
+const masteredTraining = { version: 1, lastLesson: 'CONTACT', lessons: {
+  CONTACT: { mastered: true, practiced: true, attempts: 7, correct: 6 },
+  TOPSPIN: { mastered: true, practiced: true, attempts: 7, correct: 6 } } };
+const trainSnapshot = (requestId, overrides = {}) => ({ type: 'train', requestId, sessionId: 'host-training', mode: 'course',
+  id: 'CONTACT', stage: 'practice', phase: 'intro', attempts: 0, practicePassed: false, quizPassed: false,
+  attemptReplay: { available: false, attemptId: null, truncated: false }, ...overrides });
 
 function hostFixture(raw = {}) {
   const sent = [], frames = [], listeners = [], motionListeners = [];
+  const localStorage = storage({ v: 8, ...raw });
   const query = { matches: false, addEventListener(type, fn) { motionListeners.push(fn); } };
   const layer = { classList: classes(), appendChild() {} }, body = { classList: classes() };
   const document = { body, querySelectorAll: () => [], addEventListener() {},
     createElement() { const frame = { contentWindow: { postMessage(m) { sent.push(plain(m)); } }, setAttribute() {}, remove() {} }; frames.push(frame); return frame; } };
   const window = { addEventListener(type, fn) { if (type === 'message') listeners.push(fn); }, matchMedia: () => query };
-  const context = vm.createContext({ window, document, localStorage: storage({ v: 8, ...raw }), sessionStorage: storage(null),
+  const context = vm.createContext({ window, document, localStorage, sessionStorage: storage(null),
     structuredClone, URLSearchParams, console, clamp, setTimeout: () => 1, clearTimeout() {},
     location: { search: '', href: 'http://localhost/', origin: 'http://localhost', protocol: 'http:' },
     I18n: { lang: 'ru' }, t: (key) => key, TGX: { w: null }, MODE: { id: 'ranked' }, Sfx: { sync() {} },
@@ -38,9 +48,9 @@ function hostFixture(raw = {}) {
   const api = context.api; api.GameHost.ensure();
   const message = (data, source = api.GameHost.frame.contentWindow) => listeners.forEach(fn => fn({ data: { __tt: 1, ...data }, source }));
   const registry = vm.runInContext('CALIBRATION_REGISTRY', context);
-  const ready = (preferences = {}) => message({ type: 'ready', rules: { captureRadius: .2 }, calibrationRegistry: plain(registry), calibrationPreferences: preferences, trainingCatalog: { version: 1, lessons: [] } });
+  const ready = (preferences = {}, trainingCatalog = { version: 1, lessons: [] }) => message({ type: 'ready', rules: { captureRadius: .2 }, calibrationRegistry: plain(registry), calibrationPreferences: preferences, trainingCatalog });
   const snapshot = () => api.applyGameCalibrations({ settings: {}, sessionKind: api.GameHost.sessionKind, slowmo: { allowed: true } }, api.S.cal);
-  return { ...api, sent, frames, ready, message, snapshot, body, query, motionListeners };
+  return { ...api, sent, frames, ready, message, snapshot, body, query, motionListeners, localStorage };
 }
 
 test('ready sends current settings before mode, discards old hint/cal packets and waits for acknowledgement', () => {
@@ -175,13 +185,14 @@ test('shell OS listener keeps effective reduced motion active while requested rm
 });
 
 function embedFixture() {
-  const sent = [], listeners = [], networkHandlers = new Map(); let updates = 0, resizes = 0;
+  const sent = [], listeners = [], networkHandlers = new Map(), glListeners = [], trainStarts = [], previewOpens = [], previewCommands = [], pauses = [];
+  let updates = 0, resizes = 0, captureCancels = 0, trainSequence = 0;
   const audio = { levels: { master: .8, effects: .9, music: .25, ambient: .2 }, muted: false, init() {}, resume() {},
     setMuted(on) { this.muted = on; }, setQuiet(on) { this.quiet = on; },
     setLevels(raw) { for (const key of Object.keys(this.levels)) if (Number.isFinite(raw[key])) this.levels[key] = clamp(raw[key], 0, 1); this.volume = this.levels.master; return { ...this.levels }; } };
-  const ui = { inputMode: 'mouse', tick() {}, trainSync() {}, syncShotFeedback() {}, syncScore() {} };
+  const ui = { inputMode: 'mouse', tick() {}, trainSync() {}, trainDone() {}, trainHide() {}, syncShotFeedback() {}, syncScore() {} };
   const g = { ui, audio, settings: { targetScore: 11, difficulty: 1, showTrail: true, quality: 'medium' }, sessionKind: 'free',
-    time: 0, strokeTime: 0, timeScale: 1, state: 3, server: 1, score: [0, 0], shotId: 1,
+    time: 0, strokeTime: 0, timeScale: 1, state: 3, server: 1, score: [0, 0], shotId: 1, paused: false,
     hintContact: true, motionQuery: { matches: false }, slowmo: { allowed: true }, career: { active: false }, R: {},
     ball: { hist: [], live: true, lastHitBy: -1 }, rallyBounces: [1], scene: { mat: { table: { color: [0, 0, 0] } } },
     network: { state: 'LOBBY', isInMatch: false, on(type, fn) { networkHandlers.set(type, fn); }, leaveRoom() {}, disconnect() {} },
@@ -189,20 +200,40 @@ function embedFixture() {
     startMatch(diff) { this.settings.difficulty = diff; this.training = null; this.slowmo.allowed = true; },
     setAiTrend() {}, trendFromHistory() {},
     setInspectSlowmo(on) { this.inspectSlowmo = on && this.slowmo.allowed; return this.inspectSlowmo; },
-    startTraining(m) { this.training = { stage: 'practice', sessionId: 't1', revision: 0, options: m, snapshot() { return { stage: this.stage }; } }; },
-    setPaused(v) { this.paused = v; }, syncAudioQuiet() {} };
+    startTraining(m) {
+      this.training?.quit(); trainStarts.push(plain(m));
+      this.training = { mode: m.mode || 'course', stage: 'practice', phase: 'intro', finished: false,
+        sessionId: 't' + (++trainSequence), revision: 0, options: m, step: 0, S: { id: m.lessonId || 'CONTACT' },
+        attempts: 0, done: 0, practicePassed: false, quizPassed: false, attemptClip: null,
+        action() { return false; }, skip() { return false; },
+        quit() { this.finished = true; this.attemptClip = null; g.training = null; g.ball.live = false; },
+        snapshot() { return { sessionId: this.sessionId, mode: this.mode, id: this.S.id, stage: this.stage, phase: this.phase,
+          attempts: this.attempts, practicePassed: this.practicePassed, quizPassed: this.quizPassed,
+          attemptReplay: { available: !!this.attemptClip, attemptId: this.attemptClip?.attemptId ?? null, truncated: !!this.attemptClip?.truncated } }; },
+        summary() { return { sessionId: this.sessionId, mode: this.mode, courseComplete: false, practiceSet: this.practiceSet }; } };
+    },
+    setPaused(v) { pauses.push(v); this.paused = v; }, syncAudioQuiet() {} };
+  g.preview = { active: false, error: null,
+    open(options) { previewOpens.push(plain(options)); this.options = options; this.error = null; this.savedPause = g.paused; this.active = true; return true; },
+    close(restore = true) { if (!this.active) return false; this.active = false; if (restore) g.paused = this.savedPause; return true; },
+    command(command, value) { previewCommands.push({ command, value }); return true; },
+    snapshot() { return { source: this.options?.source || 'example', active: this.active }; }, localize() {} };
+  g.openTrainingPreview = options => g.preview.open(options);
   const window = { __TT_EMBED: true, __game: g, parent: { postMessage(m) { sent.push(plain(m)); } }, addEventListener(type, fn) { if (type === 'message') listeners.push(fn); } };
-  const document = { readyState: 'complete', visibilityState: 'visible', addEventListener() {}, documentElement: { classList: classes() }, getElementById: () => null };
+  const document = { readyState: 'complete', visibilityState: 'visible', addEventListener() {}, documentElement: { classList: classes() },
+    getElementById: id => id === 'gl' ? { addEventListener(type, fn) { if (type === 'webglcontextlost') glListeners.push(fn); } } : null };
   const ET = key => key; ET.lang = () => 'ru'; ET.set = () => {};
   const context = vm.createContext({ window, document, clamp, ET, setTimeout: () => 1, clearTimeout() {},
     PH: { TABLE_Y: .76 }, GS: { MENU: 0, SERVE_READY: 1, SERVE_TOSS: 2, RALLY: 3, POINT: 4 },
     MATCH_RULES: { version: 4, captureRadius: .2, contactSideTouchPx: 48, contactSideMousePx: 40, contactBackPx: 120, contactForwardPx: 150 },
     TRAIN_STEPS: [], trainingCatalog: () => ({ version: 1, lessons: [] }),
-    createMissShotCapture: () => ({ setEnabled() {}, setHalf() {}, getHalf: () => 350, request: () => null, cancel() {}, fail() {} }),
+    createMissShotCapture: () => ({ setEnabled() {}, setHalf() {}, getHalf: () => 350, request: () => null, cancel() { captureCancels++; }, fail() {} }),
     V3: {}, TAU: Math.PI * 2 });
   vm.runInContext(calSource + '\napplyGameCalibrations(window.__game, {});\n' + embedSource, context);
-  const command = (type, data) => listeners.forEach(fn => fn({ source: window.parent, data: { __tt: 1, type, ...data } }));
-  return { g, ui, audio, sent, command, query: g.motionQuery, updates: () => updates, resizes: () => resizes, networkHandlers };
+  const command = (type, data, source = window.parent) => listeners.forEach(fn => fn({ source, data: { __tt: 1, type, ...data } }));
+  const loseContext = () => { let prevented = false; glListeners.forEach(fn => fn({ preventDefault() { prevented = true; } })); return prevented; };
+  return { g, ui, audio, sent, command, loseContext, trainStarts, previewOpens, previewCommands, pauses,
+    captureCancels: () => captureCancels, query: g.motionQuery, updates: () => updates, resizes: () => resizes, networkHandlers };
 }
 
 test('the common confirmed-contact record publishes one legacy hit and whiffs do not publish hits', () => {
@@ -470,4 +501,395 @@ test('camera gesture preferences update the host and are sent on the next sessio
   f.GameHost.syncSettings();
   const packet = f.sent.findLast(m => m.type === 'settings');
   assert.equal(packet.calibrations.camHeight, 75); assert.equal(packet.calibrations.camZoom, 80);
+});
+
+test('training commands own IDs and only the latest matching acknowledgement is delivered once without resume', () => {
+  const f = hostFixture(); f.ready(); const requestId = f.GameHost.send('train', { mode: 'course' });
+  assert.equal(requestId, 1); assert.deepEqual(plain(f.GameHost.trainingIntent), { requestId, data: { mode: 'course', sessionKind: 'practice' }, sessionId: null });
+  f.message(trainSnapshot(requestId), {}); f.message(trainSnapshot(requestId, { __tt: 0 }));
+  f.message(trainSnapshot(requestId - 1)); f.message(trainSnapshot(requestId, { sessionId: null }));
+  assert.equal(f.GameHost.trainSessionId, null);
+  f.message(trainSnapshot(requestId));
+  assert.deepEqual(plain(f.GameHost.trainingIntent), { requestId, data: { mode: 'course', sessionKind: 'practice', lessonId: 'CONTACT' }, sessionId: 'host-training' });
+  const received = []; f.GameHost.on(m => { if (m.type === 'trainActionAck') received.push(plain(m)); });
+  f.GameHost.send('pause'); const first = f.GameHost.send('trainAction', { action: 'start', actionId: 999 });
+  assert.equal(first, 1); assert.deepEqual(f.sent.at(-1), { __tt: 1, type: 'trainAction', action: 'start', actionId: first, requestId, sessionId: 'host-training' });
+  assert.equal(f.GameHost.send('resume'), false); assert.equal(f.GameHost.paused, true);
+  const current = f.GameHost.send('trainAction', { action: 'pacing', value: 'flow' });
+  const ack = { type: 'trainActionAck', actionId: current, requestId, sessionId: 'host-training', accepted: true };
+  f.message({ ...ack, actionId: first }); f.message(ack, {}); f.message({ ...ack, __tt: 0 });
+  f.message({ ...ack, requestId: requestId - 1 }); f.message({ ...ack, sessionId: 'retired' }); f.message({ ...ack, accepted: 1 });
+  assert.equal(received.length, 0); assert.equal(f.GameHost.paused, true);
+  f.message(ack); f.message({ ...ack, accepted: false });
+  assert.equal(received.length, 1); assert.equal(f.GameHost.mode.data.pacing, 'flow'); assert.equal(f.GameHost.trainingIntent.data.pacing, 'flow'); assert.equal(f.GameHost.paused, true);
+  const rejected = f.GameHost.send('trainAction', { action: 'retry' });
+  f.message({ ...ack, actionId: rejected, accepted: false });
+  assert.equal(received.length, 2); assert.equal(received.at(-1).accepted, false); assert.equal(f.GameHost.paused, true);
+  const skipped = f.GameHost.send('skipStep');
+  assert.equal(skipped, rejected + 1); assert.deepEqual(f.sent.at(-1), { __tt: 1, type: 'skipStep', actionId: skipped, requestId, sessionId: 'host-training' });
+  f.message({ ...ack, actionId: skipped }); assert.equal(received.length, 3);
+  const stale = f.GameHost.send('trainAction', { action: 'start', requestId: 0, sessionId: 'retired' });
+  assert.equal(f.sent.at(-1).requestId, 0, 'explicit stale identities must not be relabelled as current');
+  f.message({ ...ack, actionId: stale, requestId: 0, sessionId: 'retired', accepted: false });
+  assert.equal(received.length, 3); assert.equal(f.sent.some(m => m.type === 'resume'), false);
+});
+
+test('new training requests retire old snapshots, progress, completion and acknowledgements while course rewards stay one-time', () => {
+  const f = hostFixture({ v: 10, coins: 713, gems: 9, training: masteredTraining }); f.ready({}, academyCatalog);
+  const received = []; f.GameHost.on(m => { if (['train', 'trainingProgress', 'trainDone', 'trainActionAck'].includes(m.type)) received.push(plain(m)); });
+  const oldId = f.GameHost.send('train', { mode: 'course', lessonId: 'CONTACT' }); f.message(trainSnapshot(oldId, { sessionId: 'old' }));
+  const actionId = f.GameHost.send('trainAction', { action: 'continue' });
+  const requestId = f.GameHost.send('train', { mode: 'course', lessonId: 'CONTACT' });
+  assert.equal(requestId, oldId + 1); assert.equal(f.GameHost.trainSnapshot, null); assert.equal(f.GameHost._pendingTrainAction, null);
+  const before = plain(f.S), count = received.length;
+  const progress = { type: 'trainingProgress', requestId, sessionId: 'current', mode: 'course', id: 'CONTACT', stage: 'check',
+    attempts: 4, correct: 3, validated: true, practicePassed: true, quizPassed: true,
+    profile: { lessons: { CONTACT: { attempts: 99, correct: 99, mastered: true } } } };
+  const done = { type: 'trainDone', requestId, sessionId: 'current', mode: 'course', courseComplete: true };
+  f.message(trainSnapshot(oldId, { sessionId: 'old' })); f.message({ ...done, requestId: oldId, sessionId: 'old' });
+  f.message({ ...done, sessionId: 'old' }); f.message({ type: 'trainActionAck', actionId, requestId: oldId, sessionId: 'old', accepted: true });
+  f.message(trainSnapshot(requestId, { mode: 'stroke' })); f.message(trainSnapshot(requestId), {});
+  assert.equal(received.length, count); assert.deepEqual(plain(f.S), before);
+  f.message(trainSnapshot(requestId, { sessionId: 'current' }));
+  f.message(trainSnapshot(requestId, { sessionId: 'old', phase: 'live' }));
+  f.message(progress, {}); f.message({ ...progress, __tt: 0 }); f.message({ ...progress, requestId: oldId });
+  f.message({ ...progress, sessionId: 'old' }); f.message({ ...progress, mode: 'stroke' });
+  f.message({ ...done, requestId: oldId }); f.message({ ...done, sessionId: 'old' }); f.message(done, {});
+  assert.deepEqual(plain(f.S), before); assert.equal(f.GameHost.trainSnapshot.sessionId, 'current');
+  f.message(done); const rewarded = received.at(-1);
+  assert.equal(rewarded.rewarded, true); assert.equal(rewarded.mastered, 2); assert.equal(rewarded.coverage, 100);
+  assert.equal(f.S.coins, 913); assert.equal(f.S.gems, 14);
+  const writes = f.localStorage.writes.length, completedCount = received.length;
+  f.message(done); f.message(progress); f.message({ type: 'trainActionAck', actionId, requestId, sessionId: 'current', accepted: true });
+  assert.equal(received.length, completedCount); assert.equal(f.localStorage.writes.length, writes); assert.equal(f.S.coins, 913);
+  const repeatedId = f.GameHost.send('train', { mode: 'course' }); f.message(trainSnapshot(repeatedId, { sessionId: 'repeat' }));
+  f.message({ ...done, requestId: repeatedId, sessionId: 'repeat' });
+  assert.equal(received.at(-1).rewarded, false); assert.equal(f.S.coins, 913); assert.equal(f.S.gems, 14);
+  f.GameHost.send('quit'); f.message({ ...done, requestId: repeatedId, sessionId: 'repeat' });
+  assert.equal(f.GameHost.trainingIntent, null); assert.equal(f.S.coins, 913);
+});
+
+test('stroke and accuracy sets preserve their separate statistics and cannot import mastery, save or reward even a full-course profile', () => {
+  for (const mode of ['stroke', 'accuracy']) for (const training of [undefined, masteredTraining]) {
+    const f = hostFixture({ v: 10, coins: 713, gems: 9, xp: 251, level: 4, rating: 1420, passXp: 60,
+      ...(training ? { training } : {}) }); f.ready({}, academyCatalog);
+    const before = plain(f.S), writes = f.localStorage.writes.length, received = [];
+    f.GameHost.on(m => { if (m.type === 'trainDone') received.push(plain(m)); });
+    const requestId = f.GameHost.send('train', { mode, setSize: 10 }); f.message(trainSnapshot(requestId, { mode }));
+    const evidence = { type: 'trainingProgress', requestId, sessionId: 'host-training', mode, id: 'CONTACT', stage: 'check', attempts: 4,
+      correct: 4, validated: true, practicePassed: true, quizPassed: true, profile: masteredTraining };
+    f.message(evidence); f.message({ ...evidence, mode: 'course' });
+    const practiceSet = { size: 10, attempted: 10, successful: 6, bestStreak: 3,
+      errors: [{ code: 'TIMING_EARLY', count: 4, correction: 'Wait for contact.' }] };
+    const done = { type: 'trainDone', requestId, sessionId: 'host-training', mode, practiceSet,
+      mastered: 2, total: 44, coverage: 100, mastery: { percent: 100 }, profile: masteredTraining, courseComplete: true, rewarded: true };
+    f.message(done); f.message(done);
+    assert.equal(received.length, 1); assert.deepEqual(received[0].practiceSet, practiceSet);
+    assert.equal(received[0].rewarded, false); assert.equal(received[0].courseComplete, false);
+    for (const key of ['mastered', 'total', 'coverage', 'mastery', 'profile']) assert.equal(Object.hasOwn(received[0], key), false, `${mode}: ${key}`);
+    assert.deepEqual(plain(f.S), before); assert.equal(f.localStorage.writes.length, writes);
+    assert.equal(f.S.v, 10); assert.deepEqual(Object.keys(f.S.training).sort(), ['lastLesson', 'lessons', 'version']);
+  }
+});
+
+test('host preview identity is separate from training and stale controls, close events and unfinished checks cannot affect the new session', () => {
+  const f = hostFixture(); f.ready(); f.GameHost.send('train', { mode: 'stroke' });
+  const requestId = f.GameHost.send('train', { mode: 'stroke' });
+  const settled = trainSnapshot(requestId, { mode: 'stroke', phase: 'fail', attemptReplay: { available: true, attemptId: 17, truncated: true } });
+  f.message(settled); assert.equal(f.GameHost.openPreview({ source: 'attempt' }), true);
+  const packet = f.sent.findLast(m => m.type === 'previewOpen');
+  assert.notEqual(packet.requestId, requestId); assert.equal(packet.trainRequestId, requestId); assert.equal(packet.sessionId, settled.sessionId); assert.equal(packet.attemptId, 17);
+  const received = []; f.GameHost.on(m => { if (m.type === 'preview') received.push(plain(m)); });
+  const preview = { type: 'preview', requestId: packet.requestId, trainRequestId: requestId, sessionId: settled.sessionId, attemptId: 17, active: true, paused: true };
+  f.message(preview, {}); f.message({ ...preview, __tt: 0 }); f.message({ ...preview, requestId });
+  f.message({ ...preview, trainRequestId: requestId - 1 }); f.message({ ...preview, sessionId: 'old' });
+  assert.equal(f.GameHost.preview.pending, true); assert.equal(received.length, 0);
+  f.message(preview); assert.equal(f.GameHost.preview.active, true);
+  f.GameHost.send('previewCommand', { command: 'rate', value: .25 }); assert.equal(f.sent.at(-1).requestId, packet.requestId);
+  const count = f.sent.length;
+  assert.equal(f.GameHost.send('previewCommand', { requestId, command: 'seek', value: 1 }), false);
+  assert.equal(f.GameHost.send('previewClose', { requestId }), false); assert.equal(f.GameHost.send('resume'), false); assert.equal(f.sent.length, count);
+  f.GameHost.closePreview(); assert.equal(f.sent.at(-1).requestId, packet.requestId);
+  f.message({ ...preview, active: false }); f.message({ ...preview, active: false, paused: false });
+  assert.equal(received.length, 2); assert.equal(f.GameHost.paused, true, 'a duplicate close cannot undo a pause');
+  assert.equal(f.GameHost.openPreview({ source: 'attempt', attemptId: 16 }), false);
+  assert.equal(f.GameHost.openPreview({ source: 'example', sessionId: 'old' }), false);
+  assert.equal(f.GameHost.openPreview({ source: 'example' }), true);
+  const nextId = f.GameHost.send('train', { mode: 'course' }); assert.equal(f.GameHost.preview, null);
+  f.message({ ...preview, active: false, paused: true }); f.message({ type: 'paused', requestId, sessionId: settled.sessionId, v: true });
+  assert.equal(f.GameHost.paused, false); assert.equal(received.length, 2);
+  f.message(trainSnapshot(nextId, { sessionId: 'check', stage: 'check', phase: 'live', attempts: 3 }));
+  assert.equal(f.GameHost.openPreview({ source: 'example' }), false);
+  f.message(trainSnapshot(nextId, { sessionId: 'check', stage: 'check', phase: 'review', attempts: 3 }));
+  assert.equal(f.GameHost.openPreview({ source: 'example' }), false);
+  f.message(trainSnapshot(nextId, { sessionId: 'check', stage: 'check', phase: 'review', attempts: 4 }));
+  assert.equal(f.GameHost.openPreview({ source: 'example' }), true);
+  assert.equal(f.sent.at(-1).trainRequestId, nextId); assert.equal(f.sent.at(-1).attemptId, null);
+  assert.equal(f.sent.some(m => m.type === 'resume'), false);
+});
+
+test('GPU training recovery clears actions, previews and recordings and resends only lesson gates and in-memory options with an intro notice', () => {
+  for (const mode of ['course', 'stroke']) {
+    const f = hostFixture({ v: 10, training: masteredTraining }); f.ready({}, academyCatalog);
+    const before = plain(f.S.training), received = []; f.GameHost.on(m => received.push(plain(m)));
+    const options = { mode, lessonId: 'CONTACT', stroke: 'LOOP', pacing: 'coach', setSize: mode === 'course' ? null : 10,
+      adaptive: true, variation: true, seed: 23 };
+    const requestId = f.GameHost.send('train', options);
+    const snapshot = trainSnapshot(requestId, { mode, stage: mode === 'course' ? 'check' : 'practice', phase: mode === 'course' ? 'live' : 'fail',
+      attempts: mode === 'course' ? 2 : 7, practicePassed: mode === 'course', quizPassed: mode === 'course',
+      attemptReplay: { available: true, attemptId: 12, truncated: false }, practiceSet: { attempted: 7 } });
+    f.message(snapshot); f.GameHost.send('pause');
+    const paceId = f.GameHost.send('trainAction', { action: 'pacing', value: 'flow' });
+    f.message({ type: 'trainActionAck', actionId: paceId, requestId, sessionId: snapshot.sessionId, accepted: true });
+    const pendingId = f.GameHost.send('trainAction', { action: 'retry' });
+    if (mode === 'stroke') assert.equal(f.GameHost.openPreview({ source: 'attempt' }), true);
+    f.S.hint = false; f.S.audioLevels.master = 0; const oldFrame = f.GameHost.frame;
+    f.message({ type: 'glLost', inMatch: false, score: [0, 0], server: 1 });
+    assert.equal(f.frames.length, 2); assert.equal(f.GameHost.ready, false); assert.equal(f.GameHost.trainSnapshot, null);
+    assert.equal(f.GameHost.preview, null); assert.equal(f.GameHost._pendingTrainAction, null); assert.equal(f.GameHost._trainRecovery, null);
+    const recoveredId = f.GameHost.trainRequestId;
+    assert.equal(recoveredId, requestId + 1);
+    assert.deepEqual(plain(f.GameHost.trainingIntent), { requestId: recoveredId, sessionId: null, data: { ...options, pacing: 'flow',
+      sessionKind: snapshot.stage === 'check' ? 'check' : 'practice',
+      resume: { stage: snapshot.stage, practicePassed: snapshot.practicePassed, quizPassed: snapshot.quizPassed } } });
+    f.message({ type: 'trainActionAck', actionId: pendingId, requestId, sessionId: snapshot.sessionId, accepted: true }, oldFrame.contentWindow);
+    f.ready({}, academyCatalog);
+    const train = f.sent.findLast(m => m.type === 'train'), settings = f.sent.findLast(m => m.type === 'settings');
+    assert.ok(f.sent.indexOf(settings) < f.sent.indexOf(train)); assert.equal(settings.hint, false); assert.equal(settings.audioLevels.master, 0);
+    for (const key of ['mode', 'lessonId', 'stroke', 'setSize', 'adaptive', 'variation', 'seed']) assert.equal(train[key], options[key], key);
+    assert.equal(train.pacing, 'flow'); assert.equal(train.requestId, recoveredId);
+    assert.deepEqual(train.resume, { stage: snapshot.stage, practicePassed: snapshot.practicePassed, quizPassed: snapshot.quizPassed });
+    for (const key of ['attempts', 'stats', 'attemptReplay', 'attemptClip', 'practiceSet']) assert.equal(Object.hasOwn(train, key), false, key);
+    assert.deepEqual(received.findLast(m => m.type === 'ready').recovery,
+      { type: 'train', requestId: recoveredId, lessonId: 'CONTACT', phase: 'intro', resetAttempts: true, replayAvailable: false });
+    assert.equal(f.GameHost.paused, true); assert.deepEqual(plain(f.S.training), before);
+    f.message(trainSnapshot(recoveredId, { mode, sessionId: 'recovered', attempts: 0 }));
+    const ackCount = received.filter(m => m.type === 'trainActionAck').length;
+    f.message({ type: 'trainActionAck', actionId: pendingId, requestId, sessionId: snapshot.sessionId, accepted: true });
+    assert.equal(received.filter(m => m.type === 'trainActionAck').length, ackCount);
+    assert.equal(f.GameHost.trainSnapshot.attemptReplay.available, false);
+    assert.equal(f.GameHost.send('trainAction', { action: 'start' }), pendingId + 1);
+  }
+});
+
+test('queued training replacement discards retired actions and a superseded GPU recovery notice before ready', () => {
+  const f = hostFixture(); const oldId = f.GameHost.send('train', { mode: 'course' });
+  f.GameHost.send('trainAction', { action: 'start', sessionId: 'old' }); f.GameHost.send('skipStep', { sessionId: 'old' });
+  assert.equal(f.GameHost.send('previewOpen', { source: 'example', trainRequestId: oldId, sessionId: 'old' }), false);
+  assert.equal(f.GameHost.preview, null);
+  const requestId = f.GameHost.send('train', { mode: 'stroke', setSize: 20 }); f.ready();
+  assert.deepEqual(f.sent.filter(m => m.type === 'train').map(m => m.requestId), [requestId]);
+  assert.equal(f.sent.some(m => ['trainAction', 'skipStep', 'previewOpen'].includes(m.type)), false);
+  assert.equal(f.GameHost._pendingTrainAction, null);
+  f.message(trainSnapshot(requestId, { mode: 'stroke' }));
+  const readyMessages = []; f.GameHost.on(m => { if (m.type === 'ready') readyMessages.push(plain(m)); });
+  f.GameHost.recover({ inMatch: false });
+  const recoveredId = f.GameHost.trainRequestId; assert.equal(f.GameHost._trainRecoveryNotice.requestId, recoveredId);
+  const newestId = f.GameHost.send('train', { mode: 'accuracy', setSize: 10 }); f.ready();
+  assert.equal(newestId, recoveredId + 1); assert.equal(readyMessages.at(-1).recovery, undefined);
+  assert.deepEqual(f.sent.filter(m => m.type === 'train').map(m => m.requestId), [requestId, newestId]);
+  assert.deepEqual(plain(f.GameHost.trainingIntent), { requestId: newestId, data: { mode: 'accuracy', setSize: 10, sessionKind: 'practice' }, sessionId: null });
+});
+
+test('a late GPU journal flush cannot replace a frame that was already reloaded', async () => {
+  const f = hostFixture(); f.ready(); let finish;
+  f.GameHost.debug = true; f.GameHost.frame.contentWindow.__game = { debugArchive: { flush: () => new Promise(resolve => { finish = resolve; }) } };
+  f.message({ type: 'glLost', inMatch: false }); assert.equal(f.GameHost._glRecoveryPending, true);
+  f.GameHost.reload(); finish(true); await new Promise(resolve => setImmediate(resolve));
+  assert.equal(f.frames.length, 2); assert.equal(f.GameHost._glRecoveryPending, false);
+});
+
+test('embed rejects wrong sources, requests, sessions and stale or repeated action IDs without waking or changing pause', () => {
+  const f = embedFixture(); f.command('train', { mode: 'course', requestId: 10 });
+  const t = f.g.training, calls = []; t.action = (action, value) => { calls.push({ action, value }); t.phase = 'wait'; return true; };
+  f.command('pause'); f.command('sleep');
+  const command = { action: 'start', requestId: 10, sessionId: t.sessionId, actionId: 1 };
+  const count = f.sent.length; f.command('trainAction', command, {}); f.command('trainAction', { ...command, __tt: 0 });
+  assert.equal(f.sent.length, count);
+  for (const actionId of [undefined, null, 0, -1, 1.5, '1', Infinity]) f.command('trainAction', { ...command, actionId });
+  f.command('trainAction', { ...command, requestId: 9 }); f.command('trainAction', { ...command, actionId: 2, sessionId: 'old' });
+  f.command('trainAction', { ...command, actionId: 2 }); f.command('trainAction', command);
+  assert.equal(calls.length, 0); assert.equal(f.g.paused, true); assert.equal(f.g._ttSleeping, true);
+  assert.ok(f.sent.filter(m => m.type === 'trainActionAck').every(m => m.accepted === false));
+  f.command('trainAction', { ...command, actionId: 3 });
+  assert.equal(calls.length, 1); assert.equal(f.g.paused, false); assert.equal(f.g._ttSleeping, false);
+  assert.deepEqual(f.sent.at(-1), { __tt: 1, type: 'trainActionAck', actionId: 3, requestId: 10, sessionId: t.sessionId, accepted: true });
+  assert.deepEqual(f.sent.findLast(m => m.type === 'paused'), { __tt: 1, type: 'paused', v: false, host: true, requestId: 10, sessionId: t.sessionId });
+  f.command('pause'); f.command('sleep'); f.command('trainAction', { ...command, actionId: 3, action: 'retry' });
+  t.action = () => false; f.command('trainAction', { ...command, actionId: 4 });
+  assert.equal(f.g.paused, true); assert.equal(f.g._ttSleeping, true); assert.equal(f.sent.at(-1).accepted, false);
+  t.finished = true; t.phase = 'done'; t.action = t.skip = () => { throw Error('completed training cannot be changed'); };
+  let actionId = 5;
+  for (const action of ['start', 'retry', 'restart', 'continue', 'resume']) {
+    f.command('trainAction', { ...command, actionId: actionId++, action }); assert.equal(f.sent.at(-1).accepted, false);
+  }
+  f.command('skipStep', { ...command, actionId: actionId++ }); assert.equal(f.sent.at(-1).accepted, false);
+  assert.equal(f.g.paused, true); assert.equal(f.g._ttSleeping, true);
+  f.command('train', { mode: 'course', requestId: 11 }); const next = f.g.training;
+  f.command('sleep'); f.command('train', { requestId: 10 }); f.command('train', { requestId: 11 });
+  assert.equal(f.trainStarts.length, 2); assert.equal(f.g.training, next); assert.equal(f.g._ttSleeping, true);
+  next.action = () => { throw Error('old identity reached the new Trainer'); };
+  f.command('trainAction', { ...command, actionId: actionId++ });
+  f.command('trainAction', { ...command, actionId: actionId++, requestId: 11 });
+  assert.equal(f.sent.at(-1).accepted, false); assert.equal(f.g.paused, true); assert.equal(f.g._ttSleeping, true);
+});
+
+test('embed uses boolean action results and answer-or-value, and pacing, restart and skip never unpause', () => {
+  const f = embedFixture(); f.command('train', { mode: 'course', requestId: 7 }); const t = f.g.training;
+  let actionId = 0;
+  for (const scenario of [
+    { action: 'start', accepted: true, unpause: true }, { action: 'retry', accepted: true, unpause: true },
+    { action: 'continue', accepted: true, unpause: true }, { action: 'resume', accepted: true, unpause: true },
+    { action: 'answer', value: 'correct', accepted: true, unpause: true },
+    { action: 'answer', answer: 'correct', value: 'ignored', accepted: true, unpause: true },
+    { action: 'pacing', answer: null, value: 'flow', accepted: true, unpause: false },
+    { action: 'restart', accepted: true, unpause: false }, { action: 'answer', answer: 'wrong', accepted: false, unpause: false },
+    { action: 'resume', accepted: false, unpause: false }, { action: 'start', accepted: 1, unpause: false }
+  ]) {
+    t.phase = 'fail'; t.quizPassed = true; f.command('pause');
+    t.action = (action, value) => {
+      assert.equal(action, scenario.action); assert.equal(value, scenario.answer ?? scenario.value);
+      if (scenario.accepted === true && scenario.unpause) t.phase = 'wait';
+      return scenario.accepted;
+    };
+    f.command('trainAction', { requestId: 7, sessionId: t.sessionId, actionId: ++actionId,
+      action: scenario.action, answer: scenario.answer, value: scenario.value });
+    assert.equal(f.sent.at(-1).accepted, scenario.accepted === true); assert.equal(f.g.paused, !scenario.unpause, scenario.action);
+    if (scenario.action === 'pacing') assert.equal(t.phase, 'fail');
+  }
+  let skips = 0; t.skip = () => { skips++; t.phase = 'intro'; return true; }; f.command('pause');
+  const skip = { requestId: 7, sessionId: t.sessionId, actionId: ++actionId };
+  f.command('skipStep', skip); assert.equal(skips, 1); assert.equal(f.sent.at(-1).accepted, true); assert.equal(f.g.paused, true);
+  f.command('skipStep', skip); assert.equal(skips, 1); assert.equal(f.sent.at(-1).accepted, false);
+  t.skip = () => false; f.command('skipStep', { ...skip, actionId: ++actionId }); assert.equal(f.sent.at(-1).accepted, false); assert.equal(f.g.paused, true);
+  f.command('resume'); assert.equal(f.g.paused, true);
+  t.action = () => { t.finished = true; t.phase = 'done'; return true; };
+  f.command('trainAction', { ...skip, actionId: ++actionId, action: 'continue' });
+  assert.equal(f.sent.at(-1).accepted, true); assert.equal(f.g.paused, true, 'an applied continue that finishes cannot restart a ball');
+  f.command('match'); f.command('pause'); f.command('resume'); assert.equal(f.g.paused, false, 'ordinary match resume stays available');
+});
+
+test('embed preview validates training and completed attempts, blocks unfinished checks and guards the separate command/close ID', () => {
+  const f = embedFixture(); f.command('train', { mode: 'course', requestId: 20 }); const t = f.g.training;
+  t.attemptClip = { attemptId: 11, truncated: false }; t.stage = 'check'; t.phase = 'live'; t.attempts = 2;
+  f.command('pause'); f.command('sleep'); let previewId = 0;
+  const open = options => f.command('previewOpen', { requestId: ++previewId, trainRequestId: 20, sessionId: t.sessionId, source: 'example', ...options });
+  const count = f.sent.length;
+  f.command('previewOpen', { requestId: 50, source: 'example' }, {}); f.command('previewOpen', { __tt: 0, requestId: 50, source: 'example' });
+  f.command('previewOpen', { source: 'example' }); assert.equal(f.sent.length, count);
+  open({ trainRequestId: 19 }); open({ sessionId: 'old' }); open({});
+  t.phase = 'review'; t.attempts = 3; open({});
+  t.stage = 'practice'; t.phase = 'fail'; open({ source: 'attempt', attemptId: 10 });
+  t.phase = 'live'; open({ source: 'attempt', attemptId: 11 });
+  assert.equal(f.previewOpens.length, 0); assert.equal(f.g.paused, true); assert.equal(f.g._ttSleeping, true);
+  assert.ok(f.sent.filter(m => m.type === 'preview').every(m => m.active === false && m.opened === false));
+  t.stage = 'check'; t.phase = 'review'; t.attempts = 4; open({}); const activeId = previewId;
+  assert.notEqual(activeId, 20); assert.equal(f.previewOpens.length, 1); assert.equal(f.g.preview.active, true);
+  assert.equal(f.sent.at(-1).requestId, activeId); assert.equal(f.sent.at(-1).trainRequestId, 20); assert.equal(f.sent.at(-1).sessionId, t.sessionId);
+  const controls = f.sent.length, cancels = f.captureCancels();
+  f.command('previewCommand', { requestId: 20, command: 'rate', value: 1 }); f.command('previewCommand', { command: 'rate', value: 1 });
+  f.command('previewCommand', { requestId: activeId, command: 'rate', value: 1 }, {});
+  f.command('previewClose', { requestId: 20 }); f.command('previewClose'); f.command('previewClose', { requestId: activeId }, {});
+  assert.equal(f.sent.length, controls); assert.equal(f.previewCommands.length, 0); assert.equal(f.captureCancels(), cancels); assert.equal(f.g.preview.active, true);
+  f.command('previewCommand', { requestId: activeId, command: 'rate', value: .25 }); assert.deepEqual(f.previewCommands, [{ command: 'rate', value: .25 }]);
+  t.action = t.skip = () => { throw Error('preview changed live training'); };
+  f.command('trainAction', { requestId: 20, sessionId: t.sessionId, actionId: 1, action: 'resume' }); assert.equal(f.sent.at(-1).accepted, false);
+  f.command('skipStep', { requestId: 20, sessionId: t.sessionId, actionId: 2 }); assert.equal(f.sent.at(-1).accepted, false);
+  f.command('resume'); assert.equal(f.g.paused, true); assert.equal(t.attempts, 4); assert.equal(t.attemptClip.attemptId, 11);
+  f.command('previewClose', { requestId: activeId }); assert.equal(f.g.preview.active, false); assert.equal(f.g.paused, true);
+  const closedCount = f.sent.length; f.command('previewClose', { requestId: activeId }); assert.equal(f.sent.length, closedCount);
+  t.action = () => true; f.command('trainAction', { requestId: 20, sessionId: t.sessionId, actionId: 1, action: 'resume' });
+  assert.equal(f.sent.at(-1).accepted, false, 'an action rejected during preview cannot be replayed after close');
+  t.stage = 'practice'; t.phase = 'fail'; open({ source: 'attempt', attemptId: 11 });
+  assert.equal(f.previewOpens.length, 2); assert.equal(f.previewOpens.at(-1).source, 'attempt');
+  const oldPreviewId = previewId; f.command('train', { mode: 'stroke', requestId: 21 });
+  assert.equal(f.g.preview.active, false); assert.equal(t.attemptClip, null); assert.notEqual(f.g.training.sessionId, t.sessionId);
+  f.command('previewCommand', { requestId: oldPreviewId, command: 'rate', value: 1 }); f.command('previewClose', { requestId: oldPreviewId });
+  assert.equal(f.previewCommands.length, 1); assert.equal(f.g.training.phase, 'intro');
+  f.ui.trainSync(f.g.training); f.ui.trainDone(f.g.training);
+  for (const type of ['train', 'trainDone']) {
+    const message = f.sent.findLast(m => m.type === type);
+    assert.equal(message.requestId, 21); assert.equal(message.sessionId, f.g.training.sessionId); assert.equal(message.mode, 'stroke');
+  }
+});
+
+test('embed context loss disposes the old attempt and preview and no late action, train or wake can revive them', () => {
+  const f = embedFixture(); f.command('train', { mode: 'course', requestId: 30 }); const t = f.g.training;
+  t.phase = 'fail'; t.attemptClip = { attemptId: 12, truncated: true };
+  f.command('previewOpen', { requestId: 1, trainRequestId: 30, sessionId: t.sessionId, source: 'attempt', attemptId: 12 });
+  const cancels = f.captureCancels(); assert.equal(f.g.preview.active, true); assert.equal(f.loseContext(), true);
+  assert.equal(t.attemptClip, null); assert.equal(t.finished, true); assert.equal(f.g.training, null); assert.equal(f.g.preview.active, false);
+  assert.ok(f.captureCancels() > cancels); assert.equal(f.g._ttContextLost, true); assert.equal(f.g._ttSleeping, true);
+  const loss = f.sent.findLast(m => m.type === 'glLost');
+  assert.equal(loss.requestId, 30); assert.equal(loss.sessionId, t.sessionId); assert.equal(loss.inMatch, false); assert.equal(loss.training, 0);
+  f.command('trainAction', { requestId: 30, sessionId: t.sessionId, actionId: 1, action: 'start' }); assert.equal(f.sent.at(-1).accepted, false);
+  f.command('skipStep', { requestId: 30, sessionId: t.sessionId, actionId: 2 }); assert.equal(f.sent.at(-1).accepted, false);
+  f.command('wake'); f.command('resume'); f.command('train', { requestId: 31 }); f.command('previewOpen', { requestId: 2, source: 'example' });
+  f.g.update(.016); assert.equal(f.updates(), 0); assert.equal(f.trainStarts.length, 1); assert.equal(f.g.training, null); assert.equal(f.g._ttSleeping, true);
+  f.loseContext(); assert.equal(f.sent.filter(m => m.type === 'glLost').length, 1); assert.equal(f.sent.some(m => m.type === 'trainDone'), false);
+});
+
+test('preview errors survive graceful close for unavailable fallback and a successful new open clears them without resume', () => {
+  const f = embedFixture(); f.command('train', { mode: 'stroke', requestId: 9 }); const t = f.g.training;
+  f.command('previewOpen', { requestId: 1, trainRequestId: 9, sessionId: t.sessionId, source: 'example' });
+  f.g.preview.error = 'renderer_error'; f.g.preview.close();
+  const closed = f.sent.at(-1);
+  assert.equal(closed.type, 'preview'); assert.equal(closed.requestId, 1); assert.equal(closed.active, false); assert.equal(closed.error, 'renderer_error');
+  assert.equal(closed.trainRequestId, 9); assert.equal(closed.sessionId, t.sessionId); assert.equal(f.g.paused, true);
+  f.command('previewOpen', { requestId: 2, trainRequestId: 9, sessionId: t.sessionId, source: 'example' });
+  assert.equal(f.sent.at(-1).error, null); f.command('previewClose', { requestId: 2 });
+  assert.equal(f.sent.at(-1).error, null); assert.equal(f.g.paused, true); assert.equal(t.phase, 'intro');
+  assert.equal(f.sent.some(m => m.type === 'trainDone' || m.type === 'paused' && m.v === false), false);
+});
+
+test('training intent retains detached clean options, latest lesson and pacing but never serialized progress or recording', () => {
+  const f = hostFixture(); const options = { mode: 'course', lessonId: 'CONTACT', pacing: 'coach', adaptive: true, variation: true,
+    resume: { stage: 'check', practicePassed: true, quizPassed: true } };
+  const requestId = f.GameHost.send('train', options), oldIntent = f.GameHost.trainingIntent;
+  assert.deepEqual(plain(oldIntent.data), { ...options, sessionKind: 'check' });
+  assert.notEqual(oldIntent.data.resume, options.resume); assert.notEqual(oldIntent.data, f.GameHost.mode.data);
+  for (const key of ['__tt', 'type', 'requestId', 'progress', 'attemptReplay', 'attemptClip']) assert.equal(Object.hasOwn(oldIntent.data, key), false, key);
+  f.ready({}, academyCatalog);
+  options.resume.quizPassed = false; options.lessonId = 'CONTACT_CHANGED'; options.pacing = 'flow';
+  assert.equal(oldIntent.data.resume.quizPassed, true); assert.equal(oldIntent.data.lessonId, 'CONTACT'); assert.equal(oldIntent.data.pacing, 'coach');
+  f.message(trainSnapshot(requestId, { id: 'TOPSPIN', pacing: 'flow' }));
+  assert.equal(f.GameHost.trainingIntent.sessionId, 'host-training'); assert.equal(f.GameHost.trainingIntent.data.lessonId, 'TOPSPIN');
+  assert.equal(f.GameHost.trainingIntent.data.pacing, 'flow'); assert.notEqual(f.GameHost.trainingIntent.data.resume, oldIntent.data.resume);
+  assert.equal(oldIntent.data.lessonId, 'CONTACT'); assert.equal(oldIntent.data.pacing, 'coach');
+  const actionId = f.GameHost.send('trainAction', { action: 'pacing', value: 'coach' });
+  f.message({ type: 'trainActionAck', requestId, sessionId: 'host-training', actionId, accepted: true });
+  assert.equal(f.GameHost.trainingIntent.data.pacing, 'coach'); assert.equal(f.GameHost.mode.data.pacing, 'coach');
+  f.GameHost.reload(); const count = f.GameHost.trainSnapshot;
+  f.message(trainSnapshot(requestId)); assert.equal(f.GameHost.trainSnapshot, count); assert.equal(f.GameHost.trainingIntent, null);
+});
+
+test('completed check done previews remain read-only while incomplete or malformed check counts cannot open either source', () => {
+  const host = hostFixture(); host.ready(); const requestId = host.GameHost.send('train', { mode: 'course' });
+  for (const attempts of [3, undefined, NaN, '4', 4.5]) {
+    host.message(trainSnapshot(requestId, { stage: 'check', phase: 'done', attempts }));
+    assert.equal(host.GameHost.openPreview({ source: 'example' }), false);
+    assert.equal(host.GameHost.openPreview({ source: 'attempt' }), false);
+  }
+  host.message(trainSnapshot(requestId, { stage: 'check', phase: 'done', attempts: 4,
+    attemptReplay: { available: true, attemptId: 15, truncated: false } }));
+  host.message({ type: 'trainDone', requestId, sessionId: 'host-training', mode: 'course', courseComplete: false });
+  assert.equal(host.GameHost.openPreview({ source: 'attempt' }), true);
+  assert.equal(host.sent.at(-1).attemptId, 15); assert.equal(host.GameHost.paused, true);
+  const f = embedFixture(); f.command('train', { mode: 'course', requestId: 8 }); const t = f.g.training;
+  t.stage = 'check'; t.phase = 'done'; t.finished = true; t.attemptClip = { attemptId: 15, truncated: false };
+  t.action = t.skip = () => { throw Error('completed preview must remain read-only'); };
+  let previewId = 0;
+  for (const attempts of [3, undefined, NaN, '4', 4.5]) {
+    t.attempts = attempts;
+    f.command('previewOpen', { requestId: ++previewId, trainRequestId: 8, sessionId: t.sessionId, source: 'example' });
+    assert.equal(f.g.preview.active, false); assert.equal(f.sent.at(-1).opened, false);
+  }
+  t.attempts = 4;
+  for (const source of ['attempt', 'example']) {
+    f.command('previewOpen', { requestId: ++previewId, trainRequestId: 8, sessionId: t.sessionId, source, attemptId: source === 'attempt' ? 15 : null });
+    assert.equal(f.g.preview.active, true); assert.equal(f.g.paused, true);
+    f.command('previewClose', { requestId: previewId }); assert.equal(f.g.preview.active, false); assert.equal(f.g.paused, true);
+  }
+  f.command('trainAction', { requestId: 8, sessionId: t.sessionId, actionId: 1, action: 'restart' });
+  assert.equal(f.sent.at(-1).accepted, false); assert.equal(t.attempts, 4); assert.equal(t.attemptClip.attemptId, 15);
 });

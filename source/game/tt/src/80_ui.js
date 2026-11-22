@@ -101,7 +101,7 @@ class UI {
 
   showShot(info, now = performance.now() / 1000) {
     const g = this.game, stroke = info && info.stroke;
-    if (this.usesMatchHud()) { this.clearShotFeedback(); return false; }
+    if (g?.training || this.usesMatchHud()) { this.clearShotFeedback(); return false; }
     const point = info && shotVec(info.contactPoint), velocity = info && shotVec(info.v), spin = info && shotVec(info.w);
     if (!g || g.demoMode || g.preview?.active || !info || info.side !== 1 || !stroke || !STROKES[stroke.id] ||
         !point || !velocity || !spin || !Number.isFinite(info.shotId) || info.shotId <= this._labelShotId) return false;
@@ -122,7 +122,7 @@ class UI {
   }
 
   drawShotLabels(c, W, H, d, now = performance.now() / 1000) {
-    if (this.usesMatchHud()) { this.clearShotFeedback(); return; }
+    if (this.game?.training || this.usesMatchHud()) { this.clearShotFeedback(); return; }
     this.syncShotFeedback(now);
     const g = this.game;
     if (!this.hitLabels.length || !g || g.paused || g.demoMode || g.preview?.active || [GS.MENU, GS.MATCH_END].includes(g.state)) return;
@@ -234,6 +234,10 @@ class UI {
     c.fill(); c.shadowBlur = 0;
     c.lineWidth = 1.6 * d; c.strokeStyle = 'rgba(255,255,255,.85)'; c.stroke();
     c.restore();
+    if (g.training?.adaptive && !cue.frozen && cue.helpLevel !== 'independent') {
+      c.save(); c.fillStyle = '#B2C4D3'; c.font = '500 ' + Math.round(10 * d) + 'px ' + CSSFONT; c.textAlign = 'center';
+      c.fillText(ET(cue.helpLevel === 'guided' ? 'ui.trainingGuided' : 'ui.trainingRing'), x, Math.max(12 * d, y - r - 12 * d)); c.restore();
+    }
     if (cue.frozen && cue.gesture && cue.gesture.kind !== 'tap') {
       const points = cue.gesture.points, pad = 24 * d;
       let scale = 1;

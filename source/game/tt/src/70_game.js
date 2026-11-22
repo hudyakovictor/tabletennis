@@ -419,6 +419,7 @@ class Game {
     this.cancelInput = (reason = 'unspecified', event = null) => {
       this.cancelPaddleTrick();
       if (this.preview?.active) return;
+      this.training?.captureAttemptGesture?.();
       if (this.debugRecording) this.logInput('input_cancel', { dom: event ? domEvent(event) : null,
         outcome: { reason, active: !!this.swipe.active, pointerDown: !!this.pointerDown, pointers: ptrs.size } });
       ptrs.clear(); cameraDrag = cameraGesture = null; suppressTouches = false; dropStroke();
@@ -1131,11 +1132,10 @@ class Game {
     this._contactFlashSeen = new Set();
     this._demoGesture = null;
     this.matchTasks = { topspin: 0, smash: 0, serves: 0, moments: 0 };
-    this.training = null;
-    /* Тренировка поднимает CAPTURE_FORGIVE до 1.55 и снимает его только в
-     * complete()/quit(). Здесь учебник сбрасывается мимо них: без этой
-     * строки свободная игра могла остаться с учебным захватом (×1.55 ко
-     * всем осям) — мяч бьётся «дальше кольца» до самого конца сессии. */
+    const wasTraining = !!this.training;
+    this.training?.quit?.(); this.training = null;
+    if (wasTraining) this.ai.setLevel?.(this.settings.difficulty);
+    // A new match must not inherit training or temporary cord assistance.
     this.clearCordCaptureBoost();
     if (typeof setCaptureForgiveness === 'function') setCaptureForgiveness(1);
     this.matchWinner = 0;
@@ -1243,6 +1243,7 @@ class Game {
   }
 
   returnToMenu() {
+    this.preview?.close(false);
     this.lobbyScene?.stop();
     this.endReplay(false);
     this.freePlay = false;
@@ -1318,13 +1319,13 @@ class Game {
   }
 
   openTrainingPreview(options = {}) {
+    const trainer = this.training;
     if (!this.preview || this.network.isInMatch || this.career.active ||
-        this.state !== GS.MENU && gameplayCalibrationLocked(this)) return false;
-    this.setPaused(true);
-    this.cancelInput?.('preview_open');
-    this.cancelPendingCapture?.();
-    this.swipe.lastReleased = null; this.swipeReleasedAt = this.lastSwipeT = -Infinity;
-    this._pendingTap = null; this.mouseTrail = []; this.ui?.clearShotFeedback?.();
+        trainer && trainer.stage === 'check' && (!['review', 'done'].includes(trainer.phase) || trainer.attempts < 4) ||
+        !trainer && this.state !== GS.MENU && gameplayCalibrationLocked(this)) return false;
+    if (trainer && (options.sessionId !== undefined && options.sessionId !== trainer.sessionId ||
+        options.trainRequestId !== undefined && options.trainRequestId !== trainer.options.requestId)) return false;
+    if (options.source === 'attempt' && (!trainer || !trainer.getAttemptClip(options.attemptId))) return false;
     const opened = this.preview.open(options);
     this._syncMatchHud(true);
     return opened;
@@ -2430,7 +2431,7 @@ class Game {
         if (b.lastHitBy === 1 && this.shotJournal) this.shotJournal.net();
         /* Шнур временно расширяет окно приёма, не изменяя время игры.
          * Базовый forgive восстанавливается в stepPhysics. */
-        if (typeof getCaptureForgiveness === 'function' && typeof setCaptureForgiveness === 'function') {
+        if (!this.training && typeof getCaptureForgiveness === 'function' && typeof setCaptureForgiveness === 'function') {
           if (!(this._cordForgiveUntil > this.time)) {
             this._cordBaseForgive = getCaptureForgiveness();
           }
@@ -2446,12 +2447,14 @@ class Game {
         if (b.lastHitBy === 1 && this.shotJournal) this.shotJournal.net();
         this.moments.addBounce(true);
       }
+      this.training?.recordEvent?.('net', { tape: nk === 2, point: { ...nh } });
     }
 
     /* --- floor --- */
     if (b.p.y - PH.R <= 0.0 && b.v.y < 0) {
       b.p.y = PH.R;
       impactSphere(b.v, b.w, N_UP, ZERO3, PH.E_FLOOR, PH.MU_FLOOR, 0);
+      this.training?.recordEvent?.('floor', { point: { ...b.p } });
       this.onFloor();
       if (V3.len(b.v) < 0.6) b.live = false;
     }
@@ -4690,6 +4693,7 @@ class Game {
   /* ------------------------------ update --------------------------- */
   update(dtReal) {
     if (this.preview?.active) return;
+    this.training?.refreshHelp?.();
     if (this.paused || (typeof document !== 'undefined' && document.hidden)) return;
     if (!Number.isFinite(dtReal) || dtReal <= 0) return;
     dtReal = Math.min(dtReal, 0.1);
@@ -4702,7 +4706,7 @@ class Game {
     /* ---- the coach is holding the ball in mid-air: the world stops, the
        bat still follows the finger so the pupil can line it up ---- */
     if (this.training && this.training.frozen) {
-      this.training.update(dtReal);
+      this.training.update(dtReal, 0);
       this.updatePlayerPaddle(dtReal);
       this.updateCamera(dtReal);
       return;
@@ -4729,13 +4733,16 @@ class Game {
     // Normal play always runs at real time; only an explicit slow-motion
     // effect may reduce it. Legacy flytime preferences cannot accelerate it.
     const inspectorActive = this.inspectSlowmo && this.slowmo.allowed;
-    const requestedScale = inspectorActive || this.slowmo.active || this.slowmoUntil ? this.targetTimeScale : 1;
+    const requestedScale = this.training?.adaptive ? this.training.tutorialScale
+      : inspectorActive || this.slowmo.active || this.slowmoUntil ? this.targetTimeScale : 1;
     const targetScale = clamp(Number.isFinite(requestedScale) ? requestedScale : 1, 0.1, 1);
     this.timeScale = typeof gameplayCalibrationLocked === 'function' && gameplayCalibrationLocked(this)
-      ? 1 : clamp(expSmooth(Number.isFinite(this.timeScale) ? this.timeScale : 1, targetScale, 9, dtReal), 0.1, 1);
+      ? 1 : this.training?.adaptive ? targetScale
+        : clamp(expSmooth(Number.isFinite(this.timeScale) ? this.timeScale : 1, targetScale, 9, dtReal), 0.1, 1);
     const dt = dtReal * this.timeScale;
     this.strokeTime += dt;
     this.stateSimT = (this.stateSimT || 0) + dt;
+    this.training?.beginRecordingFrame?.(dtReal, dt);
 
     if (this.demoMode && !this.paused) {
       this.updateDemoPlayer(dtReal);
@@ -4868,12 +4875,14 @@ class Game {
       this._subK = 0; this._subN = nSub;
       while (this._acc >= PHYS_DT && guard++ < 400) {
         this._subPad = this.substepPadPose(this._subK++, nSub);
+        this._trainingSubFraction = this._subK / nSub;
         this._advanceStamina(PHYS_DT);
         this.stepPhysics(PHYS_DT);
         this._acc -= PHYS_DT;
         if (!this.ball.live) break;
       }
       this._subPad = null;
+      this._trainingSubFraction = null;
       this.recordBallTrail();
     } else this._acc = 0;
 
@@ -4978,6 +4987,7 @@ class Game {
     this.updateCamera(dtReal);
     this.keepPaddleOnScreen();
     this.clampPaddleVolume();
+    this.training?.captureRecordingFrame?.();
 
     // post-processing: оставлен только тонмап/виньетка. Радиальное «мыло»
     // и хроматический аберрационный сдвиг убраны совсем: они размывали и

@@ -1,5 +1,5 @@
-/* Voluntary academy: explanation -> guided practice -> decision -> normal-
- * speed check. Stroke/accuracy practice is endless and never grants mastery. */
+/* Voluntary academy: show -> try -> review -> reinforce. Practice sets never
+ * grant mastery; omitted options retain the original endless auto-feed. */
 function detectInputMode(win = window, nav = navigator) {
   const matches = query => !!(win.matchMedia && win.matchMedia(query).matches);
   return matches('(pointer: coarse)') || ((nav.maxTouchPoints || 0) > 0 && !matches('(pointer: fine)')) ? 'touch' : 'mouse';
@@ -7,6 +7,150 @@ function detectInputMode(win = window, nav = navigator) {
 function trainingTip(step, mode) { return ET(mode === 'touch' ? step.tip : step.mouseTip); }
 const COACH_FREEZE_T = .22;
 let trainingSessionSequence = 0;
+const TRAIN_HELP_LEVELS = ['guided', 'ring', 'independent'];
+
+function trainingRandom(seed) {
+  let state = seed >>> 0;
+  return () => {
+    state = (state + 0x6d2b79f5) >>> 0;
+    let n = Math.imul(state ^ state >>> 15, state | 1);
+    n ^= n + Math.imul(n ^ n >>> 7, n | 61);
+    return ((n ^ n >>> 14) >>> 0) / 4294967296;
+  };
+}
+
+const TRAIN_ATTEMPT_HZ = 30, TRAIN_ATTEMPT_CAP = 240, TRAIN_ATTEMPT_STRIDE = 43;
+
+class TrainingAttemptRecorder {
+  constructor(game, metadata) {
+    this.g = game; this.metadata = metadata;
+    this.frames = new Float64Array(TRAIN_ATTEMPT_CAP * TRAIN_ATTEMPT_STRIDE);
+    this.input = new Float64Array(TRAIN_ATTEMPT_STRIDE); this.previous = new Float64Array(TRAIN_ATTEMPT_STRIDE);
+    this.sample = new Float64Array(TRAIN_ATTEMPT_STRIDE); this.n = 0; this.head = 0; this.next = 0;
+    this.lastInput = -Infinity; this.truncated = false; this.invalid = false;
+    this.events = []; this.gestures = []; this.lastContact = null; this._q = Q.new(); this._rollQ = Q.new(); this._normal = V3.new();
+  }
+  read(real, simulation, ball) {
+    const g = this.g, b = ball || g.ball, f = this.input;
+    if (!b || !g.player || !g.aiPaddle || ![b.p, b.v, b.w, b.q].every(v => v && Object.values(v).every(Number.isFinite))) return false;
+    f[0] = real; f[1] = simulation;
+    let k = 2;
+    for (const v of [b.p, b.v, b.w, b.q]) for (const axis of v === b.q ? ['x', 'y', 'z', 'w'] : ['x', 'y', 'z']) f[k++] = v[axis];
+    for (const [pad, at, player] of [[g.player, 15, true], [g.aiPaddle, 28, false]]) {
+      if (!pad.pos || !pad.normal) return false;
+      const face = pad.activeFace === -1 ? -1 : 1, roll = Number.isFinite(pad.roll) ? pad.roll : player ? 0 : g.ai?.roll || .28;
+      let q = pad.q;
+      if (!pad.poseReady || !q) {
+        V3.mul(this._normal, pad.normal, face); Q.lookRotation(this._q, this._normal, { x: 0, y: 1, z: 0 });
+        q = Q.mul(this._q, this._q, Q.setAxisAngle(this._rollQ, 0, 0, 1, roll));
+      }
+      k = at;
+      for (const v of [pad.pos, q, pad.normal]) for (const axis of v === q ? ['x', 'y', 'z', 'w'] : ['x', 'y', 'z']) f[k++] = v[axis];
+      f[k++] = roll; f[k++] = face; f[k] = player && g.playerPaddleVisible === false ? 0 : 1;
+    }
+    f[41] = Number.isFinite(g.ball.lastHitBy) ? g.ball.lastHitBy : 0; f[42] = g.ball.live ? 1 : 0;
+    return f.every(Number.isFinite);
+  }
+  append(frame) {
+    if (this.n === TRAIN_ATTEMPT_CAP) this.truncated = true;
+    this.frames.set(frame, this.head * TRAIN_ATTEMPT_STRIDE);
+    this.head = (this.head + 1) % TRAIN_ATTEMPT_CAP; this.n = Math.min(TRAIN_ATTEMPT_CAP, this.n + 1);
+  }
+  push(real, simulation, exact = false, ball) {
+    if (!Number.isFinite(real) || !Number.isFinite(simulation) || real < this.lastInput) return false;
+    if (!this.read(real, simulation, ball)) { this.invalid = true; return false; }
+    const f = this.input, p = this.previous, sample = this.sample, step = 1 / TRAIN_ATTEMPT_HZ;
+    if (real - this.next > TRAIN_ATTEMPT_CAP * step) { this.next = real - (TRAIN_ATTEMPT_CAP - 1) * step; this.truncated = true; }
+    for (; this.next <= real + 1e-9; this.next += step) {
+      const u = Number.isFinite(this.lastInput) && real > this.lastInput ? clamp((this.next - this.lastInput) / (real - this.lastInput), 0, 1) : 1;
+      for (let i = 0; i < TRAIN_ATTEMPT_STRIDE; i++) sample[i] = lerp(p[i], f[i], u);
+      sample[0] = this.next;
+      for (const at of [11, 18, 31]) {
+        const sign = p[at] * f[at] + p[at + 1] * f[at + 1] + p[at + 2] * f[at + 2] + p[at + 3] * f[at + 3] < 0 ? -1 : 1;
+        let length = 0;
+        for (let i = 0; i < 4; i++) { sample[at + i] = lerp(p[at + i], sign * f[at + i], u); length += sample[at + i] ** 2; }
+        length = Math.sqrt(length) || 1; for (let i = 0; i < 4; i++) sample[at + i] /= length;
+      }
+      for (const at of [26, 27, 39, 40, 41, 42]) sample[at] = u < 1 ? p[at] : f[at];
+      this.append(sample);
+    }
+    if (exact) this.append(f);
+    this.previous.set(f); this.lastInput = real; return true;
+  }
+  event(type, real, simulation, data = {}) {
+    this.push(real, simulation, true);
+    const event = { type, real, simulation, ...data };
+    this.events.push(event); if (this.events.length > 64) this.events.shift();
+    if (type === 'contact' && data.side === 1) this.lastContact = this.input.slice();
+  }
+  gesture(swipe, real, simulation, contact = false) {
+    if (!swipe?.samples?.length || !Number.isSafeInteger(swipe.gestureId)) return;
+    let gesture = this.gestures.find(x => x.gestureId === swipe.gestureId);
+    if (!gesture) {
+      gesture = { gestureId: swipe.gestureId, inputMode: this.g.ui?.inputMode || 'touch' }; this.gestures.push(gesture);
+      if (this.gestures.length > 32) this.gestures.shift();
+    }
+    const rect = this.g.canvas?.getBoundingClientRect?.();
+    Object.assign(gesture, { points: swipe.samples.filter(p => [p.x, p.y, p.t].every(Number.isFinite)).slice(-64).map(p => ({ x: p.x, y: p.y, t: p.t })),
+      real, simulation, startSimTime: swipe.startSimTime, sampleSimTime: swipe.sampleSimTime,
+      viewport: rect ? [rect.width, rect.height] : [1, 1], truncated: swipe.evictedPathLen > 0,
+      origin: { x: swipe.originX, y: swipe.originY, t: swipe.originT } });
+    if (contact) {
+      gesture.contactReal = real;
+      const p = this.g.project?.(this.g.ball.p, {});
+      if (p?.ok && [p.x, p.y].every(Number.isFinite)) gesture.contact = { x: p.x, y: p.y };
+    }
+  }
+  finish(outcome) {
+    if (this.invalid || this.n < 2) return null;
+    const frames = new Float64Array(this.n * TRAIN_ATTEMPT_STRIDE), gaps = [];
+    for (let i = 0; i < this.n; i++) {
+      const at = (this.head - this.n + i + TRAIN_ATTEMPT_CAP) % TRAIN_ATTEMPT_CAP * TRAIN_ATTEMPT_STRIDE;
+      frames.set(this.frames.subarray(at, at + TRAIN_ATTEMPT_STRIDE), i * TRAIN_ATTEMPT_STRIDE);
+    }
+    // Even a long missed sequence retains its last real contact and final
+    // outcome. Missing middle footage is explicit, never interpolated.
+    if (this.lastContact && this.lastContact[0] < frames[0]) {
+      gaps.push({ from: this.lastContact[0], to: frames[TRAIN_ATTEMPT_STRIDE] });
+      frames.set(this.lastContact, 0); this.truncated = true;
+    }
+    return { schema: 1, hz: TRAIN_ATTEMPT_HZ, stride: TRAIN_ATTEMPT_STRIDE, count: this.n, frames,
+      startReal: frames[0], endReal: frames[(this.n - 1) * TRAIN_ATTEMPT_STRIDE],
+      truncated: this.truncated, gaps, metadata: this.metadata,
+      events: JSON.parse(JSON.stringify(this.events)), gestures: JSON.parse(JSON.stringify(this.gestures)), outcome: JSON.parse(JSON.stringify(outcome)) };
+  }
+}
+
+function validTrainingAttempt(clip) {
+  return !!clip && clip.schema === 1 && clip.hz === TRAIN_ATTEMPT_HZ && clip.stride === TRAIN_ATTEMPT_STRIDE &&
+    Number.isSafeInteger(clip.count) && clip.count >= 2 && clip.count <= TRAIN_ATTEMPT_CAP &&
+    clip.frames instanceof Float64Array && clip.frames.length === clip.count * TRAIN_ATTEMPT_STRIDE && Number.isFinite(clip.startReal) &&
+    Number.isFinite(clip.endReal) && clip.endReal > clip.startReal && clip.frames.every(Number.isFinite);
+}
+
+function sampleTrainingAttempt(clip, seconds, out) {
+  if (!clip || !Number.isFinite(seconds)) return false;
+  const f = clip.frames, stride = TRAIN_ATTEMPT_STRIDE, time = clamp(clip.startReal + seconds, clip.startReal, clip.endReal);
+  let lo = 0, hi = clip.count - 1;
+  while (lo < hi) { const mid = Math.ceil((lo + hi) / 2); if (f[mid * stride] <= time) lo = mid; else hi = mid - 1; }
+  const a = lo * stride, b = Math.min(lo + 1, clip.count - 1) * stride;
+  out.gap = !!clip.gaps?.some(g => time > g.from && time < g.to);
+  const u = out.gap || f[b] <= f[a] ? 0 : clamp((time - f[a]) / (f[b] - f[a]), 0, 1);
+  const vector = (v, at) => { for (const [i, axis] of ['x', 'y', 'z'].entries()) v[axis] = lerp(f[a + at + i], f[b + at + i], u); };
+  const quaternion = (q, at) => {
+    const sign = f[a + at] * f[b + at] + f[a + at + 1] * f[b + at + 1] + f[a + at + 2] * f[b + at + 2] + f[a + at + 3] * f[b + at + 3] < 0 ? -1 : 1;
+    let length = 0;
+    for (const [i, axis] of ['x', 'y', 'z', 'w'].entries()) { q[axis] = lerp(f[a + at + i], sign * f[b + at + i], u); length += q[axis] ** 2; }
+    length = Math.sqrt(length) || 1; for (const axis of ['x', 'y', 'z', 'w']) q[axis] /= length;
+  };
+  vector(out.ball.p, 2); vector(out.ball.v, 5); vector(out.ball.w, 8); quaternion(out.ball.q, 11);
+  for (const [pad, at] of [[out.player, 15], [out.opponent, 28]]) {
+    vector(pad.pos, at); quaternion(pad.q, at + 3); vector(pad.normal, at + 7); V3.norm(pad.normal, pad.normal);
+    pad.roll = lerp(f[a + at + 10], f[b + at + 10], u); pad.activeFace = f[a + at + 11]; pad.visible = f[a + at + 12] === 1;
+  }
+  out.real = time; out.simulation = lerp(f[a + 1], f[b + 1], u); out.ball.lastHitBy = f[a + 41];
+  return out;
+}
 
 function trainingFeedBall(spec, n = 0, varied = false, displaced = false, backhandSide = 0) {
   const side = n % 2 ? -1 : 1;
@@ -91,6 +235,11 @@ class Trainer {
     this.g = game;
     this.mode = ['course', 'stroke', 'accuracy'].includes(options.mode) ? options.mode : 'course';
     this.sessionId = 'train-' + (++trainingSessionSequence);
+    this.pacing = ['coach', 'flow'].includes(options.pacing) ? options.pacing : 'flow';
+    this.setSize = this.mode !== 'course' && [10, 20].includes(options.setSize) ? options.setSize : null;
+    this.adaptive = options.adaptive === true; this.variation = options.variation === true;
+    this.seed = Number.isFinite(options.seed) ? options.seed >>> 0 : (Date.now() ^ Math.imul(trainingSessionSequence, 0x9e3779b9)) >>> 0;
+    this.random = trainingRandom(this.seed);
     this.profile = { version: TRAINING_VERSION, lessons: {}, lastLesson: null };
     for (const s of TRAIN_STEPS) {
       const old = options.progress && options.progress.lessons && options.progress.lessons[s.id];
@@ -107,12 +256,19 @@ class Trainer {
     this.ballNo = 0; this.fails = 0; this.frozen = false; this.heldOnce = false; this.nudge = 0;
     this._frozenDrills = new Set(); this.aimSide = 0; this.unfrozeAt = -9; this.revision = 0;
     this.stats = { attempts: 0, hits: 0, success: 0, streak: 0, bestStreak: 0 };
+    this.setErrors = {}; this.queue = []; this.queueIndex = 0; this.currentSlot = null;
+    this.attemptId = 0; this.attemptClip = null; this.recording = null;
     this.lastCapturedShotId = -1;
     this.oldAiLevel = game.ai && game.ai.levelIndex;
   }
   get S() { return this.custom || TRAIN_STEPS[this.step]; }
-  get guide() { return this.stage === 'check' || this.S.coach === 'none' ||
-    (this.g.settings ? this.g.settings.hint === false : this.options.hint === false) ? 'none' : 'ring'; }
+  get helpAllowed() { return this.stage !== 'check' && !this.finished && this.S.coach !== 'none' && !this.S.sparring &&
+    this.g.hintRequested !== false && this.g.hintContact !== false &&
+    !(this.g.settings ? this.g.settings.hint === false : this.options.hint === false) &&
+    !(typeof gameplayCalibrationLocked === 'function' && gameplayCalibrationLocked(this.g)); }
+  get guide() { return !this.helpAllowed || this.adaptive && this.helpLevel === 'independent' ? 'none' : 'ring'; }
+  get tutorialScale() { return this.adaptive && this.phase === 'live' && this.helpAllowed && this.helpLevel === 'guided' ? .65 : 1; }
+  get reviewHeld() { return this.phase === 'fail' && this.stage === 'practice' && this.pacing === 'coach' && !this.feedback?.neutral; }
   get inputMode() { return this.g.ui && this.g.ui.inputMode === 'mouse' ? 'mouse' : 'touch'; }
   get feedbackText() { return this.feedback ? this.feedback.title + '. ' + this.feedback.correction : ''; }
   get allowAi() { return this.phase === 'live' && !this.frozen && !!this.S.sparring; }
@@ -148,24 +304,64 @@ class Trainer {
     this.goStep(i);
     const resume = this.options.resume;
     if (this.mode === 'course' && resume && resume.stage === 'check' && resume.quizPassed && resume.practicePassed) {
-      this.practicePassed = true; this.quizPassed = true; this.stage = 'check'; this.configureHelp(); this.sync();
+      this.practicePassed = true; this.quizPassed = true; this.stage = 'check'; this.resetQueue(); this.configureHelp(); this.sync();
     }
   }
   configureHelp() {
     // A pending cord bonus belongs to the previous mode, not this stage.
     this.g.clearCordCaptureBoost?.();
-    if (typeof setCaptureForgiveness === 'function') setCaptureForgiveness(this.stage === 'practice' ? 1.25 : 1);
+    this.refreshHelp();
+    if (this.stage === 'check') {
+      this.g.timeScale = this.g.targetTimeScale = 1; this.g.slowmoUntil = 0;
+      if (this.g.slowmo) this.g.slowmo.on = this.g.slowmo.active = false;
+    }
     if (this.g.setSlowmoAllowed) this.g.setSlowmoAllowed(this.stage !== 'check');
     if (this.S.sparring && this.g.ai) {
       this.g.ai.setLevel(0); this.g.ai.reset(); this.g.ai.setHandicap(1);
       if (this.g.ai.setTrend) this.g.ai.setTrend(0);
     }
   }
+  refreshHelp() {
+    if (this.frozen && this.guide === 'none') { this.frozen = false; this.nudge = 0; this.msg = ''; this.msgKey = null; this.sync(); }
+    const capture = this.stage === 'practice' && !this.finished && (!this.adaptive || this.helpAllowed && this.helpLevel !== 'independent') ? 1.25 : 1;
+    if (typeof setCaptureForgiveness === 'function') setCaptureForgiveness(capture);
+  }
+  resetQueue() {
+    this.queue = []; this.queueIndex = 0; this.currentSlot = null;
+    this.extendQueue();
+  }
+  extendQueue() {
+    if (!this.variation || this.mode === 'course' && this.stage !== 'check') return;
+    const S = this.S, size = this.mode === 'course' ? 4 : this.setSize || 20;
+    const kinds = S.mix && S.mix.filter(k => TRAIN_FEEDS[k]) || [Object.keys(TRAIN_FEEDS).find(k => TRAIN_FEEDS[k] === S.feed) || 'normal'];
+    const targetCount = S.target === 'mixed' ? 5 : ['sides', 'corners', 'depth'].includes(S.target) ? 2 : 1;
+    const shuffled = count => {
+      const values = Array.from({ length: size }, (_, i) => i % count);
+      for (let i = values.length - 1; i > 0; i--) {
+        const j = Math.floor(this.random() * (i + 1)); [values[i], values[j]] = [values[j], values[i]];
+      }
+      return values;
+    };
+    const feeds = shuffled(Math.max(1, kinds.length)), lanes = shuffled(2), targets = shuffled(targetCount);
+    for (let i = 0; i < size; i++) this.queue.push({ kind: kinds[feeds[i]] || 'normal', lane: lanes[i], targetIndex: targets[i] });
+  }
+  adaptResult(success) {
+    if (!this.adaptive || this.stage !== 'practice') return;
+    this.helpRun = this.helpResult === success ? this.helpRun + 1 : 1; this.helpResult = success;
+    if (this.helpRun < 2) return;
+    const index = TRAIN_HELP_LEVELS.indexOf(this.helpLevel);
+    this.helpLevel = TRAIN_HELP_LEVELS[clamp(index + (success ? 1 : -1), 0, 2)];
+    this.helpRun = 0; this.helpResult = null;
+    this.refreshHelp();
+  }
   goStep(i) {
     this.step = clamp(Number.isFinite(i) ? i : 0, 0, TRAIN_STEPS.length - 1);
     this.done = 0; this.attempts = 0; this.ballNo = 0; this.fails = 0; this.frozen = false; this.heldOnce = false; this.nudge = 0;
     this.phase = 'intro'; this.stage = 'practice'; this.t = 0; this.msg = ''; this.msgKey = null; this.lastShot = null; this.result = null;
     this.feedback = null; this.latestFeedback = null; this.inputMotion = null; this.flightTrace = null;
+    this.attemptClip = this.recording = this.recordingFrame = null;
+    this.helpLevel = this.profile.lessons[this.S.id]?.mastered ? 'ring' : 'guided'; this.helpRun = 0; this.helpResult = null;
+    if (this.mode !== 'course') { this.stats = { attempts: 0, hits: 0, success: 0, streak: 0, bestStreak: 0 }; this.setErrors = {}; }
     this.reportedAttempts = 0; this.reportedCorrect = 0;
     this.motionContactGestureId = this.g.swipe && this.g.swipe.gestureId || 0;
     this.practicePassed = false; this.quizPassed = false; this.checkPassed = false; this.finished = false; this.turns = 0; this.replyReady = false;
@@ -173,7 +369,7 @@ class Trainer {
     if (this.mode === 'course') this.profile.lastLesson = this.S.id;
     this.diagram = null; this.g.ball.live = false; this.g.isServeBall = false; this.g.state = GS.RALLY; this.g.stateT = 0;
     if (this.g.cancelInput) this.g.cancelInput();
-    this.configureHelp(); this.sync();
+    this.resetQueue(); this.configureHelp(); this.sync();
   }
   nextStep() {
     if (this.mode !== 'course') { this.goStep(this.step); return; }
@@ -181,10 +377,13 @@ class Trainer {
     this.goStep(this.step + 1);
   }
   complete() {
+    if (this.finished) return false;
     this.finished = true; this.phase = 'done'; this.g.ball.live = false; this.restoreHelp();
     this.sync(); this.g.ui && this.g.ui.trainDone(this);
+    return true;
   }
   restoreHelp() {
+    this.frozen = false; this.g.timeScale = this.g.targetTimeScale = 1; this.g.slowmoUntil = 0;
     this.g.clearCordCaptureBoost?.();
     if (typeof setCaptureForgiveness === 'function') setCaptureForgiveness(1);
     if (this.g.setSlowmoAllowed) this.g.setSlowmoAllowed(true);
@@ -192,6 +391,7 @@ class Trainer {
   }
   quit() {
     this.restoreHelp(); this.frozen = false; this.replyReady = false; this.finished = true;
+    this.attemptClip = this.recording = this.recordingFrame = null; this.queue.length = 0; this.currentSlot = null;
     if (this.g.cancelInput) this.g.cancelInput();
     this.g.training = null; this.g.ball.live = false; this.g.state = GS.MENU;
     this.g.ui && this.g.ui.trainHide();
@@ -208,6 +408,7 @@ class Trainer {
     if (this.msgKey) this.msg = ET(this.msgKey);
     else if (this.phase === 'fail' && this.feedback) this.msg = this.feedbackText;
     if (this.diagram) this.diagram.caption = ET('academy.model');
+    for (const error of Object.values(this.setErrors)) error.correction = ET(error.correctionKey);
   }
   progress(practiced, mastered) {
     if (this.mode !== 'course') return;
@@ -221,7 +422,16 @@ class Trainer {
     if (this.g.ui && this.g.ui.trainProgress) this.g.ui.trainProgress(this);
   }
   action(action, answer) {
-    if (action === 'restart') { this.goStep(this.step); return true; }
+    if (action === 'restart') {
+      this.stats = { attempts: 0, hits: 0, success: 0, streak: 0, bestStreak: 0 }; this.setErrors = {};
+      this.goStep(this.step); return true;
+    }
+    if (this.finished) return false;
+    if (action === 'pacing') {
+      if (!['coach', 'flow'].includes(answer)) return false;
+      this.pacing = answer; this.sync(); return true;
+    }
+    if (action === 'resume') return ['wait', 'live', 'ok'].includes(this.phase) || this.phase === 'fail' && !this.reviewHeld;
     if (action === 'retry') {
       if (this.phase === 'fail' || this.phase === 'ok') {
         this.phase = 'wait'; this.t = 0; this.g.ball.live = false; this.feedback = null; this.msg = ''; this.msgKey = null;
@@ -231,6 +441,7 @@ class Trainer {
       this.done = 0; this.attempts = 0; this.phase = 'intro'; this.t = 0; this.result = null; this.msg = ''; this.msgKey = null;
       this.reportedAttempts = 0; this.reportedCorrect = 0;
       this.feedback = null;
+      this.attemptClip = this.recording = this.recordingFrame = null; this.resetQueue();
       this.g.ball.live = false; this.frozen = false; if (this.g.cancelInput) this.g.cancelInput(); this.sync(); return true;
     }
     if (action === 'answer' && this.phase === 'question') {
@@ -239,6 +450,7 @@ class Trainer {
       this.quizPassed = true; this.stage = 'check'; this.done = 0; this.attempts = 0; this.phase = 'intro'; this.t = 0;
       this.reportedAttempts = 0; this.reportedCorrect = 0;
       this.feedback = null; this.result = null;
+      this.attemptClip = this.recording = this.recordingFrame = null; this.resetQueue();
       this.msgKey = 'academy.checkReady'; this.msg = ET(this.msgKey); this.configureHelp(); this.sync(); return true;
     }
     if (action === 'continue' && this.phase === 'review') {
@@ -268,19 +480,22 @@ class Trainer {
     if (this.phase !== 'live') return null;
     const g = this.g, b = g.ball;
     if (this.guide === 'none') return this.currentTarget ? { kind: 'aim', side: this.aimSide, zone: this.currentTarget } : null;
-    if (this.S.serve && g.state === GS.SERVE_READY) return { kind: 'tap', p: b.p, aim: this.aimSide, zone: this.currentTarget };
+    if (this.S.serve && g.state === GS.SERVE_READY) return { kind: 'tap', p: b.p, aim: this.aimSide, zone: this.currentTarget, helpLevel: this.helpLevel };
     if (!b.live || b.lastHitBy === 1) return this.currentTarget ? { kind: 'aim', side: this.aimSide, zone: this.currentTarget } : null;
     if (this.S.serve && g.state === GS.SERVE_TOSS && b.lastHitBy === 0)
       return { kind: 'contact', p: b.p, t: 0, level: this.frozen ? 'freeze' : 'ring', frozen: this.frozen, serve: true, aim: this.aimSide, zone: this.currentTarget,
+        helpLevel: this.helpLevel, timeScale: this.tutorialScale,
         gesture: this.frozen ? trainingLessonView(this.S).gesture : null };
     const cp = g.contactPrediction && g.contactPrediction();
     if (!cp || b.v.z <= .05 || b.p.z > cp.p.z + .10) return this.currentTarget ? { kind: 'aim', side: this.aimSide, zone: this.currentTarget } : null;
     if (!this._cueP || this._cueBall !== g.shotId) { this._cueP = { ...cp.p }; this._cueBall = g.shotId; }
     return { kind: 'contact', p: this._cueP, t: cp.t, level: this.frozen ? 'freeze' : 'ring', frozen: this.frozen,
+      helpLevel: this.helpLevel, timeScale: this.tutorialScale,
       nudge: this.nudge, aim: this.aimSide, zone: this.currentTarget,
       gesture: this.frozen ? trainingLessonView(this.S).gesture : null };
   }
   feed() {
+    if (this.finished || this.setSize !== null && this.attempts >= this.setSize) return false;
     const g = this.g, b = g.ball, S = this.S;
     if (g.cancelInput) g.cancelInput();
     this.phase = 'wait'; this.t = 0; this.msg = ''; this.msgKey = null;
@@ -288,7 +503,12 @@ class Trainer {
     this.flightTrace = null; this.motionContactGestureId = g.swipe && g.swipe.gestureId || 0;
     this.attemptJournalId = g.shotJournal && g.shotJournal.sequence || 0; this.turns = 0; this.replyReady = false;
     this.ballNo++; this.heldOnce = false; this.frozen = false; this.nudge = 0; this._cueP = null;
-    const targetIndex = this.stage === 'check' ? this.attempts : this.done;
+    this.attemptId++; this.recording = null; this.recordingFrame = null;
+    const legacyIndex = this.stage === 'check' ? this.attempts : this.done;
+    if (!this.currentSlot) this.currentSlot = this.queue[this.queueIndex] || {
+      kind: S.mix ? S.mix[this.queueIndex % S.mix.length] : Object.keys(TRAIN_FEEDS).find(k => TRAIN_FEEDS[k] === S.feed) || 'normal',
+      lane: legacyIndex, targetIndex: legacyIndex };
+    const targetIndex = this.currentSlot.targetIndex;
     const nextTarget = trainingTarget(S.target, targetIndex);
     if (['x0', 'x1', 'z0', 'z1'].some(k => (nextTarget && nextTarget[k]) !== (this.currentTarget && this.currentTarget[k]))) this.diagram = null;
     this.currentTarget = nextTarget;
@@ -297,19 +517,68 @@ class Trainer {
     g.rallyBounces.length = 0; g.serveBounces = 0; g.netTouched = false; g.rally = 0;
     if (g.recorder && g.recorder.reset) g.recorder.reset();
     if (g.ai && g.ai.reset) g.ai.reset();
-    if (S.serve) { g.server = 1; g.prepServe(); this.phase = 'live'; this.t = 0; this.sync(); return; }
-    const kind = S.mix ? S.mix[(this.ballNo - 1) % S.mix.length] : Object.keys(TRAIN_FEEDS).find(k => TRAIN_FEEDS[k] === S.feed) || 'normal';
+    if (S.serve) { g.server = 1; g.prepServe(); this.phase = 'live'; this.t = 0; this.startRecording(); this.sync(); return; }
+    const kind = this.currentSlot.kind;
     this.incomingKind = kind;
     const F = S.mix ? TRAIN_FEEDS[kind] : S.feed || TRAIN_FEEDS.normal;
     const backhand = S.backhand ? g.settings && g.settings.hand === 'left' ? 1 : -1 : 0;
-    const launch = trainingFeedBall(F, targetIndex, this.stage === 'check' || this.mode !== 'course', S.displaced, backhand);
+    const launch = trainingFeedBall(F, this.currentSlot.lane, this.stage === 'check' || this.mode !== 'course', S.displaced, backhand);
     if (!launch) { this.onSystemFault('feeder'); return; }
     V3.copy(b.p, launch.p); V3.copy(b.v, launch.v); V3.copy(b.w, launch.w);
     Q.identity(b.q); b.live = true; b.hist.length = 0; b.lastHitBy = -1; b.golden = null; b.trailGrade = null;
     g.shotId = (g.shotId || 0) + 1; g.isServeBall = false; g.state = GS.RALLY; g.stateT = 0;
     if (g.ai) { V3.copy(g.ai.pos, launch.p); if (g.ai.anim) { g.ai.anim.swing = 1; g.ai.anim.windup = 0; } }
     if (g.aiPaddle) V3.copy(g.aiPaddle.pos, launch.p);
-    this.phase = 'live'; this.t = 0; this.sync();
+    this.phase = 'live'; this.t = 0; this.startRecording(); this.sync();
+  }
+  startRecording() {
+    const g = this.g;
+    if (!g.player || !g.aiPaddle || !g.ball.q) return;
+    const equipment = side => g.equip?.forSide ? { ...g.equip.forSide(side) } : {};
+    this.recording = new TrainingAttemptRecorder(g, { attemptId: this.attemptId, sessionId: this.sessionId,
+      lessonId: this.S.id, strokeId: this.S.stroke, technique: this.S.technique || this.S.stroke,
+      hand: g.settings?.hand || 'right', grip: g.settings?.grip || 'shakehand', racket: g._equippedRacket || 'r-standard',
+      equipment: { forehand: equipment(1), backhand: equipment(-1), opponent: g.ai?.equip ? { ...g.ai.equip } : {} },
+      target: this.currentTarget && { ...this.currentTarget } });
+    this.activeReal = 0; this.activeSim = 0; this.recording.push(0, 0, true);
+  }
+  beginRecordingFrame(real, simulation) {
+    if (!this.recording || this.phase !== 'live' || this.frozen) return;
+    this.recordingFrame = { recorder: this.recording, real: this.activeReal, simulation: this.activeSim, dtReal: real, dtSim: simulation };
+    this.activeReal += real; this.activeSim += simulation;
+  }
+  recordingTime() {
+    const frame = this.recordingFrame;
+    if (frame?.recorder === this.recording) {
+      const fraction = Number.isFinite(this.g._trainingSubFraction) ? this.g._trainingSubFraction : 1;
+      return [frame.real + frame.dtReal * fraction, frame.simulation + frame.dtSim * fraction];
+    }
+    return [this.activeReal || 0, this.activeSim || 0];
+  }
+  captureAttemptGesture(contact = false) {
+    if (this.recording) this.recording.gesture(this.g.swipe, ...this.recordingTime(), contact);
+  }
+  captureRecordingFrame() {
+    if (this.recording && this.phase === 'live') {
+      this.captureAttemptGesture(); this.recording.push(this.activeReal, this.activeSim);
+    }
+    this.recordingFrame = null;
+  }
+  recordEvent(type, data = {}) {
+    if (this.recording && this.phase === 'live') this.recording.event(type, ...this.recordingTime(), data);
+  }
+  finishRecording(success) {
+    if (!this.recording) return;
+    this.captureAttemptGesture();
+    this.recordEvent('outcome', { success, ...(this.result || {}) });
+    const clip = this.recording.finish({ success, ...(this.result || {}) });
+    this.attemptClip = clip ? { ...clip, attemptId: this.attemptId, sessionId: this.sessionId } : null;
+    this.recording = this.recordingFrame = null;
+  }
+  getAttemptClip(attemptId) {
+    if (!Number.isSafeInteger(attemptId) || this.attemptClip?.attemptId !== attemptId || this.attemptClip.sessionId !== this.sessionId ||
+        this.stage === 'check' && (!['review', 'done'].includes(this.phase) || this.attempts < 4) || this.feedback?.neutral) return null;
+    return validTrainingAttempt(this.attemptClip) ? this.attemptClip : null;
   }
   onPlayerHit(info, racket = {}, contactP) {
     if (this.phase !== 'live') return;
@@ -317,6 +586,15 @@ class Trainer {
     const stroke = racket.stroke && racket.stroke.id;
     if (!TRAIN_GUIDES[stroke] || TRAIN_GUIDES[stroke].stroke !== stroke) return;
     const b = this.g.ball, input = racket.contactInput || {};
+    this.captureAttemptGesture(true);
+    if (this.recording && input.p && input.v && input.w) this.recording.push(...this.recordingTime(), true, { p: input.p, v: input.v, w: input.w, q: b.q });
+    const pose = this.g.player?.contactPose;
+    this.recordEvent('contact', { side: 1, strokeId: stroke, point: { ...(contactP || b.p) }, gestureId: this.g.swipe?.gestureId,
+      pose: pose ? { pos: { ...pose.pos }, q: { ...pose.q }, point: { ...pose.point },
+        localPoint: { ...pose.localPoint }, activeFace: pose.activeFace, normal: { ...pose.normal }, roll: pose.roll } : null,
+      incoming: input.p && input.v && input.w ? { p: { ...input.p }, v: { ...input.v }, w: { ...input.w }, q: { ...b.q } } : null,
+      outgoing: { p: { ...b.p }, v: { ...b.v }, w: { ...b.w }, q: { ...b.q } },
+      normal: racket.normal && { ...racket.normal }, vR: racket.vR && { ...racket.vR }, forehand: racket.forehand !== false });
     this.inputMotion = null;
     this.captureMotion(input.p || contactP || b.p);
     const spin = measureShotSpin(b.w, b.v), flight = trainingPath(b.p, b.v, b.w);
@@ -449,6 +727,7 @@ class Trainer {
       targetHit: result.targetHit === true, target: this.currentTarget, landing: result.landing || null };
   }
   onBounce(side, lastHitBy) {
+    this.recordEvent('bounce', { side, lastHitBy, point: { ...this.g.ball.p } });
     if (this.phase !== 'live' || lastHitBy !== 1 || !this.pending) return;
     const serving = this.S.serve && this.turns === 0 && this.g.isServeBall;
     if (serving && (side !== -1 || this.g.serveBounces < 1 || this.g.netTouched)) return;
@@ -505,6 +784,7 @@ class Trainer {
   onSystemFault(reason = 'feeder') {
     if (this.finished || !['wait', 'live'].includes(this.phase)) return false;
     const neutral = reason === 'let' ? 'let' : 'feeder';
+    this.recording = this.recordingFrame = null;
     this.g.ball.live = false; this.pending = null; this.frozen = false; this.replyReady = false;
     this.result = { reason: neutral, neutral: true, contact: !!(this.lastShot && this.lastShot.shotId === this.g.shotId),
       legal: neutral === 'let', targetHit: false };
@@ -533,15 +813,26 @@ class Trainer {
     this.feedback = this.feedbackFor(key); this.fail(this.feedback.title + '. ' + this.feedback.correction);
   }
   settle(success, message) {
+    if (this.finished || this.phase !== 'live') return false;
+    this.finishRecording(success);
     this.attempts++; this.stats.attempts++;
+    this.queueIndex++; this.currentSlot = null;
+    if (this.queue.length && this.queueIndex >= this.queue.length && this.setSize === null && this.mode !== 'course') this.extendQueue();
     this.frozen = false; this.replyReady = false; this.pending = null; this.g.ball.live = false;
     this.latestFeedback = this.feedback;
     if (this.g.cancelInput) this.g.cancelInput();
     if (success) {
       this.done++; this.stats.success++; this.stats.streak++; this.stats.bestStreak = Math.max(this.stats.bestStreak, this.stats.streak); this.fails = 0;
-    } else { this.fails++; this.stats.streak = 0; }
+    } else {
+      this.fails++; this.stats.streak = 0;
+      const f = this.feedback;
+      if (f && !f.neutral) this.setErrors[f.code] = { count: (this.setErrors[f.code]?.count || 0) + 1,
+        correction: f.correction, correctionKey: f.textKeys.correction };
+    }
+    this.adaptResult(success);
     this.msg = message; this.msgKey = success ? 'academy.counted' : null; this.msgCol = success ? '#4ee39a' : '#ffb066'; this.t = 0;
     if (this.g.audio && this.g.audio.ui) this.g.audio.ui(success ? 'good' : 'bad');
+    if (this.setSize !== null && this.attempts >= this.setSize) { this.complete(); return true; }
     if (this.mode === 'course' && this.stage === 'check' && this.attempts >= 4) {
       this.checkPassed = this.done >= 3 && this.practicePassed && this.quizPassed;
       this.phase = 'review'; this.msgKey = this.checkPassed ? 'academy.mastered' : 'academy.checkFailed'; this.msg = ET(this.msgKey);
@@ -550,10 +841,15 @@ class Trainer {
       this.practicePassed = true; this.progress(true, false); this.phase = 'question'; this.msgKey = 'academy.practiceDone'; this.msg = ET(this.msgKey);
     } else this.phase = success ? 'ok' : 'fail';
     this.sync();
+    return true;
   }
   pass() { if (this.phase === 'live') { this.feedback = this.feedbackFor(null); this.settle(true, ET('academy.counted')); } }
   fail(why) { if (this.phase === 'live') this.settle(false, why); }
-  skip() { if (!this.finished && this.mode === 'course') this.nextStep(); }
+  skip() { if (this.finished || this.mode !== 'course') return false; this.nextStep(); return true; }
+  practiceSet() {
+    return this.setSize === null ? null : { size: this.setSize, attempted: this.stats.attempts, successful: this.stats.success,
+      bestStreak: this.stats.bestStreak, errors: Object.entries(this.setErrors).map(([code, e]) => ({ code, count: e.count, correction: e.correction })) };
+  }
   snapshot() {
     const S = this.S;
     // null is uncomputed; false caches an invalid physical example.
@@ -563,9 +859,12 @@ class Trainer {
       this.diagram = trainingDiagram(stroke, this.currentTarget, S.feed, eq, S.technique || stroke, S.gesture) || false;
     }
     return { sessionId: this.sessionId, mode: this.mode, id: S.id, step: this.step, total: TRAIN_STEPS.length,
+      pacing: this.pacing, setSize: this.setSize, adaptive: this.adaptive, variation: this.variation, helpLevel: this.helpLevel,
+      practiceSet: this.practiceSet(), attemptReplay: { available: !!this.getAttemptClip(this.attemptClip?.attemptId),
+        attemptId: this.attemptClip?.attemptId || null, truncated: this.attemptClip?.truncated === true },
       title: ET(S.title), goal: this.mode === 'accuracy' ? ET(TRAIN_TARGETS.find(t => t.id === S.target).title) : ET(S.goal),
       text: this.phase === 'intro' ? '' : this.coachText, tip: trainingTip(S, this.inputMode), lesson: trainingLessonView(S),
-      inputMode: this.inputMode, stage: this.stage, phase: this.phase, done: this.done, need: this.stage === 'check' ? 4 : S.need,
+      inputMode: this.inputMode, stage: this.stage, phase: this.phase, done: this.done, need: this.stage === 'check' ? 4 : this.setSize || S.need,
       paddleHidden: this.g.playerPaddleVisible === false,
       attempts: this.attempts, stats: { ...this.stats }, msg: this.msg, frozen: this.frozen, nudge: this.nudge > 0, guide: this.guide,
       quiz: this.phase === 'question' ? trainingLessonView(S).quiz : null, result: this.result, feedback: this.feedback,
@@ -575,6 +874,7 @@ class Trainer {
       mastery: trainingCoverage(this.profile.lessons) };
   }
   summary() {
+    if (this.setSize !== null) return { sessionId: this.sessionId, mode: this.mode, practiceSet: this.practiceSet(), courseComplete: false };
     const mastered = TRAIN_STEPS.filter(s => this.profile.lessons[s.id] && this.profile.lessons[s.id].mastered).length;
     return { sessionId: this.sessionId, mode: this.mode, mastered, total: TRAIN_STEPS.length,
       coverage: trainingCoverage(this.profile.lessons).percent, courseComplete: this.mode === 'course' && mastered === TRAIN_STEPS.length };
@@ -583,7 +883,11 @@ class Trainer {
     dtReal = Number.isFinite(dtReal) ? Math.max(0, dtReal) : 0;
     dtSim = Number.isFinite(dtSim) ? Math.max(0, dtSim) : 0;
     if (this.nudge > 0) this.nudge = Math.max(0, this.nudge - dtReal);
+    this.refreshHelp();
     if (this.frozen || this.finished) return;
+    if (this.recording && this.phase === 'live' && !this.recordingFrame) {
+      this.activeReal += dtReal; this.activeSim += dtSim; this.captureRecordingFrame();
+    }
     this.simTime += dtSim;
     this.t += this.phase === 'live' ? dtSim : dtReal;
     const g = this.g;
@@ -593,16 +897,18 @@ class Trainer {
       if (this.flightTrace.length < 96) this.flightTrace.push([p.x, p.y, p.z]);
       this.traceAt = this.simTime;
     }
-    if (this.phase === 'live' && this.stage === 'practice' && this.guide !== 'none' && !this._frozenDrills.has(this.S.id)) {
+    if (this.phase === 'live' && this.stage === 'practice' && this.guide !== 'none' &&
+        (this.adaptive ? this.helpLevel === 'guided' && !this.heldOnce : !this._frozenDrills.has(this.S.id))) {
       const serving = this.S.serve && g.state === GS.SERVE_TOSS && g.ball.lastHitBy === 0;
       const cp = !serving && g.contactPrediction && g.contactPrediction();
       if (serving && g.ball.v.y < 0 && g.ball.p.y <= (g.tossApex || 0) - .05 ||
           !serving && cp && g.rallyBounces.some(s => s > 0) && cp.t <= COACH_FREEZE_T) {
-        this._frozenDrills.add(this.S.id); this.frozen = true; this.heldOnce = true; this.sync(); return;
+        if (!this.adaptive) this._frozenDrills.add(this.S.id);
+        this.frozen = true; this.heldOnce = true; this.sync(); return;
       }
     }
     if (this.phase === 'wait' && this.t >= .65) this.feed();
-    else if (this.phase === 'ok' && this.t >= 1 || this.phase === 'fail' && this.t >= 1.5) this.feed();
+    else if (this.phase === 'ok' && this.t >= 1 || this.phase === 'fail' && !this.reviewHeld && this.t >= 1.5) this.feed();
     else if (this.phase === 'live' && this.t > (this.S.serve ? 25 : this.S.rally || this.S.sparring ? 35 : 10)) this.onFault(-1, 'miss');
     if (this.replyReady && g.ai && g.ai.pos) {
       const k = 1 - Math.exp(-18 * dtSim), b = g.ball;
